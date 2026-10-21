@@ -500,3 +500,100 @@ func TestLeaseRefreshTransportErrorIsNotLoss(t *testing.T) {
 		t.Fatalf("a transport failure was reported as a lost lease: %v", err)
 	}
 }
+
+// Delivery is serial: while one event is being written, later mail waits and
+// arrives after it, in stream order.
+func TestDeliveryIsSerialAndOrdered(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ep, err := Open(ctx, f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	var mu sync.Mutex
+	var order []string
+	var active, maxActive int32
+	deliver := func(text string, meta map[string]string) error {
+		n := atomic.AddInt32(&active, 1)
+		defer atomic.AddInt32(&active, -1)
+		for {
+			m := atomic.LoadInt32(&maxActive)
+			if n <= m || atomic.CompareAndSwapInt32(&maxActive, m, n) {
+				break
+			}
+		}
+		if strings.Contains(text, "first") {
+			time.Sleep(400 * time.Millisecond)
+		}
+		mu.Lock()
+		order = append(order, meta["seqs"])
+		mu.Unlock()
+		return nil
+	}
+	go ep.Run(ctx, deliver)
+	b := f.client(t, "b")
+	if _, err := b.Send(context.Background(), "a", "first", 0); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond) // first is now being written
+	for _, m := range []string{"second", "third"} {
+		if _, err := b.Send(context.Background(), "a", m, 0); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(80 * time.Millisecond) // beyond the 50 ms settle: separate batches if not serialised
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var seqs []string
+	for {
+		mu.Lock()
+		seqs = strings.Split(strings.Join(order, ","), ",")
+		mu.Unlock()
+		if len(seqs) >= 3 && seqs[0] != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %q delivered", seqs)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.Join(seqs, ",") != "1,2,3" {
+		t.Fatalf("delivered out of stream order: %v", seqs)
+	}
+	if atomic.LoadInt32(&maxActive) > 1 {
+		t.Fatalf("%d deliveries ran at once", maxActive)
+	}
+}
+
+// Run returns only after the delivery in progress has finished, so nothing
+// writes to Claude or acks after the endpoint is closed.
+func TestRunWaitsForDeliveryBeforeReturning(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	var active int32
+	started := make(chan struct{}, 1)
+	deliver := func(string, map[string]string) error {
+		atomic.AddInt32(&active, 1)
+		defer atomic.AddInt32(&active, -1)
+		started <- struct{}{}
+		time.Sleep(500 * time.Millisecond)
+		return nil
+	}
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, deliver); close(done) }()
+	if _, err := f.client(t, "b").Send(context.Background(), "a", "slow", 0); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	cancel()
+	<-done
+	if atomic.LoadInt32(&active) != 0 {
+		t.Fatal("Run returned while a delivery was still writing")
+	}
+}

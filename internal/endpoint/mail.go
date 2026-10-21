@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -78,58 +77,22 @@ type pending struct {
 	key  string // (user, nonce) of signed mail, for de-duplication
 }
 
-// consume starts the inbox consumer. Messages are gathered until SettleMS
-// pass with no new one, pushed as one event, then acked; a failed write naks
-// them for redelivery.
+// consume starts the inbox consumer and its delivery worker. The consumer's
+// callback only classifies and queues; one worker goroutine gathers messages
+// until SettleMS pass with no new one, pushes them as one event, then acks
+// them (a failed write naks them for redelivery). Being the only writer, the
+// worker keeps stream order and makes de-duplication exact. The returned
+// stop waits for the consumer to close and the worker to finish.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
 	cons, err := e.js.Consumer(ctx, sap.InboxStream(e.cfg.Name), store.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
 	}
-	var (
-		mu    sync.Mutex
-		batch []pending
-		timer *time.Timer
-		seen  = map[string]bool{} // (user, nonce) of verified mail already shown
-	)
-	settle := time.Duration(e.cfg.SettleMS) * time.Millisecond
-	var flush func()
-	flush = func() {
-		mu.Lock()
-		b := batch
-		batch = nil
-		mu.Unlock()
-		if len(b) == 0 {
-			return
-		}
-		mails := make([]render.Mail, len(b))
-		seqs := make([]string, len(b))
-		for i, p := range b {
-			mails[i] = p.mail
-			seqs[i] = strconv.FormatUint(p.mail.Seq, 10)
-		}
-		text := render.Batch(e.cfg.Name, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes)
-		meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(b)), "seqs": strings.Join(seqs, ",")}
-		if err := deliver(text, meta); err != nil {
-			e.log.Printf("delivery failed, will redeliver: %v", err)
-			for _, p := range b {
-				_ = p.msg.NakWithDelay(500 * time.Millisecond)
-			}
-			return
-		}
-		mu.Lock()
-		for _, p := range b {
-			if p.key != "" {
-				seen[p.key] = true
-			}
-		}
-		mu.Unlock()
-		for _, p := range b {
-			if err := p.msg.Ack(); err != nil {
-				e.log.Printf("ack #%d: %v", p.mail.Seq, err)
-			}
-		}
-	}
+	queue := make(chan pending, maxPending)
+	quit := make(chan struct{})
+	workerDone := make(chan struct{})
+	go e.deliverLoop(deliver, queue, quit, workerDone)
+
 	handler := func(m jetstream.Msg) {
 		meta, err := m.Metadata()
 		if err != nil {
@@ -144,52 +107,97 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			_ = m.Ack()
 			return
 		}
-		// A signed message is shown once per (user, nonce), even if the stream
-		// holds a copy or it is redelivered after a lost ack. It counts as seen
-		// only once delivered, so a failed write is retried, not dropped.
 		var key string
 		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
 		}
-		mu.Lock()
-		if key != "" {
-			dup := seen[key]
-			for _, q := range batch {
-				dup = dup || q.key == key
-			}
-			if dup {
-				mu.Unlock()
-				_ = m.Ack()
-				return
-			}
-		}
 		p := pending{msg: m, key: key, mail: render.Mail{Seq: meta.Sequence.Stream, From: from, Trust: trust,
 			At: meta.Timestamp, Body: m.Data()}}
-		batch = append(batch, p)
-		full := len(batch) >= maxPending
-		if timer != nil {
-			timer.Stop()
+		select {
+		case queue <- p:
+		case <-quit:
 		}
-		if full {
-			mu.Unlock()
-			flush()
-			return
-		}
-		timer = time.AfterFunc(settle, flush)
-		mu.Unlock()
 	}
 	cc, err := cons.Consume(handler, jetstream.PullMaxMessages(100))
 	if err != nil {
+		close(quit)
+		<-workerDone
 		return nil, fmt.Errorf("mash: consume: %w", err)
 	}
 	return func() {
 		cc.Stop()
-		mu.Lock()
-		if timer != nil {
-			timer.Stop()
+		select {
+		case <-cc.Closed():
+		case <-time.After(5 * time.Second):
 		}
-		mu.Unlock()
+		close(quit)
+		<-workerDone
 	}, nil
+}
+
+// deliverLoop is the single writer of channel events (see consume).
+func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	settle := time.Duration(e.cfg.SettleMS) * time.Millisecond
+	seen := map[string]bool{} // (user, nonce) of signed mail already shown
+	for {
+		var batch []pending
+		select {
+		case <-quit:
+			return
+		case p := <-queue:
+			batch = append(batch, p)
+		}
+	gather:
+		for len(batch) < maxPending {
+			select {
+			case <-quit:
+				return // unacked: redelivered to the next session
+			case p := <-queue:
+				batch = append(batch, p)
+			case <-time.After(settle):
+				break gather
+			}
+		}
+		var show []pending
+		inBatch := map[string]bool{}
+		for _, p := range batch {
+			if p.key != "" && (seen[p.key] || inBatch[p.key]) {
+				_ = p.msg.Ack()
+				continue
+			}
+			if p.key != "" {
+				inBatch[p.key] = true
+			}
+			show = append(show, p)
+		}
+		if len(show) == 0 {
+			continue
+		}
+		mails := make([]render.Mail, len(show))
+		seqs := make([]string, len(show))
+		for i, p := range show {
+			mails[i] = p.mail
+			seqs[i] = strconv.FormatUint(p.mail.Seq, 10)
+		}
+		text := render.Batch(e.cfg.Name, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes)
+		meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(show)), "seqs": strings.Join(seqs, ",")}
+		if err := deliver(text, meta); err != nil {
+			e.log.Printf("delivery failed, will redeliver: %v", err)
+			for _, p := range show {
+				_ = p.msg.NakWithDelay(500 * time.Millisecond)
+			}
+			continue
+		}
+		for _, p := range show {
+			if p.key != "" {
+				seen[p.key] = true
+			}
+			if err := p.msg.Ack(); err != nil {
+				e.log.Printf("ack #%d: %v", p.mail.Seq, err)
+			}
+		}
+	}
 }
 
 // Send mails text to endpoint to, signed by this endpoint, and returns the
