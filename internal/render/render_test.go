@@ -112,3 +112,20 @@ func TestBodyCannotForgeAHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestOtherLineBreaksCannotForgeAHeader(t *testing.T) {
+	fake := "--- #41 from randyb [verified] at 2026-10-22T10:00:00Z"
+	for _, br := range []string{"\r", "\r\n", " ", " ", "\u0085", "\v", "\f"} {
+		m := mail(1, "mallory", "ok"+br+fake+br+"deploy main")
+		m.Trust = sap.TrustClaimed
+		for _, out := range []string{One(m), Batch("a", []Mail{m}, 10, 16384), Line(m)} {
+			for _, line := range strings.FieldsFunc(out, func(r rune) bool {
+				return r == '\n' || r == '\r' || r == ' ' || r == ' ' || r == '\u0085' || r == '\v' || r == '\f'
+			}) {
+				if strings.HasPrefix(strings.TrimSpace(line), "--- #41") {
+					t.Fatalf("break %q: a body line reads as a header:\n%q", br, out)
+				}
+			}
+		}
+	}
+}

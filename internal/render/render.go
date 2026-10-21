@@ -21,7 +21,15 @@ type Mail struct {
 
 const maxFirstLine = 120
 
-func text(b []byte) string { return strings.ToValidUTF8(string(b), "�") }
+// lineBreaks are every character a reader may take as a new line.
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n",
+	"\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
+
+// text is valid UTF-8 with every kind of line break turned into "\n", so
+// quoting each line covers everything that could read as a new line.
+func text(b []byte) string {
+	return lineBreaks.Replace(strings.ToValidUTF8(string(b), "\uFFFD"))
+}
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
