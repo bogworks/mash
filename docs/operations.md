@@ -4,7 +4,7 @@ mash needs a NATS server in operator mode with JetStream, and one account for ma
 
 ## The account
 
-Create an account (these examples call it `MASH`) with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint plus temporary watch consumers.
+Create an account (these examples call it `MASH`) with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint.
 
 ```sh
 nsc add account MASH
@@ -54,7 +54,7 @@ Deliver the credentials file to the machine that runs the session, and nowhere e
 - read (never write) the directory;
 - hold its own lease and nothing else.
 
-It cannot read another endpoint's inbox or history, take another endpoint's name, write the directory, or delete or purge any stream. The integration tests assert each of these denials against a real server.
+It cannot read another endpoint's inbox, history or replies (each endpoint receives only under its own `_INBOX.<name>` prefix), take another endpoint's name, write the directory, create or delete consumers, or delete or purge any stream. It holds no response permission, because NATS grants that for any reply subject an endpoint receives; replies may only go to `_INBOX.>` subjects. The integration tests assert each of these denials against a real server.
 
 ## Removing an endpoint
 
