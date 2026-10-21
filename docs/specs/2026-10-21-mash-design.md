@@ -125,7 +125,7 @@ A per-endpoint stream keeps each endpoint's history private to that endpoint, gi
 ### 6.2 Rules
 
 - The directory is the only source for `name ↔ user` and for mail subjects.
-- Endpoints read it by watching the bucket and keep an in-memory copy that stays current.
+- Endpoints read it at start and re-read it every 15 s, keeping an in-memory copy. The keys come from stream info (a subjects filter) and each value by direct get, so endpoints need no consumer on the directory.
 - An endpoint's own directory record must match the user in its credentials, or `mash serve` refuses to run.
 
 ## 7. Endpoint manager (`mash serve`)
@@ -142,7 +142,7 @@ An MCP server over stdio, started by Claude Code from the mash plugin. One per C
    - Refresh with a revision-checked *update* every 30 s.
    - If the lease is lost (an update conflict), stop consuming, report it, and exit non-zero.
 5. **Register the SAP service** (section 7.4) and start the heartbeat.
-6. **Start the inbox consumer** and the directory watch.
+6. **Start the inbox consumer** and the directory poll.
 
 ### 7.2 Delivering mail to Claude
 
@@ -205,12 +205,9 @@ These permissions, applied to a user named `<name>`, are the whole security mode
   - `$JS.API.CONSUMER.MSG.NEXT.inbox-<name>.deliver`;
   - `$JS.ACK.inbox-<name>.deliver.>`;
   - `$JS.API.DIRECT.GET.inbox-<name>` and `$JS.API.DIRECT.GET.inbox-<name>.>`.
-- For the directory, read only, by watch:
+- For the directory, read only (stream info and direct get; no consumers):
   - `$JS.API.STREAM.INFO.KV_mash-directory`;
-  - `$JS.API.CONSUMER.CREATE.KV_mash-directory.>`;
-  - `$JS.API.CONSUMER.DELETE.KV_mash-directory.>`, so the watch can remove its own temporary consumer;
   - `$JS.API.DIRECT.GET.KV_mash-directory.>`;
-  - `$JS.FC.KV_mash-directory.>`.
 - For its own lease:
   - `$JS.API.STREAM.INFO.KV_mash-leases`;
   - `$KV.mash-leases.<name>`;

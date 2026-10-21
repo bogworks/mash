@@ -11,8 +11,6 @@ func TestPermissionsExact(t *testing.T) {
 	p := Permissions("o", "a")
 	wantPub := []string{
 		"$JS.ACK.inbox-a.deliver.>",
-		"$JS.API.CONSUMER.CREATE.KV_mash-directory.>",
-		"$JS.API.CONSUMER.DELETE.KV_mash-directory.>",
 		"$JS.API.CONSUMER.INFO.inbox-a.deliver",
 		"$JS.API.CONSUMER.MSG.NEXT.inbox-a.deliver",
 		"$JS.API.DIRECT.GET.KV_mash-directory.>",
@@ -23,7 +21,6 @@ func TestPermissionsExact(t *testing.T) {
 		"$JS.API.STREAM.INFO.KV_mash-directory",
 		"$JS.API.STREAM.INFO.KV_mash-leases",
 		"$JS.API.STREAM.INFO.inbox-a",
-		"$JS.FC.KV_mash-directory.>",
 		"$KV.mash-leases.a",
 		"$SRV.>",
 		"agents.hb.cc.o.a",
@@ -66,6 +63,9 @@ func TestPermissionsNeverGrantOthers(t *testing.T) {
 		}
 		if strings.HasPrefix(s, "_INBOX") && s != "_INBOX_a.>" {
 			t.Errorf("inbox grant beyond its own prefix: %q", s)
+		}
+		if strings.Contains(s, "CONSUMER.CREATE") || strings.Contains(s, "CONSUMER.DELETE") {
+			t.Errorf("consumer management grant: %q", s)
 		}
 		if strings.Contains(s, "$KV.mash-directory") {
 			t.Errorf("directory must be read-only: %q", s)

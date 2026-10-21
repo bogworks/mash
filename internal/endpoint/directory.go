@@ -3,9 +3,9 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -25,73 +25,24 @@ type Presence struct {
 	LastSeen time.Time
 }
 
-func (e *Endpoint) setRecord(r store.Record) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if old, ok := e.dir[r.Name]; ok && e.byUser[old.User] == r.Name {
-		delete(e.byUser, old.User)
-	}
-	e.dir[r.Name] = r
-	e.byUser[r.User] = r.Name
-}
+// DirectoryPoll is how often a running endpoint re-reads the directory.
+// Polling needs only stream info and direct gets: endpoints may not create
+// consumers on the directory (one could exhaust or delete another's).
+var DirectoryPoll = 15 * time.Second
 
-func (e *Endpoint) dropRecord(name string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if old, ok := e.dir[name]; ok {
-		if e.byUser[old.User] == name {
-			delete(e.byUser, old.User)
-		}
-		delete(e.dir, name)
-	}
-}
-
-// watchDirectory keeps the in-memory directory current. It returns once the
-// initial values are loaded.
-func (e *Endpoint) watchDirectory(ctx context.Context) error {
-	w, err := e.dirKV.WatchAll(ctx)
-	if err != nil {
-		return fmt.Errorf("mash: watching the directory: %w", err)
-	}
-	ready := make(chan struct{})
-	go func() {
-		defer w.Stop()
-		initial := true
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case u, ok := <-w.Updates():
-				if !ok {
-					return
-				}
-				if u == nil {
-					if initial {
-						initial = false
-						close(ready)
-					}
-					continue
-				}
-				switch u.Operation() {
-				case jetstream.KeyValuePut:
-					if r, err := store.ParseRecord(u.Key(), u.Value()); err == nil {
-						e.setRecord(r)
-					} else {
-						e.log.Print(err)
-					}
-				default:
-					e.dropRecord(u.Key())
-				}
+// pollDirectory re-reads the directory every DirectoryPoll until ctx ends.
+func (e *Endpoint) pollDirectory(ctx context.Context) {
+	t := time.NewTicker(DirectoryPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := e.loadDirectory(ctx); err != nil && ctx.Err() == nil {
+				e.log.Print(err)
 			}
 		}
-	}()
-	select {
-	case <-ready:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("mash: the directory did not load")
 	}
 }
 
@@ -192,16 +143,33 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// loadDirectory reads every directory record once (Run keeps it current after).
+// loadDirectory reads every directory record and replaces the in-memory copy:
+// the keys come from stream info (subjects filter), each value by direct get.
 func (e *Endpoint) loadDirectory(ctx context.Context) error {
-	keys, err := e.dirKV.Keys(ctx)
-	if err != nil && !errors.Is(err, jetstream.ErrNoKeysFound) {
+	s, err := e.js.Stream(ctx, "KV_"+store.DirectoryBucket)
+	if err != nil {
 		return fmt.Errorf("mash: reading the directory: %w", err)
 	}
-	for _, k := range keys {
-		if r, err := store.GetRecord(ctx, e.dirKV, k); err == nil {
-			e.setRecord(r)
+	prefix := "$KV." + store.DirectoryBucket + "."
+	info, err := s.Info(ctx, jetstream.WithSubjectFilter(prefix+">"))
+	if err != nil {
+		return fmt.Errorf("mash: reading the directory: %w", err)
+	}
+	dir := map[string]store.Record{}
+	for subj := range info.State.Subjects {
+		key := strings.TrimPrefix(subj, prefix)
+		r, err := store.GetRecord(ctx, e.dirKV, key)
+		if err != nil {
+			continue // deleted or purged
 		}
+		dir[key] = r
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dir = dir
+	e.byUser = make(map[string]string, len(dir))
+	for n, r := range dir {
+		e.byUser[r.User] = n
 	}
 	return nil
 }

@@ -296,6 +296,9 @@ func TestDeliverAcksOnlyAfterWrite(t *testing.T) {
 }
 
 func TestDirectoryLiveUpdate(t *testing.T) {
+	old := DirectoryPoll
+	DirectoryPoll = 100 * time.Millisecond
+	t.Cleanup(func() { DirectoryPoll = old })
 	f := newFixture(t, "a")
 	a, ev := f.run(t, "a")
 	f.add(t, "c")

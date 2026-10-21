@@ -174,6 +174,8 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	denied(t, nc, "$JS.API.STREAM.MSG.DELETE.inbox-a", `{"seq":1}`, "deleting a message")
 	denied(t, nc, "$JS.API.STREAM.PURGE.inbox-a", `{}`, "purging own inbox")
 	denied(t, nc, "$JS.API.STREAM.DELETE.inbox-a", ``, "deleting own inbox")
+	denied(t, nc, "$JS.API.CONSUMER.CREATE.KV_mash-directory.evil", `{"stream_name":"KV_mash-directory","config":{"durable_name":"evil","deliver_subject":"x"}}`, "a durable consumer on the directory")
+	denied(t, nc, "$JS.API.CONSUMER.DELETE.KV_mash-directory.anything", ``, "deleting a directory consumer")
 	denied(t, nc, "$JS.API.STREAM.CREATE.x", `{"name":"x","subjects":["x"]}`, "creating a stream")
 
 	// Inbox privacy: replies (JetStream deliveries, KV reads, prompt answers)

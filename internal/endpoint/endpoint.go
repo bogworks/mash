@@ -242,9 +242,7 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if err := e.watchDirectory(ctx); err != nil {
-		return err
-	}
+	go e.pollDirectory(ctx)
 	if err := e.watchPresence(ctx); err != nil {
 		return err
 	}
