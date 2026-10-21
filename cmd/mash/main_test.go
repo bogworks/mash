@@ -18,9 +18,10 @@ func envFrom(m map[string]string) func(string) string { return func(k string) st
 
 // session runs `mash serve` over pipes and speaks MCP to it.
 type session struct {
-	in    *io.PipeWriter
-	lines chan map[string]any
-	done  chan int
+	in      *io.PipeWriter
+	lines   chan map[string]any
+	done    chan int
+	backlog []map[string]any // lines read while waiting for something else
 }
 
 func startServe(t *testing.T, env map[string]string) *session {
@@ -59,8 +60,15 @@ func (s *session) send(t *testing.T, msg string) {
 }
 
 // await returns the first line matching pred within d.
+// Lines that don't match are kept for later awaits, not discarded.
 func (s *session) await(t *testing.T, d time.Duration, pred func(map[string]any) bool) map[string]any {
 	t.Helper()
+	for i, m := range s.backlog {
+		if pred(m) {
+			s.backlog = append(s.backlog[:i], s.backlog[i+1:]...)
+			return m
+		}
+	}
 	deadline := time.After(d)
 	for {
 		select {
@@ -71,6 +79,7 @@ func (s *session) await(t *testing.T, d time.Duration, pred func(map[string]any)
 			if pred(m) {
 				return m
 			}
+			s.backlog = append(s.backlog, m)
 		case <-deadline:
 			t.Fatal("timed out waiting for output")
 		}
