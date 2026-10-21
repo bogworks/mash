@@ -43,10 +43,12 @@ func Permissions(owner, name string) jwt.Permissions {
 		"$JS.API.DIRECT.GET." + inbox + ".>",
 		"$JS.API.STREAM.INFO." + dir,
 		"$JS.API.CONSUMER.CREATE." + dir + ".>",
+		"$JS.API.CONSUMER.DELETE." + dir + ".>",
 		"$JS.API.DIRECT.GET." + dir + ".>",
 		"$JS.FC." + dir + ".>",
 		"$JS.API.STREAM.INFO." + lease,
 		"$KV." + store.LeaseBucket + "." + name,
+		"$JS.API.DIRECT.GET." + lease + ".$KV." + store.LeaseBucket + "." + name,
 	}
 	sub := []string{
 		"_INBOX.>",

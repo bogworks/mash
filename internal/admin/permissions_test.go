@@ -12,9 +12,11 @@ func TestPermissionsExact(t *testing.T) {
 	wantPub := []string{
 		"$JS.ACK.inbox-a.deliver.>",
 		"$JS.API.CONSUMER.CREATE.KV_mash-directory.>",
+		"$JS.API.CONSUMER.DELETE.KV_mash-directory.>",
 		"$JS.API.CONSUMER.INFO.inbox-a.deliver",
 		"$JS.API.CONSUMER.MSG.NEXT.inbox-a.deliver",
 		"$JS.API.DIRECT.GET.KV_mash-directory.>",
+		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.a",
 		"$JS.API.DIRECT.GET.inbox-a",
 		"$JS.API.DIRECT.GET.inbox-a.>",
 		"$JS.API.INFO",

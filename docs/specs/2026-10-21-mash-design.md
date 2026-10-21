@@ -208,11 +208,13 @@ These permissions, applied to a user named `<name>`, are the whole security mode
 - For the directory, read only, by watch:
   - `$JS.API.STREAM.INFO.KV_mash-directory`;
   - `$JS.API.CONSUMER.CREATE.KV_mash-directory.>`;
+  - `$JS.API.CONSUMER.DELETE.KV_mash-directory.>`, so the watch can remove its own temporary consumer;
   - `$JS.API.DIRECT.GET.KV_mash-directory.>`;
   - `$JS.FC.KV_mash-directory.>`.
 - For its own lease:
   - `$JS.API.STREAM.INFO.KV_mash-leases`;
-  - `$KV.mash-leases.<name>`.
+  - `$KV.mash-leases.<name>`;
+  - `$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.<name>`, to read its own lease (who holds a contested name).
 
 **Subscribe allow:**
 - `_INBOX.>`;
