@@ -212,7 +212,24 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 		e.log.Printf("lease refresh: %v (will retry)", err)
 		return nil
 	}
-	// Our entry is gone (expired during an outage) or replaced. Re-take it if free.
+	// Our revision is stale. Either an earlier refresh landed but its reply was
+	// lost (the entry is still ours: adopt it), the entry expired during an
+	// outage (re-take it if free), or another session holds the name.
+	if cur, gerr := e.leaseKV.Get(ctx, e.cfg.Name); gerr == nil {
+		var lv leaseValue
+		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
+			e.leaseRev.Store(cur.Revision())
+			if rev, uerr := e.leaseKV.Update(ctx, e.cfg.Name, val, cur.Revision()); uerr == nil {
+				e.leaseRev.Store(rev)
+			} else {
+				e.log.Printf("lease refresh: %v (will retry)", uerr)
+			}
+			return nil
+		}
+	} else if !errors.Is(gerr, jetstream.ErrKeyNotFound) && !errors.Is(gerr, jetstream.ErrKeyDeleted) {
+		e.log.Printf("lease check: %v (will retry)", gerr)
+		return nil
+	}
 	if rev, cerr := e.leaseKV.Create(ctx, e.cfg.Name, val); cerr == nil {
 		e.leaseRev.Store(rev)
 		return nil

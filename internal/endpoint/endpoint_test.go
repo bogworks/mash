@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/randybias/mash/internal/admin"
 	"github.com/randybias/mash/internal/config"
 	"github.com/randybias/mash/internal/sap"
+	"github.com/randybias/mash/internal/store"
 	"github.com/randybias/mash/internal/testenv"
 )
 
@@ -395,5 +397,34 @@ func TestReconnectResumes(t *testing.T) {
 	joined := strings.Join(got, "\n")
 	if strings.Count(joined, "before restart") != 1 || strings.Count(joined, "after restart") != 1 {
 		t.Fatalf("want each message exactly once, got:\n%s", joined)
+	}
+}
+
+// A refresh whose reply was lost leaves leaseRev stale; the next refresh must
+// recognise its own entry, not conclude another session took the name.
+func TestLeaseRefreshAfterLostReply(t *testing.T) {
+	f := newFixture(t, "a")
+	ep, err := Open(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	mine := fmt.Sprintf(`{"instance_id":%q,"host":"h","pid":"1","since":"x"}`, ep.instance)
+	if _, err := kv.Put(context.Background(), "a", []byte(mine)); err != nil { // the "lost" update
+		t.Fatal(err)
+	}
+	if err := ep.refreshLease(context.Background()); err != nil {
+		t.Fatalf("own entry treated as lost: %v", err)
+	}
+	if err := ep.refreshLease(context.Background()); err != nil {
+		t.Fatalf("refresh after adopting the revision: %v", err)
+	}
+	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ep.refreshLease(context.Background()); err == nil || !strings.Contains(err.Error(), "lost the lease") {
+		t.Fatalf("a lease held by another instance must be reported lost: %v", err)
 	}
 }
