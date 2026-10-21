@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -115,7 +116,56 @@ func (e *Endpoint) watchPresence(ctx context.Context) error {
 		return fmt.Errorf("mash: heartbeat subscription: %w", err)
 	}
 	go func() { <-ctx.Done(); _ = sub.Unsubscribe() }()
+	go e.bootstrapPresence()
 	return nil
+}
+
+// bootstrapPresence asks every SAP agent for its registration right after
+// subscribing to heartbeats (subscribe-before-discover, SAP §8.5), so presence
+// doesn't wait a full heartbeat interval. A registration counts only when its
+// id_sig verifies and its key is the one the directory has for that name.
+func (e *Endpoint) bootstrapPresence() {
+	inbox := nats.NewInbox()
+	sub, err := e.nc.SubscribeSync(inbox)
+	if err != nil {
+		return
+	}
+	defer sub.Unsubscribe()
+	if err := e.nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
+		return
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m, err := sub.NextMsg(time.Until(deadline))
+		if err != nil {
+			return
+		}
+		var info struct {
+			Metadata  map[string]string `json:"metadata"`
+			Endpoints []struct {
+				Name    string `json:"name"`
+				Subject string `json:"subject"`
+			} `json:"endpoints"`
+		}
+		if json.Unmarshal(m.Data, &info) != nil || info.Metadata["owner"] != e.cfg.Owner {
+			continue
+		}
+		md := info.Metadata
+		for _, ep := range info.Endpoints {
+			if ep.Name != "prompt" {
+				continue
+			}
+			name, ok := sap.NameFromSubject(ep.Subject)
+			if !ok || !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
+				continue
+			}
+			e.mu.Lock()
+			if e.byUser[md["user_nkey"]] == name {
+				e.lastSeen[name] = time.Now()
+			}
+			e.mu.Unlock()
+		}
+	}
 }
 
 // Who returns the directory with presence, sorted by name.
