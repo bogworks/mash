@@ -459,3 +459,44 @@ func TestUnsafeSenderNameIsReplaced(t *testing.T) {
 		t.Fatalf("label:\n%s", got)
 	}
 }
+
+// The lease is kept alive from Open, before Run starts (the MCP handshake
+// may be slow), so it cannot expire while the session is coming up.
+func TestLeaseRenewedBeforeRun(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "a")
+	ep, err := Open(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	first, err := kv.Get(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	now, err := kv.Get(context.Background(), "a")
+	if err != nil || now.Revision() <= first.Revision() {
+		t.Fatalf("lease not refreshed before Run: rev %d -> %v %v", first.Revision(), now, err)
+	}
+}
+
+// A refresh that cannot reach the server is not a lost lease.
+func TestLeaseRefreshTransportErrorIsNotLoss(t *testing.T) {
+	f := newFixture(t, "a")
+	ep, err := Open(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	f.e.Shutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := ep.refreshLease(ctx); err != nil {
+		t.Fatalf("a transport failure was reported as a lost lease: %v", err)
+	}
+}

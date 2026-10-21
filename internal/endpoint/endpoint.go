@@ -37,10 +37,13 @@ type Endpoint struct {
 	self store.Record
 	log  *log.Logger
 
-	instance string // this process's id (lease holder, SAP instance)
-	dirKV    jetstream.KeyValue
-	leaseKV  jetstream.KeyValue
-	leaseRev atomic.Uint64
+	instance    string // this process's id (lease holder, SAP instance)
+	dirKV       jetstream.KeyValue
+	leaseKV     jetstream.KeyValue
+	leaseRev    atomic.Uint64
+	leaseCancel context.CancelFunc
+	leaseDone   chan struct{}
+	leaseLost   chan error
 
 	mu       sync.RWMutex
 	dir      map[string]store.Record // by name
@@ -193,7 +196,33 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 		return fmt.Errorf("mash: lease: %w", err)
 	}
 	e.leaseRev.Store(rev)
+	e.keepLease()
 	return nil
+}
+
+// keepLease refreshes the lease from the moment it is taken until Close, so a
+// slow start (the MCP handshake) cannot let it expire. A loss is reported on
+// leaseLost, which Run watches.
+func (e *Endpoint) keepLease() {
+	ctx, cancel := context.WithCancel(context.Background())
+	e.leaseCancel, e.leaseDone, e.leaseLost = cancel, make(chan struct{}), make(chan error, 1)
+	go func() {
+		defer close(e.leaseDone)
+		t := time.NewTicker(LeaseRefresh)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := e.refreshLease(ctx); err != nil {
+					e.log.Print(err)
+					e.leaseLost <- err
+					return
+				}
+			}
+		}
+	}()
 }
 
 // refreshLease renews the lease. A conflict means another session took the
@@ -230,9 +259,21 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 		e.log.Printf("lease check: %v (will retry)", gerr)
 		return nil
 	}
-	if rev, cerr := e.leaseKV.Create(ctx, e.cfg.Name, val); cerr == nil {
+	rev, cerr := e.leaseKV.Create(ctx, e.cfg.Name, val)
+	if cerr == nil {
 		e.leaseRev.Store(rev)
 		return nil
+	}
+	if !errors.Is(cerr, jetstream.ErrKeyExists) {
+		e.log.Printf("lease re-take: %v (will retry)", cerr) // e.g. a lost reply: next tick adopts it
+		return nil
+	}
+	if cur, gerr := e.leaseKV.Get(ctx, e.cfg.Name); gerr == nil {
+		var lv leaseValue
+		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
+			e.leaseRev.Store(cur.Revision())
+			return nil
+		}
 	}
 	return fmt.Errorf("mash: lost the lease on %s to another session", e.cfg.Name)
 }
@@ -251,22 +292,11 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 		return err
 	}
 	defer stop()
-	if e.leaseKV == nil {
-		<-ctx.Done()
+	select {
+	case <-ctx.Done():
 		return nil
-	}
-	t := time.NewTicker(LeaseRefresh)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-			if err := e.refreshLease(ctx); err != nil {
-				e.log.Print(err)
-				return err
-			}
-		}
+	case err := <-e.leaseLost: // nil channel (no lease) never fires
+		return err
 	}
 }
 
@@ -274,6 +304,10 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 func (e *Endpoint) Close() {
 	if svc := e.svc(); svc != nil {
 		svc.stop()
+	}
+	if e.leaseCancel != nil {
+		e.leaseCancel()
+		<-e.leaseDone
 	}
 	if e.leaseKV != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
