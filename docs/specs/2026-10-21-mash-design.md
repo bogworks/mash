@@ -195,6 +195,7 @@ These permissions, applied to a user named `<name>`, are the whole security mode
 
 **Publish allow:**
 - `agents.mail.*.<owner>.*`: send mail to any endpoint. The signature, not the subject, proves the sender.
+- `agents.prompt.*.<owner>.*` and `agents.status.*.<owner>.*`: live SAP prompts and status probes to peers (`mash prompt`).
 - `agents.hb.cc.<owner>.<name>`.
 - `$SRV.>`: micro-service replies.
 - `$JS.API.INFO`.
@@ -220,7 +221,7 @@ These permissions, applied to a user named `<name>`, are the whole security mode
 - `$SRV.>`;
 - `agents.hb.*.<owner>.*`, for presence.
 
-**Response permission:** `allow_responses` with max 1, for micro-service and prompt replies.
+**Response permission:** `allow_responses` with up to 1000 messages for 15 minutes. A SAP prompt reply is a stream of chunks: an ack, a "working" status every 30 s for up to 10 minutes, the response and the terminator.
 
 Anything not listed is denied. That includes another endpoint's inbox, its history and its lease, stream deletion and purging, and the admin API. The integration tests (section 12) assert each denial against a real server.
 
