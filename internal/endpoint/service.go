@@ -35,10 +35,32 @@ type PromptEvent struct {
 	Text      string
 }
 
+// openPrompt is one live prompt. mu serialises everything published on its
+// reply subject, so nothing can follow the terminator (SAP §6.5).
 type openPrompt struct {
-	reply string
-	done  chan struct{}
-	once  sync.Once
+	reply  string
+	done   chan struct{}
+	mu     sync.Mutex
+	closed bool
+}
+
+// send publishes a chunk unless the prompt is closed; final also terminates
+// it (after an optional error), exactly once.
+func (e *Endpoint) send(p *openPrompt, data []byte, final bool, code, desc string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	if data != nil {
+		_ = e.nc.Publish(p.reply, data)
+	}
+	if final {
+		p.closed = true
+		close(p.done)
+		e.end(p.reply, code, desc)
+	}
+	return true
 }
 
 type service struct {
@@ -254,11 +276,10 @@ func (e *Endpoint) handlePrompt(r micro.Request, onPrompt func(PromptEvent)) {
 			case <-p.done:
 				return
 			case <-keep.C:
-				_ = e.nc.Publish(reply, chunk("status", "working"))
+				e.send(p, chunk("status", "working"), false, "", "")
 			case <-timeout.C:
-				if e.finishPrompt(id) {
-					e.end(reply, "500", "no reply from the session")
-				}
+				e.send(p, nil, true, "500", "no reply from the session")
+				e.forget(id)
 				return
 			}
 		}
@@ -266,20 +287,16 @@ func (e *Endpoint) handlePrompt(r micro.Request, onPrompt func(PromptEvent)) {
 	onPrompt(PromptEvent{RequestID: id, From: from, Trust: tr, Text: text})
 }
 
-// finishPrompt removes an open prompt; it reports whether it was still open.
-func (e *Endpoint) finishPrompt(id string) bool {
+// forget removes a finished prompt from the open set.
+func (e *Endpoint) forget(id string) {
 	svc := e.svc()
 	svc.mu.Lock()
-	p, ok := svc.prompts[id]
 	delete(svc.prompts, id)
 	svc.mu.Unlock()
-	if ok {
-		p.once.Do(func() { close(p.done) })
-	}
-	return ok
 }
 
 // Reply answers a live prompt with a response chunk; done ends the stream.
+// Nothing is sent once the prompt has ended (answered or timed out).
 func (e *Endpoint) Reply(requestID, text string, done bool) error {
 	svc := e.svc()
 	if svc == nil {
@@ -288,14 +305,11 @@ func (e *Endpoint) Reply(requestID, text string, done bool) error {
 	svc.mu.Lock()
 	p, ok := svc.prompts[requestID]
 	svc.mu.Unlock()
-	if !ok {
+	if !ok || !e.send(p, chunk("response", text), done, "", "") {
 		return fmt.Errorf("mash: no open prompt %q (already answered or timed out)", requestID)
 	}
-	if err := e.nc.Publish(p.reply, chunk("response", text)); err != nil {
-		return err
-	}
-	if done && e.finishPrompt(requestID) {
-		e.end(p.reply, "", "")
+	if done {
+		e.forget(requestID)
 	}
 	return nil
 }

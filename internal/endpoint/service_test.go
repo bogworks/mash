@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +270,60 @@ func TestReplyUnknownRequest(t *testing.T) {
 	a := f.serve(t, "a", noPrompt)
 	if err := a.Reply("nope", "x", true); err == nil {
 		t.Fatal("reply to an unknown request must fail")
+	}
+}
+
+// Two final replies race: exactly one wins, and nothing follows the terminator.
+func TestPromptNothingAfterTerminator(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	results := make(chan error, 2)
+	f.serve(t, "a", func(ep *Endpoint, p PromptEvent) {
+		start := make(chan struct{})
+		for i := 0; i < 2; i++ {
+			go func(i int) { <-start; results <- ep.Reply(p.RequestID, fmt.Sprintf("answer %d", i), true) }(i)
+		}
+		close(start)
+	})
+	b := f.client(t, "b")
+	nc := b.Conn()
+	inbox := nc.NewInbox()
+	sub, _ := nc.SubscribeSync(inbox)
+	m := nats.NewMsg("agents.prompt.cc.o.a")
+	m.Reply, m.Data = inbox, []byte("race")
+	h, _ := b.Identity().Sign(m.Subject, m.Data, "b", time.Now(), "")
+	m.Header.Set(sap.HeaderName, h.Encode())
+	if err := nc.PublishMsg(m); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	ended := false
+	for {
+		r, err := sub.NextMsg(700 * time.Millisecond)
+		if err != nil {
+			break
+		}
+		if len(r.Data) == 0 && len(r.Header) == 0 {
+			if ended {
+				t.Fatal("two terminators")
+			}
+			ended = true
+			continue
+		}
+		if ended {
+			t.Fatalf("a chunk after the terminator: %s (stream %q)", r.Data, seen)
+		}
+		seen = append(seen, string(r.Data))
+	}
+	if !ended {
+		t.Fatalf("no terminator: %q", seen)
+	}
+	ok := 0
+	for i := 0; i < 2; i++ {
+		if <-results == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d replies succeeded; exactly one may", ok)
 	}
 }
