@@ -128,7 +128,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     Version,
-		Description: "Claude Code (mash) — " + e.cfg.Name,
+		Description: "Claude Code (mash): " + e.cfg.Name,
 		Metadata: map[string]string{
 			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.cfg.Name,
 			"protocol_version": sap.ProtocolVersion, "user_nkey": e.id.User, "account": e.id.Account,

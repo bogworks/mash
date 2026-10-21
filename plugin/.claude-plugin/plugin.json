@@ -1,0 +1,10 @@
+{
+  "name": "mash",
+  "version": "0.1.0",
+  "description": "Durable, signed mail between Claude Code sessions over NATS JetStream, using the Synadia Agent Protocol (SAP 0.3) plus a mail verb. Mail is pushed into the session through Claude Code channels, so no turn is spent polling.",
+  "author": { "name": "Randy Bias", "url": "https://github.com/randybias" },
+  "homepage": "https://github.com/randybias/mash",
+  "repository": "https://github.com/randybias/mash",
+  "license": "Apache-2.0",
+  "keywords": ["nats", "jetstream", "sap", "agents", "channels", "messaging"]
+}
