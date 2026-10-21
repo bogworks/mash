@@ -64,15 +64,28 @@ func (e *Endpoint) send(p *openPrompt, data []byte, final bool, code, desc strin
 }
 
 type service struct {
-	svc     micro.Service
-	mu      sync.Mutex
-	prompts map[string]*openPrompt
-	nonces  sap.NonceSet
+	svc      micro.Service
+	mu       sync.Mutex
+	prompts  map[string]*openPrompt
+	nonces   sap.NonceSet
+	quit     chan struct{} // closed by stop: ends the heartbeat
+	stopOnce sync.Once
 }
 
+// stop deregisters the SAP service and ends the heartbeat. Idempotent.
 func (s *service) stop() {
-	if s.svc != nil {
-		_ = s.svc.Stop()
+	s.stopOnce.Do(func() {
+		close(s.quit)
+		if s.svc != nil {
+			_ = s.svc.Stop()
+		}
+	})
+}
+
+// StopService deregisters this endpoint's SAP service and stops its heartbeat.
+func (e *Endpoint) StopService() {
+	if s := e.svc(); s != nil {
+		s.stop()
 	}
 }
 
@@ -153,7 +166,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	if err != nil {
 		return err
 	}
-	s := &service{prompts: map[string]*openPrompt{}, nonces: sap.NewNonceSet(2 * sap.LiveSkew)}
+	s := &service{prompts: map[string]*openPrompt{}, nonces: sap.NewNonceSet(2 * sap.LiveSkew), quit: make(chan struct{})}
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     Version,
@@ -191,6 +204,8 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-s.quit:
 				return
 			case <-t.C:
 				e.publishHeartbeat()

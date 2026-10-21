@@ -342,3 +342,51 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 		t.Fatalf("the old session still answers status: %s", m.Data)
 	}
 }
+
+// Losing the lease must shut down even when Claude has stopped reading stdout:
+// the notice to Claude may block, the shutdown may not.
+func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
+	old := endpoint.LeaseRefresh
+	endpoint.LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { endpoint.LeaseRefresh = old })
+	w := newWorld(t, "a")
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"serve"}, envFrom(w.env["a"]), inR, outW, io.Discard) }()
+	t.Cleanup(func() { inW.Close(); outR.Close() })
+	sc := bufio.NewScanner(outR)
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`+"\n")
+	sc.Scan()
+	io.WriteString(inW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n")
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`+"\n")
+	sc.Scan()
+	// From here on nobody reads stdout.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, "a\tonline") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a never came online")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	_ = kv.Purge(context.Background(), "a")
+	if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-done:
+		if code == 0 {
+			t.Fatal("exit 0 after losing the lease")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve hung on a blocked stdout after losing its lease")
+	}
+	if _, err := w.e.Conn(t, w.e.AdminCreds).Request("agents.status.cc.o.a", nil, time.Second); err == nil {
+		t.Fatal("the old session still answers status")
+	}
+}

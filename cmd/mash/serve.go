@@ -76,12 +76,23 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Rea
 			_ = srv.Notify(endpoint.ErrorInstructions(cfg.Name, err), map[string]string{"error": "true"})
 		}
 		if err := ep.Run(ctx, srv.Notify); err != nil && ctx.Err() == nil {
-			// The lease is gone (another session holds the name): stop
-			// everything, so the two never split prompts or heartbeat as one.
-			fmt.Fprintln(stderr, err)
-			_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
-				map[string]string{"error": "true"})
+			// The lease is gone (another session holds the name): stop the SAP
+			// service first, so the two never split prompts or heartbeat as
+			// one, then tell Claude, but never let a blocked stdout hold up
+			// the shutdown.
 			lost.Store(true)
+			ep.StopService()
+			fmt.Fprintln(stderr, err)
+			told := make(chan struct{})
+			go func() {
+				_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
+					map[string]string{"error": "true"})
+				close(told)
+			}()
+			select {
+			case <-told:
+			case <-time.After(2 * time.Second):
+			}
 			cancel()
 		}
 	}()
