@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"time"
 )
 
 // Tool is one MCP tool. A Call error is returned to Claude as an error result.
@@ -29,15 +30,36 @@ type Server struct {
 	tools        map[string]Tool
 	order        []string
 
-	wmu   sync.Mutex
-	once  sync.Once
-	ready chan struct{}
+	wmu       sync.Mutex
+	once      sync.Once
+	ready     chan struct{}
+	listOnce  sync.Once
+	listed    chan struct{}
+	chanReady chan struct{}
 }
+
+// Claude Code drops channel events that arrive before it has registered the
+// channel, which happens around its first tools/list after initialize. These
+// bound the wait.
+var (
+	ChannelGrace    = 500 * time.Millisecond
+	ChannelFallback = 3 * time.Second
+)
 
 // New returns a server; Run starts it.
 func New(in io.Reader, out io.Writer, name, version, instructions string, tools []Tool) *Server {
 	s := &Server{in: in, out: out, name: name, version: version, instructions: instructions,
-		tools: map[string]Tool{}, ready: make(chan struct{})}
+		tools: map[string]Tool{}, ready: make(chan struct{}), listed: make(chan struct{}), chanReady: make(chan struct{})}
+	grace, fallback := ChannelGrace, ChannelFallback // read once: tests change them
+	go func() {
+		<-s.ready
+		select {
+		case <-s.listed:
+		case <-time.After(fallback):
+		}
+		time.Sleep(grace)
+		close(s.chanReady)
+	}()
 	for _, t := range tools {
 		s.tools[t.Name] = t
 		s.order = append(s.order, t.Name)
@@ -47,6 +69,11 @@ func New(in io.Reader, out io.Writer, name, version, instructions string, tools 
 
 // Initialized is closed once the client has sent notifications/initialized.
 func (s *Server) Initialized() <-chan struct{} { return s.ready }
+
+// ChannelReady is closed when channel events are expected to be delivered:
+// after initialized and the client's first tools/list (plus a short grace),
+// or after ChannelFallback without one. Send events only after it closes.
+func (s *Server) ChannelReady() <-chan struct{} { return s.chanReady }
 
 type request struct {
 	ID     json.RawMessage `json:"id,omitempty"`
@@ -145,6 +172,7 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 			list = append(list, map[string]any{"name": t.Name, "description": t.Description, "inputSchema": t.Schema})
 		}
 		_ = s.result(req.ID, map[string]any{"tools": list})
+		s.listOnce.Do(func() { close(s.listed) })
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`

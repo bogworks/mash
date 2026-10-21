@@ -199,6 +199,17 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 		out  string
 		code int
 	}
+	// Prompt once a is registered (its SAP service starts when the channel is ready).
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if out, _ := w.cli(t, "b", "who"); strings.Contains(out, "a\tonline") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a never came online")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	done := make(chan res, 1)
 	go func() { o, c := w.cli(t, "b", "prompt", "a", "what", "time?"); done <- res{o, c} }()
 	ev := s.await(t, 5*time.Second, isChannel)

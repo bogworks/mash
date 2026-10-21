@@ -215,3 +215,33 @@ func TestRunEndsWhenInputCloses(t *testing.T) {
 		t.Fatal("Run did not return on EOF")
 	}
 }
+
+func TestChannelReadyWaitsForToolsList(t *testing.T) {
+	h := start(t, nil)
+	h.initialize(t)
+	select {
+	case <-h.s.ChannelReady():
+		t.Fatal("channel ready before tools/list: events sent now are dropped by Claude Code")
+	case <-time.After(300 * time.Millisecond):
+	}
+	h.send(t, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	h.next(t)
+	select {
+	case <-h.s.ChannelReady():
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel never ready after tools/list")
+	}
+}
+
+func TestChannelReadyFallback(t *testing.T) {
+	old := ChannelFallback
+	ChannelFallback = 200 * time.Millisecond
+	t.Cleanup(func() { ChannelFallback = old })
+	h := start(t, nil)
+	h.initialize(t)
+	select {
+	case <-h.s.ChannelReady():
+	case <-time.After(2 * time.Second):
+		t.Fatal("no fallback without tools/list")
+	}
+}

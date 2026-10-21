@@ -28,7 +28,7 @@ func serve(cfg config.Config, cfgErr error, stdin io.Reader, stdout, stderr io.W
 		if notify {
 			go func() {
 				select {
-				case <-srv.Initialized():
+				case <-srv.ChannelReady():
 					_ = srv.Notify(instr, map[string]string{"error": "true"})
 				case <-ctx.Done():
 				}
@@ -59,7 +59,7 @@ func serve(cfg config.Config, cfgErr error, stdin io.Reader, stdout, stderr io.W
 
 	go func() {
 		select {
-		case <-srv.Initialized():
+		case <-srv.ChannelReady():
 		case <-ctx.Done():
 			return
 		}
