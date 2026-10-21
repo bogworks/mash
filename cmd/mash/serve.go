@@ -17,8 +17,8 @@ import (
 )
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
-func serve(cfg config.Config, cfgErr error, stdin io.Reader, stdout, stderr io.Writer) int {
-	ctx, cancel := context.WithCancel(context.Background())
+func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Reader, stdout, stderr io.Writer) int {
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	// Without a usable identity, still answer MCP (the plugin may be enabled

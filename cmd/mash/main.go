@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/randybias/mash/internal/config"
 	"github.com/randybias/mash/internal/endpoint"
@@ -31,11 +34,20 @@ MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS (see docs/install.md).
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr))
+	// A session that is killed (Claude Code exiting, a closed terminal) shuts
+	// down cleanly, so serve releases its lease instead of leaving it to expire.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	code := runCtx(ctx, os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
 // run is main with its environment injected, for tests.
 func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runCtx(context.Background(), args, env, stdin, stdout, stderr)
+}
+
+func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -55,7 +67,7 @@ func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr
 	}
 	switch args[0] {
 	case "serve":
-		return serve(cfg, err, stdin, stdout, stderr)
+		return serve(ctx, cfg, err, stdin, stdout, stderr)
 	case "send", "read", "inbox", "who", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	case "admin":
