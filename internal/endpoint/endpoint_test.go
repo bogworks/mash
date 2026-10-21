@@ -375,18 +375,19 @@ func TestReconnectResumes(t *testing.T) {
 	}
 	ev.waitFor(t, 1, 5*time.Second)
 	f.e.Restart(t)
+	// Send exactly once after b has reconnected: a retried Send would be a
+	// new message (new nonce), which is not what this test is about.
 	deadline := time.Now().Add(20 * time.Second)
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, err := b.Send(ctx, "a", "after restart", 0)
-		cancel()
-		if err == nil {
-			break
-		}
+	for !b.Conn().IsConnected() {
 		if time.Now().After(deadline) {
-			t.Fatalf("send never succeeded after restart: %v", err)
+			t.Fatal("b never reconnected")
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := b.Send(ctx, "a", "after restart", 0); err != nil {
+		t.Fatalf("send after restart: %v", err)
 	}
 	got := ev.waitFor(t, 2, 20*time.Second)
 	time.Sleep(500 * time.Millisecond)

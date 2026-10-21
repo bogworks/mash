@@ -125,8 +125,7 @@ func (e *Endpoint) init(ctx context.Context) error {
 			e.cfg.Creds, e.id.User, e.cfg.Name, self.User)
 	}
 	e.self = self
-	e.setRecord(self)
-	return nil
+	return e.loadDirectory(ctx)
 }
 
 // Open connects, checks the identity and takes the endpoint's lease.

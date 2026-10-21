@@ -1,0 +1,66 @@
+// Command mash is a messaging mesh for agents: a Claude Code channel server
+// (mash serve), a CLI for people and scripts, and admin tooling.
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/randybias/mash/internal/config"
+	"github.com/randybias/mash/internal/endpoint"
+)
+
+const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
+
+  mash serve                                   the Claude Code channel server (started by the plugin)
+  mash send <to> [text... | --file F | -]      mail an endpoint (as MASH_NAME)
+  mash read <seq>                              print one message from your inbox
+  mash inbox [--limit N]                       recent messages in your inbox
+  mash who                                     endpoints, and who is online
+  mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
+  mash admin init                              create the directory and lease buckets
+  mash admin permissions <name> [--nsc]        the NATS permissions an endpoint user needs
+  mash admin provision <name> --user U --account A [--note N]
+  mash admin deprovision <name>
+  mash admin list
+  mash version
+
+Configuration: ~/.config/mash/config.json {"url","owner"}, overridden by MASH_URL,
+MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS (see docs/install.md).
+`
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr))
+}
+
+// run is main with its environment injected, for tests.
+func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	if args[0] == "version" {
+		fmt.Fprintf(stdout, "mash %s\n", endpoint.Version)
+		return 0
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		fmt.Fprint(stdout, usage)
+		return 0
+	}
+	cfg, err := config.Load(env, env("HOME"))
+	if err != nil && args[0] != "serve" {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	switch args[0] {
+	case "serve":
+		return serve(cfg, err, stdin, stdout, stderr)
+	case "send", "read", "inbox", "who", "prompt":
+		return cli(cfg, args, stdin, stdout, stderr)
+	case "admin":
+		return adminCmd(cfg, args[1:], stdout, stderr)
+	}
+	fmt.Fprintf(stderr, "mash: unknown command %q\n\n%s", args[0], usage)
+	return 2
+}

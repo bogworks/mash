@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -179,4 +180,28 @@ func (e *Endpoint) Who() []Presence {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Record.Name < out[j].Record.Name })
 	return out
+}
+
+// Refresh loads the directory and asks who is online, for one-shot callers
+// (the CLI's who) that don't Run. It waits up to two seconds for answers.
+func (e *Endpoint) Refresh(ctx context.Context) error {
+	if err := e.loadDirectory(ctx); err != nil {
+		return err
+	}
+	e.bootstrapPresence()
+	return nil
+}
+
+// loadDirectory reads every directory record once (Run keeps it current after).
+func (e *Endpoint) loadDirectory(ctx context.Context) error {
+	keys, err := e.dirKV.Keys(ctx)
+	if err != nil && !errors.Is(err, jetstream.ErrNoKeysFound) {
+		return fmt.Errorf("mash: reading the directory: %w", err)
+	}
+	for _, k := range keys {
+		if r, err := store.GetRecord(ctx, e.dirKV, k); err == nil {
+			e.setRecord(r)
+		}
+	}
+	return nil
 }
