@@ -175,7 +175,7 @@ func (e *Env) Conn(t *testing.T, creds string) *nats.Conn {
 // ConnAs connects as endpoint name, using its private inbox prefix.
 func (e *Env) ConnAs(t *testing.T, creds, name string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(e.URL, nats.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX_"+name))
+	nc, err := nats.Connect(e.URL, nats.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+name))
 	if err != nil {
 		t.Fatal(err)
 	}

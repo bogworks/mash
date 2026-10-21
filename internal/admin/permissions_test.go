@@ -4,7 +4,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPermissionsExact(t *testing.T) {
@@ -23,6 +22,7 @@ func TestPermissionsExact(t *testing.T) {
 		"$JS.API.STREAM.INFO.inbox-a",
 		"$KV.mash-leases.a",
 		"$SRV.>",
+		"_INBOX.>",
 		"agents.hb.cc.o.a",
 		"agents.mail.*.o.*",
 		"agents.prompt.*.o.*",
@@ -30,7 +30,7 @@ func TestPermissionsExact(t *testing.T) {
 	}
 	wantSub := []string{
 		"$SRV.>",
-		"_INBOX_a.>",
+		"_INBOX.a.>",
 		"agents.hb.*.o.*",
 		"agents.prompt.cc.o.a",
 		"agents.status.cc.o.a",
@@ -46,8 +46,8 @@ func TestPermissionsExact(t *testing.T) {
 	if len(p.Pub.Deny) != 0 || len(p.Sub.Deny) != 0 {
 		t.Errorf("unexpected deny lists")
 	}
-	if p.Resp == nil || p.Resp.MaxMsgs != 1000 || p.Resp.Expires != 15*time.Minute {
-		t.Errorf("resp %+v; want 1000 messages for 15m (SAP prompt streams chunks)", p.Resp)
+	if p.Resp != nil {
+		t.Errorf("resp %+v: a response grant lets an endpoint launder any reply subject it receives", p.Resp)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestPermissionsNeverGrantOthers(t *testing.T) {
 		if strings.Contains(s, "inbox-") && !strings.Contains(s, "inbox-a") {
 			t.Errorf("grant on another inbox: %q", s)
 		}
-		if strings.HasPrefix(s, "_INBOX") && s != "_INBOX_a.>" {
-			t.Errorf("inbox grant beyond its own prefix: %q", s)
+		if strings.HasPrefix(s, "_INBOX") && s != "_INBOX.a.>" && s != "_INBOX.>" {
+			t.Errorf("unexpected inbox grant: %q", s)
 		}
 		if strings.Contains(s, "CONSUMER.CREATE") || strings.Contains(s, "CONSUMER.DELETE") {
 			t.Errorf("consumer management grant: %q", s)
@@ -78,8 +78,6 @@ func TestNSCFlags(t *testing.T) {
 	for _, want := range []string{
 		"--allow-pub agents.mail.*.o.*",
 		"--allow-sub agents.prompt.cc.o.a",
-		"--allow-pub-response=1000",
-		"--response-ttl 15m",
 	} {
 		if !strings.Contains(f, want) {
 			t.Errorf("flags missing %q:\n%s", want, f)

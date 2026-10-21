@@ -159,7 +159,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	nc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX_a"))
+	nc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +180,9 @@ func TestEndpointPermissionDenials(t *testing.T) {
 
 	// Inbox privacy: replies (JetStream deliveries, KV reads, prompt answers)
 	// travel on inbox subjects, so a may subscribe only to its own prefix.
-	for _, subj := range []string{"_INBOX.>", "_INBOX_b.>", "_INBOX_b.x"} {
+	for _, subj := range []string{"_INBOX.>", "_INBOX.b.>", "_INBOX.b.x", "_INBOX.*.x"} {
 		errs := make(chan error, 1)
-		sc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX_a"),
+		sc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.a"),
 			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 				select {
 				case errs <- err:
@@ -203,6 +203,27 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			t.Errorf("subscribe %s: allowed; another endpoint's replies would be readable", subj)
 		}
 		sc.Close()
+	}
+
+	// Reply-permission laundering: a sends itself a request whose reply subject
+	// is a JetStream admin call, then answers it. A response grant derived from
+	// received reply subjects would let that through.
+	sub, err := nc.SubscribeSync("agents.status.cc.o.a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lm := nats.NewMsg("agents.status.cc.o.a")
+	lm.Reply = "$JS.API.STREAM.DELETE.inbox-b"
+	if err := nc.PublishMsg(lm); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sub.NextMsg(2 * time.Second); err == nil {
+		_ = got.Respond(nil)
+	}
+	nc.Flush()
+	time.Sleep(300 * time.Millisecond)
+	if _, err := js.Stream(ctx, "inbox-b"); err != nil {
+		t.Fatalf("an endpoint deleted another endpoint's inbox by answering its own request: %v", err)
 	}
 
 	// And the allowed path: a reads its own inbox by direct get.

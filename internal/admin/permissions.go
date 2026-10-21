@@ -5,20 +5,10 @@
 package admin
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/nats-io/jwt/v2"
 
 	"github.com/randybias/mash/internal/sap"
 	"github.com/randybias/mash/internal/store"
-)
-
-// Response limits: a SAP prompt reply is a stream of chunks (ack, "working"
-// every 30 s for up to 10 minutes, response, terminator) to the caller's inbox.
-const (
-	RespMaxMsgs = 1000
-	RespTTL     = 15 * time.Minute
 )
 
 // Permissions is the complete permission set of endpoint name under owner
@@ -33,6 +23,7 @@ func Permissions(owner, name string) jwt.Permissions {
 		"agents.prompt.*." + owner + ".*",
 		"agents.status.*." + owner + ".*",
 		subj.HB,
+		"_INBOX.>", // replies (SAP prompt chunks, $SRV answers) go to callers' inboxes only
 		"$SRV.>",
 		"$JS.API.INFO",
 		"$JS.API.STREAM.INFO." + inbox,
@@ -57,7 +48,9 @@ func Permissions(owner, name string) jwt.Permissions {
 	var p jwt.Permissions
 	p.Pub.Allow.Add(pub...)
 	p.Sub.Allow.Add(sub...)
-	p.Resp = &jwt.ResponsePermission{MaxMsgs: RespMaxMsgs, Expires: RespTTL}
+	// No response permission: it grants publishing to any reply subject the
+	// endpoint receives, so a request it sends itself with a reply subject of
+	// $JS.API.STREAM.DELETE.<victim> would let it delete another inbox.
 	return p
 }
 
@@ -71,6 +64,5 @@ func NSCFlags(owner, name string) []string {
 	for _, s := range p.Sub.Allow {
 		f = append(f, "--allow-sub", s)
 	}
-	f = append(f, fmt.Sprintf("--allow-pub-response=%d", RespMaxMsgs), "--response-ttl", "15m")
 	return f
 }
