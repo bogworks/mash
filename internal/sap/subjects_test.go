@@ -16,6 +16,9 @@ func TestFor(t *testing.T) {
 	if MailFilter("randyb", "p-ops2") != "agents.mail.*.randyb.p-ops2" {
 		t.Fatal(MailFilter("randyb", "p-ops2"))
 	}
+	if InboxPrefix("p-ops2") != "_INBOX_p-ops2" {
+		t.Fatal(InboxPrefix("p-ops2"))
+	}
 	if InboxStream("p-ops2") != "inbox-p-ops2" {
 		t.Fatal(InboxStream("p-ops2"))
 	}

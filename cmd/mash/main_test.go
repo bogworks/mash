@@ -10,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/randybias/mash/internal/admin"
+	"github.com/randybias/mash/internal/endpoint"
+	"github.com/randybias/mash/internal/store"
 	"github.com/randybias/mash/internal/testenv"
 )
 
@@ -290,5 +294,51 @@ func TestUsage(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 || !strings.Contains(out.String(), "mash ") {
 		t.Fatalf("version: %d %s", code, out.String())
+	}
+}
+
+func TestServeExitsWhenLeaseLost(t *testing.T) {
+	old := endpoint.LeaseRefresh
+	endpoint.LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { endpoint.LeaseRefresh = old })
+	w := newWorld(t, "a")
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, "a\tonline") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a never came online")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Another session takes the name: the lease is purged and re-created by it.
+	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
+	kv, err := js.KeyValue(context.Background(), store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := kv.Purge(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else","host":"h","pid":"1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-s.done:
+		s.done <- code
+		if code == 0 {
+			t.Fatal("serve exited 0 after losing its lease")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve kept running after losing its lease (it would split prompts with the new holder)")
+	}
+	// Its SAP registration is gone with it.
+	nc := w.e.Conn(t, w.e.AdminCreds)
+	if m, err := nc.Request("agents.status.cc.o.a", nil, time.Second); err == nil {
+		t.Fatalf("the old session still answers status: %s", m.Data)
 	}
 }

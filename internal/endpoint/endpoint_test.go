@@ -206,7 +206,7 @@ func identity(t *testing.T, creds string) sap.Identity {
 func TestForgedDroppedClaimedLabelled(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	subj := sap.For(f.e.Owner, "a").Mail
-	nc := f.e.Conn(t, f.creds["b"])
+	nc := f.e.ConnAs(t, f.creds["b"], "b")
 	id := identity(t, f.creds["b"])
 
 	h, _ := id.Sign(subj, []byte("forged body"), "b", time.Now(), "")
@@ -235,7 +235,7 @@ func TestUnknownSigner(t *testing.T) {
 	subj := sap.For(f.e.Owner, "a").Mail
 	id := identity(t, creds)
 	h, _ := id.Sign(subj, []byte("who am i"), "x", time.Now(), "")
-	publishRaw(t, f.e.Conn(t, creds), subj, h.Encode(), "who am i")
+	publishRaw(t, f.e.ConnAs(t, creds, "x"), subj, h.Encode(), "who am i")
 	_, ev := f.run(t, "a")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatal(got[0])
@@ -247,7 +247,7 @@ func TestNameClaimMismatchIsUnknownSigner(t *testing.T) {
 	subj := sap.For(f.e.Owner, "a").Mail
 	id := identity(t, f.creds["b"])
 	h, _ := id.Sign(subj, []byte("i am root"), "root", time.Now(), "")
-	publishRaw(t, f.e.Conn(t, f.creds["b"]), subj, h.Encode(), "i am root")
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, h.Encode(), "i am root")
 	_, ev := f.run(t, "a")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatalf("b claiming another name must not verify:\n%s", got[0])
@@ -323,7 +323,7 @@ func TestDirectoryLiveUpdate(t *testing.T) {
 	subj := sap.For(f.e.Owner, "a").Mail
 	id := identity(t, f.creds["c"])
 	h, _ := id.Sign(subj, []byte("from a ghost"), "c", time.Now(), "")
-	publishRaw(t, f.e.Conn(t, f.creds["c"]), subj, h.Encode(), "from a ghost")
+	publishRaw(t, f.e.ConnAs(t, f.creds["c"], "c"), subj, h.Encode(), "from a ghost")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatalf("mail from a deprovisioned user: %s", got[0])
 	}

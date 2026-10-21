@@ -62,10 +62,17 @@ func chunk(typ string, data any) []byte {
 	return b
 }
 
+// svc returns the SAP service once StartService has registered it.
+func (e *Endpoint) svc() *service {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.service
+}
+
 // Instance is the SAP instance id (the micro service id once registered).
 func (e *Endpoint) Instance() string {
-	if e.service != nil && e.service.svc != nil {
-		return e.service.svc.Info().ID
+	if s := e.svc(); s != nil {
+		return s.svc.Info().ID
 	}
 	return e.instance
 }
@@ -139,7 +146,9 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		return fmt.Errorf("mash: SAP registration: %w", err)
 	}
 	s.svc = svc
+	e.mu.Lock()
 	e.service = s
+	e.mu.Unlock()
 	if err := svc.AddEndpoint("prompt", micro.HandlerFunc(func(r micro.Request) { e.handlePrompt(r, onPrompt) }),
 		micro.WithEndpointSubject(e.subj.Prompt), micro.WithEndpointQueueGroup(sap.QueueGroup),
 		micro.WithEndpointMetadata(e.promptMetadata())); err != nil {
@@ -206,7 +215,7 @@ func (e *Endpoint) handlePrompt(r micro.Request, onPrompt func(PromptEvent)) {
 	if reply == "" {
 		return
 	}
-	h, tr := sap.VerifyLive(r.Headers().Get(sap.HeaderName), r.Subject(), r.Data(), time.Now(), e.service.nonces)
+	h, tr := sap.VerifyLive(r.Headers().Get(sap.HeaderName), r.Subject(), r.Data(), time.Now(), e.svc().nonces)
 	switch tr {
 	case sap.TrustMalformed:
 		e.end(reply, "400", "malformed Agent-Sender header")
@@ -231,9 +240,10 @@ func (e *Endpoint) handlePrompt(r micro.Request, onPrompt func(PromptEvent)) {
 	_ = e.nc.Publish(reply, chunk("status", "ack"))
 	id := nuid.Next()
 	p := &openPrompt{reply: reply, done: make(chan struct{})}
-	e.service.mu.Lock()
-	e.service.prompts[id] = p
-	e.service.mu.Unlock()
+	svc := e.svc()
+	svc.mu.Lock()
+	svc.prompts[id] = p
+	svc.mu.Unlock()
 	go func() {
 		keep := time.NewTicker(PromptKeepalive)
 		defer keep.Stop()
@@ -258,10 +268,11 @@ func (e *Endpoint) handlePrompt(r micro.Request, onPrompt func(PromptEvent)) {
 
 // finishPrompt removes an open prompt; it reports whether it was still open.
 func (e *Endpoint) finishPrompt(id string) bool {
-	e.service.mu.Lock()
-	p, ok := e.service.prompts[id]
-	delete(e.service.prompts, id)
-	e.service.mu.Unlock()
+	svc := e.svc()
+	svc.mu.Lock()
+	p, ok := svc.prompts[id]
+	delete(svc.prompts, id)
+	svc.mu.Unlock()
 	if ok {
 		p.once.Do(func() { close(p.done) })
 	}
@@ -270,12 +281,13 @@ func (e *Endpoint) finishPrompt(id string) bool {
 
 // Reply answers a live prompt with a response chunk; done ends the stream.
 func (e *Endpoint) Reply(requestID, text string, done bool) error {
-	if e.service == nil {
+	svc := e.svc()
+	if svc == nil {
 		return errors.New("mash: no live prompts (SAP service not started)")
 	}
-	e.service.mu.Lock()
-	p, ok := e.service.prompts[requestID]
-	e.service.mu.Unlock()
+	svc.mu.Lock()
+	p, ok := svc.prompts[requestID]
+	svc.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("mash: no open prompt %q (already answered or timed out)", requestID)
 	}
@@ -290,7 +302,7 @@ func (e *Endpoint) Reply(requestID, text string, done bool) error {
 
 // Discover finds name's prompt subject from $SRV.INFO.agents (SAP §4.3).
 func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, error) {
-	inbox := nats.NewInbox()
+	inbox := nc.NewInbox()
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
 		return "", err
@@ -323,7 +335,7 @@ func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, e
 // Prompt sends a signed live prompt to subject and writes the streamed reply
 // to out (SAP §5-§6, §13). It fails on an error chunk or 60 s of silence.
 func Prompt(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
-	inbox := nats.NewInbox()
+	inbox := nc.NewInbox()
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
 		return err

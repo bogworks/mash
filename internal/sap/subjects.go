@@ -33,6 +33,11 @@ func MailFilter(owner, name string) string {
 	return "agents.mail.*." + owner + "." + name
 }
 
+// InboxPrefix is the reply-subject prefix of endpoint name's connections.
+// Each endpoint may subscribe only under its own prefix, so replies meant for
+// one endpoint (JetStream deliveries, KV reads, prompt answers) are private.
+func InboxPrefix(name string) string { return "_INBOX_" + name }
+
 // InboxStream is the JetStream stream that holds name's mail.
 func InboxStream(name string) string { return "inbox-" + name }
 

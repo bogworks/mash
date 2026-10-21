@@ -217,7 +217,7 @@ These permissions, applied to a user named `<name>`, are the whole security mode
   - `$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.<name>`, to read its own lease (who holds a contested name).
 
 **Subscribe allow:**
-- `_INBOX.>`;
+- `_INBOX_<name>.>`: the endpoint's own reply prefix. Its connections set the custom inbox prefix `_INBOX_<name>`, so replies meant for one endpoint (JetStream deliveries, KV reads, prompt answers) can't be read by another;
 - `agents.prompt.cc.<owner>.<name>`;
 - `agents.status.cc.<owner>.<name>`;
 - `$SRV.>`;

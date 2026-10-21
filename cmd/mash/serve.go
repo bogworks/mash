@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/randybias/mash/internal/config"
@@ -51,13 +52,16 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Rea
 		fmt.Fprintln(stderr, err)
 		return degraded(endpoint.ErrorInstructions(cfg.Name, err), true)
 	}
-	defer ep.Close()
-
 	policy, _ := os.ReadFile(filepath.Join(cfg.Dir, "policy.md"))
 	srv := mcp.New(stdin, stdout, "mash", endpoint.Version,
 		endpoint.Instructions(cfg.Name, cfg.Owner, string(policy)), tools(ep))
 
+	// One goroutine runs the endpoint once Claude Code can take channel events.
+	// It is always awaited before Close, so nothing touches the endpoint after.
+	var lost atomic.Bool
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		select {
 		case <-srv.ChannelReady():
 		case <-ctx.Done():
@@ -71,13 +75,23 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Rea
 			fmt.Fprintln(stderr, err)
 			_ = srv.Notify(endpoint.ErrorInstructions(cfg.Name, err), map[string]string{"error": "true"})
 		}
-		if err := ep.Run(ctx, srv.Notify); err != nil {
+		if err := ep.Run(ctx, srv.Notify); err != nil && ctx.Err() == nil {
+			// The lease is gone (another session holds the name): stop
+			// everything, so the two never split prompts or heartbeat as one.
 			fmt.Fprintln(stderr, err)
-			_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off until this session restarts.", cfg.Name, err),
+			_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
 				map[string]string{"error": "true"})
+			lost.Store(true)
+			cancel()
 		}
 	}()
 	_ = srv.Run(ctx)
+	cancel()
+	<-done
+	ep.Close()
+	if lost.Load() {
+		return 1
+	}
 	return 0
 }
 

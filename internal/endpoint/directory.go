@@ -126,7 +126,7 @@ func (e *Endpoint) watchPresence(ctx context.Context) error {
 // doesn't wait a full heartbeat interval. A registration counts only when its
 // id_sig verifies and its key is the one the directory has for that name.
 func (e *Endpoint) bootstrapPresence() {
-	inbox := nats.NewInbox()
+	inbox := e.nc.NewInbox()
 	sub, err := e.nc.SubscribeSync(inbox)
 	if err != nil {
 		return

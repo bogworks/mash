@@ -33,7 +33,7 @@ func TestPermissionsExact(t *testing.T) {
 	}
 	wantSub := []string{
 		"$SRV.>",
-		"_INBOX.>",
+		"_INBOX_a.>",
 		"agents.hb.*.o.*",
 		"agents.prompt.cc.o.a",
 		"agents.status.cc.o.a",
@@ -63,6 +63,9 @@ func TestPermissionsNeverGrantOthers(t *testing.T) {
 		}
 		if strings.Contains(s, "inbox-") && !strings.Contains(s, "inbox-a") {
 			t.Errorf("grant on another inbox: %q", s)
+		}
+		if strings.HasPrefix(s, "_INBOX") && s != "_INBOX_a.>" {
+			t.Errorf("inbox grant beyond its own prefix: %q", s)
 		}
 		if strings.Contains(s, "$KV.mash-directory") {
 			t.Errorf("directory must be read-only: %q", s)

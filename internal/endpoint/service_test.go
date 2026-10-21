@@ -37,7 +37,7 @@ func noPrompt(*Endpoint, PromptEvent) {}
 func TestRegistrationMetadata(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
-	nc := f.e.Conn(t, f.creds["b"])
+	nc := f.e.ConnAs(t, f.creds["b"], "b")
 	m, err := nc.Request("$SRV.INFO.agents", nil, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ type hbPayload struct {
 
 func TestHeartbeatSigned(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	nc := f.e.Conn(t, f.creds["b"])
+	nc := f.e.ConnAs(t, f.creds["b"], "b")
 	sub, err := nc.SubscribeSync("agents.hb.cc.o.a")
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestWhoShowsOnline(t *testing.T) {
 func TestStatusReply(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
-	m, err := f.e.Conn(t, f.creds["b"]).Request("agents.status.cc.o.a", nil, 2*time.Second)
+	m, err := f.e.ConnAs(t, f.creds["b"], "b").Request("agents.status.cc.o.a", nil, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestPromptEnvelopeJSON(t *testing.T) {
 func promptRaw(t *testing.T, ep *Endpoint, subj string, payload []byte, sign bool) []string {
 	t.Helper()
 	nc := ep.Conn()
-	inbox := nats.NewInbox()
+	inbox := nc.NewInbox()
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
 		t.Fatal(err)

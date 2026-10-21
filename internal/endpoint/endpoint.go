@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
@@ -39,7 +40,7 @@ type Endpoint struct {
 	instance string // this process's id (lease holder, SAP instance)
 	dirKV    jetstream.KeyValue
 	leaseKV  jetstream.KeyValue
-	leaseRev uint64
+	leaseRev atomic.Uint64
 
 	mu       sync.RWMutex
 	dir      map[string]store.Record // by name
@@ -67,6 +68,29 @@ type leaseValue struct {
 	Since    string `json:"since"`
 }
 
+// checkCredsFor refuses credentials minted for another endpoint before any
+// network call: an endpoint user may only receive under its own inbox prefix.
+// Unrestricted credentials (no subscribe list) are left to the directory check.
+func checkCredsFor(path, name string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("mash: credentials: %w", err)
+	}
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return fmt.Errorf("mash: credentials: %w", err)
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil {
+		return fmt.Errorf("mash: credentials: %w", err)
+	}
+	allow := uc.Permissions.Sub.Allow
+	if len(allow) == 0 || allow.Contains(sap.InboxPrefix(name)+".>") {
+		return nil
+	}
+	return fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, name)
+}
+
 func readIdentity(path string) (sap.Identity, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -84,9 +108,13 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkCredsFor(cfg.Creds, cfg.Name); err != nil {
+		return nil, err
+	}
 	nc, err := nats.Connect(cfg.URL,
 		nats.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
+		nats.CustomInboxPrefix(sap.InboxPrefix(cfg.Name)),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(2*time.Second),
 		nats.ReconnectJitter(5*time.Second, 5*time.Second),
@@ -164,7 +192,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mash: lease: %w", err)
 	}
-	e.leaseRev = rev
+	e.leaseRev.Store(rev)
 	return nil
 }
 
@@ -174,9 +202,9 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	host, _ := os.Hostname()
 	val, _ := json.Marshal(leaseValue{Instance: e.instance, Host: host, PID: fmt.Sprint(os.Getpid()),
 		Since: time.Now().UTC().Format(time.RFC3339)})
-	rev, err := e.leaseKV.Update(ctx, e.cfg.Name, val, e.leaseRev)
+	rev, err := e.leaseKV.Update(ctx, e.cfg.Name, val, e.leaseRev.Load())
 	if err == nil {
-		e.leaseRev = rev
+		e.leaseRev.Store(rev)
 		return nil
 	}
 	var apiErr *jetstream.APIError
@@ -186,7 +214,7 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	}
 	// Our entry is gone (expired during an outage) or replaced. Re-take it if free.
 	if rev, cerr := e.leaseKV.Create(ctx, e.cfg.Name, val); cerr == nil {
-		e.leaseRev = rev
+		e.leaseRev.Store(rev)
 		return nil
 	}
 	return fmt.Errorf("mash: lost the lease on %s to another session", e.cfg.Name)
@@ -229,12 +257,12 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 
 // Close releases the lease and closes the connection.
 func (e *Endpoint) Close() {
-	if e.service != nil {
-		e.service.stop()
+	if svc := e.svc(); svc != nil {
+		svc.stop()
 	}
 	if e.leaseKV != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = e.leaseKV.Delete(ctx, e.cfg.Name, jetstream.LastRevision(e.leaseRev))
+		_ = e.leaseKV.Delete(ctx, e.cfg.Name, jetstream.LastRevision(e.leaseRev.Load()))
 		cancel()
 	}
 	e.nc.Close()

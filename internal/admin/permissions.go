@@ -51,7 +51,7 @@ func Permissions(owner, name string) jwt.Permissions {
 		"$JS.API.DIRECT.GET." + lease + ".$KV." + store.LeaseBucket + "." + name,
 	}
 	sub := []string{
-		"_INBOX.>",
+		sap.InboxPrefix(name) + ".>",
 		subj.Prompt,
 		subj.Status,
 		"$SRV.>",

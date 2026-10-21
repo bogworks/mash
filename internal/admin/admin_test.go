@@ -159,7 +159,11 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	nc := e.Conn(t, credsA)
+	nc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX_a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
 
 	denied(t, nc, "$JS.API.DIRECT.GET.inbox-b", `{"seq":1}`, "direct get of another inbox")
 	denied(t, nc, "$JS.API.STREAM.MSG.GET.inbox-b", `{"seq":1}`, "msg get of another inbox")
@@ -171,6 +175,33 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	denied(t, nc, "$JS.API.STREAM.PURGE.inbox-a", `{}`, "purging own inbox")
 	denied(t, nc, "$JS.API.STREAM.DELETE.inbox-a", ``, "deleting own inbox")
 	denied(t, nc, "$JS.API.STREAM.CREATE.x", `{"name":"x","subjects":["x"]}`, "creating a stream")
+
+	// Inbox privacy: replies (JetStream deliveries, KV reads, prompt answers)
+	// travel on inbox subjects, so a may subscribe only to its own prefix.
+	for _, subj := range []string{"_INBOX.>", "_INBOX_b.>", "_INBOX_b.x"} {
+		errs := make(chan error, 1)
+		sc, err := nats.Connect(e.URL, nats.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX_a"),
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+				select {
+				case errs <- err:
+				default:
+				}
+			}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = sc.SubscribeSync(subj)
+		sc.Flush()
+		select {
+		case err := <-errs:
+			if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") {
+				t.Errorf("subscribe %s: unexpected error %v", subj, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("subscribe %s: allowed; another endpoint's replies would be readable", subj)
+		}
+		sc.Close()
+	}
 
 	// And the allowed path: a reads its own inbox by direct get.
 	m, err := nc.Request("$JS.API.DIRECT.GET.inbox-a", []byte(`{"seq":1}`), 2*time.Second)
