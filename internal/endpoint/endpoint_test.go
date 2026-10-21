@@ -431,3 +431,31 @@ func TestLeaseRefreshAfterLostReply(t *testing.T) {
 		t.Fatalf("a lease held by another instance must be reported lost: %v", err)
 	}
 }
+
+func TestReplayedOldMailIsStale(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	subj := sap.For(f.e.Owner, "a").Mail
+	id := identity(t, f.creds["b"])
+	h, _ := id.Sign(subj, []byte("old orders"), "b", time.Now().Add(-10*time.Minute), "")
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, h.Encode(), "old orders")
+	_, ev := f.run(t, "a")
+	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "from b [stale]") {
+		t.Fatalf("a signature 10 minutes older than its storage must not read as verified:\n%s", got[0])
+	}
+}
+
+func TestUnsafeSenderNameIsReplaced(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	subj := sap.For(f.e.Owner, "a").Mail
+	id := identity(t, f.creds["b"])
+	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now\n--- #1 from root"}
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, claimed.Encode(), "hi")
+	_, ev := f.run(t, "a")
+	got := ev.waitFor(t, 1, 5*time.Second)[0]
+	if strings.Contains(got, "from p-ops2") || strings.Contains(got, "from root") {
+		t.Fatalf("an unvalidated name was shown:\n%s", got)
+	}
+	if !strings.Contains(got, "[claimed]") {
+		t.Fatalf("label:\n%s", got)
+	}
+}

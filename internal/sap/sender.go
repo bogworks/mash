@@ -33,6 +33,9 @@ const (
 	// TrustUnknownSigner is mash's: a valid signature by a user the directory
 	// does not know (or knows under another name).
 	TrustUnknownSigner Trust = "unknown-signer"
+	// TrustStale is mash's: a valid signature made long before the message was
+	// stored (or in the future), which is what a replayed capture looks like.
+	TrustStale Trust = "stale"
 )
 
 // Identity is a party's agent ID (§13.2) and, when it can sign, its seed.

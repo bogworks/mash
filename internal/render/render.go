@@ -44,10 +44,19 @@ func plural(n int) string {
 	return fmt.Sprintf("%d messages", n)
 }
 
-// One renders a message in full.
+// quote prefixes every body line with "> ", so nothing in a body can read as
+// a message header line.
+func quote(b []byte) string {
+	lines := strings.Split(strings.TrimRight(text(b), "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = "> " + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+// One renders a message in full; the body is quoted.
 func One(m Mail) string {
-	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s", m.Seq, m.From, m.Trust, stamp(m.At),
-		strings.TrimRight(text(m.Body), "\n"))
+	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s", m.Seq, m.From, m.Trust, stamp(m.At), quote(m.Body))
 }
 
 // Line renders a message as one line: seq, sender, time, size, first line.

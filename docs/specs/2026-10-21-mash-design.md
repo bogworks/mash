@@ -80,6 +80,7 @@ mail is **declared, not registered** as a micro-service endpoint:
   - `claimed`: no `sig`.
   - `absent`: no header.
   - `forged`: a failing signature. These are never shown as mail. They are logged and counted, then acked so they can't block the inbox.
+  - `stale`: a valid signature made more than 5 minutes before the stream stored the message (or more than 30 s in the future), which is what a replayed capture looks like. Shown as information only.
 - **Who a verified user is:** the directory maps `user → name`. This is the "registry it trusts" of §13.7.2. A key the directory doesn't know is `unknown-signer`, even with a valid signature.
 
 ## 5. Storage
@@ -148,7 +149,7 @@ An MCP server over stdio, started by Claude Code from the mash plugin. One per C
 
 - **Batching:** gather messages until 100 ms pass with no new one (`MASH_SETTLE_MS`), then push one `notifications/claude/channel` event.
 - **Full or digest:** if the batch is at most 10 messages and at most 16 KiB of bodies (`MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`), each message is shown in full. Otherwise a digest shows one line each: `#<seq>`, sender, trust class, size, first line.
-- **Each message header line:** `--- #<seq> from <sender> [<trust>] at <time>`.
+- **Each message header line:** `--- #<seq> from <sender> [<trust>] at <time>`. The body follows with every line quoted (`> `), so no body text can read as a header. A sender name that is not a valid endpoint name is shown as a short form of its key.
 - **Event `meta`:** `{to, count, seqs}`, string values only.
 - **Ack** each message after its notification is written to stdout. Delivered means received: history stays in the stream.
 - **Ordering:** stream order, per inbox.

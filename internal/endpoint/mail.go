@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/randybias/mash/internal/config"
 	"github.com/randybias/mash/internal/render"
 	"github.com/randybias/mash/internal/sap"
 	"github.com/randybias/mash/internal/store"
@@ -28,9 +29,26 @@ const InReplyToHeader = "Mash-In-Reply-To"
 // maxPending flushes a batch early so a flood can't grow it without bound.
 const maxPending = 200
 
+// MaxSignedAge bounds how long before its storage a message may have been
+// signed. Older (or future) signatures are labelled stale: a replayed capture.
+var MaxSignedAge = 5 * time.Minute
+
+// shownName is the sender name as displayed: a self-declared name only when it
+// is a valid endpoint name, else a short form of the key (never raw text).
+func shownName(h sap.SenderHeader) string {
+	if config.ValidName(h.Name) {
+		return h.Name
+	}
+	if len(h.User) > 8 {
+		return h.User[:4] + "…" + h.User[len(h.User)-4:]
+	}
+	return "?"
+}
+
 // classify verifies a stored message and names its sender (spec section 4).
-// ok is false for forged or malformed mail, which is never shown.
-func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte) (from string, trust sap.Trust, h sap.SenderHeader, ok bool) {
+// storedAt is when the stream stored it. ok is false for forged or malformed
+// mail, which is never shown.
+func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, storedAt time.Time) (from string, trust sap.Trust, h sap.SenderHeader, ok bool) {
 	h, trust = sap.VerifyStored(hdr.Get(sap.HeaderName), subject, data)
 	switch trust {
 	case sap.TrustForged, sap.TrustMalformed:
@@ -38,20 +56,18 @@ func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte) (from 
 	case sap.TrustAbsent:
 		return "?", trust, h, true
 	case sap.TrustClaimed:
-		if h.Name != "" {
-			return h.Name, trust, h, true
-		}
-		return h.User, trust, h, true
+		return shownName(h), trust, h, true
 	}
 	e.mu.RLock()
 	name := e.byUser[h.User]
 	e.mu.RUnlock()
 	if name == "" || (h.Name != "" && h.Name != name) {
-		from = h.Name
-		if from == "" {
-			from = h.User
+		return shownName(h), sap.TrustUnknownSigner, h, true
+	}
+	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
+		if age := storedAt.Sub(signed); age > MaxSignedAge || age < -sap.LiveSkew {
+			return name, sap.TrustStale, h, true
 		}
-		return from, sap.TrustUnknownSigner, h, true
 	}
 	return name, sap.TrustVerified, h, true
 }
@@ -121,7 +137,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			_ = m.Term()
 			return
 		}
-		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data())
+		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
 		if !ok {
 			e.dropped.Add(1)
 			e.log.Printf("dropped #%d: %s sender header (claimed user %s)", meta.Sequence.Stream, trust, h.User)
@@ -132,7 +148,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		// holds a copy or it is redelivered after a lost ack. It counts as seen
 		// only once delivered, so a failed write is retried, not dropped.
 		var key string
-		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner {
+		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
 		}
 		mu.Lock()
@@ -242,7 +258,7 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 }
 
 func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
-	from, trust, _, ok := e.classify(raw.Subject, raw.Header, raw.Data)
+	from, trust, _, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
