@@ -192,10 +192,45 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			}
 		}
 	}
+	// process handles a finished attempt. stop is true when the loop must return (ep non-nil on success).
+	process := func(r result) (ep *endpoint.Endpoint, stop bool) {
+		inflight = false
+		var h *endpoint.LeaseHeldError
+		switch {
+		case r.err == nil:
+			acquiredCount.Add(1)
+			state.Store(&sessionState{ep: r.ep})
+			return r.ep, true
+		case ctx.Err() != nil:
+			return nil, true // cancellation is never "held"
+		case errors.As(r.err, &h):
+			held = h
+			state.Store(&sessionState{waiting: h})
+			timer.Reset(leaseRetry)
+		default: // a non-held failure ends the wait: terminal for this session
+			fmt.Fprintln(stderr, r.err)
+			failed = r.err
+			state.Store(&sessionState{failed: r.err})
+			if ready == nil { // Claude is already listening: say so now
+				notify(endpoint.ErrorInstructions(cfg.Name, r.err))
+				return nil, true
+			}
+		}
+		return nil, false
+	}
 	for {
 		select {
 		case <-ready:
 			ready = nil
+			// An attempt that finished before readiness is settled first, so a success is never announced as
+			// "held" and a terminal failure is told at once.
+			select {
+			case r := <-results:
+				if ep, stop := process(r); stop {
+					return ep, ep != nil
+				}
+			default:
+			}
 			if failed != nil {
 				notify(endpoint.ErrorInstructions(cfg.Name, failed))
 				return nil, false
@@ -223,27 +258,8 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 				results <- result{ep, err}
 			}()
 		case r := <-results:
-			inflight = false
-			var h *endpoint.LeaseHeldError
-			switch {
-			case r.err == nil:
-				acquiredCount.Add(1)
-				state.Store(&sessionState{ep: r.ep})
-				return r.ep, true
-			case ctx.Err() != nil:
-				return nil, false // cancellation is never "held"
-			case errors.As(r.err, &h):
-				held = h
-				state.Store(&sessionState{waiting: h})
-				timer.Reset(leaseRetry)
-			default: // a non-held failure ends the wait: terminal for this session
-				fmt.Fprintln(stderr, r.err)
-				failed = r.err
-				state.Store(&sessionState{failed: r.err})
-				if ready == nil { // Claude is already listening: say so now
-					notify(endpoint.ErrorInstructions(cfg.Name, r.err))
-					return nil, false
-				}
+			if ep, stop := process(r); stop {
+				return ep, ep != nil
 			}
 		case <-ctx.Done():
 			drain()

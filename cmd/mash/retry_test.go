@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,20 +140,39 @@ func TestServeRetriesHeldLease(t *testing.T) {
 			t.Fatalf("held notice lacks %q: %s", want, held)
 		}
 	}
+	// Mail sent while the name is held waits in the inbox and arrives after the online notice.
+	if out, code := w.cli(t, "b", "send", "a", "sent while held"); code != 0 {
+		t.Fatalf("send: %d %s", code, out)
+	}
 	freeLease(t, kv, "a")
 	if online := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(online, "online") {
 		t.Fatalf("online notice: %s", online)
 	}
-	// Mail now reaches the session; the next channel event is that mail (no extra notices were sent).
+	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "sent while held") {
+		t.Fatalf("expected the queued mail after the online notice, got %s", ev)
+	}
 	if out, code := w.cli(t, "b", "send", "a", "hello after recovery"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "hello after recovery") {
 		t.Fatalf("expected the mail, got %s", ev)
 	}
+	// The registered tools now work on the recovered endpoint, as endpoint a.
 	r := s.call(t, 10, "send", `{"to":"b","text":"thanks"}`)
 	if txt := resultText(r); !strings.HasPrefix(txt, "sent #") || r["isError"] == true {
 		t.Fatalf("send tool after recovery: %v", r)
+	}
+	if txt := resultText(s.call(t, 11, "inbox", `{}`)); !strings.Contains(txt, "sent while held") || !strings.Contains(txt, "hello after recovery") {
+		t.Fatalf("inbox after recovery: %s", txt)
+	}
+	if txt := resultText(s.call(t, 12, "read", `{"seq":1}`)); !strings.Contains(txt, "sent while held") {
+		t.Fatalf("read after recovery: %s", txt)
+	}
+	if txt := resultText(s.call(t, 13, "who", `{}`)); !strings.Contains(txt, "a\tonline") {
+		t.Fatalf("who after recovery: %s", txt)
+	}
+	if out, _ := w.cli(t, "b", "inbox"); !strings.Contains(out, "from a [verified]") || !strings.Contains(out, "thanks") {
+		t.Fatalf("b's inbox: %s", out)
 	}
 	if out, _ := w.cli(t, "b", "who"); !strings.Contains(out, "a\tonline") {
 		t.Fatalf("who: %s", out)
@@ -205,9 +224,16 @@ func TestServeDoesNotDisplaceRenewingHolder(t *testing.T) {
 	waiter.initialize(t)
 	waiter.tools(t)
 	eventually(t, 10*time.Second, "10 retries while the holder renews", func() bool { return acquireAttempts.Load()-attempts0 >= 10 })
-	cur, _ := kv.Get(context.Background(), "a")
-	if cur.Revision() < first.Revision()+5 {
-		t.Fatalf("holder refreshed %d times, want at least 5", cur.Revision()-first.Revision())
+	eventually(t, 10*time.Second, "5 holder refreshes", func() bool {
+		cur, err := kv.Get(context.Background(), "a")
+		return err == nil && cur.Revision() >= first.Revision()+5
+	})
+	// The holder still gets its mail while a waiter is retrying against it.
+	if out, code := w.cli(t, "a", "send", "a", "to the holder"); code != 0 {
+		t.Fatalf("send: %d %s", code, out)
+	}
+	if ev := content(holder.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "to the holder") {
+		t.Fatalf("holder event %s", ev)
 	}
 	if acquiredCount.Load() != acquired0 {
 		t.Fatal("the waiter took a continuously renewed lease")
@@ -283,6 +309,8 @@ func TestServeCancelDuringWait(t *testing.T) {
 	waitGone(t, w, base, "a", kv, false)
 }
 
+// Cancellation (here the parent context, which is observable) is already in effect when a retry's Open
+// succeeds: the worker must still close that endpoint and release its lease.
 func TestServeCancelRightAfterOpen(t *testing.T) {
 	setTiming(t, 20*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a")
@@ -290,19 +318,27 @@ func TestServeCancelRightAfterOpen(t *testing.T) {
 	base := w.e.Connections()
 	holdLease(t, kv, "a")
 	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	letGo := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(letGo) // registered before the session: a failed test cannot leave the attempt blocked
 	afterOpenHook = func() { close(reached); <-release }
-	s := startServe(t, w.env["a"])
-	s.initialize(t)
-	s.tools(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done, closeIO := startServeCtx(t, ctx, w.env["a"])
+	t.Cleanup(closeIO)
 	freeLease(t, kv, "a")
 	select {
 	case <-reached:
 	case <-time.After(5 * time.Second):
 		t.Fatal("no successful Open")
 	}
-	s.in.Close() // cancellation wins the race with a successful Open
-	close(release)
-	s.exited(t, 5*time.Second)
+	cancel() // cancellation is in effect before the successful Open is published
+	letGo()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not exit")
+	}
 	waitGone(t, w, base, "a", kv, false)
 	if _, err := kv.Get(context.Background(), "a"); err == nil {
 		t.Fatal("a successful Open raced with shutdown and left its lease held")
@@ -316,29 +352,39 @@ func TestServeCancelBeforeAttemptAndParentCancel(t *testing.T) {
 	base := w.e.Connections()
 	holdLease(t, kv, "a")
 	reached, release := make(chan struct{}, 100), make(chan struct{})
+	var once sync.Once
+	letGo := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(letGo)
 	beforeAttemptHook = func() { reached <- struct{}{}; <-release }
-	// Parent cancellation (not stdin) ends serve.
 	ctx, cancel := context.WithCancel(context.Background())
-	inR, inW := io.Pipe()
-	outR, outW := io.Pipe()
-	done := make(chan int, 1)
-	go func() { done <- runCtx(ctx, []string{"serve"}, envFrom(w.env["a"]), inR, outW, io.Discard) }()
-	go io.Copy(io.Discard, outR)
-	t.Cleanup(func() { inW.Close(); outR.Close() })
-	io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`+"\n")
+	t.Cleanup(cancel)
+	done, closeIO := startServeCtx(t, ctx, w.env["a"])
+	t.Cleanup(closeIO)
 	select {
 	case <-reached:
 	case <-time.After(5 * time.Second):
 		t.Fatal("no attempt started")
 	}
 	cancel()
-	close(release)
+	letGo()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not exit on parent cancel")
 	}
 	waitGone(t, w, base, "a", kv, false)
+}
+
+// startServeCtx runs serve under a caller-controlled context, for cancellation that stdin EOF cannot order.
+func startServeCtx(t *testing.T, ctx context.Context, env map[string]string) (<-chan int, func()) {
+	t.Helper()
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan int, 1)
+	go func() { done <- runCtx(ctx, []string{"serve"}, envFrom(env), inR, outW, io.Discard); outW.Close() }()
+	go io.Copy(io.Discard, outR)
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`+"\n")
+	return done, func() { inW.Close(); outR.Close() }
 }
 
 func TestServeHeldThenNonHeldErrorIsTerminal(t *testing.T) {
@@ -386,8 +432,9 @@ func TestServeOrdinaryStartupHasNoNotice(t *testing.T) {
 	}
 }
 
-// The first Open happens before the MCP server exists, so it is bounded by openTimeout and stdin EOF is seen
-// after it returns; it must still end promptly once it does.
+// The first Open happens before the MCP server exists. Against a server that accepts but never speaks NATS
+// it is bounded by nats' own handshake timeout (openTimeout bounds only context-aware steps); this asserts
+// that serve then notices the stdin EOF and exits, not that openTimeout is effective.
 func TestServeFirstOpenUnresponsiveThenEOF(t *testing.T) {
 	setTiming(t, 50*time.Millisecond, 300*time.Millisecond)
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // accepts, never speaks NATS
@@ -413,12 +460,9 @@ func TestServeFirstOpenUnresponsiveThenEOF(t *testing.T) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	done := make(chan int, 1)
-	go func() { done <- run([]string{"serve"}, envFrom(env), inR, outW, io.Discard) }()
-	go func() {
-		sc := bufio.NewScanner(outR)
-		for sc.Scan() {
-		}
-	}()
+	go func() { done <- run([]string{"serve"}, envFrom(env), inR, outW, io.Discard); outW.Close() }()
+	go io.Copy(io.Discard, outR)
+	t.Cleanup(func() { outR.Close() })
 	inW.Close() // EOF while the first Open is in flight
 	select {
 	case <-done:
