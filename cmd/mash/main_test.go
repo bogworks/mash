@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -398,5 +399,31 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	}
 	if _, err := w.e.Conn(t, w.e.AdminCreds).Request("agents.status.cc.o.a", nil, time.Second); err == nil {
 		t.Fatal("the old session still answers status")
+	}
+}
+
+func TestVersionLine(t *testing.T) {
+	bi := func(rev, modified string) *debug.BuildInfo {
+		s := []debug.BuildSetting{{Key: "vcs.revision", Value: rev}}
+		if modified != "" {
+			s = append(s, debug.BuildSetting{Key: "vcs.modified", Value: modified})
+		}
+		return &debug.BuildInfo{Settings: s}
+	}
+	cases := []struct {
+		name, ldflags string
+		info          *debug.BuildInfo
+		want          string
+	}{
+		{"ldflags wins", "abc1234", bi("ffff", ""), "mash 0.1.0 (commit abc1234)"},
+		{"vcs revision", "", bi("0123456789abcdef", "false"), "mash 0.1.0 (commit 0123456789abcdef)"},
+		{"modified tree", "", bi("0123456789abcdef", "true"), "mash 0.1.0 (commit 0123456789abcdef+dirty)"},
+		{"no build info", "", nil, "mash 0.1.0 (commit unknown)"},
+		{"no vcs settings", "", &debug.BuildInfo{}, "mash 0.1.0 (commit unknown)"},
+	}
+	for _, c := range cases {
+		if got := versionLine("0.1.0", c.ldflags, c.info); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
 	}
 }

@@ -75,7 +75,7 @@ Each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the
 | Symptom | Likely cause |
 |---|---|
 | The session says it has no mash identity | `MASH_NAME` was not set when Claude Code started. |
-| The session says the name is already in use | Another live session holds the lease. It expires 90 s after that session dies. |
+| The session says the name is already in use | Another live session holds the lease (it expires 90 s after that session dies). The session keeps retrying every 10 s and tells Claude when mail is on; no restart is needed. |
 | `--channels` says "not on the approved channels allowlist" | The managed settings allowlist is missing (see install.md, step 3). |
 | Mail arrives labelled `[unknown-signer]` | The sender's key is not in the directory: it was deprovisioned, or it is not a mash endpoint. |
 | `mash: endpoint X is not provisioned` | Run `mash admin provision`, or check `MASH_NAME` for a typo. |

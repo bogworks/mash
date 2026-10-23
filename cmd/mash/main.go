@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/randybias/mash/internal/config"
@@ -47,13 +48,40 @@ func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr
 	return runCtx(context.Background(), args, env, stdin, stdout, stderr)
 }
 
+// commit is set by -ldflags "-X main.commit=<sha>"; otherwise the VCS revision stamped by go build is used.
+var commit string
+
+// versionLine is "mash <version> (commit <rev>)". It names the commit so a pinned build can be checked.
+func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
+	rev := ldflags
+	if rev == "" && bi != nil {
+		modified := false
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				modified = s.Value == "true"
+			}
+		}
+		if rev != "" && modified {
+			rev += "+dirty"
+		}
+	}
+	if rev == "" {
+		rev = "unknown"
+	}
+	return fmt.Sprintf("mash %s (commit %s)", version, rev)
+}
+
 func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
 	if args[0] == "version" {
-		fmt.Fprintf(stdout, "mash %s\n", endpoint.Version)
+		bi, _ := debug.ReadBuildInfo()
+		fmt.Fprintln(stdout, versionLine(endpoint.Version, commit, bi))
 		return 0
 	}
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
