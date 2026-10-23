@@ -1,11 +1,12 @@
-# Lease retry on startup (S5) Implementation Plan, revision 2
+# Lease retry on startup (S5) Implementation Plan, revision 3
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans. Steps use checkbox syntax.
 
 **Goal:** a `mash serve` that starts while its endpoint's lease is held keeps retrying the take until it gets
 it, then comes online with no restart of Claude.
 
-**Revision 2** answers Codex's reject (10 findings, `.codex-review-lease-retry.md`, untracked): one MCP server
+**Revision 3** answers Codex's second review (4 new findings, 4 partly-closed) and the lead's rulings; approved on
+commit, no further review round. **Revision 2** answered Codex's reject (10 findings, `.codex-review-lease-retry.md`, untracked): one MCP server
 and one joined worker; tools registered once; serialized, readiness-ordered notices; cancellation is never
 "held"; a defined terminal state; a narrowed guarantee; honest scope on MCP I/O leaks; real tests.
 
@@ -22,24 +23,32 @@ session stayed offline 3+ minutes past the 90 s lease because a startup lease co
 ## Global Constraints
 
 - **Files allowed:** `cmd/mash/serve.go`, `cmd/mash/main_test.go`, `internal/testenv/testenv.go` (a connection
-  count accessor), `docs/operations.md` (one troubleshooting line), and **one narrow change in
-  `internal/endpoint/endpoint.go` `takeLease`** (finding 4): after `Create`/`Get`, if `ctx.Err() != nil`
-  return it instead of a `LeaseHeldError`. No change to `store.LeaseTTL` (90 s), the protocol, `internal/mcp`,
+  count accessor), `cmd/mash/main.go` (`mash version` prints the commit), `docs/operations.md` (one troubleshooting line), and **one narrow change in
+  `internal/endpoint/endpoint.go` `takeLease`** (approved by the lead, confined to the held-error branch):
+  immediately before `return held`, `if ctx.Err() != nil { return ctx.Err() }`. **No** unconditional
+  post-success cancellation return (`Open` closes the connection only on failure, so that could strand a
+  created lease). Its test goes in `internal/endpoint/endpoint_test.go` (in scope). No change to `store.LeaseTTL` (90 s), the protocol, `internal/mcp`,
   or lease refresh/loss behaviour.
 - **Which errors retry:** only `*endpoint.LeaseHeldError` from the **first** `Open`. Any other first-`Open`
   error is handled exactly as today (tool-less error server, terminal), unchanged.
-- **Retry rule:** `var leaseRetry = 10 * time.Second`; each attempt gets a fresh `Open` context bounded at 20 s
-  (nats dial adds its own default 2 s timeout; `nats.Connect` takes no context, so shutdown during a dial can
-  take up to that 2 s: accepted and tested with a 5 s allowance). Never gives up; ends on stdin close or
-  `ctx` cancel.
+- **Retry rule:** `var leaseRetry = 10 * time.Second`; each attempt gets a fresh `Open` context bounded by
+  `var openTimeout = 20 * time.Second`. `nats.Connect` takes no context and its DNS lookup, connection init
+  and server-pool attempts are not bounded by it, so **no connect-time bound is claimed**: the worker waits for
+  an in-flight attempt to finish and closes its result. Never gives up; ends on stdin close or `ctx` cancel.
+- **First `Open` (finding A):** it stays before the MCP server exists, exactly as today, so it is bounded only
+  by `openTimeout` and stdin EOF during it is noticed after it returns (existing behaviour, unchanged). A test
+  forces an unresponsive first `Open` with a short `openTimeout` and asserts `serve` then exits on EOF.
+  Everything after the first `Open` (retries) is cancellable by stdin EOF and parent cancellation.
 - **Guarantee, narrowed (finding 6):** the waiter never takes a name whose holder is *continuously renewing*.
   If a holder loses its NATS connection and its lease expires, a waiter may take the name before the old holder
   notices; the old holder then stops, as it does today. Lease loss after a session has started stays terminal:
   it is never fed back into acquisition.
 - **Out of scope (finding 7), not promised:** the existing `internal/mcp` behaviours: the readiness goroutine
   of `mcp.New` when stdin closes before `initialize`, a scanner blocked on stdin, and `Notify` blocking on a
-  stuck stdout. This plan promises only: `serve` returns promptly on stdin close or cancel during the wait,
-  the worker is joined, and the endpoint's NATS connection and lease refresher are closed. Tests assert those
+  stuck stdout. This plan promises only, **when stdout is writable**: `serve` returns promptly on stdin close or cancel
+  during the wait (a worker blocked in `Notify` on a stuck stdout cannot reach its cleanup; `internal/mcp` has
+  no cancellation path and is not changed), the worker is joined, and the endpoint's NATS connection and
+  lease refresher are closed. Tests assert those
   (connection count), not goroutine zero.
 - **Terminal state after a retry hits a non-held error (finding 8):** stop retrying; store the error in the
   state; send one terminal notice (after readiness, through the same owner); every tool call returns that error
@@ -53,7 +62,10 @@ immutable definitions; each handler does `st := state.Load()` once and: `st.ep !
 that endpoint; `st.waiting != nil` → return "mash is waiting for endpoint <name> (held by <host> pid <pid>
 since <t>); mail is off"; `st.failed != nil` → that error.
 
-Worker (one goroutine, joined): `acquire` loop → `Store(ep)` → wait `ChannelReady` → notices → existing
+Worker (one goroutine, joined): a `select` loop over {`ChannelReady` once, the retry timer, the result of an
+in-flight attempt (each attempt runs in a sub-goroutine the worker always receives from and, on success,
+owns), `ctx.Done`}, so readiness is observed *while* acquisition continues and the held notice can be sent
+while waiting; on acquisition → `Store(ep)` → (if not yet ready, wait `ChannelReady`) → online notice → existing
 `StartService`/`Run` body → `ep.Close()` in a `defer`, unconditionally, **including when cancellation wins the
 race with a successful `Open`** (finding 5: the worker, not the caller, owns every successful result).
 
@@ -61,6 +73,10 @@ Notices are sent only by the worker, in order, and only after `ChannelReady` (fi
 still held when readiness arrives → one "held, retrying" notice; when acquired after having waited → one
 "online, mail is on" notice (if acquisition happened before readiness, only the online notice is sent, after
 readiness). A session that never waited sends no notice (ordinary startup is unchanged, finding 9).
+
+**Waiting instructions (finding C):** `endpoint.Instructions(name, owner, policy)` (the normal text, including
+`policy.md`) plus one temporary line "mail is off until the name is free; mash is retrying", so a recovered
+session has the full operating guidance. Tested with a policy sentinel in `policy.md`.
 
 First `Open` succeeds → state is pre-stored `ep` and the worker skips the loop: the same code path, no notices.
 
@@ -84,8 +100,9 @@ First `Open` succeeds → state is pre-stored `ep` and the worker skips the loop
 **Interfaces:** consumes `endpoint.Open`, `*endpoint.LeaseHeldError`; produces `var leaseRetry`,
 `var acquireAttempts atomic.Int64` (test-visible attempt counter), `type sessionState`.
 
-- [ ] **Step 1: tests first.** Timing globals (`leaseRetry`, `endpoint.LeaseRefresh`) are restored only after
-  the worker has exited (cleanup registered after the serve-join).
+- [ ] **Step 1: tests first.** Timing globals (`leaseRetry`, `openTimeout`, `endpoint.LeaseRefresh`) are
+  saved and their restoration is **registered before any session starts**, so (cleanups run in reverse
+  registration order) it runs after every serve/holder/waiter has been cancelled and joined (finding B).
   - `TestServeRetriesHeldLease`: a stand-in holder key for `alpha`, created directly in the lease bucket;
     `leaseRetry=50ms`; `serve` over pipes; `initialize`; assert tools list has five tools (not zero), one
     "held, retrying" channel event naming holder host/pid/since and containing "already in use"; delete the key
@@ -96,9 +113,12 @@ First `Open` succeeds → state is pre-stored `ep` and the worker skips the loop
     waiter makes at least 10 attempts (`acquireAttempts`) while the holder refreshes at least 5 times; the
     waiter never comes online; holder still serves mail. Then the holder closes and the waiter acquires.
   - `TestServeWaitingToolsAreSafe`: every tool returns the "waiting" result, no panic.
-  - `TestServeCancelDuringWait`, `TestServeCancelDuringDial`, `TestServeCancelRightAfterOpen`: stdin closed at
-    each point, with barriers (a hook between `Open` returning and publication); `serve` returns within 5 s,
+  - `TestServeCancelDuringWait`, `TestServeCancelDuringAttempt`, `TestServeCancelRightAfterOpen`: stdin closed,
+    and separately the parent context cancelled, at each point, with barriers (a hook between `Open` returning and publication); `serve` returns within 5 s,
     `Env.Connections()` returns to its baseline, and no lease key remains held by the instance.
+  - `TestServeWaitingInstructionsKeepPolicy`: the initialize instructions contain the `policy.md` sentinel and
+    the waiting line.
+  - `TestServeFirstOpenUnresponsiveThenEOF` (finding A).
   - `TestServeHeldThenNonHeldErrorIsTerminal`: revoke or unprovision `alpha` while it waits; assert retries
     stop (attempt count stops growing), one terminal notice, tools return the error.
   - `TestServeLeaseConflict` (existing) is **updated**: second session now sees the guarded tools, the waiting
@@ -106,12 +126,22 @@ First `Open` succeeds → state is pre-stored `ep` and the worker skips the loop
   - `TestServeOrdinaryStartupHasNoNotice`: a free name sends no channel event before mail.
   - Existing suite expectations for non-held startup errors unchanged.
 - [ ] **Step 2: run, confirm FAIL.** `go test ./cmd/mash -run 'TestServe' -count=1`
-- [ ] **Step 3: implement** per Design; the endpoint change is the `ctx.Err()` check in `takeLease` (and a unit
-  test in `internal/endpoint` that a cancelled context yields the context error, not `LeaseHeldError`).
+- [ ] **Step 3: implement** per Design; the endpoint change is the `ctx.Err()` check in `takeLease` (and the endpoint
+  regression test, in package `endpoint`: wrap the JetStream/KV so `Create` returns `ErrKeyExists`, the wrapper's
+  `Get` cancels the context and fails; assert `takeLease` returns the context error and **not** a
+  `LeaseHeldError`. It fails on the current code at exactly that branch).
 - [ ] **Step 4: whole suite.** `CGO_ENABLED=1 go test -race ./... -count=1`, then again with `-count=5` on
   `./cmd/mash` for flakes. Expected: PASS.
 - [ ] **Step 5: Codex adversarial review** of the diff, re-running its tests; fix or answer every finding.
 - [ ] **Step 6: commit.** `fix(serve): retry a held lease at startup until it is taken; no restart needed`
+
+## Task 1b: `mash version` prints the commit
+
+**Files:** `cmd/mash/main.go`, `main_test.go`. `mash version` prints `mash 0.1.0 (commit <rev>)`, where `<rev>`
+is `main.commit` from `-ldflags "-X main.commit=…"` when set, else `debug.ReadBuildInfo` `vcs.revision`
+(`+dirty` if `vcs.modified`), else `unknown`; so rangehand's `compat.json` can pin and check the S5-fixed commit.
+- [ ] Test (function takes the build info as an argument): ldflags wins; vcs.revision used; modified marks
+  `+dirty`; none → `unknown`; the existing `version` assertions are updated. Commit separately.
 
 ## Task 2: live check on the scratch NATS
 
