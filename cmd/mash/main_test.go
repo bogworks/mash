@@ -235,21 +235,31 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 }
 
 func TestServeLeaseConflict(t *testing.T) {
-	w := newWorld(t, "a")
+	setTiming(t, time.Hour, 20*time.Second)
+	w := newWorld(t, "a", "b")
 	first := startServe(t, w.env["a"])
 	first.initialize(t)
 	first.tools(t)
 	second := startServe(t, w.env["a"])
 	r := second.initialize(t)
-	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "already in use") {
+	// The refused session now waits for the name: normal instructions plus a waiting line, and the tools
+	// (which report that mail is off until the name is free).
+	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "waiting") {
 		t.Fatalf("instructions %q", instr)
 	}
-	if n := len(second.tools(t)); n != 0 {
-		t.Fatalf("a refused session exposes %d tools", n)
+	if n := len(second.tools(t)); n != 5 {
+		t.Fatalf("a waiting session exposes %d tools, want 5", n)
 	}
 	ev := second.await(t, 5*time.Second, isChannel)
 	if !strings.Contains(ev["params"].(map[string]any)["content"].(string), "already in use") {
 		t.Fatalf("event %v", ev)
+	}
+	// The holder is undisturbed and still gets its mail.
+	if out, code := w.cli(t, "b", "send", "a", "still yours"); code != 0 {
+		t.Fatalf("send: %d %s", code, out)
+	}
+	if got := content(first.await(t, 5*time.Second, isChannel)); !strings.Contains(got, "still yours") {
+		t.Fatalf("holder event %s", got)
 	}
 }
 

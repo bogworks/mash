@@ -182,3 +182,6 @@ func (e *Env) ConnAs(t *testing.T, creds, name string) *nats.Conn {
 	t.Cleanup(nc.Close)
 	return nc
 }
+
+// Connections is the number of client connections the server holds now.
+func (e *Env) Connections() int { return e.srv.NumClients() }

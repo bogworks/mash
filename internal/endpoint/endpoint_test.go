@@ -597,3 +597,52 @@ func TestRunWaitsForDeliveryBeforeReturning(t *testing.T) {
 		t.Fatal("Run returned while a delivery was still writing")
 	}
 }
+
+// A lease conflict whose follow-up Get fails because the caller was cancelled is cancellation, not "held":
+// a retrying waiter must stop, not report a holder it never saw.
+type cancelOnGetKV struct {
+	jetstream.KeyValue
+	cancel context.CancelFunc
+}
+
+func (k cancelOnGetKV) Create(context.Context, string, []byte, ...jetstream.KVCreateOpt) (uint64, error) {
+	return 0, jetstream.ErrKeyExists
+}
+
+func (k cancelOnGetKV) Get(ctx context.Context, _ string) (jetstream.KeyValueEntry, error) {
+	k.cancel()
+	return nil, ctx.Err()
+}
+
+type cancelJS struct {
+	jetstream.JetStream
+	cancel context.CancelFunc
+}
+
+func (j cancelJS) KeyValue(ctx context.Context, bucket string) (jetstream.KeyValue, error) {
+	kv, err := j.JetStream.KeyValue(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	return cancelOnGetKV{kv, j.cancel}, nil
+}
+
+func TestTakeLeaseCancelDuringHeldLookupIsNotHeld(t *testing.T) {
+	f := newFixture(t, "a")
+	e, err := OpenClient(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.nc.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.js = cancelJS{e.js, cancel}
+	err = e.takeLease(ctx)
+	var held *LeaseHeldError
+	if errors.As(err, &held) {
+		t.Fatalf("cancellation reported as held: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}

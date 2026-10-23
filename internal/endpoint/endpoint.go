@@ -190,6 +190,9 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 				held.Host, held.PID, held.Since = lv.Host, lv.PID, lv.Since
 			}
 		}
+		if ctx.Err() != nil {
+			return ctx.Err() // cancelled while looking up the holder: not "held"
+		}
 		return held
 	}
 	if err != nil {
