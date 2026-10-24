@@ -58,21 +58,7 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           name="mash-${GOOS_T}-${GOARCH_T}"
-          mkdir -p "$RUNNER_TEMP/tool"
-          go build -o "$RUNNER_TEMP/tool/buildrelease" ./scripts/buildrelease
-          for n in a b; do
-            src="$RUNNER_TEMP/clone-$n/src"
-            mkdir -p "$(dirname "$src")"
-            git clone -q "$GITHUB_WORKSPACE" "$src"
-            git -C "$src" checkout -q "$GITHUB_SHA"
-            "$RUNNER_TEMP/tool/buildrelease" -src "$src" -out "$RUNNER_TEMP/out-$n/$name" \
-              -goos "$GOOS_T" -goarch "$GOARCH_T" -version "$version" -commit "$GITHUB_SHA" | tee "$RUNNER_TEMP/sum-$n"
-          done
-          a="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-a")"
-          b="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-b")"
-          if [ "$a" != "$b" ]; then echo "not reproducible: $a vs $b" >&2; exit 1; fi
-          mkdir -p dist
-          cp "$RUNNER_TEMP/out-a/$name" "dist/$name"
+          scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$GITHUB_SHA" "dist/$name"
       - uses: actions/upload-artifact@v4
         with:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}

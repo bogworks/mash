@@ -104,8 +104,8 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 	// Written only when it changes, which a process does once: later commands (and the tests, which run many in
 	// one process beside live sessions that read it) only read.
 	bi, _ := readBuildInfo()
-	if v := resolveVersion(endpoint.Version, bi); v != endpoint.Version {
-		endpoint.Version = v
+	if v := resolveVersion(endpoint.CurrentVersion(), bi); v != endpoint.CurrentVersion() {
+		endpoint.SetVersion(v)
 	}
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
@@ -113,7 +113,7 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 	}
 	if args[0] == "version" {
 		bi, _ := readBuildInfo()
-		fmt.Fprintln(stdout, versionLine(endpoint.Version, commit, bi))
+		fmt.Fprintln(stdout, versionLine(endpoint.CurrentVersion(), commit, bi))
 		return 0
 	}
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {

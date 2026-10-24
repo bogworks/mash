@@ -471,3 +471,24 @@ func TestCheck_versionLineMustBeExact(t *testing.T) {
 		t.Fatalf("a version line with surrounding whitespace passed: %v", err)
 	}
 }
+
+// The binary under test is written to a name nobody can predict: a planted symlink at the old, guessable path is
+// never followed.
+func TestReproducible_doesNotWriteThroughAPredictableTempPath(t *testing.T) {
+	f := newFixture(t)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(os.TempDir(), fmt.Sprintf("release-check-%d-mash", os.Getpid()))
+	if err := os.Symlink(victim, planted); err != nil {
+		t.Skipf("cannot plant a symlink: %v", err)
+	}
+	defer os.Remove(planted)
+	if err := f.check(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "precious" {
+		t.Fatalf("the gate wrote through a planted symlink: %q", b)
+	}
+}

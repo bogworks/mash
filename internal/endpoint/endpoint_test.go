@@ -646,3 +646,19 @@ func TestTakeLeaseCancelDuringHeldLookupIsNotHeld(t *testing.T) {
 		t.Fatalf("got %v, want context.Canceled", err)
 	}
 }
+
+// The version is read by live sessions while a command may resolve it: reads and writes are synchronized.
+func TestVersionAccessorIsRaceFree(t *testing.T) {
+	old := CurrentVersion()
+	defer SetVersion(old)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); SetVersion("1.2.3") }()
+		go func() { defer wg.Done(); _ = CurrentVersion() }()
+	}
+	wg.Wait()
+	if CurrentVersion() != "1.2.3" {
+		t.Fatal(CurrentVersion())
+	}
+}

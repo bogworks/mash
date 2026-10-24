@@ -480,25 +480,25 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 }
 
 func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
-	old := endpoint.Version
-	defer func() { endpoint.Version = old }()
-	endpoint.Version = endpoint.DevVersion
+	old := endpoint.CurrentVersion()
+	defer endpoint.SetVersion(old)
+	endpoint.SetVersion(endpoint.DevVersion)
 	var out bytes.Buffer
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
 		t.Fatal(out.String())
 	}
 	line := out.String()
-	if !strings.HasPrefix(line, "mash "+endpoint.Version+" (commit ") {
-		t.Fatalf("printed %q but the service version is %q", line, endpoint.Version)
+	if !strings.HasPrefix(line, "mash "+endpoint.CurrentVersion()+" (commit ") {
+		t.Fatalf("printed %q but the service version is %q", line, endpoint.CurrentVersion())
 	}
 }
 
 // The version is resolved before dispatch: with tagged build info injected, `version` prints it and the service
 // version (what SAP INFO and the MCP initialize report) is the same literal.
 func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
-	oldV, oldR := endpoint.Version, readBuildInfo
-	defer func() { endpoint.Version, readBuildInfo = oldV, oldR }()
-	endpoint.Version = endpoint.DevVersion
+	oldV, oldR := endpoint.CurrentVersion(), readBuildInfo
+	defer func() { endpoint.SetVersion(oldV); readBuildInfo = oldR }()
+	endpoint.SetVersion(endpoint.DevVersion)
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true
 	}
@@ -506,8 +506,8 @@ func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
 		t.Fatal(out.String())
 	}
-	if !strings.HasPrefix(out.String(), "mash 1.2.3 (commit ") || endpoint.Version != "1.2.3" {
-		t.Fatalf("printed %q, service version %q", out.String(), endpoint.Version)
+	if !strings.HasPrefix(out.String(), "mash 1.2.3 (commit ") || endpoint.CurrentVersion() != "1.2.3" {
+		t.Fatalf("printed %q, service version %q", out.String(), endpoint.CurrentVersion())
 	}
 	// And the MCP server (an inert session answers initialize) announces the same version.
 	s := startServe(t, map[string]string{"HOME": t.TempDir()})

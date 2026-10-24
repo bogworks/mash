@@ -290,7 +290,18 @@ func buildFresh(ctx context.Context, o Options, x, goos, goarch, keep string) (s
 // reproducible builds x twice for the host in two different fresh clones: the hashes must match, and the binary's
 // `version` must print exactly "mash <version> (commit x)".
 func reproducible(ctx context.Context, o Options, x string) error {
-	keep := filepath.Join(os.TempDir(), fmt.Sprintf("release-check-%d-mash", os.Getpid()))
+	// A name nobody can predict, created exclusively (0600): a planted symlink at a guessable path would otherwise be
+	// written through, and the file could be swapped between the write and the run.
+	kf, err := os.CreateTemp("", "release-check-*-mash")
+	if err != nil {
+		return op(fmt.Errorf("a temporary file for the built binary: %w", err))
+	}
+	keep := kf.Name()
+	if err := kf.Chmod(0o700); err != nil { // CreateTemp makes it 0600; it must be runnable by us, and only by us
+		kf.Close()
+		return op(err)
+	}
+	kf.Close()
 	defer os.Remove(keep)
 	a, err := buildFresh(ctx, o, x, "", "", keep)
 	if err != nil {
@@ -482,5 +493,3 @@ func checkAssets(ctx context.Context, o Options) error {
 	}
 	return r.result("release " + tag + " assets")
 }
-
-var _ = bytes.NewReader

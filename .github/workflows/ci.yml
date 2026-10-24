@@ -7,6 +7,11 @@ permissions:
   contents: read
 env:
   GOTOOLCHAIN: go1.27.3
+# A new push to a pull request supersedes its older run; a run on main is never cancelled (the release gate reads
+# main's check runs).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
     timeout-minutes: 30
@@ -21,11 +26,13 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
-  # The release gate (scripts/release-check) requires a check run named "reproducible" on the candidate: X built from
-  # two fresh clones in different directories must give identical bytes, so a change that breaks reproducibility
-  # fails here, before a tag does.
+  # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
+  # on the candidate, so the name is explicit and the job is neither conditional nor matrixed: every release target
+  # built from two fresh clones in different directories must give identical bytes, so a change that breaks
+  # reproducibility fails here, before a tag does.
   reproducible:
-    timeout-minutes: 20
+    name: reproducible
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "0"
@@ -36,19 +43,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build twice in fresh clones and compare
+      - name: Build every release target twice in fresh clones and compare
         run: |
           set -euo pipefail
-          go build -o "$RUNNER_TEMP/buildrelease" ./scripts/buildrelease
-          for n in a b; do
-            src="$RUNNER_TEMP/clone-$n/src"
-            mkdir -p "$(dirname "$src")"
-            git clone -q "$GITHUB_WORKSPACE" "$src"
-            git -C "$src" checkout -q "$GITHUB_SHA"
-            "$RUNNER_TEMP/buildrelease" -src "$src" -out "$RUNNER_TEMP/out-$n/mash" \
-              -version 0.0.0-ci -commit "$GITHUB_SHA" | tee "$RUNNER_TEMP/sum-$n"
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            scripts/build-twice "${t%/*}" "${t#*/}" 0.0.0-ci "$GITHUB_SHA" "$RUNNER_TEMP/out/mash-${t%/*}-${t#*/}"
           done
-          a="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-a")"
-          b="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-b")"
-          [ "$a" = "$b" ] || { echo "not reproducible: $a vs $b" >&2; exit 1; }
-          [ "$("$RUNNER_TEMP/out-a/mash" version)" = "mash 0.0.0-ci (commit $GITHUB_SHA)" ]
+      - name: The binary reports its version and commit
+        run: |
+          set -euo pipefail
+          got="$("$RUNNER_TEMP/out/mash-linux-amd64" version)"
+          want="mash 0.0.0-ci (commit $GITHUB_SHA)"
+          if [ "$got" != "$want" ]; then echo "mash version printed '$got', expected '$want'" >&2; exit 1; fi

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# build-twice <goos|-> <goarch|-> <version> <commit> <outfile>
+#
+# Builds the candidate <commit> twice, each time from a fresh clone in a different directory, with the release recipe
+# (scripts/buildrelease), and publishes <outfile> only if both builds print a valid SHA-256 and the two are equal.
+# Used by release.yml and ci.yml, so the CI signal and the release build are the same check. "-" for goos and goarch
+# builds for the host. WORKSPACE (default: this repository) is where the commit lives; BUILDRELEASE (default: built
+# from WORKSPACE) overrides the build tool, for tests.
+set -euo pipefail
+goos=${1:?goos}; goarch=${2:?goarch}; version=${3:?version}; commit=${4:?commit}; out=${5:?outfile}
+ws=${WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}
+tmp=$(mktemp -d)
+ref="refs/ci/candidate-$$"
+cleanup() { git -C "$ws" update-ref -d "$ref" 2>/dev/null; rm -rf "$tmp"; }
+trap cleanup EXIT
+tool=${BUILDRELEASE:-}
+if [ -z "$tool" ]; then
+  (cd "$ws" && go build -o "$tmp/buildrelease" ./scripts/buildrelease)
+  tool="$tmp/buildrelease"
+fi
+# A pull request's candidate is a merge commit no branch or tag reaches, and a plain clone carries only branches and
+# tags: publish the commit under a ref of its own and fetch exactly that.
+git -C "$ws" update-ref "$ref" "$commit"
+sums=()
+for n in a b; do
+  src="$tmp/clone-$n/src"
+  mkdir -p "$src"
+  git init -q "$src"
+  git -C "$src" fetch -q --no-tags "$ws" "+$ref:refs/ci/candidate"
+  git -C "$src" checkout -q --detach refs/ci/candidate
+  flags=(-src "$src" -out "$tmp/out-$n/mash" -version "$version" -commit "$commit")
+  if [ "$goos" != "-" ]; then flags+=(-goos "$goos" -goarch "$goarch"); fi
+  "$tool" "${flags[@]}" > "$tmp/sum-$n"
+  sum=$(cut -d' ' -f1 "$tmp/sum-$n")
+  if ! [[ $sum =~ ^[0-9a-f]{64}$ ]]; then
+    echo "build $n printed no valid sha256: '$(head -c 200 "$tmp/sum-$n")'" >&2
+    exit 1
+  fi
+  sums+=("$sum")
+done
+if [ "${sums[0]}" != "${sums[1]}" ]; then
+  echo "not reproducible: ${sums[0]} vs ${sums[1]}" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$out")"
+cp "$tmp/out-a/mash" "$out"
+echo "${sums[0]}  $out"

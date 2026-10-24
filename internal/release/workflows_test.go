@@ -161,14 +161,14 @@ func TestRelease_buildsExactlyTheFourTargetsTwiceInFreshClones(t *testing.T) {
 		t.Fatalf("matrix targets %v, want %v", got, want)
 	}
 	var run string
-	for _, s := range b.Steps {
-		if strings.Contains(s.Run, "buildrelease") {
-			run = s.Run
+	for _, st := range b.Steps {
+		if strings.Contains(st.Run, "build-twice") {
+			run = st.Run
 		}
 	}
-	for _, must := range []string{"for n in a b", "git clone", "checkout -q \"$GITHUB_SHA\"", "-commit \"$GITHUB_SHA\"", "not reproducible", "mash-${GOOS_T}-${GOARCH_T}"} {
+	for _, must := range []string{`scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$GITHUB_SHA"`, "mash-${GOOS_T}-${GOARCH_T}"} {
 		if !strings.Contains(run, must) {
-			t.Errorf("the build step lacks %q", must)
+			t.Errorf("the build step lacks %q:\n%s", must, run)
 		}
 	}
 	if strings.Contains(run, "-tags") {
@@ -276,12 +276,59 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 	}
 }
 
-// ci.yml's check names are the job ids (plus matrix values): an explicit job name would change them silently.
-func TestCI_jobsHaveNoExplicitNames(t *testing.T) {
+// ci.yml's check names are the job names (plus matrix values): a name that differs from the job id, a condition or a
+// matrix on a required job would silently make the gate refuse every candidate.
+func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 	for jn, j := range load(t, "ci.yml").Jobs {
-		if j.Name != "" {
-			t.Errorf("job %s has name %q: GitHub would name its check run that, not %q", jn, j.Name, jn)
+		if j.Name != "" && j.Name != jn {
+			t.Errorf("job %s is named %q: its check run would not be called %q", jn, j.Name, jn)
 		}
+		if jn == "reproducible" {
+			if j.Name != "reproducible" {
+				t.Errorf("the reproducible job must set name: reproducible explicitly (the gate requires that exact check name)")
+			}
+			if j.If != "" || len(j.Strategy.Matrix) != 0 || j.ContinueOnError != nil {
+				t.Errorf("the reproducible job must run unconditionally, unmatrixed and strictly: %+v", j)
+			}
+		}
+	}
+}
+
+// ci.yml's reproducible job builds all four release targets through the same script the release workflow uses, and
+// says what the binary reports when it is wrong.
+func TestCI_reproducibleJobUsesTheSharedScriptForEveryTarget(t *testing.T) {
+	j := load(t, "ci.yml").Jobs["reproducible"]
+	var run string
+	for _, st := range j.Steps {
+		run += st.Run + "\n"
+	}
+	for _, must := range []string{"scripts/build-twice", "linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "$GITHUB_SHA", "version"} {
+		if !strings.Contains(run, must) {
+			t.Errorf("the reproducible job lacks %q:\n%s", must, run)
+		}
+	}
+	if !strings.Contains(run, "expected") {
+		t.Error("a version mismatch must report what was printed and what was expected")
+	}
+}
+
+// A new push cancels the superseded PR run, but never a run on main: the release gate reads main's check runs.
+func TestCI_concurrencyNeverCancelsMain(t *testing.T) {
+	b, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w struct {
+		Concurrency struct {
+			Group  string `yaml:"group"`
+			Cancel any    `yaml:"cancel-in-progress"`
+		} `yaml:"concurrency"`
+	}
+	if err := yaml.Unmarshal(b, &w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Concurrency.Group == "" || fmt.Sprint(w.Concurrency.Cancel) != "${{ github.event_name == 'pull_request' }}" {
+		t.Fatalf("concurrency: %+v", w.Concurrency)
 	}
 }
 
@@ -405,5 +452,119 @@ func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
 	if len(lines) != 1 || !strings.HasPrefix(lines[0], "release create v0.1.0 ") || !strings.Contains(lines[0], " --draft ") || !strings.Contains(lines[0], "--verify-tag") ||
 		strings.Contains(lines[0], "--draft=false") || strings.Contains(lines[0], "--latest") {
 		t.Fatalf("gh was called as %q", lines)
+	}
+}
+
+// ---- scripts/build-twice, run for real ----
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func headOf(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func buildTwice(t *testing.T, ws, tool string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(filepath.Join(repoRoot(t), "scripts", "build-twice"), args...)
+	cmd.Env = append(os.Environ(), "WORKSPACE="+ws)
+	if tool != "" {
+		cmd.Env = append(cmd.Env, "BUILDRELEASE="+tool)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func TestBuildTwice_buildsReproduciblyAndTheBinarySaysWhatItIs(t *testing.T) {
+	root := repoRoot(t)
+	x := headOf(t, root)
+	out := filepath.Join(t.TempDir(), "out", "mash")
+	got, err := buildTwice(t, root, "", "-", "-", "0.1.0", x, out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}  `).MatchString(got) {
+		t.Fatalf("output %q", got)
+	}
+	line, err := exec.Command(out, "version").Output()
+	if err != nil || strings.TrimSpace(string(line)) != "mash 0.1.0 (commit "+x+")" {
+		t.Fatalf("%q %v", line, err)
+	}
+}
+
+// stub is a stand-in buildrelease: it writes the -out file with the given content and prints what it is told to.
+func stub(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "buildrelease")
+	if err := os.WriteFile(p, []byte("#!/bin/bash\nset -eu\nwhile [ $# -gt 0 ]; do case $1 in -out) out=$2; shift;; esac; shift; done\nmkdir -p \"$(dirname \"$out\")\"\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestBuildTwice_refusesEmptyMalformedOrDifferingHashes(t *testing.T) {
+	root := repoRoot(t)
+	x := headOf(t, root)
+	counter := filepath.Join(t.TempDir(), "n")
+	cases := map[string]struct{ body, want string }{
+		"empty output":     {`echo x > "$out"; echo ""`, "no valid sha256"},
+		"a banner first":   {`echo x > "$out"; echo "building..."`, "no valid sha256"},
+		"short hash":       {`echo x > "$out"; echo "abc123  $out"`, "no valid sha256"},
+		"uppercase hash":   {`echo x > "$out"; echo "` + strings.Repeat("A", 64) + `  $out"`, "no valid sha256"},
+		"differing hashes": {`n=$(cat ` + counter + ` 2>/dev/null || echo 0); n=$((n+1)); echo $n > ` + counter + `; echo x > "$out"; printf '%064d  %s\n' $n "$out"`, "not reproducible"},
+	}
+	for name, c := range cases {
+		os.Remove(counter)
+		out := filepath.Join(t.TempDir(), "mash")
+		got, err := buildTwice(t, root, stub(t, c.body), "-", "-", "0.1.0", x, out)
+		if err == nil || !strings.Contains(got, c.want) {
+			t.Errorf("%s: err=%v output=%q (want a failure saying %q)", name, err, got, c.want)
+		}
+		if _, statErr := os.Stat(out); statErr == nil {
+			t.Errorf("%s: an output file was published although the check failed", name)
+		}
+	}
+}
+
+// A pull request's candidate is a synthetic merge commit that no branch or tag points at: the clones must still get it.
+func TestBuildTwice_buildsACommitNoBranchOrTagReaches(t *testing.T) {
+	ws := filepath.Join(t.TempDir(), "ws")
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", ws).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	run("commit", "-q", "--allow-empty", "-m", "base")
+	tree := run("rev-parse", "HEAD^{tree}")
+	base := run("rev-parse", "HEAD")
+	merge := run("commit-tree", tree, "-p", base, "-m", "refs/pull/1/merge") // reachable from nothing
+	if refs := run("for-each-ref", "--contains", merge); refs != "" {
+		t.Fatalf("the test commit is reachable from %q", refs)
+	}
+	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	out := filepath.Join(t.TempDir(), "mash")
+	if got, err := buildTwice(t, ws, ok, "-", "-", "0.0.0-ci", merge, out); err != nil {
+		t.Fatalf("a commit that only HEAD-less refs reach could not be cloned: %v\n%s", err, got)
+	}
+	// And the script leaves no helper ref behind in the workspace.
+	if refs := run("for-each-ref", "refs/ci"); refs != "" {
+		t.Fatalf("refs left in the workspace: %s", refs)
 	}
 }
