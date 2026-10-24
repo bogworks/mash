@@ -57,7 +57,11 @@ func CheckSource(srcDir, commit, out string) error {
 	if got := strings.TrimSpace(string(head)); got != commit {
 		return fmt.Errorf("source HEAD is %s, not the candidate %s", got, commit)
 	}
-	st, err := exec.Command("git", "-C", srcDir, "status", "--porcelain", "--ignored=no").Output()
+	// Every untracked and every ignored file counts: a stray .go file, hidden by a global ignore rule or by
+	// status.showUntrackedFiles=no in someone's configuration, would be compiled into a binary stamped with X.
+	stCmd := exec.Command("git", "-C", srcDir, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
+	stCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	st, err := stCmd.Output()
 	if err != nil {
 		return err
 	}
@@ -100,6 +104,16 @@ func Build(ctx context.Context, srcDir, out, goos, goarch, version, commit strin
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return "", err
+	}
+	// The module cache is an input too: its files must be the ones go.sum names, or an edited dependency would
+	// be compiled in unseen.
+	for _, sub := range [][]string{{"mod", "download"}, {"mod", "verify"}} { // fetch what is missing, then check all of it
+		c := exec.CommandContext(ctx, "go", sub...)
+		c.Dir = srcDir
+		c.Env = buildEnv(os.Environ(), goos, goarch)
+		if b, err := c.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("go %s: %w\n%s", strings.Join(sub, " "), err, b)
+		}
 	}
 	args := append([]string{"build"}, BuildFlags(version, commit)...)
 	args = append(args, "-o", abs, "./cmd/mash")

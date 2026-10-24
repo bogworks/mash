@@ -54,6 +54,21 @@ func TestBuild_sameSourceSameHashInDifferentDirectories(t *testing.T) {
 	}
 }
 
+func TestBuild_versionChangesWhatTheBinaryPrints(t *testing.T) {
+	src := cloneHead(t)
+	x := gitIn(t, src, "rev-parse", "HEAD")
+	for _, v := range []string{"0.1.0", "0.1.1"} {
+		out := filepath.Join(t.TempDir(), "mash")
+		if _, err := Build(context.Background(), src, out, "", "", v, x); err != nil {
+			t.Fatal(err)
+		}
+		got, err := exec.Command(out, "version").Output()
+		if err != nil || strings.TrimSpace(string(got)) != "mash "+v+" (commit "+x+")" {
+			t.Fatalf("version %s: %q %v", v, got, err)
+		}
+	}
+}
+
 func TestBuild_versionChangesTheHash(t *testing.T) {
 	src := cloneHead(t)
 	ctx := context.Background()
@@ -96,10 +111,23 @@ func TestBuild_ignoresAHostileAmbientEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Settings that would change the compiled bytes if they reached the build, including ones that arrive in a
+	// go env file, a workspace and a separate build cache.
+	envFile := filepath.Join(t.TempDir(), "go.env")
+	if err := os.WriteFile(envFile, []byte("GOFLAGS=-ldflags=-s -w\nGOAMD64=v3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(t.TempDir(), "go.work")
+	if err := os.WriteFile(work, []byte("go 1.27.3\n\nuse "+src+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOENV", envFile)
+	t.Setenv("GOWORK", work)
 	t.Setenv("GOAMD64", "v3")
-	t.Setenv("GOFLAGS", "-tags=failpoints")
+	t.Setenv("GOFLAGS", "-ldflags=-s -w")
 	t.Setenv("GOEXPERIMENT", "nocoverageredesign")
 	t.Setenv("CGO_ENABLED", "1")
+	t.Setenv("GOCACHE", t.TempDir())
 	hostile, err := Build(ctx, src, filepath.Join(t.TempDir(), "r"), "linux", "amd64", "0.1.0", "abc123")
 	if err != nil {
 		t.Fatal(err)
@@ -294,5 +322,37 @@ func TestBuild_binaryPrintsTheVersionAndCommit(t *testing.T) {
 	got, err := exec.Command(out, "version").Output()
 	if err != nil || strings.TrimSpace(string(got)) != "mash 0.1.0 (commit "+x+")" {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+// Source that is not exactly the commit is refused whatever git is configured to hide.
+func TestCheckSource_untrackedAndIgnoredFilesAreRefusedWhateverGitIsConfiguredToHide(t *testing.T) {
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "one")
+	x := gitIn(t, dir, "rev-parse", "HEAD")
+	out := filepath.Join(t.TempDir(), "mash")
+	home := t.TempDir()
+	// A global configuration that hides untracked files and ignores *.go everywhere.
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[status]\n\tshowUntrackedFiles = no\n[core]\n\texcludesFile = "+filepath.Join(home, "ignore")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "ignore"), []byte("*.go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	if err := os.WriteFile(filepath.Join(dir, "evil.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSource(dir, x, out); err == nil || !strings.Contains(err.Error(), "clean") {
+		t.Fatalf("a stray ignored .go file in the tree was accepted: %v", err)
+	}
+	_ = os.Remove(filepath.Join(dir, "evil.go"))
+	if err := os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSource(dir, x, out); err == nil || !strings.Contains(err.Error(), "clean") {
+		t.Fatalf("a stray untracked file hidden by showUntrackedFiles=no was accepted: %v", err)
 	}
 }
