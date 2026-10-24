@@ -1,8 +1,11 @@
 name: ci
+# Docs-only changes run nothing (Actions minutes are capped; macOS bills at 10x).
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
 permissions:
   contents: read
 env:
