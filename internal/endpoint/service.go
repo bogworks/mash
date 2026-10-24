@@ -18,7 +18,7 @@ import (
 )
 
 // Version is the mash version, reported as the SAP service version.
-var Version = "0.1.0"
+var Version = "dev"
 
 // Timings (spec 7.4). Variables so tests can shorten them.
 var (

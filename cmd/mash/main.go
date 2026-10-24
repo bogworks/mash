@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/randybias/mash/internal/config"
@@ -51,6 +53,23 @@ func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr
 // commit is set by -ldflags "-X main.commit=<sha>"; otherwise the VCS revision stamped by go build is used.
 var commit string
 
+// resolveVersion is the version this binary reports: the one a release build stamped into endpoint.Version by
+// ldflag (anything but the default "dev"), else the module version a `go install …@v0.1.0` build carries, else "dev".
+func resolveVersion(configured string, bi *debug.BuildInfo) string {
+	if configured != "" && configured != "dev" {
+		return configured
+	}
+	// Only a clean tag counts. Since Go 1.24 a plain `go build` in a checkout stamps a pseudo-version
+	// (v0.0.0-<time>-<sha>, with +dirty for a modified tree) into Main.Version: that is a development build.
+	if bi != nil && releaseTag.MatchString(bi.Main.Version) {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return "dev"
+}
+
+// releaseTag is vN.N.N with an optional -prerelease that is not a pseudo-version's timestamp-and-sha tail.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$`)
+
 // versionLine is "mash <version> (commit <rev>)". It names the commit so a pinned build can be checked.
 func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
 	rev := ldflags
@@ -75,6 +94,12 @@ func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
 }
 
 func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// Resolved before anything dispatches, so `version`, the MCP server and the SAP service all report one string.
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		endpoint.Version = resolveVersion(endpoint.Version, bi)
+	} else {
+		endpoint.Version = resolveVersion(endpoint.Version, nil)
+	}
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2

@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -425,5 +427,67 @@ func TestVersionLine(t *testing.T) {
 		if got := versionLine("0.1.0", c.ldflags, c.info); got != c.want {
 			t.Errorf("%s: got %q want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestResolveVersion(t *testing.T) {
+	mod := func(v string) *debug.BuildInfo { return &debug.BuildInfo{Main: debug.Module{Version: v}} }
+	cases := []struct {
+		name, configured string
+		bi               *debug.BuildInfo
+		want             string
+	}{
+		{"the release ldflag wins over the module", "1.2.3", mod("v9.9.9"), "1.2.3"},
+		{"a go install @tag build uses the module version, minus the v", "dev", mod("v0.1.0"), "0.1.0"},
+		{"a pseudo-version is a development build", "dev", mod("v0.1.1-0.20261024000000-abcdef123456"), "dev"},
+		{"a dirty pseudo-version is a development build", "dev", mod("v0.0.0-20261024004654-55a16af46855+dirty"), "dev"},
+		{"a prerelease tag is a version", "dev", mod("v0.2.0-rc.1"), "0.2.0-rc.1"},
+		{"an incompatible suffix is not a clean tag", "dev", mod("v2.0.0+incompatible"), "dev"},
+		{"(devel) is not a version", "dev", mod("(devel)"), "dev"},
+		{"empty module version", "dev", mod(""), "dev"},
+		{"no build info", "dev", nil, "dev"},
+		{"an empty configured version is dev", "", nil, "dev"},
+	}
+	for _, c := range cases {
+		if got := resolveVersion(c.configured, c.bi); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A release build stamps the version by ldflag: the binary prints it, and the SAP service version (endpoint.Version)
+// is the same string, resolved before any command runs.
+func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "mash")
+	build := exec.Command("go", "build", "-o", bin,
+		"-ldflags", "-X github.com/randybias/mash/internal/endpoint.Version=7.8.9 -X main.commit=abc1234", ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := exec.Command(bin, "version").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "mash 7.8.9 (commit abc1234)" {
+		t.Fatalf("%q %v", out, err)
+	}
+	// An unstamped build says dev, never a number that is not the source's.
+	plain := filepath.Join(t.TempDir(), "mash")
+	if out, err := exec.Command("go", "build", "-o", plain, ".").CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash dev (commit ") {
+		t.Fatalf("%q", out)
+	}
+}
+
+func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
+	old := endpoint.Version
+	defer func() { endpoint.Version = old }()
+	endpoint.Version = "dev"
+	var out bytes.Buffer
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	line := out.String()
+	if !strings.HasPrefix(line, "mash "+endpoint.Version+" (commit ") {
+		t.Fatalf("printed %q but the service version is %q", line, endpoint.Version)
 	}
 }
