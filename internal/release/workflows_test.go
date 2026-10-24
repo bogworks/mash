@@ -33,7 +33,8 @@ type job struct {
 	Permissions     map[string]string `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
 	Strategy        struct {
-		Matrix map[string]any `yaml:"matrix"`
+		Matrix   map[string]any `yaml:"matrix"`
+		FailFast *bool          `yaml:"fail-fast"`
 	} `yaml:"strategy"`
 	Steps []step `yaml:"steps"`
 }
@@ -337,6 +338,40 @@ func TestCI_concurrencyNeverCancelsMain(t *testing.T) {
 	}
 }
 
+// bash 3.2 (macOS) does not stop `set -e` on a failing `[[ ]]` that stands alone, so a check written that way
+// passes there while the same script refuses on Linux. Every `[[` must be the condition of an if/while or part of
+// a && / || list; the guard test below runs the real script on whichever OS the tests run on.
+func TestWorkflows_noBareDoubleBracketUnderSetE(t *testing.T) {
+	for name, w := range all(t) {
+		for jn, j := range w.Jobs {
+			for _, st := range j.Steps {
+				for _, ln := range strings.Split(st.Run, "\n") {
+					if strings.HasPrefix(strings.TrimSpace(ln), "[[") {
+						t.Errorf("%s job %s: a bare [[ ]] is ignored by set -e in bash 3.2: %q", name, jn, ln)
+					}
+				}
+			}
+		}
+	}
+	b, err := os.ReadFile("../../scripts/build-twice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "[[") {
+			t.Errorf("scripts/build-twice: a bare [[ ]] is ignored by set -e in bash 3.2: %q", ln)
+		}
+	}
+}
+
+// One OS failing must not hide the other's result: the matrix runs to the end.
+func TestCI_matrixDoesNotFailFast(t *testing.T) {
+	j := load(t, "ci.yml").Jobs["test"]
+	if j.Strategy.FailFast == nil || *j.Strategy.FailFast {
+		t.Fatal("ci.yml test matrix must set fail-fast: false")
+	}
+}
+
 // guardRepo makes a repository whose origin/main holds X, signing with a throwaway SSH key.
 func guardRepo(t *testing.T) (dir, x string) {
 	t.Helper()
@@ -474,9 +509,18 @@ func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-amd64"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The runner is Linux and has sha256sum; the test also runs where only shasum exists (macOS).
+	shim := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shim, "sha256sum"), []byte("#!/bin/sh\nexec shasum -a 256 \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("PATH")
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		path = shim + ":" + path
+	}
 	cmd := exec.Command("bash", "-e", "-c", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
+	cmd.Env = append(os.Environ(), "PATH="+path, "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -632,7 +676,7 @@ func TestBuildTwice_buildsACommitNoBranchOrTagReaches(t *testing.T) {
 	if refs := run("for-each-ref", "--contains", merge); refs != "" {
 		t.Fatalf("the test commit is reachable from %q", refs)
 	}
-	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	ok := stub(t, `echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	out := filepath.Join(t.TempDir(), "mash")
 	if got, err := buildTwice(t, ws, ok, "-", "-", "0.0.0-ci", merge, out); err != nil {
 		t.Fatalf("a commit that only HEAD-less refs reach could not be cloned: %v\n%s", err, got)
@@ -669,7 +713,7 @@ func TestBuildTwice_worksFromAShallowWorkspace(t *testing.T) {
 		t.Fatal("the workspace is not shallow")
 	}
 	x := run(ws, "rev-parse", "HEAD")
-	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	ok := stub(t, `echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	out := filepath.Join(t.TempDir(), "mash")
 	if got, err := buildTwice(t, ws, ok, "-", "-", "0.1.0", x, out); err != nil {
 		t.Fatalf("a shallow workspace could not be cloned from: %v\n%s", err, got)
@@ -683,7 +727,7 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 	x := headOf(t, root)
 	tmp := t.TempDir()
 	// A tool that deletes the helper ref itself, so the script's own deletion fails.
-	tool := stub(t, `case "$out" in *out-b*) for r in $(git -C `+root+` for-each-ref --format='%(refname)' refs/ci); do git -C `+root+` update-ref -d $r; done;; esac; echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	tool := stub(t, `case "$out" in *out-b*) for r in $(git -C `+root+` for-each-ref --format='%(refname)' refs/ci); do git -C `+root+` update-ref -d $r; done;; esac; echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	cmd := exec.Command(filepath.Join(root, "scripts", "build-twice"), "-", "-", "0.1.0", x, filepath.Join(tmp, "mash"))
 	cmd.Env = append(os.Environ(), "WORKSPACE="+root, "BUILDRELEASE="+tool, "TMPDIR="+tmp)
 	if out, err := cmd.CombinedOutput(); err != nil {

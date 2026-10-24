@@ -16,6 +16,7 @@ jobs:
   test:
     timeout-minutes: 30
     strategy:
+      fail-fast: false # one OS failing must not cancel the other and hide its result
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
