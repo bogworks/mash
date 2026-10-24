@@ -509,9 +509,18 @@ func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-amd64"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The runner is Linux and has sha256sum; the test also runs where only shasum exists (macOS).
+	shim := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shim, "sha256sum"), []byte("#!/bin/sh\nexec shasum -a 256 \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("PATH")
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		path = shim + ":" + path
+	}
 	cmd := exec.Command("bash", "-e", "-c", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
+	cmd.Env = append(os.Environ(), "PATH="+path, "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -667,7 +676,7 @@ func TestBuildTwice_buildsACommitNoBranchOrTagReaches(t *testing.T) {
 	if refs := run("for-each-ref", "--contains", merge); refs != "" {
 		t.Fatalf("the test commit is reachable from %q", refs)
 	}
-	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	ok := stub(t, `echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	out := filepath.Join(t.TempDir(), "mash")
 	if got, err := buildTwice(t, ws, ok, "-", "-", "0.0.0-ci", merge, out); err != nil {
 		t.Fatalf("a commit that only HEAD-less refs reach could not be cloned: %v\n%s", err, got)
@@ -704,7 +713,7 @@ func TestBuildTwice_worksFromAShallowWorkspace(t *testing.T) {
 		t.Fatal("the workspace is not shallow")
 	}
 	x := run(ws, "rev-parse", "HEAD")
-	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	ok := stub(t, `echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	out := filepath.Join(t.TempDir(), "mash")
 	if got, err := buildTwice(t, ws, ok, "-", "-", "0.1.0", x, out); err != nil {
 		t.Fatalf("a shallow workspace could not be cloned from: %v\n%s", err, got)
@@ -718,7 +727,7 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 	x := headOf(t, root)
 	tmp := t.TempDir()
 	// A tool that deletes the helper ref itself, so the script's own deletion fails.
-	tool := stub(t, `case "$out" in *out-b*) for r in $(git -C `+root+` for-each-ref --format='%(refname)' refs/ci); do git -C `+root+` update-ref -d $r; done;; esac; echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	tool := stub(t, `case "$out" in *out-b*) for r in $(git -C `+root+` for-each-ref --format='%(refname)' refs/ci); do git -C `+root+` update-ref -d $r; done;; esac; echo x > "$out"; echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  $out"`)
 	cmd := exec.Command(filepath.Join(root, "scripts", "build-twice"), "-", "-", "0.1.0", x, filepath.Join(tmp, "mash"))
 	cmd.Env = append(os.Environ(), "WORKSPACE="+root, "BUILDRELEASE="+tool, "TMPDIR="+tmp)
 	if out, err := cmd.CombinedOutput(); err != nil {
