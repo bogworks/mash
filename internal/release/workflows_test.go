@@ -33,7 +33,8 @@ type job struct {
 	Permissions     map[string]string `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
 	Strategy        struct {
-		Matrix map[string]any `yaml:"matrix"`
+		Matrix   map[string]any `yaml:"matrix"`
+		FailFast *bool          `yaml:"fail-fast"`
 	} `yaml:"strategy"`
 	Steps []step `yaml:"steps"`
 }
@@ -334,6 +335,40 @@ func TestCI_concurrencyNeverCancelsMain(t *testing.T) {
 	// share a group: only a pull request's runs do.
 	if !strings.Contains(w.Concurrency.Group, "github.event_name == 'pull_request' && github.ref || github.run_id") {
 		t.Fatalf("concurrency group %q lets a run on main replace another pending one", w.Concurrency.Group)
+	}
+}
+
+// bash 3.2 (macOS) does not stop `set -e` on a failing `[[ ]]` that stands alone, so a check written that way
+// passes there while the same script refuses on Linux. Every `[[` must be the condition of an if/while or part of
+// a && / || list; the guard test below runs the real script on whichever OS the tests run on.
+func TestWorkflows_noBareDoubleBracketUnderSetE(t *testing.T) {
+	for name, w := range all(t) {
+		for jn, j := range w.Jobs {
+			for _, st := range j.Steps {
+				for _, ln := range strings.Split(st.Run, "\n") {
+					if strings.HasPrefix(strings.TrimSpace(ln), "[[") {
+						t.Errorf("%s job %s: a bare [[ ]] is ignored by set -e in bash 3.2: %q", name, jn, ln)
+					}
+				}
+			}
+		}
+	}
+	b, err := os.ReadFile("../../scripts/build-twice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "[[") {
+			t.Errorf("scripts/build-twice: a bare [[ ]] is ignored by set -e in bash 3.2: %q", ln)
+		}
+	}
+}
+
+// One OS failing must not hide the other's result: the matrix runs to the end.
+func TestCI_matrixDoesNotFailFast(t *testing.T) {
+	j := load(t, "ci.yml").Jobs["test"]
+	if j.Strategy.FailFast == nil || *j.Strategy.FailFast {
+		t.Fatal("ci.yml test matrix must set fail-fast: false")
 	}
 }
 

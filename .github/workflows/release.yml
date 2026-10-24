@@ -26,7 +26,8 @@ jobs:
         # Shape, not validity: the runner holds no key. It stops a malformed name, a lightweight tag or a plainly
         # unsigned one from producing a draft; `release-check --assets` runs `git verify-tag` with the lead's keyring.
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # In an `if`, not bare: bash 3.2 (macOS, where the tests run this script) does not stop `set -e` on a lone [[ ]].
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "not a version tag: $GITHUB_REF_NAME" >&2; exit 1; fi
           [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]
           git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
       - name: The candidate is on main
