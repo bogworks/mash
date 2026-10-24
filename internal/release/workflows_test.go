@@ -14,20 +14,25 @@ import (
 )
 
 type step struct {
-	Name string            `yaml:"name"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	Env  map[string]string `yaml:"env"`
-	With map[string]any    `yaml:"with"`
+	Name            string            `yaml:"name"`
+	If              string            `yaml:"if"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	Env             map[string]string `yaml:"env"`
+	With            map[string]any    `yaml:"with"`
 }
 
 type job struct {
-	Needs          any               `yaml:"needs"`
-	TimeoutMinutes int               `yaml:"timeout-minutes"`
-	RunsOn         string            `yaml:"runs-on"`
-	Permissions    map[string]string `yaml:"permissions"`
-	Env            map[string]string `yaml:"env"`
-	Strategy       struct {
+	Name            string            `yaml:"name"`
+	If              string            `yaml:"if"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	Needs           any               `yaml:"needs"`
+	TimeoutMinutes  int               `yaml:"timeout-minutes"`
+	RunsOn          string            `yaml:"runs-on"`
+	Permissions     map[string]string `yaml:"permissions"`
+	Env             map[string]string `yaml:"env"`
+	Strategy        struct {
 		Matrix map[string]any `yaml:"matrix"`
 	} `yaml:"strategy"`
 	Steps []step `yaml:"steps"`
@@ -243,5 +248,162 @@ func TestCI_producesTheCheckNamesTheGateRequires(t *testing.T) {
 	}
 	if w.Env["GOTOOLCHAIN"] != Toolchain {
 		t.Errorf("ci.yml GOTOOLCHAIN = %q, want %s", w.Env["GOTOOLCHAIN"], Toolchain)
+	}
+}
+
+// Nothing in the release workflow can route around a failed guard or a failed build: no conditions, no
+// continue-on-error, strict shell options in every script that compares or publishes.
+func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
+	w := load(t, "release.yml")
+	for jn, j := range w.Jobs {
+		if j.If != "" || j.ContinueOnError != nil {
+			t.Errorf("job %s has if/continue-on-error: %q %v", jn, j.If, j.ContinueOnError)
+		}
+		for _, st := range j.Steps {
+			if st.If != "" || st.ContinueOnError != nil {
+				t.Errorf("job %s step %q has if/continue-on-error: %q %v", jn, st.Name, st.If, st.ContinueOnError)
+			}
+			if strings.Contains(st.Run, "|| true") || strings.Contains(st.Run, "|| :") {
+				t.Errorf("job %s step %q swallows a failure", jn, st.Name)
+			}
+			if (jn == "build" || jn == "draft") && st.Run != "" && !strings.Contains(st.Run, "set -euo pipefail") && !strings.Contains(st.Run, "set -eu") {
+				// a one-line step is fine, a script that compares or publishes must be strict
+				if strings.Count(st.Run, "\n") > 1 {
+					t.Errorf("job %s step %q is a script without set -e", jn, st.Name)
+				}
+			}
+		}
+	}
+}
+
+// ci.yml's check names are the job ids (plus matrix values): an explicit job name would change them silently.
+func TestCI_jobsHaveNoExplicitNames(t *testing.T) {
+	for jn, j := range load(t, "ci.yml").Jobs {
+		if j.Name != "" {
+			t.Errorf("job %s has name %q: GitHub would name its check run that, not %q", jn, j.Name, jn)
+		}
+	}
+}
+
+// guardRepo makes a repository whose origin/main holds X, signing with a throwaway SSH key.
+func guardRepo(t *testing.T) (dir, x string) {
+	t.Helper()
+	root := t.TempDir()
+	dir = filepath.Join(root, "repo")
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q", "--bare", "origin.git")
+	run("init", "-q", "-b", "main", "repo")
+	g := func(args ...string) string { return run(append([]string{"-C", dir}, args...)...) }
+	g("commit", "-q", "--allow-empty", "-m", "x")
+	g("remote", "add", "origin", filepath.Join(root, "origin.git"))
+	g("push", "-q", "origin", "main")
+	g("fetch", "-q", "origin")
+	key := filepath.Join(root, "k")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Skipf("no ssh-keygen: %v\n%s", err, out)
+	}
+	pub, _ := os.ReadFile(key + ".pub")
+	if err := os.WriteFile(filepath.Join(root, "signers"), []byte("t@t "+string(pub)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g("config", "gpg.format", "ssh")
+	g("config", "user.signingkey", key+".pub")
+	g("config", "gpg.ssh.allowedSignersFile", filepath.Join(root, "signers"))
+	return dir, g("rev-parse", "HEAD")
+}
+
+// The whole guard script is run against real tags: only an annotated, signed v<N.N.N> at a commit on main passes.
+func TestRelease_guardScriptRefusesEveryBadTag(t *testing.T) {
+	w := load(t, "release.yml")
+	var script string
+	for _, st := range w.Jobs["guard"].Steps {
+		script += st.Run + "\n"
+	}
+	dir, x := guardRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGuard := func(tag, sha string) error {
+		cmd := exec.Command("bash", "-e", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GITHUB_REF_NAME="+tag, "GITHUB_SHA="+sha)
+		return cmd.Run()
+	}
+	git("tag", "-s", "v0.1.0", "-m", "release", x)
+	if err := runGuard("v0.1.0", x); err != nil {
+		t.Fatalf("an annotated, signed tag on main was refused: %v", err)
+	}
+	git("tag", "v0.2.0", x)
+	if err := runGuard("v0.2.0", x); err == nil {
+		t.Error("a lightweight tag passed the guard")
+	}
+	git("-c", "tag.gpgSign=false", "tag", "-a", "v0.3.0", "-m", "unsigned", x)
+	if err := runGuard("v0.3.0", x); err == nil {
+		t.Error("an unsigned annotated tag passed the guard")
+	}
+	git("tag", "-s", "v0.4", "-m", "bad name", x)
+	if err := runGuard("v0.4", x); err == nil {
+		t.Error("a malformed tag name passed the guard")
+	}
+	// A signed tag at a commit that is not on main.
+	git("commit", "-q", "--allow-empty", "-m", "off main")
+	out, _ := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	off := strings.TrimSpace(string(out))
+	git("tag", "-s", "v0.5.0", "-m", "off main", off)
+	if err := runGuard("v0.5.0", off); err == nil {
+		t.Error("a tag on a commit that is not on main passed the guard")
+	}
+}
+
+// The draft job's script is run with a stand-in gh: it creates a draft, verifies the tag, and publishes nothing else.
+func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
+	w := load(t, "release.yml")
+	var script string
+	for _, st := range w.Jobs["draft"].Steps {
+		if strings.Contains(st.Run, "gh release create") {
+			script = st.Run
+		}
+	}
+	if script == "" {
+		t.Fatal("no draft step")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"mash-linux-amd64", "SHA256SUMS", "CHANGELOG.md"} {
+		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(dir, "bin")
+	log := filepath.Join(dir, "gh.log")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-e", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "GITHUB_REF_NAME=v0.1.0", "GH_TOKEN=x")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	b, _ := os.ReadFile(log)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "release create v0.1.0 ") || !strings.Contains(lines[0], " --draft ") || !strings.Contains(lines[0], "--verify-tag") ||
+		strings.Contains(lines[0], "--draft=false") || strings.Contains(lines[0], "--latest") {
+		t.Fatalf("gh was called as %q", lines)
 	}
 }
