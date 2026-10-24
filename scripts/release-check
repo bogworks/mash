@@ -7,5 +7,5 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cd "$root"
 # Bootstrap under the pinned Go settings too: an ambient workspace, overlay or experiment must not change the gate.
-GOWORK=off GOENV=off GOFLAGS= GOEXPERIMENT= GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go build -o "$tmp/release-check" ./scripts/releasecheck
+GOWORK=off GOENV=off GOFLAGS= GOEXPERIMENT= GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go build -o "$tmp/release-check" ./scripts/releasecheck || { echo "release-check: cannot build the gate" >&2; exit 4; }
 "$tmp/release-check" "$@"

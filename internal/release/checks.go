@@ -16,7 +16,14 @@ type CheckRun struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	App        struct {
+		Slug string `json:"slug"`
+	} `json:"app"`
 }
+
+// CIApp is the GitHub App whose check runs count: Actions. Another integration can write check runs under any
+// name, so a name alone proves nothing.
+const CIApp = "github-actions"
 
 // RequiredChecks are the check runs ci.yml produces that a candidate must have passed.
 var RequiredChecks = []string{"test (ubuntu-latest)", "test (macos-latest)", "reproducible"}
@@ -39,6 +46,10 @@ func CheckCI(runs []CheckRun, x string) error {
 	for _, r := range runs {
 		if r.HeadSHA != x {
 			problems = append(problems, fmt.Sprintf("CI check run %q (id %d) is for commit %q, not %s", r.Name, r.ID, r.HeadSHA, x))
+			continue
+		}
+		if r.App.Slug != CIApp {
+			problems = append(problems, fmt.Sprintf("CI check run %q (id %d) comes from app %q, not %s", r.Name, r.ID, r.App.Slug, CIApp))
 			continue
 		}
 		if prev, ok := byID[r.ID]; ok && prev != r {

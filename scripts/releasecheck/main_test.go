@@ -37,11 +37,12 @@ func write(t *testing.T, dir, name, body string) {
 }
 
 type fixture struct {
-	t      *testing.T
-	repo   string
-	x      string
-	origin string
-	o      Options
+	t       *testing.T
+	wantErr string // when set, the refusal must say this
+	repo    string
+	x       string
+	origin  string
+	o       Options
 }
 
 // newFixture: a repo whose main (pushed to a local "release repository") holds the candidate X with a buildable
@@ -88,7 +89,7 @@ func signingSetup(t *testing.T, repo, dir string) {
 }
 
 func ciRun(id int, name, sha string) map[string]any {
-	return map[string]any{"id": id, "head_sha": sha, "name": name, "status": "completed", "conclusion": "success"}
+	return map[string]any{"id": id, "head_sha": sha, "name": name, "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}}
 }
 
 func (f *fixture) setCIPages(sha string, perPage int, runs []map[string]any) {
@@ -194,8 +195,15 @@ func TestCheck_refusals(t *testing.T) {
 			n := 0
 			f.o.build = func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) {
 				n++
+				if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+					return "", err
+				}
+				if err := os.WriteFile(out, []byte("#!/bin/sh\necho x\n"), 0o755); err != nil { // a real file, so the failure is the comparison
+					return "", err
+				}
 				return fmt.Sprintf("%064d", n), nil
 			}
+			f.wantErr = "not reproducible"
 		},
 		"a binary that prints another version": func(f *fixture) {
 			f.o.Version = "0.1.1" // the tag the binary is built for is 0.1.1 ... but its line is compared to the same version
@@ -214,6 +222,9 @@ func TestCheck_refusals(t *testing.T) {
 		}
 		if got := exitCode(err); got != 3 {
 			t.Errorf("%s: exit %d, want 3 (refused): %v", name, got, err)
+		}
+		if f.wantErr != "" && !strings.Contains(err.Error(), f.wantErr) {
+			t.Errorf("%s: refused for the wrong reason: %v (want %q)", name, err, f.wantErr)
 		}
 	}
 }
@@ -426,4 +437,37 @@ func TestAssets_aMissingReleaseIsFourNotARefusal(t *testing.T) {
 func shaOf(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+func TestCheck_exitCodesOfEmptyAndUnreadableResponses(t *testing.T) {
+	f := newFixture(t)
+	write(t, filepath.Dir(f.o.GH), "ci-1.json", `{"total_count": 0, "check_runs": []}`)
+	if got := exitCode(f.check()); got != 3 { // CI demonstrably has not run: refused, not "could not decide"
+		t.Errorf("zero check runs: exit %d, want 3", got)
+	}
+	g := newFixture(t)
+	setAssets(t, g, nil)
+	write(t, filepath.Dir(g.o.GH), "assets.json", "not json")
+	if got := exitCode(checkAssets(context.Background(), g.o)); got != 4 {
+		t.Errorf("an unreadable assets listing: exit %d, want 4", got)
+	}
+}
+
+// The binary's line must be exactly "mash <version> (commit X)" and one newline: surrounding whitespace is refused.
+func TestCheck_versionLineMustBeExact(t *testing.T) {
+	f := newFixture(t)
+	f.o.build = func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) {
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return "", err
+		}
+		line := "mash " + version + " (commit " + commit + ")"
+		if err := os.WriteFile(out, []byte("#!/bin/sh\nprintf '\\n  "+line+"\\n\\n'\n"), 0o755); err != nil {
+			return "", err
+		}
+		return strings.Repeat("a", 64), nil
+	}
+	err := f.check()
+	if err == nil || !strings.Contains(err.Error(), "exactly") {
+		t.Fatalf("a version line with surrounding whitespace passed: %v", err)
+	}
 }

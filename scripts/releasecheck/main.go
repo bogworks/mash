@@ -241,16 +241,16 @@ func check(ctx context.Context, o Options) error {
 func freshClone(repo, x string) (src, work string, err error) {
 	work, err = os.MkdirTemp("", "release-check-")
 	if err != nil {
-		return "", "", err
+		return "", "", op(err)
 	}
 	src = filepath.Join(work, "src")
 	if out, err := exec.Command("git", "clone", "-q", "--no-hardlinks", repo, src).CombinedOutput(); err != nil {
 		os.RemoveAll(work)
-		return "", "", fmt.Errorf("clone: %w\n%s", err, out)
+		return "", "", op(fmt.Errorf("clone: %w\n%s", err, out))
 	}
 	if _, err := git(src, "checkout", "-q", "--detach", x); err != nil {
 		os.RemoveAll(work)
-		return "", "", err
+		return "", "", op(err)
 	}
 	return src, work, nil
 }
@@ -307,8 +307,8 @@ func reproducible(ctx context.Context, o Options, x string) error {
 	if err != nil {
 		return fmt.Errorf("running the built binary: %w", err)
 	}
-	if want := fmt.Sprintf("mash %s (commit %s)", o.Version, x); strings.TrimSpace(string(got)) != want {
-		return fmt.Errorf("the binary prints %q, want %q", strings.TrimSpace(string(got)), want)
+	if want := fmt.Sprintf("mash %s (commit %s)\n", o.Version, x); string(got) != want {
+		return fmt.Errorf("the binary prints %q, want exactly %q", got, want)
 	}
 	return nil
 }
@@ -332,8 +332,11 @@ func checkRuns(o Options, x string) ([]release.CheckRun, error) {
 		if err := json.Unmarshal(b, &resp); err != nil {
 			return nil, err
 		}
-		if resp.Total == nil || *resp.Total <= 0 {
+		if resp.Total == nil || *resp.Total < 0 {
 			return nil, errors.New("the response has no usable total_count")
+		}
+		if *resp.Total == 0 { // a complete, empty listing: CI has not run on this commit, which CheckCI refuses
+			return nil, nil
 		}
 		for _, r := range resp.CheckRuns {
 			if !seen[r.ID] {
@@ -455,7 +458,7 @@ func checkAssets(ctx context.Context, o Options) error {
 		} `json:"assets"`
 	}
 	if err := json.Unmarshal(b, &resp); err != nil {
-		return err
+		return gateError{fmt.Errorf("could not read the release's assets: %w", err)}
 	}
 	have := map[string]string{}
 	for _, a := range resp.Assets {
@@ -466,8 +469,12 @@ func checkAssets(ctx context.Context, o Options) error {
 	}
 	// The tag must still be the verified object, leading to the same commit: it can be moved while we read.
 	if terr == nil {
-		if obj, c, err := tagRefs(o.Repo, o.Remote, tag); err != nil || c != x || obj != tagObj {
-			r.step("tag "+tag+" still is the verified object", fmt.Errorf("now %q -> %q (%v)", obj, c, err))
+		obj, c, err := tagRefs(o.Repo, o.Remote, tag)
+		switch {
+		case err != nil: // keeps its classification: a lookup that failed is not a moved tag
+			r.step("tag "+tag+" still is the verified object", err)
+		case c != x || obj != tagObj:
+			r.step("tag "+tag+" still is the verified object", fmt.Errorf("now %q -> %q", obj, c))
 		}
 	}
 	if buildOK {

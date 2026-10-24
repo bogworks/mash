@@ -7,10 +7,14 @@ import (
 
 var candidate = strings.Repeat("a", 40)
 
+func withApp(r CheckRun) CheckRun { r.App.Slug = CIApp; return r }
+
 func runs(names ...string) []CheckRun {
 	var out []CheckRun
 	for i, n := range names {
-		out = append(out, CheckRun{ID: int64(i + 1), HeadSHA: candidate, Name: n, Status: "completed", Conclusion: "success"})
+		r := CheckRun{ID: int64(i + 1), HeadSHA: candidate, Name: n, Status: "completed", Conclusion: "success"}
+		r.App.Slug = CIApp
+		out = append(out, r)
 	}
 	return out
 }
@@ -39,6 +43,7 @@ func TestCheckCI_failureNamesTheRun(t *testing.T) {
 	} {
 		rs := runs("test (ubuntu-latest)", "test (macos-latest)")
 		bad.ID, bad.HeadSHA = 99, candidate
+		bad.App.Slug = CIApp
 		if err := CheckCI(append(rs, bad), candidate); err == nil || !strings.Contains(err.Error(), "reproducible") {
 			t.Errorf("%+v: %v", bad, err)
 		}
@@ -46,11 +51,11 @@ func TestCheckCI_failureNamesTheRun(t *testing.T) {
 }
 
 func TestCheckCI_aRerunSupersedesAnEarlierFailureButNotALaterOne(t *testing.T) {
-	rs := append(runs(RequiredChecks...), CheckRun{ID: 0, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "failure"})
+	rs := append(runs(RequiredChecks...), withApp(CheckRun{ID: 0, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "failure"}))
 	if err := CheckCI(rs, candidate); err != nil {
 		t.Fatalf("the latest run of a check decides: %v", err)
 	}
-	rs = append(runs(RequiredChecks...), CheckRun{ID: 50, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "failure"})
+	rs = append(runs(RequiredChecks...), withApp(CheckRun{ID: 50, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "failure"}))
 	if err := CheckCI(rs, candidate); err == nil {
 		t.Fatal("a newer failure was ignored")
 	}
@@ -65,14 +70,14 @@ func TestCheckCI_runsMustBeForTheCandidate(t *testing.T) {
 	if err := CheckCI(rs, candidate); err == nil || !strings.Contains(err.Error(), other) {
 		t.Fatalf("checks for another commit passed: %v", err)
 	}
-	mixed := append(runs(RequiredChecks...), CheckRun{ID: 77, HeadSHA: other, Name: "reproducible", Status: "completed", Conclusion: "success"})
+	mixed := append(runs(RequiredChecks...), withApp(CheckRun{ID: 77, HeadSHA: other, Name: "reproducible", Status: "completed", Conclusion: "success"}))
 	if err := CheckCI(mixed, candidate); err == nil {
 		t.Fatal("a run for another commit was ignored")
 	}
 }
 
 func TestCheckCI_conflictingDuplicatesOfOneIDAreRefusedWhateverTheOrder(t *testing.T) {
-	good := CheckRun{ID: 5, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"}
+	good := withApp(CheckRun{ID: 5, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"})
 	bad := good
 	bad.Conclusion = "failure"
 	rest := runs("test (ubuntu-latest)", "test (macos-latest)")
@@ -152,5 +157,19 @@ func TestCheckAssets(t *testing.T) {
 	h[Target{"linux", "amd64"}] = ""
 	if err := CheckAssets(goodAssets(), h); err == nil || !strings.Contains(err.Error(), "no usable build hash") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A check run written by another integration under a required name is refused, not counted.
+func TestCheckCI_aSpoofedNameFromAnotherAppIsRefused(t *testing.T) {
+	rs := runs("test (ubuntu-latest)", "test (macos-latest)")
+	spoof := CheckRun{ID: 90, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"}
+	spoof.App.Slug = "some-other-app"
+	if err := CheckCI(append(rs, spoof), candidate); err == nil || !strings.Contains(err.Error(), "some-other-app") {
+		t.Fatalf("a spoofed check passed: %v", err)
+	}
+	spoof.App.Slug = "" // no app at all
+	if err := CheckCI(append(rs, spoof), candidate); err == nil {
+		t.Fatal("a check with no app passed")
 	}
 }
