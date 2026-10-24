@@ -25,6 +25,10 @@ jobs:
     # Linux on Ubicloud's runners (GitHub's own minutes are capped); macOS stays on GitHub (Ubicloud has none). The
     # matrix keeps GitHub's names, so the check names the release gate requires don't change.
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubicloud-standard-2' || matrix.os }}
+    # TEMPORARY, until the archeron macOS runner is online: GitHub's own minutes are spent, so the macOS job can't
+    # start; it mustn't turn every run red meanwhile. Its check run still fails, so the release gate, which requires
+    # test (macos-latest) to succeed, still refuses a release without a real macOS pass. Remove with the runner.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
