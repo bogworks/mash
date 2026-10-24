@@ -1,6 +1,7 @@
 package release
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -44,28 +45,60 @@ func buildEnv(base []string, goos, goarch string) []string {
 	return out
 }
 
+// ToolError is a failure of git itself (not a checkout, a corrupt repository, git missing) as opposed to a finding
+// about the source: the caller could not decide.
+type ToolError struct{ Err error }
+
+func (e *ToolError) Error() string { return e.Err.Error() }
+func (e *ToolError) Unwrap() error { return e.Err }
+
+// gitEnv is the environment for the git calls that attest a tree: no variable may point git at another repository,
+// index or object store, and no user or system configuration may change what it reports.
+func gitEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "GIT_CONFIG") || k == "GIT_DIR" || k == "GIT_WORK_TREE" || k == "GIT_INDEX_FILE" ||
+			k == "GIT_COMMON_DIR" || k == "GIT_OBJECT_DIRECTORY" || k == "GIT_ALTERNATE_OBJECT_DIRECTORIES" || k == "GIT_NAMESPACE" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+}
+
+// gitOut runs git in dir under gitEnv and returns stdout; a failure names the command and carries git's stderr.
+func gitOut(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", &ToolError{fmt.Errorf("git %s in %s: %w: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))}
+	}
+	return stdout.String(), nil
+}
+
 // CheckSource refuses a source tree that is not exactly the candidate: HEAD must be the full commit X, the
 // working tree clean, and the output outside the tree. A release binary stamped X must be built from X.
 func CheckSource(srcDir, commit, out string) error {
 	if len(commit) != 40 || strings.Trim(commit, "0123456789abcdef") != "" {
 		return fmt.Errorf("commit %q is not a full 40-hex SHA", commit)
 	}
-	head, err := exec.Command("git", "-C", srcDir, "rev-parse", "HEAD").Output()
+	head, err := gitOut(srcDir, "rev-parse", "HEAD")
 	if err != nil {
-		return fmt.Errorf("%s is not a git checkout: %w", srcDir, err)
+		return err
 	}
-	if got := strings.TrimSpace(string(head)); got != commit {
+	if got := strings.TrimSpace(head); got != commit {
 		return fmt.Errorf("source HEAD is %s, not the candidate %s", got, commit)
 	}
 	// Every untracked and every ignored file counts: a stray .go file, hidden by a global ignore rule or by
 	// status.showUntrackedFiles=no in someone's configuration, would be compiled into a binary stamped with X.
-	stCmd := exec.Command("git", "-C", srcDir, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
-	stCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
-	st, err := stCmd.Output()
+	st, err := gitOut(srcDir, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return err
 	}
-	if len(strings.TrimSpace(string(st))) > 0 {
+	if len(strings.TrimSpace(st)) > 0 {
 		return fmt.Errorf("source tree is not clean:\n%s", st)
 	}
 	absSrc, err := resolvedAbs(srcDir)

@@ -166,7 +166,7 @@ func TestRelease_buildsExactlyTheFourTargetsTwiceInFreshClones(t *testing.T) {
 			run = st.Run
 		}
 	}
-	for _, must := range []string{`scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$GITHUB_SHA"`, "mash-${GOOS_T}-${GOARCH_T}"} {
+	for _, must := range []string{`scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit"`, "mash-${GOOS_T}-${GOARCH_T}"} {
 		if !strings.Contains(run, must) {
 			t.Errorf("the build step lacks %q:\n%s", must, run)
 		}
@@ -395,6 +395,21 @@ func TestRelease_guardScriptRefusesEveryBadTag(t *testing.T) {
 	if err := runGuard("v0.1.0", x); err != nil {
 		t.Fatalf("an annotated, signed tag on main was refused: %v", err)
 	}
+	// GitHub's docs do not say whether GITHUB_SHA on an annotated-tag push is the commit or the tag object, so the
+	// workflow must not depend on it: the candidate is derived from the tag.
+	tagObj := func(tag string) string {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", tag).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if tagObj("v0.1.0") == x {
+		t.Fatal("the annotated tag object has the commit's SHA")
+	}
+	if err := runGuard("v0.1.0", tagObj("v0.1.0")); err != nil {
+		t.Fatalf("with GITHUB_SHA set to the tag object the guard refused a good tag: %v", err)
+	}
 	git("tag", "v0.2.0", x)
 	if err := runGuard("v0.2.0", x); err == nil {
 		t.Error("a lightweight tag passed the guard")
@@ -414,6 +429,60 @@ func TestRelease_guardScriptRefusesEveryBadTag(t *testing.T) {
 	git("tag", "-s", "v0.5.0", "-m", "off main", off)
 	if err := runGuard("v0.5.0", off); err == nil {
 		t.Error("a tag on a commit that is not on main passed the guard")
+	}
+}
+
+// No release job reads GITHUB_SHA: whatever it holds on an annotated-tag push, the commit comes from the tag.
+func TestRelease_candidateIsDerivedFromTheTagNotGITHUB_SHA(t *testing.T) {
+	w := load(t, "release.yml")
+	for name, j := range w.Jobs {
+		for _, st := range j.Steps {
+			if strings.Contains(st.Run, "GITHUB_SHA") || strings.Contains(st.Env["X"], "github.sha") {
+				t.Errorf("job %s step %q reads GITHUB_SHA", name, st.Name)
+			}
+		}
+	}
+}
+
+// The changelog step, run in a real repository with GITHUB_SHA set to the tag object, lists the right range.
+func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
+	w := load(t, "release.yml")
+	var script string
+	for _, st := range w.Jobs["draft"].Steps {
+		if strings.Contains(st.Run, "git log") {
+			script = st.Run
+		}
+	}
+	if script == "" {
+		t.Fatal("no changelog step")
+	}
+	dir, x := guardRepo(t)
+	g := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	g("tag", "-s", "v0.1.0", "-m", "one", x)
+	g("commit", "-q", "--allow-empty", "-m", "second change")
+	g("tag", "-s", "v0.2.0", "-m", "two", "HEAD")
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-amd64"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-e", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "dist", "CHANGELOG.md"))
+	if !strings.Contains(string(b), "second change") || strings.Contains(string(b), " x (") {
+		t.Fatalf("changelog:\n%s", b)
 	}
 }
 

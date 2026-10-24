@@ -30,7 +30,9 @@ jobs:
           [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]
           git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
       - name: The candidate is on main
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+        # The commit comes from the tag: what GITHUB_SHA holds on an annotated-tag push (commit or tag object) is not
+        # relied on anywhere in this workflow.
+        run: git merge-base --is-ancestor "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" origin/main
   build:
     needs: guard
     timeout-minutes: 30
@@ -57,8 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
           name="mash-${GOOS_T}-${GOARCH_T}"
-          scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$GITHUB_SHA" "dist/$name"
+          scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit" "dist/$name"
       - uses: actions/upload-artifact@v4
         with:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -81,12 +84,13 @@ jobs:
       - name: Checksums and changelog
         run: |
           set -euo pipefail
+          commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
           (cd dist && sha256sum mash-* > SHA256SUMS)
           # The previous release tag, if there is one (the first release has none: its changelog is the whole history).
-          if prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null)"; then
-            range="$prev..$GITHUB_SHA"
+          if prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$commit^" 2>/dev/null)"; then
+            range="$prev..$commit"
           else
-            range="$GITHUB_SHA"
+            range="$commit"
           fi
           { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
       - name: Draft release

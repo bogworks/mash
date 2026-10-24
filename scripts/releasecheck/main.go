@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/randybias/mash/internal/release"
 )
@@ -45,6 +46,9 @@ type Options struct {
 var versionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout)) }
+
+// versionTimeout bounds the candidate's `version` run.
+var versionTimeout = 30 * time.Second
 
 func mainRun(args []string, out io.Writer) int {
 	o := Options{Repo: ".", Out: out}
@@ -265,6 +269,10 @@ func buildFresh(ctx context.Context, o Options, x, goos, goarch, keep string) (s
 	defer os.RemoveAll(work)
 	bin := filepath.Join(work, "out", "mash")
 	if err := release.CheckSource(src, x, bin); err != nil {
+		var te *release.ToolError
+		if errors.As(err, &te) {
+			return "", op(err) // git failed: nothing was found out about the candidate
+		}
 		return "", err
 	}
 	build := o.build
@@ -278,10 +286,10 @@ func buildFresh(ctx context.Context, o Options, x, goos, goarch, keep string) (s
 	if keep != "" {
 		b, err := os.ReadFile(bin)
 		if err != nil {
-			return "", err
+			return "", op(err)
 		}
 		if err := os.WriteFile(keep, b, 0o755); err != nil {
-			return "", err
+			return "", op(err)
 		}
 	}
 	return sum, nil
@@ -314,9 +322,22 @@ func reproducible(ctx context.Context, o Options, x string) error {
 	if a != b {
 		return fmt.Errorf("not reproducible: two fresh builds of %s give %s and %s", x, a, b)
 	}
-	got, err := exec.Command(keep, "version").Output()
+	// The candidate is unvetted code: it gets a deadline, and a hang is a finding about it.
+	runCtx, cancel := context.WithTimeout(ctx, versionTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, keep, "version")
+	cmd.WaitDelay = 2 * time.Second // a child that keeps the pipe open must not outlive the kill
+	got, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("running the built binary: %w", err)
+		var ee *exec.ExitError
+		switch {
+		case runCtx.Err() != nil && ctx.Err() == nil:
+			return fmt.Errorf("the built binary's version did not finish within %v", versionTimeout)
+		case errors.As(err, &ee):
+			return fmt.Errorf("running the built binary: %w", err)
+		default:
+			return op(fmt.Errorf("starting the built binary: %w", err)) // could not run it: says nothing about it
+		}
 	}
 	if want := fmt.Sprintf("mash %s (commit %s)\n", o.Version, x); string(got) != want {
 		return fmt.Errorf("the binary prints %q, want exactly %q", got, want)

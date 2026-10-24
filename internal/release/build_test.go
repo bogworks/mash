@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -354,5 +355,32 @@ func TestCheckSource_untrackedAndIgnoredFilesAreRefusedWhateverGitIsConfiguredTo
 	}
 	if err := CheckSource(dir, x, out); err == nil || !strings.Contains(err.Error(), "clean") {
 		t.Fatalf("a stray untracked file hidden by showUntrackedFiles=no was accepted: %v", err)
+	}
+}
+
+func TestCheckSource_gitRedirectionInTheEnvironmentIsIgnored(t *testing.T) {
+	dir, other := t.TempDir(), t.TempDir()
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "one")
+	x := gitIn(t, dir, "rev-parse", "HEAD")
+	gitIn(t, other, "init", "-q")
+	gitIn(t, other, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, ".git", "index"))
+	t.Setenv("GIT_COMMON_DIR", filepath.Join(other, ".git"))
+	if err := CheckSource(dir, x, filepath.Join(t.TempDir(), "out")); err != nil {
+		t.Fatalf("an inherited GIT_DIR changed which repository was judged: %v", err)
+	}
+}
+
+func TestCheckSource_gitFailuresKeepStderrAndAreToolErrors(t *testing.T) {
+	err := CheckSource(t.TempDir(), strings.Repeat("a", 40), filepath.Join(t.TempDir(), "out"))
+	var te *ToolError
+	if !errors.As(err, &te) {
+		t.Fatalf("a directory that is not a checkout is %v, want a *ToolError", err)
+	}
+	if !strings.Contains(err.Error(), "not a git repository") || !strings.Contains(err.Error(), "rev-parse") {
+		t.Fatalf("the error lost git's reason or the command: %v", err)
 	}
 }

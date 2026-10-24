@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/randybias/mash/internal/release"
 )
@@ -490,5 +491,86 @@ func TestReproducible_doesNotWriteThroughAPredictableTempPath(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(victim); string(b) != "precious" {
 		t.Fatalf("the gate wrote through a planted symlink: %q", b)
+	}
+}
+
+// stubBuild installs a build that leaves whatever binary body it is given at out (nil: no file at all).
+func stubBuild(f *fixture, body []byte) {
+	f.o.build = func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) {
+		if body != nil {
+			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(out, body, 0o755); err != nil {
+				return "", err
+			}
+		}
+		return strings.Repeat("a", 64), nil
+	}
+}
+
+// A failure of the gate's own plumbing (the built file cannot be read, the binary cannot be started) says nothing
+// about the candidate: exit 4, could not decide.
+func TestReproducible_localFailuresAreFourNotARefusal(t *testing.T) {
+	f := newFixture(t)
+	stubBuild(f, nil) // the build "succeeds" and leaves no file to stage
+	if got := exitCode(f.check()); got != 4 {
+		t.Errorf("a built file that cannot be read: exit %d, want 4", got)
+	}
+	g := newFixture(t)
+	stubBuild(g, []byte("not an executable")) // exec fails to start it (no shebang, not an object file)
+	if got := exitCode(g.check()); got != 4 {
+		t.Errorf("a binary that cannot be started: exit %d, want 4", got)
+	}
+	h := newFixture(t)
+	stubBuild(h, []byte("#!/bin/sh\nexit 1\n")) // it ran and failed: the candidate's fault
+	if got := exitCode(h.check()); got != 3 {
+		t.Errorf("a binary that exits 1: exit %d, want 3", got)
+	}
+}
+
+// The candidate is unvetted code: a `version` that never returns is a refusal, not a stalled gate.
+func TestReproducible_aHangingVersionIsRefusedAtADeadline(t *testing.T) {
+	old := versionTimeout
+	versionTimeout = 300 * time.Millisecond
+	defer func() { versionTimeout = old }()
+	f := newFixture(t)
+	stubBuild(f, []byte("#!/bin/sh\nsleep 30\n")) // the sleep outlives the shell and keeps the pipe open
+	start := time.Now()
+	err := f.check()
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("the gate waited %v for a hanging binary", time.Since(start))
+	}
+	if exitCode(err) != 3 || err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("a hanging binary: %v (exit %d), want a refusal that says so", err, exitCode(err))
+	}
+}
+
+// The wrapper reads the toolchain from internal/release, the one place it is declared.
+func TestWrapper_toolchainPinComesFromTheDeclaredConstant(t *testing.T) {
+	b, err := os.ReadFile("../release-check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "go1.") {
+		t.Fatal("scripts/release-check hardcodes a Go version")
+	}
+	var line string
+	for _, ln := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(ln, "toolchain=") {
+			line = ln
+		}
+	}
+	if line == "" || !strings.Contains(string(b), "GOTOOLCHAIN=\"$toolchain\"") {
+		t.Fatal("the wrapper does not derive and use $toolchain")
+	}
+	cmd := exec.Command("sh", "-c", line+"; printf %s \"$toolchain\"")
+	cmd.Dir = "../.." // the wrapper cds to the repository root before reading it
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if string(out) != release.Toolchain {
+		t.Fatalf("the wrapper pins %q, internal/release.Toolchain is %q", out, release.Toolchain)
 	}
 }
