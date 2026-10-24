@@ -438,15 +438,16 @@ func TestResolveVersion(t *testing.T) {
 		want             string
 	}{
 		{"the release ldflag wins over the module", "1.2.3", mod("v9.9.9"), "1.2.3"},
-		{"a go install @tag build uses the module version, minus the v", "dev", mod("v0.1.0"), "0.1.0"},
-		{"a pseudo-version is a development build", "dev", mod("v0.1.1-0.20261024000000-abcdef123456"), "dev"},
-		{"a dirty pseudo-version is a development build", "dev", mod("v0.0.0-20261024004654-55a16af46855+dirty"), "dev"},
-		{"a prerelease tag is a version", "dev", mod("v0.2.0-rc.1"), "0.2.0-rc.1"},
-		{"an incompatible suffix is not a clean tag", "dev", mod("v2.0.0+incompatible"), "dev"},
-		{"(devel) is not a version", "dev", mod("(devel)"), "dev"},
-		{"empty module version", "dev", mod(""), "dev"},
-		{"no build info", "dev", nil, "dev"},
-		{"an empty configured version is dev", "", nil, "dev"},
+		{"a go install @tag build uses the module version, minus the v", endpoint.DevVersion, mod("v0.1.0"), "0.1.0"},
+		{"a pseudo-version is a development build", endpoint.DevVersion, mod("v0.1.1-0.20261024000000-abcdef123456"), endpoint.DevVersion},
+		{"a dirty pseudo-version is a development build", endpoint.DevVersion, mod("v0.0.0-20261024004654-55a16af46855+dirty"), endpoint.DevVersion},
+		{"a hyphenated prerelease is a version", endpoint.DevVersion, mod("v1.2.3-rc-1"), "1.2.3-rc-1"},
+		{"a prerelease tag is a version", endpoint.DevVersion, mod("v0.2.0-rc.1"), "0.2.0-rc.1"},
+		{"an incompatible suffix is not a clean tag", endpoint.DevVersion, mod("v2.0.0+incompatible"), endpoint.DevVersion},
+		{"(devel) is not a version", endpoint.DevVersion, mod("(devel)"), endpoint.DevVersion},
+		{"empty module version", endpoint.DevVersion, mod(""), endpoint.DevVersion},
+		{"no build info", endpoint.DevVersion, nil, endpoint.DevVersion},
+		{"an empty configured version is dev", "", nil, endpoint.DevVersion},
 	}
 	for _, c := range cases {
 		if got := resolveVersion(c.configured, c.bi); got != c.want {
@@ -473,7 +474,7 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", plain, ".").CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash dev (commit ") {
+	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash 0.0.0-dev (commit ") {
 		t.Fatalf("%q", out)
 	}
 }
@@ -481,7 +482,7 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
 	old := endpoint.Version
 	defer func() { endpoint.Version = old }()
-	endpoint.Version = "dev"
+	endpoint.Version = endpoint.DevVersion
 	var out bytes.Buffer
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
 		t.Fatal(out.String())
@@ -489,5 +490,29 @@ func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
 	line := out.String()
 	if !strings.HasPrefix(line, "mash "+endpoint.Version+" (commit ") {
 		t.Fatalf("printed %q but the service version is %q", line, endpoint.Version)
+	}
+}
+
+// The version is resolved before dispatch: with tagged build info injected, `version` prints it and the service
+// version (what SAP INFO and the MCP initialize report) is the same literal.
+func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
+	oldV, oldR := endpoint.Version, readBuildInfo
+	defer func() { endpoint.Version, readBuildInfo = oldV, oldR }()
+	endpoint.Version = endpoint.DevVersion
+	readBuildInfo = func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true
+	}
+	var out bytes.Buffer
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	if !strings.HasPrefix(out.String(), "mash 1.2.3 (commit ") || endpoint.Version != "1.2.3" {
+		t.Fatalf("printed %q, service version %q", out.String(), endpoint.Version)
+	}
+	// And the MCP server (an inert session answers initialize) announces the same version.
+	s := startServe(t, map[string]string{"HOME": t.TempDir()})
+	r := s.initialize(t)
+	if v := r["result"].(map[string]any)["serverInfo"].(map[string]any)["version"]; v != "1.2.3" {
+		t.Fatalf("MCP serverInfo version %v", v)
 	}
 }

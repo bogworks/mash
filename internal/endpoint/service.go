@@ -18,7 +18,11 @@ import (
 )
 
 // Version is the mash version, reported as the SAP service version.
-var Version = "dev"
+var Version = DevVersion
+
+// DevVersion is what an unstamped build reports. It is valid SemVer because the SAP service (micro.AddService)
+// refuses anything else as its version.
+const DevVersion = "0.0.0-dev"
 
 // Timings (spec 7.4). Variables so tests can shorten them.
 var (
