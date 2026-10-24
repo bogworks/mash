@@ -1,0 +1,108 @@
+name: release
+# Runs on a signed tag v<N.N.N> that the lead pushes at the candidate commit X after scripts/release-check passed. It
+# builds every target twice, in two fresh clones in different directories, and fails unless the two SHA-256s match.
+# It publishes a DRAFT release; the lead runs `scripts/release-check --assets <version> <X>` (tag signature, tag at X,
+# exactly our builds attached) before publishing.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # one tag, one release build; never abandon a build half way
+env:
+  GOTOOLCHAIN: go1.27.3
+  CGO_ENABLED: "0"
+jobs:
+  guard:
+    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag is v<N.N.N>, annotated, and carries a signature
+        # Shape, not validity: the runner holds no key. It stops a malformed name, a lightweight tag or a plainly
+        # unsigned one from producing a draft; `release-check --assets` runs `git verify-tag` with the lead's keyring.
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]
+          git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
+      - name: The candidate is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+  build:
+    needs: guard
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm64}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build twice in fresh clones and compare
+        env:
+          GOOS_T: ${{ matrix.goos }}
+          GOARCH_T: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="mash-${GOOS_T}-${GOARCH_T}"
+          mkdir -p "$RUNNER_TEMP/tool"
+          go build -o "$RUNNER_TEMP/tool/buildrelease" ./scripts/buildrelease
+          for n in a b; do
+            src="$RUNNER_TEMP/clone-$n/src"
+            mkdir -p "$(dirname "$src")"
+            git clone -q "$GITHUB_WORKSPACE" "$src"
+            git -C "$src" checkout -q "$GITHUB_SHA"
+            "$RUNNER_TEMP/tool/buildrelease" -src "$src" -out "$RUNNER_TEMP/out-$n/$name" \
+              -goos "$GOOS_T" -goarch "$GOARCH_T" -version "$version" -commit "$GITHUB_SHA" | tee "$RUNNER_TEMP/sum-$n"
+          done
+          a="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-a")"
+          b="$(cut -d' ' -f1 "$RUNNER_TEMP/sum-b")"
+          if [ "$a" != "$b" ]; then echo "not reproducible: $a vs $b" >&2; exit 1; fi
+          mkdir -p dist
+          cp "$RUNNER_TEMP/out-a/$name" "dist/$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+  draft:
+    needs: build
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and changelog
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum mash-* > SHA256SUMS)
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then range="$prev..$GITHUB_SHA"; else range="$GITHUB_SHA"; fi
+          { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file dist/CHANGELOG.md dist/mash-* dist/SHA256SUMS
