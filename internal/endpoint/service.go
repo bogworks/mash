@@ -17,8 +17,30 @@ import (
 	"github.com/randybias/mash/internal/sap"
 )
 
-// Version is the mash version, reported as the SAP service version.
-var Version = "0.1.0"
+// Version is the mash version, reported as the SAP service version. A release build stamps it by ldflag; everything
+// else reads and writes it through CurrentVersion and SetVersion, which are synchronized (live sessions read it
+// while a command may resolve it).
+var Version = DevVersion
+
+var versionMu sync.RWMutex
+
+// CurrentVersion is the version to report.
+func CurrentVersion() string {
+	versionMu.RLock()
+	defer versionMu.RUnlock()
+	return Version
+}
+
+// SetVersion replaces it (done once, at startup, when the module version or build info resolves it).
+func SetVersion(v string) {
+	versionMu.Lock()
+	Version = v
+	versionMu.Unlock()
+}
+
+// DevVersion is what an unstamped build reports. It is valid SemVer because the SAP service (micro.AddService)
+// refuses anything else as its version.
+const DevVersion = "0.0.0-dev"
 
 // Timings (spec 7.4). Variables so tests can shorten them.
 var (
@@ -169,7 +191,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	s := &service{prompts: map[string]*openPrompt{}, nonces: sap.NewNonceSet(2 * sap.LiveSkew), quit: make(chan struct{})}
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
-		Version:     Version,
+		Version:     CurrentVersion(),
 		Description: "Claude Code (mash): " + e.cfg.Name,
 		Metadata: map[string]string{
 			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.cfg.Name,

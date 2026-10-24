@@ -5,8 +5,16 @@ on:
   pull_request:
 permissions:
   contents: read
+env:
+  GOTOOLCHAIN: go1.27.3
+# A new push to a pull request supersedes its older run; a run on main is never cancelled (the release gate reads
+# main's check runs).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -18,3 +26,32 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+  # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
+  # on the candidate, so the name is explicit and the job is neither conditional nor matrixed: every release target
+  # built from two fresh clones in different directories must give identical bytes, so a change that breaks
+  # reproducibility fails here, before a tag does.
+  reproducible:
+    name: reproducible
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build every release target twice in fresh clones and compare
+        run: |
+          set -euo pipefail
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            scripts/build-twice "${t%/*}" "${t#*/}" 0.0.0-ci "$GITHUB_SHA" "$RUNNER_TEMP/out/mash-${t%/*}-${t#*/}"
+          done
+      - name: The binary reports its version and commit
+        run: |
+          set -euo pipefail
+          got="$("$RUNNER_TEMP/out/mash-linux-amd64" version)"
+          want="mash 0.0.0-ci (commit $GITHUB_SHA)"
+          if [ "$got" != "$want" ]; then echo "mash version printed '$got', expected '$want'" >&2; exit 1; fi

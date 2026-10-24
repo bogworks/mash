@@ -64,7 +64,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Rea
 	// Without a usable identity, still answer MCP (the plugin may be enabled
 	// in every session) but expose no tools, and say why.
 	degraded := func(instr string, notify bool) int {
-		srv := mcp.New(stdin, stdout, "mash", endpoint.Version, instr, nil)
+		srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, nil)
 		if notify {
 			go func() {
 				select {
@@ -105,7 +105,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, stdin io.Rea
 		state.Store(&sessionState{waiting: held})
 		instr += waitingLine
 	}
-	srv := mcp.New(stdin, stdout, "mash", endpoint.Version, instr, tools(&state, cfg.Name))
+	srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, tools(&state, cfg.Name))
 
 	// One worker owns the endpoint from acquisition to Close, and is joined before serve returns: every
 	// successful Open is closed by it, even when cancellation wins the race with publication. It is also the

@@ -1,0 +1,14 @@
+#!/bin/sh
+# The release gate. Usage: scripts/release-check <X> <version>  |  scripts/release-check --assets <version> <X>
+# The command is built first and run directly, so its exit code (2 usage, 3 refused, 4 could not decide) reaches the caller.
+set -eu
+root="$(cd "$(dirname "$0")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+cd "$root"
+# Bootstrap under the pinned Go settings too: an ambient workspace, overlay or experiment must not change the gate.
+# The toolchain is read from the one place it is declared.
+toolchain="$(sed -n 's/^const Toolchain = "\(.*\)"$/\1/p' internal/release/build.go)"
+[ -n "$toolchain" ] || { echo "release-check: cannot read the toolchain from internal/release/build.go" >&2; exit 4; }
+GOWORK=off GOENV=off GOFLAGS= GOEXPERIMENT= GOTOOLCHAIN="$toolchain" CGO_ENABLED=0 go build -o "$tmp/release-check" ./scripts/releasecheck || { echo "release-check: cannot build the gate" >&2; exit 4; }
+"$tmp/release-check" "$@"
