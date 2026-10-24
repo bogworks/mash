@@ -34,7 +34,7 @@ The design, with every subject, permission and limit, is in [docs/specs/2026-10-
 You need a NATS server in operator mode with JetStream, an account for mash, and Claude Code with channels (claude.ai or Console authentication). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
-go install github.com/randybias/mash/cmd/mash@latest      # puts mash on PATH
+go install github.com/randybias/mash/cmd/mash@v0.1.0      # a tagged release; `mash version` prints the tag
 claude plugin marketplace add randybias/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings), then:
@@ -46,6 +46,10 @@ Operators provision endpoints with `mash admin` and their usual NATS tooling: se
 ## Status
 
 v0.1: the spec, a Go implementation with an integration suite that runs against an in-process NATS server carrying the production permissions, and a live end-to-end run on a real deployment. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+
+## Releases
+
+Releases are signed tags built reproducibly from fresh clones: see [docs/release.md](docs/release.md).
 
 ## License
 

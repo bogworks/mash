@@ -96,8 +96,12 @@ jobs:
         run: |
           set -euo pipefail
           (cd dist && sha256sum mash-* > SHA256SUMS)
-          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)"
-          if [ -n "$prev" ]; then range="$prev..$GITHUB_SHA"; else range="$GITHUB_SHA"; fi
+          # The previous release tag, if there is one (the first release has none: its changelog is the whole history).
+          if prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null)"; then
+            range="$prev..$GITHUB_SHA"
+          else
+            range="$GITHUB_SHA"
+          fi
           { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
       - name: Draft release
         env:
