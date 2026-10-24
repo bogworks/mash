@@ -22,7 +22,9 @@ jobs:
       fail-fast: false # one OS failing must not cancel the other and hide its result
       matrix:
         os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # Linux on Ubicloud's runners (GitHub's own minutes are capped); macOS stays on GitHub (Ubicloud has none). The
+    # matrix keeps GitHub's names, so the check names the release gate requires don't change.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubicloud-standard-2' || matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -37,7 +39,7 @@ jobs:
   reproducible:
     name: reproducible
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     env:
       CGO_ENABLED: "0"
     steps:
