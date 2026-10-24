@@ -11,7 +11,7 @@ goos=${1:?goos}; goarch=${2:?goarch}; version=${3:?version}; commit=${4:?commit}
 ws=${WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}
 tmp=$(mktemp -d)
 ref="refs/ci/candidate-$$"
-cleanup() { git -C "$ws" update-ref -d "$ref" 2>/dev/null; rm -rf "$tmp"; }
+cleanup() { git -C "$ws" update-ref -d "$ref" 2>/dev/null || true; rm -rf "$tmp"; }
 trap cleanup EXIT
 tool=${BUILDRELEASE:-}
 if [ -z "$tool" ]; then
@@ -26,7 +26,7 @@ for n in a b; do
   src="$tmp/clone-$n/src"
   mkdir -p "$src"
   git init -q "$src"
-  git -C "$src" fetch -q --no-tags "$ws" "+$ref:refs/ci/candidate"
+  git -C "$src" fetch -q --no-tags --update-shallow "$ws" "+$ref:refs/ci/candidate"
   git -C "$src" checkout -q --detach refs/ci/candidate
   flags=(-src "$src" -out "$tmp/out-$n/mash" -version "$version" -commit "$commit")
   if [ "$goos" != "-" ]; then flags+=(-goos "$goos" -goarch "$goarch"); fi

@@ -327,8 +327,13 @@ func TestCI_concurrencyNeverCancelsMain(t *testing.T) {
 	if err := yaml.Unmarshal(b, &w); err != nil {
 		t.Fatal(err)
 	}
-	if w.Concurrency.Group == "" || fmt.Sprint(w.Concurrency.Cancel) != "${{ github.event_name == 'pull_request' }}" {
+	if fmt.Sprint(w.Concurrency.Cancel) != "${{ github.event_name == 'pull_request' }}" {
 		t.Fatalf("concurrency: %+v", w.Concurrency)
+	}
+	// A pending run is replaced by a newer one in its group even without cancel-in-progress, so runs on main must not
+	// share a group: only a pull request's runs do.
+	if !strings.Contains(w.Concurrency.Group, "github.event_name == 'pull_request' && github.ref || github.run_id") {
+		t.Fatalf("concurrency group %q lets a run on main replace another pending one", w.Concurrency.Group)
 	}
 }
 
@@ -566,5 +571,57 @@ func TestBuildTwice_buildsACommitNoBranchOrTagReaches(t *testing.T) {
 	// And the script leaves no helper ref behind in the workspace.
 	if refs := run("for-each-ref", "refs/ci"); refs != "" {
 		t.Fatalf("refs left in the workspace: %s", refs)
+	}
+}
+
+// The `test` jobs check out shallowly (actions/checkout's default): the tests and the script must work from there.
+func TestBuildTwice_worksFromAShallowWorkspace(t *testing.T) {
+	root := repoRoot(t)
+	// Two commits of history, then a depth-1 clone of it: a shallow workspace like CI's.
+	full := filepath.Join(t.TempDir(), "full")
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", full).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	run(full, "commit", "-q", "--allow-empty", "-m", "one")
+	run(full, "commit", "-q", "--allow-empty", "-m", "two")
+	ws := filepath.Join(t.TempDir(), "ws")
+	if out, err := exec.Command("git", "clone", "-q", "--depth", "1", "file://"+full, ws).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if run(ws, "rev-parse", "--is-shallow-repository") != "true" {
+		t.Fatal("the workspace is not shallow")
+	}
+	x := run(ws, "rev-parse", "HEAD")
+	ok := stub(t, `echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	out := filepath.Join(t.TempDir(), "mash")
+	if got, err := buildTwice(t, ws, ok, "-", "-", "0.1.0", x, out); err != nil {
+		t.Fatalf("a shallow workspace could not be cloned from: %v\n%s", err, got)
+	}
+	_ = root
+}
+
+// A failed ref cleanup must not stop the temporary directories being removed.
+func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
+	root := repoRoot(t)
+	x := headOf(t, root)
+	tmp := t.TempDir()
+	// A tool that deletes the helper ref itself, so the script's own deletion fails.
+	tool := stub(t, `case "$out" in *out-b*) for r in $(git -C `+root+` for-each-ref --format='%(refname)' refs/ci); do git -C `+root+` update-ref -d $r; done;; esac; echo x > "$out"; sha=$(sha256sum "$out" | cut -d' ' -f1); echo "$sha  $out"`)
+	cmd := exec.Command(filepath.Join(root, "scripts", "build-twice"), "-", "-", "0.1.0", x, filepath.Join(tmp, "mash"))
+	cmd.Env = append(os.Environ(), "WORKSPACE="+root, "BUILDRELEASE="+tool, "TMPDIR="+tmp)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	left, _ := filepath.Glob(filepath.Join(tmp, "tmp.*"))
+	if len(left) != 0 {
+		t.Fatalf("temporary directories left behind: %v", left)
 	}
 }
