@@ -69,6 +69,8 @@ type leaseValue struct {
 	Host     string `json:"host"`
 	PID      string `json:"pid"`
 	Since    string `json:"since"`
+	// LaunchToken names the launch of the agent this session serves (MASH_LAUNCH_TOKEN); absent when none was given.
+	LaunchToken string `json:"launch_token,omitempty"`
 }
 
 // checkCredsFor refuses credentials minted for another endpoint before any
@@ -180,7 +182,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 	e.leaseKV = kv
 	host, _ := os.Hostname()
 	val, _ := json.Marshal(leaseValue{Instance: e.instance, Host: host, PID: fmt.Sprint(os.Getpid()),
-		Since: time.Now().UTC().Format(time.RFC3339)})
+		Since: time.Now().UTC().Format(time.RFC3339), LaunchToken: e.cfg.LaunchToken})
 	rev, err := kv.Create(ctx, e.cfg.Name, val)
 	if errors.Is(err, jetstream.ErrKeyExists) {
 		held := &LeaseHeldError{Name: e.cfg.Name, Host: "?", PID: "?", Since: "?"}
@@ -233,7 +235,7 @@ func (e *Endpoint) keepLease() {
 func (e *Endpoint) refreshLease(ctx context.Context) error {
 	host, _ := os.Hostname()
 	val, _ := json.Marshal(leaseValue{Instance: e.instance, Host: host, PID: fmt.Sprint(os.Getpid()),
-		Since: time.Now().UTC().Format(time.RFC3339)})
+		Since: time.Now().UTC().Format(time.RFC3339), LaunchToken: e.cfg.LaunchToken})
 	rev, err := e.leaseKV.Update(ctx, e.cfg.Name, val, e.leaseRev.Load())
 	if err == nil {
 		e.leaseRev.Store(rev)

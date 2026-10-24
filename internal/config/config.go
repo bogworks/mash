@@ -15,15 +15,16 @@ import (
 
 // Config is the resolved configuration for one process.
 type Config struct {
-	URL        string // NATS URL
-	Owner      string // SAP owner token
-	Name       string // endpoint name (MASH_NAME); empty = inert
-	Creds      string // endpoint credentials file
-	SettleMS   int    // quiet time before a batch is pushed
-	BatchMsgs  int    // a batch up to this many messages is shown in full
-	BatchBytes int    // ... and up to this many body bytes
-	AdminCreds string // admin credentials for `mash admin`
-	Dir        string // ~/.config/mash
+	URL         string // NATS URL
+	Owner       string // SAP owner token
+	Name        string // endpoint name (MASH_NAME); empty = inert
+	Creds       string // endpoint credentials file
+	SettleMS    int    // quiet time before a batch is pushed
+	BatchMsgs   int    // a batch up to this many messages is shown in full
+	BatchBytes  int    // ... and up to this many body bytes
+	AdminCreds  string // admin credentials for `mash admin`
+	LaunchToken string // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Dir         string // ~/.config/mash
 }
 
 type file struct {
@@ -83,6 +84,7 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.Name, "MASH_NAME")
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
+	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	for _, p := range []struct {
 		dst *int
 		key string
@@ -96,6 +98,9 @@ func Load(env func(string) string, home string) (Config, error) {
 		}
 	}
 
+	if !validLaunchToken(c.LaunchToken) {
+		return c, fmt.Errorf("mash: MASH_LAUNCH_TOKEN: use at most 128 letters, digits, '.', '_' or '-'")
+	}
 	if c.Name == "" {
 		return c, nil
 	}
@@ -115,4 +120,17 @@ func Load(env func(string) string, home string) (Config, error) {
 		c.Creds = filepath.Join(dir, c.Name+".creds")
 	}
 	return c, nil
+}
+
+// validLaunchToken: empty, or up to 128 of [A-Za-z0-9._-] (it goes into a JSON lease value and a process environment).
+func validLaunchToken(t string) bool {
+	if len(t) > 128 {
+		return false
+	}
+	for _, r := range t {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

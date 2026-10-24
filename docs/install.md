@@ -56,6 +56,7 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 | `owner` | `MASH_OWNER` | Your SAP owner token (lower-case letters, digits, single hyphens). |
 | `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `~/.config/mash/<name>.creds`. |
 | | `MASH_NAME` | The endpoint name, set per session at launch. |
+| | `MASH_LAUNCH_TOKEN` | Optional. Names this launch of the agent (up to 128 of `A-Za-z0-9._-`); written into the endpoint's lease as `launch_token` so a supervisor can tell which launch holds it. |
 | `settle_ms` | `MASH_SETTLE_MS` | Quiet time before a batch is pushed. Default 100. |
 | `batch_msgs`, `batch_bytes` | `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` | A batch up to 10 messages and 16 KiB is shown in full; more becomes a digest. |
 
