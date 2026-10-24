@@ -124,3 +124,25 @@ func TestBadNumbersRejected(t *testing.T) {
 		t.Fatal("non-numeric MASH_SETTLE_MS must be rejected")
 	}
 }
+
+func TestLaunchTokenFromTheEnvironment(t *testing.T) {
+	base := map[string]string{"MASH_URL": "nats://x", "MASH_OWNER": "o", "MASH_NAME": "n"}
+	load := func(tok string) (Config, error) {
+		env := map[string]string{"MASH_LAUNCH_TOKEN": tok}
+		for k, v := range base {
+			env[k] = v
+		}
+		return Load(func(k string) string { return env[k] }, t.TempDir())
+	}
+	if c, err := load("tok-1.A_b"); err != nil || c.LaunchToken != "tok-1.A_b" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if c, err := load(""); err != nil || c.LaunchToken != "" {
+		t.Fatalf("unset: %+v %v", c, err)
+	}
+	for _, bad := range []string{"has space", "new\nline", strings.Repeat("a", 129), "semi;colon"} {
+		if _, err := load(bad); err == nil {
+			t.Errorf("token %q accepted", bad)
+		}
+	}
+}

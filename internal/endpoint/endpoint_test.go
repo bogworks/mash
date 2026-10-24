@@ -2,8 +2,10 @@ package endpoint
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -660,5 +662,55 @@ func TestVersionAccessorIsRaceFree(t *testing.T) {
 	wg.Wait()
 	if CurrentVersion() != "1.2.3" {
 		t.Fatal(CurrentVersion())
+	}
+}
+
+// The launch token (MASH_LAUNCH_TOKEN) rides in the lease value so a supervisor can tell which launch of an agent owns
+// the endpoint; without it the lease value is what v0.1.0 wrote.
+func TestLeaseCarriesTheLaunchToken(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfg("a")
+	cfg.LaunchToken = "tok-1.A"
+	ep, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	read := func(name string) leaseValue {
+		t.Helper()
+		en, err := kv.Get(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lv leaseValue
+		if err := json.Unmarshal(en.Value(), &lv); err != nil {
+			t.Fatal(err)
+		}
+		return lv
+	}
+	if lv := read("a"); lv.LaunchToken != "tok-1.A" || lv.PID != fmt.Sprint(os.Getpid()) {
+		t.Fatalf("lease %+v", lv)
+	}
+	if err := ep.refreshLease(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if lv := read("a"); lv.LaunchToken != "tok-1.A" {
+		t.Fatalf("a refresh dropped the token: %+v", lv)
+	}
+	// No token: the field is absent from the stored JSON, and a v0.1.0-shaped entry still decodes.
+	ep2, err := Open(context.Background(), f.cfg("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep2.Close()
+	en, _ := kv.Get(context.Background(), "b")
+	if strings.Contains(string(en.Value()), "launch_token") {
+		t.Fatalf("a lease without a token carries the field: %s", en.Value())
+	}
+	var old leaseValue
+	if err := json.Unmarshal([]byte(`{"instance_id":"i","host":"h","pid":"1","since":"x"}`), &old); err != nil || old.LaunchToken != "" {
+		t.Fatalf("v0.1.0 entry: %+v %v", old, err)
 	}
 }
