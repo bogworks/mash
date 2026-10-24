@@ -546,6 +546,16 @@ func TestReproducible_aHangingVersionIsRefusedAtADeadline(t *testing.T) {
 	}
 }
 
+// A `version` that exits 0 but leaves a child holding its output open is the candidate's misbehaviour too.
+func TestReproducible_aLingeringChildIsARefusalNotFour(t *testing.T) {
+	f := newFixture(t)
+	stubBuild(f, []byte("#!/bin/sh\n(sleep 30 &)\nexit 0\n"))
+	err := f.check()
+	if exitCode(err) != 3 {
+		t.Fatalf("a binary that leaves a child on its output: %v (exit %d), want a refusal", err, exitCode(err))
+	}
+}
+
 // The wrapper reads the toolchain from internal/release, the one place it is declared.
 func TestWrapper_toolchainPinComesFromTheDeclaredConstant(t *testing.T) {
 	b, err := os.ReadFile("../release-check")

@@ -335,6 +335,8 @@ func reproducible(ctx context.Context, o Options, x string) error {
 			return fmt.Errorf("the built binary's version did not finish within %v", versionTimeout)
 		case errors.As(err, &ee):
 			return fmt.Errorf("running the built binary: %w", err)
+		case errors.Is(err, exec.ErrWaitDelay): // it exited, but left a process holding its output open
+			return fmt.Errorf("the built binary's version left a process running: %w", err)
 		default:
 			return op(fmt.Errorf("starting the built binary: %w", err)) // could not run it: says nothing about it
 		}
