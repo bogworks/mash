@@ -767,3 +767,31 @@ func TestForgedSenderInstanceNotShown(t *testing.T) {
 		t.Fatalf("a forged instance was shown:\n%s", got)
 	}
 }
+
+// The instance shown with a message is the lease's instance_id (what `mash who`
+// shows), even with the SAP service up, where Instance() is the micro id.
+func TestSenderInstanceIsTheLeaseInstance(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	_, ev := f.run(t, "a")
+	b := f.serve(t, "b", noPrompt)
+	if _, err := b.Send(context.Background(), "a", "hi", 0); err != nil {
+		t.Fatal(err)
+	}
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	en, err := kv.Get(context.Background(), "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lv leaseValue
+	if err := json.Unmarshal(en.Value(), &lv); err != nil {
+		t.Fatal(err)
+	}
+	if b.Instance() == lv.Instance {
+		t.Skip("service id equals the lease instance; nothing to distinguish")
+	}
+	got := ev.waitFor(t, 1, 5*time.Second)[0]
+	if !strings.Contains(got, "\ninstance: "+lv.Instance+"\n") {
+		t.Fatalf("want lease instance %q (service id %q):\n%s", lv.Instance, b.Instance(), got)
+	}
+}

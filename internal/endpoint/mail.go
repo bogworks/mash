@@ -233,7 +233,7 @@ func (e *Endpoint) Send(ctx context.Context, to, text string, inReplyTo uint64) 
 	msg.Data = data
 	msg.Header.Set(sap.HeaderName, h.Encode())
 	msg.Header.Set(jetstream.MsgIDHeader, h.Nonce)
-	if iv, err := e.id.SignInstance(h, e.Instance()); err == nil {
+	if iv, err := e.id.SignInstance(h, e.instance); err == nil {
 		msg.Header.Set(InstanceHeader, iv)
 	}
 	if inReplyTo > 0 {
