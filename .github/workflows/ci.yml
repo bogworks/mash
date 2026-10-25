@@ -22,20 +22,37 @@ jobs:
       fail-fast: false # one OS failing must not cancel the other and hide its result
       matrix:
         os: [ubuntu-latest, macos-latest]
-    # Linux on Ubicloud's runners (GitHub's own minutes are capped); macOS stays on GitHub (Ubicloud has none). The
-    # matrix keeps GitHub's names, so the check names the release gate requires don't change.
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubicloud-standard-2' || matrix.os }}
-    # TEMPORARY, until the archeron macOS runner is online: GitHub's own minutes are spent, so the macOS job can't
-    # start; it mustn't turn every run red meanwhile. Its check run still fails, so the release gate, which requires
-    # test (macos-latest) to succeed, still refuses a release without a real macOS pass. Remove with the runner.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    # Linux on Ubicloud's runners (GitHub's own minutes are capped); macOS on our own self-hosted runner (a 2 vCPU,
+    # 4 GB Intel VM, persistent, one job at a time). The matrix keeps GitHub's names, so the check names the release
+    # gate requires (test (macos-latest)) don't change.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubicloud-standard-2' || fromJSON('["self-hosted","macOS","mash-ci"]') }}
     steps:
+      # The macOS runner is persistent: keep every Go cache and temp dir under RUNNER_TEMP, which is wiped below.
+      - name: Job-local Go and temp dirs (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
+          {
+            echo "GOPATH=$RUNNER_TEMP/go"
+            echo "GOCACHE=$RUNNER_TEMP/gocache"
+            echo "GOMODCACHE=$RUNNER_TEMP/gomod"
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ matrix.os != 'macos-latest' }}
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Leave nothing behind (macOS)
+        if: always() && matrix.os == 'macos-latest'
+        run: |
+          # Go's module cache is read-only, so make it writable before removing it.
+          chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
+          rm -rf "$RUNNER_TOOL_CACHE/go"
+          git clean -ffdx || true
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is neither conditional nor matrixed: every release target
   # built from two fresh clones in different directories must give identical bytes, so a change that breaks
