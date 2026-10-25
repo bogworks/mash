@@ -144,3 +144,49 @@ func TestIDSigRoundTrip(t *testing.T) {
 		t.Fatal("id_sig verified over the wrong owner")
 	}
 }
+
+func TestInstanceBindingRoundTrip(t *testing.T) {
+	id := b13Identity(t)
+	h, err := id.Sign(b13Subject, []byte("x"), "n", time.Now(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := id.SignInstance(h, "INST1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := VerifyInstance(v, h); !ok || got != "INST1" {
+		t.Fatalf("verify: %q %v", got, ok)
+	}
+	// a different message (nonce) must not accept the same binding
+	h2, _ := id.Sign(b13Subject, []byte("x"), "n", time.Now(), "")
+	if _, ok := VerifyInstance(v, h2); ok {
+		t.Fatal("binding replayed onto another message")
+	}
+	// a tampered instance fails
+	if _, ok := VerifyInstance("EVIL"+v[len("INST1"):], h); ok {
+		t.Fatal("tampered instance accepted")
+	}
+	for _, bad := range []string{"", "nodot", ".sig", "INST1."} {
+		if _, ok := VerifyInstance(bad, h); ok {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	// signed by another key
+	other := freshIdentityForTest(t)
+	ov, _ := other.SignInstance(h, "INST1")
+	if _, ok := VerifyInstance(ov, h); ok {
+		t.Fatal("another key's binding accepted")
+	}
+}
+
+func freshIdentityForTest(t *testing.T) Identity {
+	t.Helper()
+	kp, _ := nkeys.CreateUser()
+	seed, _ := kp.Seed()
+	id, err := NewIdentity(seed, b13Account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

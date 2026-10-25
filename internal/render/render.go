@@ -12,11 +12,14 @@ import (
 
 // Mail is one message as delivered.
 type Mail struct {
-	Seq   uint64
-	From  string
-	Trust sap.Trust
-	At    time.Time
-	Body  []byte
+	Seq  uint64
+	From string
+	// Instance is the sender's verified instance id; empty when it sent none
+	// or the binding did not verify.
+	Instance string
+	Trust    sap.Trust
+	At       time.Time
+	Body     []byte
 }
 
 const maxFirstLine = 120
@@ -64,12 +67,24 @@ func quote(b []byte) string {
 
 // One renders a message in full; the body is quoted.
 func One(m Mail) string {
-	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s", m.Seq, m.From, m.Trust, stamp(m.At), quote(m.Body))
+	inst := ""
+	if m.Instance != "" {
+		inst = "instance: " + m.Instance + "\n" // never from the body: bodies are quoted
+	}
+	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s%s", m.Seq, m.From, m.Trust, stamp(m.At), inst, quote(m.Body))
+}
+
+// instField is the trailing tab field of the one-line forms.
+func instField(m Mail) string {
+	if m.Instance == "" {
+		return ""
+	}
+	return "\tinstance " + m.Instance
 }
 
 // Line renders a message as one line: seq, sender, time, size, first line.
 func Line(m Mail) string {
-	return fmt.Sprintf("#%d\tfrom %s [%s]\t%s\t%d B\t%s", m.Seq, m.From, m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body))
+	return fmt.Sprintf("#%d\tfrom %s [%s]\t%s\t%d B\t%s", m.Seq, m.From, m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body)) + instField(m)
 }
 
 // Batch renders msgs for endpoint to: in full when there are at most maxMsgs
@@ -90,7 +105,7 @@ func Batch(to string, msgs []Mail, maxMsgs, maxBytes int) string {
 	fmt.Fprintf(&b, "mash: %s for %s (%d B), shown as a digest. Read the ones you need with the read tool (by #seq).\n\n",
 		plural(len(msgs)), to, total)
 	for _, m := range msgs {
-		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s\n", m.Seq, m.From, m.Trust, len(m.Body), firstLine(m.Body))
+		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s%s\n", m.Seq, m.From, m.Trust, len(m.Body), firstLine(m.Body), instField(m))
 	}
 	return b.String()
 }

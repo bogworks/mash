@@ -326,3 +326,41 @@ func (s *nonceSet) Seen(user, nonce string, now time.Time) bool {
 	s.at[k] = now
 	return false
 }
+
+// instanceInput is what a sender signs to bind its instance id to one message:
+// the message's own signed fields, so the binding cannot move to another one.
+func instanceInput(h SenderHeader, instance string) []byte {
+	return []byte("MASH-SENDER-INSTANCE-V1\n" + h.Account + "\n" + h.User + "\n" + h.Sub + "\n" +
+		h.TS + "\n" + h.Nonce + "\n" + instance + "\n")
+}
+
+// SignInstance binds instance (the sender's own process id) to the message h
+// signs. The value is "<instance>.<sig>", for the Mash-Sender-Instance header.
+func (id Identity) SignInstance(h SenderHeader, instance string) (string, error) {
+	if id.kp == nil {
+		return "", errors.New("sap: identity has no seed")
+	}
+	if !nonceRE.MatchString(instance) {
+		return "", errors.New("sap: instance id is not a plain token")
+	}
+	sig, err := id.kp.Sign(instanceInput(h, instance))
+	if err != nil {
+		return "", err
+	}
+	return instance + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// VerifyInstance checks an instance binding against the (already verified)
+// sender header of the same message. It returns the instance only when the
+// header's own key signed it for this message.
+func VerifyInstance(value string, h SenderHeader) (string, bool) {
+	i := strings.LastIndexByte(value, '.')
+	if i <= 0 || i == len(value)-1 {
+		return "", false
+	}
+	instance, sig := value[:i], value[i+1:]
+	if !nonceRE.MatchString(instance) || !verifySig(h.User, instanceInput(h, instance), sig) {
+		return "", false
+	}
+	return instance, true
+}

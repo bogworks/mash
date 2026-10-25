@@ -714,3 +714,56 @@ func TestLeaseCarriesTheLaunchToken(t *testing.T) {
 		t.Fatalf("v0.1.0 entry: %+v %v", old, err)
 	}
 }
+
+// The sender's verified instance id is shown with the message: it is the
+// sender's own, signed under its key, and a forgery is never shown.
+func TestSenderInstanceVerified(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a, ev := f.run(t, "a")
+	b := f.client(t, "b")
+	seq, err := b.Send(context.Background(), "a", "hello a", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Instance() == "" {
+		t.Fatal("sender has no instance")
+	}
+	got := ev.waitFor(t, 1, 5*time.Second)[0]
+	if !strings.Contains(got, "\ninstance: "+b.Instance()+"\n> hello a") {
+		t.Fatalf("event lacks the sender's instance %q:\n%s", b.Instance(), got)
+	}
+	m, err := a.Read(context.Background(), seq)
+	if err != nil || m.Instance != b.Instance() {
+		t.Fatalf("read: %+v %v", m, err)
+	}
+	ms, err := a.Inbox(context.Background(), 20)
+	if err != nil || len(ms) != 1 || ms[0].Instance != b.Instance() {
+		t.Fatalf("inbox: %+v %v", ms, err)
+	}
+}
+
+func TestForgedSenderInstanceNotShown(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	subj := sap.For(f.e.Owner, "a").Mail
+	id := identity(t, f.creds["b"])
+	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	for i, hv := range []string{"VICTIM.AAAA", "VICTIM"} { // an unsigned claim; one without a dot
+		h, _ := id.Sign(subj, []byte("hi"), "b", time.Now(), "")
+		msg := nats.NewMsg(subj)
+		msg.Data = []byte("hi")
+		msg.Header.Set(sap.HeaderName, h.Encode())
+		msg.Header.Set(InstanceHeader, hv)
+		msg.Header.Set(jetstream.MsgIDHeader, h.Nonce+fmt.Sprint(i))
+		if err := nc.PublishMsg(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, ev := f.run(t, "a")
+	got := strings.Join(ev.waitFor(t, 1, 5*time.Second), "\n")
+	if !strings.Contains(got, "from b [verified]") {
+		t.Fatalf("message not delivered:\n%s", got)
+	}
+	if strings.Contains(got, "VICTIM") || strings.Contains(got, "instance") {
+		t.Fatalf("a forged instance was shown:\n%s", got)
+	}
+}

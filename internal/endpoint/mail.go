@@ -25,6 +25,10 @@ type Deliverer func(text string, meta map[string]string) error
 // InReplyToHeader carries the seq a message answers (optional).
 const InReplyToHeader = "Mash-In-Reply-To"
 
+// InstanceHeader carries the sender's instance id and its signature over it
+// (sap.Identity.SignInstance). Only a value that verifies is ever shown.
+const InstanceHeader = "Mash-Sender-Instance"
+
 // maxPending flushes a batch early so a flood can't grow it without bound.
 const maxPending = 200
 
@@ -42,6 +46,16 @@ func shownName(h sap.SenderHeader) string {
 		return h.User[:4] + "…" + h.User[len(h.User)-4:]
 	}
 	return "?"
+}
+
+// senderInstance is the sender's instance id, only when the sender's own key
+// signed it onto this very message and the message itself verified.
+func senderInstance(hdr nats.Header, trust sap.Trust, h sap.SenderHeader) string {
+	if trust != sap.TrustVerified && trust != sap.TrustStale {
+		return ""
+	}
+	inst, _ := sap.VerifyInstance(hdr.Get(InstanceHeader), h)
+	return inst
 }
 
 // classify verifies a stored message and names its sender (spec section 4).
@@ -112,7 +126,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			key = h.User + "\x00" + h.Nonce
 		}
 		p := pending{msg: m, key: key, mail: render.Mail{Seq: meta.Sequence.Stream, From: from, Trust: trust,
-			At: meta.Timestamp, Body: m.Data()}}
+			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h)}}
 		select {
 		case queue <- p:
 		case <-quit:
@@ -219,6 +233,9 @@ func (e *Endpoint) Send(ctx context.Context, to, text string, inReplyTo uint64) 
 	msg.Data = data
 	msg.Header.Set(sap.HeaderName, h.Encode())
 	msg.Header.Set(jetstream.MsgIDHeader, h.Nonce)
+	if iv, err := e.id.SignInstance(h, e.Instance()); err == nil {
+		msg.Header.Set(InstanceHeader, iv)
+	}
 	if inReplyTo > 0 {
 		msg.Header.Set(InReplyToHeader, strconv.FormatUint(inReplyTo, 10))
 	}
@@ -266,11 +283,12 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 }
 
 func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
-	from, trust, _, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
+	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
-	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data}, true
+	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data,
+		Instance: senderInstance(raw.Header, trust, h)}, true
 }
 
 // Read returns message seq from this endpoint's own inbox.
