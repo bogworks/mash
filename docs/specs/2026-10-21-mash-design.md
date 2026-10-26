@@ -150,6 +150,7 @@ An MCP server over stdio, started by Claude Code from the mash plugin. One per C
 - **Batching:** gather messages until 100 ms pass with no new one (`MASH_SETTLE_MS`), then push one `notifications/claude/channel` event.
 - **Full or digest:** if the batch is at most 10 messages and at most 16 KiB of bodies (`MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`), each message is shown in full. Otherwise a digest shows one line each: `#<seq>`, sender, trust class, size, first line.
 - **Each message header line:** `--- #<seq> from <sender> [<trust>] at <time>`. The body follows with every line quoted (`> `), so no body text can read as a header. A sender name that is not a valid endpoint name is shown as a short form of its key.
+- **Sender instance:** when the sender's instance id is known, a line `instance: <id>` follows the header line (before the quoted body; digest and one-line forms end with a tab field `instance <id>`). The sender signs the id onto the message with its own key (`Mash-Sender-Instance: <id>.<sig>`, over the message's account, user, subject, time and nonce), and the receiver shows it only if that signature verifies and the message is `verified` or `stale`. Without a valid binding the line is absent and the output is unchanged.
 - **Event `meta`:** `{to, count, seqs}`, string values only.
 - **Ack** each message after its notification is written to stdout. Delivered means received: history stays in the stream.
 - **Ordering:** stream order, per inbox.

@@ -129,3 +129,29 @@ func TestOtherLineBreaksCannotForgeAHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceRenderedWhenKnown(t *testing.T) {
+	m := mail(5, "alice", "hi")
+	m.Instance = "INST123"
+	one := One(m)
+	if !strings.HasPrefix(one, "--- #5 from alice [verified] at 2026-10-22T10:00:00Z\ninstance: INST123\n> hi") {
+		t.Fatalf("One:\n%s", one)
+	}
+	if l := Line(m); !strings.HasSuffix(l, "\tinstance INST123") {
+		t.Fatalf("Line: %q", l)
+	}
+	d := Batch("a", []Mail{m, m}, 1, 16384)
+	if !strings.Contains(d, "\tinstance INST123\n") {
+		t.Fatalf("digest:\n%s", d)
+	}
+}
+
+func TestInstanceAbsentIsUnchanged(t *testing.T) {
+	m := mail(5, "alice", "hi")
+	if got := One(m); got != "--- #5 from alice [verified] at 2026-10-22T10:00:00Z\n> hi" {
+		t.Fatalf("One changed: %q", got)
+	}
+	if strings.Contains(Line(m), "instance") {
+		t.Fatal("Line mentions instance")
+	}
+}
