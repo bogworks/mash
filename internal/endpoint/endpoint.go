@@ -161,6 +161,36 @@ func (e *Endpoint) init(ctx context.Context) error {
 	return e.loadDirectory(ctx)
 }
 
+// AdoptLaunchInstance makes a client (`mash send`) run inside a launched agent session sign as that session's
+// serve: when MASH_LAUNCH_TOKEN is set and the endpoint's lease carries the same launch token, the client takes the
+// lease's instance id instead of its own fresh one. A reader that binds a reply to the session's instance (the
+// lease's) then accepts mail the agent sent from its shell exactly as mail sent through the channel. Without a token
+// it does nothing. With a token it fails when the lease can't be read, is absent, or belongs to another launch: mail
+// sent under a fresh instance would look delivered and still be rejected by such a reader. It holds the same
+// endpoint key either way: this changes which instance the mail names, not who signs it.
+func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
+	if e.cfg.LaunchToken == "" {
+		return nil
+	}
+	kv, err := e.js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but the lease bucket can't be read: %w", err)
+	}
+	cur, err := kv.Get(ctx, e.cfg.Name)
+	if err != nil {
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease can't be read (is its serve running?): %w", e.cfg.Name, err)
+	}
+	var lv leaseValue
+	if err := json.Unmarshal(cur.Value(), &lv); err != nil || lv.Instance == "" {
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease names no instance", e.cfg.Name)
+	}
+	if lv.LaunchToken != e.cfg.LaunchToken {
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN does not match the launch holding %s's lease: this shell is not that session's", e.cfg.Name)
+	}
+	e.instance = lv.Instance
+	return nil
+}
+
 // Open connects, checks the identity and takes the endpoint's lease.
 func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	e, err := OpenClient(ctx, cfg)

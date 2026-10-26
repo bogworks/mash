@@ -53,6 +53,14 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		default:
 			body = strings.Join(args[2:], " ")
 		}
+		// A send from a launched session's shell names the session's instance; adopted after the body is read, so
+		// a slow stdin can't leave it signing for a serve that has since gone.
+		ac, acc := context.WithTimeout(ctx, 5*time.Second)
+		err := ep.AdoptLaunchInstance(ac)
+		acc()
+		if err != nil {
+			return fail(err)
+		}
 		c, cc := short()
 		defer cc()
 		seq, err := ep.Send(c, args[1], body, 0)

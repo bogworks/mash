@@ -516,3 +516,104 @@ func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
 		t.Fatalf("MCP serverInfo version %v", v)
 	}
 }
+
+// A `mash send` from the shell of a launched session (same MASH_LAUNCH_TOKEN as the session's serve) names the
+// serve's lease instance, and the receiver shows it as the verified sender instance.
+func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	var lease string
+	deadline := time.Now().Add(10 * time.Second)
+	for lease == "" {
+		if en, err := kv.Get(context.Background(), "a"); err == nil {
+			var lv struct {
+				Instance string `json:"instance_id"`
+			}
+			_ = json.Unmarshal(en.Value(), &lv)
+			lease = lv.Instance
+		}
+		if lease == "" && time.Now().After(deadline) {
+			t.Fatal("a never took its lease")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if out, code := w.cli(t, "a", "send", "b", "from", "the", "shell"); code != 0 {
+		t.Fatalf("cli send: %d %s", code, out)
+	}
+	out, code := w.cli(t, "b", "read", "1")
+	if code != 0 || !strings.Contains(out, "from a [verified]") || !strings.Contains(out, "instance: "+lease+"\n") {
+		t.Fatalf("want a verified mail naming the lease instance %q: %d %s", lease, code, out)
+	}
+}
+
+// bInboxEmpty fails the test when b holds any mail from a.
+func bInboxEmpty(t *testing.T, w *world) {
+	t.Helper()
+	if out, code := w.cli(t, "b", "read", "1"); code == 0 {
+		t.Fatalf("b has a message #1 that must not exist: %s", out)
+	}
+	if out, code := w.cli(t, "b", "inbox"); code != 0 || strings.Contains(out, "from a") {
+		t.Fatalf("b's inbox holds mail from a: %d %s", code, out)
+	}
+}
+
+// A token that names another launch than the serve's must stop the send: nothing is delivered under a fresh
+// instance a reader would reject.
+func TestCLISendWithAnotherLaunchTokenFails(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	// wait for the serve's lease
+	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := kv.Get(context.Background(), "a"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a never took its lease")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// the same endpoint, another launch's shell (a copy, so the running serve's env is untouched)
+	w.env["a-other"] = map[string]string{}
+	for k, v := range w.env["a"] {
+		w.env["a-other"][k] = v
+	}
+	w.env["a-other"]["MASH_LAUNCH_TOKEN"] = "tok-2"
+	out, code := w.cli(t, "a-other", "send", "b", "mismatch", "body")
+	if code == 0 || !strings.Contains(out, "does not match") {
+		t.Fatalf("want a non-zero exit naming the mismatch: %d %s", code, out)
+	}
+	bInboxEmpty(t, w)
+}
+
+// A token with no serve running has no lease to adopt: the send fails and delivers nothing.
+func TestCLISendWithATokenAndNoServeFails(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
+	out, code := w.cli(t, "a", "send", "b", "no", "serve")
+	if code == 0 || !strings.Contains(out, "MASH_LAUNCH_TOKEN") {
+		t.Fatalf("want a non-zero exit naming MASH_LAUNCH_TOKEN: %d %s", code, out)
+	}
+	bInboxEmpty(t, w)
+}
+
+// Without a token and without a serve a send works as it always did.
+func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	if out, code := w.cli(t, "a", "send", "b", "plain"); code != 0 || !strings.Contains(out, "sent #1 from a to b") {
+		t.Fatalf("plain send: %d %s", code, out)
+	}
+	if out, code := w.cli(t, "b", "read", "1"); code != 0 || !strings.Contains(out, "plain") {
+		t.Fatalf("b read: %d %s", code, out)
+	}
+}

@@ -795,3 +795,123 @@ func TestSenderInstanceIsTheLeaseInstance(t *testing.T) {
 		t.Fatalf("want lease instance %q (service id %q):\n%s", lv.Instance, b.Instance(), got)
 	}
 }
+
+// leaseInstance reads the instance_id held in name's lease.
+func leaseInstance(t *testing.T, f *fixture, name string) string {
+	t.Helper()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
+	en, err := kv.Get(context.Background(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lv leaseValue
+	if err := json.Unmarshal(en.Value(), &lv); err != nil {
+		t.Fatal(err)
+	}
+	return lv.Instance
+}
+
+// sendFromClient has a client of "a" (cfg token tok, optionally adopting) send to b and returns the client, the
+// adopt error (nil when not adopting) and what b reads: the mail's trust and its verified instance. The send goes
+// out even after a failed adopt, to show which instance the client would have signed.
+func sendFromClient(t *testing.T, f *fixture, tok string, adopt bool) (*Endpoint, error, sap.Trust, string) {
+	t.Helper()
+	b := f.client(t, "b")
+	cfg := f.cfg("a")
+	cfg.LaunchToken = tok
+	c, err := OpenClient(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	var aerr error
+	if adopt {
+		aerr = c.AdoptLaunchInstance(context.Background())
+	}
+	seq, err := c.Send(context.Background(), "b", "from the shell", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := b.Read(context.Background(), seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, aerr, m.Trust, m.Instance
+}
+
+// A client in the launched session's shell (same launch token) signs the serve's lease instance, so a reader that
+// binds a reply to that instance accepts it.
+func TestAdoptLaunchInstanceSignsTheLeaseInstance(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfg("a")
+	cfg.LaunchToken = "tok-1"
+	serve, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serve.Close()
+	lease := leaseInstance(t, f, "a")
+	if lease == "" {
+		t.Fatal("lease has no instance")
+	}
+	c, aerr, trust, inst := sendFromClient(t, f, "tok-1", true)
+	if aerr != nil {
+		t.Fatalf("matching token must adopt without error: %v", aerr)
+	}
+	if c.instance != lease {
+		t.Fatalf("client instance %q, want the lease's %q", c.instance, lease)
+	}
+	if trust != sap.TrustVerified || inst != lease {
+		t.Fatalf("receiver saw trust %v instance %q, want verified %q", trust, inst, lease)
+	}
+}
+
+func TestAdoptLaunchInstanceFailsOnAnotherLaunch(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfg("a")
+	cfg.LaunchToken = "tok-1"
+	serve, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serve.Close()
+	lease := leaseInstance(t, f, "a")
+	c, aerr, trust, inst := sendFromClient(t, f, "tok-2", true)
+	if aerr == nil || !strings.Contains(aerr.Error(), "does not match") {
+		t.Fatalf("a different launch's token must fail with a mismatch, got %v", aerr)
+	}
+	if trust != sap.TrustVerified || inst == lease || inst != c.instance || inst == "" {
+		t.Fatalf("trust %v instance %q (lease %q, own %q): a different launch must keep its own", trust, inst, lease, c.instance)
+	}
+}
+
+func TestAdoptLaunchInstanceNeedsAToken(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfg("a")
+	cfg.LaunchToken = "tok-1"
+	serve, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serve.Close()
+	lease := leaseInstance(t, f, "a")
+	c, aerr, trust, inst := sendFromClient(t, f, "", true)
+	if aerr != nil {
+		t.Fatalf("no token must be a no-op without error: %v", aerr)
+	}
+	if trust != sap.TrustVerified || inst == lease || inst != c.instance || inst == "" {
+		t.Fatalf("trust %v instance %q (lease %q, own %q): no token must keep its own", trust, inst, lease, c.instance)
+	}
+}
+
+func TestAdoptLaunchInstanceWithoutALeaseFails(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	c, aerr, trust, inst := sendFromClient(t, f, "tok-1", true)
+	if aerr == nil || !strings.Contains(aerr.Error(), "lease") {
+		t.Fatalf("a token with no serve must fail naming the lease, got %v", aerr)
+	}
+	if trust != sap.TrustVerified || inst == "" || inst != c.instance {
+		t.Fatalf("trust %v instance %q (own %q): a failed adopt leaves the client's own instance", trust, inst, c.instance)
+	}
+}
