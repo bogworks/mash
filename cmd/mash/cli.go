@@ -56,11 +56,15 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		// A send from a launched session's shell names the session's instance; adopted after the body is read, so
 		// a slow stdin can't leave it signing for a serve that has since gone.
 		ac, acc := context.WithTimeout(ctx, 5*time.Second)
-		err := ep.AdoptLaunchInstance(ac)
-		acc()
-		if err != nil {
-			return fail(err)
+		// A lane's shell outlives its serve's lease in two windows: right after a (re)start, before the new serve
+		// takes the lease, and after a crash, while the dead serve's lease (another launch's token) has not yet
+		// expired. Refusing there lost a resumed lane's replies (Rangehand V9, rc2 dry run). So the mail goes out
+		// under the client's own instance, and the warning says it cannot be bound to the session; a reader that
+		// binds acks to the session's instance then rejects it, exactly as before this adoption existed.
+		if err := ep.AdoptLaunchInstance(ac); err != nil {
+			fmt.Fprintf(stderr, "%v; sending under this command's own instance\n", err)
 		}
+		acc()
 		c, cc := short()
 		defer cc()
 		seq, err := ep.Send(c, args[1], body, 0)

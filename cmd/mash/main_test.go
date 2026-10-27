@@ -551,60 +551,104 @@ func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
 	}
 }
 
-// bInboxEmpty fails the test when b holds any mail from a.
-func bInboxEmpty(t *testing.T, w *world) {
+// waitLeaseInstance waits for a's lease and returns its instance id.
+func waitLeaseInstance(t *testing.T, w *world) string {
 	t.Helper()
-	if out, code := w.cli(t, "b", "read", "1"); code == 0 {
-		t.Fatalf("b has a message #1 that must not exist: %s", out)
-	}
-	if out, code := w.cli(t, "b", "inbox"); code != 0 || strings.Contains(out, "from a") {
-		t.Fatalf("b's inbox holds mail from a: %d %s", code, out)
-	}
-}
-
-// A token that names another launch than the serve's must stop the send: nothing is delivered under a fresh
-// instance a reader would reject.
-func TestCLISendWithAnotherLaunchTokenFails(t *testing.T) {
-	w := newWorld(t, "a", "b")
-	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
-	s := startServe(t, w.env["a"])
-	s.initialize(t)
-	s.tools(t)
-	// wait for the serve's lease
 	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := kv.Get(context.Background(), "a"); err == nil {
-			break
+		if en, err := kv.Get(context.Background(), "a"); err == nil {
+			var lv struct {
+				Instance string `json:"instance_id"`
+			}
+			_ = json.Unmarshal(en.Value(), &lv)
+			if lv.Instance != "" {
+				return lv.Instance
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("a never took its lease")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	// the same endpoint, another launch's shell (a copy, so the running serve's env is untouched)
+}
+
+// otherLaunchShell adds a copy of a's env under the name "a-other" with another launch's token (a copy, so a running
+// serve's env is untouched).
+func otherLaunchShell(w *world, token string) {
 	w.env["a-other"] = map[string]string{}
 	for k, v := range w.env["a"] {
 		w.env["a-other"][k] = v
 	}
-	w.env["a-other"]["MASH_LAUNCH_TOKEN"] = "tok-2"
-	out, code := w.cli(t, "a-other", "send", "b", "mismatch", "body")
-	if code == 0 || !strings.Contains(out, "does not match") {
-		t.Fatalf("want a non-zero exit naming the mismatch: %d %s", code, out)
-	}
-	bInboxEmpty(t, w)
+	w.env["a-other"]["MASH_LAUNCH_TOKEN"] = token
 }
 
-// A token with no serve running has no lease to adopt: the send fails and delivers nothing.
-func TestCLISendWithATokenAndNoServeFails(t *testing.T) {
+// requireSentUnderOwnInstance asserts a send that could not adopt the lease still delivered: exit 0, the warning
+// (naming the reason and the fallback) on stderr, and b's copy naming an instance that is not notLease.
+func requireSentUnderOwnInstance(t *testing.T, w *world, out string, code int, reason, notLease string) {
+	t.Helper()
+	if code != 0 {
+		t.Fatalf("want exit 0 (the send must not be refused): %d %s", code, out)
+	}
+	if !strings.Contains(out, reason) || !strings.Contains(out, "sending under this command's own instance") {
+		t.Fatalf("want a warning naming %q and the fallback: %s", reason, out)
+	}
+	if !strings.Contains(out, "sent #1 from a to b") {
+		t.Fatalf("want the send reported: %s", out)
+	}
+	rd, rcode := w.cli(t, "b", "read", "1")
+	if rcode != 0 || !strings.Contains(rd, "from a") || !strings.Contains(rd, "instance: ") {
+		t.Fatalf("b must hold the mail from a: %d %s", rcode, rd)
+	}
+	if notLease != "" && strings.Contains(rd, "instance: "+notLease+"\n") {
+		t.Fatalf("the mail must not name the lease's instance %q: %s", notLease, rd)
+	}
+}
+
+// A token that names another launch than the serve's cannot adopt the lease; the send is still delivered, under the
+// client's own instance, with a warning (a lane relaunched after a crash holds a new token while the dead serve's
+// lease lingers).
+func TestCLISendWithAnotherLaunchTokenFallsBackToItsOwnInstance(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	lease := waitLeaseInstance(t, w)
+	otherLaunchShell(w, "tok-2")
+	out, code := w.cli(t, "a-other", "send", "b", "mismatch", "body")
+	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
+}
+
+// A token with no serve running has no lease to adopt; the send is still delivered under the client's own instance.
+func TestCLISendWithATokenAndNoServeFallsBackToItsOwnInstance(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
 	out, code := w.cli(t, "a", "send", "b", "no", "serve")
-	if code == 0 || !strings.Contains(out, "MASH_LAUNCH_TOKEN") {
-		t.Fatalf("want a non-zero exit naming MASH_LAUNCH_TOKEN: %d %s", code, out)
-	}
-	bInboxEmpty(t, w)
+	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
+}
+
+// Restart window (a): a relaunched lane has a new token, and the new serve has not taken the lease yet.
+func TestCLISendWithANewTokenBeforeTheNewServeTakesTheLease(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-2"
+	out, code := w.cli(t, "a", "send", "b", "before", "the", "lease")
+	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
+}
+
+// Restart window (b): the old serve's lease (tok-1) is still held (a running serve stands in for a lingering one),
+// and the relaunched lane's shell has tok-2. The mail goes out under the shell's own instance, not the lease's.
+func TestCLISendWithANewTokenAgainstTheOldLease(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	lease := waitLeaseInstance(t, w)
+	otherLaunchShell(w, "tok-2")
+	out, code := w.cli(t, "a-other", "send", "b", "after", "the", "kill")
+	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
 }
 
 // Without a token and without a serve a send works as it always did.

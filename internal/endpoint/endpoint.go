@@ -168,6 +168,7 @@ func (e *Endpoint) init(ctx context.Context) error {
 // it does nothing. With a token it fails when the lease can't be read, is absent, or belongs to another launch: mail
 // sent under a fresh instance would look delivered and still be rejected by such a reader. It holds the same
 // endpoint key either way: this changes which instance the mail names, not who signs it.
+// The error is advisory: `mash send` reports it and sends under its own instance (it never blocks a send).
 func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
 	if e.cfg.LaunchToken == "" {
 		return nil
