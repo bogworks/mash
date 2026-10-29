@@ -33,12 +33,12 @@ func TestUTF16Len(t *testing.T) {
 
 func TestSelect(t *testing.T) {
 	for _, n := range []string{"", "claude"} {
-		a, err := Select(n)
+		a, err := Select(n, "")
 		if err != nil || a.Name() != "claude" {
 			t.Fatalf("Select(%q) = %v, %v", n, a, err)
 		}
 	}
-	if _, err := Select("nope"); err == nil || !strings.Contains(err.Error(), "nope") || !strings.Contains(err.Error(), "claude") {
+	if _, err := Select("nope", ""); err == nil || !strings.Contains(err.Error(), "nope") || !strings.Contains(err.Error(), "claude") {
 		t.Fatalf("Select(nope) err = %v", err)
 	}
 }

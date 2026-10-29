@@ -203,8 +203,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// Every notice to the session goes through the adapter's Waker: Pi drops MCP notifications, so its notices
+		// (live prompts and errors too) reach it as wake files. For Claude the Waker is srv.Notify itself.
+		wake := adapter.Waker(srv.Notify)
 		notify := func(text string) {
-			_ = srv.Notify(text, nil)
+			_ = wake(text, nil)
 		}
 		waited := ep == nil
 		if waited {
@@ -253,12 +256,12 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
 			text := fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
 				p.From, p.Trust, p.RequestID, p.Text)
-			_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
+			_ = wake(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
 		}); err != nil {
 			fmt.Fprintln(stderr, err)
-			_ = srv.Notify(endpoint.ErrorInstructions(cfg.Name, err), map[string]string{"error": "true"})
+			_ = wake(endpoint.ErrorInstructions(cfg.Name, err), map[string]string{"error": "true"})
 		}
-		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
+		if err := ep.Run(ctx, wake); err != nil && ctx.Err() == nil {
 			// The lease is gone (another session holds the name): stop the SAP
 			// service first, so the two never split prompts or heartbeat as
 			// one, then tell Claude, but never let a blocked stdout hold up
@@ -268,7 +271,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			fmt.Fprintln(stderr, err)
 			told := make(chan struct{})
 			go func() {
-				_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
+				_ = wake(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
 					map[string]string{"error": "true"})
 				close(told)
 			}()
