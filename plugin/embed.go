@@ -8,3 +8,9 @@ import "embed"
 //
 //go:embed .claude-plugin/plugin.json .mcp.json hooks/hooks.json scripts/mash
 var Files embed.FS
+
+// PiFiles holds the Pi extension. It is separate from Files so the Claude plugin's file set, and what
+// `mash plugin export <dir>` writes, do not change.
+//
+//go:embed pi/mash.ts
+var PiFiles embed.FS

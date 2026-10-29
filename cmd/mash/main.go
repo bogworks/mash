@@ -39,6 +39,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash admin deprovision <name>
   mash admin list
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
+  mash plugin export --host pi <dir>           write this build's Pi extension (mash.ts) into <dir>
   mash version
 
 Configuration: ~/.config/mash/config.json {"url","owner"}, overridden by MASH_URL,
