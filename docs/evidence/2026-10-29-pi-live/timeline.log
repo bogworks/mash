@@ -1,0 +1,53 @@
+14:24:05.601 env knobs: MASH_IDLE_WAKE=10s MASH_SETTLE_MS=20 PI_OFFLINE=1 isolated PI_CODING_AGENT_DIR and HOME
+14:24:05.601 S1 pi started pid 2084857
+14:24:06.112 WATCH pi 2084857 serves [2084958(ppid 2084857 start 85823749)]
+14:24:08.875 S1 online=true serve pids under pi: [2084958]
+14:24:08.875 RESULT S1 PASS scratch online=true after Pi start; serve pid(s) under Pi [2084958] (pi pid 2084857)
+14:24:08.878 sent MARK-PROMPT []
+14:24:09.079 S2 MARK-PROMPT spooled=true
+14:24:09.079 prompt: Reply with the exact MARK- words you were sent by mash, nothing else.
+14:24:09.734 S2 started=true settled=true custom=true assistant=true
+14:24:09.734 RESULT S2 PASS spooled=true; custom mash message has MARK-PROMPT=true; assistant mentions=true; message_end: ...T14:24:08Z\ninstance: thsUMZKLXfybvoWUGDGD3h\nkind: task\n> MARK-PROMPT\n","display":true,"details":{"seqs":[1],"urgent"...
+14:24:09.734 prompt: Run the bash command `sleep 15` and then reply DONE plus any MARK- words mash showed you.
+14:24:13.744 sent MARK-TOOL []
+14:24:46.267 S3 toolstart=true started=true settled=true toolHas=true starts=1 extraRunAfter=false
+14:24:46.267 RESULT S3 PASS tool_execution_end contains MARK-TOOL=true; agent_start count in run=1; extra run within 20s after=false; tool_execution_end: ...T14:24:13Z\ninstance: thsUMZKLXfybvoWUGDGDTd\nkind: task\n> MARK-TOOL\n"}],"structuredContent":{"output":"","truncated":...
+14:24:48.271 sent MARK-IDLE []
+14:24:59.078 S4 started=true latency=10.13874857s settled=true custom=true
+14:24:59.078 RESULT S4 PASS run started by itself 10.1s after send (MASH_IDLE_WAKE=10s); custom mash message has MARK-IDLE=true; message_end: ...T14:24:48Z\ninstance: thsUMZKLXfybvoWUGDGEAr\nkind: task\n> MARK-IDLE\n","display":true,"details":{"seqs":[3],"urgent":f...
+14:25:01.082 sent MARK-FYI [--kind fyi]
+14:25:36.114 S5 run started within 35s=false
+14:25:36.114 prompt: Reply with every MARK- word mash has shown you since I last asked, nothing else.
+14:25:37.528 RESULT S5 PASS no run in 35s=true; prompt run custom mash message has MARK-FYI=true; message_end: ...9T14:25:01Z\ninstance: thsUMZKLXfybvoWUGDGEjR\nkind: fyi\n> MARK-FYI\n","display":true,"details":{"seqs":[4],"urgent":fa...
+14:25:39.532 sent MARK-URGENT [--urgent]
+14:25:40.742 RESULT S6 PASS run started 0.1s after send; custom mash message has MARK-URGENT=true; message_end: ...nstance: thsUMZKLXfybvoWUGDGFZJ\nurgent: yes\nkind: task\n> MARK-URGENT\n","display":true,"details":{"seqs":[5],"urgent"...
+14:25:42.742 S7 mash prompt started
+14:25:45.308 S7 started=true settled=true sender got=true "PONG\n" code=0 after 2.565329073s
+14:25:45.308 RESULT S7 PASS run started=true settled=true tool calls in run=3; mash prompt exit=0 output="PONG" after 2.6s
+14:25:45.316 serve pids under pi before S8: [2084958]
+14:25:47.417 S8 new_session response=true
+14:25:47.435 WATCH pi 2084857 serves [2091186(ppid 2084857 start 85833879) 2091199(ppid 2084857 start 85833879)]
+14:25:49.421 sent MARK-NEW []
+14:26:21.002 RESULT S8 PASS new_session response=true; idle wake run started 10.3s after send; custom mash message has MARK-NEW=true; serve pids after [2091199 2091186]; message_end: ...T14:25:49Z\ninstance: thsUMZKLXfybvoWUGDGHJN\nkind: task\n> MARK-NEW\n","display":true,"details":{"seqs":[6],"urgent":fa...
+14:26:21.009 serve pids at end of first pi: [2091186 2091199] (start [2084958])
+14:26:21.009 S1 addendum: same serve pid at end=false (Pi kept the stdio server connected and did not respawn it)
+14:26:23.013 sent MARK-REPLAY [--kind fyi]
+14:26:23.214 S9 MARK-REPLAY spooled=true
+14:26:23.224 S9 spool listing before kill: .hooked .lock .session .stream 7.json drained shown wakes; unread=1
+14:26:23.224 S9 SIGKILL to pi pid 2084857; serve before: [2091186 2091199]
+14:26:23.572 WATCH pi 2084857 serves []
+14:26:26.229 S9 no stray serve after SIGKILL
+14:26:26.229 S9 spool listing before restart: .hooked .lock .session .stream 7.json drained shown wakes
+14:26:26.230 S9 second pi pid 2093964
+14:26:26.626 WATCH pi 2093964 serves [2093999(ppid 2093964 start 85837797)]
+14:26:29.244 S9 online after restart=true; spool: .hooked .lock .session .stream drained shown wakes
+14:26:29.244 prompt: Reply with every MARK- word mash has shown you, nothing else.
+14:26:35.433 S9a prompt right after restart: custom mash message has MARK-REPLAY=false; spool: .hooked .lock .session .stream drained shown wakes; unread=1
+14:26:53.234 S9b MARK-REPLAY re-spooled by the new serve=true 24.0s after Pi online (30.0s after the kill); spool: .hooked .lock .session .stream 7.json drained shown wakes
+14:26:53.234 prompt: Again: reply with every MARK- word mash has shown you in this prompt, nothing else.
+14:26:53.938 RESULT S9 PASS spooled before kill=true, spool file still on disk after kill=true; no stray serve after SIGKILL; online after restart=true; (a) prompt right after restart showed MARK-REPLAY in a custom mash message=false; (b) new serve re-spooled it 24.0s after Pi online=true; (c) later prompt run custom mash message shows MARK-REPLAY=true; re-delivered marker present=false (not expected: it was never shown before the kill); message_end: ...9T14:26:23Z\ninstance: thsUMZKLXfybvoWUGDGJC5\nkind: fyi\n> MARK-REPLAY\n","display":true,"details":{"seqs":[7],"urgent"...
+14:26:56.946 S10 unread=0 spool leftovers=[] inbox marks=[MARK-PROMPT MARK-TOOL MARK-IDLE MARK-FYI MARK-URGENT MARK-NEW MARK-REPLAY]
+14:26:56.950 RESULT S10 PASS unread count=0; spool leftovers=0; marks in inbox=[MARK-PROMPT MARK-TOOL MARK-IDLE MARK-FYI MARK-URGENT MARK-NEW MARK-REPLAY]; every mark appears in rpc.jsonl=true missing=[]
+14:26:57.169 WATCH pi 2093964 serves []
+14:26:58.957 KEY LEAK in rpc.jsonl: scrubbing
+14:26:59.203 pi 1.4.0
