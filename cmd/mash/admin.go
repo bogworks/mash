@@ -15,9 +15,11 @@ import (
 
 	madmin "github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const (
+	limitsUsage    = "usage: mash admin limits [name...] | mash admin limits --show"
 	provisionUsage = "usage: mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]..."
 	setMetaUsage   = "usage: mash admin set-meta <name> [--role R] [--host H] [--label k=v]...   (at least one; a value of - clears the field; --label k=- clears that label)"
 )
@@ -27,6 +29,9 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
+		cfg.Limits = store.DefaultLimits()
 	}
 	if cfg.Owner == "" {
 		return fail(errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)"))
@@ -44,6 +49,13 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
+	if args[0] == "limits" && len(args) == 2 && args[1] == "--show" {
+		l := cfg.Limits
+		fmt.Fprintf(stdout, "inbox_max_bytes %s\ninbox_max_age %s\ndirectory_max_bytes %s\nlease_max_bytes %s\ninbox_max_consumers %d\n",
+			config.FormatSize(l.InboxMaxBytes), config.FormatAge(l.InboxMaxAge), config.FormatSize(l.DirectoryMaxBytes),
+			config.FormatSize(l.LeaseMaxBytes), l.InboxMaxConsumers)
+		return 0
+	}
 	if cfg.URL == "" || cfg.AdminCreds == "" {
 		return fail(errors.New("mash: admin commands need MASH_URL and MASH_ADMIN_CREDS"))
 	}
@@ -57,6 +69,9 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	defer nc.Close()
 	a, err := madmin.New(nc, cfg.Owner)
 	if err != nil {
+		return fail(err)
+	}
+	if err := a.SetLimits(cfg.Limits); err != nil {
 		return fail(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -97,6 +112,19 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s\n", rec.Name, rec.Name, rec.MailSubject)
+	case "limits":
+		for _, n := range args[1:] {
+			if !config.ValidName(n) {
+				return fail(errors.New(limitsUsage))
+			}
+		}
+		lines, err := a.ApplyLimits(ctx, args[1:]...)
+		for _, l := range lines {
+			fmt.Fprintln(stdout, l)
+		}
+		if err != nil {
+			return fail(err)
+		}
 	case "set-meta":
 		if len(args) < 3 || !config.ValidName(args[1]) {
 			return fail(errors.New(setMetaUsage))

@@ -31,7 +31,9 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash inbox [--limit N] [--after SEQ]         recent messages, or the N after SEQ (oldest first)
   mash who [--long]                            endpoints, and who is online (--long: role, host, labels, lease)
   mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
-  mash admin init                              create the directory and lease buckets
+  mash admin init                              create the directory and lease buckets (or raise their caps to the configured limits)
+  mash admin limits [name...]                  raise existing inboxes to the configured limits (config.json "limits"; never lowers)
+  mash admin limits --show                     print the effective limits
   mash admin permissions <name> [--nsc]        the NATS permissions an endpoint user needs
   mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]...
   mash admin set-meta <name> [--role R] [--host H] [--label k=v]...   (a value of - clears the field; --label k=- clears that label)

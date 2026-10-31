@@ -43,16 +43,54 @@ const InboxDuplicateWindow = 2 * time.Minute
 // InboxConfig is endpoint name's inbox stream. No subject transform: a stored
 // Agent-Sender header must verify against the stored subject (SAP §13.8).
 func InboxConfig(owner, name string) jetstream.StreamConfig {
+	return InboxConfigFor(owner, name, DefaultLimits())
+}
+
+// Limits are the configurable caps: the inbox's size, age and consumer count, and the two buckets' sizes.
+// DefaultLimits is what mash has always used.
+type Limits struct {
+	InboxMaxBytes     int64
+	InboxMaxAge       time.Duration
+	DirectoryMaxBytes int64
+	LeaseMaxBytes     int64
+	InboxMaxConsumers int // -1 is unlimited
+}
+
+// DefaultLimits returns the built-in limits.
+func DefaultLimits() Limits {
+	return Limits{InboxMaxBytes: InboxMaxBytes, InboxMaxAge: InboxMaxAge,
+		DirectoryMaxBytes: DirectoryMaxBytes, LeaseMaxBytes: LeaseMaxBytes, InboxMaxConsumers: -1}
+}
+
+// Validate checks l against the sane minimums, naming the offending field.
+func (l Limits) Validate() error {
+	switch {
+	case l.InboxMaxBytes < 2*MaxMsgSize:
+		return fmt.Errorf("mash: limits inbox_max_bytes %d is below the minimum %d (twice the largest message)", l.InboxMaxBytes, 2*MaxMsgSize)
+	case l.InboxMaxAge < time.Hour:
+		return fmt.Errorf("mash: limits inbox_max_age %s is below the minimum 1h", l.InboxMaxAge)
+	case l.DirectoryMaxBytes < 1<<20:
+		return fmt.Errorf("mash: limits directory_max_bytes %d is below the minimum 1MiB", l.DirectoryMaxBytes)
+	case l.LeaseMaxBytes < 1<<20:
+		return fmt.Errorf("mash: limits lease_max_bytes %d is below the minimum 1MiB", l.LeaseMaxBytes)
+	case l.InboxMaxConsumers != -1 && l.InboxMaxConsumers < 1:
+		return fmt.Errorf("mash: limits inbox_max_consumers %d must be -1 (unlimited) or at least 1", l.InboxMaxConsumers)
+	}
+	return nil
+}
+
+// InboxConfigFor is InboxConfig under limits l.
+func InboxConfigFor(owner, name string, l Limits) jetstream.StreamConfig {
 	return jetstream.StreamConfig{
 		Name:              sap.InboxStream(name),
 		Description:       "mash inbox for " + name,
 		Subjects:          []string{sap.MailFilter(owner, name)},
 		Storage:           jetstream.FileStorage,
 		Retention:         jetstream.LimitsPolicy,
-		MaxAge:            InboxMaxAge,
-		MaxBytes:          InboxMaxBytes,
+		MaxAge:            l.InboxMaxAge,
+		MaxBytes:          l.InboxMaxBytes,
 		MaxMsgs:           -1,
-		MaxConsumers:      -1,
+		MaxConsumers:      l.InboxMaxConsumers,
 		MaxMsgsPerSubject: -1,
 		MaxMsgSize:        MaxMsgSize,
 		Discard:           jetstream.DiscardOld,
@@ -77,15 +115,21 @@ func ConsumerConfig() jetstream.ConsumerConfig {
 }
 
 // DirectoryConfig is the directory bucket: name -> Record, written by the admin.
-func DirectoryConfig() jetstream.KeyValueConfig {
+func DirectoryConfig() jetstream.KeyValueConfig { return DirectoryConfigFor(DefaultLimits()) }
+
+// DirectoryConfigFor is DirectoryConfig under limits l.
+func DirectoryConfigFor(l Limits) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: DirectoryBucket, Description: "mash endpoint directory",
-		History: 1, Storage: jetstream.FileStorage, MaxBytes: DirectoryMaxBytes}
+		History: 1, Storage: jetstream.FileStorage, MaxBytes: l.DirectoryMaxBytes}
 }
 
 // LeaseConfig is the lease bucket: name -> holder, expiring unless refreshed.
-func LeaseConfig() jetstream.KeyValueConfig {
+func LeaseConfig() jetstream.KeyValueConfig { return LeaseConfigFor(DefaultLimits()) }
+
+// LeaseConfigFor is LeaseConfig under limits l.
+func LeaseConfigFor(l Limits) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: LeaseBucket, Description: "mash endpoint leases",
-		History: 1, TTL: LeaseTTL, Storage: jetstream.FileStorage, MaxBytes: LeaseMaxBytes}
+		History: 1, TTL: LeaseTTL, Storage: jetstream.FileStorage, MaxBytes: l.LeaseMaxBytes}
 }
 
 // Record is one directory entry (spec 6.1).

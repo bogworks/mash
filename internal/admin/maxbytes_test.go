@@ -100,7 +100,7 @@ func TestInitBoundsExistingUnboundedBucketKeepingKeys(t *testing.T) {
 	}
 }
 
-func TestInitNeverResizesAnExplicitMaxBytes(t *testing.T) {
+func TestInitRaisesASmallerMaxBytesAndNeverLowersALargerOne(t *testing.T) {
 	e := testenv.Start(t)
 	a, js := initOn(t, e)
 	ctx := context.Background()
@@ -117,7 +117,7 @@ func TestInitNeverResizesAnExplicitMaxBytes(t *testing.T) {
 	if err := a.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := bucketBytes(t, js, store.DirectoryBucket); got != 1<<20 {
+	if got := bucketBytes(t, js, store.DirectoryBucket); got != 16<<20 { // raised to the configured limit
 		t.Fatalf("directory MaxBytes %d", got)
 	}
 	if got := bucketBytes(t, js, store.LeaseBucket); got != 64<<20 {

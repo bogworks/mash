@@ -1,8 +1,10 @@
 package store
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const baseRecord = `"name":"a","owner":"o","agent":"cc","agent_token":"t","account":"A","user":"U","mail_subject":"agents.mail.cc.o.a","created":"2026-01-01T00:00:00Z"`
@@ -70,5 +72,50 @@ func TestValidLabels(t *testing.T) {
 		if err := ValidLabels(l); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+func TestDefaultLimitsEqualTheConstants(t *testing.T) {
+	d := DefaultLimits()
+	if d.InboxMaxBytes != 16<<20 || d.InboxMaxAge != 30*24*time.Hour || d.DirectoryMaxBytes != 16<<20 ||
+		d.LeaseMaxBytes != 4<<20 || d.InboxMaxConsumers != -1 {
+		t.Fatalf("defaults %+v", d)
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(InboxConfig("o", "a"), InboxConfigFor("o", "a", d)) ||
+		!reflect.DeepEqual(DirectoryConfig(), DirectoryConfigFor(d)) || !reflect.DeepEqual(LeaseConfig(), LeaseConfigFor(d)) {
+		t.Fatal("wrappers differ from the *For functions")
+	}
+	if c := InboxConfig("o", "a"); c.MaxBytes != InboxMaxBytes || c.MaxAge != InboxMaxAge || c.MaxConsumers != -1 {
+		t.Fatalf("inbox %+v", c)
+	}
+	if DirectoryConfig().MaxBytes != DirectoryMaxBytes || LeaseConfig().MaxBytes != LeaseMaxBytes {
+		t.Fatal("bucket caps")
+	}
+}
+
+func TestLimitsValidate(t *testing.T) {
+	for _, c := range []struct {
+		field string
+		mod   func(*Limits)
+	}{
+		{"inbox_max_bytes", func(l *Limits) { l.InboxMaxBytes = 2*MaxMsgSize - 1 }},
+		{"inbox_max_age", func(l *Limits) { l.InboxMaxAge = time.Hour - 1 }},
+		{"directory_max_bytes", func(l *Limits) { l.DirectoryMaxBytes = 1<<20 - 1 }},
+		{"lease_max_bytes", func(l *Limits) { l.LeaseMaxBytes = 1<<20 - 1 }},
+		{"inbox_max_consumers", func(l *Limits) { l.InboxMaxConsumers = 0 }},
+		{"inbox_max_consumers", func(l *Limits) { l.InboxMaxConsumers = -2 }},
+	} {
+		l := DefaultLimits()
+		c.mod(&l)
+		if err := l.Validate(); err == nil || !strings.Contains(err.Error(), c.field) {
+			t.Errorf("%s: %v", c.field, err)
+		}
+	}
+	l := Limits{InboxMaxBytes: 2 * MaxMsgSize, InboxMaxAge: time.Hour, DirectoryMaxBytes: 1 << 20, LeaseMaxBytes: 1 << 20, InboxMaxConsumers: 1}
+	if err := l.Validate(); err != nil {
+		t.Fatalf("minimums: %v", err)
 	}
 }

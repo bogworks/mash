@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -19,8 +20,18 @@ import (
 
 // Admin provisions endpoints with the account's admin credentials.
 type Admin struct {
-	js    jetstream.JetStream
-	owner string
+	js     jetstream.JetStream
+	owner  string
+	limits store.Limits
+}
+
+// SetLimits sets the caps Init, Provision and EnsureInbox use (default: store.DefaultLimits). It validates them.
+func (a *Admin) SetLimits(l store.Limits) error {
+	if err := l.Validate(); err != nil {
+		return err
+	}
+	a.limits = l
+	return nil
 }
 
 // New returns an Admin for owner.
@@ -32,20 +43,20 @@ func New(nc *nats.Conn, owner string) (*Admin, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Admin{js: js, owner: owner}, nil
+	return &Admin{js: js, owner: owner, limits: store.DefaultLimits()}, nil
 }
 
 // Init creates the directory and lease buckets. It is idempotent. A bucket from before buckets had a size cap (no
-// MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket that already has an explicit
-// MaxBytes keeps it, larger or smaller, and nothing is purged.
+// MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
+// configured limit is raised to it; a larger one is kept (a limit is never lowered), and nothing is purged.
 func (a *Admin) Init(ctx context.Context) error {
-	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfig(), store.LeaseConfig()} {
+	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits)} {
 		if kv, err := a.js.KeyValue(ctx, cfg.Bucket); err == nil {
 			st, err := kv.Status(ctx)
 			if err != nil {
 				return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 			}
-			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok && bs.StreamInfo().Config.MaxBytes > 0 {
+			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok && bs.StreamInfo().Config.MaxBytes > cfg.MaxBytes {
 				cfg.MaxBytes = bs.StreamInfo().Config.MaxBytes
 			}
 		}
@@ -109,7 +120,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 			return store.Record{}, fmt.Errorf("mash: lease: %w", err)
 		}
 	}
-	s, err := a.js.CreateOrUpdateStream(ctx, store.InboxConfig(a.owner, name))
+	s, err := a.js.CreateOrUpdateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits))
 	if err != nil {
 		return store.Record{}, fmt.Errorf("mash: inbox stream: %w", err)
 	}
@@ -145,13 +156,13 @@ func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) 
 	var made []string
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
-		if s, err = a.js.CreateStream(ctx, store.InboxConfig(a.owner, name)); err != nil {
+		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
 			return nil, fmt.Errorf("mash: inbox stream: %w", err)
 		}
 		made = append(made, "stream")
 	} else if err != nil {
 		return nil, fmt.Errorf("mash: inbox stream: %w", err)
-	} else if err := checkInboxStream(name, s.CachedInfo().Config, store.InboxConfig(a.owner, name)); err != nil {
+	} else if err := checkInboxStream(name, s.CachedInfo().Config, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
 		return nil, err
 	}
 	c, err := s.Consumer(ctx, store.Consumer)
@@ -252,6 +263,74 @@ func checkInboxConsumer(name string, got, want jetstream.ConsumerConfig) error {
 		// 4096); they do not change which mail arrives, so they are not compared.
 		{"memory_storage", got.MemoryStorage, want.MemoryStorage},
 	})
+}
+
+// ApplyLimits raises the configured limits on existing inboxes in place with a stream update: max_bytes and max_age
+// where they are below the configured value, and max_consumers where it differs. With no names it covers every
+// directory endpoint. Lowering max_bytes or max_age is refused with an error naming the endpoint and field (nothing
+// changes for that endpoint), because it could discard stored mail; the other endpoints are still processed and the
+// errors are joined. It returns one line per endpoint saying what changed.
+func (a *Admin) ApplyLimits(ctx context.Context, names ...string) ([]string, error) {
+	if len(names) == 0 {
+		recs, err := a.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range recs {
+			names = append(names, r.Name)
+		}
+	}
+	var lines []string
+	var errs []error
+	for _, name := range names {
+		line, err := a.applyInboxLimits(ctx, name)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, errors.Join(errs...)
+}
+
+func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, error) {
+	if !config.ValidName(name) {
+		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	s, err := a.js.Stream(ctx, sap.InboxStream(name))
+	if err != nil {
+		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	cfg := s.CachedInfo().Config
+	l := a.limits
+	if cfg.MaxBytes > l.InboxMaxBytes {
+		return "", fmt.Errorf("mash: inbox of %s has max_bytes %d, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, cfg.MaxBytes, l.InboxMaxBytes, name)
+	}
+	if cfg.MaxAge > l.InboxMaxAge {
+		return "", fmt.Errorf("mash: inbox of %s has max_age %s, above the configured %s; mash never lowers a limit, because that could discard stored mail; "+
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, cfg.MaxAge, l.InboxMaxAge, name)
+	}
+	var changed []string
+	if cfg.MaxBytes < l.InboxMaxBytes {
+		changed = append(changed, fmt.Sprintf("max_bytes %d -> %d", cfg.MaxBytes, l.InboxMaxBytes))
+		cfg.MaxBytes = l.InboxMaxBytes
+	}
+	if cfg.MaxAge < l.InboxMaxAge {
+		changed = append(changed, fmt.Sprintf("max_age %s -> %s", cfg.MaxAge, l.InboxMaxAge))
+		cfg.MaxAge = l.InboxMaxAge
+	}
+	if cfg.MaxConsumers != l.InboxMaxConsumers {
+		changed = append(changed, fmt.Sprintf("max_consumers %d -> %d", cfg.MaxConsumers, l.InboxMaxConsumers))
+		cfg.MaxConsumers = l.InboxMaxConsumers
+	}
+	if len(changed) == 0 {
+		return name + ": unchanged", nil
+	}
+	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
+		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	return name + ": " + strings.Join(changed, ", "), nil
 }
 
 // MetaUpdate names the metadata fields SetMeta changes; a nil field is left alone and a pointer to "" clears it.
