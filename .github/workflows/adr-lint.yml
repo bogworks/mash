@@ -1,0 +1,45 @@
+name: adr-lint
+# Architecture decision records are enforced on every pull request (scripts/adrlint has the code, docs/decisions/README.md
+# the rules): the records themselves are linted, an accepted record may not be rewritten (compared with the base branch),
+# and the pull request body must carry one "Decision: none" or "Decision: ADR-NNNN" line. "none" on a change to a
+# protected path needs the decision-confirmed label, which a reviewer applies; that is why labeled and unlabeled re-run it.
+# A pull request from a fork runs on ubuntu-latest, never on a self-hosted runner. The body and the labels reach the tool
+# through env, never through the text of the shell script.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: go1.27.3
+concurrency:
+  group: adr-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  adr-lint:
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Lint the records
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          go run ./scripts/adrlint docs --base "origin/$BASE_REF"
+      - name: Check the pull request's decision
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
+          go run ./scripts/adrlint pr --files "$RUNNER_TEMP/files"
