@@ -138,7 +138,7 @@ func TestRelease_isTriggeredOnlyByVersionTagsAndPinsTheBuild(t *testing.T) {
 		t.Errorf("workflow permissions: %v (want contents: read only)", w.Permissions)
 	}
 	for jn, j := range w.Jobs {
-		if jn != "draft" && jn != "guard" && len(j.Permissions) != 0 {
+		if jn != "draft" && jn != "guard" && jn != "attest" && len(j.Permissions) != 0 {
 			t.Errorf("job %s widens permissions: %v", jn, j.Permissions)
 		}
 	}
@@ -593,7 +593,41 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	}
 }
 
-// The draft job's script is run with a stand-in gh: it creates a draft, verifies the tag, and publishes nothing else.
+// The attest job, and only it, holds the signing permissions (and no contents); it attests the four binaries.
+func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
+	w := load(t, "release.yml")
+	j := w.Jobs["attest"]
+	for _, p := range []string{"id-token", "attestations"} {
+		if j.Permissions[p] != "write" {
+			t.Errorf("attest job must grant %s: write, got %q", p, j.Permissions[p])
+		}
+	}
+	attest := regexp.MustCompile(`^actions/attest-build-provenance@[0-9a-f]{40}$`)
+	found := false
+	for _, st := range j.Steps {
+		if attest.MatchString(st.Uses) {
+			found = true
+			if st.With["subject-path"] != "dist/mash-*" {
+				t.Errorf("attest subject-path = %v, want dist/mash-*", st.With["subject-path"])
+			}
+		}
+	}
+	if !found {
+		t.Error("attest job has no attest-build-provenance step pinned to a full commit")
+	}
+	// Least privilege: no other job and not the workflow gets the signing permissions.
+	for _, p := range []string{"id-token", "attestations"} {
+		if w.Permissions[p] != "" {
+			t.Errorf("workflow-level %s permission must not be set", p)
+		}
+		for id, o := range w.Jobs {
+			if id != "attest" && o.Permissions[p] != "" {
+				t.Errorf("job %s must not hold %s", id, p)
+			}
+		}
+	}
+}
+
 func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
 	w := load(t, "release.yml")
 	var script string
@@ -1002,7 +1036,7 @@ func TestRelease_runsOnRunnerLinuxDefaultHosted(t *testing.T) {
 }
 
 // A draft left behind stops the next draft before anything is built: the guard job runs scripts/draft-guard, and it is
-// the only job that gets contents: write beyond the draft job (workflow default stays read).
+// the only job that gets contents: write beyond the draft job; attest holds the signing permissions and no contents (workflow default stays read).
 func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 	w := load(t, "release.yml")
 	var run string
@@ -1020,6 +1054,10 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 		case "guard", "draft":
 			if j.Permissions["contents"] != "write" || len(j.Permissions) != 1 {
 				t.Errorf("job %s permissions = %v, want contents: write only", id, j.Permissions)
+			}
+		case "attest":
+			if j.Permissions["id-token"] != "write" || j.Permissions["attestations"] != "write" || len(j.Permissions) != 2 {
+				t.Errorf("job attest permissions = %v, want id-token: write and attestations: write only", j.Permissions)
 			}
 		default:
 			if len(j.Permissions) != 0 {

@@ -78,7 +78,8 @@ The numbered steps are what the command does in each state, and the manual path 
 3. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
 4. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
    targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, then creates a
-   **draft** release with the binaries, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`), `SHA256SUMS` and a changelog.
+   **draft** release with the binaries, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`), `SHA256SUMS` and a changelog,
+   and a parallel `attest` job attests build provenance for the four binaries (see "Build provenance").
 5. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing). Then publish the draft: `gh release edit v<version> --draft=false`.
@@ -173,6 +174,18 @@ The pins live outside the embedded files on purpose. `plugin/scripts/mash` is em
 -buildvcs=false -mod=readonly` and `-ldflags "-X …/internal/endpoint.Version=<N.N.N> -X main.commit=<X>"`. It refuses a
 source tree whose HEAD is not X, that holds any untracked or ignored file, or that contains the output, and runs
 `go mod download` + `go mod verify` first, so the module cache is what `go.sum` names.
+
+## Build provenance
+
+The `attest` job attests each `dist/mash-*` binary with `actions/attest-build-provenance` (pinned to a commit; the job,
+and only that job, holds `id-token: write` and `attestations: write`). Consumers verify a downloaded binary with:
+
+    gh attestation verify mash-linux-amd64 -R bogworks/mash
+
+Attestations need a public repository (a private one needs GitHub Enterprise Cloud); once the repo is public the
+attestation is recorded in the public Sigstore transparency log. Until the repo is flipped public this step does not
+produce a usable attestation (on a private repo without Enterprise Cloud it fails the job), so it only takes effect
+after the flip.
 
 ## Versions
 
