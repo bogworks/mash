@@ -12,6 +12,10 @@ go test -race ./...
 
 These are the same checks CI runs on Linux and macOS. CI also builds every release target twice and requires identical bytes (the `reproducible` job), so avoid anything that makes the build non-deterministic.
 
+## Portable code
+
+Product code carries no personal convention: every path, name, host, org and long timeout is a setting, flag or environment variable with a neutral default. `go test ./internal/portable/` scans `cmd/`, `internal/` and `scripts/` (non-test Go, shell scripts) and `.github/workflows/` for personal names (R1), home and temp paths (R2), foreign GitHub orgs (R3), inline timeouts over 30 s (R4) and the R1 names in shell (R5). `internal/portable/baseline.txt` records the hits that exist today and can only shrink: a new violation fails the test, and so does a row above the real count (run `MASH_PORTABLE_UPDATE=1 go test ./internal/portable/` to lower it). A new row needs a reason a stranger installing mash could not hit. See [ADR 0044](docs/decisions/0044-product-code-carries-no-personal-convention-a-ratchet-lint-enforces-it.md).
+
 ## Repo layout
 
 - `cmd/mash`: the `mash` binary.
