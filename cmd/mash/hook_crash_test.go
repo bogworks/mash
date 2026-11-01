@@ -35,6 +35,21 @@ func hookContext(t *testing.T, stdout []byte) string {
 	return o.Specific.Context
 }
 
+// piText is the text in a Pi hook's stdout ("" for none).
+func piText(t *testing.T, stdout []byte) string {
+	t.Helper()
+	if len(bytes.TrimSpace(stdout)) == 0 {
+		return ""
+	}
+	var o struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(stdout, &o); err != nil {
+		t.Fatalf("pi hook output %q: %v", stdout, err)
+	}
+	return o.Text
+}
+
 func seqsShown(text string) []int {
 	var out []int
 	for _, m := range shownSeq.FindAllStringSubmatch(text, -1) {
@@ -48,15 +63,28 @@ func seqsShown(text string) []int {
 // reach it, kills it with SIGKILL there, and returns what it had printed; without one it runs to the end.
 func runMashHook(t *testing.T, env map[string]string, failpoint string) string {
 	t.Helper()
+	return runMashHookAs(t, env, failpoint, "claude")
+}
+
+// runMashHookAs is runMashHook for a host adapter: its stdin event and how its stdout carries the text.
+func runMashHookAs(t *testing.T, env map[string]string, failpoint, hostName string) string {
+	t.Helper()
+	stdin, decode := `{"hook_event_name":"PostToolUse"}`, hookContext
+	if hostName == "pi" {
+		stdin, decode = `{"event":"tool"}`, piText
+	}
 	cmd := exec.Command(mashBinary(t), "hook")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+	if hostName == "pi" {
+		cmd.Env = append(cmd.Env, "MASH_HOST=pi")
+	}
 	if failpoint != "" {
 		cmd.Env = append(cmd.Env, "MASH_HOOK_FAILPOINT="+failpoint)
 	}
-	cmd.Stdin = strings.NewReader(`{"hook_event_name":"PostToolUse"}`)
+	cmd.Stdin = strings.NewReader(stdin)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	errp, err := cmd.StderrPipe()
@@ -71,7 +99,7 @@ func runMashHook(t *testing.T, env map[string]string, failpoint string) string {
 		if err := cmd.Wait(); err != nil {
 			t.Fatal(err)
 		}
-		return hookContext(t, out.Bytes())
+		return decode(t, out.Bytes())
 	}
 	reached := make(chan bool, 1)
 	go func() {
@@ -99,12 +127,17 @@ func runMashHook(t *testing.T, env map[string]string, failpoint string) string {
 		t.Fatal(err)
 	}
 	cmd.Wait() // "signal: killed"
-	return hookContext(t, out.Bytes())
+	return decode(t, out.Bytes())
 }
 
 // Hook delivery is at-least-once: a hook killed at any point of its run loses nothing, and what the next run shows
 // again is only what the killed run had begun to show, each marked as re-delivered so the model does not act twice.
-func TestHookCrashMatrix(t *testing.T) {
+func TestHookCrashMatrix(t *testing.T) { crashMatrix(t, "claude") }
+
+// The same matrix with the Pi adapter (invariant 5): the shared hook loop, a different adapter.
+func TestHookCrashMatrixPi(t *testing.T) { crashMatrix(t, "pi") }
+
+func crashMatrix(t *testing.T, hostName string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no SIGKILL semantics or flock on windows")
 	}
@@ -133,8 +166,8 @@ func TestHookCrashMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			first := runMashHook(t, env, c.failpoint)
-			second := runMashHook(t, env, "")
+			first := runMashHookAs(t, env, c.failpoint, hostName)
+			second := runMashHookAs(t, env, "", hostName)
 			if got := seqsShown(first); !equalInts(got, c.interrupt) {
 				t.Fatalf("the killed run showed %v, want %v:\n%s", got, c.interrupt, first)
 			}
@@ -166,7 +199,7 @@ func TestHookCrashMatrix(t *testing.T) {
 					t.Errorf("#%d flagged re-delivered on its first showing", s)
 				}
 			}
-			if again := runMashHook(t, env, ""); again != "" {
+			if again := runMashHookAs(t, env, "", hostName); again != "" {
 				t.Fatalf("a third run showed %q", again)
 			}
 			if w, _ := sp.Waiting(); len(w) != 0 {

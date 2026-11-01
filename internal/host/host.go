@@ -1,5 +1,5 @@
-// Package host isolates what is specific to the agent host a mash session runs in (Claude Code today), so other
-// hosts (Hermes, Pi) can plug in later. An Adapter says how a host's hook invocation is read, who owns a session's
+// Package host isolates what is specific to the agent host a mash session runs in (Claude Code, Pi), so other
+// hosts (Hermes) can plug in. An Adapter says how a host's hook invocation is read, who owns a session's
 // spool, how spooled mail is presented, and how serve's wake is delivered.
 //
 // The wake is today the MCP channel notification serve already passes to the endpoint as its Deliverer; Waker is the
@@ -52,14 +52,23 @@ type Presentation struct {
 	BatchMsgs, BatchBytes int
 }
 
-// Select returns the adapter for a host name: "" or "claude" is Claude Code.
-func Select(name string) (Adapter, error) {
+// Initer is an optional Adapter capability: a hook event that only answers the host (no drain, no lock) and the
+// bytes to print. handled=false means the trigger is an ordinary delivery point.
+type Initer interface {
+	Init(t Trigger) (out []byte, handled bool)
+}
+
+// Select returns the adapter for a host name: "" or "claude" is Claude Code. spoolDir is the endpoint's spool
+// directory, which hosts that wake through it (Pi) need.
+func Select(name, spoolDir string) (Adapter, error) {
 	switch name {
 	case "", "claude":
 		return Claude{}, nil
+	case "pi":
+		return Pi{SpoolDir: spoolDir}, nil
 	}
 	return nil, fmt.Errorf("mash: unknown host %q (MASH_HOST); known hosts: %s", name, strings.Join(Known(), ", "))
 }
 
 // Known lists the host names Select accepts.
-func Known() []string { return []string{"claude"} }
+func Known() []string { return []string{"claude", "pi"} }
