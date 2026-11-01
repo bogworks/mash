@@ -161,7 +161,7 @@ func credsPath(cfg config.Config) string {
 	switch {
 	case cfg.Creds != "":
 		return cfg.Creds
-	case cfg.Name != "":
+	case cfg.Name != "" && cfg.Dir != "":
 		return filepath.Join(cfg.Dir, cfg.Name+".creds")
 	}
 	return ""

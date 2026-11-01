@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -382,5 +383,121 @@ func TestPlainTextWarning(t *testing.T) {
 		if got := PlainTextWarning(url) != ""; got != warn {
 			t.Errorf("PlainTextWarning(%q) warns = %v, want %v", url, got, warn)
 		}
+	}
+}
+
+func writeIn(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestXDGConfigHomeUsedWhenItHasConfig(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
+	writeIn(t, filepath.Join(xdg, "mash"), `{"url":"tls://new:1","owner":"new"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "tls://new:1" || c.Dir != filepath.Join(xdg, "mash") || c.Creds != filepath.Join(xdg, "mash", "a.creds") {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestOldConfigStillReadWhenXDGHasNone(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "tls://old:1" || c.Dir != filepath.Join(home, ".config", "mash") {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestRelativeXDGConfigHomeIgnored(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
+	t.Chdir(t.TempDir())
+	writeIn(t, filepath.Join("rel", "mash"), `{"url":"tls://rel:1","owner":"rel"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": "rel"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "tls://old:1" || c.Dir != filepath.Join(home, ".config", "mash") {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestNoHomeNeedingAPathIsAnError(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// The default creds path needs a directory.
+	_, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o"}), "")
+	if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("err %v", err)
+	}
+	// So do url and owner, which would have come from the file.
+	_, err = Load(envOf(map[string]string{"MASH_NAME": "a"}), "")
+	if !errors.Is(err, ErrNoConfigDir) || !strings.Contains(err.Error(), "set HOME or XDG_CONFIG_HOME") {
+		t.Fatalf("err %v", err)
+	}
+	// A relative XDG_CONFIG_HOME does not stand in for the home.
+	_, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o", "XDG_CONFIG_HOME": "rel"}), "")
+	if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestNoHomeWithEverythingFromTheEnvironmentLoads(t *testing.T) {
+	t.Chdir(t.TempDir())
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "MASH_CREDS": "/etc/a.creds"}), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "tls://x:1" || c.Creds != "/etc/a.creds" || c.Dir != "" {
+		t.Fatalf("got %+v", c)
+	}
+	// An absolute XDG_CONFIG_HOME is enough of a home for the default creds path.
+	xdg := t.TempDir()
+	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "XDG_CONFIG_HOME": xdg}), "")
+	if err != nil || c.Creds != filepath.Join(xdg, "mash", "a.creds") {
+		t.Fatalf("got %+v, %v", c, err)
+	}
+}
+
+func TestTildeExpandedInCreds(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"u","owner":"o","creds":"~/x.creds","admin_creds":"~"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Creds != filepath.Join(home, "x.creds") || c.AdminCreds != home {
+		t.Fatalf("got %q, %q", c.Creds, c.AdminCreds)
+	}
+	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_CREDS": "~/e.creds", "MASH_ADMIN_CREDS": "~/adm/a.creds"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Creds != filepath.Join(home, "e.creds") || c.AdminCreds != filepath.Join(home, "adm", "a.creds") {
+		t.Fatalf("got %q, %q", c.Creds, c.AdminCreds)
+	}
+}
+
+func TestTildeUserNotExpanded(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"u","owner":"o","creds":"~bob/x","admin_creds":"~bob"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Creds != "~bob/x" || c.AdminCreds != "~bob" {
+		t.Fatalf("got %q, %q", c.Creds, c.AdminCreds)
 	}
 }

@@ -180,7 +180,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	var state atomic.Pointer[sessionState]
 	instr := ""
-	policy, _ := os.ReadFile(filepath.Join(cfg.Dir, "policy.md"))
+	var policy []byte
+	if cfg.Dir != "" {
+		policy, _ = os.ReadFile(filepath.Join(cfg.Dir, "policy.md"))
+	}
 	instr = endpoint.Instructions(cfg.Name, cfg.Owner, string(policy))
 	switch {
 	case ep != nil:
