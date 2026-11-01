@@ -25,6 +25,8 @@ Status: v0.3.0, pre-1.0, one host adapter (Claude Code). Known limits are listed
 
 The fastest way to try mash is a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
 
+See it working first: [two Claude Code sessions exchanging mail, one woken by it](docs/demo/) (a recording to play with `asciinema play`).
+
 1. Sign up for Synadia Cloud (the free tier is enough) and create an API token for your team in the Synadia console.
 2. Install mash, the plugin, and the channel allowlist (once per machine), as in [docs/install.md](docs/install.md) sections 1 to 3:
 
