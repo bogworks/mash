@@ -83,7 +83,7 @@ The numbered steps are what the command does in each state, and the manual path 
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 5. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing). Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing); and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash` passes on the binary downloaded from the release (a missing or failing attestation is refused, exit 3, naming the binary; this covers an older or hand-made draft that `attest` never saw, and runs only after the earlier checks passed). Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
 6. **Pin:** in the orchestrator's `compat.json` set `mash` to `{"version": "<version>", "commit": "<X>"}`.
 
@@ -183,10 +183,8 @@ and only that job, holds `id-token: write` and `attestations: write`). Consumers
 
     gh attestation verify mash-linux-amd64 -R bogworks/mash
 
-Attestations need a public repository (a private one needs GitHub Enterprise Cloud); once the repo is public the
-attestation is recorded in the public Sigstore transparency log. Until the repo is flipped public this step does not
-produce a usable attestation (on a private repo without Enterprise Cloud it fails the job), so it only takes effect
-after the flip. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
+Attestations require a public repository (a private one needs GitHub Enterprise Cloud); this repository is public, so the
+attestation is recorded in the public Sigstore transparency log. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
 or outlive a failed attestation, and a failed attestation leaves no draft (rerun the workflow).
 
 ## Versions

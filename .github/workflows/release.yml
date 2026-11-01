@@ -85,6 +85,7 @@ jobs:
           if-no-files-found: error
   draft:
     # A draft exists only once provenance does, so publishing can never precede or outlive a failed attestation.
+    # Attestation requires a public repository (or GitHub Enterprise Cloud); this repository is public.
     needs: [build, attest]
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
