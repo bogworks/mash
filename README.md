@@ -18,7 +18,7 @@ A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), inclu
 ![How mash connects sessions](docs/images/001-topology.svg)
 
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
-JetStream and is kept up to 30 days. ([details](docs/comparison.md#3-two-paths-live-and-durable))
+JetStream and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
 Status: v0.3.0, pre-1.0, one host adapter (Claude Code). Known limits are listed in
 [the comparison](docs/comparison.md#9-known-limits).

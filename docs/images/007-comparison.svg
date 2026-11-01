@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 512" width="860" height="512" role="img" aria-labelledby="d7-title d7-desc"><title id="d7-title">Where mash sits among six ways to move messages between agents</title><desc id="d7-desc">Matrix of eight properties by six mechanisms: Durable store-and-forward: mash yes, SAP + Synadia plugins no, NATS JetStream yes, A2A 1.0 partial, MCP Agent Mail yes, Claude Code cross-session partial; At-least-once delivery: mash yes, SAP + Synadia plugins no, NATS JetStream yes, A2A 1.0 partial, MCP Agent Mail partial, Claude Code cross-session partial; Per-message sender proof: mash yes, SAP + Synadia plugins partial, NATS JetStream no, A2A 1.0 no, MCP Agent Mail no, Claude Code cross-session no; Outbound-only (works behind NAT): mash yes, SAP + Synadia plugins yes, NATS JetStream yes, A2A 1.0 no, MCP Agent Mail partial, Claude Code cross-session yes; Discovery and presence: mash yes, SAP + Synadia plugins yes, NATS JetStream partial, A2A 1.0 partial, MCP Agent Mail partial, Claude Code cross-session yes; Live request-reply: mash yes, SAP + Synadia plugins yes, NATS JetStream yes, A2A 1.0 yes, MCP Agent Mail no, Claude Code cross-session partial; Wake an idle agent: mash partial, SAP + Synadia plugins partial, NATS JetStream no, A2A 1.0 partial, MCP Agent Mail no, Claude Code cross-session yes; Host independence: mash partial, SAP + Synadia plugins yes, NATS JetStream yes, A2A 1.0 yes, MCP Agent Mail yes, Claude Code cross-session no.</desc>
+<style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style>
+<rect x="0.5" y="0.5" width="859" height="511" rx="14" class="bg"/>
+<text x="32" y="42" class="t-title">Where mash sits among six ways to move messages between agents</text>
+<text x="32" y="66" class="t-sub">Marks only; the detail and caveats are in the footnotes of the text table below.</text>
+<rect x="246" y="96" width="98" height="346" rx="8" class="f-teal"/>
+<text x="295" y="130" class="t-h mid x-teal">mash</text>
+<text x="397" y="122" class="t-h mid">SAP + Synadia</text>
+<text x="397" y="138" class="t-h mid">plugins</text>
+<text x="499" y="122" class="t-h mid">NATS</text>
+<text x="499" y="138" class="t-h mid">JetStream</text>
+<text x="601" y="130" class="t-h mid">A2A 1.0</text>
+<text x="703" y="122" class="t-h mid">MCP Agent</text>
+<text x="703" y="138" class="t-h mid">Mail</text>
+<text x="805" y="122" class="t-h mid">Claude Code</text>
+<text x="805" y="138" class="t-h mid">cross-session</text>
+<path d="M32,154 L856,154" class="rule"/>
+<text x="36" y="177" class="t-b">Durable store-and-forward</text>
+<circle cx="295" cy="172" r="11" class="f-green"/><path d="M290,172 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="172" r="11" class="f-red"/><path d="M393,168 l8,8 M401,168 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="499" cy="172" r="11" class="f-green"/><path d="M494,172 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="601" cy="172" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M596,172 l10,0" class="a a-amber"/>
+<circle cx="703" cy="172" r="11" class="f-green"/><path d="M698,172 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="805" cy="172" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M800,172 l10,0" class="a a-amber"/>
+<path d="M32,190 L856,190" class="rule"/>
+<text x="36" y="213" class="t-b">At-least-once delivery</text>
+<circle cx="295" cy="208" r="11" class="f-green"/><path d="M290,208 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="208" r="11" class="f-red"/><path d="M393,204 l8,8 M401,204 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="499" cy="208" r="11" class="f-green"/><path d="M494,208 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="601" cy="208" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M596,208 l10,0" class="a a-amber"/>
+<circle cx="703" cy="208" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M698,208 l10,0" class="a a-amber"/>
+<circle cx="805" cy="208" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M800,208 l10,0" class="a a-amber"/>
+<path d="M32,226 L856,226" class="rule"/>
+<text x="36" y="249" class="t-b">Per-message sender proof</text>
+<circle cx="295" cy="244" r="11" class="f-green"/><path d="M290,244 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="244" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M392,244 l10,0" class="a a-amber"/>
+<circle cx="499" cy="244" r="11" class="f-red"/><path d="M495,240 l8,8 M503,240 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="601" cy="244" r="11" class="f-red"/><path d="M597,240 l8,8 M605,240 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="703" cy="244" r="11" class="f-red"/><path d="M699,240 l8,8 M707,240 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="805" cy="244" r="11" class="f-red"/><path d="M801,240 l8,8 M809,240 l-8,8" class="a" style="stroke:var(--red)"/>
+<path d="M32,262 L856,262" class="rule"/>
+<text x="36" y="285" class="t-b">Outbound-only</text>
+<circle cx="295" cy="280" r="11" class="f-green"/><path d="M290,280 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="280" r="11" class="f-green"/><path d="M392,280 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="499" cy="280" r="11" class="f-green"/><path d="M494,280 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="601" cy="280" r="11" class="f-red"/><path d="M597,276 l8,8 M605,276 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="703" cy="280" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M698,280 l10,0" class="a a-amber"/>
+<circle cx="805" cy="280" r="11" class="f-green"/><path d="M800,280 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<path d="M32,298 L856,298" class="rule"/>
+<text x="36" y="321" class="t-b">Discovery and presence</text>
+<circle cx="295" cy="316" r="11" class="f-green"/><path d="M290,316 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="316" r="11" class="f-green"/><path d="M392,316 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="499" cy="316" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M494,316 l10,0" class="a a-amber"/>
+<circle cx="601" cy="316" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M596,316 l10,0" class="a a-amber"/>
+<circle cx="703" cy="316" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M698,316 l10,0" class="a a-amber"/>
+<circle cx="805" cy="316" r="11" class="f-green"/><path d="M800,316 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<path d="M32,334 L856,334" class="rule"/>
+<text x="36" y="357" class="t-b">Live request-reply</text>
+<circle cx="295" cy="352" r="11" class="f-green"/><path d="M290,352 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="397" cy="352" r="11" class="f-green"/><path d="M392,352 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="499" cy="352" r="11" class="f-green"/><path d="M494,352 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="601" cy="352" r="11" class="f-green"/><path d="M596,352 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="703" cy="352" r="11" class="f-red"/><path d="M699,348 l8,8 M707,348 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="805" cy="352" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M800,352 l10,0" class="a a-amber"/>
+<path d="M32,370 L856,370" class="rule"/>
+<text x="36" y="393" class="t-b">Wake an idle agent</text>
+<circle cx="295" cy="388" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M290,388 l10,0" class="a a-amber"/>
+<circle cx="397" cy="388" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M392,388 l10,0" class="a a-amber"/>
+<circle cx="499" cy="388" r="11" class="f-red"/><path d="M495,384 l8,8 M503,384 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="601" cy="388" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M596,388 l10,0" class="a a-amber"/>
+<circle cx="703" cy="388" r="11" class="f-red"/><path d="M699,384 l8,8 M707,384 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="805" cy="388" r="11" class="f-green"/><path d="M800,388 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<path d="M32,406 L856,406" class="rule"/>
+<text x="36" y="429" class="t-b">Host independence</text>
+<circle cx="295" cy="424" r="11" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M290,424 l10,0" class="a a-amber"/>
+<circle cx="397" cy="424" r="11" class="f-green"/><path d="M392,424 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="499" cy="424" r="11" class="f-green"/><path d="M494,424 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="601" cy="424" r="11" class="f-green"/><path d="M596,424 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="703" cy="424" r="11" class="f-green"/><path d="M698,424 l4,4 l7,-8" class="a a-green thin" style="stroke-width:2"/>
+<circle cx="805" cy="424" r="11" class="f-red"/><path d="M801,420 l8,8 M809,420 l-8,8" class="a" style="stroke:var(--red)"/>
+<circle cx="40" cy="476" r="8" class="f-green"/><path d="M36,476 l3,3 l5,-6" class="a a-green thin" style="stroke-width:1.75"/>
+<text x="54" y="480" class="t-cap">yes</text>
+<circle cx="105" cy="476" r="8" class="f-amber" style="stroke:var(--amber);stroke-width:1.25"/><path d="M101,476 l8,0" class="a a-amber" style="stroke-width:1.75"/>
+<text x="119" y="480" class="t-cap">partial</text>
+<circle cx="198" cy="476" r="8" class="f-red"/><path d="M195,473 l6,6 M201,473 l-6,6" class="a" style="stroke:var(--red);stroke-width:1.75"/>
+<text x="212" y="480" class="t-cap">no (in the base protocol)</text>
+<text x="409" y="480" class="t-s mid">?</text>
+<text x="423" y="480" class="t-cap">could not be sourced</text>
+<text x="587" y="480" class="t-s mid">n/a</text>
+<text x="601" y="480" class="t-cap">does not apply</text>
+<text x="32" y="494" class="t-cap">Rows for licence, maturity and what you run, and eight more mechanisms, are in the text table.</text>
+</svg>
