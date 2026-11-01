@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bogworks/mash/internal/store"
@@ -121,7 +123,10 @@ func ConfigDir(env func(string) string, home string) string {
 	xdg := ""
 	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
 		xdg = filepath.Join(x, "mash")
-		if _, err := os.Stat(filepath.Join(xdg, "config.json")); err == nil {
+		// Only a config.json that is absent falls back to the legacy directory. Any other error (permission denied,
+		// I/O) keeps the XDG directory so Load's read fails loudly instead of silently using a different config.
+		if _, err := os.Stat(filepath.Join(xdg, "config.json")); err == nil ||
+			!(errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
 			return xdg
 		}
 	}

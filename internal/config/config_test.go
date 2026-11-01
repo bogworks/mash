@@ -421,6 +421,48 @@ func TestOldConfigStillReadWhenXDGHasNone(t *testing.T) {
 	}
 }
 
+func TestUnreadableXDGDirFailsLoudlyNotLegacy(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory modes")
+	}
+	home, xdg := t.TempDir(), t.TempDir()
+	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
+	mashDir := filepath.Join(xdg, "mash")
+	writeIn(t, mashDir, `{"url":"tls://new:1","owner":"new"}`)
+	if err := os.Chmod(mashDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mashDir, 0o700) })
+	if _, err := os.Stat(filepath.Join(mashDir, "config.json")); err == nil {
+		t.Skip("the OS ignores the directory mode")
+	}
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	if err == nil {
+		t.Fatalf("Load succeeded with %+v, want an error", c)
+	}
+	if !strings.Contains(err.Error(), mashDir) {
+		t.Fatalf("error %q does not mention %s", err, mashDir)
+	}
+	if c.URL == "tls://old:1" {
+		t.Fatalf("used the legacy config: %+v", c)
+	}
+}
+
+func TestMissingXDGConfigFallsBackToLegacyEvenWithXDGDir(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
+	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "tls://old:1" {
+		t.Fatalf("got %+v", c)
+	}
+}
+
 func TestRelativeXDGConfigHomeIgnored(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
