@@ -818,8 +818,9 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 }
 
 // ciOnlyJobs are ci.yml's jobs that the release gate does not require: changes (does a pull request touch code?) and
-// pr-check (the one check a pull request's review waits for).
-var ciOnlyJobs = []string{"changes", "pr-check"}
+// pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
+// review starts on; it gates neither a merge nor a release).
+var ciOnlyJobs = []string{"changes", "conformance", "pr-check"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -1023,6 +1024,50 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 			if len(j.Permissions) != 0 {
 				t.Errorf("job %s must not widen permissions: %v", id, j.Permissions)
 			}
+		}
+	}
+}
+
+// conformance is the fast static slice a pull request's review starts on. It is advisory: it gates neither a merge
+// (not in pr-check's needs, not a Mergify condition) nor a release, and it never runs on a merge queue's branches.
+func TestCI_conformanceIsAdvisory(t *testing.T) {
+	w := load(t, "ci.yml")
+	j, ok := w.Jobs["conformance"]
+	if !ok {
+		t.Fatal("ci.yml has no conformance job")
+	}
+	for _, want := range []string{"github.event_name == 'pull_request'", "!startsWith(github.head_ref, 'mergify/')"} {
+		if !strings.Contains(j.If, want) {
+			t.Errorf("conformance if %q lacks %q", j.If, want)
+		}
+	}
+	for _, want := range []string{"vars.RUNNER_LINUX", "ubuntu-latest"} {
+		if !strings.Contains(j.RunsOn, want) {
+			t.Errorf("conformance runs-on %q lacks %q", j.RunsOn, want)
+		}
+	}
+	if needs := fmt.Sprint(w.Jobs["pr-check"].Needs); strings.Contains(needs, "conformance") {
+		t.Errorf("pr-check needs conformance, which would make it gate a merge: %v", needs)
+	}
+	for _, c := range RequiredChecks {
+		if c == "conformance" {
+			t.Error("conformance is in RequiredChecks, which would make it gate a release")
+		}
+	}
+	m, err := os.ReadFile("../../.mergify.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(m), "conformance") {
+		t.Error(".mergify.yml names conformance; it must not be a queue or merge condition")
+	}
+	var runs strings.Builder
+	for _, s := range j.Steps {
+		runs.WriteString(s.Run + "\n")
+	}
+	for _, want := range []string{"go build ./...", "go vet ./...", "gofmt -l", "go mod tidy -diff", "staticcheck"} {
+		if !strings.Contains(runs.String(), want) {
+			t.Errorf("conformance has no step running %q", want)
 		}
 	}
 }

@@ -114,6 +114,33 @@ jobs:
           got="$("$RUNNER_TEMP/out/mash-linux-amd64" version)"
           want="mash 0.0.0-ci (commit $GITHUB_SHA)"
           if [ "$got" != "$want" ]; then echo "mash version printed '$got', expected '$want'" >&2; exit 1; fi
+  # conformance: the fast static slice (build, vet, gofmt, tidy, staticcheck) that the review watcher waits for before it
+  # starts a Codex review, so review rounds do not wait for the test matrix (every step here is also covered by the
+  # jobs above or by lint.yml). It runs on pull_request events only, never on a merge queue's branches, and is NOT in
+  # pr-check's needs and not a Mergify condition: it only gates when a review starts, not whether a pull request merges.
+  conformance:
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/')
+    timeout-minutes: 15
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - name: gofmt reports nothing
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then echo "gofmt would change:" >&2; echo "$out" >&2; exit 1; fi
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
+      # As in lint.yml: existing findings are listed without failing until they are fixed.
+      - name: staticcheck
+        continue-on-error: true
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
   # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed (test
   # may skip a pull request that touches no code). always(), so a failed or skipped job still gives a verdict.
   pr-check:
