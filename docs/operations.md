@@ -35,7 +35,7 @@ Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's f
 
 ## Adding an endpoint
 
-An endpoint is one named Claude Code session. Names are lower-case letters, digits and single hyphens, up to 48 characters, unique per owner.
+An endpoint is one named Claude Code session. Names are lower-case letters, digits and single hyphens, up to 48 characters, unique per NATS account (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
 
 ```sh
 (
