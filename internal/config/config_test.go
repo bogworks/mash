@@ -603,3 +603,56 @@ func TestLoadDefaultCredsFallBackToLegacy(t *testing.T) {
 		t.Fatalf("creds %q, want %q", c.Creds, lp)
 	}
 }
+
+func TestFindDoesNotFallBackWhenXDGFileIsPresentButUnusable(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	env := envOf(map[string]string{"XDG_CONFIG_HOME": xdg})
+	xdgDir, legacy := filepath.Join(xdg, "mash"), filepath.Join(home, ".config", "mash")
+	writeXDG(t, xdg, `{}`)
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "policy.md"), []byte("L"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	xp := filepath.Join(xdgDir, "policy.md")
+	check := func(label string) {
+		t.Helper()
+		if got := FindFile(env, home, "policy.md"); got != xp {
+			t.Fatalf("%s: FindFile %q, want %q", label, got, xp)
+		}
+		c := Config{Dir: xdgDir, Legacy: legacy}
+		if got := c.Find("policy.md"); got != xp {
+			t.Fatalf("%s: Find %q, want %q", label, got, xp)
+		}
+	}
+	if err := os.Symlink(filepath.Join(xdg, "nowhere"), xp); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	check("dangling symlink")
+	if err := os.Remove(xp); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		return
+	}
+	locked := filepath.Join(xdg, "locked")
+	if err := os.MkdirAll(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(locked, "policy.md")
+	if err := os.WriteFile(target, []byte("X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	if _, err := os.Stat(target); err == nil {
+		t.Skip("the OS ignores the directory mode")
+	}
+	if err := os.Symlink(target, xp); err != nil {
+		t.Fatal(err)
+	}
+	check("symlink to inaccessible target")
+}

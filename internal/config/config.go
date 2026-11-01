@@ -137,6 +137,14 @@ func ConfigDir(env func(string) string, home string) string {
 	return xdg
 }
 
+// absent reports whether p is definitely not there: Lstat says not-exist or not-a-directory. Anything else, a symlink
+// (even a dangling or inaccessible one) or a permission or I/O error, counts as present so the caller's read fails
+// loudly instead of silently picking a file from another directory.
+func absent(p string) bool {
+	_, err := os.Lstat(p)
+	return err != nil && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR))
+}
+
 // FindFile is the path of name (policy.md, a default creds file): in the XDG mash directory when it is there, else in
 // the legacy $HOME/.config/mash when it is there, else in ConfigDir, so messages and creation paths stay where they
 // were. The XDG copy wins when both exist.
@@ -150,7 +158,7 @@ func FindFile(env func(string) string, home, name string) string {
 	}
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
+		if !absent(p) {
 			return p
 		}
 	}
@@ -167,7 +175,7 @@ func (c Config) Find(name string) string {
 			continue
 		}
 		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
+		if !absent(p) {
 			return p
 		}
 	}
