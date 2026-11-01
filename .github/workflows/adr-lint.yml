@@ -73,6 +73,9 @@ jobs:
         if: steps.build.outputs.skip != 'true'
         env:
           BASE_REF: ${{ github.base_ref }}
+          # Data through env: extra forbidden words kept in a repository variable, not in the tree. This workflow runs
+          # from the base branch, so this line takes effect once it has merged.
+          MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/adrlint" docs --root "$GITHUB_WORKSPACE/pr" --base "origin/$BASE_REF"

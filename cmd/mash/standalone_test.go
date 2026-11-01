@@ -21,6 +21,23 @@ import (
 
 var foreignTools = []string{"range", "herdr", "claude"}
 
+// forbiddenWords splits a comma-separated word list: trimmed, lowercased, empty entries dropped.
+func forbiddenWords(list string) []string {
+	var ws []string
+	for _, w := range strings.Split(list, ",") {
+		if w = strings.ToLower(strings.TrimSpace(w)); w != "" {
+			ws = append(ws, w)
+		}
+	}
+	return ws
+}
+
+// allForeignTools is the neutral list plus the words in MASH_FORBIDDEN_WORDS (set by the maintainers, so the names
+// they stand for need not appear in the tree).
+func allForeignTools() []string {
+	return append(append([]string{}, foreignTools...), forbiddenWords(os.Getenv("MASH_FORBIDDEN_WORDS"))...)
+}
+
 // scrubbedEnv is the whole environment of a standalone subprocess: an empty PATH directory, an empty HOME, and the
 // MASH_* variables the test sets, nothing else.
 func scrubbedEnv(t *testing.T, mash map[string]string) []string {
@@ -49,7 +66,7 @@ func assertToolsAbsent(t *testing.T, env []string) {
 			}
 		}
 	}
-	for _, tool := range foreignTools {
+	for _, tool := range allForeignTools() {
 		if _, err := os.Stat(filepath.Join(path, tool)); err == nil {
 			t.Fatalf("%s is resolvable on the scrubbed PATH %s", tool, path)
 		}
@@ -230,11 +247,42 @@ func TestNoForeignToolInSource(t *testing.T) {
 }
 
 func hasForeign(s string) bool {
+	return hasForeignIn(s, forbiddenWords(os.Getenv("MASH_FORBIDDEN_WORDS")))
+}
+
+// hasForeignIn reports whether s is a foreign tool: the neutral list (a whole name or a last path element), or any of
+// extra as a whole path component.
+func hasForeignIn(s string, extra []string) bool {
 	s = strings.ToLower(s)
 	for _, tool := range foreignTools {
 		if s == tool || strings.HasSuffix(s, "/"+tool) {
 			return true
 		}
 	}
+	for _, w := range extra {
+		for _, c := range strings.Split(s, "/") {
+			if c == w {
+				return true
+			}
+		}
+	}
 	return strings.Contains(s, "herdr")
+}
+
+func TestForbiddenWordsHelpers(t *testing.T) {
+	if got := forbiddenWords(" Zebra, ,quokka,,"); len(got) != 2 || got[0] != "zebra" || got[1] != "quokka" {
+		t.Errorf("forbiddenWords = %q", got)
+	}
+	if got := forbiddenWords(""); len(got) != 0 {
+		t.Errorf("empty list gave %q", got)
+	}
+	x := []string{"zebra"}
+	for s, want := range map[string]bool{"zebra": true, "example.com/Zebra/pkg": true, "/usr/bin/zebra": true, "zebras": false, "pkg/okapi": false} {
+		if got := hasForeignIn(s, x); got != want {
+			t.Errorf("hasForeignIn(%q) = %v, want %v", s, got, want)
+		}
+	}
+	if hasForeignIn("zebra", nil) {
+		t.Error("no extra words must not match")
+	}
 }

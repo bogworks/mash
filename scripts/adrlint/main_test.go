@@ -419,11 +419,44 @@ func TestRootFlag(t *testing.T) {
 
 // TestRepositoryADRsPass lints the repository's real ADRs, so they are always covered.
 func TestRepositoryADRsPass(t *testing.T) {
-	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"))
+	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"), extraVocab(os.Getenv(forbiddenWordsEnv)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(vs) > 0 {
 		t.Fatalf("the repository's ADRs have violations:\n%s", strings.Join(vs, "\n"))
+	}
+}
+
+func TestForbiddenWordsFromEnv(t *testing.T) {
+	adr := "0001-use-one-way.md"
+	files := func(body string) map[string]string { return with(good(), adr, edit(goodADR, "A driver.", body)) }
+	run := func(words, body string) string {
+		dir := tree(t, files(body))
+		_, out, _ := runCLI(t, nil, map[string]string{forbiddenWordsEnv: words}, "docs", dir)
+		return out
+	}
+	tests := []struct {
+		name, words, body string
+		fail              bool
+	}{
+		{"empty default changes nothing", "", "A zebra.", false},
+		{"body occurrence fails", "zebra,quokka", "A zebra here.", true},
+		{"second word fails", "zebra, quokka ", "A quokka here.", true},
+		{"case-insensitive", "zebra", "A ZeBrA here.", true},
+		{"whole word only", "zebra", "Many zebras and zebrafish.", false},
+		{"empty entries ignored", ",, ,zebra,", "A horse.", false},
+		{"only empty entries match nothing", ",, ,", "A horse.", false},
+		{"escaped line passes", "zebra", "A zebra. <!-- adrlint:allow vocabulary -->", false},
+		{"metacharacters are literal", "a.c", "An abc.", false},
+		{"built-in rule still applies", "zebra", "A lane.", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := run(tc.words, tc.body)
+			if got := strings.Contains(out, "forbidden vocabulary"); got != tc.fail {
+				t.Errorf("fail = %v, want %v; output:\n%s", got, tc.fail, out)
+			}
+		})
 	}
 }

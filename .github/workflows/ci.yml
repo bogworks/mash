@@ -74,7 +74,12 @@ jobs:
       - run: go vet ./...
       # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner and about 4x that on the
       # macOS runner, past go test's default 10 m (run 41292329623). A real hang still fails.
-      - run: go test -race -timeout 20m ./...
+      - name: go test
+        env:
+          # The words internal to the maintainers, from a repository variable (data through env): the standalone
+          # source scan in cmd/mash fails on any of them.
+          MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
+        run: go test -race -timeout 20m ./...
       - name: Leave nothing behind (macOS)
         if: always() && matrix.os == 'macos-latest'
         run: |

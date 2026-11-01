@@ -247,6 +247,9 @@ and tick it off in the repository's setup issue.
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
       Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
       signed with the key in `docs/allowed_signers`, see "Signing".)
+- [ ] Repository variable `MASH_FORBIDDEN_WORDS`: the words internal to the maintainers that must not appear in the
+      tree; set by the maintainers (comma-separated, whole words, case-insensitive). `adr-lint` and the standalone
+      tests in `cmd/mash` read it, so the guard needs no names in the tree.
 - [ ] Ruleset for `v*` tags: no deletion, no update.
 - [ ] Immutable releases: switch on after the first release is published.
 
