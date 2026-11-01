@@ -85,32 +85,66 @@ The numbered steps are what the command does in each state, and the manual path 
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
 6. **Pin:** in the orchestrator's `compat.json` set `mash` to `{"version": "<version>", "commit": "<X>"}`.
 
-## Optional, maintainers only (needs access to the rangehand repo): rangehand's tier c against the candidate
+## Optional: check a downstream consumer
 
-This step is for mash's maintainers: it needs access to the private rangehand repository and is not part of the normal gate.
+This step is for mash's maintainers who have a checkout of a downstream consumer of mash (a project that runs its own
+live checks of mash). It is not part of the normal gate, and mash knows nothing about any particular consumer: the
+consumer's checkout says how it is run.
 
-`scripts/release-check --rangehand <rangehand checkout> <X> <version>` is the gate above plus one last step, "rangehand's
-tier c (mash set) passes against the candidate". It is **opt-in**: without the flag nothing changes, and the step takes
-30+ minutes (a 2 hour limit) because it runs real Claude sessions in a container. The flag must be the first argument and
-does not combine with `--assets`.
+`scripts/release-check --consumer <consumer checkout> <X> <version>` is the gate above plus one last step, "the
+consumer's check passes against the candidate". It is **opt-in**: without the flag nothing changes, and the step can take
+30+ minutes (a 2 hour limit) if the consumer starts a container and real agent sessions. The flag must be the first
+argument and does not combine with `--assets`.
 
-It runs rangehand's `test/scenarios/live/run-in-container.sh` (the parts that exercise mash: mail, the hook and channel
-delivery, the crash and the multi-endpoint mesh, `RANGE_LIVE_SET=mash`) from a fresh clone of the checkout at its HEAD commit
-(uncommitted changes in the checkout never reach the run; the clone is removed afterwards) and, as the version label, the highest
-`vMAJOR.MINOR.PATCH` tag reachable from the checkout (compared numerically, so v1.10.0 is above v1.9.0; pre-release tags are ignored), with the candidate handed over by `RANGE_MASH_BIN` (X built for linux on the host's
-architecture; a linux host reuses the build of the plugin step), `RANGE_MASH_PLUGIN` (`plugin/` of a fresh clone of X)
-and `RANGE_LIVE_MASH_MARKETPLACE` (that clone), never the checkout running the gate. The runner's output streams to the
-terminal. Exit 0 passes only if the results file exists and every part in it passed with every line's `candidate_mash` equal
-to the exact `RANGE_MASH_BIN` the gate passed (a 0 with no evidence is a refusal); exit 3 is a refusal naming the failing parts only when a failed part can be read from the results (the runner also exits 3 for setup failures such as missing credentials or a docker build failure, which is could not decide); an inherited `RANGE_LIVE_ONLY` is dropped from the runner's environment, since rangehand rejects it with `RANGE_LIVE_SET`; anything else (exit 2:
-docker missing or an invalid variable; no rangehand tag; a failure to start; the limit) is exit 4, could not decide.
-On the limit the runner's shell, which runs in its own process group, gets TERM (it forwards it to the live run, which removes
-its containers); after a 10 minute grace the whole group is killed.
+**The manifest.** The checkout must carry a committed file `.mash-consumer-check` in its root. Without it (or if it is
+invalid, or its command is not a file) the step is exit 4, could not decide, and nothing is run. It is read from the
+clone below, so an uncommitted manifest is never used. Lines are `key=value`; blank lines and `#` comments are ignored and
+a value may be wrapped in single or double quotes:
 
-Prerequisites: docker; a rangehand checkout at a commit that has 053c5ff (the candidate run); the host's Claude login,
-which rangehand's container uses. The results (`results.jsonl`, part logs in `results.jsonl.logs/`) are in a
-`release-check-rangehand-*` directory under the temp directory whose path is printed whatever the outcome; it is kept.
-On a non-linux host, rangehand (as of 053c5ff) runs `mash version` on the host before starting the container, so the linux candidate cannot run there and the step reports "could not decide"; use a linux host until rangehand handles that.
-This never makes a rangehand receipt: only the compat.json pin certifies, and a candidate run keeps results alone.
+| key | meaning |
+| --- | --- |
+| `command` | the script, a path inside the checkout, run as `sh <command> <commit> <version>` |
+| `bin_env` | the variable that receives the absolute path of the binary under test |
+| `plugin_env` | the variable that receives mash's plugin directory (`plugin/` of a fresh clone of X) |
+| `set_env` | the variable that receives the value of `set` |
+| `set` | the test set to run, the part of the consumer's tests that exercise mash |
+| `results_env` | the variable that receives the path the script writes its JSONL results to |
+| `marketplace_env` | optional: the variable that receives the root of that clone of X |
+| `drop_env` | optional: comma-separated variables removed from the inherited environment (those the script rejects together with `set_env`) |
+| `parts` | comma-separated parts of the set that must each appear in the results |
+
+All keys but `marketplace_env` and `drop_env` are required. For example:
+
+    command=ci/live/run.sh
+    bin_env=MASH_CONSUMER_BIN
+    plugin_env=MASH_CONSUMER_PLUGIN
+    set_env=MASH_CONSUMER_SET
+    set=mash
+    results_env=MASH_CONSUMER_RESULTS
+    marketplace_env=MASH_CONSUMER_MARKETPLACE
+    drop_env=MASH_CONSUMER_ONLY
+    parts=PartA,PartB
+
+**The run.** mash runs the manifest's command from a fresh clone of the checkout at its HEAD commit (uncommitted changes
+in the checkout never reach the run; the clone is removed afterwards), with the commit and, as the version label, the
+highest `vMAJOR.MINOR.PATCH` tag reachable from the checkout (compared numerically, so v1.10.0 is above v1.9.0;
+pre-release tags are ignored) as its two arguments. The candidate is handed over by the environment variables the manifest
+names: the binary (X built for linux on the host's architecture; a linux host reuses the build of the plugin step), the
+plugin directory and, if named, the marketplace root (a fresh clone of X, never the checkout running the gate), the set,
+and the results path. The script's output streams to the terminal. No receipt variable is ever set.
+
+**The results and exit codes.** The script writes one JSON object per line: `id`, `part`, `result` (`start`, `pass`, or
+anything else for a failure) and `candidate_mash`. Exit 0 passes only if the results file exists, every part in it passed,
+every line's `candidate_mash` equals the exact `bin_env` value mash passed, and every part in the manifest's `parts` appears
+(a 0 with no evidence is a refusal). Exit 3 is a refusal naming the failing parts, only when a failed part can be read from
+the results (a script also exits 3 for setup failures such as missing credentials, which is could not decide). Anything else
+(exit 2; no consumer release tag; no or an invalid manifest; a failure to start; the limit) is exit 4, could not decide.
+On the limit the script's shell, which runs in its own process group, gets TERM (a well-behaved script forwards it and
+cleans up its containers); after a 10 minute grace the whole group is killed.
+
+The results (`results.jsonl`, part logs in `results.jsonl.logs/` if the script writes them) are in a
+`release-check-consumer-*` directory under the temp directory whose path is printed whatever the outcome; it is kept.
+This never makes a consumer receipt: only the compat.json pin certifies, and a candidate run keeps results alone.
 
 ## Before 0.3.0 and later minors: the live stranger tier
 
@@ -213,6 +247,9 @@ and tick it off in the repository's setup issue.
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
       Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
       signed with the key in `docs/allowed_signers`, see "Signing".)
+- [ ] Repository variable `MASH_FORBIDDEN_WORDS`: the words internal to the maintainers that must not appear in the
+      tree; set by the maintainers (comma-separated, whole words, case-insensitive). `adr-lint` and the standalone
+      tests in `cmd/mash` read it, so the guard needs no names in the tree.
 - [ ] Ruleset for `v*` tags: no deletion, no update.
 - [ ] Immutable releases: switch on after the first release is published.
 

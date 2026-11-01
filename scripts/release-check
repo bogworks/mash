@@ -1,16 +1,16 @@
 #!/bin/sh
 # The release gate. Usage: scripts/release-check <X> <version>  |  scripts/release-check publish [--wait <d>] <version> <X>
 #   |  scripts/release-check --assets <version> <X>
-#   |  scripts/release-check --rangehand <companion checkout> <X> <version>   (maintainers only: needs access to the rangehand repo)
+#   |  scripts/release-check --consumer <consumer checkout> <X> <version>   (maintainers only: needs a downstream consumer checkout)
 # The command is built first and run directly, so its exit code (2 usage, 3 refused, 4 could not decide) reaches the caller.
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# The gate runs from the repository root, so a relative companion checkout is made absolute first.
-if [ "${1:-}" = "--rangehand" ] && [ $# -ge 2 ] && co="$(cd "$2" 2>/dev/null && pwd)"; then
+# The gate runs from the repository root, so a relative consumer checkout is made absolute first.
+if [ "${1:-}" = "--consumer" ] && [ $# -ge 2 ] && co="$(cd "$2" 2>/dev/null && pwd)"; then
   shift 2
-  set -- --rangehand "$co" "$@"
+  set -- --consumer "$co" "$@"
 fi
 cd "$root"
 # Bootstrap under the pinned Go settings too: an ambient workspace, overlay or experiment must not change the gate.

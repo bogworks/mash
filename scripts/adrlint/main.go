@@ -74,7 +74,7 @@ var (
 	statusRE    = regexp.MustCompile(`(?i)^(proposed|accepted|rejected|deprecated|superseded by ADR-\d{4})(?:\s*;\s*(.*))?$`)
 	noteRefRE   = regexp.MustCompile(`(?i)\bADR-(\d{4})\b`)
 	linkRE      = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]*)[^)]*\)`)
-	vocabRE     = regexp.MustCompile(`(?i)\b(rangehand|herds?|herdr|lanes?|lead|orchestrator)\b`)
+	vocabRE     = regexp.MustCompile(`(?i)\b(herds?|herdr|lanes?|lead|orchestrator)\b`)
 	supersedeLn = regexp.MustCompile(`^Superseded by \[[^\]]+\]\([^)]+\)\.?$`)
 	decisionRE  = regexp.MustCompile(`(?i)^decision:\s*(none|ADR-\d{4})\s*$`)
 	adrRefRE    = regexp.MustCompile(`^(?i:ADR)-(\d{4})$`)
@@ -93,6 +93,24 @@ func realGit(args ...string) ([]byte, error) {
 }
 
 // env is everything run reads from outside: tests inject it.
+// forbiddenWordsEnv names the variable holding extra forbidden words (comma-separated, case-insensitive, whole words),
+// so the words themselves need not appear in the tree.
+const forbiddenWordsEnv = "MASH_FORBIDDEN_WORDS"
+
+// extraVocab builds the whole-word, case-insensitive matcher for a comma-separated word list; nil when it names none.
+func extraVocab(list string) *regexp.Regexp {
+	var ws []string
+	for _, w := range strings.Split(list, ",") {
+		if w = strings.TrimSpace(w); w != "" {
+			ws = append(ws, regexp.QuoteMeta(w))
+		}
+	}
+	if len(ws) == 0 {
+		return nil
+	}
+	return regexp.MustCompile(`(?i)\b(` + strings.Join(ws, "|") + `)\b`)
+}
+
 type env struct {
 	stdout, stderr io.Writer
 	getenv         func(string) string
@@ -164,7 +182,7 @@ func runDocs(args []string, e env) int {
 	if *root != "." {
 		git = func(a ...string) ([]byte, error) { return e.git(append([]string{"-C", *root}, a...)...) }
 	}
-	vs, err := lintDocs(fsDir)
+	vs, err := lintDocs(fsDir, extraVocab(e.getenv(forbiddenWordsEnv)))
 	if err != nil {
 		fmt.Fprintln(e.stderr, "adrlint:", err)
 		return 2
@@ -269,7 +287,7 @@ func viol(file string, line int, format string, a ...any) string {
 }
 
 // lintDocs applies rules a to d to every ADR in dir.
-func lintDocs(dir string) ([]string, error) {
+func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 	files, bad, err := adrFiles(dir)
 	if err != nil {
 		return nil, err
@@ -331,7 +349,7 @@ func lintDocs(dir string) ([]string, error) {
 		if !listed[n] {
 			vs = append(vs, viol(path, 1, "not listed in README.md (needs a link whose target is %s)", n))
 		}
-		vs = append(vs, lintADR(path, dir, splitLines(b), func(num string) string {
+		vs = append(vs, lintADR(path, dir, splitLines(b), extra, func(num string) string {
 			for _, f := range files {
 				if f[:4] == num {
 					if !listed[f] {
@@ -399,7 +417,7 @@ func sectionName(text string) string {
 
 // lintADR applies rules a, b, d and the link half of c to one ADR. target reports a problem with the ADR number a
 // "superseded by" status names ("" when it exists and is listed).
-func lintADR(path, dir string, lines []string, target func(num string) string) []string {
+func lintADR(path, dir string, lines []string, extra *regexp.Regexp, target func(num string) string) []string {
 	var vs []string
 
 	// a: front matter.
@@ -510,7 +528,11 @@ func lintADR(path, dir string, lines []string, target func(num string) string) [
 			}
 		}
 		if i >= body && !strings.Contains(ln, allowVocab) { // the front matter is metadata, not prose
-			for _, m := range vocabRE.FindAllString(ln, -1) {
+			ms := vocabRE.FindAllString(ln, -1)
+			if extra != nil {
+				ms = append(ms, extra.FindAllString(ln, -1)...)
+			}
+			for _, m := range ms {
 				vs = append(vs, viol(path, i+1, "forbidden vocabulary %q (add %s on the line if it is deliberate)", m, allowVocab))
 			}
 		}

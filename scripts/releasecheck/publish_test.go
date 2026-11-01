@@ -368,7 +368,7 @@ func TestParseArgs_publish(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"publish"}, {"publish", "1.2.3"}, {"publish", "1.2.3", "abc", "d"},
-		{"publish", "--assets", "1.2.3", "abc"}, {"publish", "--rangehand", "co", "1.2.3", "abc"},
+		{"publish", "--assets", "1.2.3", "abc"}, {"publish", "--consumer", "co", "1.2.3", "abc"},
 		{"publish", "--wait"}, {"publish", "--wait", "soon", "1.2.3", "abc"}, {"publish", "--wait", "-1m", "1.2.3", "abc"},
 		{"publish", "--bogus", "1.2.3", "abc"},
 		{"1.2.3", "abc", "publish"}, // publish is only the first argument

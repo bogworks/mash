@@ -138,7 +138,7 @@ func TestDocs(t *testing.T) {
 		{"b: heading with parenthetical suffix", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options (reconstructed 2026-10-31; not recorded at the time)")), nil},
 		{"b: heading with another word after the name", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options Extra")), []string{`missing section "## Considered Options"`}},
 		{"c: bad file name", with(good(), "2-Bad.md", goodADR), []string{"file name must be NNNN-kebab-title.md"}},
-		{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, Rangehand, orchestrator.")), []string{`forbidden vocabulary "Lane"`, `"lead"`, `"herds"`, `"herdr"`, `"Rangehand"`, `"orchestrator"`}},
+		{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orchestrator.")), []string{`forbidden vocabulary "Lane"`, `"lead"`, `"herds"`, `"herdr"`, `"orchestrator"`}},
 		{"d: escape on the same line", with(good(), adr, edit(goodADR, "A driver.", "A lane. <!-- adrlint:allow vocabulary -->")), nil},
 		{"d: escape on another line does not count", with(good(), adr, edit(goodADR, "A driver.", "<!-- adrlint:allow vocabulary -->\nA lane.")), []string{`forbidden vocabulary "lane"`}},
 		{"d: whole word only", with(good(), adr, edit(goodADR, "A driver.", "leading planes lanes_x")), nil},
@@ -419,11 +419,44 @@ func TestRootFlag(t *testing.T) {
 
 // TestRepositoryADRsPass lints the repository's real ADRs, so they are always covered.
 func TestRepositoryADRsPass(t *testing.T) {
-	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"))
+	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"), extraVocab(os.Getenv(forbiddenWordsEnv)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(vs) > 0 {
 		t.Fatalf("the repository's ADRs have violations:\n%s", strings.Join(vs, "\n"))
+	}
+}
+
+func TestForbiddenWordsFromEnv(t *testing.T) {
+	adr := "0001-use-one-way.md"
+	files := func(body string) map[string]string { return with(good(), adr, edit(goodADR, "A driver.", body)) }
+	run := func(words, body string) string {
+		dir := tree(t, files(body))
+		_, out, _ := runCLI(t, nil, map[string]string{forbiddenWordsEnv: words}, "docs", dir)
+		return out
+	}
+	tests := []struct {
+		name, words, body string
+		fail              bool
+	}{
+		{"empty default changes nothing", "", "A zebra.", false},
+		{"body occurrence fails", "zebra,quokka", "A zebra here.", true},
+		{"second word fails", "zebra, quokka ", "A quokka here.", true},
+		{"case-insensitive", "zebra", "A ZeBrA here.", true},
+		{"whole word only", "zebra", "Many zebras and zebrafish.", false},
+		{"empty entries ignored", ",, ,zebra,", "A horse.", false},
+		{"only empty entries match nothing", ",, ,", "A horse.", false},
+		{"escaped line passes", "zebra", "A zebra. <!-- adrlint:allow vocabulary -->", false},
+		{"metacharacters are literal", "a.c", "An abc.", false},
+		{"built-in rule still applies", "zebra", "A lane.", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := run(tc.words, tc.body)
+			if got := strings.Contains(out, "forbidden vocabulary"); got != tc.fail {
+				t.Errorf("fail = %v, want %v; output:\n%s", got, tc.fail, out)
+			}
+		})
 	}
 }
