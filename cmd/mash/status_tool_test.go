@@ -619,3 +619,30 @@ func TestStatusTLSLine(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusManagedDirEnv(t *testing.T) {
+	src := settingsSource(t, "a", nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "managed-settings.json"), []byte(mashAllowed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src.managedDir = ""
+	val := dir
+	src.getenv = func(k string) string {
+		if k == "MASH_MANAGED_SETTINGS_DIR" {
+			return val
+		}
+		return ""
+	}
+	l := statusLine(t, statusText(src), "channel allowlist: ")
+	if l != "channel allowlist: OK - local managed settings file enables channels and lists mash@mash" {
+		t.Fatalf("managed file in env dir not read: %q", l)
+	}
+	val = "relative/dir" // ignored: the OS default location is read instead
+	_, srcs := src.settings()
+	for _, sc := range srcs {
+		if strings.Contains(sc.Path, "relative") {
+			t.Fatalf("relative MASH_MANAGED_SETTINGS_DIR was used: %s", sc.Path)
+		}
+	}
+}
