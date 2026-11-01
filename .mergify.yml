@@ -37,9 +37,6 @@ queue_rules:
       - or:
           - author = randybias
           - approved-reviews-by = randybias
-      # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
-      # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
-      - check-success = adr-lint
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:

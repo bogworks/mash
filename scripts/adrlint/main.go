@@ -73,7 +73,7 @@ var (
 	noteRefRE   = regexp.MustCompile(`(?i)\bADR-(\d{4})\b`)
 	linkRE      = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]*)[^)]*\)`)
 	vocabRE     = regexp.MustCompile(`(?i)\b(rangehand|herds?|herdr|lanes?|lead|orchestrator)\b`)
-	supersedeLn = regexp.MustCompile(`(?i)^\W*superseded by \[[^\]]*\]\([^)]*\)`)
+	supersedeLn = regexp.MustCompile(`^Superseded by \[[^\]]+\]\([^)]+\)\.?$`)
 	decisionRE  = regexp.MustCompile(`(?i)^decision:\s*(none|ADR-\d{4})\s*$`)
 	adrRefRE    = regexp.MustCompile(`^(?i:ADR)-(\d{4})$`)
 )
@@ -569,8 +569,8 @@ func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 	return vs, nil
 }
 
-// compareAccepted reports every change to an accepted ADR other than its status line (to a superseded-by value) and
-// a "Superseded by [..](..)" line. Only the first body difference is reported: later lines shift with it.
+// compareAccepted reports every change to an accepted ADR other than its status keyword (to superseded-by or
+// deprecated, note unchanged only if the keyword stays) and one exact "Superseded by [..](..)." body line. Only the first body difference is reported: later lines shift with it.
 func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curLines []string) []string {
 	cfm := parseFrontMatter(curLines)
 	if !cfm.ok {
@@ -578,17 +578,30 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 	}
 	var vs []string
 	skipCur := -1
+	newKw := ""
 	if cs, ok := cfm.keys["status"]; ok {
 		skipCur = cs.line
-		if kw, _, ok := parseStatus(cs.val); !ok || (kw != "accepted" && !strings.HasPrefix(kw, "superseded by")) {
-			vs = append(vs, viol(path, cs.line, "accepted ADR (at %s): status may only change to \"superseded by ADR-NNNN\", not %q", base, cs.val))
+		kw, _, ok := parseStatus(cs.val)
+		newKw = kw
+		switch {
+		case !ok || (kw != "accepted" && kw != "deprecated" && !strings.HasPrefix(kw, "superseded by")):
+			vs = append(vs, viol(path, cs.line, "accepted ADR (at %s): status may only change to \"superseded by ADR-NNNN\" or \"deprecated\", not %q", base, cs.val))
+		case kw == "accepted" && curLines[cs.line-1] != oldLines[ofm.keys["status"].line-1]:
+			vs = append(vs, viol(path, cs.line, "accepted ADR (at %s): the status line may not change (note included) while the status stays accepted", base))
 		}
 	} else {
 		vs = append(vs, viol(path, 1, "accepted ADR (at %s) lost its status key", base))
 	}
+	links := 0
 	for i, ln := range curLines {
-		if !supersedeLn.MatchString(ln) {
+		if i+1 <= cfm.end || !supersedeLn.MatchString(ln) {
 			continue
+		}
+		if links++; links > 1 {
+			vs = append(vs, viol(path, i+1, "accepted ADR (at %s): at most one \"Superseded by\" line may be added", base))
+		}
+		if !strings.HasPrefix(newKw, "superseded by") {
+			vs = append(vs, viol(path, i+1, "accepted ADR (at %s): a \"Superseded by\" line needs the status \"superseded by ADR-NNNN\"", base))
 		}
 		for _, m := range linkRE.FindAllStringSubmatch(ln, -1) {
 			t := linkTarget(m[1])
@@ -601,10 +614,10 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 			}
 		}
 	}
-	strip := func(lines []string, skip int) []numbered {
+	strip := func(lines []string, skip, end int) []numbered {
 		var out []numbered
 		for i, ln := range lines {
-			if i+1 != skip && !supersedeLn.MatchString(ln) {
+			if i+1 != skip && (i+1 <= end || !supersedeLn.MatchString(ln)) {
 				out = append(out, numbered{ln, i + 1})
 			}
 		}
@@ -613,7 +626,7 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 		}
 		return out
 	}
-	o, c := strip(oldLines, ofm.keys["status"].line), strip(curLines, skipCur)
+	o, c := strip(oldLines, ofm.keys["status"].line, ofm.end), strip(curLines, skipCur, cfm.end)
 	for i := 0; i < len(o) || i < len(c); i++ {
 		if i >= len(c) {
 			return append(vs, viol(path, len(curLines), "accepted ADR (at %s) is immutable: text was removed (was line %d: %q)", base, o[i].line, o[i].text))
@@ -623,7 +636,7 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 			if i < len(o) {
 				was = fmt.Sprintf(" (was %q)", o[i].text)
 			}
-			return append(vs, viol(path, c[i].line, "accepted ADR (at %s) is immutable: only the status line and a \"Superseded by [..](..)\" line may change%s", base, was))
+			return append(vs, viol(path, c[i].line, "accepted ADR (at %s) is immutable: only the status keyword and one whole-line \"Superseded by [..](..)\" line may change%s", base, was))
 		}
 	}
 	return vs
