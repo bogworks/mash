@@ -567,13 +567,14 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return inboxText(ms), nil
 			})},
-		{Name: "who", Description: "List mash endpoints and whether each is online, with their role, host and labels when recorded. " +
-			"Optional filters (all must match): match (text in name, role, note or labels), name, role (case-insensitive substrings), " +
+		{Name: "who", Description: "List mash endpoints and whether each is online, with their role, host, description, capabilities and labels when recorded. " +
+			"Optional filters (all must match): match (text in name, role, note, description, capabilities or labels), cap (capability words, all must be present), name, role (case-insensitive substrings), " +
 			"label (\"k\" or \"k=v\" strings), online (true: online only, false: offline only). format: text (default) or json.",
 			Schema: schema(map[string]any{
-				"match":  str("case-insensitive text found in the name, role, note, or a label key or value"),
+				"match":  str("case-insensitive text found in the name, role, note, description, a capability, or a label key or value"),
 				"name":   str("case-insensitive substring of the endpoint name"),
 				"role":   str("case-insensitive substring of the role"),
+				"cap":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each an exact capability word the endpoint must have"},
 				"label":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each \"k\" (label present) or \"k=v\" (exact value)"},
 				"online": flag("true: only online endpoints; false: only offline; absent: both"),
 				"format": map[string]any{"type": "string", "enum": []string{"text", "json"}, "description": "text (default) or json"},
@@ -584,6 +585,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					Name   string   `json:"name"`
 					Role   string   `json:"role"`
 					Label  []string `json:"label"`
+					Cap    []string `json:"cap"`
 					Online *bool    `json:"online"`
 					Format string   `json:"format"`
 				}
@@ -595,7 +597,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				if a.Format != "" && a.Format != "text" && a.Format != "json" {
 					return "", fmt.Errorf("who: format %q is not text or json", a.Format)
 				}
-				f := endpoint.WhoFilter{Match: a.Match, Name: a.Name, Role: a.Role, Labels: a.Label}
+				f := endpoint.WhoFilter{Match: a.Match, Name: a.Name, Role: a.Role, Labels: a.Label, Caps: a.Cap}
 				if a.Online != nil {
 					f.Online, f.Offline = *a.Online, !*a.Online
 				}
@@ -721,7 +723,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		}
 		if long {
 			r := p.Record
-			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}} {
+			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}} {
 				if f.v != "" {
 					fmt.Fprintf(&b, "\t%s %s", f.k, f.v)
 				}

@@ -71,3 +71,36 @@ func TestWhoFilterValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWhoFilterCapsAndDescription(t *testing.T) {
+	ps := []Presence{
+		{Online: true, Record: store.Record{Name: "alpha", Description: "Runs the NATS account tooling", Caps: []string{"nats-accounts", "review"}}},
+		{Record: store.Record{Name: "beta", Caps: []string{"review"}}},
+		{Record: store.Record{Name: "gamma"}},
+	}
+	for _, c := range []struct {
+		name string
+		f    WhoFilter
+		want []string
+	}{
+		{"one cap", WhoFilter{Caps: []string{"review"}}, []string{"alpha", "beta"}},
+		{"caps AND", WhoFilter{Caps: []string{"review", "nats-accounts"}}, []string{"alpha"}},
+		{"cap is exact", WhoFilter{Caps: []string{"nats"}}, []string{}},
+		{"cap with online", WhoFilter{Caps: []string{"review"}, Online: true}, []string{"alpha"}},
+		{"match description", WhoFilter{Match: "account TOOLING"}, []string{"alpha"}},
+		{"match cap", WhoFilter{Match: "REVIE"}, []string{"alpha", "beta"}},
+	} {
+		if got := presenceNames(c.f.Apply(ps)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+	if (WhoFilter{Caps: []string{"x"}}).IsZero() {
+		t.Error("caps filter is zero")
+	}
+	if err := (WhoFilter{Caps: []string{"Bad"}}).Validate(); err == nil {
+		t.Error("invalid cap accepted")
+	}
+	if err := (WhoFilter{Caps: []string{"ok.1"}}).Validate(); err != nil {
+		t.Error(err)
+	}
+}

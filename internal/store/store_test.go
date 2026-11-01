@@ -119,3 +119,31 @@ func TestLimitsValidate(t *testing.T) {
 		t.Fatalf("minimums: %v", err)
 	}
 }
+
+func TestValidCapsAndDescription(t *testing.T) {
+	nine := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}
+	for name, c := range map[string][]string{"nil": nil, "one": {"nats-accounts"}, "eight": nine[:8], "dotted": {"a.b_c-d9"}, "32 chars": {"a" + strings.Repeat("b", 31)}} {
+		if err := ValidCaps(c); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+	for name, c := range map[string][]string{"nine": nine, "upper": {"Nats"}, "digit first": {"1a"}, "empty": {""}, "33 chars": {"a" + strings.Repeat("b", 32)},
+		"space": {"a b"}, "duplicate": {"a", "a"}} {
+		if err := ValidCaps(c); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	for _, ok := range []string{"", "runs the nats account tooling", strings.Repeat("x", 256), strings.Repeat("é", 256)} {
+		if err := ValidDescription(ok); err != nil {
+			t.Errorf("%.20q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"a\tb", "a\nb", "\x00", strings.Repeat("x", 257)} {
+		if err := ValidDescription(bad); err == nil {
+			t.Errorf("%.20q accepted", bad)
+		}
+	}
+	if !ValidCap("a") || ValidCap("A") {
+		t.Fatal("ValidCap")
+	}
+}

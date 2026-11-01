@@ -2,15 +2,19 @@ package endpoint
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/bogworks/mash/internal/store"
 )
 
 // WhoFilter narrows a directory listing. Every set field must hold (they AND). Name, Role and Match are
 // case-insensitive substrings, Owner is exact, and each Label is "K" (the key is present) or "K=V" (the value is
-// exactly V, case-sensitive). Online and Offline are mutually exclusive.
+// exactly V, case-sensitive). Each Cap is an exact capability word (they AND). Match also searches the description and capabilities.
+// Online and Offline are mutually exclusive.
 type WhoFilter struct {
 	Match, Name, Owner, Role string
-	Labels                   []string
+	Labels, Caps             []string
 	Online, Offline          bool
 }
 
@@ -33,12 +37,17 @@ func (f WhoFilter) Validate() error {
 			return err
 		}
 	}
+	for _, c := range f.Caps {
+		if !store.ValidCap(c) {
+			return fmt.Errorf("mash: capability filter %q: a letter, then up to 31 of a-z 0-9 _ . -", c)
+		}
+	}
 	return nil
 }
 
 // IsZero reports a filter with nothing set.
 func (f WhoFilter) IsZero() bool {
-	return f.Match == "" && f.Name == "" && f.Owner == "" && f.Role == "" && len(f.Labels) == 0 && !f.Online && !f.Offline
+	return f.Match == "" && f.Name == "" && f.Owner == "" && f.Role == "" && len(f.Labels) == 0 && len(f.Caps) == 0 && !f.Online && !f.Offline
 }
 
 // Apply returns the presences that pass every filter, in the input order. A malformed label spec matches nothing,
@@ -79,9 +88,17 @@ func (f WhoFilter) matches(p Presence) bool {
 			return false
 		}
 	}
+	for _, c := range f.Caps {
+		if !slices.Contains(r.Caps, c) {
+			return false
+		}
+	}
 	if f.Match != "" {
 		m := strings.ToLower(f.Match)
-		hit := containsFold(r.Name, m) || containsFold(r.Role, m) || containsFold(r.Note, m)
+		hit := containsFold(r.Name, m) || containsFold(r.Role, m) || containsFold(r.Note, m) || containsFold(r.Description, m)
+		for _, c := range r.Caps {
+			hit = hit || containsFold(c, m)
+		}
 		for k, v := range r.Labels {
 			hit = hit || containsFold(k, m) || containsFold(v, m)
 		}

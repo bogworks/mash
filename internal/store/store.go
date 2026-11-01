@@ -149,6 +149,10 @@ type Record struct {
 	Role   string            `json:"role,omitempty"`
 	Host   string            `json:"host,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
+	// Description is free text on what the endpoint does, and Caps are up to MaxCaps capability words (sorted), both
+	// set by the admin. Readers from before these fields ignore them, and set-meta keeps fields it does not know.
+	Description string   `json:"description,omitempty"`
+	Caps        []string `json:"caps,omitempty"`
 }
 
 // MaxMetaLen is the longest Role, Host or label value.
@@ -178,11 +182,45 @@ func ValidLabels(l map[string]string) error {
 	return nil
 }
 
+// MaxDescriptionLen is the longest Description.
+const MaxDescriptionLen = 256
+
+// MaxCaps is the most capability words one record may carry.
+const MaxCaps = 8
+
+// ValidCap reports whether c is a legal capability word: [a-z][a-z0-9_.-]{0,31}.
+func ValidCap(c string) bool { return labelKey.MatchString(c) }
+
+// ValidCaps checks a capability list: at most MaxCaps words, each passing ValidCap, none repeated.
+func ValidCaps(caps []string) error {
+	if len(caps) > MaxCaps {
+		return fmt.Errorf("mash: %d capabilities; at most %d", len(caps), MaxCaps)
+	}
+	seen := map[string]bool{}
+	for _, c := range caps {
+		if !ValidCap(c) {
+			return fmt.Errorf("mash: capability %q: a letter, then up to 31 of a-z 0-9 _ . -", c)
+		}
+		if seen[c] {
+			return fmt.Errorf("mash: capability %q is listed twice", c)
+		}
+		seen[c] = true
+	}
+	return nil
+}
+
+// ValidDescription checks a description: at most MaxDescriptionLen characters, printable, no tab or newline.
+func ValidDescription(v string) error {
+	return validText("description", v, MaxDescriptionLen)
+}
+
 // ValidMeta checks one metadata value: at most MaxMetaLen characters, printable, no tab or newline (they end up in
 // tab-separated output). Empty is valid (unset).
-func ValidMeta(field, v string) error {
-	if utf8.RuneCountInString(v) > MaxMetaLen {
-		return fmt.Errorf("mash: %s is longer than %d characters", field, MaxMetaLen)
+func ValidMeta(field, v string) error { return validText(field, v, MaxMetaLen) }
+
+func validText(field, v string, max int) error {
+	if utf8.RuneCountInString(v) > max {
+		return fmt.Errorf("mash: %s is longer than %d characters", field, max)
 	}
 	for _, r := range v {
 		if !unicode.IsPrint(r) {

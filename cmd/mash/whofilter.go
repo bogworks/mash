@@ -9,7 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 )
 
-const whoUsage = "usage: mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]"
+const whoUsage = "usage: mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]"
 
 // whoOutput is how `mash who` renders its result.
 type whoOutput struct{ Long, JSON, Names bool }
@@ -40,7 +40,7 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 			case "--offline":
 				f.Offline = true
 			}
-		case "--match", "--name", "--owner", "--role", "--label":
+		case "--match", "--name", "--owner", "--role", "--label", "--cap":
 			if !hasVal {
 				if i+1 >= len(args) {
 					return bad("%s needs a value", name)
@@ -59,6 +59,8 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 				f.Role = val
 			case "--label":
 				f.Labels = append(f.Labels, val)
+			case "--cap":
+				f.Caps = append(f.Caps, val)
 			}
 		default:
 			return bad("unknown argument %q", args[i])
@@ -89,15 +91,17 @@ type whoLease struct {
 }
 
 type whoEntry struct {
-	Name     string            `json:"name"`
-	Owner    string            `json:"owner"`
-	Online   bool              `json:"online"`
-	LastSeen string            `json:"last_seen,omitempty"`
-	Role     string            `json:"role,omitempty"`
-	Host     string            `json:"host,omitempty"`
-	Note     string            `json:"note,omitempty"`
-	Labels   map[string]string `json:"labels,omitempty"`
-	Lease    *whoLease         `json:"lease,omitempty"`
+	Name        string            `json:"name"`
+	Owner       string            `json:"owner"`
+	Online      bool              `json:"online"`
+	LastSeen    string            `json:"last_seen,omitempty"`
+	Role        string            `json:"role,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Note        string            `json:"note,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Caps        []string          `json:"caps,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Lease       *whoLease         `json:"lease,omitempty"`
 }
 
 // whoJSON renders the presences as a JSON array (`[]` when none). Map keys encode sorted. lease is added only when
@@ -106,7 +110,10 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
-		e := whoEntry{Name: r.Name, Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note}
+		e := whoEntry{Name: r.Name, Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description}
+		if len(r.Caps) > 0 {
+			e.Caps = r.Caps
+		}
 		if len(r.Labels) > 0 {
 			e.Labels = r.Labels
 		}
