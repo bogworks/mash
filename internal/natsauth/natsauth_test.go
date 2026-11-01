@@ -69,3 +69,10 @@ func TestTLSHint(t *testing.T) {
 		t.Error("a non-TLS error must pass through unchanged")
 	}
 }
+
+func TestTLSHintClosedAfterHandshake(t *testing.T) {
+	err := errors.New("nats: tls error: connection closed by remote after TLS handshake: write: broken pipe")
+	if got := natsauth.TLSHint(err).Error(); !strings.Contains(got, "tls_cert") || !strings.Contains(got, "tls_key") {
+		t.Fatalf("hint = %q", got)
+	}
+}
