@@ -21,8 +21,8 @@ import (
 
 const (
 	limitsUsage    = "usage: mash admin limits [name...] | mash admin limits --show"
-	provisionUsage = "usage: mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]..."
-	setMetaUsage   = "usage: mash admin set-meta <name> [--role R] [--host H] [--label k=v]...   (at least one; a value of - clears the field; --label k=- clears that label)"
+	provisionUsage = "usage: mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..."
+	setMetaUsage   = "usage: mash admin set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...   (at least one; a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)"
 )
 
 func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
@@ -101,23 +101,15 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		if len(args) < 2 {
 			return fail(errors.New(provisionUsage))
 		}
-		labels := map[string]string{}
-		for i := 2; i+1 < len(args); i++ {
-			if args[i] != "--label" {
-				continue
-			}
-			k, v, ok := strings.Cut(args[i+1], "=")
-			if !ok || v == "-" {
-				return fail(errors.New(provisionUsage))
-			}
-			labels[k] = v
-		}
-		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"),
-			madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels})
+		meta, err := provisionMeta(args, opt)
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s\n", rec.Name, rec.Name, rec.MailSubject)
+		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"), meta)
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", rec.Name, rec.Name, rec.MailSubject, metaSuffix(rec))
 	case "limits":
 		for _, n := range args[1:] {
 			if !config.ValidName(n) {
@@ -135,44 +127,15 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		if len(args) < 3 || !config.ValidName(args[1]) {
 			return fail(errors.New(setMetaUsage))
 		}
-		var u madmin.MetaUpdate
-		dst := map[string]**string{"--role": &u.Role, "--host": &u.Host}
-		for i := 2; i < len(args); i += 2 {
-			if args[i] == "--label" {
-				if i+1 >= len(args) {
-					return fail(errors.New(setMetaUsage))
-				}
-				k, v, ok := strings.Cut(args[i+1], "=")
-				if !ok {
-					return fail(errors.New(setMetaUsage))
-				}
-				if v == "-" {
-					v = ""
-				}
-				if u.Labels == nil {
-					u.Labels = map[string]string{}
-				}
-				if _, dup := u.Labels[k]; dup {
-					return fail(errors.New(setMetaUsage))
-				}
-				u.Labels[k] = v
-				continue
-			}
-			p, ok := dst[args[i]]
-			if !ok || i+1 >= len(args) || *p != nil {
-				return fail(errors.New(setMetaUsage))
-			}
-			v := args[i+1]
-			if v == "-" {
-				v = ""
-			}
-			*p = &v
+		u, err := setMetaUpdate(args)
+		if err != nil {
+			return fail(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels))
+		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels), metaSuffix(rec))
 	case "deprovision":
 		const deprovisionUsage = "usage: mash admin deprovision <name> [--user <public-key>]"
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
@@ -206,6 +169,85 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+// metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
+func metaSuffix(r store.Record) string {
+	var b strings.Builder
+	if r.Description != "" {
+		fmt.Fprintf(&b, ", description %q", r.Description)
+	}
+	if len(r.Caps) > 0 {
+		fmt.Fprintf(&b, ", caps %s", strings.Join(r.Caps, ","))
+	}
+	return b.String()
+}
+
+// provisionMeta reads the optional metadata flags of `provision`. opt returns a single-valued flag's value.
+func provisionMeta(args []string, opt func(string) string) (madmin.Meta, error) {
+	labels := map[string]string{}
+	var caps []string
+	for i := 2; i+1 < len(args); i++ {
+		switch args[i] {
+		case "--label":
+			k, v, ok := strings.Cut(args[i+1], "=")
+			if !ok || v == "-" {
+				return madmin.Meta{}, errors.New(provisionUsage)
+			}
+			labels[k] = v
+		case "--cap":
+			caps = append(caps, args[i+1])
+		}
+	}
+	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps}, nil
+}
+
+// setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.
+func setMetaUpdate(args []string) (madmin.MetaUpdate, error) {
+	var u madmin.MetaUpdate
+	bad := errors.New(setMetaUsage)
+	dst := map[string]**string{"--role": &u.Role, "--host": &u.Host, "--describe": &u.Description}
+	for i := 2; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			return u, bad
+		}
+		val := args[i+1]
+		switch args[i] {
+		case "--label":
+			k, v, ok := strings.Cut(val, "=")
+			if !ok {
+				return u, bad
+			}
+			if v == "-" {
+				v = ""
+			}
+			if u.Labels == nil {
+				u.Labels = map[string]string{}
+			}
+			if _, dup := u.Labels[k]; dup {
+				return u, bad
+			}
+			u.Labels[k] = v
+		case "--cap":
+			if val == "-" {
+				u.ClearCaps = true
+			} else {
+				u.AddCaps = append(u.AddCaps, val)
+			}
+		case "--uncap":
+			u.DropCaps = append(u.DropCaps, val)
+		default:
+			p, ok := dst[args[i]]
+			if !ok || *p != nil {
+				return u, bad
+			}
+			if val == "-" {
+				val = ""
+			}
+			*p = &val
+		}
+	}
+	return u, nil
 }
 
 // labelList renders labels sorted as k=v, space separated; "none" when there are none.

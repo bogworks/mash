@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,11 +79,19 @@ func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 
 // Meta is a record's optional directory metadata.
 type Meta struct {
-	Role, Host string
-	Labels     map[string]string
+	Role, Host  string
+	Labels      map[string]string
+	Description string
+	Caps        []string
 }
 
 func (m Meta) validate() error {
+	if err := store.ValidDescription(m.Description); err != nil {
+		return err
+	}
+	if err := store.ValidCaps(m.Caps); err != nil {
+		return err
+	}
 	for _, f := range []struct{ name, v string }{{"role", m.Role}, {"host", m.Host}} {
 		if err := store.ValidMeta(f.name, f.v); err != nil {
 			return err
@@ -141,7 +150,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 		Name: name, Owner: a.owner, Agent: sap.AgentName, AgentToken: sap.AgentToken,
 		Account: account, User: user, MailSubject: sap.For(a.owner, name).Mail,
 		Created: time.Now().UTC().Format(time.RFC3339), Note: note,
-		Role: meta.Role, Host: meta.Host, Labels: meta.Labels,
+		Role: meta.Role, Host: meta.Host, Labels: meta.Labels, Description: meta.Description, Caps: sortedCaps(meta.Caps),
 	}
 	val, _ := json.Marshal(rec)
 	if _, err := kv.Create(ctx, name, val); err != nil {
@@ -441,9 +450,24 @@ func (a *Admin) applyInboxLimitsLocked(ctx context.Context, name string) (string
 
 // MetaUpdate names the metadata fields SetMeta changes; a nil field is left alone and a pointer to "" clears it.
 // Labels is applied per key: a value sets that label, an empty value clears it, other labels are left alone.
+// Description is set like Role. Caps are applied as a merge: AddCaps are added, DropCaps removed, and ClearCaps
+// removes every capability first (then AddCaps still apply).
 type MetaUpdate struct {
-	Role, Host *string
-	Labels     map[string]string
+	Role, Host  *string
+	Labels      map[string]string
+	Description *string
+	AddCaps     []string
+	DropCaps    []string
+	ClearCaps   bool
+}
+
+func sortedCaps(c []string) []string {
+	if len(c) == 0 {
+		return nil
+	}
+	out := append([]string(nil), c...)
+	sort.Strings(out)
+	return out
 }
 
 // setMetaTries is how many times SetMeta re-reads and retries after losing a compare-and-set.
@@ -464,6 +488,18 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 			}
 		}
 	}
+	if u.Description != nil {
+		if err := store.ValidDescription(*u.Description); err != nil {
+			return store.Record{}, err
+		}
+		fields["description"] = u.Description
+	}
+	for _, c := range append(append([]string(nil), u.AddCaps...), u.DropCaps...) {
+		if !store.ValidCap(c) {
+			return store.Record{}, fmt.Errorf("mash: capability %q: a letter, then up to 31 of a-z 0-9 _ . -", c)
+		}
+	}
+	changeCaps := u.ClearCaps || len(u.AddCaps) > 0 || len(u.DropCaps) > 0
 	for k, v := range u.Labels {
 		if !store.ValidLabelKey(k) {
 			return store.Record{}, fmt.Errorf("mash: label key %q: a letter, then up to 31 of a-z 0-9 _ . -", k)
@@ -525,6 +561,38 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 			} else {
 				b, _ := json.Marshal(labels)
 				obj["labels"] = b
+			}
+		}
+		if changeCaps {
+			var caps []string
+			if raw, ok := obj["caps"]; ok && !u.ClearCaps {
+				if err := json.Unmarshal(raw, &caps); err != nil {
+					return store.Record{}, fmt.Errorf("mash: directory %s: caps: %w", name, err)
+				}
+			}
+			set := map[string]bool{}
+			for _, c := range caps {
+				set[c] = true
+			}
+			for _, c := range u.DropCaps {
+				delete(set, c)
+			}
+			for _, c := range u.AddCaps {
+				set[c] = true
+			}
+			merged := make([]string, 0, len(set))
+			for c := range set {
+				merged = append(merged, c)
+			}
+			sort.Strings(merged)
+			if err := store.ValidCaps(merged); err != nil {
+				return store.Record{}, err
+			}
+			if len(merged) == 0 {
+				delete(obj, "caps")
+			} else {
+				b, _ := json.Marshal(merged)
+				obj["caps"] = b
 			}
 		}
 		val, err := json.Marshal(obj)

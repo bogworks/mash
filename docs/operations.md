@@ -74,27 +74,32 @@ It cannot read another endpoint's inbox, history or replies (each endpoint recei
 
 An endpoint's directory record can carry optional fields: `--role` (what it is for), `--host` (the machine it is meant to run on) and up to 8 free-form labels, `--label key=value` (repeatable), for grouping or tagging endpoints, for example `team=acme` or `project=billing`. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
 
+Two more fields say what the endpoint does: `--describe TEXT`, free text of up to 256 printable characters (no tab or newline), and up to 8 capability words, `--cap C` (repeatable), each a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`, with no repeats. Capabilities are stored sorted. A label holds one value per key and there are only 8 of them; capabilities are a list of words to find an endpoint by, and the description is the longer sentence ([ADR-0050](decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
+
 ```sh
-mash admin provision "$name" --user "$user" --account "$account" --role reviewer --host laptop --label team=acme --label tier=1
+mash admin provision "$name" --user "$user" --account "$account" --role reviewer --host laptop --label team=acme --label tier=1 --describe "Keeps the NATS accounts current" --cap nats-accounts --cap review
 mash admin set-meta "$name" --role builder --host - --label tier=- --label env=prod   # change role, clear host, clear one label, set another; everything else stays
+mash admin set-meta "$name" --describe "New text" --cap deploy --uncap review   # replace the description, add one capability, remove another
+mash admin set-meta "$name" --describe - --cap -                              # clear the description and every capability
 ```
 
-`set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. The 8-label cap is checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. `mash admin list` is unchanged.
+`set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. `--describe -` clears the description. `--cap C` adds a capability, `--uncap C` removes one, and `--cap -` clears them all (added in the same command afterwards). The 8-label and 8-capability caps are checked after the merge. The confirmation line also shows the description and capabilities when set. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. `mash admin list` is unchanged.
 
-`mash who` prints the same lines as before, so tools that parse it keep working. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
+`mash who` prints the same lines as before, so tools that parse it keep working. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then `desc TEXT` and `caps a,b,c` columns when set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
 
 ### Finding endpoints: `who` filters and `--json`
 
 ```
-mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
+mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]
 ```
 
-Filters all have to match. `--name`, `--role` and `--match` are case-insensitive substrings; `--owner` is exact; `--label K` keeps endpoints that have label `K`, and `--label K=V` those whose value is exactly `V` (case-sensitive; repeat the flag to require several). `--match TEXT` looks in the name, role, note and label keys and values at once. `--online` and `--offline` exclude each other. A flag takes its value as the next argument or as `--flag=value`. With no match the command exits 0 with empty output (`[]` for `--json`); a bad flag or value exits 2 with the usage on stderr. `mash who` with no flags prints what it always did, and `no endpoints` only when the directory itself is empty.
+Filters all have to match. `--name`, `--role` and `--match` are case-insensitive substrings; `--owner` is exact; `--label K` keeps endpoints that have label `K`, and `--label K=V` those whose value is exactly `V` (case-sensitive; repeat the flag to require several). `--cap C` keeps endpoints that have capability `C` (exact; repeat the flag to require several, and an invalid word is an error). `--match TEXT` looks in the name, role, note, description, capabilities and label keys and values at once. `--online` and `--offline` exclude each other. A flag takes its value as the next argument or as `--flag=value`. With no match the command exits 0 with empty output (`[]` for `--json`); a bad flag or value exits 2 with the usage on stderr. `mash who` with no flags prints what it always did, and `no endpoints` only when the directory itself is empty.
 
 ```sh
 mash who --match nats                       # replaces: mash who | grep -i nats
 mash who --role reviewer --online --names   # names only, one per line, for scripts
 mash who --label team=acme --json           # machine-readable
+mash who --cap nats-accounts --online --names   # who can do this right now, for scripts
 ```
 
 `--names` prints one name per line. `--json` prints an array, one object per endpoint, in name order; `--long` adds `lease`. `--json` and `--names` exclude each other. These field names are stable:
@@ -105,11 +110,12 @@ mash who --label team=acme --json           # machine-readable
 | `owner` | string | always |
 | `online` | boolean | always |
 | `last_seen` | string, RFC 3339 UTC | when a heartbeat was seen |
-| `role`, `host`, `note` | string | when set |
+| `role`, `host`, `note`, `description` | string | when set |
 | `labels` | object, key to value | when there is at least one |
+| `caps` | array of strings, sorted | when there is at least one |
 | `lease` | object with `host` and `version` | with `--long`, when this endpoint's own live lease is known |
 
-The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
+The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `cap` (an array of capability words), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
 
 ## Removing an endpoint
 

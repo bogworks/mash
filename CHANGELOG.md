@@ -11,6 +11,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Added
 
+- The directory record gains `description` (free text, up to 256 characters) and `caps` (up to 8 capability words), set by the admin: `mash admin provision --describe TEXT --cap C...` and `mash admin set-meta --describe TEXT|- --cap C|- --uncap C`. `mash who --cap C` (repeatable, exact, all must be present) finds endpoints by capability, `--match` also searches the description and capabilities, `--long` and `--json` show them, and the `who` tool gains a `cap` parameter. Older readers ignore the new fields ([ADR-0050](docs/decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
 - `mash who` filters and machine-readable output: `--match TEXT` (name, role, note, labels), `--name`, `--role`, `--owner`, `--label K[=V]` (repeatable), `--online`/`--offline`, `--names` and `--json` (a documented array; `--long` adds `lease`). Filters combine with AND, no match exits 0 with empty output, a bad flag exits 2, and the unfiltered output is unchanged. The `who` tool gains optional `match`, `name`, `role`, `label`, `online` and `format` parameters that use the same filter (see [docs/operations.md](docs/operations.md#finding-endpoints-who-filters-and---json)).
 
 ### Added

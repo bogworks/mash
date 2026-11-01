@@ -208,3 +208,83 @@ func TestSetMetaLabels(t *testing.T) {
 		t.Fatalf("empty labels stored: %s", ent.Value())
 	}
 }
+
+func TestProvisionDescriptionAndCaps(t *testing.T) {
+	e, a, _ := setup(t)
+	ctx := context.Background()
+	_, u := e.Mint(t, "alpha")
+	rec, err := a.Provision(ctx, "alpha", u, e.Account, "", admin.Meta{Description: "runs nats tooling", Caps: []string{"zeta", "nats-accounts"}})
+	if err != nil || rec.Description != "runs nats tooling" || strings.Join(rec.Caps, ",") != "nats-accounts,zeta" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	_, u2 := e.Mint(t, "beta")
+	for name, m := range map[string]admin.Meta{
+		"bad cap": {Caps: []string{"Bad"}}, "dup cap": {Caps: []string{"a", "a"}},
+		"nine caps": {Caps: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}},
+		"tab":       {Description: "a\tb"}, "long": {Description: strings.Repeat("x", 257)},
+	} {
+		if _, err := a.Provision(ctx, "beta", u2, e.Account, "", m); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+func TestSetMetaDescriptionAndCaps(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, u := e.Mint(t, "alpha")
+	if _, err := a.Provision(ctx, "alpha", u, e.Account, "", admin.Meta{Role: "r", Caps: []string{"b"}}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	// Plant a field this mash does not know, as a newer mash would.
+	ent, _ := kv.Get(ctx, "alpha")
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(ent.Value(), &obj)
+	obj["future"] = json.RawMessage(`{"x":[1,2]}`)
+	val, _ := json.Marshal(obj)
+	if _, err := kv.Put(ctx, "alpha", val); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Description: sp("does things"), AddCaps: []string{"c", "a"}})
+	if err != nil || rec.Description != "does things" || strings.Join(rec.Caps, ",") != "a,b,c" || rec.Role != "r" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	ent, _ = kv.Get(ctx, "alpha")
+	if !strings.Contains(string(ent.Value()), `"future":{"x":[1,2]}`) {
+		t.Fatalf("unknown field lost: %s", ent.Value())
+	}
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{DropCaps: []string{"b"}, AddCaps: []string{"d"}}); err != nil || strings.Join(rec.Caps, ",") != "a,c,d" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"a"}, DropCaps: []string{"zz"}}); err != nil || len(rec.Caps) != 3 {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	// The limit applies after the merge: 3 + 5 = 8 is fine, one more is not.
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"e", "f", "g", "h", "i"}}); err != nil || len(rec.Caps) != 8 {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"j"}}); err == nil {
+		t.Fatal("ninth cap accepted")
+	}
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"j"}, DropCaps: []string{"a"}}); err != nil || len(rec.Caps) != 8 {
+		t.Fatalf("swap at the limit: %+v %v", rec, err)
+	}
+	for name, up := range map[string]admin.MetaUpdate{"bad cap": {AddCaps: []string{"Bad"}}, "bad uncap": {DropCaps: []string{"a b"}},
+		"tab": {Description: sp("a\tb")}, "long": {Description: sp(strings.Repeat("x", 257))}} {
+		if _, err := a.SetMeta(ctx, "alpha", up); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{Description: sp(""), ClearCaps: true}); err != nil || rec.Description != "" || len(rec.Caps) != 0 || rec.Role != "r" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	ent, _ = kv.Get(ctx, "alpha")
+	if s := string(ent.Value()); strings.Contains(s, `"caps"`) || strings.Contains(s, `"description"`) || !strings.Contains(s, `"future"`) {
+		t.Fatalf("after clear: %s", s)
+	}
+	_, _ = a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"p", "q"}})
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{ClearCaps: true, AddCaps: []string{"z"}}); err != nil || strings.Join(rec.Caps, ",") != "z" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+}

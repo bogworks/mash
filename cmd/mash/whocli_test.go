@@ -8,7 +8,7 @@ import (
 
 func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.admin(t, "set-meta", "a", "--role", "NATS operator", "--label", "team=acme"); code != 0 {
+	if out, code := w.admin(t, "set-meta", "a", "--role", "NATS operator", "--label", "team=acme", "--describe", "keeps accounts", "--cap", "nats-accounts"); code != 0 {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
 	base, _ := w.cli(t, "b", "who")
@@ -23,6 +23,12 @@ func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	}
 	if out, _ := w.cli(t, "b", "who", "--name", "B", "--offline", "--names"); out != "b\n" {
 		t.Fatalf("--name --offline: %q", out)
+	}
+	if out, _ := w.cli(t, "b", "who", "--cap", "nats-accounts", "--names"); out != "a\n" {
+		t.Fatalf("--cap: %q", out)
+	}
+	if out, _ := w.cli(t, "b", "who", "--match", "accounts", "--long"); !strings.Contains(out, "desc keeps accounts\tcaps nats-accounts") {
+		t.Fatalf("--long: %q", out)
 	}
 	out, code := w.cli(t, "b", "who", "--json", "--role", "operator")
 	var arr []map[string]any
@@ -57,6 +63,12 @@ func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	}
 	if r := s.call(t, 34, "who", `{"format":"xml"}`); r["isError"] != true {
 		t.Fatalf("bad format: %v", r)
+	}
+	if got := resultText(s.call(t, 36, "who", `{"cap":["nats-accounts"]}`)); !strings.HasPrefix(got, "a\t") || strings.Contains(got, "b\t") {
+		t.Fatalf("cap who: %q", got)
+	}
+	if r := s.call(t, 37, "who", `{"cap":["Bad"]}`); r["isError"] != true {
+		t.Fatalf("bad cap: %v", r)
 	}
 	if r := s.call(t, 35, "who", `{"label":["=x"]}`); r["isError"] != true {
 		t.Fatalf("bad label: %v", r)
