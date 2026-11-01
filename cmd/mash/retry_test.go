@@ -292,6 +292,106 @@ func TestServeWaitingInstructionsKeepPolicy(t *testing.T) {
 	}
 }
 
+// An XDG config.json makes the XDG directory the config directory, but an operator policy.md that only exists in the
+// legacy ~/.config/mash must still be applied.
+func TestServeLegacyPolicyWithXDGConfig(t *testing.T) {
+	setTiming(t, time.Hour, 20*time.Second)
+	w := newWorld(t, "a")
+	holdLease(t, leaseKV(t, w), "a")
+	env := w.env["a"]
+	xdg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "mash", "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["XDG_CONFIG_HOME"] = xdg
+	dir := filepath.Join(env["HOME"], ".config", "mash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.md"), []byte("LEGACY-POLICY-SENTINEL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, env)
+	instr := s.initialize(t)["result"].(map[string]any)["instructions"].(string)
+	if !strings.Contains(instr, "LEGACY-POLICY-SENTINEL") {
+		t.Fatalf("legacy policy dropped: %q", instr)
+	}
+}
+
+// An XDG policy.md that exists but cannot be read is a configuration failure: the operator's restrictions are
+// neither dropped nor replaced by the legacy copy. A missing policy.md is still an empty policy.
+func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file")
+	}
+	setTiming(t, time.Hour, 20*time.Second)
+	w := newWorld(t, "a")
+	env := w.env["a"]
+	xdg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "mash", "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pol := filepath.Join(xdg, "mash", "policy.md")
+	if err := os.WriteFile(pol, []byte("XDG-POLICY"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(pol); err == nil {
+		t.Skip("file modes are not enforced here")
+	}
+	env["XDG_CONFIG_HOME"] = xdg
+	dir := filepath.Join(env["HOME"], ".config", "mash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.md"), []byte("LEGACY-POLICY-SENTINEL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, env)
+	instr := s.initialize(t)["result"].(map[string]any)["instructions"].(string)
+	if strings.Contains(instr, "LEGACY-POLICY-SENTINEL") || !strings.Contains(instr, "reading "+pol) {
+		t.Fatalf("unreadable policy not reported: %q", instr)
+	}
+	if st := resultText(s.call(t, 90, "status", "{}")); !strings.Contains(st, "config: FAILED") || !strings.Contains(st, "reading "+pol) {
+		t.Fatalf("status does not report it: %s", st)
+	}
+
+	// A dangling symlink is present, not absent: ReadFile says ErrNotExist but it is still a configuration error.
+	if err := os.Remove(pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(xdg, "nowhere.md"), pol); err != nil {
+		t.Fatal(err)
+	}
+	sd := startServe(t, env)
+	instr = sd.initialize(t)["result"].(map[string]any)["instructions"].(string)
+	if strings.Contains(instr, "LEGACY-POLICY-SENTINEL") || !strings.Contains(instr, "reading "+pol) {
+		t.Fatalf("dangling policy symlink not reported: %q", instr)
+	}
+	if st := resultText(sd.call(t, 90, "status", "{}")); !strings.Contains(st, "config: FAILED") || !strings.Contains(st, "reading "+pol) {
+		t.Fatalf("status does not report dangling symlink: %s", st)
+	}
+	if err := os.Remove(pol); err != nil {
+		t.Fatal(err)
+	}
+
+	// Missing policy.md: fine, empty policy.
+	if err := os.Remove(filepath.Join(dir, "policy.md")); err != nil {
+		t.Fatal(err)
+	}
+	holdLease(t, leaseKV(t, w), "a")
+	s2 := startServe(t, env)
+	instr = s2.initialize(t)["result"].(map[string]any)["instructions"].(string)
+	if strings.Contains(instr, "reading ") {
+		t.Fatalf("missing policy reported as an error: %q", instr)
+	}
+}
+
 // stdin closing at any point of the wait must end serve and leave no connection or lease behind.
 func waitGone(t *testing.T, w *world, base int, name string, kv jetstream.KeyValue, planted bool) {
 	t.Helper()

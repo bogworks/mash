@@ -38,11 +38,11 @@ Messages: `mash: no NATS url (config.json "url" or MASH_URL)` and `mash: no owne
 
 Fix: set `url` and `owner` in `~/.config/mash/config.json`, or `MASH_URL` and `MASH_OWNER`. The environment wins over the file. The owner is 1 to 48 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
 
-mash reads `~/.config/mash/config.json` under `$HOME`; it does not look at `XDG_CONFIG_HOME`, and a `~` in `creds` is not expanded (tracked in #42). If you moved the file, move it back or use the `MASH_*` variables, and write creds paths in full.
+mash reads `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
 
 ## `creds: MISSING`, or the creds file is refused
 
-- `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `~/.config/mash/<name>.creds`. Put it there or set `MASH_CREDS` (or `creds` in config.json).
+- `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - `creds: FAILED - ... is a directory` or `is not readable`: fix the path or ownership.
 - An error starting `sap: creds JWT:` or `sap: creds seed:`: the file is not an operator-mode user creds file (tracked in #32).

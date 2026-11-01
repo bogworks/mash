@@ -1,4 +1,4 @@
-// Package config loads mash's settings: ~/.config/mash/config.json, then the
+// Package config loads mash's settings: config.json in the config directory (see ConfigDir), then the
 // environment, which wins. An empty endpoint name means the endpoint manager
 // runs inert (the plugin can be enabled in sessions that have no identity).
 package config
@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bogworks/mash/internal/store"
@@ -44,7 +46,8 @@ type Config struct {
 	LaunchToken    string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
 	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	Dir            string        // ~/.config/mash
+	Dir            string        // the config directory (ConfigDir); "" when none can be found
+	Legacy         string        // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits         store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 }
 
@@ -110,16 +113,113 @@ func ValidateFile(raw []byte) error {
 	return nil
 }
 
-// Load resolves the configuration. env is os.Getenv in production.
+// ErrNoConfigDir is what Load reports when a config file or default creds path is needed and neither a home nor an
+// absolute XDG_CONFIG_HOME is available.
+var ErrNoConfigDir = errors.New("mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables")
+
+// ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds: $XDG_CONFIG_HOME/mash
+// when XDG_CONFIG_HOME is absolute and that directory holds a config.json, else $HOME/.config/mash (where existing
+// installs keep theirs). With no home it is the XDG directory if one is set, else "": never a relative path.
+func ConfigDir(env func(string) string, home string) string {
+	xdg := ""
+	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
+		xdg = filepath.Join(x, "mash")
+		// Only a config.json that is absent falls back to the legacy directory. Any other error (permission denied,
+		// I/O) keeps the XDG directory so Load's read fails loudly instead of silently using a different config.
+		if _, err := os.Stat(filepath.Join(xdg, "config.json")); err == nil ||
+			!(errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
+			return xdg
+		}
+	}
+	if home != "" {
+		return filepath.Join(home, ".config", "mash")
+	}
+	return xdg
+}
+
+// Absent reports whether p is definitely not there: Lstat says not-exist or not-a-directory. Anything else, a symlink
+// (even a dangling or inaccessible one) or a permission or I/O error, counts as present so the caller's read fails
+// loudly instead of silently picking a file from another directory.
+func Absent(p string) bool {
+	_, err := os.Lstat(p)
+	return err != nil && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR))
+}
+
+// FindFile is the path of name (policy.md, a default creds file): in the XDG mash directory when it is there, else in
+// the legacy $HOME/.config/mash when it is there, else in ConfigDir, so messages and creation paths stay where they
+// were. The XDG copy wins when both exist.
+func FindFile(env func(string) string, home, name string) string {
+	var dirs []string
+	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
+		dirs = append(dirs, filepath.Join(x, "mash"))
+	}
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".config", "mash"))
+	}
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if !Absent(p) {
+			return p
+		}
+	}
+	if d := ConfigDir(env, home); d != "" {
+		return filepath.Join(d, name)
+	}
+	return ""
+}
+
+// Find is FindFile for this Config: name in Dir if present, else in Legacy if present, else in Dir.
+func (c Config) Find(name string) string {
+	for _, d := range []string{c.Dir, c.Legacy} {
+		if d == "" {
+			continue
+		}
+		p := filepath.Join(d, name)
+		if !Absent(p) {
+			return p
+		}
+	}
+	if c.Dir == "" {
+		return ""
+	}
+	return filepath.Join(c.Dir, name)
+}
+
+// ExpandHome expands a leading "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
+func ExpandHome(p, home string) string {
+	if home == "" {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+// Load resolves the configuration. env is os.Getenv in production; home is $HOME, or the OS's idea of the user's home
+// when that is unset ("" when unknown).
 func Load(env func(string) string, home string) (Config, error) {
-	dir := filepath.Join(home, ".config", "mash")
-	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
+	dir := ConfigDir(env, home)
+	legacy := ""
+	if home != "" {
+		legacy = filepath.Join(home, ".config", "mash")
+	}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
 	if c.StateHome == "" {
 		c.StateHome = filepath.Join(home, ".local", "state")
 	}
 
 	var f file
-	raw, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	var raw []byte
+	var err error
+	if dir != "" { // no directory means no file: the pure-environment case still loads
+		raw, err = os.ReadFile(filepath.Join(dir, "config.json"))
+	} else {
+		err = os.ErrNotExist
+	}
 	switch {
 	case err == nil:
 		if err := json.Unmarshal(raw, &f); err != nil {
@@ -164,6 +264,7 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.Name, "MASH_NAME")
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
+	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	str(&c.Host, "MASH_HOST")
 	str(&c.TLSCA, "MASH_TLS_CA")
@@ -235,16 +336,25 @@ func Load(env func(string) string, home string) (Config, error) {
 		return c, fmt.Errorf("mash: MASH_NAME %q: use 1-48 lower-case letters, digits and single hyphens, starting with a letter", c.Name)
 	}
 	if c.URL == "" {
+		if dir == "" {
+			return c, ErrNoConfigDir
+		}
 		return c, ErrNoURL
 	}
 	if c.Owner == "" {
+		if dir == "" {
+			return c, ErrNoConfigDir
+		}
 		return c, ErrNoOwner
 	}
 	if !ValidName(c.Owner) {
 		return c, fmt.Errorf("mash: owner %q: use 1-48 lower-case letters, digits and single hyphens", c.Owner)
 	}
 	if c.Creds == "" {
-		c.Creds = filepath.Join(dir, c.Name+".creds")
+		if dir == "" {
+			return c, ErrNoConfigDir
+		}
+		c.Creds = c.Find(c.Name + ".creds")
 	}
 	return c, nil
 }

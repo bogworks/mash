@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -153,6 +154,19 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
+	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
+	// a silent drop of the operator's restrictions.
+	var policy []byte
+	if cfg.Dir != "" {
+		path := cfg.Find("policy.md")
+		var perr error
+		if policy, perr = os.ReadFile(path); perr != nil && !(errors.Is(perr, fs.ErrNotExist) && config.Absent(path)) {
+			perr = fmt.Errorf("mash: reading %s: %w", path, perr)
+			src.cfgErr = perr
+			fmt.Fprintln(stderr, perr)
+			return degraded(endpoint.ErrorInstructions(cfg.Name, perr), true)
+		}
+	}
 	// The first Open runs before the MCP server exists, as it always has: it is bounded by openTimeout, and a
 	// stdin EOF during it is seen once it returns. A held lease is waited out, and a transient failure (a
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
@@ -180,7 +194,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	var state atomic.Pointer[sessionState]
 	instr := ""
-	policy, _ := os.ReadFile(filepath.Join(cfg.Dir, "policy.md"))
 	instr = endpoint.Instructions(cfg.Name, cfg.Owner, string(policy))
 	switch {
 	case ep != nil:

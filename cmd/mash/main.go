@@ -44,7 +44,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 
-Configuration: ~/.config/mash/config.json {"url","owner"}, overridden by MASH_URL,
+Configuration: ~/.config/mash/config.json (or $XDG_CONFIG_HOME/mash) {"url","owner"}, overridden by MASH_URL,
 MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 `
@@ -146,7 +146,11 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 	if args[0] == "plugin" { // before config: an install runs it with no endpoint and no environment
 		return pluginCmd(args[1:], stdout, stderr)
 	}
-	cfg, err := config.Load(env, env("HOME"))
+	home := env("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	cfg, err := config.Load(env, home)
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
 		// An unknown host is refused loudly, never read as claude: a hook that ran with the wrong adapter would
