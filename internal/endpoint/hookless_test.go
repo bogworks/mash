@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -270,4 +271,72 @@ func TestProvenHooklessNoticeCoversResultAndFyiMail(t *testing.T) {
 	if got := ev.all(); len(got) != 1 {
 		t.Fatalf("%d wakes, want exactly 1: %q", len(got), got)
 	}
+}
+
+// Issue #40: a channel write is not delivery when wakes are not landing. Once HooklessWakes wakes have started no turn,
+// a message the spool will not take is held unacked, not written to the channel; after a hook runs it falls back to
+// the channel and acks again. (Before any hook, under SpoolFromStart, it is held too: see
+// TestSpoolFromStartClaudeUnwritableSpoolHoldsBeforeAnyHook; the channel's ack path is
+// TestSpoolFromStartClaudeUnwritableSpoolFallsBackToTheChannelAfterAHook.)
+func TestSuspectedHooklessHoldsSpoolFallbackUntilAHookRuns(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through a 0500 directory")
+	}
+	hooklessKnobs(t)
+	od := spoolFullDelay
+	spoolFullDelay = time.Second
+	t.Cleanup(func() { spoolFullDelay = od })
+	f := newFixture(t, "a", "b")
+	a, ev, sp := f.runSpooledClaudeFromStart(t, "a")
+	sendTask(t, f, "stuck")
+	ev.waitFor(t, 3, 5*time.Second)
+	until(t, "suspected", func() bool { st, _ := a.Hookless(); return st == HooklessSuspected })
+	wakes := len(ev.all())
+
+	if err := os.Chmod(sp.Dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
+	sendTask(t, f, "fallback body")
+	time.Sleep(4 * time.Second) // past the three spool tries and a redelivery
+	for _, g := range ev.all() {
+		if strings.Contains(g, "fallback body") {
+			t.Fatalf("channel event %q shows a message while wakes are not landing", g)
+		}
+	}
+	if n := unread(t, a); n != 2 {
+		t.Fatalf("unread %d, want 2: the fallback message must stay unacked", n)
+	}
+	if got := len(ev.all()); got != wakes {
+		t.Fatalf("%d channel events, want the %d wakes only", got, wakes)
+	}
+
+	// A hook runs: the state clears and the fallback acks on its channel write.
+	if err := os.Chmod(sp.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Touch(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sp.Dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := a.Hookless(); st != HooklessNone {
+		t.Fatalf("state %v after a hook ran, want none", st)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		found := false
+		for _, g := range ev.all() {
+			found = found || strings.Contains(g, "> fallback body")
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the fallback never reached the channel after a hook ran: %q", ev.all())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	until(t, "the fallback acks", func() bool { return unread(t, a) == 1 }) // the spooled "stuck" is still held
 }

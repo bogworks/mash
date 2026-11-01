@@ -48,9 +48,9 @@ func TestStatusToolSuspected(t *testing.T) {
 	eventually(t, 10*time.Second, "SUSPECTED shows", func() bool {
 		id++
 		out = statusOf(t, s, id)
-		return strings.Contains(out, "delivery: SUSPECTED - 1 wakes and no hook since ")
+		return strings.Contains(out, "delivery: SUSPECTED - the last 1 wakes started no turn (no hook since ")
 	})
-	if line := statusLine(t, out, "delivery: SUSPECTED"); !strings.HasSuffix(line, "; re-waking stopped") {
+	if line := statusLine(t, out, "delivery: SUSPECTED"); !strings.HasSuffix(line, "; channel writes are not counted as delivery; re-waking stopped") {
 		t.Fatalf("suspected line %q", line)
 	}
 	if strings.Contains(out, "DEGRADED") || strings.Contains(out, "hooks have not run") {
