@@ -222,6 +222,21 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 - **The development flag does nothing here, so the allowlist is required.** With `-p` or the Agent SDK, Claude Code ignores `--dangerously-load-development-channels` and the channel does not register ([Claude Code channels reference](https://code.claude.com/docs/en/channels-reference#test-during-the-research-preview)). Allowlist mash in managed settings as in [install.md](install.md#3-allow-the-channel-once-per-machine) for any channel wake; hooks deliver mail without a channel, but nothing wakes an idle session. A headless run that is already in a turn needs no wake.
 - **An SDK host must load the plugin itself.** `claude -p` loads plugins you already installed, but an Agent SDK host takes plugins through the SDK's plugin option ([Load plugins in the Agent SDK](https://code.claude.com/docs/en/agent-sdk/plugins)). Mail needs the plugin's MCP server (`mash serve`) and both hooks, PostToolUse and UserPromptSubmit (`plugin/hooks/hooks.json`); a host that loads MCP servers or hooks its own way and omits either gets no delivery, and `status` reports `delivery:` accordingly. Also set `MASH_NAME`. mash has not been run under an SDK host.
 
+## Fixed protocol constants
+
+These timings are not configurable: peers and the server must agree on them, so one operator's value would break another's session or weaken a check.
+
+| Name | Value | Where | Why fixed |
+|---|---|---|---|
+| Heartbeat interval | 30 s | `endpoint.HeartbeatInterval` (`internal/endpoint/service.go`) | Endpoints publish presence at this rate; the online window below assumes it. |
+| Online window | 90 s (3 heartbeats) | `endpoint.OnlineWindow` (`directory.go`) | How recently a heartbeat must be seen for `who` to show an endpoint online; every reader must apply the same rule. |
+| Lease TTL | 90 s | `store.LeaseTTL` (`internal/store/store.go`) | The lease bucket's expiry: how long a crashed holder blocks its name. It is set on the bucket, so every session shares it. |
+| Lease refresh | 30 s | `endpoint.LeaseRefresh` (`endpoint.go`) | A third of the TTL, so two missed refreshes do not lose the lease. |
+| Live request signature skew | 30 s | `sap.LiveSkew` (`internal/sap/sender.go`) | How far a signed live request's time may differ from the receiver's clock; `mash status` warns at 10 s. |
+| Signed message age | 5 min | `endpoint.MaxSignedAge` (`mail.go`) | A message signed longer than this before it was stored is labelled `[stale]`: the replay defence. |
+| MCP ping | every 30 s, 10 s to answer | `mcpPingEvery`, `mcpPingWait` (`cmd/mash/serve.go`) | Serve's liveness check of its MCP client, recorded in the lease. |
+| Channel grace and fallback | 500 ms, 3 s | `mcp.ChannelGrace`, `mcp.ChannelFallback` (`internal/mcp/server.go`) | Claude Code drops channel events sent before it registers the channel; these bound that wait. |
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

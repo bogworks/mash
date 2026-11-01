@@ -21,7 +21,7 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	if cfg.Inert() {
 		return fail(fmt.Errorf("mash: set MASH_NAME to the endpoint you are acting as"))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), cliDeadline(cfg))
 	defer cancel()
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
 	ep, err := endpoint.OpenClientWith(openCtx, cfg, clientNeeds(cfg, args))
@@ -248,4 +248,12 @@ func inboxArgs(args []string) (limit int, after *uint64, err error) {
 		args = args[2:]
 	}
 	return limit, after, nil
+}
+
+// cliDeadline is the total deadline of one command: cli_timeout, else 15 minutes.
+func cliDeadline(cfg config.Config) time.Duration {
+	if cfg.CLITimeout > 0 {
+		return cfg.CLITimeout
+	}
+	return config.DefaultCLITimeout
 }

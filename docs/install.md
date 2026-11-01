@@ -84,6 +84,11 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 | `idle_wake` | `MASH_IDLE_WAKE` | Hook mode: how long spooled mail waits for a hook before serve wakes the idle session. A Go duration, 5s to 30m. Default `45s`; re-wakes double from there, to 30 minutes. |
 | `open_timeout` | `MASH_OPEN_TIMEOUT` | How long a command or serve may spend opening: connecting to its data and checking its identity. A Go duration above zero (for example `"45s"`), for slow links. Default `20s`. |
 | `call_timeout` | `MASH_CALL_TIMEOUT` | How long one command, or one tool call in serve, may spend on its requests once open. A Go duration above zero. Default `15s`. |
+| `lease_retry` | `MASH_LEASE_RETRY` | serve: the wait between attempts to take an endpoint's lease while another session holds it. A Go duration above zero. Default `10s`. |
+| `transient_budget` | `MASH_TRANSIENT_BUDGET` | serve: how long transient failures (timeouts, no responders, a dropped connection) may repeat while waiting for the lease before the wait ends. A Go duration above zero. Default `15m`. |
+| `transient_max` | `MASH_TRANSIENT_MAX` | serve: the retry backoff after transient failures doubles from `lease_retry` up to this. A Go duration above zero. Default `2m`. |
+| `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
+| `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mash admin` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
 
 The environment wins over the file. Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`).
 

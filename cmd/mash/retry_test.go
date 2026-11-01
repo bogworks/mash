@@ -801,3 +801,46 @@ func TestServeRecordsItselfWhileWaiting(t *testing.T) {
 	s.await(t, 5*time.Second, isChannel) // the online notice
 	eventually(t, 10*time.Second, "waiting record removed once bound", func() bool { _, err := os.Stat(rec); return err != nil })
 }
+
+// lease_retry (MASH_LEASE_RETRY) reaches the wait: with the test knob at 10 s, the configured 50 ms is what the held
+// notice names and what retries the lease.
+func TestServeLeaseRetryFromConfig(t *testing.T) {
+	setTiming(t, 10*time.Second, 20*time.Second)
+	w := newWorld(t, "a")
+	kv := leaseKV(t, w)
+	holdLease(t, kv, "a")
+	env := w.env["a"]
+	env["MASH_LEASE_RETRY"] = "50ms"
+	s := startServe(t, env)
+	s.initialize(t)
+	s.tools(t)
+	if held := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(held, "retrying every 50ms") {
+		t.Fatalf("held notice: %s", held)
+	}
+	freeLease(t, kv, "a")
+	if online := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(online, "online") {
+		t.Fatalf("online notice: %s", online)
+	}
+}
+
+func TestApplyRetryTiming(t *testing.T) {
+	setTiming(t, time.Second, time.Second)
+	transientMax, transientBudget = 3*time.Second, 4*time.Second
+	applyRetryTiming(config.Config{})
+	if leaseRetry != time.Second || transientMax != 3*time.Second || transientBudget != 4*time.Second {
+		t.Fatalf("unset keys changed the knobs: %v %v %v", leaseRetry, transientMax, transientBudget)
+	}
+	applyRetryTiming(config.Config{LeaseRetry: 5 * time.Second, TransientMax: 6 * time.Second, TransientBudget: 7 * time.Second})
+	if leaseRetry != 5*time.Second || transientMax != 6*time.Second || transientBudget != 7*time.Second {
+		t.Fatalf("set keys: %v %v %v", leaseRetry, transientMax, transientBudget)
+	}
+}
+
+func TestCLIAndAdminDeadlines(t *testing.T) {
+	if cliDeadline(config.Config{}) != 15*time.Minute || cliDeadline(config.Config{CLITimeout: time.Hour}) != time.Hour {
+		t.Fatal("cliDeadline")
+	}
+	if adminDeadline(config.Config{}) != 30*time.Second || adminDeadline(config.Config{AdminTimeout: 2 * time.Minute}) != 2*time.Minute {
+		t.Fatal("adminDeadline")
+	}
+}
