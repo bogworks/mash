@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/store"
 )
 
 func (w *world) admin(t *testing.T, args ...string) (string, int) {
@@ -116,5 +117,40 @@ func TestWhoLongAndMCPWhoShowMetaAndLease(t *testing.T) {
 	}
 	if got := whoLine(t, txt, "b"); got != "b\toffline" && !strings.HasPrefix(got, "b\t") {
 		t.Errorf("mcp who b: %q", got)
+	}
+}
+
+func TestAdminLimitsCLI(t *testing.T) {
+	w := newWorld(t, "a")
+	run := func(l store.Limits, args ...string) (string, int) {
+		var out, errb bytes.Buffer
+		code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, Limits: l}, args, &out, &errb)
+		return out.String() + errb.String(), code
+	}
+	// --show needs no server and prints the defaults for a Config with no limits.
+	const defaults = "inbox_max_bytes 16MiB\ninbox_max_age 30d\ndirectory_max_bytes 16MiB\nlease_max_bytes 4MiB\ninbox_max_consumers -1\n"
+	if out, code := run(store.Limits{}, "limits", "--show"); code != 0 || out != defaults {
+		t.Fatalf("show: %d %q", code, out)
+	}
+	custom := store.Limits{InboxMaxBytes: 64 << 20, InboxMaxAge: 36 * time.Hour, DirectoryMaxBytes: 2 << 20, LeaseMaxBytes: 5 << 19, InboxMaxConsumers: 3}
+	if out, code := run(custom, "limits", "--show"); code != 0 ||
+		out != "inbox_max_bytes 64MiB\ninbox_max_age 36h0m0s\ndirectory_max_bytes 2MiB\nlease_max_bytes 2560KiB\ninbox_max_consumers 3\n" {
+		t.Fatalf("show custom: %d %q", code, out)
+	}
+	// limits [name...] raises an existing inbox.
+	_, u := w.e.Mint(t, "c")
+	if out, code := w.admin(t, "provision", "c", "--user", u, "--account", w.e.Account); code != 0 {
+		t.Fatalf("provision: %d %s", code, out)
+	}
+	up := store.DefaultLimits()
+	up.InboxMaxBytes = 32 << 20
+	if out, code := run(up, "limits", "c"); code != 0 || !strings.Contains(out, "c: max_bytes 16777216 -> 33554432") {
+		t.Fatalf("limits: %d %q", code, out)
+	}
+	if out, code := run(up, "limits", "c"); code != 0 || strings.TrimSpace(out) != "c: unchanged" {
+		t.Fatalf("again: %d %q", code, out)
+	}
+	if out, code := run(store.DefaultLimits(), "limits", "c"); code != 1 || !strings.Contains(out, "max_bytes") {
+		t.Fatalf("lower: %d %q", code, out)
 	}
 }

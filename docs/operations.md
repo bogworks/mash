@@ -4,12 +4,14 @@ mash needs a NATS server in operator mode with JetStream, and one account for ma
 
 ## The account
 
-Create an account (these examples call it `MASH`) with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint.
+Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.
 
 ```sh
-nsc add account MASH
-nsc edit account MASH --sk generate --js-disk-storage 2G --js-streams 64 --js-consumer 128
-nsc push --account MASH
+ACCOUNT=${ACCOUNT:-MASH}
+JS_DISK=${JS_DISK:-2G} JS_STREAMS=${JS_STREAMS:-64} JS_CONSUMERS=${JS_CONSUMERS:-128}
+nsc add account "$ACCOUNT"
+nsc edit account "$ACCOUNT" --sk generate --js-disk-storage "$JS_DISK" --js-streams "$JS_STREAMS" --js-consumer "$JS_CONSUMERS"
+nsc push --account "$ACCOUNT"
 ```
 
 mash stores everything on file storage; it needs no memory store. A server with no memory store configured refuses an account that asks for one, so leave `--js-mem-storage` unset.
@@ -17,8 +19,8 @@ mash stores everything on file storage; it needs no memory store. A server with 
 Add an admin user for mash's admin commands (full access to the account), and keep its credentials only where you run `mash admin`:
 
 ```sh
-nsc add user --account MASH mashadmin
-nsc generate creds --account MASH --name mashadmin > ~/.config/mash/admin.creds
+nsc add user --account "$ACCOUNT" mashadmin
+nsc generate creds --account "$ACCOUNT" --name mashadmin > ~/.config/mash/admin.creds
 chmod 600 ~/.config/mash/admin.creds
 ```
 
@@ -29,7 +31,7 @@ export MASH_URL=tls://nats.example.com:4222 MASH_OWNER=alice MASH_ADMIN_CREDS=~/
 mash admin init
 ```
 
-Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. The directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous. Running `mash admin init` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key, and a bucket that already has a cap keeps it, larger or smaller. Init never purges anything.
+Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. By default the directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous (see [Limits](#limits) to change them). Running `mash admin init` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key; a bucket whose cap is smaller than the configured one is raised to it; a bucket with a larger cap keeps it. Init never lowers a cap and never purges anything.
 
 ## Adding an endpoint
 
@@ -49,7 +51,7 @@ nsc add user --account MASH "$name" "$@"
 user=$(nsc describe user --account MASH --name "$name" --json | jq -r .sub)
 account=$(nsc describe account MASH --json | jq -r .sub)
 mash admin provision "$name" --user "$user" --account "$account" --note "design session on laptop"
-nsc generate creds --account MASH --name "$name" > ~/.config/mash/$name.creds
+nsc generate creds --account "$ACCOUNT" --name "$name" > ~/.config/mash/$name.creds
 chmod 600 ~/.config/mash/$name.creds
 )
 ```
@@ -85,15 +87,70 @@ mash admin set-meta "$name" --role builder --host - --label tier=- --label env=p
 
 ```sh
 mash admin deprovision design
-nsc revocations add-user --account MASH --name design
-nsc push --account MASH
+nsc revocations add-user --account "$ACCOUNT" --name design
+nsc push --account "$ACCOUNT"
 ```
 
 Deprovisioning fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and provisioning the name again clears it at once. Revoking the user stops its credentials from connecting at all. Until you revoke, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
 
 ## Inbox limits
 
-Each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest. Single messages are limited to 1 MiB including headers, or to the server's `max_payload` when that is smaller: mash reads it from the server at connect time and refuses an oversize send locally with a clear error before anything is published. Synadia Cloud's free tier caps a payload at 512 KiB, so there the limit is 512 KiB. Message deletion and purging are denied on the stream itself, so even the account admin cannot quietly rewrite history; deleting the whole stream (deprovisioning) is the only way to remove it.
+By default each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest (both are configurable: see [Limits](#limits)). Single messages are limited to 1 MiB including headers, or to the server's `max_payload` when that is smaller: mash reads it from the server at connect time and refuses an oversize send locally with a clear error before anything is published. Synadia Cloud's free tier caps a payload at 512 KiB, so there the limit is 512 KiB. Message deletion and purging are denied on the stream itself, so even the account admin cannot quietly rewrite history; deleting the whole stream (deprovisioning) is the only way to remove it.
+
+## Limits
+
+The caps on inboxes and buckets are configurable. The defaults are what mash has always used:
+
+| Key (`limits` in config.json) | Default | Applies to |
+|---|---|---|
+| `inbox_max_bytes` | `16MiB` | each inbox stream; the oldest mail is dropped past it (minimum 2 MiB) |
+| `inbox_max_age` | `30d` | each inbox stream; older mail is dropped (minimum `1h`) |
+| `directory_max_bytes` | `16MiB` | the directory bucket (minimum 1 MiB) |
+| `lease_max_bytes` | `4MiB` | the lease bucket (minimum 1 MiB) |
+| `inbox_max_consumers` | `-1` | consumers per inbox stream (-1 is unlimited, else at least 1) |
+
+An optional `limits` object in `~/.config/mash/config.json` changes them; leave out a key to keep its default. Sizes are integers (bytes) or strings with a `B`, `KiB`, `MiB` or `GiB` suffix; ages are Go durations (`720h`) or whole days (`30d`). An unknown key or an invalid value is an error naming it. There are no environment overrides.
+
+```json
+{
+  "url": "tls://nats.example.com:4222",
+  "owner": "alice",
+  "limits": {
+    "inbox_max_bytes": "16MiB",
+    "inbox_max_age": "30d",
+    "directory_max_bytes": "16MiB",
+    "lease_max_bytes": "4MiB",
+    "inbox_max_consumers": -1
+  }
+}
+```
+
+`mash admin limits --show` prints the effective limits, one `key value` per line.
+
+### Changing limits later
+
+Limits only go up. Edit config.json, then apply it:
+
+```sh
+mash admin init              # raises the two buckets (a larger existing cap is kept)
+mash admin limits            # raises every inbox's max_bytes and max_age, and sets max_consumers
+mash admin limits design     # or only the named inboxes
+```
+
+New endpoints (`mash admin provision`) get the configured limits at once. `mash admin limits` updates each existing stream in place, keeping its mail, and prints a line per endpoint saying what changed. It refuses to lower `max_bytes` or `max_age` on an endpoint, with an error naming the endpoint and field, and changes nothing for it, because a lower cap could discard stored mail. To lower an inbox's limits, run `mash admin deprovision <name>` (which removes the mail in it) and provision it again. `mash admin init` likewise never lowers a bucket. The check that runs on an existing inbox still reports any stream that differs from the configured limits. Run `mash admin limits` from one admin at a time: JetStream has no compare-and-set on a stream's configuration, so two admins applying different limits to the same inbox at the same moment can leave the lower of the two caps (and a lower cap can discard mail).
+
+### Account limits
+
+The NATS account has limits of its own: streams, consumers and disk. Size them from the endpoint count: one stream per endpoint plus two for the buckets, and one consumer per endpoint. The disk must hold the sum of the stream caps (`inbox_max_bytes` per endpoint plus the two bucket caps), so raising the inbox cap raises the disk you need.
+
+```sh
+ENDPOINTS=20
+JS_STREAMS=$((ENDPOINTS + 2))
+JS_CONSUMERS=$ENDPOINTS
+JS_DISK_MIB=$((ENDPOINTS * 16 + 16 + 4))   # inbox_max_bytes in MiB per endpoint, plus the two buckets
+```
+
+The examples above default to `JS_DISK=2G`, `JS_STREAMS=64` and `JS_CONSUMERS=128`, which leave room to grow; change the values and re-run `nsc edit account "$ACCOUNT" ... --js-disk-storage "$JS_DISK" --js-streams "$JS_STREAMS" --js-consumer "$JS_CONSUMERS"` and `nsc push`. Leave `--js-mem-storage` unset.
 
 ## Durability and sync_interval
 

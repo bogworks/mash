@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bogworks/mash/internal/store"
 )
 
 func writeFile(t *testing.T, home, body string) {
@@ -250,6 +252,71 @@ func TestLoadSpoolFromStart(t *testing.T) {
 	for _, v := range []string{"yes", "on", "TRUE", "2", " 1"} {
 		if _, err := load(t, `{`+base+`}`, map[string]string{"MASH_SPOOL_FROM_START": v}); err == nil || !strings.Contains(err.Error(), "MASH_SPOOL_FROM_START") {
 			t.Fatalf("%q: err %v, want a MASH_SPOOL_FROM_START error", v, err)
+		}
+	}
+}
+
+func TestLimitsConfig(t *testing.T) {
+	home := t.TempDir()
+	c, err := Load(envOf(nil), home)
+	if err != nil || c.Limits != store.DefaultLimits() {
+		t.Fatalf("no file: %+v %v", c.Limits, err)
+	}
+	writeFile(t, home, `{"limits":{"inbox_max_bytes":"64MiB","inbox_max_age":"7d","directory_max_bytes":2097152,"lease_max_bytes":"1GiB","inbox_max_consumers":4}}`)
+	c, err = Load(envOf(nil), home)
+	want := store.Limits{InboxMaxBytes: 64 << 20, InboxMaxAge: 7 * 24 * time.Hour, DirectoryMaxBytes: 2 << 20, LeaseMaxBytes: 1 << 30, InboxMaxConsumers: 4}
+	if err != nil || c.Limits != want {
+		t.Fatalf("custom: %+v %v", c.Limits, err)
+	}
+	writeFile(t, home, `{"limits":{"inbox_max_age":"36h"}}`)
+	if c, err = Load(envOf(nil), home); err != nil || c.Limits.InboxMaxAge != 36*time.Hour || c.Limits.InboxMaxBytes != 16<<20 {
+		t.Fatalf("partial: %+v %v", c.Limits, err)
+	}
+	for _, bad := range []struct{ body, key string }{
+		{`{"limits":{"inbox_max_bytez":"1MiB"}}`, "inbox_max_bytez"},
+		{`{"limits":{"inbox_max_bytes":"lots"}}`, "inbox_max_bytes"},
+		{`{"limits":{"inbox_max_bytes":"16MB"}}`, "inbox_max_bytes"},
+		{`{"limits":{"inbox_max_bytes":-5}}`, "inbox_max_bytes"},
+		{`{"limits":{"inbox_max_bytes":"1MiB"}}`, "inbox_max_bytes"}, // below the minimum
+		{`{"limits":{"inbox_max_age":"soon"}}`, "inbox_max_age"},
+		{`{"limits":{"inbox_max_age":"0d"}}`, "inbox_max_age"},
+		{`{"limits":{"inbox_max_age":"30m"}}`, "inbox_max_age"},
+		{`{"limits":{"inbox_max_age":30}}`, "inbox_max_age"},
+		{`{"limits":{"directory_max_bytes":"1KiB"}}`, "directory_max_bytes"},
+		{`{"limits":{"lease_max_bytes":true}}`, "lease_max_bytes"},
+		{`{"limits":{"inbox_max_consumers":0}}`, "inbox_max_consumers"},
+		{`{"limits":{"inbox_max_consumers":"2"}}`, "inbox_max_consumers"},
+		{`{"limits":[1]}`, "limits"},
+	} {
+		writeFile(t, home, bad.body)
+		if _, err := Load(envOf(nil), home); err == nil || !strings.Contains(err.Error(), bad.key) {
+			t.Errorf("%s: %v", bad.body, err)
+		}
+		if err := ValidateFile([]byte(bad.body)); err == nil {
+			t.Errorf("ValidateFile accepted %s", bad.body)
+		}
+	}
+}
+
+func TestParseSizeAndAge(t *testing.T) {
+	for in, want := range map[string]int64{"1024": 1024, "10B": 10, "4KiB": 4096, "16MiB": 16 << 20, "2GiB": 2 << 30, " 3 MiB ": 3 << 20} {
+		if got, err := ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%q) = %d, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"", "MiB", "-1MiB", "0", "1.5MiB", "1MB", "9999999999GiB"} {
+		if _, err := ParseSize(in); err == nil {
+			t.Errorf("ParseSize(%q) accepted", in)
+		}
+	}
+	for in, want := range map[string]time.Duration{"30d": 720 * time.Hour, "1d": 24 * time.Hour, "90m": 90 * time.Minute, "720h": 720 * time.Hour} {
+		if got, err := ParseAge(in); err != nil || got != want {
+			t.Errorf("ParseAge(%q) = %v, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"", "d", "-1d", "1.5d", "0", "x"} {
+		if _, err := ParseAge(in); err == nil {
+			t.Errorf("ParseAge(%q) accepted", in)
 		}
 	}
 }

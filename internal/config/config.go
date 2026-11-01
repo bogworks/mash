@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/bogworks/mash/internal/store"
 )
 
 // The defaults of Config.OpenTimeout and Config.CallTimeout.
@@ -38,6 +40,7 @@ type Config struct {
 	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
 	Dir            string        // ~/.config/mash
+	Limits         store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 }
 
 type file struct {
@@ -56,6 +59,8 @@ type file struct {
 	Host       string `json:"host"`
 
 	SpoolFromStart *bool `json:"spool_from_start"`
+
+	Limits json.RawMessage `json:"limits"`
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -90,13 +95,16 @@ func ValidateFile(raw []byte) error {
 			return fmt.Errorf("\"idle_wake\" %w", err)
 		}
 	}
+	if _, err := ParseLimits(f.Limits); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Load resolves the configuration. env is os.Getenv in production.
 func Load(env func(string) string, home string) (Config, error) {
 	dir := filepath.Join(home, ".config", "mash")
-	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME")}
+	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
 	if c.StateHome == "" {
 		c.StateHome = filepath.Join(home, ".local", "state")
 	}
@@ -130,6 +138,10 @@ func Load(env func(string) string, home string) (Config, error) {
 			return c, fmt.Errorf("mash: config.json \"idle_wake\" %w", err)
 		}
 		c.IdleWake = d
+	}
+
+	if c.Limits, err = ParseLimits(f.Limits); err != nil {
+		return c, err
 	}
 
 	str := func(dst *string, key string) {
