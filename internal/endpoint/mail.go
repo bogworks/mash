@@ -240,10 +240,12 @@ func (e *Endpoint) wakingProbe(cons jetstream.Consumer) wakingProbe {
 	return func(ctx context.Context) (uint64, int, uint64, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
+		t0 := time.Now()
 		ci, err := cons.Info(ctx)
 		if err != nil {
 			return 0, 0, 0, err
 		}
+		e.noteServerTime(ci.TimeStamp, t0, time.Now())
 		s, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
 		if err != nil {
 			return 0, 0, 0, err

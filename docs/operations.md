@@ -235,4 +235,5 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 | `remote error: tls: bad certificate` (or `certificate required`) on connect | The server requires a client certificate, or refused the one given. Set both `tls_cert` and `tls_key` (`MASH_TLS_CERT`, `MASH_TLS_KEY`) to a certificate the server's CA signed. |
 | `status` says `tls: WARN` | The url is plain `nats://` to a non-loopback host. Use `tls://` with the server's certificate. |
 | `do not match endpoint` | The credentials file belongs to a different endpoint than `MASH_NAME`. |
+| Peers look offline, or mail arrives labelled `[stale]` | Clock skew. Keep every machine's clock in sync (NTP, including laptops, containers and VMs after suspend): more than 30 s of skew (`sap.LiveSkew`) makes live requests and heartbeats fail and stored mail `[stale]`. `status` prints a `clock:` line and warns past 10 s. |
 | Clients take 30-60 s to reconnect after a network blip | The server rate-limits new connections per source address. Clients retry with jitter; raise the limit for trusted sources if this matters. |

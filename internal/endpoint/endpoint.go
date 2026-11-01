@@ -34,6 +34,11 @@ type Endpoint struct {
 	// The last answered ping of serve's MCP client (unix seconds, 0 for none), written into the lease.
 	mcpSeen atomic.Int64
 
+	// skew is the server's clock minus ours in ns, from the last consumer info (noteServerTime); skewSet is false until
+	// there is one.
+	skew    atomic.Int64
+	skewSet atomic.Bool
+
 	// waking is the unread waking-mail count written into the lease (waking.go).
 	waking *wakingTracker
 
@@ -616,3 +621,27 @@ func (e *Endpoint) Conn() *nats.Conn { return e.nc }
 
 // Identity is this endpoint's signing identity.
 func (e *Endpoint) Identity() sap.Identity { return e.id }
+
+// skewOf is the server's clock minus the local one, the server's time being taken as read at the midpoint of the
+// request (t0 to t1). A zero server time (an old server that sends none) is no reading.
+func skewOf(server, t0, t1 time.Time) (time.Duration, bool) {
+	if server.IsZero() {
+		return 0, false
+	}
+	return server.Sub(t0.Add(t1.Sub(t0) / 2)), true
+}
+
+// noteServerTime records the skew from a server timestamp that came back on a call made anyway (the consumer info at
+// each lease refresh), so measuring the clock adds no traffic.
+func (e *Endpoint) noteServerTime(server, t0, t1 time.Time) {
+	if d, ok := skewOf(server, t0, t1); ok {
+		e.skew.Store(int64(d))
+		e.skewSet.Store(true)
+	}
+}
+
+// ClockSkew is the server's clock minus this machine's as of the last lease refresh; ok is false before the first
+// reading. A skew beyond sap.LiveSkew makes peers look offline (live signatures are refused) and mail [stale].
+func (e *Endpoint) ClockSkew() (time.Duration, bool) {
+	return time.Duration(e.skew.Load()), e.skewSet.Load()
+}

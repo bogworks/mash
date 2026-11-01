@@ -18,6 +18,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/mcp"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
 
@@ -91,6 +92,7 @@ func statusTool(src *statusSource) mcp.Tool {
 func statusText(src *statusSource) string {
 	cfg := src.cfg
 	lines := []string{nameLine(cfg), configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src)}
+	lines = append(lines, clockLine(clockSkewOf(src)))
 	lines = append(lines, allowlistLine(src))
 	if l := environmentLine(src); l != "" {
 		lines = append(lines, l)
@@ -233,6 +235,32 @@ func connectionLine(src *statusSource) string {
 			cfg.Name, redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
 	}
 	return "connection: STARTING - mash is opening endpoint " + cfg.Name
+}
+
+// clockWarn is the skew past which status warns, well inside sap.LiveSkew so there is time to fix it.
+const clockWarn = 10 * time.Second
+
+// clockSkewOf is the endpoint's last measured skew from the server; ok is false with no endpoint or no reading yet.
+func clockSkewOf(src *statusSource) (time.Duration, bool) {
+	if src.state == nil {
+		return 0, false
+	}
+	if st := src.state.Load(); st != nil && st.ep != nil {
+		return st.ep.ClockSkew()
+	}
+	return 0, false
+}
+
+// clockLine is the clock line for a measured skew (server minus local); ok is false when there is none.
+func clockLine(skew time.Duration, ok bool) string {
+	if !ok {
+		return "clock: n/a - not connected"
+	}
+	n := int64((skew.Abs() + time.Second/2) / time.Second)
+	if skew.Abs() > clockWarn {
+		return fmt.Sprintf("clock: WARN - %ds from the server (limit %d s: beyond it peers look offline and mail is [stale]). Next: sync this machine's clock (NTP)", n, int(sap.LiveSkew/time.Second))
+	}
+	return fmt.Sprintf("clock: OK - within %ds of the server", n)
 }
 
 // reportSettings prints once, at serve start, the allowlist line when it is not OK and the environment line when it
