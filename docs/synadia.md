@@ -9,7 +9,7 @@
 3. Writes `~/.config/mash/config.json` (`url`, `owner`); it refuses to change a different one without `--force`.
 4. Runs `mash admin init` and `mash admin provision` with the admin creds, sends a test message between the first two endpoints, and deletes the admin user (also when it fails or is interrupted).
 
-`--dry-run` does step 1 only and prints the plan. The token is read from `SYNADIA_API_TOKEN`, from one line on stdin (`--token-stdin`) or from a prompt; it is never taken from the command line, never stored and never printed. Run only one copy at a time: the script takes no lock on `config.json`.
+`--dry-run` does step 1 only and prints the plan. The token is read from `SYNADIA_API_TOKEN`, from one line on stdin (`--token-stdin`) or from a prompt; it is never taken from the command line, never stored and never printed. A real run holds a `mkdir` lock, `~/.config/mash/.quickstart.lock`, until it ends, so a second run on the same config directory is refused; if no run is going, remove a stale lock with `rmdir`. If `mash admin provision` fails for an endpoint, the script runs `mash admin deprovision` for it before it deletes the admin user, so a half-created inbox is removed. The test message carries a random token, which must appear in the `[verified]` inbox entry.
 
 ## Free-tier limits
 

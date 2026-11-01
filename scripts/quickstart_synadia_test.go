@@ -535,3 +535,104 @@ func TestQuickstartRefusesMismatchedCreds(t *testing.T) {
 		t.Errorf("config.json left behind: %v", err)
 	}
 }
+
+// wrapperMash writes a --mash script that records every call in <dir>/calls, runs body first (it may exit), and then
+// delegates to the real binary.
+func wrapperMash(t *testing.T, body string) (script, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	script, calls = filepath.Join(dir, "mash"), filepath.Join(dir, "calls")
+	src := "#!/bin/sh\necho \"$*\" >>'" + calls + "'\n" + body + "\nexec '" + mashBinary(t) + "' \"$@\"\n"
+	if err := os.WriteFile(script, []byte(src), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script, calls
+}
+
+func lockPath(home string) string { return filepath.Join(home, ".config", "mash", ".quickstart.lock") }
+
+func TestQuickstartConfigDirLock(t *testing.T) {
+	e := testenv.Start(t)
+	t.Run("held lock refuses a second run", func(t *testing.T) {
+		f := newFake(t, e, 5)
+		home := t.TempDir()
+		if err := os.MkdirAll(lockPath(home), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+		if r.code == 0 || !strings.Contains(r.out, lockPath(home)) || !strings.Contains(r.out, "another quickstart run") || f.postCount() != 0 {
+			t.Fatalf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
+		}
+		if _, err := os.Stat(lockPath(home)); err != nil {
+			t.Errorf("the refused run removed the other run's lock: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".config", "mash", "config.json")); err == nil {
+			t.Errorf("config.json written despite the lock")
+		}
+	})
+	t.Run("lock removed after success", func(t *testing.T) {
+		home := t.TempDir()
+		r := runScript(t, newFake(t, e, 5), home, nil, "--owner", "alice", "--endpoint", "a", "--no-test")
+		if r.code != 0 {
+			t.Fatalf("exit %d:\n%s", r.code, r.out)
+		}
+		if _, err := os.Stat(lockPath(home)); !os.IsNotExist(err) {
+			t.Errorf("lock left after success: %v", err)
+		}
+	})
+	t.Run("lock removed after failure", func(t *testing.T) {
+		f := newFake(t, e, 5)
+		f.set(func(f *fakeSynadia) { f.failCreds = true })
+		home := t.TempDir()
+		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+		if r.code == 0 {
+			t.Fatalf("want a failure:\n%s", r.out)
+		}
+		if _, err := os.Stat(lockPath(home)); !os.IsNotExist(err) {
+			t.Errorf("lock left after failure: %v", err)
+		}
+	})
+	t.Run("dry run takes no lock and creates nothing", func(t *testing.T) {
+		home := t.TempDir()
+		if r := runScript(t, newFake(t, e, 5), home, nil, "--dry-run", "--owner", "alice", "--endpoint", "a"); r.code != 0 {
+			t.Fatalf("exit %d:\n%s", r.code, r.out)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".config")); err == nil {
+			t.Errorf("dry run created the config directory")
+		}
+	})
+}
+
+func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 6)
+	wrapper, calls := wrapperMash(t, `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "provision: boom" >&2; exit 1; fi`)
+	home := t.TempDir()
+	r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	if r.code == 0 {
+		t.Fatalf("want a failure:\n%s", r.out)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "admin deprovision alice-b\n") || strings.Contains(string(b), "admin deprovision alice-a") {
+		t.Errorf("want exactly alice-b deprovisioned, calls:\n%s", b)
+	}
+	if !strings.Contains(r.out, "deprovision alice-b") {
+		t.Errorf("output does not mention the deprovision:\n%s", r.out)
+	}
+	for _, n := range f.names() {
+		if strings.HasPrefix(n, "mash-quickstart-admin-") || n == "alice-b" {
+			t.Errorf("user %s survived", n)
+		}
+	}
+}
+
+func TestQuickstartMailTestNeedsItsOwnToken(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 6)
+	// The inbox shows an old [verified] message without this run's token.
+	wrapper, _ := wrapperMash(t, `if [ "$1" = inbox ]; then echo '#1 [verified] alice-a: an older message'; exit 0; fi`)
+	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	if r.code == 0 || !strings.Contains(r.out, "did not arrive as [verified]") {
+		t.Fatalf("a stale verified message passed the mail test, exit %d:\n%s", r.code, r.out)
+	}
+}
