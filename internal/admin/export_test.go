@@ -38,3 +38,9 @@ func SetAfterDeprovisionGet(f func()) (prev func()) {
 	prev, afterDeprovisionGet = afterDeprovisionGet, f
 	return
 }
+
+// SetAfterDeprovisionPurge installs a hook that runs between DeprovisionIfUser's record delete and its fence; it returns the previous one.
+func SetAfterDeprovisionPurge(f func()) (prev func()) {
+	prev, afterDeprovisionPurge = afterDeprovisionPurge, f
+	return
+}

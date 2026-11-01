@@ -2,9 +2,11 @@ package admin_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -120,11 +122,20 @@ func TestDeprovisionIfUserRecreatedByOtherLeavesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	// Admins now serialise per name, so the replacement is written straight to the directory, as an admin without
+	// the lock would (an older mash, or a lock that expired).
 	prev := admin.SetAfterDeprovisionGet(func() {
-		if err := a.Deprovision(ctx, "alpha"); err != nil {
+		old, err := store.GetRecord(ctx, kv, "alpha")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := kv.Purge(ctx, "alpha"); err != nil {
 			t.Error(err)
 		}
-		if _, err := a.Provision(ctx, "alpha", other, e.Account, "", admin.Meta{}); err != nil {
+		old.User = other
+		val, _ := json.Marshal(old)
+		if _, err := kv.Create(ctx, "alpha", val); err != nil {
 			t.Error(err)
 		}
 	})
@@ -172,5 +183,63 @@ func TestDeprovisionIfUserNoRecordRefusedStreamKept(t *testing.T) {
 	}
 	if _, err := js.Stream(ctx, "inbox-alpha"); err == nil {
 		t.Fatal("plain deprovision left the stream")
+	}
+}
+
+// Another admin provisions the name after the guarded record delete and before the fence. The name's lock makes that
+// Provision wait for the whole deprovision, so the first call's fence and stream delete never hit the new endpoint.
+func TestDeprovisionIfUserHoldsNameAcrossPurgeAndFence(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	_, other := e.Mint(t, "beta")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := initOn(t, e)
+	done := make(chan error, 1)
+	var completedInSeam bool
+	prev := admin.SetAfterDeprovisionPurge(func() {
+		go func() {
+			_, err := b.Provision(ctx, "alpha", other, e.Account, "", admin.Meta{})
+			done <- err
+		}()
+		select {
+		case <-done:
+			completedInSeam = true
+		case <-time.After(1500 * time.Millisecond):
+		}
+	})
+	defer admin.SetAfterDeprovisionPurge(prev)
+	if err := a.DeprovisionIfUser(ctx, "alpha", user); err != nil {
+		t.Fatal(err)
+	}
+	if completedInSeam {
+		t.Fatal("a second admin's Provision completed between the record delete and the fence")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("provision after the deprovision: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the waiting Provision never finished")
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if rec, err := store.GetRecord(ctx, kv, "alpha"); err != nil || rec.User != other {
+		t.Fatalf("the new record is missing: %+v %v", rec, err)
+	}
+	if leasePresent(t, js, "alpha") {
+		t.Fatal("the new endpoint's lease is still fenced")
+	}
+	if _, err := js.Publish(ctx, "agents.mail.cc.o.alpha", []byte("hello")); err != nil {
+		t.Fatalf("mail to the new endpoint: %v", err)
+	}
+	st, err := js.Stream(ctx, "inbox-alpha")
+	if err != nil {
+		t.Fatalf("the new endpoint's inbox is gone: %v", err)
+	}
+	if info, err := st.Info(ctx); err != nil || info.State.Msgs != 1 {
+		t.Fatalf("inbox state %+v %v, want the one message", info, err)
 	}
 }

@@ -39,8 +39,19 @@ Chosen option: (b), for the guarded form only. Plain `Deprovision` keeps ADR-001
 * The gap between the record delete and the tombstone is safe. `Open` takes the lease and then reads the directory
   record again; with the record gone it gives the lease back and fails (ADR-0015). A session that already holds the
   lease is stopped by the tombstone at its next refresh, as before. So a record-less name cannot be held.
+* `DeprovisionIfUser`, plain `Deprovision` and `Provision` each run under the per-name lock of ADR-0048
+  (`limits-lock.<name>` in the lease bucket) for their whole body: the guarded call holds it across the read, the
+  record delete, the fence and the inbox delete, and `Provision` across its record check, lease clear, stream and
+  record write. Another admin who provisions or deprovisions the same name meets the lock and waits (up to 20 s, then
+  fails with the lock's "try again" message), then acts on the final state. This closes the interval between the
+  record delete and the fence, in which a second admin could provision the name and have its new lease fenced and
+  its new inbox deleted by the first call. A Provision that waited for a deprovision finds no record and no stream,
+  clears the tombstone as it always does, and starts clean.
 * If the call fails between the record delete and the fence, the name has no record, an inbox and no tombstone. A plain
   `mash admin deprovision <name>` finishes it.
+* Residual risk: the lock expires after 30 s (and on the admins' clocks). A deprovision or provision that outlasts
+  that, or an admin running a mash without the lock, can still interleave with another; the revision guard on the
+  record delete still protects the record in that case, but not the fence or the inbox.
 
 ### Consequences
 
@@ -53,7 +64,10 @@ Chosen option: (b), for the guarded form only. Plain `Deprovision` keeps ADR-001
 
 * `internal/admin/deprovision_user_test.go`: a matching user is removed, another user is refused with the record,
   inbox and lease untouched, a record changed or replaced between the read and the delete survives, and a missing
-  record with an existing inbox is refused.
+  record with an existing inbox is refused. `TestDeprovisionIfUserHoldsNameAcrossPurgeAndFence` starts a second
+  admin's Provision of the same name between the record delete and the fence and asserts it does not complete until
+  the call returns, and that the new record, inbox and mail then exist. The replaced-record test writes the
+  replacement directly, as an admin without the lock would.
 * `cmd/mash/main_test.go` (`TestAdminCLI`): bad keys are usage errors and no key longer than 8 characters is printed.
 * `scripts/quickstart_synadia_test.go`: the cleanup is one guarded call and maps each refusal to its message.
 
@@ -71,4 +85,4 @@ Chosen option: (b), for the guarded form only. Plain `Deprovision` keeps ADR-001
 
 ## More Information
 
-* Issue #9; ADR-0015; code in `internal/admin/admin.go` (`DeprovisionIfUser`).
+* Issue #9; ADR-0015; ADR-0048; code in `internal/admin/admin.go` (`DeprovisionIfUser`).
