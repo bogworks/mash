@@ -137,7 +137,7 @@ mash admin limits            # raises every inbox's max_bytes and max_age, and s
 mash admin limits design     # or only the named inboxes
 ```
 
-New endpoints (`mash admin provision`) get the configured limits at once. `mash admin limits` updates each existing stream in place, keeping its mail, and prints a line per endpoint saying what changed. It refuses to lower `max_bytes` or `max_age` on an endpoint, with an error naming the endpoint and field, and changes nothing for it, because a lower cap could discard stored mail. To lower an inbox's limits, run `mash admin deprovision <name>` (which removes the mail in it) and provision it again. `mash admin init` likewise never lowers a bucket. The check that runs on an existing inbox still reports any stream that differs from the configured limits.
+New endpoints (`mash admin provision`) get the configured limits at once. `mash admin limits` updates each existing stream in place, keeping its mail, and prints a line per endpoint saying what changed. It refuses to lower `max_bytes` or `max_age` on an endpoint, with an error naming the endpoint and field, and changes nothing for it, because a lower cap could discard stored mail. To lower an inbox's limits, run `mash admin deprovision <name>` (which removes the mail in it) and provision it again. `mash admin init` likewise never lowers a bucket. The check that runs on an existing inbox still reports any stream that differs from the configured limits. Run `mash admin limits` from one admin at a time: JetStream has no compare-and-set on a stream's configuration, so two admins applying different limits to the same inbox at the same moment can leave the lower of the two caps (and a lower cap can discard mail).
 
 ### Account limits
 
