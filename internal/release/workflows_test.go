@@ -16,13 +16,14 @@ import (
 )
 
 type step struct {
-	Name            string            `yaml:"name"`
-	If              string            `yaml:"if"`
-	ContinueOnError any               `yaml:"continue-on-error"`
-	Uses            string            `yaml:"uses"`
-	Run             string            `yaml:"run"`
-	Env             map[string]string `yaml:"env"`
-	With            map[string]any    `yaml:"with"`
+	Name             string            `yaml:"name"`
+	If               string            `yaml:"if"`
+	ContinueOnError  any               `yaml:"continue-on-error"`
+	Uses             string            `yaml:"uses"`
+	Run              string            `yaml:"run"`
+	WorkingDirectory string            `yaml:"working-directory"`
+	Env              map[string]string `yaml:"env"`
+	With             map[string]any    `yaml:"with"`
 }
 
 type job struct {
@@ -1064,16 +1065,30 @@ func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
 	if trusted == nil || pr == nil || goStep == nil {
 		t.Fatalf("need a trusted/ checkout, a pr/ checkout and setup-go: %v %v %v", trusted, pr, goStep)
 	}
-	if trusted.With["ref"] != "${{ github.base_ref }}" {
-		t.Errorf("trusted/ ref = %v, want the base ref", trusted.With["ref"])
+	if trusted.With["ref"] != "${{ github.event.pull_request.base.sha }}" {
+		t.Errorf("trusted/ ref = %v, want the base sha", trusted.With["ref"])
 	}
-	if _, ok := pr.With["ref"]; ok {
-		t.Errorf("pr/ must use the default ref, got %v", pr.With["ref"])
+	if pr.With["ref"] != "${{ github.event.pull_request.head.sha }}" || pr.With["repository"] != "${{ github.event.pull_request.head.repo.full_name }}" {
+		t.Errorf("pr/ must be the head sha of the head repo, got %v of %v", pr.With["ref"], pr.With["repository"])
+	}
+	// pull_request_target: GitHub runs the base branch's copy of this workflow; the PR is data only.
+	wf := load(t, "adr-lint.yml")
+	on, _ := wf.On.(map[string]any)
+	if _, ok := on["pull_request_target"]; !ok || len(on) != 1 {
+		t.Errorf("adr-lint must trigger on pull_request_target only, got %v", wf.On)
+	}
+	if len(wf.Permissions) != 1 || wf.Permissions["contents"] != "read" || len(j.Permissions) != 0 {
+		t.Errorf("permissions must be exactly contents: read, got %v / job %v", wf.Permissions, j.Permissions)
+	}
+	for _, st := range j.Steps {
+		if st.WorkingDirectory == "pr" || strings.HasPrefix(st.WorkingDirectory, "pr/") {
+			t.Errorf("step %q runs in the pull request tree", st.Name)
+		}
 	}
 	if goStep.With["go-version-file"] != "trusted/go.mod" {
 		t.Errorf("go-version-file = %v, want trusted/go.mod", goStep.With["go-version-file"])
 	}
-	for _, bad := range []string{"go run", "cd pr", "./pr/"} {
+	for _, bad := range []string{"go run", "go build ./pr", "cd pr", "./pr/", "pr/scripts", "source pr/", "bash pr/"} {
 		if strings.Contains(runs, bad) {
 			t.Errorf("a step runs code from the pull request tree (%q):\n%s", bad, runs)
 		}

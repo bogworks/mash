@@ -5,15 +5,17 @@ name: adr-lint
 # request adds or changes. "none" on a change to a protected path (docs/decisions/ included) needs the decision-confirmed
 # label, which a reviewer applies; that is why labeled and unlabeled re-run it.
 #
-# Trust: the checker is built from the BASE branch (checked out in trusted/) and pointed at the pull request's tree
-# (checked out in pr/) with --root. Nothing from pr/ is ever built or run, so a pull request cannot edit
-# scripts/adrlint to pass its own gate. A pull request that itself changes scripts/adrlint is therefore judged by the
-# base branch's version of the checker; its change takes effect once it has merged. (The first pull request that adds
-# scripts/adrlint has no checker at its base and cannot pass this workflow until it is merged by a maintainer.)
+# Trust: this runs on pull_request_target, so GitHub runs THIS workflow file from the BASE branch; a pull request cannot
+# edit it to pass its own gate. The checker is built from the base branch (checked out in trusted/) and pointed at the
+# pull request's head (checked out in pr/) with --root. The pull request is data only: nothing from pr/ is ever built,
+# sourced or run, no secret is used, and the token is contents: read. A pull request that changes this workflow or
+# scripts/adrlint is judged by the base branch's versions; its change takes effect once it has merged. (The first pull
+# request that adds scripts/adrlint has no checker at its base and cannot pass this workflow until a maintainer merges it.)
 # A pull request from a fork runs on ubuntu-latest, never on a self-hosted runner. The body and the labels reach the tool
-# through env, never through the text of the shell script. fetch-depth 0 in pr/ brings origin/<base> for the git calls.
+# through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
+# is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 permissions:
   contents: read
@@ -24,21 +26,31 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
+    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.base_ref }}
+          ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
+          fetch-depth: 0
           persist-credentials: false
       - name: Check out the pull request (data only, never run)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           path: pr
           fetch-depth: 0
           persist-credentials: false
+      - name: Bring the base branch into pr/ (from trusted/, locally)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git -C pr fetch --no-tags "$GITHUB_WORKSPACE/trusted" "+$BASE_SHA:refs/remotes/origin/$BASE_REF"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: trusted/go.mod
