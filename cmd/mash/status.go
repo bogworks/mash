@@ -36,6 +36,9 @@ type statusSource struct {
 	// home, the OS default managed directory and the process environment. Tests set them.
 	home, managedDir string
 	getenv           func(string) string
+	// cli is `mash status` from a shell: nothing is connected, so the live-only lines (connection, delivery) say
+	// that a running session reports them instead of printing a state they cannot know.
+	cli bool
 }
 
 // settings reads Claude Code's managed sources and the home they were read from. home is "" when it is unknown.
@@ -188,9 +191,13 @@ func credsLine(cfg config.Config) string {
 	return fmt.Sprintf("creds: OK - %s exists and is readable", p)
 }
 
+const cliLiveNote = "not checked from the CLI (a running session reports it)"
+
 func connectionLine(src *statusSource) string {
 	cfg := src.cfg
 	switch {
+	case src.cli:
+		return "connection: " + cliLiveNote
 	case src.cfgErr != nil:
 		return "connection: FAILED - not started, because of the config problem above"
 	case cfg.Name == "":
@@ -278,6 +285,9 @@ func environmentLine(src *statusSource) string {
 
 func deliveryLines(src *statusSource) []string {
 	cfg := src.cfg
+	if src.cli {
+		return []string{"delivery: " + cliLiveNote + ": hook state and channel notification counts exist only inside a running session"}
+	}
 	var out []string
 	switch {
 	case cfg.Name == "" || cfg.Owner == "":
@@ -337,4 +347,13 @@ func hooklessFix(sp spool.Spool, own time.Time) string {
 		return "start Claude Code with MASH_LAUNCH_TOKEN=<any unique value>, and report your setup (see docs/operations.md)"
 	}
 	return "remove disableAllHooks from the settings; under allowManagedHooksOnly an administrator force-enables mash@mash in managed enabledPlugins; check hook.log (see docs/operations.md)"
+}
+
+// statusCmd is `mash status`: the status tool's lines for this environment, read from the shell, before Claude Code
+// is launched. It connects to nothing and takes no lease. It is a report, so a missing name or config is output, not
+// a failure.
+func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout io.Writer) int {
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, cli: true, home: env("HOME"), getenv: env}
+	fmt.Fprintln(stdout, statusText(src))
+	return 0
 }

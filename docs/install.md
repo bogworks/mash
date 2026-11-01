@@ -67,7 +67,7 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 | `url` | `MASH_URL` | The NATS server. Use TLS: SAP identity is only meaningful over a verified connection. |
 | `owner` | `MASH_OWNER` | Your SAP owner token (lower-case letters, digits, single hyphens). |
 | `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `~/.config/mash/<name>.creds`. |
-| | `MASH_NAME` | The endpoint name, set per session at launch. |
+| | `MASH_NAME` | The endpoint name, set per session at launch. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |
 | | `MASH_LAUNCH_TOKEN` | Optional. Names this launch of the agent (up to 128 of `A-Za-z0-9._-`); written into the endpoint's lease as `launch_token` so a supervisor can tell which launch holds it. It also ties a session's hooks to its `mash serve`: a hook that carries the same non-empty token as serve is recognised as this session's even where its process chain cannot be followed (wrappers, sandboxes, IDE hosts). Use a fresh value for each launch (for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude ...`); a value reused across launches defeats the hook-ownership rule. |
 | `settle_ms` | `MASH_SETTLE_MS` | Quiet time before a batch is pushed. Default 100. |
 | `batch_msgs`, `batch_bytes` | `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` | A batch up to 10 messages and 16 KiB is shown in full; more becomes a digest. |
@@ -88,7 +88,7 @@ MASH_NAME=design claude --channels plugin:mash@mash
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
-In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's name and owner. From a shell, the same identity can use the CLI:
+In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's name and owner. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
 
 ```sh
 MASH_NAME=design mash who

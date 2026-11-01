@@ -195,7 +195,7 @@ flowchart TB
     cc["Agent host session<br/>(Claude Code)"]
     serve["mash serve<br/>endpoint manager, MCP server"]
     hook["mash hook<br/>short-lived, per hook event"]
-    cli["mash CLI<br/>send, read, inbox, who, prompt, admin"]
+    cli["mash CLI<br/>send, read, inbox, who, prompt, status, admin"]
     spool[("Spool directory<br/>~/.local/state/mash/spool/owner/name")]
     cfg[("~/.config/mash<br/>config.json, creds, policy.md")]
   end
