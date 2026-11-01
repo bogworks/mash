@@ -48,6 +48,7 @@ Configuration: config.json {"url","owner"} in $MASH_CONFIG_DIR (default ~/.confi
 MASH_URL, MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
 State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.local/state/mash).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
+Also tunable: lease_retry, transient_budget, transient_max, cli_timeout, admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX, MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
 `
 
 func main() {

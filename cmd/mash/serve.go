@@ -82,6 +82,20 @@ var (
 	afterOpenHook     func()
 )
 
+// applyRetryTiming sets the retry timers from the configured values that are set; the package variables stay the
+// test knobs, and an unset key leaves them alone.
+func applyRetryTiming(cfg config.Config) {
+	if cfg.LeaseRetry > 0 {
+		leaseRetry = cfg.LeaseRetry
+	}
+	if cfg.TransientBudget > 0 {
+		transientBudget = cfg.TransientBudget
+	}
+	if cfg.TransientMax > 0 {
+		transientMax = cfg.TransientMax
+	}
+}
+
 // openBound is the bound on one Open: the configured open timeout, unless a test set one.
 func openBound(cfg config.Config) time.Duration {
 	if openTimeout > 0 {
@@ -125,6 +139,7 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
+	applyRetryTiming(cfg)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 

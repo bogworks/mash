@@ -222,6 +222,50 @@ func TestTimeoutSettings(t *testing.T) {
 	}
 }
 
+func TestMoreTimeoutSettings(t *testing.T) {
+	load := func(file string, env map[string]string) (Config, error) {
+		home := t.TempDir()
+		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
+		env["MASH_NAME"] = "a"
+		return Load(envOf(env), home)
+	}
+	keys := []struct {
+		key, env string
+		get      func(Config) time.Duration
+	}{
+		{"lease_retry", "MASH_LEASE_RETRY", func(c Config) time.Duration { return c.LeaseRetry }},
+		{"transient_budget", "MASH_TRANSIENT_BUDGET", func(c Config) time.Duration { return c.TransientBudget }},
+		{"transient_max", "MASH_TRANSIENT_MAX", func(c Config) time.Duration { return c.TransientMax }},
+		{"cli_timeout", "MASH_CLI_TIMEOUT", func(c Config) time.Duration { return c.CLITimeout }},
+		{"admin_timeout", "MASH_ADMIN_TIMEOUT", func(c Config) time.Duration { return c.AdminTimeout }},
+	}
+	for _, k := range keys {
+		if c, err := load("", map[string]string{}); err != nil || k.get(c) != 0 {
+			t.Errorf("%s unset: %v %v", k.key, k.get(c), err)
+		}
+		if c, err := load(`,"`+k.key+`":"7s"`, map[string]string{}); err != nil || k.get(c) != 7*time.Second {
+			t.Errorf("%s file: %v %v", k.key, k.get(c), err)
+		}
+		if c, err := load("", map[string]string{k.env: "9s"}); err != nil || k.get(c) != 9*time.Second {
+			t.Errorf("%s env: %v %v", k.env, k.get(c), err)
+		}
+		if c, err := load(`,"`+k.key+`":"7s"`, map[string]string{k.env: "9s"}); err != nil || k.get(c) != 9*time.Second {
+			t.Errorf("%s env beats file: %v %v", k.env, k.get(c), err)
+		}
+		if c, err := load(`,"`+k.key+`":"soon"`, map[string]string{k.env: "9s"}); err != nil || k.get(c) != 9*time.Second {
+			t.Errorf("%s invalid file under valid env: %v %v", k.key, k.get(c), err)
+		}
+		for _, bad := range []string{"soon", "0s", "0", "-5s", "45"} {
+			if _, err := load("", map[string]string{k.env: bad}); err == nil || !strings.Contains(err.Error(), k.env) {
+				t.Errorf("env %s=%q: err %v", k.env, bad, err)
+			}
+			if _, err := load(`,"`+k.key+`":"`+bad+`"`, map[string]string{}); err == nil || !strings.Contains(err.Error(), k.key) {
+				t.Errorf("file %s=%q: err %v", k.key, bad, err)
+			}
+		}
+	}
+}
+
 func TestLoadSpoolFromStart(t *testing.T) {
 	load := func(t *testing.T, file string, env map[string]string) (Config, error) {
 		t.Helper()
