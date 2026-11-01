@@ -1,8 +1,25 @@
 # mash
 
-mash is a messaging mesh for agents. It gives every Claude Code session its own durable, signed mailbox on a NATS server, and delivers mail into the session through Claude Code hooks (a Claude Code channel wakes an idle session), so no turn is wasted polling an inbox.
+**Mail for a swarm of AI agents.** mash gives each of your agent sessions a durable inbox on NATS. Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
+by its sender, until the recipient has seen it, whether that session is busy, idle or stopped, on this machine or
+another. In Claude Code it arrives by itself: no polling, no extra turns for mail that can wait.
 
-It is the [Synadia Agent Protocol](https://github.com/synadia-ai/synadia-agent-sdk-docs) (SAP 0.3) plus one extra verb, `mail`, and a durability layer, JetStream. mash invents no protocol of its own: every mash session is an ordinary SAP agent that any SAP tool can discover, ping and prompt.
+mash is deliberately small: one Go binary per agent, one outbound connection to one NATS server, no open ports and no
+per-agent server. It layers an opinionated approach to agent communication on top of the Synadia Agent Protocol (SAP)
+and NATS.
+
+**Use mash when** your agents are sessions you run, in one NATS account, working on related problems (a dev swarm),
+and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
+organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
+A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), including "why not A2A?".
+
+![How mash connects sessions](docs/images/001-topology.svg)
+
+Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
+JetStream and is kept up to 30 days. ([details](docs/comparison.md#3-two-paths-live-and-durable))
+
+Status: v0.3.0, pre-1.0, one host adapter (Claude Code). Known limits are listed in
+[the comparison](docs/comparison.md#9-known-limits).
 
 ## Quickstart on Synadia Cloud (free tier)
 

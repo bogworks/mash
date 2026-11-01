@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 456" width="860" height="456" role="img" aria-labelledby="d1-title d1-desc"><title id="d1-title">Agents dial out to one bus. Nothing dials in.</title><desc id="d1-desc">Three agents behind a home NAT, an office firewall and a private cloud subnet each open an outbound connection to one NATS server. For contrast, an A2A agent is a server that a client must reach inbound.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="455" rx="14" class="bg"/><text x="32" y="42" class="t-title">Agents dial out to one bus. Nothing dials in.</text><defs><marker id="d1-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d1-gray" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-gray"/></marker></defs><text x="32" y="66" class="t-sub">Each mash process opens one outbound TLS connection to the NATS server and listens on no port.</text><rect x="32" y="92" width="156" height="124" rx="10" class="bound"/><text x="44" y="112" class="t-s">Laptop · home NAT</text><rect x="46" y="128" width="128" height="60" rx="8" class="card"/><text x="110" y="153" class="t-h mid">alice</text><text x="110" y="174" class="mono mid x-muted">key UAJ4…7Q2</text><path d="M110,188 L110,284" class="a a-teal " marker-end="url(#d1-teal)"/><rect x="212" y="92" width="156" height="124" rx="10" class="bound"/><text x="224" y="112" class="t-s">Office · firewall</text><rect x="226" y="128" width="128" height="60" rx="8" class="card"/><text x="290" y="153" class="t-h mid">bob</text><text x="290" y="174" class="mono mid x-muted">key UDX9…K3M</text><path d="M290,188 L290,284" class="a a-teal " marker-end="url(#d1-teal)"/><rect x="392" y="92" width="156" height="124" rx="10" class="bound"/><text x="404" y="112" class="t-s">Cloud · private subnet</text><rect x="406" y="128" width="128" height="60" rx="8" class="card"/><text x="470" y="153" class="t-h mid">carol</text><text x="470" y="174" class="mono mid x-muted">key UC2T…W8P</text><path d="M470,188 L470,284" class="a a-teal " marker-end="url(#d1-teal)"/><text x="298" y="252" class="t-i x-teal w6">outbound TLS</text><rect x="92" y="286" width="396" height="64" rx="12" class="f-teal"/><text x="290" y="313" class="t-h mid">NATS server with JetStream</text><text x="290" y="333" class="t-s mid">self-hosted or Synadia Cloud · one account</text><text x="290" y="378" class="t-b mid">Peers know each other by name and key, never by IP address.</text><text x="290" y="398" class="t-s mid">Move an agent by taking its credentials file along. Peers see no change.</text><path d="M580,92 L580,402" class="rule"/><text x="604" y="112" class="t-h x-gray">For contrast: A2A</text><rect x="636" y="128" width="160" height="48" rx="8" class="f-gray"/><text x="716" y="157" class="t-b mid">client agent</text><rect x="612" y="226" width="208" height="112" rx="10" class="bound"/><text x="624" y="246" class="t-s">reachable address required</text><rect x="636" y="260" width="160" height="60" rx="8" class="f-gray"/><text x="716" y="285" class="t-h mid">agent = HTTP server</text><text x="716" y="306" class="mono mid x-muted">listens on :443</text><path d="M716,176 L716,258" class="a a-gray " marker-end="url(#d1-gray)"/><text x="726" y="206" class="t-i x-gray w6">inbound</text><text x="612" y="362" class="t-s">The agent is the server: peers,</text><text x="612" y="380" class="t-s">or a gateway in front of it,</text><text x="612" y="398" class="t-s">must reach it inbound.</text><text x="32" y="434" class="t-cap">Arrows point from the side that opens the network connection. Dashed boxes are network boundaries.</text></svg>

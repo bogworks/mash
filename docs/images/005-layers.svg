@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 520" width="860" height="520" role="img" aria-labelledby="d5-title d5-desc"><title id="d5-title">Three layers, each doing its own job</title><desc id="d5-desc">NATS supplies connections, user keys, permissions, JetStream and KV. SAP supplies the agent subject hierarchy, discovery, heartbeat, live prompts and signed senders. mash adds the mail verb and inbox, the directory, leases, two more trust labels and delivery into the session.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="519" rx="14" class="bg"/><text x="32" y="42" class="t-title">Three layers, each doing its own job</text><text x="32" y="66" class="t-sub">mash adds one declared SAP verb, mail, plus the parts that deliver it into a session.</text><rect x="32" y="92" width="796" height="126" rx="10" class="f-violet"/><rect x="32" y="92" width="6" height="126" rx="3" class="solid-violet"/><text x="56" y="122" font-size="16" class="t-h x-violet">mash</text><text x="56" y="142" class="t-s">the inbox</text><rect x="188" y="108" width="235" height="26" rx="6" class="plain"/><text x="305.5" y="125.5" class="t-i mid">mail verb, one inbox per endpoint</text><rect x="431" y="108" width="165" height="26" rx="6" class="plain"/><text x="513.5" y="125.5" class="t-i mid">directory: name to key</text><rect x="604" y="108" width="203" height="26" rx="6" class="plain"/><text x="705.5" y="125.5" class="t-i mid">leases: one session per name</text><rect x="188" y="142" width="222" height="26" rx="6" class="plain"/><text x="299.0" y="159.5" class="t-i mid">labels unknown-signer and stale</text><rect x="418" y="142" width="107" height="26" rx="6" class="plain"/><text x="471.5" y="159.5" class="t-i mid">quoted bodies</text><rect x="533" y="142" width="107" height="26" rx="6" class="plain"/><text x="586.5" y="159.5" class="t-i mid">hook delivery</text><rect x="648" y="142" width="75" height="26" rx="6" class="plain"/><text x="685.5" y="159.5" class="t-i mid">batching</text><rect x="188" y="176" width="146" height="26" rx="6" class="plain"/><text x="261.0" y="193.5" class="t-i mid">kinds: wake or wait</text><rect x="342" y="176" width="152" height="26" rx="6" class="plain"/><text x="418.0" y="193.5" class="t-i mid">idle and urgent wake</text><rect x="502" y="176" width="229" height="26" rx="6" class="plain"/><text x="616.5" y="193.5" class="t-i mid">host adapter, Claude Code plugin</text><rect x="32" y="230" width="796" height="92" rx="10" class="f-blue"/><rect x="32" y="230" width="6" height="92" rx="3" class="solid-blue"/><text x="56" y="260" font-size="16" class="t-h x-blue">SAP</text><text x="56" y="280" class="t-s">the agent protocol</text><rect x="188" y="246" width="285" height="26" rx="6" class="plain"/><text x="330.5" y="263.5" class="mono mid">agents.&lt;verb&gt;.&lt;agent&gt;.&lt;owner&gt;.&lt;name&gt;</text><rect x="481" y="246" width="126" height="26" rx="6" class="plain"/><text x="544.0" y="263.5" class="t-i mid">discovery ($SRV)</text><rect x="615" y="246" width="126" height="26" rx="6" class="plain"/><text x="678.0" y="263.5" class="t-i mid">signed heartbeat</text><rect x="188" y="280" width="152" height="26" rx="6" class="plain"/><text x="264.0" y="297.5" class="t-i mid">status, live prompts</text><rect x="348" y="280" width="133" height="26" rx="6" class="plain"/><text x="414.5" y="297.5" class="t-i mid">§13 signed sender</text><rect x="489" y="280" width="197" height="26" rx="6" class="plain"/><text x="587.5" y="297.5" class="t-i mid">verified · claimed · absent</text><rect x="32" y="334" width="796" height="92" rx="10" class="f-teal"/><rect x="32" y="334" width="6" height="92" rx="3" class="solid-teal"/><text x="56" y="364" font-size="16" class="t-h x-teal">NATS</text><text x="56" y="384" class="t-s">the bus</text><rect x="188" y="350" width="152" height="26" rx="6" class="plain"/><text x="264.0" y="367.5" class="t-i mid">outbound connections</text><rect x="348" y="350" width="165" height="26" rx="6" class="plain"/><text x="430.5" y="367.5" class="t-i mid">user keys (JWT + nkey)</text><rect x="521" y="350" width="146" height="26" rx="6" class="plain"/><text x="594.0" y="367.5" class="t-i mid">subject permissions</text><rect x="188" y="384" width="229" height="26" rx="6" class="plain"/><text x="302.5" y="401.5" class="t-i mid">JetStream: store, ack, redeliver</text><rect x="425" y="384" width="178" height="26" rx="6" class="plain"/><text x="514.0" y="401.5" class="t-i mid">KV: TTL, compare-and-set</text><rect x="611" y="384" width="107" height="26" rx="6" class="plain"/><text x="664.5" y="401.5" class="t-i mid">dedupe window</text><text x="32" y="454" class="t-s">mash is a documented SAP extension. It bends one SAP rule: mail is addressed through mash&#x27;s own</text><text x="32" y="472" class="t-s">directory, not live discovery, so it reaches agents that are not running.</text><text x="32" y="498" class="t-cap">Structure only, so no arrows: each layer builds on the one beneath it.</text></svg>
