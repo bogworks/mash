@@ -77,9 +77,10 @@ The numbered steps are what the command does in each state, and the manual path 
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
 3. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
 4. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
-   targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, then creates a
-   **draft** release with the binaries, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`), `SHA256SUMS` and a changelog,
-   and a parallel `attest` job attests build provenance for the four binaries (see "Build provenance").
+   targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
+   attests build provenance for the four binaries (see "Build provenance"). Only after `attest` succeeds does it create a
+   **draft** release with the binaries, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`), `SHA256SUMS` and a changelog.
+   A failed attestation leaves no draft; fix the cause and rerun the workflow.
 5. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing). Then publish the draft: `gh release edit v<version> --draft=false`.
@@ -185,7 +186,8 @@ and only that job, holds `id-token: write` and `attestations: write`). Consumers
 Attestations need a public repository (a private one needs GitHub Enterprise Cloud); once the repo is public the
 attestation is recorded in the public Sigstore transparency log. Until the repo is flipped public this step does not
 produce a usable attestation (on a private repo without Enterprise Cloud it fails the job), so it only takes effect
-after the flip.
+after the flip. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
+or outlive a failed attestation, and a failed attestation leaves no draft (rerun the workflow).
 
 ## Versions
 

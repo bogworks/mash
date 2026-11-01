@@ -84,7 +84,8 @@ jobs:
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
   draft:
-    needs: build
+    # A draft exists only once provenance does, so publishing can never precede or outlive a failed attestation.
+    needs: [build, attest]
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:

@@ -183,8 +183,8 @@ func TestRelease_buildsExactlyTheFourTargetsTwiceInFreshClones(t *testing.T) {
 
 func TestRelease_jobOrderAndDraftOnly(t *testing.T) {
 	w := load(t, "release.yml")
-	need := func(j string) string { return fmt.Sprint(w.Jobs[j].Needs) }
-	if need("build") != "guard" || need("draft") != "build" {
+	need := func(j string) string { return strings.Join(jobNeeds(w.Jobs[j].Needs), ",") }
+	if need("build") != "guard" || need("draft") != "build,attest" {
 		t.Fatalf("job order: build needs %s, draft needs %s", need("build"), need("draft"))
 	}
 	var run string
@@ -594,8 +594,30 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 }
 
 // The attest job, and only it, holds the signing permissions (and no contents); it attests the four binaries.
+// jobNeeds normalises a job's `needs`, which YAML allows as a string or a list.
+func jobNeeds(v any) []string {
+	switch n := v.(type) {
+	case string:
+		return []string{n}
+	case []any:
+		var out []string
+		for _, e := range n {
+			out = append(out, fmt.Sprint(e))
+		}
+		return out
+	}
+	return nil
+}
+
 func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	w := load(t, "release.yml")
+	have := map[string]bool{}
+	for _, n := range jobNeeds(w.Jobs["draft"].Needs) {
+		have[n] = true
+	}
+	if !have["build"] || !have["attest"] {
+		t.Errorf("draft must need both build and attest, got %v", w.Jobs["draft"].Needs)
+	}
 	j := w.Jobs["attest"]
 	for _, p := range []string{"id-token", "attestations"} {
 		if j.Permissions[p] != "write" {
