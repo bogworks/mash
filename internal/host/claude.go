@@ -230,10 +230,12 @@ func (Claude) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.En
 			ms[i] = endpoint.MailOf(e)
 			ts[i] = ms[i].Trust
 		}
-		return endpoint.HookFrame(p.Name, ts) + "\n" + render.Batch(p.Name, p.Owner, ms, p.BatchMsgs, maxBytes)
+		return endpoint.HookFrame(p.Name, ts) + "\n" + render.HookBatch(p.Name, p.Owner, ms, p.BatchMsgs, maxBytes)
 	}
 	text := build(waiting, p.BatchBytes)
+	maxBytes := p.BatchBytes
 	if utf16Len(text) > hookContextMax {
+		maxBytes = 0
 		for {
 			text = build(waiting, 0)
 			if utf16Len(text) <= hookContextMax || len(waiting) == 1 {
@@ -241,6 +243,17 @@ func (Claude) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.En
 			}
 			waiting = waiting[:len(waiting)-1]
 		}
+	}
+	ms := make([]render.Mail, len(waiting))
+	for i, e := range waiting {
+		ms[i] = endpoint.MailOf(e)
+	}
+	digest := render.IsDigest(ms, p.BatchMsgs, maxBytes)
+	// What a digest lists the model has not read: mark those Listed (and the rest not), so the hook lists them instead of draining them
+	// (ADR 0046). The slice is a copy of the caller's entries, which are left as they were.
+	waiting = slices.Clone(waiting)
+	for i := range waiting {
+		waiting[i].Listed = digest // also clears a mark Waiting set: shown in full now, so drained
 	}
 	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": p.Event, "additionalContext": text}})
 	return append(out, '\n'), waiting

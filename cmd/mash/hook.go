@@ -1,11 +1,13 @@
 package main
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -100,8 +102,30 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if err != nil || len(waiting) == 0 {
 		return 0
 	}
-	out, shown := adapter.Present(host.Presentation{Name: cfg.Name, Owner: cfg.Owner, Event: trig.Event,
-		BatchMsgs: cfg.BatchMsgs, BatchBytes: cfg.BatchBytes}, waiting)
+	// A message an earlier digest listed is not shown again in a digest (the model was told to read it, and a repeat on
+	// every tool call would be noise); it is shown only in full, in a run whose whole batch fits that way, which then
+	// drains it (ADR 0046). A run with nothing new shows nothing.
+	var fresh, listed []spool.Entry
+	for _, e := range waiting {
+		if e.Listed {
+			listed = append(listed, e)
+		} else {
+			fresh = append(fresh, e)
+		}
+	}
+	if len(fresh) == 0 {
+		return 0
+	}
+	pres := host.Presentation{Name: cfg.Name, Owner: cfg.Owner, Event: trig.Event, BatchMsgs: cfg.BatchMsgs, BatchBytes: cfg.BatchBytes}
+	out, shown := adapter.Present(pres, slices.Clone(fresh))
+	if len(listed) > 0 && !anyListed(shown) {
+		// New mail fits in full: see whether the listed mail fits with it. Only a batch with no digest line is taken.
+		all := append(slices.Clone(fresh), listed...)
+		slices.SortFunc(all, func(a, b spool.Entry) int { return cmp.Compare(a.Seq, b.Seq) })
+		if out2, shown2 := adapter.Present(pres, all); !anyListed(shown2) {
+			out, shown = out2, shown2
+		}
+	}
 	seqs := make([]uint64, len(shown))
 	for i, e := range shown {
 		seqs[i] = e.Seq
@@ -115,7 +139,12 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	}
 	failpoint(env, stderr, "after-print")
 	for i, e := range shown {
-		if err := sp.Drained(e.Seq); err != nil {
+		if e.Listed {
+			// Listed in a digest, not read: waiting and unacked until the model reads it (ADR 0046).
+			if err := sp.Listed(e.Seq); err != nil {
+				fmt.Fprintf(stderr, "mash hook: marking #%d listed: %v\n", e.Seq, err)
+			}
+		} else if err := sp.Drained(e.Seq); err != nil {
 			fmt.Fprintf(stderr, "mash hook: marking #%d drained: %v\n", e.Seq, err)
 		}
 		if i == 0 {
@@ -123,6 +152,11 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 	}
 	return 0
+}
+
+// anyListed reports whether any entry was rendered as a digest line.
+func anyListed(es []spool.Entry) bool {
+	return slices.ContainsFunc(es, func(e spool.Entry) bool { return e.Listed })
 }
 
 func getenv(env func(string) string, k string) string {

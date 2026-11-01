@@ -123,6 +123,25 @@ func (w *wakingTracker) add(seq uint64, wakes bool) {
 	}
 }
 
+// listed stops counting a message a hook has listed in a digest: the model was told of it and to read it, so it is not
+// mail that should wake it. It stays unread (unacked) and is forgotten by done when acked; a redelivery's add changes
+// nothing.
+func (w *wakingTracker) listed(seq uint64) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	wakes, ok := w.unread[seq]
+	if ok && wakes {
+		w.unread[seq] = false
+		w.count--
+	}
+	w.mu.Unlock()
+	if ok && wakes {
+		w.poke()
+	}
+}
+
 // done forgets a message that has been shown (acked).
 func (w *wakingTracker) done(seq uint64) {
 	if w == nil {

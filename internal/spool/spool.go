@@ -9,7 +9,8 @@
 //
 // Layout, under Dir: <seq>.json for each message waiting (0600), shown/<seq> for each one a hook is about to show
 // and has not yet drained, drained/<seq> for each one a hook has shown and serve has not yet acked, and .hooked,
-// whose mtime is the last hook run, and .alive, whose mtime is the last run of a subagent's hook. The directories are 0700.
+// whose mtime is the last hook run, listed/<seq> for each one a hook has only listed in a digest (still waiting, not
+// drained: it is drained when the model reads it or a later hook shows it in full, ADR 0046), and .alive, whose mtime is the last run of a subagent's hook. The directories are 0700.
 package spool
 
 import (
@@ -40,6 +41,10 @@ type Entry struct {
 	// Redelivered is set by Waiting, never persisted: a hook had begun to show this entry and did not finish
 	// draining it, so the session may already have seen it.
 	Redelivered bool `json:"-"`
+	// Listed is never persisted. Waiting sets it for an entry a hook has listed in a digest (its listed/<seq> mark is
+	// there); the host adapter's Present sets it on the entries it rendered as digest lines, which the hook then marks
+	// listed instead of drained.
+	Listed bool `json:"-"`
 }
 
 // Spool is one endpoint's spool directory.
@@ -66,6 +71,11 @@ const (
 
 func (s Spool) drained() string { return filepath.Join(s.Dir, "drained") }
 func (s Spool) shown() string   { return filepath.Join(s.Dir, "shown") }
+func (s Spool) listed() string  { return filepath.Join(s.Dir, "listed") }
+
+func (s Spool) listedFile(seq uint64) string {
+	return filepath.Join(s.listed(), strconv.FormatUint(seq, 10))
+}
 
 func (s Spool) shownFile(seq uint64) string {
 	return filepath.Join(s.shown(), strconv.FormatUint(seq, 10))
@@ -77,7 +87,7 @@ func (s Spool) file(seq uint64) string {
 
 // Init makes the spool's directories, 0700, and tightens them if they exist.
 func (s Spool) Init() error {
-	for _, d := range []string{s.Dir, s.drained(), s.shown()} {
+	for _, d := range []string{s.Dir, s.drained(), s.shown(), s.listed()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
 		}
@@ -90,8 +100,12 @@ func (s Spool) Init() error {
 
 // ClearWaiting removes every waiting <seq>.json and leftover .put-* temporary file, keeping the drained/ tombstones
 // and .hooked, and the shown/ marks like the tombstones: a message shown and not drained is redelivered, and may have
-// been seen. A restarted serve calls it: NATS redelivers what was never acked (codex M1 on #21).
+// been seen. The listed/ marks go with the files: a message only listed in a digest was not seen, and its redelivery
+// is listed again, once (ADR 0046). A restarted serve calls it: NATS redelivers what was never acked (codex M1 on #21).
 func (s Spool) ClearWaiting() error {
+	if err := s.clearDir(s.listed()); err != nil {
+		return err
+	}
 	des, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return err
@@ -111,6 +125,23 @@ func (s Spool) ClearWaiting() error {
 	return nil
 }
 
+// clearDir removes the files in dir; a missing dir is empty.
+func (s Spool) clearDir(dir string) error {
+	des, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, d := range des {
+		if err := os.Remove(filepath.Join(dir, d.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("spool: %w", err)
+		}
+	}
+	return nil
+}
+
 // Bind scopes the spool to stream, the identity of the inbox stream. Sequences restart at 1 when the stream is
 // recreated (deprovision, then provision), so a tombstone or waiting file left by the old stream would match new
 // mail: Bind drops them all when stream differs from the one recorded, and records it. Equal, it changes nothing
@@ -123,9 +154,9 @@ func (s Spool) Bind(stream string) error {
 	if err := s.ClearWaiting(); err != nil {
 		return err
 	}
-	for _, dir := range []string{s.drained(), s.shown()} {
+	for _, dir := range []string{s.drained(), s.shown(), s.listed()} {
 		des, err := os.ReadDir(dir)
-		if err != nil && !(dir == s.shown() && errors.Is(err, fs.ErrNotExist)) {
+		if err != nil && !(dir != s.drained() && errors.Is(err, fs.ErrNotExist)) {
 			return err
 		}
 		for _, d := range des {
@@ -218,6 +249,17 @@ func (s Spool) Waiting() ([]Entry, error) {
 			}
 		}
 	}
+	if len(out) > 0 {
+		if ls, err := os.ReadDir(s.listed()); err == nil {
+			marked := map[string]bool{}
+			for _, d := range ls {
+				marked[d.Name()] = true
+			}
+			for i := range out {
+				out[i].Listed = marked[strconv.FormatUint(out[i].Seq, 10)]
+			}
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out, nil
 }
@@ -246,6 +288,41 @@ func (s Spool) MarkShown(seqs ...uint64) error {
 	return nil
 }
 
+// Listed marks seq as listed in a digest and not seen: its listed mark is written (atomically: a temporary file,
+// renamed) and its shown mark removed, so a later run does not flag it re-delivered. Its file stays, so a later hook
+// can show it in full; it is not drained, so serve does not ack it (ADR 0046).
+func (s Spool) Listed(seq uint64) error {
+	if err := os.MkdirAll(s.listed(), 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.listed(), ".put-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // a no-op once renamed
+	err = f.Chmod(0o600)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.listedFile(seq)); err != nil {
+		return err
+	}
+	if err := os.Remove(s.shownFile(seq)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// IsListed reports whether a hook has listed seq in a digest and nothing has drained it since.
+func (s Spool) IsListed(seq uint64) bool {
+	_, err := os.Stat(s.listedFile(seq))
+	return err == nil
+}
+
 // Drained marks seq shown: its tombstone is written, then its file removed, then its shown mark. Tombstone first, so
 // a crash in between leaves the message both waiting and drained, which shows it again (flagged Redelivered, as the
 // mark is still there) rather than losing it.
@@ -260,6 +337,9 @@ func (s Spool) Drained(seq uint64) error {
 	if err := os.Remove(s.shownFile(seq)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(s.listedFile(seq)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 
@@ -272,7 +352,7 @@ func (s Spool) IsDrained(seq uint64) bool {
 // Acked forgets seq once serve has acked it: its tombstone, its shown mark and any waiting file (a redelivery spooled
 // again).
 func (s Spool) Acked(seq uint64) error {
-	for _, p := range []string{filepath.Join(s.drained(), strconv.FormatUint(seq, 10)), s.file(seq), s.shownFile(seq)} {
+	for _, p := range []string{filepath.Join(s.drained(), strconv.FormatUint(seq, 10)), s.file(seq), s.shownFile(seq), s.listedFile(seq)} {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("spool: %w", err)
 		}

@@ -208,7 +208,7 @@ flowchart TB
   cc -->|"starts, MCP over stdio"| serve
   cc -->|"runs after each tool call and prompt"| hook
   serve -->|"writes files"| spool
-  hook -->|"reads, marks shown and drained"| spool
+  hook -->|"reads, marks shown, then drained (listed, for a digest)"| spool
   serve -->|"reads"| cfg
   cli -->|"reads"| cfg
   serve -->|"one NATS connection"| nats
@@ -222,7 +222,7 @@ never connects to NATS.*
 |---|---|---|
 | `mash serve` (mash) | The endpoint manager. A long-lived MCP server that the agent host starts once per session. It holds the NATS connection, the lease, the SAP registration and the inbox consumer, and offers the session its tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` | Already connected when mail arrives, and a send is one tool call and one round trip ([ADR-0022][0022]). Without `MASH_NAME` it connects to nothing and offers only `status` and `version` ([ADR-0012][0012]) |
 | `mash hook` (mash) | A short-lived command the agent host runs after each tool call and with each prompt. It prints spooled mail as hook context and makes no network call | A busy session sees mail with no turn of its own ([ADR-0024][0024]) |
-| Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/` and `drained/` marks; directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON) and `.session` keeps the legacy `pid:N` text so an older hook still enforces ancestry; a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
+| Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/`, `listed/` and `drained/` marks (`listed/` is a message a digest named and the model has not read: still waiting and unacked, drained by `read` or a full showing, [ADR-0046][0046]); directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON) and `.session` keeps the legacy `pid:N` text so an older hook still enforces ancestry; a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
 | `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. Setting up a hosted account is a script outside the binary, `scripts/quickstart-synadia.sh` | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
 | Agent host (agent host) | Claude Code, through the mash plugin: an MCP server entry and two hooks | The plugin is the unit of distribution ([ADR-0033][0033]) |
 | NATS server (NATS) | Inbox streams, two KV buckets, and the SAP subjects | See section 8.2 |
@@ -737,7 +737,7 @@ that takes channel events.
 | urgent | mash | A signed mark that wakes the recipient at once, honoured only from a `verified` sender |
 | trust label | mash | One word on every shown message: `verified`, `unknown-signer`, `claimed`, `absent` or `stale` |
 | verified | SAP, refined by mash | A valid signature by a user key that the directory lists under the claimed name, made within 5 minutes before storage |
-| digest | mash | A batch shown as one line per message, read in full with the `read` tool by `#seq` |
+| digest | mash | A batch shown as one line per message, read in full with the `read` tool by `#seq`; its messages are listed, not acked, until read ([ADR-0046][0046]) |
 | wake | mash | A channel event, one summary line, that starts a turn in an idle session |
 | hook | agent host | A command Claude Code runs at fixed points. mash uses `PostToolUse` (after each tool call) and `UserPromptSubmit` (when a turn starts) |
 | channel | agent host | Claude Code's way for an MCP server to push an event into a session. It starts a turn when the session is idle |
@@ -963,3 +963,4 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 [0037]: decisions/0037-mail-carries-text-files-travel-by-reference.md
 [0038]: decisions/0038-synadia-setup-is-a-script-outside-the-binary.md
 [0040]: decisions/0040-hook-ownership-session-id-launch-token-then-process-chain.md
+[0046]: decisions/0046-a-digest-lists-mail-it-does-not-ack-it.md

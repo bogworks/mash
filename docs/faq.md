@@ -78,7 +78,7 @@ The plugin's launcher downloads and verifies binaries for Linux and macOS, on am
 
 ## Is a digest the same as the model having read the mail?
 
-No. When a batch is more than 10 messages or 16 KiB, the hook shows a digest, one line per message with a preview, and the messages listed count as shown, so they are acked. The model reads the ones it needs with the `read` tool. Put the action in the first line of a message. A digest line counts as delivery ([Hook delivery](operations.md#hook-delivery)).
+No. When a batch is more than 10 messages or 16 KiB, the hook shows a digest, one line per message with a preview. Those messages are listed, not acked: each stays unread in the inbox until the model calls `read` for its `#seq` (or a later hook run shows it in full). A listed message never wakes the session. Put the action in the first line of a message all the same ([Hook delivery](operations.md#hook-delivery), [ADR-0046](decisions/0046-a-digest-lists-mail-it-does-not-ack-it.md)).
 
 ## Is the connection encrypted?
 
