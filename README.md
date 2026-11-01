@@ -13,6 +13,8 @@ and messages must wait for a busy or stopped recipient. **Use A2A** when agents 
 organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
 A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), including "why not A2A?".
 
+**Why not Claude Code's built-in [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)?** It is tied to one agent host and one user, needs a claude.ai sign-in to reach another machine, holds mail for an offline session only until it reconnects, and describes no sender proof. Use mash when mail must outlive the recipient's session, when you want signed sender proof with trust labels, when you run your own NATS server, or when more than one user or machine is involved. The comparison table is in [architecture.md](docs/architecture.md#14-alternatives-and-why-they-do-not-fit), and [comparison.md](docs/comparison.md#2-choose-mash-when-choose-something-else-when) says when the built-in feature is the better choice.
+
 ![How mash connects sessions](docs/images/001-topology.svg)
 
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
@@ -20,6 +22,8 @@ JetStream and is kept up to 30 days. ([details](docs/comparison.md#3-two-paths-l
 
 Status: v0.3.0, pre-1.0, one host adapter (Claude Code). Known limits are listed in
 [the comparison](docs/comparison.md#9-known-limits).
+
+Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not supported. WSL 2 with the Linux binary is expected to work but has not been tested.
 
 ## Quickstart on Synadia Cloud (free tier)
 
@@ -111,7 +115,7 @@ Operators provision endpoints with `mash admin` and their usual NATS tooling: se
 
 ## Status
 
-mash is pre-1.0 (0.3.0). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). Interfaces may still change before 1.0. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is pre-1.0 (0.3.0). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Interfaces may still change before 1.0. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 

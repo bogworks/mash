@@ -4,6 +4,8 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 ## 1. The binary
 
+Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
+
 mash is one static Go binary. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository or `mash plugin export` gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
 
 - A `SessionStart` hook prefetches the binary into the plugin's data directory (`${CLAUDE_PLUGIN_DATA}/bin`) on first use, so the MCP server starts without a download. The server launcher downloads it as a fallback.
@@ -29,6 +31,8 @@ claude plugin install mash@mash
 ```
 
 The plugin declares an MCP server, `mash serve` (started through the plugin's launcher script, with `MASH_SPOOL_FROM_START=1`), a SessionStart hook that prefetches the pinned binary, and two hooks, PostToolUse and UserPromptSubmit, which run `mash hook`. Mail reaches the session through those hooks, as "mash mail" context; see [Hook delivery](operations.md). A session without a mash identity (no `MASH_NAME`) gets an inert server with only the `status` and `version` tools, so it is safe to install for every session.
+
+**Install scope.** `claude plugin install` installs at user scope by default (`--scope user`), which records the plugin in `enabledPlugins` in `~/.claude/settings.json` so every session on the machine has mash; a session without `MASH_NAME` stays inert. Project scope (`.claude/settings.json`) and local scope (`.claude/settings.local.json`) enable it in one repository only, so the mash server and hooks are absent in every other project. A narrower scope overrides a wider one, so a project can turn off a user-scope install. An organisation can force-enable `mash@mash` in managed `enabledPlugins`, which Claude Code lists at Managed scope and users cannot disable in `/plugin`; that is also what keeps the hooks under `allowManagedHooksOnly` (below). The `status` tool says which parts are missing in a session. See [Choose an install scope](https://code.claude.com/docs/en/plugins/install#choose-an-install-scope) in the Claude Code docs.
 
 Mail needs those hooks to run. They do not run with `disableAllHooks: true` in any Claude Code settings file, or under a managed `allowManagedHooksOnly` unless an administrator force-enables `mash@mash` in managed `enabledPlugins`. Then mash stops waking the session after a few tries and `status` reports `delivery: DEGRADED`; see [Hook delivery](operations.md).
 
@@ -97,6 +101,14 @@ MASH_NAME=design mash send review --id spec-review-1 "Spec is at docs/specs/x.md
 MASH_NAME=design mash prompt review "Are you still on the auth bug?"
 MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
 ```
+
+### Sessions and resume
+
+The endpoint name belongs to the launch, not to the conversation. It comes only from `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
+
+- `claude --resume` or `--continue` without `MASH_NAME` gives an inert session. With a different name, the conversation gets that name's mailbox, and reusing a name in an unrelated conversation hands it that endpoint's backlog. Resume with the same `MASH_NAME`.
+- One live session holds a name. A session that finds its name held starts without mail tools and retries. Do not resume a conversation while its original process is still running: a second process in the same Claude session can drain the holder's spooled mail without any signal ([receipt](evidence/2026-11-01-dual-resume/RECEIPT.md)).
+- The lease expires 90 seconds after its last refresh (`store.LeaseTTL`), and a running session refreshes it every 30 seconds (`endpoint.LeaseRefresh`). A laptop that sleeps longer than 90 seconds loses it. When the session wakes, if nobody else took the name, `mash serve` takes it back. If another session took it, the loss is final: lease loss after a start is terminal, and the session must be restarted. Run `status` to see whether the name is still held, and restart with the same `MASH_NAME`; the restart takes the name back once the other holder is gone.
 
 ### Lease fields a supervisor can read
 

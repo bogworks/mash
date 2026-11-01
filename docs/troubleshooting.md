@@ -14,7 +14,7 @@ The hook's stderr goes to `$XDG_STATE_HOME/mash/hook.log` (default `~/.local/sta
 
 Message: "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off." `status` shows `name: MISSING - not set`. The CLI says `mash: set MASH_NAME to the endpoint you are acting as`. Run `mash status` in the shell you launch Claude Code from to see the same `name: MISSING` line before you start.
 
-Cause: `MASH_NAME` was not in the environment Claude Code started with. The plugin is inert by design without it, with only `status` and `version`. The name comes only from the environment, never from config.json or the conversation. `claude --resume` and `--continue` need it again (tracked in #46).
+Cause: `MASH_NAME` was not in the environment Claude Code started with. The plugin is inert by design without it, with only `status` and `version`. The name comes only from the environment, never from config.json or the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
 
 Fix: start Claude Code as `MASH_NAME=design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_NAME=design mash status` first).
 
@@ -65,7 +65,7 @@ Fix: end the other session, or start this one with a different `MASH_NAME`. Name
 
 ## `mash: lost the lease on X to another session`
 
-Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If a session loses it after it started (a laptop asleep longer than 90 seconds, a long network loss, or `mash admin deprovision` of the name), it stops and does not try to take it back. Restart Claude Code with the same `MASH_NAME`; the restart takes the name once no one else holds it (tracked in #46).
+Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the name was deprovisioned, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_NAME`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
 
 ## `connection: RETRYING` or `FAILED`
 
@@ -130,11 +130,11 @@ The hook always exits 0, so a failing hook is silent; `hook.log` is where its er
 
 ## Mail does not arrive while a subagent works
 
-Subagents have no mailbox, and their tool calls do not deliver mail. It waits for the main session's next tool call or prompt, or for the idle wake (tracked in #45).
+Subagents have no mailbox, and their tool calls do not deliver mail. It waits for the main session's next tool call or prompt, or for the idle wake. See [Hook delivery](operations.md#hook-delivery).
 
 ## A digest lists messages, but their text is missing
 
-A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the `#seq`. Listed messages count as shown and are acked; `inbox` lists recent messages and never acks (tracked in #44).
+A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the `#seq`. Listed messages count as shown and are acked; `inbox` lists recent messages and never acks. A digest line counts as delivery (see [Hook delivery](operations.md#hook-delivery)), so senders should put the action in the first line.
 
 ## Mail from the recipient's side seems to be missing
 
