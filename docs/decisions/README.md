@@ -62,5 +62,4 @@ on), or mash's own choice on top of them.
 | [0046](0046-a-digest-lists-mail-it-does-not-ack-it.md) | A digest lists mail and does not ack it; the read tool or a full showing does (amends 0026 and 0024; their files are unchanged) | accepted | mash | 2026-11-01 |
 | [0048](0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md) | Limit changes take a per-stream KV lock with expiry | accepted | NATS / mash | 2026-11-01 |
 | [0049](0049-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
-| [0048](0048-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
-| [0049](0049-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
+| [0050](0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
