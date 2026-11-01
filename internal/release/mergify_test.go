@@ -75,6 +75,9 @@ func loadMergify(t *testing.T) mergify {
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	jobs := load(t, "ci.yml").Jobs
+	for name, j := range load(t, "adr-lint.yml").Jobs { // adr-lint.yml's jobs are checks the queue waits for too
+		jobs[name] = j
+	}
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	m := loadMergify(t)
 	if len(m.QueueRules) != 1 {
@@ -91,7 +94,7 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			t.Errorf(".mergify.yml waits for %q, which ci.yml does not run", mm[1])
 		}
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "label != hold", "-draft", "-conflict"} {
+	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "label != hold", "-draft", "-conflict"} {
 		if !strings.Contains(strings.Join(queuePlain, "\n"), want) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
