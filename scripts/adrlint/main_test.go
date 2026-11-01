@@ -111,7 +111,9 @@ func TestDocs(t *testing.T) {
 		{"a: no front matter", with(good(), adr, strings.Join(strings.Split(goodADR, "\n")[5:], "\n")), []string{adr + ":1: front matter"}},
 		{"a: missing key", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)\n", "")), []string{"has no decision-makers key"}},
 		{"a: bad status", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe")), []string{adr + ":2: status \"maybe\""}},
-		{"a: superseded status ok", with(good(), adr, edit(goodADR, "status: accepted", "status: Superseded by ADR-0002")), nil},
+		{"a: superseded status ok", with(good(), adr, edit(goodADR, "status: accepted", "status: Superseded by ADR-0002"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
+		{"a: superseded by a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-9999")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
+		{"a: superseded by an unlisted ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), []string{"ADR-0002 (0002-new.md) is not listed in README.md"}},
 		{"a: bad superseded", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by 2")), []string{"status \"superseded by 2\""}},
 		{"a: bad date", with(good(), adr, edit(goodADR, "2026-10-31", "2026-13-40")), []string{adr + ":3: date"}},
 		{"a: empty decision-makers", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers:")), []string{"decision-makers is empty"}},
@@ -212,6 +214,8 @@ func TestImmutability(t *testing.T) {
 	}{
 		{"unchanged", goodADR, goodADR, ""},
 		{"supersede", goodADR, superseded, ""},
+		{"supersede link to a missing ADR", goodADR, edit(superseded, "(0002-new.md)", "(0009-nope.md)"), "does not exist"},
+		{"supersede link to a non-ADR file", goodADR, edit(superseded, "(0002-new.md)", "(guide.md)"), "must point to an ADR file"},
 		{"supersede link changed again", superseded, edit(superseded, "(0002-new.md)", "(0003-newer.md)"), ""},
 		{"body edit", goodADR, edit(goodADR, "Chosen option: \"One\"", "Chosen option: \"Two\""), "immutable"},
 		{"front matter edit", goodADR, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers: Other"), "immutable"},
@@ -235,6 +239,7 @@ func TestImmutability(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
 			}
 			os.WriteFile(filepath.Join(dir, "0002-new.md"), []byte("x"), 0o644)
+			os.WriteFile(filepath.Join(dir, "0003-newer.md"), []byte("x"), 0o644)
 			if err := os.Chdir(root); err != nil {
 				t.Fatal(err)
 			}
@@ -243,7 +248,7 @@ func TestImmutability(t *testing.T) {
 			if tc.base != "" {
 				base["docs/decisions/0001-use-one-way.md"] = tc.base
 			}
-			vs, err := lintImmutable("docs/decisions", "good", fakeGit(base))
+			vs, err := lintImmutable("docs/decisions", "docs/decisions", "good", fakeGit(base))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +268,7 @@ func TestImmutability_deletedAcceptedADR(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# x\n"), 0o644)
 	os.Chdir(root)
 	defer os.Chdir(wd)
-	vs, err := lintImmutable("docs/decisions", "good", fakeGit(map[string]string{"docs/decisions/0001-use-one-way.md": goodADR}))
+	vs, err := lintImmutable("docs/decisions", "docs/decisions", "good", fakeGit(map[string]string{"docs/decisions/0001-use-one-way.md": goodADR}))
 	if err != nil || len(vs) != 1 || !strings.Contains(vs[0], "deleted") {
 		t.Fatalf("got %v %v", vs, err)
 	}
@@ -304,8 +309,15 @@ func TestPR(t *testing.T) {
 		want    string // "" is a pass
 		wantErr int    // expected exit when not 0/1
 	}{
-		{name: "ADR named", body: "Summary\n\nDecision: ADR-0001\n", files: "internal/sap/x.go\n"},
-		{name: "key is case-insensitive", body: "decision: adr-0001", files: "x\n"},
+		{name: "ADR named", body: "Summary\n\nDecision: ADR-0001\n", files: "internal/sap/x.go\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "key is case-insensitive", body: "decision: adr-0001", files: "docs/decisions/0001-use-one-way.md\n"},
+		{name: "ADR named but the PR does not touch it", body: "Decision: ADR-0001", files: "internal/cli/x.go\n", want: "must add or change"},
+		{name: "ADR named, another record changed", body: "Decision: ADR-0001", files: "docs/decisions/0002-other.md\n", want: "must add or change"},
+		{name: "ADR named, same name elsewhere", body: "Decision: ADR-0001", files: "other/0001-use-one-way.md\n", want: "must add or change"},
+		{name: "none on a change to a record", body: "Decision: none", files: "docs/decisions/0001-use-one-way.md\n", want: "decision-confirmed"},
+		{name: "none on a change to the README", body: "Decision: none", files: "docs/decisions/README.md\n", want: "decision-confirmed"},
+		{name: "none on a record with the label", body: "Decision: none", files: "docs/decisions/0001-use-one-way.md\n", labels: "decision-confirmed"},
+		{name: "none beside docs/decisions look-alike", body: "Decision: none", files: "docs/decisions-notes.md\n"},
 		{name: "none on an ordinary path", body: "Decision: none", files: "README.md\ninternal/cli/x.go\n"},
 		{name: "none with trailing space and CRLF", body: "Intro\r\nDecision: none  \r\n", files: "README.md\n"},
 		{name: "missing", body: "Summary only", files: "README.md\n", want: "no Decision line"},
@@ -314,7 +326,7 @@ func TestPR(t *testing.T) {
 		{name: "indented does not count", body: "  Decision: none", files: "README.md\n", want: "no Decision line"},
 		{name: "duplicate", body: "Decision: none\nDecision: ADR-0001\n", files: "README.md\n", want: "2 Decision lines"},
 		{name: "ADR file missing", body: "Decision: ADR-0009", files: "README.md\n", want: "names no file"},
-		{name: "ADR not in README", body: "Decision: ADR-0001", files: "README.md\n", readme: "# Decisions\n", want: "not listed in"},
+		{name: "ADR not in README", body: "Decision: ADR-0001", files: "docs/decisions/0001-use-one-way.md\n", readme: "# Decisions\n", want: "not listed in"},
 		{name: "none on internal/sap", body: "Decision: none", files: "internal/sap/a.go\n", want: "decision-confirmed"},
 		{name: "none on internal/store", body: "Decision: none", files: "internal/store/a.go\n", want: "decision-confirmed"},
 		{name: "none on permissions.go", body: "Decision: none", files: "internal/admin/permissions.go\n", want: "decision-confirmed"},
@@ -332,10 +344,17 @@ func TestPR(t *testing.T) {
 			if tc.readme != "" {
 				readme = tc.readme
 			}
-			dir := tree(t, with(good(), "README.md", readme))
+			root := t.TempDir()
+			dir := filepath.Join(root, "docs", "decisions")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for n, c := range with(good(), "README.md", readme) {
+				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+			}
 			fl := filepath.Join(t.TempDir(), "files")
 			os.WriteFile(fl, []byte(tc.files), 0o644)
-			code, out, errs := runCLI(t, nil, map[string]string{"PR_BODY": tc.body, "PR_LABELS": tc.labels}, "pr", "--files", fl, "--dir", dir)
+			code, out, errs := runCLI(t, nil, map[string]string{"PR_BODY": tc.body, "PR_LABELS": tc.labels}, "pr", "--files", fl, "--root", root)
 			if tc.want == "" {
 				if code != 0 || out != "" {
 					t.Fatalf("want pass, got %d %q %q", code, out, errs)
@@ -346,5 +365,34 @@ func TestPR(t *testing.T) {
 				t.Fatalf("want exit 1 with %q, got %d %q %q", tc.want, code, out, errs)
 			}
 		})
+	}
+}
+
+// --root points the checker at another tree: files resolve under it and git runs as "git -C root".
+func TestRootFlag(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "decisions")
+	os.MkdirAll(dir, 0o755)
+	for n, c := range with(good(), "0001-use-one-way.md", edit(goodADR, "Chosen option", "Changed option")) {
+		os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+	}
+	var first []string
+	g := func(args ...string) ([]byte, error) {
+		if len(args) < 3 || args[0] != "-C" {
+			t.Errorf("git called without -C root: %v", args)
+			return nil, errors.New("no -C")
+		}
+		first = append(first, args[1])
+		return fakeGit(map[string]string{"docs/decisions/0001-use-one-way.md": goodADR})(args[2:]...)
+	}
+	// The cwd is not the tree: without --root the default directory does not exist there.
+	if code, out, _ := runCLI(t, g, nil, "docs", "--root", root, "--base", "good"); code != 1 || !strings.Contains(out, "immutable") {
+		t.Errorf("docs --root: %d %q", code, out)
+	}
+	if len(first) == 0 || first[0] != root {
+		t.Errorf("git -C roots: %v, want %s", first, root)
+	}
+	if code, _, _ := runCLI(t, nil, nil, "docs"); code != 2 {
+		t.Errorf("docs without --root outside a tree: %d, want 2", code)
 	}
 }

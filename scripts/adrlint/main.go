@@ -1,23 +1,28 @@
 // Command adrlint enforces the architecture decision records under docs/decisions (adr-lint.yml's checker).
 //
-//	adrlint docs [--base <git ref>] [dir]    lint every NNNN-title.md in dir (default docs/decisions)
-//	adrlint pr --files <path> [--dir dir]    check a pull request's "Decision:" line
+//	adrlint docs [--root r] [--base <git ref>] [dir]   lint every NNNN-title.md in dir (default docs/decisions)
+//	adrlint pr --files <path> [--root r] [--dir dir]   check a pull request's "Decision:" line
+//
+// --root (default ".") is the tree being judged: dir resolves under it and, with --base, git runs as "git -C root". The
+// workflow runs a checker built from the base branch with --root pointing at the pull request's checkout, so a pull
+// request cannot change the rules it is judged by.
 //
 // docs rules (each violation is one file:line: message line on stdout, all are reported):
 //
 //	a  MADR front matter: status (proposed|accepted|rejected|deprecated|superseded by ADR-NNNN), date (YYYY-MM-DD) and
-//	   decision-makers
+//	   decision-makers; a "superseded by ADR-NNNN" status must name an ADR file that exists and is listed in README.md
 //	b  the first heading is "# <title>"; the "##" sections are present and in order; "### Consequences" and
 //	   "### Confirmation" sit under Decision Outcome
 //	c  README.md links every ADR and every README link to an ADR resolves; every relative link in an ADR resolves;
 //	   numbers are unique (gaps are allowed: a number may be reserved by an in-flight PR)
 //	d  no consumer vocabulary (see vocabRE); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
-//	   add or change a "Superseded by [..](..)" line
+//	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
-// --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be listed in
-// README.md; "none" on a change under a protected path needs the "decision-confirmed" label.
+// --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist, be listed in
+// README.md and be among the changed paths (the pull request adds or changes that record); "none" on a change under a
+// protected path (docs/decisions/ included) needs the "decision-confirmed" label.
 //
 // Exit 0: ok. Exit 1: violations. Exit 2: usage or an unreadable input.
 package main
@@ -48,6 +53,7 @@ const (
 // directory prefix; anything else is one file.
 var protected = []string{
 	"internal/sap/", "internal/store/", "internal/admin/permissions.go", "internal/config/", "internal/endpoint/", "plugin/",
+	"docs/decisions/",
 }
 
 // sections are the required "##" headings, in order.
@@ -108,7 +114,7 @@ func run(args []string, e env) int {
 }
 
 func usage(e env, msg string) int {
-	fmt.Fprintf(e.stderr, "adrlint: %s\nusage: adrlint docs [--base <git ref>] [dir]\n       adrlint pr --files <path> [--dir dir]\n", msg)
+	fmt.Fprintf(e.stderr, "adrlint: %s\nusage: adrlint docs [--root r] [--base <git ref>] [dir]\n       adrlint pr --files <path> [--root r] [--dir dir]\n", msg)
 	return 2
 }
 
@@ -141,25 +147,31 @@ func runDocs(args []string, e env) int {
 	fs := flag.NewFlagSet("docs", flag.ContinueOnError)
 	fs.SetOutput(e.stderr)
 	base := fs.String("base", "", "git ref; accepted ADRs at this ref become immutable")
+	root := fs.String("root", ".", "the tree to judge; dir and git resolve under it")
 	pos, err := parseFlags(fs, args)
 	if err != nil || len(pos) > 1 {
-		return usage(e, "docs takes [--base <ref>] [dir]")
+		return usage(e, "docs takes [--root r] [--base <ref>] [dir]")
 	}
 	dir := defaultDir
 	if len(pos) == 1 {
 		dir = pos[0]
 	}
-	vs, err := lintDocs(dir)
+	fsDir, rel := resolveDir(*root, dir)
+	git := e.git
+	if *root != "." {
+		git = func(a ...string) ([]byte, error) { return e.git(append([]string{"-C", *root}, a...)...) }
+	}
+	vs, err := lintDocs(fsDir)
 	if err != nil {
 		fmt.Fprintln(e.stderr, "adrlint:", err)
 		return 2
 	}
 	if *base != "" {
-		if _, err := e.git("rev-parse", "--verify", "--quiet", *base+"^{commit}"); err != nil {
+		if _, err := git("rev-parse", "--verify", "--quiet", *base+"^{commit}"); err != nil {
 			fmt.Fprintf(e.stderr, "adrlint: base %q is not a commit: %v\n", *base, err)
 			return 2
 		}
-		iv, err := lintImmutable(dir, *base, e.git)
+		iv, err := lintImmutable(fsDir, rel, *base, git)
 		if err != nil {
 			fmt.Fprintln(e.stderr, "adrlint:", err)
 			return 2
@@ -167,6 +179,19 @@ func runDocs(args []string, e env) int {
 		vs = append(vs, iv...)
 	}
 	return report(e, vs)
+}
+
+// resolveDir returns the directory's path on disk and its slash path relative to root (how git and the changed-path
+// list name it). A relative dir is under root; an absolute one is used as is.
+func resolveDir(root, dir string) (fsDir, rel string) {
+	if !filepath.IsAbs(dir) {
+		return filepath.Join(root, dir), filepath.ToSlash(filepath.Clean(dir))
+	}
+	rel = dir
+	if r, err := filepath.Rel(root, dir); err == nil {
+		rel = r
+	}
+	return dir, filepath.ToSlash(rel)
 }
 
 // adrFiles returns the NNNN-title.md names in dir, sorted, and the names that start with a digit but do not fit.
@@ -297,7 +322,17 @@ func lintDocs(dir string) ([]string, error) {
 		if !listed[n] {
 			vs = append(vs, viol(path, 1, "not listed in README.md (needs a link whose target is %s)", n))
 		}
-		vs = append(vs, lintADR(path, dir, splitLines(b))...)
+		vs = append(vs, lintADR(path, dir, splitLines(b), func(num string) string {
+			for _, f := range files {
+				if f[:4] == num {
+					if !listed[f] {
+						return fmt.Sprintf("ADR-%s (%s) is not listed in README.md", num, f)
+					}
+					return ""
+				}
+			}
+			return fmt.Sprintf("ADR-%s has no file %s-*.md", num, num)
+		})...)
 	}
 	return vs, nil
 }
@@ -353,8 +388,9 @@ func sectionName(text string) string {
 	return ""
 }
 
-// lintADR applies rules a, b, d and the link half of c to one ADR.
-func lintADR(path, dir string, lines []string) []string {
+// lintADR applies rules a, b, d and the link half of c to one ADR. target reports a problem with the ADR number a
+// "superseded by" status names ("" when it exists and is listed).
+func lintADR(path, dir string, lines []string, target func(num string) string) []string {
 	var vs []string
 
 	// a: front matter.
@@ -371,6 +407,10 @@ func lintADR(path, dir string, lines []string) []string {
 		}
 		if s, ok := fm.keys["status"]; ok && !validStatus(s.val) {
 			vs = append(vs, viol(path, s.line, "status %q must be proposed, accepted, rejected, deprecated or superseded by ADR-NNNN", s.val))
+		} else if ok && supersedeRE.MatchString(s.val) {
+			if msg := target(s.val[len(s.val)-4:]); msg != "" {
+				vs = append(vs, viol(path, s.line, "status %q names a missing or unlisted record: %s", s.val, msg))
+			}
 		}
 		if d, ok := fm.keys["date"]; ok {
 			if _, err := time.Parse("2006-01-02", d.val); !dateRE.MatchString(d.val) || err != nil {
@@ -466,26 +506,19 @@ type numbered struct {
 	line int
 }
 
-// lintImmutable is rule e: every ADR that was accepted at base is compared with the working file.
-func lintImmutable(dir, base string, git gitFunc) ([]string, error) {
+// lintImmutable is rule e: every ADR that was accepted at base is compared with the working file. dir is the
+// directory on disk, rel the same directory as git names it (slash path relative to the repository root).
+func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 	files, _, err := adrFiles(dir)
 	if err != nil {
 		return nil, err
-	}
-	rel := dir
-	if filepath.IsAbs(dir) {
-		if wd, err := os.Getwd(); err == nil {
-			if r, err := filepath.Rel(wd, dir); err == nil {
-				rel = r
-			}
-		}
 	}
 	// The names to check are the ones in the working tree plus the ones at base, so a deleted accepted ADR is seen.
 	names := map[string]bool{}
 	for _, n := range files {
 		names[n] = true
 	}
-	if out, err := git("ls-tree", "--name-only", base, "./"+filepath.ToSlash(rel)+"/"); err == nil {
+	if out, err := git("ls-tree", "--name-only", base, "./"+rel+"/"); err == nil {
 		for _, p := range strings.Fields(string(out)) {
 			if n := filepath.Base(p); nameRE.MatchString(n) {
 				names[n] = true
@@ -501,7 +534,7 @@ func lintImmutable(dir, base string, git gitFunc) ([]string, error) {
 	var vs []string
 	for _, n := range sorted {
 		path := filepath.Join(dir, n)
-		old, err := git("show", base+":./"+filepath.ToSlash(filepath.Join(rel, n)))
+		old, err := git("show", base+":./"+rel+"/"+n)
 		if err != nil {
 			continue // not at base: a new file is free
 		}
@@ -537,6 +570,21 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 	} else {
 		vs = append(vs, viol(path, 1, "accepted ADR (at %s) lost its status key", base))
 	}
+	for i, ln := range curLines {
+		if !supersedeLn.MatchString(ln) {
+			continue
+		}
+		for _, m := range linkRE.FindAllStringSubmatch(ln, -1) {
+			t := linkTarget(m[1])
+			if t == "" || !nameRE.MatchString(filepath.Base(t)) {
+				vs = append(vs, viol(path, i+1, "the \"Superseded by\" link %q must point to an ADR file", m[1]))
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(path), filepath.FromSlash(t))); err != nil {
+				vs = append(vs, viol(path, i+1, "the \"Superseded by\" link %q names an ADR file that does not exist", m[1]))
+			}
+		}
+	}
 	strip := func(lines []string, skip int) []numbered {
 		var out []numbered
 		for i, ln := range lines {
@@ -569,10 +617,11 @@ func runPR(args []string, e env) int {
 	fs := flag.NewFlagSet("pr", flag.ContinueOnError)
 	fs.SetOutput(e.stderr)
 	files := fs.String("files", "", "file listing the changed paths, one per line")
-	dir := fs.String("dir", defaultDir, "the decisions directory")
+	dir := fs.String("dir", defaultDir, "the decisions directory (under --root unless absolute)")
+	root := fs.String("root", ".", "the tree to judge; dir resolves under it")
 	pos, err := parseFlags(fs, args)
 	if err != nil || len(pos) != 0 || *files == "" {
-		return usage(e, "pr takes --files <path> [--dir dir]")
+		return usage(e, "pr takes --files <path> [--root r] [--dir dir]")
 	}
 	fb, err := os.ReadFile(*files)
 	if err != nil {
@@ -591,7 +640,8 @@ func runPR(args []string, e env) int {
 			labels = append(labels, l)
 		}
 	}
-	vs, err := checkPR(e.getenv("PR_BODY"), changed, labels, *dir)
+	fsDir, rel := resolveDir(*root, *dir)
+	vs, err := checkPR(e.getenv("PR_BODY"), changed, labels, fsDir, rel)
 	if err != nil {
 		fmt.Fprintln(e.stderr, "adrlint:", err)
 		return 2
@@ -608,8 +658,9 @@ func protectedPath(p string) bool {
 	return false
 }
 
-// checkPR returns the violations of the pull-request rules.
-func checkPR(body string, changed, labels []string, dir string) ([]string, error) {
+// checkPR returns the violations of the pull-request rules. dir is the decisions directory on disk, rel its slash path
+// relative to the repository root (how the changed paths name it).
+func checkPR(body string, changed, labels []string, dir, rel string) ([]string, error) {
 	var decisions []string
 	for _, ln := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		if m := decisionRE.FindStringSubmatch(ln); m != nil {
@@ -646,16 +697,24 @@ func checkPR(body string, changed, labels []string, dir string) ([]string, error
 		}
 	}
 	if file == "" {
-		return []string{fmt.Sprintf("PR body: Decision: %s names no file %s/%s-*.md", d, dir, num)}, nil
+		return []string{fmt.Sprintf("PR body: Decision: %s names no file %s/%s-*.md", d, rel, num)}, nil
 	}
 	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
 	if err != nil {
 		return nil, err
 	}
+	listed := false
 	for _, m := range linkRE.FindAllStringSubmatch(string(readme), -1) {
 		if t := linkTarget(m[1]); t != "" && filepath.Base(t) == file {
-			return nil, nil
+			listed = true
+			break
 		}
 	}
-	return []string{fmt.Sprintf("PR body: Decision: %s is not listed in %s/README.md", d, dir)}, nil
+	if !listed {
+		return []string{fmt.Sprintf("PR body: Decision: %s is not listed in %s/README.md", d, rel)}, nil
+	}
+	if !slices.Contains(changed, rel+"/"+file) {
+		return []string{fmt.Sprintf("PR body: Decision: %s names %s/%s, but this pull request does not add or change that record: it must add or change the ADR it names", d, rel, file)}, nil
+	}
+	return nil, nil
 }

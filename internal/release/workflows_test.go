@@ -1040,3 +1040,51 @@ func TestRelease_notesComeFromThePublishedReleaseNotGitDescribe(t *testing.T) {
 		t.Errorf("the draft job does not call scripts/notes-base:\n%s", run)
 	}
 }
+
+// adr-lint judges a pull request with a checker built from the base branch; the pull request's own tree is data only.
+func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
+	j := load(t, "adr-lint.yml").Jobs["adr-lint"]
+	var trusted, pr, goStep *step
+	var runs string
+	for i := range j.Steps {
+		st := &j.Steps[i]
+		runs += st.Run + "\n"
+		switch {
+		case strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["path"] == "trusted":
+			trusted = st
+		case strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["path"] == "pr":
+			pr = st
+		case strings.HasPrefix(st.Uses, "actions/setup-go@"):
+			goStep = st
+		}
+		if st.Uses != "" && strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["persist-credentials"] != false {
+			t.Errorf("checkout %v keeps credentials", st.With["path"])
+		}
+	}
+	if trusted == nil || pr == nil || goStep == nil {
+		t.Fatalf("need a trusted/ checkout, a pr/ checkout and setup-go: %v %v %v", trusted, pr, goStep)
+	}
+	if trusted.With["ref"] != "${{ github.base_ref }}" {
+		t.Errorf("trusted/ ref = %v, want the base ref", trusted.With["ref"])
+	}
+	if _, ok := pr.With["ref"]; ok {
+		t.Errorf("pr/ must use the default ref, got %v", pr.With["ref"])
+	}
+	if goStep.With["go-version-file"] != "trusted/go.mod" {
+		t.Errorf("go-version-file = %v, want trusted/go.mod", goStep.With["go-version-file"])
+	}
+	for _, bad := range []string{"go run", "cd pr", "./pr/"} {
+		if strings.Contains(runs, bad) {
+			t.Errorf("a step runs code from the pull request tree (%q):\n%s", bad, runs)
+		}
+	}
+	if !strings.Contains(runs, `"$RUNNER_TEMP/adrlint" docs --root "$GITHUB_WORKSPACE/pr"`) ||
+		!strings.Contains(runs, `"$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr"`) {
+		t.Errorf("both modes must run the base-built checker with --root pr:\n%s", runs)
+	}
+	for _, st := range j.Steps {
+		if strings.Contains(st.Run, "github.event") {
+			t.Errorf("step %q puts event data in the script text", st.Name)
+		}
+	}
+}

@@ -1,10 +1,17 @@
 name: adr-lint
 # Architecture decision records are enforced on every pull request (scripts/adrlint has the code, docs/decisions/README.md
 # the rules): the records themselves are linted, an accepted record may not be rewritten (compared with the base branch),
-# and the pull request body must carry one "Decision: none" or "Decision: ADR-NNNN" line. "none" on a change to a
-# protected path needs the decision-confirmed label, which a reviewer applies; that is why labeled and unlabeled re-run it.
+# and the pull request body must carry one "Decision: none" or "Decision: ADR-NNNN" line that names a record this pull
+# request adds or changes. "none" on a change to a protected path (docs/decisions/ included) needs the decision-confirmed
+# label, which a reviewer applies; that is why labeled and unlabeled re-run it.
+#
+# Trust: the checker is built from the BASE branch (checked out in trusted/) and pointed at the pull request's tree
+# (checked out in pr/) with --root. Nothing from pr/ is ever built or run, so a pull request cannot edit
+# scripts/adrlint to pass its own gate. A pull request that itself changes scripts/adrlint is therefore judged by the
+# base branch's version of the checker; its change takes effect once it has merged. (The first pull request that adds
+# scripts/adrlint has no checker at its base and cannot pass this workflow until it is merged by a maintainer.)
 # A pull request from a fork runs on ubuntu-latest, never on a self-hosted runner. The body and the labels reach the tool
-# through env, never through the text of the shell script.
+# through env, never through the text of the shell script. fetch-depth 0 in pr/ brings origin/<base> for the git calls.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
@@ -20,26 +27,49 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check out the base branch (the trusted checker)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.base_ref }}
+          path: trusted
+          persist-credentials: false
+      - name: Check out the pull request (data only, never run)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: pr
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          go-version-file: trusted/go.mod
           cache: false
+      - name: Build the checker from the base branch
+        id: build
+        working-directory: trusted
+        run: |
+          set -euo pipefail
+          # Bootstrap: the pull request that adds the checker has no base checker to run. Once it is on the base
+          # branch this always builds; a base without it is the only case that skips.
+          if [ ! -d scripts/adrlint ]; then
+            echo "::notice::the base branch has no scripts/adrlint yet; skipping (only the pull request that adds it)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          go build -o "$RUNNER_TEMP/adrlint" ./scripts/adrlint
       - name: Lint the records
+        if: steps.build.outputs.skip != 'true'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          go run ./scripts/adrlint docs --base "origin/$BASE_REF"
+          "$RUNNER_TEMP/adrlint" docs --root "$GITHUB_WORKSPACE/pr" --base "origin/$BASE_REF"
       - name: Check the pull request's decision
+        if: steps.build.outputs.skip != 'true'
         env:
           BASE_REF: ${{ github.base_ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           set -euo pipefail
-          git diff --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
-          go run ./scripts/adrlint pr --files "$RUNNER_TEMP/files"
+          git -C "$GITHUB_WORKSPACE/pr" diff --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
+          "$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr" --files "$RUNNER_TEMP/files"
