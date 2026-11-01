@@ -64,7 +64,9 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 | Key | Env | Meaning |
 |---|---|---|
-| `url` | `MASH_URL` | The NATS server. Use TLS: SAP identity is only meaningful over a verified connection. |
+| `url` | `MASH_URL` | The NATS server. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url to a non-loopback host makes `status` print `tls: WARN` and serve warn once on stderr. For a private CA or a server that requires client certificates, set `tls_ca`, `tls_cert` and `tls_key` below. |
+| `tls_ca` | `MASH_TLS_CA` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
+| `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
 | `owner` | `MASH_OWNER` | Your SAP owner token (lower-case letters, digits, single hyphens). |
 | `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `~/.config/mash/<name>.creds`. |
 | | `MASH_NAME` | The endpoint name, set per session at launch. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |

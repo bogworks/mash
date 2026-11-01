@@ -62,9 +62,9 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	if err := config.CheckCredsMode(cfg.AdminCreds); err != nil {
 		return fail(err)
 	}
-	nc, err := nats.Connect(cfg.URL, natsauth.UserCredentials(cfg.AdminCreds), nats.Name("mash admin"))
+	nc, err := nats.Connect(cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds), nats.Name("mash admin"))...)
 	if err != nil {
-		return fail(fmt.Errorf("mash: connect %s: %w", cfg.URL, err))
+		return fail(fmt.Errorf("mash: connect %s: %w", cfg.URL, natsauth.TLSHint(err)))
 	}
 	defer nc.Close()
 	a, err := madmin.New(nc, cfg.Owner)

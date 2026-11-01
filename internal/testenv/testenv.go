@@ -32,14 +32,20 @@ type Env struct {
 	Account    string // MASH account public key
 	AdminCreds string // path of the admin's creds file
 
-	srv      *server.Server
-	maxPay   int32
-	sysPub   string
-	port     int
-	dir      string
-	acctSK   nkeys.KeyPair
-	operator *jwt.OperatorClaims
-	resolver *server.MemAccResolver
+	CAFile, ClientCert, ClientKey string // PEM paths, set when the server runs with TLS (the client pair only if it requires one)
+
+	srv    *server.Server
+	maxPay int32
+	tls    bool
+	verify bool
+
+	serverCert, serverKey string
+	sysPub                string
+	port                  int
+	dir                   string
+	acctSK                nkeys.KeyPair
+	operator              *jwt.OperatorClaims
+	resolver              *server.MemAccResolver
 }
 
 // must panics on error; inside a test the panic fails that test.
@@ -57,6 +63,11 @@ type Options struct {
 	// RequireMaxBytes makes the MASH account refuse a stream or bucket config with no MaxBytes, as Synadia's
 	// accounts do (err_code 10113).
 	RequireMaxBytes bool
+	// TLS serves tls://127.0.0.1 with a certificate from a throwaway CA, whose PEM is Env.CAFile.
+	TLS bool
+	// RequireClientCert (with TLS) makes the server verify client certificates; Env.ClientCert and Env.ClientKey
+	// are one the CA signed.
+	RequireClientCert bool
 }
 
 // Start launches the server; it is shut down when the test ends.
@@ -116,7 +127,12 @@ func launch(dir string, o Options) (*Env, error) {
 		return nil, err
 	}
 
-	e := &Env{Owner: Owner, Account: mashPub, dir: dir, acctSK: mashSK, operator: op, resolver: resolver, maxPay: o.MaxPayload}
+	e := &Env{Owner: Owner, Account: mashPub, dir: dir, acctSK: mashSK, operator: op, resolver: resolver, maxPay: o.MaxPayload, tls: o.TLS, verify: o.RequireClientCert}
+	if o.TLS {
+		if err := e.setupTLS(dir, o); err != nil {
+			return nil, err
+		}
+	}
 	e.sysPub, e.port = sysPub, -1
 	if err := e.start(); err != nil {
 		return nil, err
@@ -143,6 +159,13 @@ func (e *Env) start() error {
 		NoLog:            true,
 		NoSigs:           true,
 		MaxPayload:       e.maxPay,
+	}
+	if e.tls {
+		tc, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: e.serverCert, KeyFile: e.serverKey, CaFile: e.CAFile, Verify: e.verify, Timeout: 5})
+		if err != nil {
+			return err
+		}
+		opts.TLSConfig, opts.TLSTimeout, opts.TLSVerify = tc, 5, e.verify
 	}
 	s, err := server.NewServer(opts)
 	if err != nil {
@@ -222,7 +245,7 @@ func (e *Env) MintEndpoint(name string) (creds, userPub string, err error) {
 // Conn connects with a creds file; it is closed when the test ends.
 func (e *Env) Conn(t *testing.T, creds string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds))
+	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +256,7 @@ func (e *Env) Conn(t *testing.T, creds string) *nats.Conn {
 // ConnAs connects as endpoint name, using its private inbox prefix.
 func (e *Env) ConnAs(t *testing.T, creds, name string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+name))
+	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+name))...)
 	if err != nil {
 		t.Fatal(err)
 	}

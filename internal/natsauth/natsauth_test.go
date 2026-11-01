@@ -3,6 +3,7 @@ package natsauth_test
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -42,4 +43,29 @@ func TestConnectsToRealServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	nc.Close()
+}
+
+func TestTLSOptions(t *testing.T) {
+	if n := len(natsauth.TLSOptions("", "", "")); n != 0 {
+		t.Fatalf("no settings: %d options", n)
+	}
+	if n := len(natsauth.TLSOptions("ca.pem", "c.pem", "k.pem")); n != 2 {
+		t.Fatalf("all settings: %d options, want 2", n)
+	}
+}
+
+func TestTLSHint(t *testing.T) {
+	for _, c := range []struct{ err, want string }{
+		{"tls: failed to verify certificate: x509: certificate signed by unknown authority", "tls_ca"},
+		{"remote error: tls: bad certificate", "tls_cert and tls_key"},
+		{"remote error: tls: certificate required", "tls_cert and tls_key"},
+	} {
+		if got := natsauth.TLSHint(errors.New(c.err)); !strings.Contains(got.Error(), c.want) || !strings.Contains(got.Error(), c.err) {
+			t.Errorf("natsauth.TLSHint(%q) = %q, want it to name %q", c.err, got, c.want)
+		}
+	}
+	plain := errors.New("connection refused")
+	if natsauth.TLSHint(plain) != plain {
+		t.Error("a non-TLS error must pass through unchanged")
+	}
 }

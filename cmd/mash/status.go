@@ -90,7 +90,7 @@ func statusTool(src *statusSource) mcp.Tool {
 // It never prints the contents of the creds file, and strips a password from the url.
 func statusText(src *statusSource) string {
 	cfg := src.cfg
-	lines := []string{nameLine(cfg), configLine(cfg, src.cfgErr), credsLine(cfg), connectionLine(src)}
+	lines := []string{nameLine(cfg), configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src)}
 	lines = append(lines, allowlistLine(src))
 	if l := environmentLine(src); l != "" {
 		lines = append(lines, l)
@@ -193,6 +193,19 @@ func credsLine(cfg config.Config) string {
 
 const cliLiveNote = "not checked from the CLI (a running session reports it)"
 
+// tlsLine warns when the url is plain nats:// (or ws://) to a non-loopback host.
+func tlsLine(cfg config.Config) string {
+	switch w := config.PlainTextWarning(cfg.URL); {
+	case cfg.URL == "":
+		return "tls: n/a - no url"
+	case w != "":
+		return fmt.Sprintf("tls: WARN - %s %s", redactURL(cfg.URL), w)
+	case strings.Contains(cfg.URL, "tls://") || strings.Contains(cfg.URL, "wss://"):
+		return "tls: OK - tls:// connection"
+	}
+	return "tls: n/a - loopback"
+}
+
 func connectionLine(src *statusSource) string {
 	cfg := src.cfg
 	switch {
@@ -229,6 +242,9 @@ func reportSettings(src *statusSource, stderr io.Writer) {
 		fmt.Fprintln(stderr, "mash: "+l)
 	}
 	if l := environmentLine(src); l != "" {
+		fmt.Fprintln(stderr, "mash: "+l)
+	}
+	if l := tlsLine(src.cfg); strings.HasPrefix(l, "tls: WARN") {
 		fmt.Fprintln(stderr, "mash: "+l)
 	}
 }

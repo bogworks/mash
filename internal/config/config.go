@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/store"
@@ -36,6 +38,9 @@ type Config struct {
 	OpenTimeout    time.Duration // bound on opening a connection to the endpoint's data: the first requests (default 20s)
 	CallTimeout    time.Duration // bound on one command's or tool call's requests once open (default 15s)
 	AdminCreds     string        // admin credentials for `mash admin`
+	TLSCA          string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
+	TLSCert        string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
+	TLSKey         string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
 	LaunchToken    string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
 	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
@@ -57,6 +62,10 @@ type file struct {
 
 	AdminCreds string `json:"admin_creds"`
 	Host       string `json:"host"`
+
+	TLSCA   string `json:"tls_ca"`
+	TLSCert string `json:"tls_cert"`
+	TLSKey  string `json:"tls_key"`
 
 	SpoolFromStart *bool `json:"spool_from_start"`
 
@@ -120,6 +129,7 @@ func Load(env func(string) string, home string) (Config, error) {
 		return c, fmt.Errorf("mash: reading config: %w", err)
 	}
 	c.URL, c.Owner, c.Creds, c.AdminCreds, c.Host = f.URL, f.Owner, f.Creds, f.AdminCreds, f.Host
+	c.TLSCA, c.TLSCert, c.TLSKey = f.TLSCA, f.TLSCert, f.TLSKey
 	if f.SpoolFromStart != nil {
 		c.SpoolFromStart = *f.SpoolFromStart
 	}
@@ -156,6 +166,9 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	str(&c.Host, "MASH_HOST")
+	str(&c.TLSCA, "MASH_TLS_CA")
+	str(&c.TLSCert, "MASH_TLS_CERT")
+	str(&c.TLSKey, "MASH_TLS_KEY")
 	for _, p := range []struct {
 		dst *int
 		key string
@@ -209,6 +222,9 @@ func Load(env func(string) string, home string) (Config, error) {
 		*p.dst = d
 	}
 
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return c, errors.New("mash: tls_cert and tls_key (MASH_TLS_CERT and MASH_TLS_KEY) must be set together")
+	}
 	if !validLaunchToken(c.LaunchToken) {
 		return c, fmt.Errorf("mash: MASH_LAUNCH_TOKEN: use at most 128 letters, digits, '.', '_' or '-'")
 	}
@@ -262,4 +278,36 @@ func positiveDuration(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("%q is not a duration above zero (for example \"20s\" or \"1m\")", v)
 	}
 	return d, nil
+}
+
+// PlainTextWarning returns a warning when url (or any entry of a comma-separated server list) uses nats:// or ws://
+// to a host that is not loopback, and "" otherwise. SAP identity assumes a verified connection, which plain text is not.
+func PlainTextWarning(url string) string {
+	for _, e := range strings.Split(url, ",") {
+		e = strings.TrimSpace(e)
+		scheme, rest, ok := strings.Cut(e, "://")
+		if !ok {
+			continue
+		}
+		if s := strings.ToLower(scheme); s != "nats" && s != "ws" {
+			continue
+		}
+		rest, _, _ = strings.Cut(rest, "/")
+		if i := strings.LastIndex(rest, "@"); i >= 0 {
+			rest = rest[i+1:]
+		}
+		host := rest
+		if h, _, err := net.SplitHostPort(rest); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if host == "" {
+			continue
+		}
+		if ip := net.ParseIP(host); (ip != nil && ip.IsLoopback()) || strings.EqualFold(host, "localhost") {
+			continue
+		}
+		return "is plain " + strings.ToLower(scheme) + ":// to a non-loopback host: SAP identity assumes a verified connection. Next: use tls:// with the server's certificate (tls_ca for a private CA)"
+	}
+	return ""
 }
