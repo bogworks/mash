@@ -47,6 +47,7 @@ type Config struct {
 	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
 	Dir            string        // the config directory (ConfigDir); "" when none can be found
+	Legacy         string        // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits         store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 }
 
@@ -136,6 +137,46 @@ func ConfigDir(env func(string) string, home string) string {
 	return xdg
 }
 
+// FindFile is the path of name (policy.md, a default creds file): in the XDG mash directory when it is there, else in
+// the legacy $HOME/.config/mash when it is there, else in ConfigDir, so messages and creation paths stay where they
+// were. The XDG copy wins when both exist.
+func FindFile(env func(string) string, home, name string) string {
+	var dirs []string
+	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
+		dirs = append(dirs, filepath.Join(x, "mash"))
+	}
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".config", "mash"))
+	}
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if d := ConfigDir(env, home); d != "" {
+		return filepath.Join(d, name)
+	}
+	return ""
+}
+
+// Find is FindFile for this Config: name in Dir if present, else in Legacy if present, else in Dir.
+func (c Config) Find(name string) string {
+	for _, d := range []string{c.Dir, c.Legacy} {
+		if d == "" {
+			continue
+		}
+		p := filepath.Join(d, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if c.Dir == "" {
+		return ""
+	}
+	return filepath.Join(c.Dir, name)
+}
+
 // ExpandHome expands a leading "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
 func ExpandHome(p, home string) string {
 	if home == "" {
@@ -154,7 +195,11 @@ func ExpandHome(p, home string) string {
 // when that is unset ("" when unknown).
 func Load(env func(string) string, home string) (Config, error) {
 	dir := ConfigDir(env, home)
-	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
+	legacy := ""
+	if home != "" {
+		legacy = filepath.Join(home, ".config", "mash")
+	}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
 	if c.StateHome == "" {
 		c.StateHome = filepath.Join(home, ".local", "state")
 	}
@@ -301,7 +346,7 @@ func Load(env func(string) string, home string) (Config, error) {
 		if dir == "" {
 			return c, ErrNoConfigDir
 		}
-		c.Creds = filepath.Join(dir, c.Name+".creds")
+		c.Creds = c.Find(c.Name + ".creds")
 	}
 	return c, nil
 }

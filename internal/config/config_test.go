@@ -543,3 +543,63 @@ func TestTildeUserNotExpanded(t *testing.T) {
 		t.Fatalf("got %q, %q", c.Creds, c.AdminCreds)
 	}
 }
+
+func writeXDG(t *testing.T, xdg, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "mash", "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFindFileFallsBackToLegacy(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	env := envOf(map[string]string{"XDG_CONFIG_HOME": xdg})
+	xdgDir, legacy := filepath.Join(xdg, "mash"), filepath.Join(home, ".config", "mash")
+	writeXDG(t, xdg, `{}`) // XDG config.json exists, so ConfigDir is the XDG directory
+	if got := ConfigDir(env, home); got != xdgDir {
+		t.Fatalf("ConfigDir %q", got)
+	}
+	if got, want := FindFile(env, home, "policy.md"), filepath.Join(xdgDir, "policy.md"); got != want {
+		t.Fatalf("neither exists: %q, want %q", got, want)
+	}
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lp := filepath.Join(legacy, "policy.md")
+	if err := os.WriteFile(lp, []byte("L"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindFile(env, home, "policy.md"); got != lp {
+		t.Fatalf("legacy only: %q, want %q", got, lp)
+	}
+	xp := filepath.Join(xdgDir, "policy.md")
+	if err := os.WriteFile(xp, []byte("X"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindFile(env, home, "policy.md"); got != xp {
+		t.Fatalf("both: %q, want %q", got, xp)
+	}
+}
+
+func TestLoadDefaultCredsFallBackToLegacy(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	writeXDG(t, xdg, `{"url":"tls://x:4222","owner":"o"}`)
+	legacy := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lp := filepath.Join(legacy, "a.creds")
+	if err := os.WriteFile(lp, []byte("c"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Creds != lp {
+		t.Fatalf("creds %q, want %q", c.Creds, lp)
+	}
+}

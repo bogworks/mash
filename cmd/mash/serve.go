@@ -182,7 +182,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	instr := ""
 	var policy []byte
 	if cfg.Dir != "" {
-		policy, _ = os.ReadFile(filepath.Join(cfg.Dir, "policy.md"))
+		policy, _ = os.ReadFile(cfg.Find("policy.md"))
 	}
 	instr = endpoint.Instructions(cfg.Name, cfg.Owner, string(policy))
 	switch {

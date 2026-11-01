@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -162,7 +161,7 @@ func credsPath(cfg config.Config) string {
 	case cfg.Creds != "":
 		return cfg.Creds
 	case cfg.Name != "" && cfg.Dir != "":
-		return filepath.Join(cfg.Dir, cfg.Name+".creds")
+		return cfg.Find(cfg.Name + ".creds")
 	}
 	return ""
 }

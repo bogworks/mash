@@ -292,6 +292,35 @@ func TestServeWaitingInstructionsKeepPolicy(t *testing.T) {
 	}
 }
 
+// An XDG config.json makes the XDG directory the config directory, but an operator policy.md that only exists in the
+// legacy ~/.config/mash must still be applied.
+func TestServeLegacyPolicyWithXDGConfig(t *testing.T) {
+	setTiming(t, time.Hour, 20*time.Second)
+	w := newWorld(t, "a")
+	holdLease(t, leaseKV(t, w), "a")
+	env := w.env["a"]
+	xdg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "mash", "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["XDG_CONFIG_HOME"] = xdg
+	dir := filepath.Join(env["HOME"], ".config", "mash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.md"), []byte("LEGACY-POLICY-SENTINEL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, env)
+	instr := s.initialize(t)["result"].(map[string]any)["instructions"].(string)
+	if !strings.Contains(instr, "LEGACY-POLICY-SENTINEL") {
+		t.Fatalf("legacy policy dropped: %q", instr)
+	}
+}
+
 // stdin closing at any point of the wait must end serve and leave no connection or lease behind.
 func waitGone(t *testing.T, w *world, base int, name string, kv jetstream.KeyValue, planted bool) {
 	t.Helper()
