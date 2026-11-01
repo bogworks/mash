@@ -77,11 +77,13 @@ The numbered steps are what the command does in each state, and the manual path 
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
 3. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
 4. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
-   targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, then creates a
+   targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
+   attests build provenance for the four binaries (see "Build provenance"). Only after `attest` succeeds does it create a
    **draft** release with the binaries, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`), `SHA256SUMS` and a changelog.
+   A failed attestation leaves no draft; fix the cause and rerun the workflow.
 5. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing). Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing); and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash` passes on the binary downloaded from the release (a missing or failing attestation is refused, exit 3, naming the binary; this covers an older or hand-made draft that `attest` never saw, and runs only after the earlier checks passed). Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
 6. **Pin:** in the orchestrator's `compat.json` set `mash` to `{"version": "<version>", "commit": "<X>"}`.
 
@@ -207,6 +209,17 @@ The pins live outside the embedded files on purpose. `plugin/scripts/mash` is em
 -buildvcs=false -mod=readonly` and `-ldflags "-X …/internal/endpoint.Version=<N.N.N> -X main.commit=<X>"`. It refuses a
 source tree whose HEAD is not X, that holds any untracked or ignored file, or that contains the output, and runs
 `go mod download` + `go mod verify` first, so the module cache is what `go.sum` names.
+
+## Build provenance
+
+The `attest` job attests each `dist/mash-*` binary with `actions/attest-build-provenance` (pinned to a commit; the job,
+and only that job, holds `id-token: write` and `attestations: write`). Consumers verify a downloaded binary with:
+
+    gh attestation verify mash-linux-amd64 -R bogworks/mash
+
+Attestations require a public repository (a private one needs GitHub Enterprise Cloud); this repository is public, so the
+attestation is recorded in the public Sigstore transparency log. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
+or outlive a failed attestation, and a failed attestation leaves no draft (rerun the workflow).
 
 ## Versions
 

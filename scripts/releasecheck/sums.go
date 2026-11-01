@@ -427,3 +427,35 @@ func signedSums(o Options, tag, x string, draft bool, have map[string]string, ha
 	rec.set(sums, hashes, scriptHash)
 	return nil
 }
+
+// verifyAttestations downloads each of the four binaries from the release into a temporary directory and runs
+// `gh attestation verify <file> -R <owner/name>` on it (the repository is the release repository, o.GHRepo). A binary
+// with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
+// gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by
+// hand) from being published without provenance. Attestations need a public repository.
+func verifyAttestations(o Options, tag string) error {
+	dir, err := os.MkdirTemp("", "release-check-attest-")
+	if err != nil {
+		return op(err)
+	}
+	defer os.RemoveAll(dir)
+	var bad []string
+	for _, t := range release.Targets {
+		name := "mash-" + t.GOOS + "-" + t.GOARCH
+		b, err := downloadAsset(o, tag, name)
+		if err != nil {
+			return err
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			return op(err)
+		}
+		if _, err := gh(o, "attestation", "verify", p, "-R", o.GHRepo); err != nil {
+			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("no verifying build provenance attestation for %s", strings.Join(bad, "; "))
+	}
+	return nil
+}

@@ -84,7 +84,9 @@ jobs:
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
   draft:
-    needs: build
+    # A draft exists only once provenance does, so publishing can never precede or outlive a failed attestation.
+    # Attestation requires a public repository (or GitHub Enterprise Cloud); this repository is public.
+    needs: [build, attest]
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -129,3 +131,20 @@ jobs:
           # release makes THIS run fail, naming it. The guard never deletes: the draft stays for the maintainer to resolve
           # (`gh release delete <tag>` after checking its state, or publish the lower one first, then rerun; ADR 0001, rule 5).
           scripts/draft-guard --after-create "$GITHUB_REF_NAME"
+  attest:
+    needs: build
+    timeout-minutes: 15
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      id-token: write # the OIDC token the attestation is signed with
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attest build provenance
+        # Provenance for the four binaries (what consumers download); SHA256SUMS is a derived listing, not a subject.
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/mash-*

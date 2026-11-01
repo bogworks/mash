@@ -702,6 +702,11 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
 			r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, have, hashes, scriptHash, rec))
+			// Provenance is checked after the signature and only for a release that already passed every earlier check.
+			// It covers a resumed or hand-made draft that release.yml's attest job never saw.
+			if r.ok() {
+				r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
+			}
 		}
 	}
 	return r.result("release " + tag + " assets")

@@ -586,3 +586,54 @@ func TestPublish_withoutAGateResultTheGateRunsFirst(t *testing.T) {
 		t.Errorf("not published:\n%s", f.ghLog())
 	}
 }
+
+// noAttestation makes the fake gh report no attestation for the named binary.
+func (f *fixture) noAttestation(t *testing.T, name string) {
+	t.Helper()
+	write(t, filepath.Join(f.ghDir(), "noattest"), name, "x")
+}
+
+// The gate verifies build provenance of every binary with gh attestation verify, against the release repository.
+func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
+	t.Run("all four verify", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		if err := checkAssets(context.Background(), f.o); err != nil {
+			t.Fatalf("a correct draft was refused: %v", err)
+		}
+		log := f.ghLog()
+		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64"} {
+			if !strings.Contains(log, n+" -R "+f.o.GHRepo) || !strings.Contains(log, "attestation verify") {
+				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
+			}
+		}
+	})
+	t.Run("one missing is refused naming it, and publishing does not happen", func(t *testing.T) {
+		f := signedDraft(t)
+		f.noAttestation(t, "mash-darwin-arm64")
+		err := f.publish()
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-darwin-arm64") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+		if strings.Contains(f.ghLog(), "release edit") {
+			t.Error("the release was published without provenance")
+		}
+	})
+	t.Run("a published release is verified too", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.attachSig(t, mustSign(t, keyOfFixture(t, f), string(sumsOfFixture(t, f))), false)
+		f.noAttestation(t, "mash-linux-arm64")
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-linux-arm64") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+	})
+	t.Run("not run when an earlier check refused", func(t *testing.T) {
+		f := signedFixture(t, func(h map[string]string) { h["mash-linux-amd64"] = "sha256:" + strings.Repeat("0", 64) })
+		if err := checkAssets(context.Background(), f.o); err == nil {
+			t.Fatal("a wrong binary passed")
+		}
+		if strings.Contains(f.ghLog(), "attestation") {
+			t.Errorf("attestations were checked after a refusal:\n%s", f.ghLog())
+		}
+	})
+}

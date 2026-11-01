@@ -403,6 +403,10 @@ func (r realWorld) Publish(tag string) error {
 	if err := verifyPublishable(r.o, tag, x, rec); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
+	// Provenance is checked again right before the irreversible step, as the gate may have run earlier in this process.
+	if err := verifyAttestations(r.o, tag); err != nil {
+		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
+	}
 	_, err = gh(r.o, "release", "edit", tag, "--repo", r.o.GHRepo, "--draft=false")
 	return op(err)
 }
