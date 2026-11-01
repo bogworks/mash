@@ -156,9 +156,16 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// The first Open runs before the MCP server exists, as it always has: it is bounded by openTimeout, and a
 	// stdin EOF during it is seen once it returns. A held lease is waited out, and a transient failure (a
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
+	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
+	// Removed on every exit, and at once when the first attempt binds (the bind also removes it, spool.OwnRecord).
+	clearWaiter := noteWaiting(cfg)
+	defer clearWaiter()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
 	ep, err := openEndpoint(openCtx, cfg)
 	openCancel()
+	if ep != nil {
+		clearWaiter()
+	}
 	var held *endpoint.LeaseHeldError
 	var startErr error // a transient first failure, retried
 	if err != nil && !errors.As(err, &held) {
@@ -209,10 +216,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		waited := ep == nil
 		if waited {
 			var ok bool
-			defer noteWaiting(cfg)() // recorded while waiting; removed on exit, and by the bind (spool.OwnRecord)
 			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify); !ok {
 				return
 			}
+			clearWaiter() // this serve now holds the lease
 		}
 		defer ep.Close()
 		select {
