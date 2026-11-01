@@ -1,12 +1,12 @@
 # timeline.log: live proof of mash PR #44 (lease handoff) and PR #121 (startup round trips, open/call timeouts)
-# Times are UTC on rdev-randyb-dev, 2026-10-31. Source: harness/*.sh. Lines starting with 4 spaces are the serve's MCP-client log (epoch seconds).
+# Times are UTC on test-host, 2026-10-31. Source: harness/*.sh. Lines starting with 4 spaces are the serve's MCP-client log (epoch seconds).
 # Trimmed: creds paths and the 40-line who listings are dropped; nothing else. Credential files are never printed.
 # Env 1 (testenv defaults) served cases A, B1, B2 and a first B3 pass; env 2 (bigger JetStream disk) served the final B3 passes.
 # The first A-main run (endpoint x) is from the first version of caseA.sh; its pre-#44 twin is omitted because that script counted serve's 'already in use' notice as delivered mail.
 
 21:18:38.845 [A-main] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
 21:18:38.848 [A-main] == step 1: serve #1 for endpoint x starts and takes the lease
-21:18:40.934 [A-main] serve#1 pid=639297; who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:18:40.934 [A-main] serve#1 pid=639297; who --long: x	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:18:40.936 [A-main] == step 2 (negative 1): serve #2 for x while #1 is alive and renewing (35 s, spans a 30 s renewal)
 21:18:41.940 [A-main] serve#2 pid=640048 started
 21:18:46.954 [A-main] mail m-alive sent while both run: sent #1 from sender to x
@@ -24,9 +24,9 @@
     1793481520.970 recv id=1 method=None
     1793481521.162 handshake sent
     1793481521.163 recv id=2 method=None
-    1793481521.664 CHANNEL {"content": "mash: endpoint x is already in use by another session (host rdev-randyb-dev, pid 639297, since 2026-10-31T21:18:38Z); mail is off for this session. mash is retrying every 10s."}
+    1793481521.664 CHANNEL {"content": "mash: endpoint x is already in use by another session (host test-host, pid 639297, since 2026-10-31T21:18:38Z); mail is off for this session. mash is retrying every 10s."}
 21:19:16.965 [A-main] serve#2 stderr:
-21:19:17.281 [A-main] who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:19:17.281 [A-main] who --long: x	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:19:18.284 [A-main] serve#2 stopped (SIGTERM); serve#1 alive: yes
 21:19:18.286 [A-main] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
 21:19:18.302 [A-main] kill -9 639297 (epoch 1793481558.299)
@@ -42,7 +42,7 @@
     1793481558.533 recv id=2 method=None
     1793481559.034 recv id=mash-ping-1 method=ping
     1793481559.462 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:19:18Z\ninstance: 6gFbwkOApeA7O5Gukpn2cK\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "x"}}
-21:19:19.841 [A-main] who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:19:19.841 [A-main] who --long: x	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:19:19.857 [A-main] mail inbox of x: #1	from sender [verified]	2026-10-31T21:18:46Z	7 B	m-alive	kind task	instance inJeVjB0bnma7rpqf81f0O|#2	from sender [verified]	2026-10-31T21:19:18Z	10 B	m-takeover	kind task	instance 6gFbwkOApeA7O5Gukpn2cK|
 21:23:34.882 [A-pre44] binary: mash 0.0.0-dev (commit unknown)
 21:23:34.885 [A-pre44] == step 1: serve #1 for endpoint e01 starts and takes the lease
@@ -64,7 +64,7 @@
     1793481820.755 recv id=1 method=None
     1793481820.947 handshake sent
     1793481820.947 recv id=2 method=None
-    1793481821.448 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host rdev-randyb-dev, pid 749945, since 2026-10-31T21:23:34Z); mail is off for this session. mash is retrying every 10s."}
+    1793481821.448 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host test-host, pid 749945, since 2026-10-31T21:23:34Z); mail is off for this session. mash is retrying every 10s."}
 21:24:16.749 [A-pre44] serve#2 stderr:
 21:24:18.767 [A-pre44] who --long: e01	online	seen 2s ago	live proof
 21:24:19.771 [A-pre44] serve#2 stopped (SIGTERM); serve#1 alive: yes
@@ -80,7 +80,7 @@
     1793481859.827 recv id=1 method=None
     1793481860.017 handshake sent
     1793481860.018 recv id=2 method=None
-    1793481860.518 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host rdev-randyb-dev, pid 749945, since 2026-10-31T21:24:04Z); mail is off for this session. mash is retrying every 10s."}
+    1793481860.518 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host test-host, pid 749945, since 2026-10-31T21:24:04Z); mail is off for this session. mash is retrying every 10s."}
     1793481939.926 CHANNEL {"content": "mash: endpoint e01 is online; mail is on for this session."}
     1793481939.926 recv id=mash-ping-1 method=ping
     1793481941.369 CHANNEL {"content": "1 message from sender\n\n--- #2 from sender [verified] at 2026-10-31T21:24:20Z\ninstance: AkWFmz4d0KLpJsbuF1rM8i\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e01"}}
@@ -88,7 +88,7 @@
 21:25:43.484 [A-pre44] mail inbox of e01: #1	from sender [verified]	2026-10-31T21:23:46Z	7 B	m-alive	instance vDdharUlOVe6XU8BL6i3tq|#2	from sender [verified]	2026-10-31T21:24:20Z	10 B	m-takeover	instance AkWFmz4d0KLpJsbuF1rM8i|
 21:25:50.564 [A-main-e02] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
 21:25:50.566 [A-main-e02] == step 1: serve #1 for endpoint e02 starts and takes the lease
-21:25:53.018 [A-main-e02] serve#1 pid=811079; who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:25:53.018 [A-main-e02] serve#1 pid=811079; who --long: e02	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:25:53.020 [A-main-e02] == step 2 (negative 1): serve #2 for e02 while #1 is alive and renewing (35 s, spans a 30 s renewal)
 21:25:54.024 [A-main-e02] serve#2 pid=812095 started
 21:25:59.038 [A-main-e02] mail m-alive sent while both run: sent #1 from sender to e02
@@ -106,9 +106,9 @@
     1793481953.054 recv id=1 method=None
     1793481953.247 handshake sent
     1793481953.248 recv id=2 method=None
-    1793481953.748 CHANNEL {"content": "mash: endpoint e02 is already in use by another session (host rdev-randyb-dev, pid 811079, since 2026-10-31T21:25:50Z); mail is off for this session. mash is retrying every 10s."}
+    1793481953.748 CHANNEL {"content": "mash: endpoint e02 is already in use by another session (host test-host, pid 811079, since 2026-10-31T21:25:50Z); mail is off for this session. mash is retrying every 10s."}
 21:26:29.049 [A-main-e02] serve#2 stderr:
-21:26:29.363 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:29.363 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:26:30.366 [A-main-e02] serve#2 stopped (SIGTERM); serve#1 alive: yes
 21:26:30.368 [A-main-e02] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
 21:26:30.383 [A-main-e02] kill -9 811079 (epoch 1793481990.380)
@@ -124,11 +124,11 @@
     1793481990.613 recv id=2 method=None
     1793481991.114 recv id=mash-ping-1 method=ping
     1793481991.284 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:26:30Z\ninstance: MOqVfSOkbOh1GylxJfKQYP\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e02"}}
-21:26:31.722 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:31.722 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:26:31.736 [A-main-e02] mail inbox of e02: #1	from sender [verified]	2026-10-31T21:25:59Z	7 B	m-alive	kind task	instance 0N1uIeE6r5NUFA4kultHM2|#2	from sender [verified]	2026-10-31T21:26:30Z	10 B	m-takeover	kind task	instance MOqVfSOkbOh1GylxJfKQYP|
 21:26:32.749 [A-main-e03] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
 21:26:33.866 [A-main-e03] == step 1: serve #1 for endpoint e03 starts and takes the lease
-21:26:37.554 [A-main-e03] serve#1 pid=820582; who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:37.554 [A-main-e03] serve#1 pid=820582; who --long: e03	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:26:37.555 [A-main-e03] == step 2 (negative 1): serve #2 for e03 while #1 is alive and renewing (35 s, spans a 30 s renewal)
 21:26:38.560 [A-main-e03] serve#2 pid=821196 started
 21:26:43.574 [A-main-e03] mail m-alive sent while both run: sent #1 from sender to e03
@@ -146,9 +146,9 @@
     1793481997.590 recv id=1 method=None
     1793481997.782 handshake sent
     1793481997.783 recv id=2 method=None
-    1793481998.283 CHANNEL {"content": "mash: endpoint e03 is already in use by another session (host rdev-randyb-dev, pid 820582, since 2026-10-31T21:26:33Z); mail is off for this session. mash is retrying every 10s."}
+    1793481998.283 CHANNEL {"content": "mash: endpoint e03 is already in use by another session (host test-host, pid 820582, since 2026-10-31T21:26:33Z); mail is off for this session. mash is retrying every 10s."}
 21:27:13.585 [A-main-e03] serve#2 stderr:
-21:27:13.900 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:27:13.900 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:27:14.903 [A-main-e03] serve#2 stopped (SIGTERM); serve#1 alive: yes
 21:27:14.905 [A-main-e03] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
 21:27:14.920 [A-main-e03] kill -9 820582 (epoch 1793482034.917)
@@ -164,7 +164,7 @@
     1793482035.149 recv id=2 method=None
     1793482035.650 recv id=mash-ping-1 method=ping
     1793482035.757 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:27:15Z\ninstance: UcxtilTXAhLEqcK3pQOJ4r\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e03"}}
-21:27:16.145 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:27:16.145 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host test-host	lease version 0.0.0-dev
 21:27:16.160 [A-main-e03] mail inbox of e03: #1	from sender [verified]	2026-10-31T21:26:43Z	7 B	m-alive	kind task	instance woIJ3c4QyI42At9WTrSkHI|#2	from sender [verified]	2026-10-31T21:27:15Z	10 B	m-takeover	kind task	instance UcxtilTXAhLEqcK3pQOJ4r|
 21:27:52.947 [B1] == proxy t35 (7000 ms RTT) at nats://127.0.0.1:45699
 21:27:52.950 [B1] config.json: {"url":"nats://127.0.0.1:45699","owner":"o","open_timeout":"2s"}  (env has no MASH_URL override below)

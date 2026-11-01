@@ -1,11 +1,11 @@
 # Lease handoff (#44) and serve startup round trips (#121): live proof, 2026-10-31 21:17-21:34Z
 
 Binary: `mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059)`, built from main (7ebf0ab, includes #44 as f4001c0 and #121 as 6b6e335). Baselines
-built from `git archive` of each merge's first parent: pre-#44 = e76a299, pre-#121 = 8dec1c0 (no git state touched). Host rdev-randyb-dev, Linux arm64, Go 1.27.3.
+built from `git archive` of each merge's first parent: pre-#44 = e76a299, pre-#121 = 8dec1c0 (no git state touched). Host test-host, Linux arm64, Go 1.27.3.
 
 Real processes only: `mash admin init`, `mash admin provision` (and `deprovision`), `mash send`, `mash who`, `mash inbox`, `mash serve`. The NATS server is
 nats-server v2.15.1 embedded through `internal/testenv` (operator mode, account MASH with JetStream, users issued with mash's permission template) by
-a throwaway helper (`harness/natsenv-main.go.txt`; the second run used a copy with a bigger disk limit). The standalone `/home/randyb/.local/bin/nats-server`
+a throwaway helper (`harness/natsenv-main.go.txt`; the second run used a copy with a bigger disk limit). The standalone nats-server binary
 was not used; testenv was the shorter path to the same server configuration. Each endpoint ran under its own temp HOME and XDG_STATE_HOME, so
 nothing touched `~/.config/mash`. `mash serve` is an MCP stdio server, so a small client (`harness/drv.py`) does the MCP handshake and logs channel
 notifications with timestamps. The delay proxy is `harness/proxy.py` (python3 asyncio TCP proxy, fixed delay each way, logs the PUB subjects it forwards).
@@ -38,7 +38,7 @@ The pre-#44 number is inside the 90 s lease TTL, as predicted (the dead holder's
 Negatives, on main:
 
 1. Live holder is kept. Serve #2 started while #1 renewed for 35 s (a 30 s renewal period inside it) got one notice, `mash: endpoint e02 is already in use by another
-   session (host rdev-randyb-dev, pid 811079, since 2026-10-31T21:25:50Z); mail is off for this session. mash is retrying every 10s.` Mail sent while both ran (`m-alive`)
+   session (host test-host, pid 811079, since 2026-10-31T21:25:50Z); mail is off for this session. mash is retrying every 10s.` Mail sent while both ran (`m-alive`)
    arrived at #1 only (`1 message from sender (task)`); #2 never reported mail. At the end both were alive and `who --long` still showed the lease held (same for x and e03).
 2. A dead holder's slot is not taken for a live one. After `kill -9`, serve #3 never printed "already in use" (0 occurrences in all three main runs) and took the lease at once,
    while the killed pid's lease key was still inside its TTL. The pre-#44 control shows the failure being fixed: serve #3 reported `endpoint e01 is already in use by another session
