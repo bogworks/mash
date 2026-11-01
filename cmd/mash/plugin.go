@@ -34,26 +34,15 @@ func pluginCmd(args []string, stdout, stderr io.Writer) int {
 // exportPlugin writes the plugin in files, and a one-entry marketplace that points at it, into dir. Only those
 // files are written (each atomically); anything else in dir is left alone.
 func exportPlugin(dir string, files fs.FS) error {
-	var pl struct{ Description, Version string }
 	b, err := fs.ReadFile(files, ".claude-plugin/plugin.json")
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(b, &pl); err != nil {
-		return fmt.Errorf("plugin.json: %w", err)
+	mkt, err := marketplaceJSON(b)
+	if err != nil {
+		return err
 	}
-	type entry struct {
-		Name        string `json:"name"`
-		Source      string `json:"source"`
-		Description string `json:"description"`
-		Version     string `json:"version"`
-	}
-	mkt, _ := json.MarshalIndent(map[string]any{
-		"name":    "mash",
-		"owner":   map[string]string{"name": "Bogworks", "url": "https://github.com/bogworks"},
-		"plugins": []entry{{"mash", "./plugin", pl.Description, pl.Version}},
-	}, "", "  ")
-	if err := writeFileAtomic(filepath.Join(dir, ".claude-plugin", "marketplace.json"), append(mkt, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, ".claude-plugin", "marketplace.json"), mkt, 0o644); err != nil {
 		return err
 	}
 	return fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
@@ -70,6 +59,37 @@ func exportPlugin(dir string, files fs.FS) error {
 		}
 		return writeFileAtomic(filepath.Join(dir, "plugin", filepath.FromSlash(p)), data, mode)
 	})
+}
+
+// marketplaceJSON builds the one-entry marketplace.json for the plugin whose plugin.json is pluginJSON. The owner
+// is the plugin's author; a missing author name falls back to the plugin name and a missing url is omitted.
+func marketplaceJSON(pluginJSON []byte) ([]byte, error) {
+	var pl struct {
+		Description, Version string
+		Author               struct{ Name, URL string }
+	}
+	if err := json.Unmarshal(pluginJSON, &pl); err != nil {
+		return nil, fmt.Errorf("plugin.json: %w", err)
+	}
+	type entry struct {
+		Name        string `json:"name"`
+		Source      string `json:"source"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+	}
+	owner := map[string]string{"name": pl.Author.Name}
+	if pl.Author.Name == "" {
+		owner["name"] = "mash"
+	}
+	if pl.Author.URL != "" {
+		owner["url"] = pl.Author.URL
+	}
+	mkt, _ := json.MarshalIndent(map[string]any{
+		"name":    "mash",
+		"owner":   owner,
+		"plugins": []entry{{"mash", "./plugin", pl.Description, pl.Version}},
+	}, "", "  ")
+	return append(mkt, '\n'), nil
 }
 
 // writeFileAtomic writes path (given mode, parents 0755) through a temp file and a rename, so a reader never sees half a file.

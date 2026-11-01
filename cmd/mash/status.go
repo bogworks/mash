@@ -51,7 +51,14 @@ func (s *statusSource) settings() (home string, srcs []claudesettings.Source) {
 	if home == "" {
 		return "", nil
 	}
-	return home, claudesettings.Sources(home, runtime.GOOS, s.managedDir)
+	managed := s.managedDir
+	if managed == "" {
+		// MASH_MANAGED_SETTINGS_DIR replaces the OS location; a relative value is ignored.
+		if d := s.env("MASH_MANAGED_SETTINGS_DIR"); filepath.IsAbs(d) {
+			managed = d
+		}
+	}
+	return home, claudesettings.Sources(home, runtime.GOOS, managed)
 }
 
 func (s *statusSource) env(k string) string {
