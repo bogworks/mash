@@ -58,6 +58,7 @@ const (
 	refusedFile = ".refused"
 	toldFile    = ".told"
 	aliveFile   = ".alive"
+	waiterPref  = ".waiting."
 
 	// refusedEvery is how often a refused hook rewrites .refused.
 	refusedEvery = 60 * time.Second
@@ -346,6 +347,15 @@ func (s Spool) OwnRecord(legacy, record string) error {
 	if err := os.Remove(filepath.Join(s.Dir, toldFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	// The new holder's own waiting record (a serve that waited, then bound) is done; so is any other for its pid.
+	var rec struct {
+		PID int `json:"pid"`
+	}
+	if json.Unmarshal([]byte(record), &rec) == nil && rec.PID > 0 {
+		if err := s.ClearWaiter(rec.PID); err != nil {
+			return err
+		}
+	}
 	if err := s.writeOrRemove(ownerFile, record); err != nil {
 		return err
 	}
@@ -490,3 +500,69 @@ func (s Spool) Told(key string) bool {
 
 // NoteTold records that the notice for key was printed, replacing any earlier key. Call it under Lock.
 func (s Spool) NoteTold(key string) error { return s.writeOrRemove(toldFile, key) }
+
+// WaiterRecord is what a serve that waits for the lease leaves in .waiting.<pid> (ADR 0043): its parent Claude
+// process and that process's session id.
+type WaiterRecord struct {
+	PID     int    `json:"pid"`
+	Session string `json:"session,omitempty"`
+}
+
+// NoteWaiter records a serve waiting for the lease, atomically, in .waiting.<pid>. Call it under Lock.
+func (s Spool) NoteWaiter(r WaiterRecord) error {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return s.writeOrRemove(waiterPref+strconv.Itoa(r.PID), string(b))
+}
+
+// ClearWaiter removes the waiting record of pid, and every other .waiting.* that names it. Call it under Lock.
+func (s Spool) ClearWaiter(pid int) error {
+	des, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return err
+	}
+	for _, d := range des {
+		if !strings.HasPrefix(d.Name(), waiterPref) {
+			continue
+		}
+		rec, ok := s.readWaiter(d.Name())
+		if d.Name() != waiterPref+strconv.Itoa(pid) && !(ok && rec.PID == pid) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.Dir, d.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Spool) readWaiter(name string) (WaiterRecord, bool) {
+	b, err := os.ReadFile(filepath.Join(s.Dir, name))
+	var r WaiterRecord
+	if err != nil || json.Unmarshal(b, &r) != nil || r.PID <= 0 {
+		return r, false
+	}
+	return r, true
+}
+
+// Waiters lists the recorded waiting serves whose process is still alive. A junk file or a dead pid is skipped.
+func (s Spool) Waiters() []WaiterRecord {
+	des, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return nil
+	}
+	var out []WaiterRecord
+	for _, d := range des {
+		if !strings.HasPrefix(d.Name(), waiterPref) || !d.Type().IsRegular() {
+			continue
+		}
+		if r, ok := s.readWaiter(d.Name()); ok {
+			if err := syscall.Kill(r.PID, 0); err == nil || errors.Is(err, syscall.EPERM) {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}

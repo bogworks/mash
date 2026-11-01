@@ -353,10 +353,7 @@ func liveDualResume(t *testing.T, id string, tokens bool) {
 
 	// b. B resumes A's session id, same env, no --fork-session.
 	b := sc.startLive(ctx, "B", envB, "--resume", a.sessionID())
-	bPrompt := "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready."
-	if tokens {
-		bPrompt = "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready, and also tell me verbatim any line from mash that says this copy of the session is not receiving mail, or say none."
-	}
+	bPrompt := "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready, and also tell me verbatim any line from mash that says this copy of the session is not receiving mail, or say none."
 	okB := ask(b, bPrompt, 1, 3*time.Minute)
 	ls.info(t, id, "B: first turn finished", "%v; exited %v", okB, b.isExited())
 	if b.isExited() {
@@ -372,10 +369,8 @@ func liveDualResume(t *testing.T, id string, tokens bool) {
 	ls.info(t, id, "B: stderr lines about mash, lease or bind", "%s", b.stderrMash())
 	ls.info(t, id, "B: who output", "%s", firstLines(b.who(), 10))
 	ls.info(t, id, "spool after B started", "%s", spoolState())
-	if tokens {
-		ls.info(t, id, "B: turn-1 result, first line", "%s", firstLines(stB.resultText, 1))
-		ls.check(t, id, "B's answer carries the not-receiving-mail notice", strings.Contains(strings.ToLower(stB.resultText), "not receiving mail"), "answer: %s", firstLines(stB.resultText, 2))
-	}
+	ls.info(t, id, "B: turn-1 result, first line", "%s", firstLines(stB.resultText, 1))
+	ls.check(t, id, "B's answer carries the not-receiving-mail notice", strings.Contains(strings.ToLower(stB.resultText), "not receiving mail"), "answer: %s", firstLines(stB.resultText, 2))
 
 	// c. Mail: who sees what.
 	listPrompt := "Run the shell command `sleep 3`, then reply with one line listing every token starting with MARK-" + id + " that you saw in any mash mail context in this session, and nothing else (write none if there are none)."
@@ -412,28 +407,22 @@ func liveDualResume(t *testing.T, id string, tokens bool) {
 	ls.info(t, id, "M1 round, A", "finished %v; %s", doneA, named(a, marks))
 	ls.info(t, id, "M1 round, B", "finished %v; %s", doneB, named(b, marks))
 	ls.info(t, id, "spool after M1 round", "%s", spoolState())
-	if tokens {
-		ls.check(t, id, "M1 round: A names M1", has(a, m1), "%s", named(a, marks))
-		ls.check(t, id, "M1 round: B does not name M1 (mail stays with A)", !has(b, m1), "%s", named(b, marks))
-	}
+	ls.check(t, id, "M1 round: A names M1", has(a, m1), "%s", named(a, marks))
+	ls.check(t, id, "M1 round: B does not name M1 (mail stays with A)", !has(b, m1), "%s", named(b, marks))
 
 	m2 := lsMarker(id + "c")
 	lsSend(t, w, id, m2)
 	marks["M2"] = m2
 	ok := ask(b, listPrompt, b.snapshot().results+1, 3*time.Minute)
 	ls.info(t, id, "M2 round, only B asked", "finished %v; %s", ok, named(b, marks))
-	if tokens {
-		ls.check(t, id, "M2 round: B does not name M2 (mail stays with A)", !has(b, m2), "%s", named(b, marks))
-	}
+	ls.check(t, id, "M2 round: B does not name M2 (mail stays with A)", !has(b, m2), "%s", named(b, marks))
 
 	m3 := lsMarker(id + "d")
 	lsSend(t, w, id, m3)
 	marks["M3"] = m3
 	ok = ask(a, listPrompt, a.snapshot().results+1, 3*time.Minute)
 	ls.info(t, id, "M3 round, only A asked", "finished %v; %s", ok, named(a, marks))
-	if tokens {
-		ls.check(t, id, "M3 round: A names M2 (left for A) and M3", has(a, m2) && has(a, m3), "%s", named(a, marks))
-	}
+	ls.check(t, id, "M3 round: A names M2 (left for A) and M3", has(a, m2) && has(a, m3), "%s", named(a, marks))
 
 	// d. Transcript shape.
 	sum, others := lsTranscript(sc.cfg, a.sessionID())

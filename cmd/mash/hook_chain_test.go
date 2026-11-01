@@ -398,3 +398,46 @@ func TestHookOtherLaunchOfTheSameSessionIsRefusedAndToldOnce(t *testing.T) {
 		t.Fatalf("left waiting: %+v", e)
 	}
 }
+
+// A plain `claude --resume` of a running session has no launch token at all. Its serve waits for the lease and is
+// recorded in the spool by its Claude pid; the copy's hooks, which descend from that pid, are refused and told once,
+// and the holder's hooks (the owner is their ancestor) still drain.
+func TestHookWaiterWithEmptyTokensIsRefusedAndToldOnce(t *testing.T) {
+	skipOnWindows(t)
+	w := newWorld(t, "a", "b")
+	sp := spoolOf(w.env["a"])
+	envFor := func() map[string]string {
+		return withEnv(w.env["a"], map[string]string{"CLAUDE_CODE_SESSION_ID": "S-two", "MASH_LAUNCH_TOKEN": "", "MASH_SPOOL_FROM_START": "1"})
+	}
+	owner := startFakeClaude(t, envFor(), true)
+	eventually(t, 20*time.Second, "serve owns the spool", func() bool { return ownedByPID(sp, owner.pid) })
+	cp := startFakeClaude(t, envFor(), false)
+	sendAndSpool(t, w, sp, "for the holder only")
+
+	// before the copy's serve is recorded as waiting, nothing tells it apart (the old behaviour)
+	unlock, err := sp.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sp.NoteWaiter(spool.WaiterRecord{PID: cp.pid, Session: "S-two"})
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr := cp.hookRaw(t, "S-two")
+	if !strings.Contains(stdout, "this copy of the session is not receiving mail") || strings.Contains(stdout, "for the holder only") {
+		t.Fatalf("notice stdout %q", stdout)
+	}
+	if !strings.Contains(stderr, "another launch of this session") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	if e, _ := sp.Waiting(); len(e) != 1 {
+		t.Fatalf("a refused hook drained: %+v", e)
+	}
+	if got, _ := cp.hookRaw(t, "S-two"); got != "" {
+		t.Fatalf("the notice repeated: %q", got)
+	}
+	if got := owner.hook(t, "S-two"); !strings.Contains(got, "> for the holder only") {
+		t.Fatalf("the holder's hook showed %q", got)
+	}
+}

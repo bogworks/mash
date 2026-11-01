@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -680,4 +681,23 @@ func TestServeRecordsMCPSeenAndChannelsInTheLease(t *testing.T) {
 	if lv := lease(); lv["channels"] != nil {
 		t.Fatalf("the lease claims channels: %v", lv)
 	}
+}
+
+// A serve waiting for the lease records itself in the spool as .waiting.<ppid>, and the record is gone once it binds.
+func TestServeRecordsItselfWhileWaiting(t *testing.T) {
+	setTiming(t, 50*time.Millisecond, 20*time.Second)
+	w := newWorld(t, "a", "b")
+	kv := leaseKV(t, w)
+	holdLease(t, kv, "a")
+	sp := spoolOf(w.env["a"])
+	rec := filepath.Join(sp.Dir, ".waiting."+strconv.Itoa(os.Getppid()))
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	eventually(t, 5*time.Second, "waiting record written", func() bool { _, err := os.Stat(rec); return err == nil })
+	if got := sp.Waiters(); len(got) != 1 || got[0].PID != os.Getppid() {
+		t.Fatalf("Waiters = %+v", got)
+	}
+	freeLease(t, kv, "a")
+	s.await(t, 5*time.Second, isChannel) // the online notice
+	eventually(t, 10*time.Second, "waiting record removed once bound", func() bool { _, err := os.Stat(rec); return err != nil })
 }

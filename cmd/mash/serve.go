@@ -209,6 +209,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		waited := ep == nil
 		if waited {
 			var ok bool
+			defer noteWaiting(cfg)() // recorded while waiting; removed on exit, and by the bind (spool.OwnRecord)
 			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify); !ok {
 				return
 			}
@@ -715,6 +716,27 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+// noteWaiting records this serve in its endpoint's spool as waiting for the lease (spool.NoteWaiter), so a hook of the
+// same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
+// removes the record. A spool that cannot be written costs only that detection.
+func noteWaiting(cfg config.Config) func() {
+	s := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
+	ppid := os.Getppid()
+	if s.Init() != nil {
+		return func() {}
+	}
+	if unlock, err := s.Lock(); err == nil {
+		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: os.Getenv("CLAUDE_CODE_SESSION_ID")})
+		unlock()
+	}
+	return func() {
+		if unlock, err := s.Lock(); err == nil {
+			_ = s.ClearWaiter(ppid)
+			unlock()
 		}
 	}
 }

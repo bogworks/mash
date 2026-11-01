@@ -86,6 +86,9 @@ func (c Claude) Owns(owner string, h HookIdentity) bool {
 //  2. launch: both launch tokens are non-empty and equal (stable across /clear);
 //  3. process: serve's parent pid is among the hook's ancestors (covers /clear on the plain CLI).
 //
+// Before them: a hook that descends from a serve recorded as waiting for the lease, and not from the owner, is refused
+// as another launch (ADR 0043), tokens or not.
+//
 // A legacy owner ("pid:N" text) is checked by rule 3 alone; an empty or other older owner is accepted.
 func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	var r ownerRecord
@@ -102,6 +105,11 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 		r.PID = n
 	default:
 		return true, "no owner recorded"
+	}
+	// A hook that descends from a serve waiting for the lease, and not from the owner, is another launch of the
+	// session, whatever the launch tokens say (ADR 0043).
+	if WaiterAncestor(r.PID, h.Waiters) > 0 {
+		return false, otherLaunchWhy + ", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"
 	}
 	// Two launches of one session (a `claude --resume` of a running session) share the session id but not the launch
 	// token: the session id then proves nothing (ADR 0043). Rule 3 still decides.
@@ -125,6 +133,24 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	}
 	return false, "session id " + differs(h.SessionID, r.Session) + ", launch token " + differs(h.LaunchToken, r.Launch) +
 		", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"
+}
+
+// WaiterAncestor is the first of waiters that is among the hook's ancestors, provided the owner (ownerPID) is not
+// itself a waiter and not among the ancestors; 0 otherwise.
+func WaiterAncestor(ownerPID int, waiters []int) int {
+	if len(waiters) == 0 || ownerPID <= 0 || slices.Contains(waiters, ownerPID) {
+		return 0
+	}
+	found := 0
+	for pid := range Ancestors {
+		if pid == ownerPID {
+			return 0
+		}
+		if found == 0 && slices.Contains(waiters, pid) {
+			found = pid
+		}
+	}
+	return found
 }
 
 // otherLaunchWhy starts the refusal reason of a hook whose session id matches the owner's but whose launch token

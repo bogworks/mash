@@ -246,3 +246,36 @@ func TestMatchOtherLaunchOfTheSameSession(t *testing.T) {
 		}
 	}
 }
+
+// A serve waiting for the lease is recorded by its Claude pid: a hook that descends from it, and not from the owner,
+// is another launch of the session even with empty launch tokens (ADR 0043).
+func TestMatchWaiterAncestorIsAnotherLaunch(t *testing.T) {
+	unrelated(t)
+	pp := os.Getppid() // an ancestor of the hook
+	for _, c := range []struct {
+		name    string
+		owner   string
+		hook    HookIdentity
+		want    bool
+		otherLn bool
+	}{
+		{"waiter ancestor, same session, empty tokens", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, false, true},
+		{"waiter ancestor, tokens differ", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB", Waiters: []int{pp}}, false, true},
+		{"waiter ancestor, no session ids", ownerJSON(4242, "", ""), HookIdentity{Waiters: []int{pp}}, false, true},
+		{"no waiters", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1"}, true, false},
+		{"waiter is not an ancestor", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{7777}}, true, false},
+		{"owner is a waiter too", ownerJSON(pp, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, true, false},
+		{"owner is an ancestor beside a waiter", ownerJSON(5002, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, true, false},
+	} {
+		ok, why := (Claude{}).Match(c.owner, c.hook)
+		if ok != c.want || IsOtherLaunch(why) != c.otherLn {
+			t.Errorf("%s: Match = %v %q, want %v (other launch %v)", c.name, ok, why, c.want, c.otherLn)
+		}
+	}
+	if got := WaiterAncestor(4242, []int{pp}); got != pp {
+		t.Errorf("WaiterAncestor = %d, want %d", got, pp)
+	}
+	if got := WaiterAncestor(5002, []int{pp}); got != 0 {
+		t.Errorf("WaiterAncestor with the owner an ancestor = %d, want 0", got)
+	}
+}
