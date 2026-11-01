@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/bogworks/mash/plugin"
 )
 
 func readJSON(t *testing.T, path string, v any) {
@@ -52,5 +55,31 @@ func TestPluginManifests(t *testing.T) {
 	// The version tool reads the plugin's own manifest through MASH_PLUGIN_ROOT, which Claude Code expands.
 	if len(s.Env) != 2 || s.Env["MASH_SPOOL_FROM_START"] != "1" || s.Env["MASH_PLUGIN_ROOT"] != "${CLAUDE_PLUGIN_ROOT}" {
 		t.Fatalf(".mcp.json env %v, want only MASH_SPOOL_FROM_START=1 and MASH_PLUGIN_ROOT=${CLAUDE_PLUGIN_ROOT}", s.Env)
+	}
+}
+
+func TestMarketplaceOwnerFromAuthor(t *testing.T) {
+	dir := t.TempDir()
+	if err := exportPlugin(dir, plugin.Files); err != nil {
+		t.Fatal(err)
+	}
+	var m struct{ Owner map[string]string }
+	readJSON(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"), &m)
+	if m.Owner["name"] != "Bogworks" || m.Owner["url"] != "https://github.com/bogworks" || len(m.Owner) != 2 {
+		t.Fatalf("owner = %v", m.Owner)
+	}
+}
+
+func TestMarketplaceWithoutAuthor(t *testing.T) {
+	b, err := marketplaceJSON([]byte(`{"description":"d","version":"1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct{ Owner map[string]string }
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Owner["name"] != "mash" || len(m.Owner) != 1 {
+		t.Fatalf("owner = %v", m.Owner)
 	}
 }
