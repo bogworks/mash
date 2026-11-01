@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
-    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'bf1' }}
+    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)

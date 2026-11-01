@@ -411,23 +411,11 @@ func TestRootFlag(t *testing.T) {
 
 // TestRepositoryADRsPass lints the repository's real ADRs, so they are always covered.
 func TestRepositoryADRsPass(t *testing.T) {
-	// knownBad: violations whose path contains one of these are skipped. Remove when #236 has merged.
-	knownBad := map[string]string{"/0038-": "no Confirmation subsection and no README row until #236"}
 	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var left []string
-	for _, v := range vs {
-		skip := false
-		for k := range knownBad {
-			skip = skip || strings.Contains(filepath.ToSlash(v), k)
-		}
-		if !skip {
-			left = append(left, v)
-		}
-	}
-	if len(left) > 0 {
-		t.Fatalf("the repository's ADRs have violations:\n%s", strings.Join(left, "\n"))
+	if len(vs) > 0 {
+		t.Fatalf("the repository's ADRs have violations:\n%s", strings.Join(vs, "\n"))
 	}
 }
