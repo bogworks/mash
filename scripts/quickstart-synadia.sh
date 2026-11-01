@@ -52,7 +52,7 @@ case "$API" in
 esac
 TEAM="" ACCOUNT="" OWNER="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOKEN_STDIN=0 NO_TEST=0
 ENDPOINTS=()
-ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
+ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" PROVISIONING_KEY="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
 CREATED_IDS=() CREATED_NAMES=() CREATED_CREDS=() PROVISIONED=() # endpoint users this run created (id, name, whether it wrote their creds file), endpoints provisioned
 CFG_BACKUP="" CFG_CREATED=0 CFG_PENDING=0 # config.json: its backup, whether this run created it, whether a failure must undo the write
 
@@ -146,11 +146,26 @@ cleanup() {
   local rc=$?
   trap - EXIT
   if [ "$rc" -ne 0 ] && [ -n "$PROVISIONING" ] && [ -n "$ADMIN_ID" ] && [ -f "${ADMIN_CREDS:-}" ]; then
-    # provision can create the inbox stream and then fail: remove the half-made inbox/record while the admin creds are valid.
-    if MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin deprovision "$PROVISIONING" >/dev/null 2>&1; then
-      say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
+    # provision can create the inbox stream and then fail. Deprovision only a record proven to be this run's (its NATS user
+    # public key is the one this run created): another admin may have provisioned the name since the directory check.
+    local lst en ek found=0 mine=0
+    if lst=$(MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin list 2>/dev/null); then
+      while IFS=$'\t' read -r en ek _; do
+        if [ "$en" = "$PROVISIONING" ]; then found=1; [ "$ek" != "$PROVISIONING_KEY" ] || mine=1; fi
+      done <<<"$lst"
+      if [ "$mine" -eq 1 ]; then
+        if MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin deprovision "$PROVISIONING" >/dev/null 2>&1; then
+          say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
+        else
+          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING'; remove it by hand (docs/synadia.md)." >&2
+        fi
+      elif [ "$found" -eq 1 ]; then
+        echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place." >&2
+      else
+        say "Setup failed: no directory record for $PROVISIONING to remove."
+      fi
     else
-      echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING' (nothing may exist to remove, or it needs removing by hand, docs/synadia.md)." >&2
+      echo "quickstart-synadia: could not run 'mash admin list'; not deprovisioning $PROVISIONING. If it is this run's, remove it by hand: mash admin deprovision $PROVISIONING (docs/synadia.md)." >&2
     fi
   fi
   if [ -n "$ADMIN_ID" ]; then
@@ -246,7 +261,7 @@ fi
 if [ "$DRY" -ne 1 ]; then
   [ -d "$CONFIG_DIR" ] || { mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"; } || die "cannot create $CONFIG_DIR"
   LOCK_DIR="$CONFIG_DIR/.quickstart.lock"
-  mkdir "$LOCK_DIR" 2>/dev/null || die "another quickstart run is using $CONFIG_DIR, or remove the stale lock if none is running: rmdir $LOCK_DIR"
+  mkdir "$LOCK_DIR" 2>/dev/null || die "another quickstart run is using $CONFIG_DIR, or remove the stale lock if none is running (only then; it holds a pid file): rm $LOCK_DIR/pid && rmdir $LOCK_DIR"
   LOCK_HELD=1
   echo "$$" >"$LOCK_DIR/pid"
 fi
@@ -390,9 +405,9 @@ for n in "${ENDPOINTS[@]}"; do
   fetch_creds "$uid" "$CONFIG_DIR/$n.creds" "$ukey"
   CREATED_CREDS[${#CREATED_CREDS[@]}-1]=1
   say "Endpoint $n: user created, creds in $CONFIG_DIR/$n.creds"
-  PROVISIONING="$n"
+  PROVISIONING="$n"; PROVISIONING_KEY="$ukey"
   mash_admin provision "$n" --user "$ukey" --account "$acct_key" --note "created by quickstart-synadia.sh"
-  PROVISIONED+=("$n"); PROVISIONING=""
+  PROVISIONED+=("$n"); PROVISIONING=""; PROVISIONING_KEY=""
   CFG_PENDING=0 # an endpoint exists under this config: a later failure keeps it
 done
 unset MASH_ADMIN_CREDS

@@ -560,7 +560,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 			t.Fatal(err)
 		}
 		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
-		if r.code == 0 || !strings.Contains(r.out, lockPath(home)) || !strings.Contains(r.out, "another quickstart run") || f.postCount() != 0 {
+		if r.code == 0 || !strings.Contains(r.out, lockPath(home)) || !strings.Contains(r.out, "another quickstart run") || !strings.Contains(r.out, "rm "+lockPath(home)+"/pid && rmdir "+lockPath(home)) || f.postCount() != 0 {
 			t.Fatalf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
 		}
 		if _, err := os.Stat(lockPath(home)); err != nil {
@@ -603,10 +603,17 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 }
 
+// failProvisionBody makes `admin provision alice-b` fail after remembering its --user key, and makes the next
+// `admin list` show a record for alice-b carrying listKey ("" means this run's own key).
+func failProvisionBody(listKey string) string {
+	return `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
+if [ "$1" = admin ] && [ "$2" = list ] && [ -f "$0.key" ]; then k='` + listKey + `'; [ -n "$k" ] || k=$(cat "$0.key"); printf 'alice-b\t%s\t2026-01-01T00:00:00Z\t\n' "$k"; exit 0; fi`
+}
+
 func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 6)
-	wrapper, calls := wrapperMash(t, `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "provision: boom" >&2; exit 1; fi`)
+	wrapper, calls := wrapperMash(t, failProvisionBody(""))
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
@@ -623,6 +630,23 @@ func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 		if strings.HasPrefix(n, "mash-quickstart-admin-") || n == "alice-b" {
 			t.Errorf("user %s survived", n)
 		}
+	}
+}
+
+func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 6)
+	wrapper, calls := wrapperMash(t, failProvisionBody("UOTHERKEYNOTTHISRUNS"))
+	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	if r.code == 0 {
+		t.Fatalf("want a failure:\n%s", r.out)
+	}
+	b, _ := os.ReadFile(calls)
+	if strings.Contains(string(b), "admin deprovision") {
+		t.Errorf("deprovisioned a record that is not this run's, calls:\n%s", b)
+	}
+	if !strings.Contains(r.out, "a record for alice-b exists that is not this run's; left in place") {
+		t.Errorf("output does not say the record was left:\n%s", r.out)
 	}
 }
 
