@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
@@ -46,6 +49,9 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if id.SessionID == "" { // the stdin session_id wins; the environment only fills in when stdin has none
 		id.SessionID = getenv(env, "CLAUDE_CODE_SESSION_ID")
 	}
+	for _, w := range sp.Waiters() {
+		id.Waiters = append(id.Waiters, w.PID)
+	}
 	ok, why := adapter.Match(sp.Owner(), id)
 	if getenv(env, "MASH_HOOK_TRACE") == "1" {
 		fmt.Fprintf(stderr, "mash hook: trace pid=%d ancestors=%v hook-session=%q match=%v (%s)\n",
@@ -58,6 +64,24 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			fmt.Fprintf(stderr, "mash hook: recording the refusal: %v\n", err)
 		}
 		fmt.Fprintf(stderr, "mash hook: not this session's spool (%s); mail left for its owner\n", why)
+		if host.IsOtherLaunch(why) {
+			// Once per (session id, launch token): tell the model in-session, since status is pull-only (ADR 0043).
+			who := id.LaunchToken
+			if who == "" { // no token: the waiting serve's pid tells the copies apart
+				who = strconv.Itoa(host.WaiterAncestor(host.OwnerPID(sp.Owner()), id.Waiters))
+			}
+			sum := sha256.Sum256([]byte(id.SessionID + "\x00" + who))
+			key := hex.EncodeToString(sum[:])[:16]
+			if !sp.Told(key) {
+				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
+					host.OwnerPID(sp.Owner()), cfg.Name)
+				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
+					if err := sp.NoteTold(key); err != nil {
+						fmt.Fprintf(stderr, "mash hook: recording the notice: %v\n", err)
+					}
+				}
+			}
+		}
 		return 0
 	}
 	if trig.Subagent {

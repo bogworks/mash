@@ -156,9 +156,16 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// The first Open runs before the MCP server exists, as it always has: it is bounded by openTimeout, and a
 	// stdin EOF during it is seen once it returns. A held lease is waited out, and a transient failure (a
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
+	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
+	// Removed on every exit, and at once when the first attempt binds (the bind also removes it, spool.OwnRecord).
+	clearWaiter := noteWaiting(cfg)
+	defer clearWaiter()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
 	ep, err := openEndpoint(openCtx, cfg)
 	openCancel()
+	if ep != nil {
+		clearWaiter()
+	}
 	var held *endpoint.LeaseHeldError
 	var startErr error // a transient first failure, retried
 	if err != nil && !errors.As(err, &held) {
@@ -212,6 +219,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify); !ok {
 				return
 			}
+			clearWaiter() // this serve now holds the lease
 		}
 		defer ep.Close()
 		select {
@@ -715,6 +723,27 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+// noteWaiting records this serve in its endpoint's spool as waiting for the lease (spool.NoteWaiter), so a hook of the
+// same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
+// removes the record. A spool that cannot be written costs only that detection.
+func noteWaiting(cfg config.Config) func() {
+	s := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
+	ppid := os.Getppid()
+	if s.Init() != nil {
+		return func() {}
+	}
+	if unlock, err := s.Lock(); err == nil {
+		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: os.Getenv("CLAUDE_CODE_SESSION_ID")})
+		unlock()
+	}
+	return func() {
+		if unlock, err := s.Lock(); err == nil {
+			_ = s.ClearWaiter(ppid)
+			unlock()
 		}
 	}
 }

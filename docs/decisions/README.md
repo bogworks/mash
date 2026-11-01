@@ -53,6 +53,7 @@ on), or mash's own choice on top of them.
 | [0037](0037-mail-carries-text-files-travel-by-reference.md) | Mail carries text only; files travel by reference to an object store | accepted | mash | 2026-10-21 |
 | [0038](0038-synadia-setup-is-a-script-outside-the-binary.md) | Synadia setup is a script outside the binary; it supersedes 0035 | accepted | mash | 2026-10-31 |
 | [0039](0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md) | mash reads Claude Code's managed settings, read-only, for diagnosis only | accepted | mash (Claude Code host) | 2026-11-01 |
-| [0040](0040-hook-ownership-session-id-launch-token-then-process-chain.md) | Hook ownership: session id, launch token, then process chain | accepted | mash | 2026-11-01 |
+| [0040](0040-hook-ownership-session-id-launch-token-then-process-chain.md) | Hook ownership: session id, launch token, then process chain | accepted (amended by [0043](0043-second-launch-of-a-running-session-is-refused-and-told-once.md)) | mash | 2026-11-01 |
 | [0041](0041-sessions-whose-hooks-never-run-stop-waking-deliver-through-read.md) | Sessions whose hooks never run stop waking and deliver through the read tool | accepted | mash | 2026-11-01 |
 | [0042](0042-sign-sha256sums-with-sshsig.md) | A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild | accepted | project | 2026-10-31 |
+| [0043](0043-second-launch-of-a-running-session-is-refused-and-told-once.md) | A second launch of a running session is refused and told once in-session (amends 0040) | accepted | mash | 2026-11-01 |

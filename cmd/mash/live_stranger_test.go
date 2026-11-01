@@ -76,6 +76,7 @@ var lsScenarios = []struct{ id, title string }{
 	{"L3", "minimal environment (IDE-like launch)"},
 	{"L4", "hooks disabled"},
 	{"D1", "two live processes on one session id"},
+	{"D2", "two live processes on one session id, distinct launch tokens"},
 }
 
 // ---- recording: timeline.log and RECEIPT.md ----

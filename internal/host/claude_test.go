@@ -214,3 +214,68 @@ func TestOwnerTokenIsJSON(t *testing.T) {
 		t.Fatalf("empty fields not omitted: %s", got)
 	}
 }
+
+// A `claude --resume` of a running session shares the session id but not the launch token: the session id then proves
+// nothing (ADR 0043); rule 3 still applies, and an empty token on either side leaves rule 1 as it was.
+func TestMatchOtherLaunchOfTheSameSession(t *testing.T) {
+	unrelated(t)
+	pp := os.Getppid()
+	for _, c := range []struct {
+		name      string
+		owner     string
+		hook      HookIdentity
+		want      bool
+		otherLnch bool
+	}{
+		{"same session, equal tokens", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokA"}, true, false},
+		{"same session, other token", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, false, true},
+		{"same session, hook token empty", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1"}, true, false},
+		{"same session, owner token empty", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, true, false},
+		{"empty tokens everywhere", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1"}, true, false},
+		{"other token, owner is an ancestor", ownerJSON(pp, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, true, false},
+		{"other session, other token", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S2", LaunchToken: "tokB"}, false, false},
+	} {
+		ok, why := (Claude{}).Match(c.owner, c.hook)
+		if ok != c.want || IsOtherLaunch(why) != c.otherLnch {
+			t.Errorf("%s: Match = %v %q, want %v (other launch %v)", c.name, ok, why, c.want, c.otherLnch)
+		}
+		for _, tok := range []string{"tokA", "tokB"} {
+			if strings.Contains(why, tok) {
+				t.Errorf("%s: reason %q contains a token", c.name, why)
+			}
+		}
+	}
+}
+
+// A serve waiting for the lease is recorded by its Claude pid: a hook that descends from it, and not from the owner,
+// is another launch of the session even with empty launch tokens (ADR 0043).
+func TestMatchWaiterAncestorIsAnotherLaunch(t *testing.T) {
+	unrelated(t)
+	pp := os.Getppid() // an ancestor of the hook
+	for _, c := range []struct {
+		name    string
+		owner   string
+		hook    HookIdentity
+		want    bool
+		otherLn bool
+	}{
+		{"waiter ancestor, same session, empty tokens", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, false, true},
+		{"waiter ancestor, tokens differ", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB", Waiters: []int{pp}}, false, true},
+		{"waiter ancestor, no session ids", ownerJSON(4242, "", ""), HookIdentity{Waiters: []int{pp}}, false, true},
+		{"no waiters", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1"}, true, false},
+		{"waiter is not an ancestor", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{7777}}, true, false},
+		{"owner is a waiter too", ownerJSON(pp, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, true, false},
+		{"owner is an ancestor beside a waiter", ownerJSON(5002, "S1", ""), HookIdentity{SessionID: "S1", Waiters: []int{pp}}, true, false},
+	} {
+		ok, why := (Claude{}).Match(c.owner, c.hook)
+		if ok != c.want || IsOtherLaunch(why) != c.otherLn {
+			t.Errorf("%s: Match = %v %q, want %v (other launch %v)", c.name, ok, why, c.want, c.otherLn)
+		}
+	}
+	if got := WaiterAncestor(4242, []int{pp}); got != pp {
+		t.Errorf("WaiterAncestor = %d, want %d", got, pp)
+	}
+	if got := WaiterAncestor(5002, []int{pp}); got != 0 {
+		t.Errorf("WaiterAncestor with the owner an ancestor = %d, want 0", got)
+	}
+}

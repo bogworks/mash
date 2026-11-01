@@ -457,3 +457,49 @@ func TestAliveIsNotHooked(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWaiters(t *testing.T) {
+	s := newSpool(t)
+	self := os.Getpid()
+	if got := s.Waiters(); len(got) != 0 {
+		t.Fatalf("waiters before any: %v", got)
+	}
+	if err := s.NoteWaiter(WaiterRecord{PID: self, Session: "S1"}); err != nil {
+		t.Fatal(err)
+	}
+	// junk, a dead pid and an unrelated pid file are skipped
+	_ = os.WriteFile(filepath.Join(s.Dir, ".waiting.junk"), []byte("not json"), 0o600)
+	_ = os.WriteFile(filepath.Join(s.Dir, ".waiting.999999999"), []byte(`{"pid":999999999}`), 0o600)
+	got := s.Waiters()
+	if len(got) != 1 || got[0].PID != self || got[0].Session != "S1" {
+		t.Fatalf("Waiters = %+v", got)
+	}
+	if err := s.ClearWaiter(self); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Waiters(); len(got) != 0 {
+		t.Fatalf("after ClearWaiter: %v", got)
+	}
+	// OwnRecord deletes every .waiting.* naming the new owner's pid, and keeps the others
+	if err := s.NoteWaiter(WaiterRecord{PID: self}); err != nil {
+		t.Fatal(err)
+	}
+	other := os.Getppid()
+	if err := s.NoteWaiter(WaiterRecord{PID: other}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.OwnRecord("pid:"+strconv.Itoa(self), `{"pid":`+strconv.Itoa(self)+`}`); err != nil {
+		t.Fatal(err)
+	}
+	got = s.Waiters()
+	if len(got) != 1 || got[0].PID != other {
+		t.Fatalf("after OwnRecord: %+v", got)
+	}
+	// a waiting message spool is not touched by waiter files, and vice versa
+	if err := s.ClearWaiting(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Waiters()) != 1 {
+		t.Fatal("ClearWaiting removed a waiter record")
+	}
+}

@@ -13,6 +13,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Changed
 
+- A `claude --resume` of a still-running session (same session id; a new `MASH_LAUNCH_TOKEN` is not required, a waiting serve records itself in the spool) no longer drains the lease holder's spool: its hooks are refused, and it is told once in its own session that it is not receiving mail ([ADR-0043](docs/decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)).
 - `mash admin provision` refuses to lower the caps of an inbox stream that already exists (a retried provision no longer shrinks an inbox the limits command had raised).
 
 ## [0.3.0] - 2026-11-01

@@ -29,3 +29,20 @@ No launcher was involved, so `MASH_LAUNCH_TOKEN` was empty for both (see caveats
 - No launcher, so launch tokens were empty; the proposed token rule in finding 1 was not exercised.
 - `-p` stream-json processes, not interactive TUIs; no channel allowlist wake was possible, so mail arrived by hook only.
 - One run, haiku: counts such as the number of transcript forks vary with how many tool calls each side made.
+
+## After the fix (ADR 0043): `TestLiveDualResumeD2`, distinct launch tokens
+
+Same flow, but A runs with `MASH_LAUNCH_TOKEN=live-token-a` and B (the `--resume`) with `live-token-b`
+(`timeline-d2.log`; the fixed mash built from the same checkout). All checks pass:
+
+- B's first hook output carried "this copy of the session is not receiving mail", once (`.refused` and `.told` appear in the spool).
+- Round 1 (both asked): A named the new mail, B did not. Round 2 (only B asked): B did not see it. Round 3 (only A asked): A named both
+  the round 2 and round 3 mail, so mail stays with the holder.
+- A killed: B took the lease (owner record shows B's token); mail sent in the meantime waited in the spool for B's next hook, now that B is the owner.
+
+### Tokenless, as the plugin launches (D1 re-run after the waiter rule)
+
+The standard plugin launch sets no `MASH_LAUNCH_TOKEN` (the owner record in `timeline-d1-after-fix.log` has none), so a token
+rule alone does not cover it. A serve that is waiting for the lease now records its parent pid in the spool, and a hook
+descended from a recorded waiter is refused (ADR 0043). D1, with no tokens, now passes the same checks as D2: the notice shows
+once, mail stays with the holder, the mail left for the holder is seen by it. D2 was re-run on the same build and passes.

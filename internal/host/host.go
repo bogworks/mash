@@ -42,8 +42,12 @@ type Trigger struct {
 }
 
 // HookIdentity is what a hook process knows about the session it runs in: its session id (from its environment, else
-// the hook's stdin) and the launch token (MASH_LAUNCH_TOKEN) it inherited.
-type HookIdentity struct{ SessionID, LaunchToken string }
+// the hook's stdin), the launch token (MASH_LAUNCH_TOKEN) it inherited, and the pids of the serves recorded as waiting
+// for the lease (spool.Waiters, ADR 0043).
+type HookIdentity struct {
+	SessionID, LaunchToken string
+	Waiters                []int
+}
 
 // Presentation is what Present needs to render a batch.
 type Presentation struct {
