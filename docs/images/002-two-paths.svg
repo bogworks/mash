@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 432" width="860" height="432" role="img" aria-labelledby="d2-title d2-desc"><title id="d2-title">One connection, two paths: live and durable</title><desc id="d2-desc">Live traffic (heartbeat, discovery, status, live prompts) crosses core NATS and is not stored. Signed mail goes into the recipient&#x27;s JetStream inbox and waits there while the recipient is busy, idle or stopped.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="431" rx="14" class="bg"/><text x="32" y="42" class="t-title">One connection, two paths: live and durable</text><defs><marker id="d2-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-amber"/></marker><marker id="d2-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-violet"/></marker></defs><text x="32" y="66" class="t-sub">Presence and prompts are about now, so nothing is stored. Mail is about later, so it waits.</text><rect x="32" y="92" width="140" height="258" rx="10" class="card"/><text x="102" y="118" class="t-h mid">Sender</text><text x="102" y="136" class="t-s mid">mash serve or CLI</text><rect x="688" y="92" width="140" height="258" rx="10" class="card"/><text x="758" y="118" class="t-h mid">Recipient</text><text x="758" y="136" class="t-s mid">mash serve</text><text x="758" y="210" class="t-s mid">must be running</text><text x="758" y="326" class="t-s mid">busy, idle</text><text x="758" y="342" class="t-s mid">or stopped</text><rect x="204" y="84" width="452" height="274" rx="12" class="domain"/><text x="220" y="104" class="t-s w6">NATS server</text><rect x="220" y="114" width="420" height="104" rx="8" class="f-amber"/><text x="236" y="138" class="t-h x-amber">Live · core NATS</text><text x="236" y="156" class="t-s">at most once · no subscriber, no delivery</text><path d="M172,184 L686,184" class="a a-amber dash" marker-end="url(#d2-amber)"/><text x="236" y="206" class="t-i">heartbeat every 30 s · discovery · status · live prompt</text><rect x="220" y="230" width="420" height="118" rx="8" class="f-violet-n"/><text x="236" y="254" class="t-h x-violet">Durable · JetStream</text><text x="236" y="272" class="t-s">at least once · on disk · redelivered until shown</text><rect x="420" y="288" width="204" height="44" rx="6" class="plain"/><rect x="432" y="300" width="14" height="20" rx="3" class="f-violet"/><rect x="452" y="300" width="14" height="20" rx="3" class="f-violet"/><rect x="472" y="300" width="14" height="20" rx="3" class="f-violet"/><rect x="492" y="300" width="14" height="20" rx="3" class="f-violet"/><rect x="512" y="300" width="14" height="20" rx="3" class="f-violet"/><text x="538" y="314" class="mono">inbox-bob</text><path d="M172,310 L418,310" class="a a-violet " marker-end="url(#d2-violet)"/><text x="240" y="330" class="t-i w6 x-violet">signed mail</text><path d="M624,310 L686,310" class="a a-violet " marker-end="url(#d2-violet)"/><text x="32" y="392" class="t-cap">Durable mail is kept until shown, for up to 30 days; a full 16 MiB inbox drops its oldest mail.</text><text x="32" y="410" class="t-cap">Arrows show the direction data moves. Dashed: not stored. Both paths share each process&#x27;s one connection.</text></svg>

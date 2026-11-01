@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 560" width="860" height="560" role="img" aria-labelledby="d4-title d4-desc"><title id="d4-title">Every message is signed. The label says how far.</title><desc id="d4-desc">A stored mail message carries a SAP section 13 signature over its keys, subject, time, nonce and body hash. The recipient checks the signature, the directory and the signature&#x27;s age, then shows one label: verified; unknown-signer, claimed, absent or stale as information only; forged and malformed mail is never shown.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="559" rx="14" class="bg"/><text x="32" y="42" class="t-title">Every message is signed. The label says how far.</text><defs><marker id="d4-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-ink"/></marker></defs><text x="32" y="66" class="t-sub">The recipient checks the signature, the directory and the age, then shows the model one word.</text><rect x="32" y="88" width="320" height="330" rx="10" class="card"/><text x="48" y="114" class="t-s">subject</text><text x="48" y="134" class="mono">agents.mail.cc.OWNER.bob</text><rect x="48" y="150" width="288" height="122" rx="8" class="f-green"/><text x="62" y="172" class="t-h x-green">Signed</text><text x="62" y="196" class="mono">Agent-Sender</text><text x="166" y="196" class="t-s">SAP §13</text><text x="62" y="214" class="t-s">covers keys, subject, time, nonce, body</text><text x="62" y="240" class="mono">Mash-Urgent  Mash-Sender-Instance</text><text x="62" y="258" class="t-s">mash marks, each bound to this message</text><rect x="48" y="284" width="288" height="74" rx="8" class="f-unsigned"/><text x="62" y="306" class="t-h x-muted">Not signed: hints only</text><text x="62" y="328" class="mono">Mash-Kind  Mash-In-Reply-To</text><text x="62" y="346" class="mono">Nats-Msg-Id</text><rect x="48" y="370" width="288" height="34" rx="8" class="plain"/><text x="62" y="392" class="t-i">Body · text up to 1 MiB, shown quoted</text><rect x="376" y="150" width="146" height="56" rx="8" class="card"/><text x="449" y="174" class="t-h mid">1 · Signature</text><text x="449" y="193" class="t-s mid">valid over the body</text><rect x="376" y="236" width="146" height="56" rx="8" class="card"/><text x="449" y="260" class="t-h mid">2 · Directory</text><text x="449" y="279" class="t-s mid">key is this name</text><rect x="376" y="322" width="146" height="56" rx="8" class="card"/><text x="449" y="346" class="t-h mid">3 · Age</text><text x="449" y="365" class="t-s mid">under 5 minutes old</text><path d="M352,178 L374,178" class="a a-ink " marker-end="url(#d4-ink)"/><path d="M449,206 L449,234" class="a a-ink " marker-end="url(#d4-ink)"/><path d="M449,292 L449,320" class="a a-ink " marker-end="url(#d4-ink)"/><path d="M522,264 L544,264" class="a a-ink " marker-end="url(#d4-ink)"/><text x="556" y="108" class="t-s w6">Shown as a request</text><rect x="556" y="118" width="120" height="24" rx="12" class="f-green"/><text x="616" y="134.5" class="mono mid w6 x-green">verified</text><text x="688" y="134.5" class="t-s">all checks pass</text><text x="556" y="172" class="t-s w6">Shown as information only</text><rect x="556" y="182" width="120" height="24" rx="12" class="f-gray"/><text x="616" y="198.5" class="mono mid w6 ">unknown-signer</text><text x="688" y="198.5" class="t-s">key not this name</text><rect x="556" y="214" width="120" height="24" rx="12" class="f-gray"/><text x="616" y="230.5" class="mono mid w6 ">claimed</text><text x="688" y="230.5" class="t-s">unsigned header</text><rect x="556" y="246" width="120" height="24" rx="12" class="f-gray"/><text x="616" y="262.5" class="mono mid w6 ">absent</text><text x="688" y="262.5" class="t-s">no sender header</text><rect x="556" y="278" width="120" height="24" rx="12" class="f-gray"/><text x="616" y="294.5" class="mono mid w6 ">stale</text><text x="688" y="294.5" class="t-s">old or replayed</text><text x="556" y="330" class="t-s w6">Never shown</text><rect x="556" y="340" width="120" height="24" rx="12" class="f-red"/><text x="616" y="356.5" class="mono mid w6 x-red">forged</text><text x="688" y="356.5" class="t-s">and malformed</text><path d="M32,440 L828,440" class="rule"/><text x="32" y="466" class="t-h x-green">verified proves</text><text x="32" y="486" class="t-i">this endpoint&#x27;s key signed this exact subject and</text><text x="32" y="504" class="t-i">body, within 5 minutes before the server stored it.</text><text x="440" y="466" class="t-h x-red">verified does not prove</text><text x="440" y="486" class="t-i">that the content is true or safe, that a human approved</text><text x="440" y="504" class="t-i">it, or which process holding the key wrote it.</text><text x="32" y="538" class="t-cap">Arrows show the order of the checks. Kind and reply-to are unsigned hints: they decide wake or wait, never trust.</text></svg>
