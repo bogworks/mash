@@ -83,6 +83,34 @@ mash admin set-meta "$name" --role builder --host - --label tier=- --label env=p
 
 `mash who` prints the same lines as before, so tools that parse it keep working. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
 
+### Finding endpoints: `who` filters and `--json`
+
+```
+mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
+```
+
+Filters all have to match. `--name`, `--role` and `--match` are case-insensitive substrings; `--owner` is exact; `--label K` keeps endpoints that have label `K`, and `--label K=V` those whose value is exactly `V` (case-sensitive; repeat the flag to require several). `--match TEXT` looks in the name, role, note and label keys and values at once. `--online` and `--offline` exclude each other. A flag takes its value as the next argument or as `--flag=value`. With no match the command exits 0 with empty output (`[]` for `--json`); a bad flag or value exits 2 with the usage on stderr. `mash who` with no flags prints what it always did, and `no endpoints` only when the directory itself is empty.
+
+```sh
+mash who --match nats                       # replaces: mash who | grep -i nats
+mash who --role reviewer --online --names   # names only, one per line, for scripts
+mash who --label team=acme --json           # machine-readable
+```
+
+`--names` prints one name per line. `--json` prints an array, one object per endpoint, in name order; `--long` adds `lease`. `--json` and `--names` exclude each other. These field names are stable:
+
+| Field | Type | Present |
+|---|---|---|
+| `name` | string | always |
+| `owner` | string | always |
+| `online` | boolean | always |
+| `last_seen` | string, RFC 3339 UTC | when a heartbeat was seen |
+| `role`, `host`, `note` | string | when set |
+| `labels` | object, key to value | when there is at least one |
+| `lease` | object with `host` and `version` | with `--long`, when this endpoint's own live lease is known |
+
+The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
+
 ## Removing an endpoint
 
 ```sh

@@ -567,10 +567,42 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return inboxText(ms), nil
 			})},
-		{Name: "who", Description: "List mash endpoints and whether each is online, with their role, host and labels when recorded.",
-			Schema: schema(map[string]any{}),
-			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, _ json.RawMessage) (string, error) {
-				return whoText(ep.Who(), true, liveLeases(ctx, ep)), nil
+		{Name: "who", Description: "List mash endpoints and whether each is online, with their role, host and labels when recorded. " +
+			"Optional filters (all must match): match (text in name, role, note or labels), name, role (case-insensitive substrings), " +
+			"label (\"k\" or \"k=v\" strings), online (true: online only, false: offline only). format: text (default) or json.",
+			Schema: schema(map[string]any{
+				"match":  str("case-insensitive text found in the name, role, note, or a label key or value"),
+				"name":   str("case-insensitive substring of the endpoint name"),
+				"role":   str("case-insensitive substring of the role"),
+				"label":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each \"k\" (label present) or \"k=v\" (exact value)"},
+				"online": flag("true: only online endpoints; false: only offline; absent: both"),
+				"format": map[string]any{"type": "string", "enum": []string{"text", "json"}, "description": "text (default) or json"},
+			}),
+			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
+				var a struct {
+					Match  string   `json:"match"`
+					Name   string   `json:"name"`
+					Role   string   `json:"role"`
+					Label  []string `json:"label"`
+					Online *bool    `json:"online"`
+					Format string   `json:"format"`
+				}
+				if len(raw) > 0 {
+					if err := json.Unmarshal(raw, &a); err != nil {
+						return "", err
+					}
+				}
+				if a.Format != "" && a.Format != "text" && a.Format != "json" {
+					return "", fmt.Errorf("who: format %q is not text or json", a.Format)
+				}
+				f := endpoint.WhoFilter{Match: a.Match, Name: a.Name, Role: a.Role, Labels: a.Label}
+				if a.Online != nil {
+					f.Online, f.Offline = *a.Online, !*a.Online
+				}
+				if err := f.Validate(); err != nil {
+					return "", err
+				}
+				return whoRender(f.Apply(ep.Who()), whoOutput{Long: true, JSON: a.Format == "json"}, !f.IsZero(), liveLeases(ctx, ep)), nil
 			})},
 		{Name: "reply", Description: "Answer a live prompt by its request_id. done=false streams a partial answer.",
 			Schema: schema(map[string]any{"request_id": str("from the prompt event"), "text": str("your answer"),
