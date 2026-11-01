@@ -115,6 +115,13 @@ func TestDocs(t *testing.T) {
 		{"a: superseded by a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-9999")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
 		{"a: superseded by an unlisted ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), []string{"ADR-0002 (0002-new.md) is not listed in README.md"}},
 		{"a: bad superseded", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by 2")), []string{"status \"superseded by 2\""}},
+		{"a: status with a note", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002 (the read tool acks)"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
+		{"a: status with a note and no ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; the clause is moved")), nil},
+		{"a: status note names a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-9999 (x)")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
+		{"a: status note names an unlisted ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002"), "0002-new.md", goodADR), []string{"ADR-0002 (0002-new.md) is not listed in README.md"}},
+		{"a: note after a bad keyword", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe; accepted")), []string{`status "maybe; accepted"`}},
+		{"d: front matter is not checked", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers: A lead, B")), nil},
+		{"d: body occurrence of lead still fails", with(good(), adr, edit(goodADR, "A driver.", "The lead decides.")), []string{`forbidden vocabulary "lead"`}},
 		{"a: bad date", with(good(), adr, edit(goodADR, "2026-10-31", "2026-13-40")), []string{adr + ":3: date"}},
 		{"a: empty decision-makers", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers:")), []string{"decision-makers is empty"}},
 		{"b: missing section", with(good(), adr, edit(goodADR, "## Decision Drivers", "## Drivers")), []string{`missing section "## Decision Drivers"`}},
@@ -394,5 +401,28 @@ func TestRootFlag(t *testing.T) {
 	}
 	if code, _, _ := runCLI(t, nil, nil, "docs"); code != 2 {
 		t.Errorf("docs without --root outside a tree: %d, want 2", code)
+	}
+}
+
+// TestRepositoryADRsPass lints the repository's real ADRs, so they are always covered.
+func TestRepositoryADRsPass(t *testing.T) {
+	// knownBad: violations whose path contains one of these are skipped. Remove when #236 has merged.
+	knownBad := map[string]string{"/0038-": "no Confirmation subsection and no README row until #236"}
+	vs, err := lintDocs(filepath.Join("..", "..", "docs", "decisions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, v := range vs {
+		skip := false
+		for k := range knownBad {
+			skip = skip || strings.Contains(filepath.ToSlash(v), k)
+		}
+		if !skip {
+			left = append(left, v)
+		}
+	}
+	if len(left) > 0 {
+		t.Fatalf("the repository's ADRs have violations:\n%s", strings.Join(left, "\n"))
 	}
 }

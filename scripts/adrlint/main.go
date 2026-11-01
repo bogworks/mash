@@ -9,13 +9,14 @@
 //
 // docs rules (each violation is one file:line: message line on stdout, all are reported):
 //
-//	a  MADR front matter: status (proposed|accepted|rejected|deprecated|superseded by ADR-NNNN), date (YYYY-MM-DD) and
+//	a  MADR front matter: status (proposed|accepted|rejected|deprecated|superseded by ADR-NNNN, optionally followed by
+//	   ";" and a free-text note; an ADR-NNNN in the note must exist and be listed), date (YYYY-MM-DD) and
 //	   decision-makers; a "superseded by ADR-NNNN" status must name an ADR file that exists and is listed in README.md
 //	b  the first heading is "# <title>"; the "##" sections are present and in order; "### Consequences" and
 //	   "### Confirmation" sit under Decision Outcome
 //	c  README.md links every ADR and every README link to an ADR resolves; every relative link in an ADR resolves;
 //	   numbers are unique (gaps are allowed: a number may be reserved by an in-flight PR)
-//	d  no consumer vocabulary (see vocabRE); a line carrying <!-- adrlint:allow vocabulary --> is exempt
+//	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
 //	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
 //
@@ -68,13 +69,13 @@ var outcomeSubs = []string{"Consequences", "Confirmation"}
 var (
 	nameRE      = regexp.MustCompile(`^(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 	dateRE      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-	supersedeRE = regexp.MustCompile(`(?i)^superseded by ADR-\d{4}$`)
+	statusRE    = regexp.MustCompile(`(?i)^(proposed|accepted|rejected|deprecated|superseded by ADR-\d{4})(?:\s*;\s*(.*))?$`)
+	noteRefRE   = regexp.MustCompile(`(?i)\bADR-(\d{4})\b`)
 	linkRE      = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]*)[^)]*\)`)
 	vocabRE     = regexp.MustCompile(`(?i)\b(rangehand|herds?|herdr|lanes?|lead|orchestrator)\b`)
 	supersedeLn = regexp.MustCompile(`(?i)^\W*superseded by \[[^\]]*\]\([^)]*\)`)
 	decisionRE  = regexp.MustCompile(`(?i)^decision:\s*(none|ADR-\d{4})\s*$`)
 	adrRefRE    = regexp.MustCompile(`^(?i:ADR)-(\d{4})$`)
-	statuses    = []string{"proposed", "accepted", "rejected", "deprecated"}
 )
 
 // gitFunc runs git with args and returns its stdout; tests replace it.
@@ -251,8 +252,14 @@ func parseFrontMatter(lines []string) frontMatter {
 	return fm
 }
 
-func validStatus(s string) bool {
-	return slices.Contains(statuses, strings.ToLower(s)) || supersedeRE.MatchString(s)
+// parseStatus splits a status value into its lower-case keyword (proposed, accepted, rejected, deprecated or
+// "superseded by adr-nnnn") and the free-text note after an optional ";". ok is false when the keyword is none of those.
+func parseStatus(s string) (keyword, note string, ok bool) {
+	m := statusRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return "", "", false
+	}
+	return strings.ToLower(m[1]), m[2], true
 }
 
 func viol(file string, line int, format string, a ...any) string {
@@ -405,11 +412,20 @@ func lintADR(path, dir string, lines []string, target func(num string) string) [
 				vs = append(vs, viol(path, 1, "front matter has no %s key", k))
 			}
 		}
-		if s, ok := fm.keys["status"]; ok && !validStatus(s.val) {
-			vs = append(vs, viol(path, s.line, "status %q must be proposed, accepted, rejected, deprecated or superseded by ADR-NNNN", s.val))
-		} else if ok && supersedeRE.MatchString(s.val) {
-			if msg := target(s.val[len(s.val)-4:]); msg != "" {
-				vs = append(vs, viol(path, s.line, "status %q names a missing or unlisted record: %s", s.val, msg))
+		if s, ok := fm.keys["status"]; ok {
+			kw, note, valid := parseStatus(s.val)
+			if !valid {
+				vs = append(vs, viol(path, s.line, "status %q must be proposed, accepted, rejected, deprecated or superseded by ADR-NNNN, optionally followed by \"; note\"", s.val))
+			} else {
+				refs := noteRefRE.FindAllStringSubmatch(note, -1)
+				if strings.HasPrefix(kw, "superseded by") {
+					refs = append([][]string{{"", kw[len(kw)-4:]}}, refs...)
+				}
+				for _, m := range refs {
+					if msg := target(m[1]); msg != "" {
+						vs = append(vs, viol(path, s.line, "status %q names a missing or unlisted record: %s", s.val, msg))
+					}
+				}
 			}
 		}
 		if d, ok := fm.keys["date"]; ok {
@@ -491,7 +507,7 @@ func lintADR(path, dir string, lines []string, target func(num string) string) [
 				}
 			}
 		}
-		if !strings.Contains(ln, allowVocab) {
+		if i >= body && !strings.Contains(ln, allowVocab) { // the front matter is metadata, not prose
 			for _, m := range vocabRE.FindAllString(ln, -1) {
 				vs = append(vs, viol(path, i+1, "forbidden vocabulary %q (add %s on the line if it is deliberate)", m, allowVocab))
 			}
@@ -540,7 +556,7 @@ func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 		}
 		oldLines := splitLines(old)
 		ofm := parseFrontMatter(oldLines)
-		if !ofm.ok || !strings.EqualFold(ofm.keys["status"].val, "accepted") {
+		if kw, _, _ := parseStatus(ofm.keys["status"].val); !ofm.ok || kw != "accepted" {
 			continue // not accepted at base: free
 		}
 		cur, err := os.ReadFile(path)
@@ -564,7 +580,7 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 	skipCur := -1
 	if cs, ok := cfm.keys["status"]; ok {
 		skipCur = cs.line
-		if !strings.EqualFold(cs.val, "accepted") && !supersedeRE.MatchString(cs.val) {
+		if kw, _, ok := parseStatus(cs.val); !ok || (kw != "accepted" && !strings.HasPrefix(kw, "superseded by")) {
 			vs = append(vs, viol(path, cs.line, "accepted ADR (at %s): status may only change to \"superseded by ADR-NNNN\", not %q", base, cs.val))
 		}
 	} else {
