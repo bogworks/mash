@@ -6,17 +6,17 @@ Symptoms, their causes, how to check, and the fix, using the exact messages mash
 
 In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_NAME`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery` and `version`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
 
-From a shell, `mash version` prints the binary's version and commit. There is no CLI `status` command (tracked in #31); the CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs `MASH_NAME` set and does not take the lease, so it works beside a running session.
+From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_NAME` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs `MASH_NAME` set and does not take the lease, so it works beside a running session.
 
 The hook's stderr goes to `$XDG_STATE_HOME/mash/hook.log` (default `~/.local/state/mash/hook.log`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
 
 ## The session has no mail tools, or says it has no mash identity
 
-Message: "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off." `status` shows `name: MISSING - not set`. The CLI says `mash: set MASH_NAME to the endpoint you are acting as`.
+Message: "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off." `status` shows `name: MISSING - not set`. The CLI says `mash: set MASH_NAME to the endpoint you are acting as`. Run `mash status` in the shell you launch Claude Code from to see the same `name: MISSING` line before you start.
 
 Cause: `MASH_NAME` was not in the environment Claude Code started with. The plugin is inert by design without it, with only `status` and `version`. The name comes only from the environment, never from config.json or the conversation. `claude --resume` and `--continue` need it again (tracked in #46).
 
-Fix: start Claude Code as `MASH_NAME=design claude --channels plugin:mash@mash`, then check `status`.
+Fix: start Claude Code as `MASH_NAME=design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_NAME=design mash status` first).
 
 If the message is `mash: MASH_NAME "X": use 1-48 lower-case letters, digits and single hyphens, starting with a letter`, change the name. `status` shows `name: FAILED`.
 

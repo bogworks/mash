@@ -531,3 +531,69 @@ func TestStatusToolReportsRefusedHooks(t *testing.T) {
 		t.Fatalf("both lines shown:\n%s", out)
 	}
 }
+
+func runStatusCLI(t *testing.T, env map[string]string) (string, int) {
+	t.Helper()
+	var out, errb strings.Builder
+	code := run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb)
+	if errb.Len() > 0 {
+		t.Logf("stderr: %s", errb.String())
+	}
+	return out.String(), code
+}
+
+func TestStatusCLIInert(t *testing.T) {
+	out, code := runStatusCLI(t, map[string]string{"HOME": t.TempDir()})
+	if code != 0 {
+		t.Fatalf("exit %d, want 0:\n%s", code, out)
+	}
+	wantAll(t, "cli inert", out, "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>",
+		"config: MISSING", "connection: not checked from the CLI", "delivery: not checked from the CLI", "channel allowlist: ")
+}
+
+func TestStatusCLINoSecrets(t *testing.T) {
+	home := t.TempDir()
+	creds := filepath.Join(t.TempDir(), "a.creds")
+	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\n"+credsSecret+"\n------END NATS USER JWT------\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runStatusCLI(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds,
+		"MASH_URL": "nats://user:hunter2pw@127.0.0.1:1"})
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	wantAll(t, "cli valid", out, "name: OK - a", "config: OK", "REDACTED@", "creds: OK")
+	for _, bad := range []string{credsSecret, "BEGIN NATS", "hunter2pw"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("status printed %q:\n%s", bad, out)
+		}
+	}
+}
+
+// The CLI and the tool share one builder: apart from the live-only lines, they print the same text.
+func TestStatusCLIMatchesTool(t *testing.T) {
+	home := t.TempDir()
+	creds := filepath.Join(t.TempDir(), "a.creds")
+	if err := os.WriteFile(creds, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds, "MASH_URL": "nats://127.0.0.1:1"}
+	cliOut, _ := runStatusCLI(t, env)
+	cfg, err := config.Load(envFrom(env), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := statusText(&statusSource{cfg: cfg, srv: &atomic.Pointer[mcp.Server]{}, home: home, getenv: envFrom(env)})
+	shared := func(s string) []string {
+		var out []string
+		for _, l := range strings.Split(s, "\n") {
+			if !strings.HasPrefix(l, "connection:") && !strings.HasPrefix(l, "delivery:") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	if a, b := strings.Join(shared(strings.TrimRight(cliOut, "\n")), "\n"), strings.Join(shared(tool), "\n"); a != b {
+		t.Fatalf("CLI and tool differ:\ncli:\n%s\ntool:\n%s", a, b)
+	}
+}

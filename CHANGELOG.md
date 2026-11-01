@@ -6,6 +6,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Added
 
+- `mash status` prints what a session would see (name, config, creds, channel allowlist, environment, version) from a shell, before Claude Code is launched. It shares the `status` tool's text, connects to nothing, works with `MASH_NAME` unset (printing `name: MISSING`), redacts the same secrets, and says the connection and delivery lines are only known inside a running session. It always exits 0.
 - Inbox, bucket and consumer limits are configurable in the `limits` section of config.json, with the defaults unchanged. `mash admin limits [name...]` raises existing inboxes in place and `--show` prints the effective limits. mash never lowers a limit, because that could discard mail; a lower value is refused, naming the endpoint and field, and an unlimited stream is never given a finite cap. `mash admin init` raises a bucket cap that is below the configured one (see "Limits" in [docs/operations.md](docs/operations.md)).
 - Build provenance: the release binaries carry a GitHub attestation, and the publish gate verifies it for all four binaries before a release is published. Check one with `gh attestation verify mash-linux-amd64 -R bogworks/mash` ([docs/release.md](docs/release.md)).
 - Docs: [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md).
