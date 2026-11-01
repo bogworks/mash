@@ -121,6 +121,14 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 			return store.Record{}, fmt.Errorf("mash: lease: %w", err)
 		}
 	}
+	// A retried provision finds its inbox stream already there: never let the update lower its caps.
+	if existing, err := a.js.Stream(ctx, sap.InboxStream(name)); err == nil {
+		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
+			return store.Record{}, err
+		}
+	} else if !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return store.Record{}, fmt.Errorf("mash: inbox stream: %w", err)
+	}
 	s, err := a.js.CreateOrUpdateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits))
 	if err != nil {
 		return store.Record{}, fmt.Errorf("mash: inbox stream: %w", err)
@@ -317,6 +325,20 @@ func capText(n int64, finite string) string {
 	return finite
 }
 
+// refuseLowering returns the "mash never lowers a limit" error when configuring limits l on an inbox stream with
+// config cfg would lower its MaxBytes or MaxAge (unlimited counts as larger than any finite value), else nil.
+func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) error {
+	if lowers(cfg.MaxBytes, l.InboxMaxBytes) {
+		return fmt.Errorf("mash: inbox of %s has max_bytes %s, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(cfg.MaxBytes, strconv.FormatInt(cfg.MaxBytes, 10)), l.InboxMaxBytes, name)
+	}
+	if lowers(int64(cfg.MaxAge), int64(l.InboxMaxAge)) {
+		return fmt.Errorf("mash: inbox of %s has max_age %s, above the configured %s; mash never lowers a limit, because that could discard stored mail; "+
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(int64(cfg.MaxAge), cfg.MaxAge.String()), l.InboxMaxAge, name)
+	}
+	return nil
+}
+
 func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, error) {
 	if !config.ValidName(name) {
 		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
@@ -327,13 +349,8 @@ func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, erro
 	}
 	cfg := s.CachedInfo().Config
 	l := a.limits
-	if lowers(cfg.MaxBytes, l.InboxMaxBytes) {
-		return "", fmt.Errorf("mash: inbox of %s has max_bytes %s, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(cfg.MaxBytes, strconv.FormatInt(cfg.MaxBytes, 10)), l.InboxMaxBytes, name)
-	}
-	if lowers(int64(cfg.MaxAge), int64(l.InboxMaxAge)) {
-		return "", fmt.Errorf("mash: inbox of %s has max_age %s, above the configured %s; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(int64(cfg.MaxAge), cfg.MaxAge.String()), l.InboxMaxAge, name)
+	if err := refuseLowering(name, cfg, l); err != nil {
+		return "", err
 	}
 	var changed []string
 	if raises(cfg.MaxBytes, l.InboxMaxBytes) {

@@ -229,3 +229,62 @@ func TestApplyLimitsRefusesToLowerUnlimited(t *testing.T) {
 		})
 	}
 }
+
+// A retried provision (stream created, directory record not) must not update an existing inbox stream to lower caps
+// (codex H1 round 2): it is refused, the stream is unchanged and no directory record appears. Equal or lower existing
+// caps are raised and the provision completes.
+func TestProvisionNeverLowersExistingInbox(t *testing.T) {
+	def := store.DefaultLimits()
+	for _, c := range []struct {
+		name  string
+		field string
+		mod   func(*jetstream.StreamConfig)
+	}{
+		{"max_bytes higher", "max_bytes", func(c *jetstream.StreamConfig) { c.MaxBytes = def.InboxMaxBytes * 2 }},
+		{"max_age higher", "max_age", func(c *jetstream.StreamConfig) { c.MaxAge = def.InboxMaxAge * 2 }},
+		{"max_bytes unlimited", "max_bytes", func(c *jetstream.StreamConfig) { c.MaxBytes = -1 }},
+		{"max_age unlimited", "max_age", func(c *jetstream.StreamConfig) { c.MaxAge = 0 }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, a, js := setup(t)
+			ctx := context.Background()
+			_, user := e.Mint(t, "alpha")
+			cfg := store.InboxConfigFor(e.Owner, "alpha", def)
+			c.mod(&cfg)
+			if _, err := js.CreateStream(ctx, cfg); err != nil {
+				t.Skipf("server refuses this config: %v", err)
+			}
+			before := inboxCfg(t, js, "alpha")
+			_, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{})
+			if err == nil || !strings.Contains(err.Error(), c.field) || !strings.Contains(err.Error(), "never lowers") {
+				t.Fatalf("err %v", err)
+			}
+			if after := inboxCfg(t, js, "alpha"); after.MaxBytes != before.MaxBytes || after.MaxAge != before.MaxAge {
+				t.Fatalf("changed despite refusal: %+v -> %+v", before, after)
+			}
+			recs, err := a.List(ctx)
+			if err != nil || len(recs) != 0 {
+				t.Fatalf("directory records %v err %v", recs, err)
+			}
+		})
+	}
+}
+
+func TestProvisionRetryRaisesLowerExistingInbox(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	def := store.DefaultLimits()
+	cfg := store.InboxConfigFor(e.Owner, "alpha", def)
+	cfg.MaxBytes = def.InboxMaxBytes / 2
+	cfg.MaxAge = def.InboxMaxAge // equal
+	if _, err := js.CreateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := inboxCfg(t, js, "alpha"); got.MaxBytes != def.InboxMaxBytes || got.MaxAge != def.InboxMaxAge {
+		t.Fatalf("config %+v", got)
+	}
+}
