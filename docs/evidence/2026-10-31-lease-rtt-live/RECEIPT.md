@@ -5,7 +5,7 @@ built from `git archive` of each merge's first parent: pre-#44 = e76a299, pre-#1
 
 Real processes only: `mash admin init`, `mash admin provision` (and `deprovision`), `mash send`, `mash who`, `mash inbox`, `mash serve`. The NATS server is
 nats-server v2.15.1 embedded through `internal/testenv` (operator mode, account MASH with JetStream, users issued with mash's permission template) by
-a throwaway helper (`harness/natsenv-main.go.txt`; the second run used a copy with a bigger disk limit). The standalone `a standalone nats-server binary`
+a throwaway helper (`harness/natsenv-main.go.txt`; the second run used a copy with a bigger disk limit). The standalone nats-server binary
 was not used; testenv was the shorter path to the same server configuration. Each endpoint ran under its own temp HOME and XDG_STATE_HOME, so
 nothing touched `~/.config/mash`. `mash serve` is an MCP stdio server, so a small client (`harness/drv.py`) does the MCP handshake and logs channel
 notifications with timestamps. The delay proxy is `harness/proxy.py` (python3 asyncio TCP proxy, fixed delay each way, logs the PUB subjects it forwards).
