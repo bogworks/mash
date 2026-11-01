@@ -231,5 +231,8 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 | `--channels` says "not on the approved channels allowlist" | The managed settings allowlist is missing (see install.md, step 3). |
 | Mail arrives labelled `[unknown-signer]` | The sender's key is not in the directory: it was deprovisioned, or it is not a mash endpoint. |
 | `mash: endpoint X is not provisioned` | Run `mash admin provision`, or check `MASH_NAME` for a typo. |
+| `x509: certificate signed by unknown authority` (or another `x509:` error) on connect | The server's certificate is not trusted. Set `tls_ca` (`MASH_TLS_CA`) to the PEM file of the CA that signed it. The files are read at connect time. |
+| `remote error: tls: bad certificate` (or `certificate required`) on connect | The server requires a client certificate, or refused the one given. Set both `tls_cert` and `tls_key` (`MASH_TLS_CERT`, `MASH_TLS_KEY`) to a certificate the server's CA signed. |
+| `status` says `tls: WARN` | The url is plain `nats://` to a non-loopback host. Use `tls://` with the server's certificate. |
 | `do not match endpoint` | The credentials file belongs to a different endpoint than `MASH_NAME`. |
 | Clients take 30-60 s to reconnect after a network blip | The server rate-limits new connections per source address. Clients retry with jitter; raise the limit for trusted sources if this matters. |

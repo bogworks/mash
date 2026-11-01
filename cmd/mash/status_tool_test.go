@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -595,5 +596,26 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	}
 	if a, b := strings.Join(shared(strings.TrimRight(cliOut, "\n")), "\n"), strings.Join(shared(tool), "\n"); a != b {
 		t.Fatalf("CLI and tool differ:\ncli:\n%s\ntool:\n%s", a, b)
+	}
+}
+
+func TestStatusTLSLine(t *testing.T) {
+	for url, want := range map[string]string{
+		"nats://10.0.0.5:4222":        "tls: WARN - nats://10.0.0.5:4222 is plain nats:// to a non-loopback host",
+		"nats://u:pw@10.0.0.5:4222":   "tls: WARN - nats://REDACTED@10.0.0.5:4222 is plain nats://",
+		"tls://nats.example.com:4222": "tls: OK - tls:// connection",
+		"nats://127.0.0.1:4222":       "tls: n/a - loopback",
+	} {
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL = url
+		l := statusLine(t, statusText(src), "tls: ")
+		if !strings.HasPrefix(l, want) {
+			t.Errorf("url %s: line %q, want prefix %q", url, l, want)
+		}
+		var buf bytes.Buffer
+		reportSettings(src, &buf)
+		if got := strings.Contains(buf.String(), "tls: WARN"); got != strings.HasPrefix(want, "tls: WARN") {
+			t.Errorf("url %s: serve stderr warns = %v: %q", url, got, buf.String())
+		}
 	}
 }

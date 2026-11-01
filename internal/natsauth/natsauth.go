@@ -8,9 +8,12 @@
 package natsauth
 
 import (
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
@@ -67,4 +70,37 @@ func UserCredentials(file string) nats.Option {
 func UserCredentialBytes(creds []byte) nats.Option {
 	read := func() ([]byte, error) { return append([]byte(nil), creds...), nil } // a copy: Wipe zeroes the parsed seed, which aliases its input
 	return nats.UserJWT(jwtFor(read), sigFor(read))
+}
+
+// TLSOptions are the client options for mash's TLS settings: ca is a PEM file of root CAs that replaces the system
+// roots, and cert and key are a PEM client certificate and its key. An empty setting adds nothing.
+func TLSOptions(ca, cert, key string) []nats.Option {
+	var opts []nats.Option
+	if ca != "" {
+		opts = append(opts, nats.RootCAs(ca))
+	}
+	if cert != "" || key != "" {
+		opts = append(opts, nats.ClientCert(cert, key))
+	}
+	return opts
+}
+
+// TLSHint appends the setting to change to a connect error that is a TLS failure: a server certificate the client
+// does not trust points at tls_ca, a server that refuses the client's certificate (or wants one) at tls_cert and tls_key.
+// Any other error is returned unchanged.
+func TLSHint(err error) error {
+	if err == nil {
+		return nil
+	}
+	var unknown x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var host x509.HostnameError
+	msg := err.Error()
+	switch {
+	case errors.As(err, &unknown), errors.As(err, &invalid), errors.As(err, &host), strings.Contains(msg, "x509:"):
+		return fmt.Errorf("%w (the server's certificate is not trusted: set tls_ca or MASH_TLS_CA to the PEM file of the CA that signed it)", err)
+	case strings.Contains(msg, "remote error: tls:"), strings.Contains(msg, "closed by remote after TLS handshake"):
+		return fmt.Errorf("%w (the server refused the client certificate or requires one: set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed)", err)
+	}
+	return err
 }

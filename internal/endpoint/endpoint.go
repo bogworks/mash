@@ -255,7 +255,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if err := checkCredsFor(cfg.Creds, cfg.Name); err != nil {
 		return nil, err
 	}
-	nc, err := connect(ctx, cfg.URL,
+	nc, err := connect(ctx, cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
 		nats.CustomInboxPrefix(sap.InboxPrefix(cfg.Name)),
@@ -265,9 +265,9 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 			log.New(os.Stderr, "mash: ", 0).Printf("nats: %v", err)
 		}),
-	)
+	)...)
 	if err != nil {
-		return nil, fmt.Errorf("mash: connect %s: %w", cfg.URL, err)
+		return nil, fmt.Errorf("mash: connect %s: %w", cfg.URL, natsauth.TLSHint(err))
 	}
 	e := &Endpoint{cfg: cfg, nc: nc, id: id, subj: sap.For(cfg.Owner, cfg.Name),
 		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(),

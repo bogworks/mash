@@ -320,3 +320,67 @@ func TestParseSizeAndAge(t *testing.T) {
 		}
 	}
 }
+
+func TestTLSSettingsFileAndEnv(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","tls_ca":"/f/ca.pem","tls_cert":"/f/c.pem","tls_key":"/f/k.pem"}`)
+	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TLSCA != "/f/ca.pem" || c.TLSCert != "/f/c.pem" || c.TLSKey != "/f/k.pem" {
+		t.Fatalf("file: got %q %q %q", c.TLSCA, c.TLSCert, c.TLSKey)
+	}
+	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/e/ca.pem", "MASH_TLS_CERT": "/e/c.pem", "MASH_TLS_KEY": "/e/k.pem"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TLSCA != "/e/ca.pem" || c.TLSCert != "/e/c.pem" || c.TLSKey != "/e/k.pem" {
+		t.Fatalf("env: got %q %q %q", c.TLSCA, c.TLSCert, c.TLSKey)
+	}
+}
+
+func TestTLSCertAndKeyMustBeSetTogether(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","tls_cert":"/f/c.pem"}`)
+	_, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	if err == nil || !strings.Contains(err.Error(), "tls_cert") || !strings.Contains(err.Error(), "tls_key") {
+		t.Fatalf("file cert only: err = %v", err)
+	}
+	// The environment can complete the pair, and can break one.
+	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err != nil {
+		t.Fatalf("pair completed by env: %v", err)
+	}
+	writeFile(t, home, `{"url":"tls://x:4222","owner":"o"}`)
+	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err == nil {
+		t.Fatal("key only: want an error")
+	}
+	// The files are read at connect time, not at load.
+	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/missing"}), home); err != nil {
+		t.Fatalf("missing CA file at load: %v", err)
+	}
+}
+
+func TestPlainTextWarning(t *testing.T) {
+	for url, warn := range map[string]bool{
+		"nats://10.0.0.5":                       true,
+		"nats://example.com:4222":               true,
+		"ws://example.com":                      true,
+		"nats://user:pw@10.0.0.5:4222":          true,
+		"nats://localhost":                      false,
+		"nats://127.0.0.1:4222":                 false,
+		"nats://127.1.2.3":                      false,
+		"nats://[::1]:4222":                     false,
+		"nats://LOCALHOST:4222":                 false,
+		"tls://example.com:4222":                false,
+		"wss://example.com":                     false,
+		"":                                      false,
+		"tls://a:4222,nats://10.0.0.5:4222":     true,
+		"nats://127.0.0.1:4222, nats://b:4222":  true,
+		"nats://127.0.0.1:4222,nats://[::1]:42": false,
+	} {
+		if got := PlainTextWarning(url) != ""; got != warn {
+			t.Errorf("PlainTextWarning(%q) warns = %v, want %v", url, got, warn)
+		}
+	}
+}

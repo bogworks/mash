@@ -93,7 +93,7 @@ The design, with every subject, permission and limit, is in [docs/specs/2026-10-
 
 ## Install
 
-You need a NATS server in operator mode with JetStream, an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
+You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `tls_ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
 go install github.com/bogworks/mash/cmd/mash@v0.3.0      # a tagged release (use @latest for the newest); `mash version` prints the tag
