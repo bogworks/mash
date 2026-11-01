@@ -190,3 +190,48 @@ Public publication is `release-check publish` (or its steps by hand) and follows
 (no secret) through `scripts/publishcheck`: every `v*` tag has a release (an rc tag with none is exempt), published
 non-rc releases went out in version order, and no draft is older than 2 hours. A violation opens or updates an issue and
 ends the run red. Fix it by publishing the release or deleting the stale draft.
+
+## New repository setup
+
+A checklist so a new repository for this project comes up complete in one pass. Do it before the first pull request,
+and tick it off in the repository's setup issue.
+
+**GitHub settings** (Settings of the repository):
+
+- [ ] Private vulnerability reporting: on (it is the reporting route in [SECURITY.md](../SECURITY.md)).
+- [ ] Dependabot alerts and Dependabot security updates: on.
+- [ ] Secret scanning with push protection: on.
+- [ ] CodeQL: code scanning runs from the repository's own workflow (`.github/workflows/codeql.yml`), so the **default
+      setup must be off**: GitHub refuses to process both ("CodeQL analyses from advanced configurations cannot be
+      processed when the default setup is enabled").
+- [ ] Actions: require approval for fork pull requests from all outside collaborators; the default workflow token is
+      read-only.
+- [ ] Ruleset for `main`, as specified in [branch-protection.md](branch-protection.md) (follow that file; the points
+      that are easy to miss): require a pull request, with the Mergify app as the bypass actor for its tested
+      fast-forward merges; require the status checks `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible`,
+      `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
+      ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
+      Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
+      signed with the key in `docs/allowed_signers`, see "Signing".)
+- [ ] Ruleset for `v*` tags: no deletion, no update.
+- [ ] Immutable releases: switch on after the first release is published.
+
+**Merge queue (Mergify):**
+
+- [ ] Install the Mergify app on the repository.
+- [ ] In its dashboard enable **both** Merge Queue and Merge Protections: `auto_merge_conditions` in `.mergify.yml`
+      need Merge Protections.
+
+**Labels:** `critical`, `pipeline`, `docs`, `hold`, `queued`, `dequeued`, `safe-to-review`, `security-ok`.
+
+**Maintainer automation** (kept outside this repository; add the repository to each):
+
+- [ ] The review watcher's checkout of the repository.
+- [ ] The pull-request notifier's instance.
+- [ ] The repository list of the velocity metrics.
+
+**CI:**
+
+- [ ] GitHub-hosted runners only: no self-hosted runner on a public repository, because it would run fork code on the
+      maintainers' machines. Set the `RUNNER_LINUX` repository variable only to a runner the maintainers control, never
+      for fork pull requests (the workflows already route forks to `ubuntu-latest`).
