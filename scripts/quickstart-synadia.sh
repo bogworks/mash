@@ -159,12 +159,17 @@ cleanup() {
       say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
     else
       case "$derr" in
-        *"belongs to another user key"*|*"changed; left in place"*)
+        *"belongs to another user key"*)
           echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place." >&2 ;;
+        *"changed; left in place"*)
+          # The record changed again and again, or now names another user: either way it may still use this run's user.
+          PROVISIONED+=("$PROVISIONING")
+          echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place; its NATS user and creds file kept." >&2 ;;
         *"has no directory record"*)
           say "Setup failed: no directory record for $PROVISIONING to remove. If its inbox stream (inbox-$PROVISIONING) was left behind, remove it with 'mash admin deprovision $PROVISIONING' (docs/synadia.md)." ;;
         *)
-          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING --user ...'; remove it by hand if it is this run's (docs/synadia.md)." >&2 ;;
+          PROVISIONED+=("$PROVISIONING") # a record may exist and use this run's user: keep the user and creds
+          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING --user ...'; remove it by hand if it is this run's (docs/synadia.md). Its NATS user and creds file kept." >&2 ;;
       esac
     fi
   fi

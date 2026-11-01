@@ -595,7 +595,9 @@ var afterDeprovisionPurge func()
 
 // DeprovisionIfUser is Deprovision for a record that must still belong to user (a public user key): it reads the
 // record's value and revision, refuses unless its user equals user, and deletes the record with a revision guard
-// (Purge with LastRevision), so a record replaced between the read and the delete is never removed.
+// (Purge with LastRevision), so a record replaced between the read and the delete is never removed. A revision
+// conflict re-reads the record (up to setMetaTries times): a metadata-only change by another admin leaves the user
+// unchanged, so the delete is retried on the new revision; a changed user, a vanished record or exhausted retries refuse.
 //
 // Order: guard and guarded record delete first, then the lease fence and the inbox delete. A refused call therefore
 // touches nothing: no tombstone, no stream delete. The whole call runs under the name's lock (ADR-0048), so another
@@ -625,28 +627,45 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 		return err
 	}
 	defer lk.release(ctx)
-	e, err := kv.Get(ctx, name)
-	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-		return refusal(name, ErrNoRecord)
-	}
-	if err != nil {
-		return fmt.Errorf("mash: directory %s: %w", name, err)
-	}
-	rec, err := store.ParseRecord(name, e.Value())
-	if err != nil {
-		return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err)
-	}
-	if rec.User != user {
-		return refusal(name, ErrRecordOtherUser)
-	}
-	if afterDeprovisionGet != nil {
-		afterDeprovisionGet()
-	}
-	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
-		if isRevisionConflict(err) {
-			return &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
+	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
+	purged := false
+	for try := 0; try < setMetaTries && !purged; try++ {
+		e, err := kv.Get(ctx, name)
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			if try > 0 {
+				return changed // it vanished after we read it: nothing proves ownership now
+			}
+			return refusal(name, ErrNoRecord)
 		}
-		return fmt.Errorf("mash: directory record: %w", err)
+		if err != nil {
+			return fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+		rec, err := store.ParseRecord(name, e.Value())
+		if err != nil {
+			return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err)
+		}
+		if rec.User != user {
+			if try > 0 {
+				return changed
+			}
+			return refusal(name, ErrRecordOtherUser)
+		}
+		if afterDeprovisionGet != nil {
+			afterDeprovisionGet()
+		}
+		err = kv.Purge(ctx, name, jetstream.LastRevision(e.Revision()))
+		switch {
+		case err == nil:
+			purged = true
+		case isRevisionConflict(err):
+			// Another admin changed the record (SetMeta bumps the revision). Re-read: if it is still this user's,
+			// retry on the new revision; a different user or a vanished record refuses on the next pass.
+		default:
+			return fmt.Errorf("mash: directory record: %w", err)
+		}
+	}
+	if !purged {
+		return changed
 	}
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()

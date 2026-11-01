@@ -31,8 +31,14 @@ refuse cannot follow that order: a refused call would already have fenced the le
 Chosen option: (b), for the guarded form only. Plain `Deprovision` keeps ADR-0015's order.
 
 * `DeprovisionIfUser` reads the record (value and revision), refuses unless its user equals the key, then purges it
-  with `jetstream.LastRevision(revision)`. A record replaced or changed in between fails the purge and is reported as
-  "the record for <name> changed; left in place".
+  with `jetstream.LastRevision(revision)`. A failed purge (revision conflict) does not refuse at once: it re-reads the
+  record, as `SetMeta` does (up to 5 tries). If the user still equals the key (another admin changed only metadata,
+  which bumps the revision), the purge is retried on the new revision, so a metadata-only change never refuses. If the
+  user now differs, the record vanished after the read, or the tries run out, it refuses with "the record for <name>
+  changed; left in place" and touches nothing.
+* The quickstart script treats "belongs to another user key" as a genuinely foreign record and still deletes its own
+  never-used NATS user. For "changed; left in place" (and for an unknown failure) a record for the name may still
+  use this run's user, so the script keeps the NATS user and its creds file and says so.
 * Every refusal happens before anything is written: no tombstone, no stream delete. With no record it refuses even if
   the inbox stream exists, because nothing proves who owns it.
 * After the record is gone it writes the tombstone and deletes the inbox stream.

@@ -652,7 +652,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 
 // failProvisionBody makes `admin provision alice-b` fail after remembering its --user key. A guarded `admin deprovision
 // alice-b --user KEY` then behaves as mode says: "own" succeeds (the record is this run's), "foreign" refuses as the real
-// guard does for another admin's record, "changed" refuses because the record changed under the guard, and "norecord"
+// guard does for another admin's record, "changed" refuses because the record kept changing or now names another user, and "norecord"
 // runs the real mash against the live test server, where no record exists.
 func failProvisionBody(mode string) string {
 	body := `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
@@ -699,7 +699,8 @@ func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
 			e := testenv.Start(t)
 			f := newFake(t, e, 6)
 			wrapper, calls := wrapperMash(t, failProvisionBody(mode))
-			r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+			home := t.TempDir()
+			r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 			if r.code == 0 {
 				t.Fatalf("want a failure:\n%s", r.out)
 			}
@@ -709,6 +710,32 @@ func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
 			}
 			if !strings.Contains(r.out, "a record for alice-b exists that is not this run's; left in place") {
 				t.Errorf("output does not say the record was left:\n%s", r.out)
+			}
+			_, credsErr := os.Stat(filepath.Join(home, ".config", "mash", "alice-b.creds"))
+			kept := false
+			for _, n := range f.names() {
+				if n == "alice-b" {
+					kept = true
+				}
+			}
+			if mode == "changed" {
+				// The endpoint may still use this run's user: keep it and its creds file.
+				if !strings.Contains(r.out, "its NATS user and creds file kept") {
+					t.Errorf("output does not say the user and creds were kept:\n%s", r.out)
+				}
+				if !kept {
+					t.Errorf("the NATS user alice-b was deleted although its record remains")
+				}
+				if credsErr != nil {
+					t.Errorf("the creds file alice-b.creds was removed: %v", credsErr)
+				}
+			} else {
+				if kept {
+					t.Errorf("the never-used NATS user alice-b survived a foreign record")
+				}
+				if credsErr == nil {
+					t.Errorf("the creds file alice-b.creds survived a foreign record")
+				}
 			}
 		})
 	}

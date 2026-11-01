@@ -10,7 +10,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Added
 
-- `mash admin deprovision <name> --user <public-key>` removes the directory record and the inbox only if the record's user is still that NATS user public key, and refuses otherwise, leaving the record, inbox and lease untouched. The record is deleted against the revision that was read, so one replaced in between is never removed. With no record it refuses, even if an inbox stream exists. Without `--user` nothing changes (issue #9). Provision and both forms of deprovision hold the per-name lock for their whole run, so another admin cannot provision the name between the record delete and the lease fence and lose its new endpoint's inbox.
+- `mash admin deprovision <name> --user <public-key>` removes the directory record and the inbox only if the record's user is still that NATS user public key, and refuses otherwise, leaving the record, inbox and lease untouched. The record is deleted against the revision that was read, so one replaced in between is never removed; a metadata-only change by another admin in between is retried on the new revision and does not refuse. With no record it refuses, even if an inbox stream exists. Without `--user` nothing changes (issue #9). Provision and both forms of deprovision hold the per-name lock for their whole run, so another admin cannot provision the name between the record delete and the lease fence and lose its new endpoint's inbox.
 
 ### Changed
 

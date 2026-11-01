@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestDeprovisionIfUserOtherUserRefused(t *testing.T) {
 	}
 }
 
-func TestDeprovisionIfUserRaceLeavesNewRecord(t *testing.T) {
+func TestDeprovisionIfUserMetadataChangeRetriesAndRemoves(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	_, user := e.Mint(t, "alpha")
@@ -90,9 +91,85 @@ func TestDeprovisionIfUserRaceLeavesNewRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
-	// Another admin changes the record (same user, new revision) between the guard's read and its delete.
+	// Another admin changes the metadata (same user, new revision) once between the guard's read and its delete.
+	changes := 0
 	prev := admin.SetAfterDeprovisionGet(func() {
+		if changes++; changes > 1 {
+			return
+		}
 		if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Role: sp("replaced")}); err != nil {
+			t.Error(err)
+		}
+	})
+	defer admin.SetAfterDeprovisionGet(prev)
+	if err := a.DeprovisionIfUser(ctx, "alpha", user); err != nil {
+		t.Fatalf("a metadata-only change refused the deprovision: %v", err)
+	}
+	if _, err := store.GetRecord(ctx, kv, "alpha"); err == nil {
+		t.Fatal("record still present")
+	}
+	if _, err := js.Stream(ctx, "inbox-alpha"); err == nil {
+		t.Fatal("inbox not deleted")
+	}
+	if !leasePresent(t, js, "alpha") {
+		t.Fatal("lease not fenced")
+	}
+}
+
+func TestDeprovisionIfUserUserChangeBetweenReadAndPurgeRefused(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	_, other := e.Mint(t, "beta")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	done := false
+	prev := admin.SetAfterDeprovisionGet(func() {
+		if done {
+			return
+		}
+		done = true
+		old, err := store.GetRecord(ctx, kv, "alpha")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		old.User = other
+		val, _ := json.Marshal(old)
+		if _, err := kv.Put(ctx, "alpha", val); err != nil {
+			t.Error(err)
+		}
+	})
+	defer admin.SetAfterDeprovisionGet(prev)
+	err := a.DeprovisionIfUser(ctx, "alpha", user)
+	if !errors.Is(err, admin.ErrRecordChanged) {
+		t.Fatalf("err %v, want ErrRecordChanged", err)
+	}
+	if rec, gerr := store.GetRecord(ctx, kv, "alpha"); gerr != nil || rec.User != other {
+		t.Fatalf("the record was touched: %+v %v", rec, gerr)
+	}
+	if _, err := js.Stream(ctx, "inbox-alpha"); err != nil {
+		t.Fatalf("inbox touched: %v", err)
+	}
+	if leasePresent(t, js, "alpha") {
+		t.Fatal("a refused call fenced the lease")
+	}
+}
+
+func TestDeprovisionIfUserRetriesExhaustedRefused(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	n := 0
+	prev := admin.SetAfterDeprovisionGet(func() {
+		n++
+		if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Role: sp(fmt.Sprintf("r%d", n))}); err != nil {
 			t.Error(err)
 		}
 	})
@@ -101,9 +178,8 @@ func TestDeprovisionIfUserRaceLeavesNewRecord(t *testing.T) {
 	if !errors.Is(err, admin.ErrRecordChanged) || !strings.Contains(err.Error(), "the record for alpha changed; left in place") {
 		t.Fatalf("err %v, want the changed-record refusal", err)
 	}
-	rec, gerr := store.GetRecord(ctx, kv, "alpha")
-	if gerr != nil || rec.Role != "replaced" {
-		t.Fatalf("the new record was lost: %+v %v", rec, gerr)
+	if rec, gerr := store.GetRecord(ctx, kv, "alpha"); gerr != nil || rec.User != user {
+		t.Fatalf("the record was lost: %+v %v", rec, gerr)
 	}
 	if _, err := js.Stream(ctx, "inbox-alpha"); err != nil {
 		t.Fatalf("inbox touched: %v", err)
