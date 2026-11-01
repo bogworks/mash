@@ -62,6 +62,24 @@ This amends ADR-0040.
 * `cmd/mash/hook_chain_test.go` (real processes): `TestHookOtherLaunchOfTheSameSessionIsRefusedAndToldOnce`.
 * Evidence: `docs/evidence/2026-11-01-dual-resume/RECEIPT.md`.
 
+## Pros and Cons of the Options
+
+### Drop rule 1 (session id) altogether
+
+* Good, because a second launch can never pass on the session id.
+* Bad, because a session whose process chain is broken (the case rule 1 was added for) would be refused again, silently.
+
+### Narrow rule 1: it does not match when both launch tokens are non-empty and differ
+
+* Good, because a resumed copy of a running session is refused while every case rule 1 covers (same launch, any process layout) still works.
+* Good, because when either token is empty nothing changes.
+* Bad, because a relaunch whose serve has not yet bound is briefly refused; its mail waits for its own serve.
+
+### Keep rule 1 and only document the hazard
+
+* Good, because nothing changes.
+* Bad, because mail is split between the two processes with no signal, as the live run showed.
+
 ## More Information
 
 * Amends ADR-0040 (rule 1 and its known-bad consequence). Related: ADR-0013 (one live session per name).

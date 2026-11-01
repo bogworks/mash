@@ -6,8 +6,6 @@ decision-makers: Randy Bias (mash maintainer)
 
 # Hook ownership: session id, launch token, then process chain
 
-Amended by [ADR-0043](0043-second-launch-of-a-running-session-is-refused-and-told-once.md): rule 1 does not match when both launch tokens are non-empty and differ.
-
 ## Context and Problem Statement
 
 A hook may drain an endpoint's spool only if it belongs to the Claude Code session whose `mash serve` holds the lease
