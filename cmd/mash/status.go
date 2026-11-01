@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/bogworks/mash/internal/claudesettings"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/host"
 	"github.com/bogworks/mash/internal/mcp"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -83,7 +86,11 @@ func versionTool(src *statusSource) mcp.Tool {
 	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's name and owner.",
 		Schema: schema(map[string]any{}),
 		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
-			return versionText(src.cfg.Name, src.cfg.Owner, src.pluginRoot), nil
+			out := versionText(src.cfg.Name, src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
+			if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
+				out += "\n" + l
+			}
+			return out, nil
 		}}
 }
 
@@ -110,6 +117,12 @@ func statusText(src *statusSource) string {
 	}
 	lines = append(lines, deliveryLines(src)...)
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
+	if !src.cli {
+		lines = append(lines, clientStatusLine(src.clientInfo()))
+	}
+	if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
+		lines = append(lines, l)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -432,4 +445,102 @@ func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout 
 	src := &statusSource{cfg: cfg, cfgErr: cfgErr, cli: true, home: env("HOME"), getenv: env}
 	fmt.Fprintln(stdout, statusText(src))
 	return 0
+}
+
+// clientInfo is what the MCP client sent in initialize; empty before one is seen or without a server.
+func (s *statusSource) clientInfo() (name, version string) {
+	if s.srv == nil {
+		return "", ""
+	}
+	if srv := s.srv.Load(); srv != nil {
+		return srv.ClientInfo()
+	}
+	return "", ""
+}
+
+// claudeCodeClient is the clientInfo name Claude Code sends.
+const claudeCodeClient = "claude-code"
+
+// clientLine is "client: <name> <version>" as the client sent it, with Claude Code's name written out.
+func clientLine(name, version string) string {
+	if name == "" && version == "" {
+		return "client: unknown (no initialize seen)"
+	}
+	shown := name
+	if name == claudeCodeClient {
+		shown = "Claude Code"
+	}
+	return strings.TrimSpace("client: " + shown + " " + version)
+}
+
+// clientStatusLine is clientLine, or a warning when Claude Code is older than host.MinClaudeCode. Other clients, and
+// versions that are not semver, get no warning: mash does not guess their version schemes.
+func clientStatusLine(name, version string) string {
+	if name != claudeCodeClient {
+		return clientLine(name, version)
+	}
+	v, ok := parseSemver(version)
+	min, _ := parseSemver(host.MinClaudeCode)
+	if !ok || !semverLess(v, min) {
+		return clientLine(name, version)
+	}
+	return fmt.Sprintf("client: WARN - Claude Code %s is older than %s, the oldest version mash has a passing live receipt on. mash does not refuse it. Next: update Claude Code", version, host.MinClaudeCode)
+}
+
+// parseSemver reads MAJOR.MINOR.PATCH, with an optional leading v and any -prerelease or +build suffix ignored.
+func parseSemver(s string) (v [3]int, ok bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 || p != strconv.Itoa(n) {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
+}
+
+func semverLess(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
+// driftLine warns when the plugin's and the binary's versions differ in major or minor. It is empty when either is
+// unknown or not semver (a dev build), and when they agree.
+func driftLine(pluginVer, binaryVer string) string {
+	p, pok := parseSemver(pluginVer)
+	b, bok := parseSemver(binaryVer)
+	if !pok || !bok || (p[0] == b[0] && p[1] == b[1]) {
+		return ""
+	}
+	return fmt.Sprintf("plugin: WARN - plugin %s and binary %s differ in major or minor. Next: update both to the same release (claude plugin update mash@mash and the mash binary)", pluginVer, binaryVer)
+}
+
+// pluginVersion is "version" from <root>/.claude-plugin/plugin.json, or "" when it cannot be read.
+func pluginVersion(root string) string {
+	if root == "" || strings.Contains(root, "${") {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Version)
 }

@@ -397,3 +397,15 @@ func TestAfterWriteRunsOnlyAfterASuccessfulWrite(t *testing.T) {
 		t.Fatalf("AfterWrite ran for a failed write or a tool error: %v", got)
 	}
 }
+
+func TestInitializeKeepsClientInfo(t *testing.T) {
+	h := start(t, nil)
+	if n, v := h.s.ClientInfo(); n != "" || v != "" {
+		t.Fatalf("before initialize: %q %q", n, v)
+	}
+	h.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"claude-code","version":"2.1.316"}}}`)
+	h.next(t)
+	if n, v := h.s.ClientInfo(); n != "claude-code" || v != "2.1.316" {
+		t.Fatalf("clientInfo %q %q", n, v)
+	}
+}

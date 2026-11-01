@@ -4,6 +4,10 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 **Requirement:** mash needs a NATS server in operator mode with JWT user credentials. Token, user/password and plain nkey authentication are not supported, because an endpoint's SAP signing identity is its NATS user key (the key in its creds file's user JWT; see the [design](specs/2026-10-21-mash-design.md)).
 
+## Requirements
+
+- Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones, `status` warns). The plugin and the `mash` binary should be the same release (major and minor); `status` warns when they are not.
+
 ## 1. The binary
 
 Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
