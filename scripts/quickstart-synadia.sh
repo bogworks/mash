@@ -21,8 +21,12 @@
 # on a terminal. It is never taken from argv, never stored and never printed; curl gets it
 # through a config file descriptor, so it does not appear in `ps`. No `set -x`.
 #
-# Guards of the old `mash init synadia` this script DROPS: the config.json file lock (do not
-# run two at once), the check of stream usage by other tools (only the plan, plus the endpoints
+# A real run holds an exclusive mkdir lock, <config dir>/.quickstart.lock (it holds the pid), from before
+# the config conflict checks until it ends; a second run on the same config dir is refused. A stale lock
+# (a killed run) must be removed by hand.
+#
+# Guards of the old `mash init synadia` this script DROPS: the config.json flock (the mkdir lock above
+# replaces it), the check of stream usage by other tools (only the plan, plus the endpoints
 # already in the mash directory, is checked against the limit), reuse of an existing same-name
 # user or directory record (it refuses instead), the check that a reused user's permissions are exactly mash's, and cleanup of
 # orphaned admin users from crashed runs (they are named mash-quickstart-admin-*; delete them
@@ -48,7 +52,7 @@ case "$API" in
 esac
 TEAM="" ACCOUNT="" OWNER="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOKEN_STDIN=0 NO_TEST=0
 ENDPOINTS=()
-ADMIN_ID="" TMP=""
+ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" PROVISIONING_KEY="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
 CREATED_IDS=() CREATED_NAMES=() CREATED_CREDS=() PROVISIONED=() # endpoint users this run created (id, name, whether it wrote their creds file), endpoints provisioned
 CFG_BACKUP="" CFG_CREATED=0 CFG_PENDING=0 # config.json: its backup, whether this run created it, whether a failure must undo the write
 
@@ -141,6 +145,29 @@ api() {
 cleanup() {
   local rc=$?
   trap - EXIT
+  if [ "$rc" -ne 0 ] && [ -n "$PROVISIONING" ] && [ -n "$ADMIN_ID" ] && [ -f "${ADMIN_CREDS:-}" ]; then
+    # provision can create the inbox stream and then fail. Deprovision only a record proven to be this run's (its NATS user
+    # public key is the one this run created): another admin may have provisioned the name since the directory check.
+    local lst en ek found=0 mine=0
+    if lst=$(MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin list 2>/dev/null); then
+      while IFS=$'\t' read -r en ek _; do
+        if [ "$en" = "$PROVISIONING" ]; then found=1; [ "$ek" != "$PROVISIONING_KEY" ] || mine=1; fi
+      done <<<"$lst"
+      if [ "$mine" -eq 1 ]; then
+        if MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin deprovision "$PROVISIONING" >/dev/null 2>&1; then
+          say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
+        else
+          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING'; remove it by hand (docs/synadia.md)." >&2
+        fi
+      elif [ "$found" -eq 1 ]; then
+        echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place." >&2
+      else
+        say "Setup failed: no directory record for $PROVISIONING to remove."
+      fi
+    else
+      echo "quickstart-synadia: could not run 'mash admin list'; not deprovisioning $PROVISIONING. If it is this run's, remove it by hand: mash admin deprovision $PROVISIONING (docs/synadia.md)." >&2
+    fi
+  fi
   if [ -n "$ADMIN_ID" ]; then
     if (api DELETE "/nats-users/$ADMIN_ID" >/dev/null) 2>/dev/null; then
       say "Deleted the temporary admin user."
@@ -171,6 +198,7 @@ cleanup() {
     elif [ "$CFG_CREATED" -eq 1 ]; then rm -f "$CONFIG" && say "Setup failed: removed the $CONFIG this run created."; fi
   fi
   [ -z "$TMP" ] || rm -rf "$TMP"
+  if [ "$LOCK_HELD" -eq 1 ]; then rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null || true; fi
   exit "$rc"
 }
 trap cleanup EXIT
@@ -227,6 +255,15 @@ say "Plan: owner '$OWNER', ${#ENDPOINTS[@]} endpoint(s) (${ENDPOINTS[*]})"
 say "Streams: 2 shared + ${#ENDPOINTS[@]} x 1 per endpoint = $need (the account allows $stream_limit)"
 if [ "$stream_limit" -ge 0 ] && [ "$need" -gt "$stream_limit" ]; then
   die "this account allows $stream_limit streams and the plan needs $need; room for $((stream_limit > 2 ? stream_limit - 2 : 0)) endpoint(s). Nothing was created"
+fi
+
+# Exclusive lock on the config directory (a real run only: a dry run creates nothing), held until the exit trap.
+if [ "$DRY" -ne 1 ]; then
+  [ -d "$CONFIG_DIR" ] || { mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"; } || die "cannot create $CONFIG_DIR"
+  LOCK_DIR="$CONFIG_DIR/.quickstart.lock"
+  mkdir "$LOCK_DIR" 2>/dev/null || die "another quickstart run is using $CONFIG_DIR, or remove the stale lock if none is running (only then; it holds a pid file): rm $LOCK_DIR/pid && rmdir $LOCK_DIR"
+  LOCK_HELD=1
+  echo "$$" >"$LOCK_DIR/pid"
 fi
 
 # Config conflict, before anything is created.
@@ -368,8 +405,9 @@ for n in "${ENDPOINTS[@]}"; do
   fetch_creds "$uid" "$CONFIG_DIR/$n.creds" "$ukey"
   CREATED_CREDS[${#CREATED_CREDS[@]}-1]=1
   say "Endpoint $n: user created, creds in $CONFIG_DIR/$n.creds"
+  PROVISIONING="$n"; PROVISIONING_KEY="$ukey"
   mash_admin provision "$n" --user "$ukey" --account "$acct_key" --note "created by quickstart-synadia.sh"
-  PROVISIONED+=("$n")
+  PROVISIONED+=("$n"); PROVISIONING=""; PROVISIONING_KEY=""
   CFG_PENDING=0 # an endpoint exists under this config: a later failure keeps it
 done
 unset MASH_ADMIN_CREDS
@@ -382,9 +420,10 @@ if [ "$NO_TEST" -eq 1 ]; then say "Test mail: skipped (--no-test)."
 elif [ "${#ENDPOINTS[@]}" -lt 2 ]; then say "Test mail: skipped, it needs two endpoints; add a second --endpoint."
 else
   a="${ENDPOINTS[0]}" b="${ENDPOINTS[1]}"
-  MASH_NAME="$a" mash send "$b" "quickstart-synadia.sh: test message, setup works." >/dev/null || die "everything was created, but sending the test message failed"
+  token="qs-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')" # unique: an older [verified] message in the inbox must not pass
+  MASH_NAME="$a" mash send "$b" "quickstart-synadia.sh test $token" >/dev/null || die "everything was created, but sending the test message failed"
   inbox=$(MASH_NAME="$b" mash inbox) || die "everything was created, but reading $b's inbox failed"
-  grep -q "verified" <<<"$inbox" || die "the test message did not arrive as [verified] in $b's inbox"
+  grep -F "$token" <<<"$inbox" | grep -qF "[verified]" || die "the test message did not arrive as [verified] in $b's inbox"
   say "Test mail: $a sent a message to $b, which read it as [verified]."
 fi
 
