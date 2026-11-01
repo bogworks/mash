@@ -16,13 +16,14 @@ import (
 )
 
 type step struct {
-	Name            string            `yaml:"name"`
-	If              string            `yaml:"if"`
-	ContinueOnError any               `yaml:"continue-on-error"`
-	Uses            string            `yaml:"uses"`
-	Run             string            `yaml:"run"`
-	Env             map[string]string `yaml:"env"`
-	With            map[string]any    `yaml:"with"`
+	Name             string            `yaml:"name"`
+	If               string            `yaml:"if"`
+	ContinueOnError  any               `yaml:"continue-on-error"`
+	Uses             string            `yaml:"uses"`
+	Run              string            `yaml:"run"`
+	WorkingDirectory string            `yaml:"working-directory"`
+	Env              map[string]string `yaml:"env"`
+	With             map[string]any    `yaml:"with"`
 }
 
 type job struct {
@@ -1083,5 +1084,67 @@ func TestRelease_notesComeFromThePublishedReleaseNotGitDescribe(t *testing.T) {
 	}
 	if !strings.Contains(run, "scripts/notes-base") {
 		t.Errorf("the draft job does not call scripts/notes-base:\n%s", run)
+	}
+}
+
+// adr-lint judges a pull request with a checker built from the base branch; the pull request's own tree is data only.
+func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
+	j := load(t, "adr-lint.yml").Jobs["adr-lint"]
+	var trusted, pr, goStep *step
+	var runs string
+	for i := range j.Steps {
+		st := &j.Steps[i]
+		runs += st.Run + "\n"
+		switch {
+		case strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["path"] == "trusted":
+			trusted = st
+		case strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["path"] == "pr":
+			pr = st
+		case strings.HasPrefix(st.Uses, "actions/setup-go@"):
+			goStep = st
+		}
+		if st.Uses != "" && strings.HasPrefix(st.Uses, "actions/checkout@") && st.With["persist-credentials"] != false {
+			t.Errorf("checkout %v keeps credentials", st.With["path"])
+		}
+	}
+	if trusted == nil || pr == nil || goStep == nil {
+		t.Fatalf("need a trusted/ checkout, a pr/ checkout and setup-go: %v %v %v", trusted, pr, goStep)
+	}
+	if trusted.With["ref"] != "${{ github.event.pull_request.base.sha }}" {
+		t.Errorf("trusted/ ref = %v, want the base sha", trusted.With["ref"])
+	}
+	if pr.With["ref"] != "${{ github.event.pull_request.head.sha }}" || pr.With["repository"] != "${{ github.event.pull_request.head.repo.full_name }}" {
+		t.Errorf("pr/ must be the head sha of the head repo, got %v of %v", pr.With["ref"], pr.With["repository"])
+	}
+	// pull_request_target: GitHub runs the base branch's copy of this workflow; the PR is data only.
+	wf := load(t, "adr-lint.yml")
+	on, _ := wf.On.(map[string]any)
+	if _, ok := on["pull_request_target"]; !ok || len(on) != 1 {
+		t.Errorf("adr-lint must trigger on pull_request_target only, got %v", wf.On)
+	}
+	if len(wf.Permissions) != 1 || wf.Permissions["contents"] != "read" || len(j.Permissions) != 0 {
+		t.Errorf("permissions must be exactly contents: read, got %v / job %v", wf.Permissions, j.Permissions)
+	}
+	for _, st := range j.Steps {
+		if st.WorkingDirectory == "pr" || strings.HasPrefix(st.WorkingDirectory, "pr/") {
+			t.Errorf("step %q runs in the pull request tree", st.Name)
+		}
+	}
+	if goStep.With["go-version-file"] != "trusted/go.mod" {
+		t.Errorf("go-version-file = %v, want trusted/go.mod", goStep.With["go-version-file"])
+	}
+	for _, bad := range []string{"go run", "go build ./pr", "cd pr", "./pr/", "pr/scripts", "source pr/", "bash pr/"} {
+		if strings.Contains(runs, bad) {
+			t.Errorf("a step runs code from the pull request tree (%q):\n%s", bad, runs)
+		}
+	}
+	if !strings.Contains(runs, `"$RUNNER_TEMP/adrlint" docs --root "$GITHUB_WORKSPACE/pr"`) ||
+		!strings.Contains(runs, `"$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr"`) {
+		t.Errorf("both modes must run the base-built checker with --root pr:\n%s", runs)
+	}
+	for _, st := range j.Steps {
+		if strings.Contains(st.Run, "github.event") {
+			t.Errorf("step %q puts event data in the script text", st.Name)
+		}
 	}
 }
