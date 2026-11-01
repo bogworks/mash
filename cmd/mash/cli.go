@@ -21,6 +21,15 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	if cfg.Inert() {
 		return fail(fmt.Errorf("mash: set MASH_NAME to the endpoint you are acting as"))
 	}
+	var whoF endpoint.WhoFilter
+	var whoO whoOutput
+	if args[0] == "who" {
+		var err error
+		if whoF, whoO, err = ParseWhoFlags(args[1:]); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), cliDeadline(cfg))
 	defer cancel()
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
@@ -155,20 +164,18 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 		fmt.Fprintln(stdout, inboxText(ms))
 	case "who":
-		long := len(args) == 2 && args[1] == "--long"
-		if len(args) > 1 && !long {
-			return fail(fmt.Errorf("usage: mash who [--long]"))
-		}
 		c, cc := short()
 		defer cc()
 		if err := ep.Refresh(c); err != nil {
 			return fail(err)
 		}
 		var live map[string]endpoint.LeaseInfo
-		if long {
+		if whoO.Long {
 			live = liveLeases(c, ep)
 		}
-		fmt.Fprintln(stdout, whoText(ep.Who(), long, live))
+		if out := whoRender(whoF.Apply(ep.Who()), whoO, !whoF.IsZero(), live); out != "" {
+			fmt.Fprintln(stdout, out)
+		}
 	case "prompt":
 		if len(args) < 3 {
 			return fail(fmt.Errorf("usage: mash prompt <to> <text...>"))
@@ -202,7 +209,8 @@ func clientNeeds(cfg config.Config, args []string) endpoint.ClientOptions {
 	case "read", "inbox":
 		return endpoint.ClientOptions{Inbox: true}
 	case "who":
-		return endpoint.ClientOptions{FullDirectory: true, Presence: true, Lease: len(args) == 2 && args[1] == "--long"}
+		_, o, _ := ParseWhoFlags(args[1:])
+		return endpoint.ClientOptions{FullDirectory: true, Presence: true, Lease: o.Long}
 	}
 	return endpoint.ClientOptions{} // prompt finds its peer by service discovery
 }

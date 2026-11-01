@@ -7,6 +7,11 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 ### Fixed
 
 - Two admins changing the limits of one inbox at the same time can no longer leave the lower cap (and evict mail). `mash admin limits` and `mash admin provision` take a per-stream lock (`limits-lock.<name>` in the lease bucket, 30 s expiry) before reading the stream and hold it through the update; a second admin waits up to 20 s, then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`. Admins' clocks should agree to within a few seconds (see "Changing limits later" in [docs/operations.md](docs/operations.md), [ADR-0048](docs/decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), #27).
+## [Unreleased]
+
+### Added
+
+- `mash who` filters and machine-readable output: `--match TEXT` (name, role, note, labels), `--name`, `--role`, `--owner`, `--label K[=V]` (repeatable), `--online`/`--offline`, `--names` and `--json` (a documented array; `--long` adds `lease`). Filters combine with AND, no match exits 0 with empty output, a bad flag exits 2, and the unfiltered output is unchanged. The `who` tool gains optional `match`, `name`, `role`, `label`, `online` and `format` parameters that use the same filter (see [docs/operations.md](docs/operations.md#finding-endpoints-who-filters-and---json)).
 
 ## [0.3.1] - 2026-11-01
 

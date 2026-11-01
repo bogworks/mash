@@ -29,7 +29,9 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
                                                within 2 minutes stores nothing new (a timed-out send prints its key); after 2 minutes it is a new message
   mash read <seq>                              print one message from your inbox
   mash inbox [--limit N] [--after SEQ]         recent messages, or the N after SEQ (oldest first)
-  mash who [--long]                            endpoints, and who is online (--long: role, host, labels, lease)
+  mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
+                                               endpoints, and who is online (--long: role, host, labels, lease);
+                                               filters AND; --names one per line; --json a stable array
   mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
   mash status                                  what a session would see (name, config, creds, channel allowlist), before launch;
                                                connects to nothing; the live parts say they need a running session
