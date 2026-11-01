@@ -45,7 +45,8 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 - `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - `creds: FAILED - ... is a directory` or `is not readable`: fix the path or ownership.
-- An error starting `sap: creds JWT:` or `sap: creds seed:`: the file is not an operator-mode user creds file (tracked in #32).
+- `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: create a user with `nsc` or Synadia Cloud and set `creds` (or `admin_creds`) to its `.creds` file.
+- `auth: WARN` in `status`: the url carries a password or token, which mash ignores. Remove it from the url and use a creds file.
 
 ## `mash: endpoint X is not provisioned`
 
@@ -61,7 +62,7 @@ Two forms: `mash: the credentials in <path> do not match endpoint X (they are fo
 
 Cause: another live session holds the name, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
 
-Fix: end the other session, or start this one with a different `MASH_NAME`. Names are unique per NATS account, not per owner (tracked in #33), so a teammate in the same account counts. `mash who` lists the endpoints.
+Fix: end the other session, or start this one with a different `MASH_NAME`. Names are unique per NATS account, not per owner, so a teammate in the same account counts. `mash who` lists the endpoints.
 
 ## `mash: lost the lease on X to another session`
 

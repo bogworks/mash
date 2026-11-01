@@ -182,6 +182,9 @@ func checkCredsFor(path, name string) error {
 	if err != nil {
 		return fmt.Errorf("mash: credentials: %w", err)
 	}
+	if err := natsauth.CheckCreds(path, raw); err != nil {
+		return err
+	}
 	tok, err := jwt.ParseDecoratedJWT(raw)
 	if err != nil {
 		return fmt.Errorf("mash: credentials: %w", err)
@@ -202,7 +205,7 @@ func readIdentity(path string) (sap.Identity, error) {
 	if err != nil {
 		return sap.Identity{}, fmt.Errorf("mash: credentials: %w", err)
 	}
-	return sap.IdentityFromCreds(raw)
+	return sap.IdentityFromCredsAt(path, raw)
 }
 
 // connect is nats.Connect bounded by ctx: the dial's timeout is what is left of ctx's deadline, and a connect that

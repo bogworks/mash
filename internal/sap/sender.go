@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 	"github.com/nats-io/nuid"
@@ -62,7 +63,13 @@ func NewIdentity(seed []byte, account string) (Identity, error) {
 }
 
 // IdentityFromCreds reads a NATS credentials file (§13.4: the JWT, not the server).
-func IdentityFromCreds(creds []byte) (Identity, error) {
+func IdentityFromCreds(creds []byte) (Identity, error) { return IdentityFromCredsAt("", creds) }
+
+// IdentityFromCredsAt is IdentityFromCreds for the file at path, which an error names (the content is never printed).
+func IdentityFromCredsAt(path string, creds []byte) (Identity, error) {
+	if err := natsauth.CheckCreds(path, creds); err != nil {
+		return Identity{}, err
+	}
 	tok, err := jwt.ParseDecoratedJWT(creds)
 	if err != nil {
 		return Identity{}, fmt.Errorf("sap: creds JWT: %w", err)

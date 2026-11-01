@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,11 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		return fail(errors.New("mash: admin commands need MASH_URL and MASH_ADMIN_CREDS"))
 	}
 	if err := config.CheckCredsMode(cfg.AdminCreds); err != nil {
+		return fail(err)
+	}
+	if raw, err := os.ReadFile(cfg.AdminCreds); err != nil {
+		return fail(fmt.Errorf("mash: admin credentials: %w", err))
+	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return fail(err)
 	}
 	nc, err := nats.Connect(cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds), nats.Name("mash admin"))...)

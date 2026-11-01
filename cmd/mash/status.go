@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -99,6 +100,9 @@ func statusTool(src *statusSource) mcp.Tool {
 func statusText(src *statusSource) string {
 	cfg := src.cfg
 	lines := []string{nameLine(cfg), configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src)}
+	if l := authLine(cfg); l != "" {
+		lines = slices.Insert(lines, 4, l)
+	}
 	lines = append(lines, clockLine(clockSkewOf(src)))
 	lines = append(lines, allowlistLine(src))
 	if l := environmentLine(src); l != "" {
@@ -215,6 +219,22 @@ func tlsLine(cfg config.Config) string {
 	return "tls: n/a - loopback"
 }
 
+// authLine warns when a url in the (comma-separated) server list carries userinfo, a password or a token, which mash
+// never uses: it authenticates with operator-mode JWT credentials only. "" when no url does. The secret is not printed.
+func authLine(cfg config.Config) string {
+	for _, e := range strings.Split(cfg.URL, ",") {
+		_, rest, ok := strings.Cut(strings.TrimSpace(e), "://")
+		if !ok {
+			rest = strings.TrimSpace(e)
+		}
+		rest, _, _ = strings.Cut(rest, "/")
+		if strings.Contains(rest, "@") {
+			return "auth: WARN - the url carries a password or token, but mash authenticates with operator-mode JWT credentials only (creds file). Next: create a user with nsc or Synadia Cloud and set creds"
+		}
+	}
+	return ""
+}
+
 func connectionLine(src *statusSource) string {
 	cfg := src.cfg
 	switch {
@@ -280,6 +300,9 @@ func reportSettings(src *statusSource, stderr io.Writer) {
 		fmt.Fprintln(stderr, "mash: "+l)
 	}
 	if l := tlsLine(src.cfg); strings.HasPrefix(l, "tls: WARN") {
+		fmt.Fprintln(stderr, "mash: "+l)
+	}
+	if l := authLine(src.cfg); l != "" {
 		fmt.Fprintln(stderr, "mash: "+l)
 	}
 }

@@ -15,9 +15,40 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 )
+
+// ErrNotJWTCreds marks a creds file that does not hold a user JWT and its seed.
+var ErrNotJWTCreds = errors.New("not operator-mode JWT credentials")
+
+// CredsError says a creds file is not operator-mode JWT credentials, wrapping cause (never the file's content). path
+// names the file; "" says "the creds file".
+func CredsError(path string, cause error) error {
+	what := "the creds file"
+	if path != "" {
+		what = path
+	}
+	return fmt.Errorf("mash: %s is not operator-mode JWT credentials (a .creds file with a user JWT and its seed, from `nsc` or Synadia Cloud); token, user/password and plain-nkey servers are not supported: %w: %w", what, ErrNotJWTCreds, cause)
+}
+
+// CheckCreds returns a CredsError unless raw holds a user JWT and its seed.
+func CheckCreds(path string, raw []byte) error {
+	tok, err := nkeys.ParseDecoratedJWT(raw)
+	if err == nil {
+		_, err = jwt.DecodeUserClaims(tok)
+	}
+	if err != nil {
+		return CredsError(path, fmt.Errorf("no user JWT: %w", err))
+	}
+	kp, err := nkeys.ParseDecoratedNKey(raw)
+	if err != nil {
+		return CredsError(path, fmt.Errorf("no user seed: %w", err))
+	}
+	kp.Wipe()
+	return nil
+}
 
 // nonceRE is the shape of a server nonce: nats-server sends 15 base64 raw-URL characters. The range leaves room for
 // other server builds without admitting anything with a newline or other punctuation.
@@ -31,7 +62,7 @@ func CheckNonce(nonce []byte) error {
 	return nil
 }
 
-func sigFor(read func() ([]byte, error)) nats.SignatureHandler {
+func sigFor(path string, read func() ([]byte, error)) nats.SignatureHandler {
 	return func(nonce []byte) ([]byte, error) {
 		if err := CheckNonce(nonce); err != nil {
 			return nil, err
@@ -42,20 +73,24 @@ func sigFor(read func() ([]byte, error)) nats.SignatureHandler {
 		}
 		kp, err := nkeys.ParseDecoratedNKey(raw)
 		if err != nil {
-			return nil, fmt.Errorf("natsauth: no usable user seed: %w", err)
+			return nil, CredsError(path, fmt.Errorf("no usable user seed: %w", err))
 		}
 		defer kp.Wipe()
 		return kp.Sign(nonce)
 	}
 }
 
-func jwtFor(read func() ([]byte, error)) nats.UserJWTHandler {
+func jwtFor(path string, read func() ([]byte, error)) nats.UserJWTHandler {
 	return func() (string, error) {
 		raw, err := read()
 		if err != nil {
 			return "", err
 		}
-		return nkeys.ParseDecoratedJWT(raw)
+		tok, err := nkeys.ParseDecoratedJWT(raw)
+		if err != nil || !strings.HasPrefix(tok, "eyJ") || strings.Count(tok, ".") != 2 { // the shape only; CheckCreds decodes the claims
+			return "", CredsError(path, errors.New("no user JWT"))
+		}
+		return tok, nil
 	}
 }
 
@@ -63,13 +98,13 @@ func jwtFor(read func() ([]byte, error)) nats.UserJWTHandler {
 // refusing to sign a nonce that is not a server nonce.
 func UserCredentials(file string) nats.Option {
 	read := func() ([]byte, error) { return os.ReadFile(file) }
-	return nats.UserJWT(jwtFor(read), sigFor(read))
+	return nats.UserJWT(jwtFor(file, read), sigFor(file, read))
 }
 
 // UserCredentialBytes is nats.UserCredentialBytes with the same refusal.
 func UserCredentialBytes(creds []byte) nats.Option {
 	read := func() ([]byte, error) { return append([]byte(nil), creds...), nil } // a copy: Wipe zeroes the parsed seed, which aliases its input
-	return nats.UserJWT(jwtFor(read), sigFor(read))
+	return nats.UserJWT(jwtFor("", read), sigFor("", read))
 }
 
 // TLSOptions are the client options for mash's TLS settings: ca is a PEM file of root CAs that replaces the system

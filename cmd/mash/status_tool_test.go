@@ -646,3 +646,34 @@ func TestStatusManagedDirEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusAuthLine(t *testing.T) {
+	const warn = "auth: WARN - the url carries a password or token, but mash authenticates with operator-mode JWT credentials only"
+	for url, wantWarn := range map[string]bool{
+		"nats://user:hunter2pw@10.0.0.5:4222": true,
+		"tls://tok3nsecret@nats.example.com":  true,
+		"tls://a.example.com,nats://u:pw@b":   true,
+		"tls://nats.example.com:4222":         false,
+		"nats://127.0.0.1:4222":               false,
+	} {
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL = url
+		out := statusText(src)
+		if got := strings.Contains(out, warn); got != wantWarn {
+			t.Errorf("url %s: warns = %v\n%s", url, got, out)
+		}
+		if !wantWarn && strings.Contains(out, "auth:") {
+			t.Errorf("url %s: unexpected auth line\n%s", url, out)
+		}
+		var buf bytes.Buffer
+		reportSettings(src, &buf)
+		if got := strings.Contains(buf.String(), warn); got != wantWarn {
+			t.Errorf("url %s: serve stderr warns = %v: %q", url, got, buf.String())
+		}
+		for _, secret := range []string{"hunter2pw", "tok3nsecret", "u:pw"} {
+			if strings.Contains(out, secret) || strings.Contains(buf.String(), secret) {
+				t.Errorf("url %s: secret %q printed", url, secret)
+			}
+		}
+	}
+}
