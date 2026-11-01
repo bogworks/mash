@@ -1,0 +1,300 @@
+# timeline.log: live proof of mash PR #44 (lease handoff) and PR #121 (startup round trips, open/call timeouts)
+# Times are UTC on rdev-randyb-dev, 2026-10-31. Source: harness/*.sh. Lines starting with 4 spaces are the serve's MCP-client log (epoch seconds).
+# Trimmed: creds paths and the 40-line who listings are dropped; nothing else. Credential files are never printed.
+# Env 1 (testenv defaults) served cases A, B1, B2 and a first B3 pass; env 2 (bigger JetStream disk) served the final B3 passes.
+# The first A-main run (endpoint x) is from the first version of caseA.sh; its pre-#44 twin is omitted because that script counted serve's 'already in use' notice as delivered mail.
+
+21:18:38.845 [A-main] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
+21:18:38.848 [A-main] == step 1: serve #1 for endpoint x starts and takes the lease
+21:18:40.934 [A-main] serve#1 pid=639297; who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:18:40.936 [A-main] == step 2 (negative 1): serve #2 for x while #1 is alive and renewing (35 s, spans a 30 s renewal)
+21:18:41.940 [A-main] serve#2 pid=640048 started
+21:18:46.954 [A-main] mail m-alive sent while both run: sent #1 from sender to x
+21:19:16.958 [A-main] serve#1 alive: yes  serve#2 alive: yes
+21:19:16.959 [A-main] serve#1 events:
+    1793481518.874 spawn pid=639297
+    1793481518.882 recv id=1 method=None
+    1793481519.074 handshake sent
+    1793481519.075 recv id=2 method=None
+    1793481519.575 recv id=mash-ping-1 method=ping
+    1793481527.053 CHANNEL {"content": "1 message from sender (task)\n\n--- #1 from sender [verified] at 2026-10-31T21:18:46Z\ninstance: inJeVjB0bnma7rpqf81f0O\nkind: task\n> m-alive\n", "meta": {"count": "1", "seqs": "1", "to": "x"}}
+    1793481549.576 recv id=mash-ping-2 method=ping
+21:19:16.962 [A-main] serve#2 events:
+    1793481520.962 spawn pid=640048
+    1793481520.970 recv id=1 method=None
+    1793481521.162 handshake sent
+    1793481521.163 recv id=2 method=None
+    1793481521.664 CHANNEL {"content": "mash: endpoint x is already in use by another session (host rdev-randyb-dev, pid 639297, since 2026-10-31T21:18:38Z); mail is off for this session. mash is retrying every 10s."}
+21:19:16.965 [A-main] serve#2 stderr:
+21:19:17.281 [A-main] who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:19:18.284 [A-main] serve#2 stopped (SIGTERM); serve#1 alive: yes
+21:19:18.286 [A-main] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
+21:19:18.302 [A-main] kill -9 639297 (epoch 1793481558.299)
+21:19:18.304 [A-main] serve#1 gone: 
+21:19:18.336 [A-main] serve#3 spawned (epoch 1793481558.317, +0.018 s after kill)
+21:19:18.667 [A-main] mail m-takeover sent: sent #2 from sender to x  (epoch 1793481558.663)
+21:19:19.492 [A-main] serve#3 pid=656921 first CHANNEL (mail delivered): epoch 1793481559.462
+21:19:19.522 [A-main] RESULT: kill -9 -> mail delivered by new serve in 1.16 s; serve#3 start -> mail 1.14 s
+21:19:19.524 [A-main] serve#3 events:
+    1793481558.333 spawn pid=656921
+    1793481558.341 recv id=1 method=None
+    1793481558.533 handshake sent
+    1793481558.533 recv id=2 method=None
+    1793481559.034 recv id=mash-ping-1 method=ping
+    1793481559.462 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:19:18Z\ninstance: 6gFbwkOApeA7O5Gukpn2cK\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "x"}}
+21:19:19.841 [A-main] who --long: x	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:19:19.857 [A-main] mail inbox of x: #1	from sender [verified]	2026-10-31T21:18:46Z	7 B	m-alive	kind task	instance inJeVjB0bnma7rpqf81f0O|#2	from sender [verified]	2026-10-31T21:19:18Z	10 B	m-takeover	kind task	instance 6gFbwkOApeA7O5Gukpn2cK|
+21:23:34.882 [A-pre44] binary: mash 0.0.0-dev (commit unknown)
+21:23:34.885 [A-pre44] == step 1: serve #1 for endpoint e01 starts and takes the lease
+21:23:40.719 [A-pre44] serve#1 pid=749945; who --long: e01	online	seen 2s ago	live proof
+21:23:40.720 [A-pre44] == step 2 (negative 1): serve #2 for e01 while #1 is alive and renewing (35 s, spans a 30 s renewal)
+21:23:41.724 [A-pre44] serve#2 pid=750676 started
+21:23:46.739 [A-pre44] mail m-alive sent while both run: sent #1 from sender to e01
+21:24:16.742 [A-pre44] serve#1 alive: yes  serve#2 alive: yes
+21:24:16.744 [A-pre44] serve#1 events:
+    1793481814.911 spawn pid=749945
+    1793481814.919 recv id=1 method=None
+    1793481815.112 handshake sent
+    1793481815.112 recv id=2 method=None
+    1793481815.613 recv id=mash-ping-1 method=ping
+    1793481826.838 CHANNEL {"content": "1 message from sender\n\n--- #1 from sender [verified] at 2026-10-31T21:23:46Z\ninstance: vDdharUlOVe6XU8BL6i3tq\n> m-alive\n", "meta": {"count": "1", "seqs": "1", "to": "e01"}}
+    1793481845.614 recv id=mash-ping-2 method=ping
+21:24:16.747 [A-pre44] serve#2 events:
+    1793481820.746 spawn pid=750676
+    1793481820.755 recv id=1 method=None
+    1793481820.947 handshake sent
+    1793481820.947 recv id=2 method=None
+    1793481821.448 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host rdev-randyb-dev, pid 749945, since 2026-10-31T21:23:34Z); mail is off for this session. mash is retrying every 10s."}
+21:24:16.749 [A-pre44] serve#2 stderr:
+21:24:18.767 [A-pre44] who --long: e01	online	seen 2s ago	live proof
+21:24:19.771 [A-pre44] serve#2 stopped (SIGTERM); serve#1 alive: yes
+21:24:19.772 [A-pre44] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
+21:24:19.787 [A-pre44] kill -9 749945 (epoch 1793481859.784)
+21:24:19.790 [A-pre44] serve#1 gone: 
+21:24:19.819 [A-pre44] serve#3 spawned (epoch 1793481859.802, +0.018 s after kill)
+21:24:20.150 [A-pre44] mail m-takeover sent: sent #2 from sender to e01  (epoch 1793481860.147)
+21:25:41.396 [A-pre44] serve#3 pid=764547 first CHANNEL (mail delivered): epoch 1793481941.369
+21:25:41.426 [A-pre44] RESULT: kill -9 -> mail delivered by new serve in 81.59 s; serve#3 start -> mail 81.57 s
+21:25:41.428 [A-pre44] serve#3 events:
+    1793481859.817 spawn pid=764547
+    1793481859.827 recv id=1 method=None
+    1793481860.017 handshake sent
+    1793481860.018 recv id=2 method=None
+    1793481860.518 CHANNEL {"content": "mash: endpoint e01 is already in use by another session (host rdev-randyb-dev, pid 749945, since 2026-10-31T21:24:04Z); mail is off for this session. mash is retrying every 10s."}
+    1793481939.926 CHANNEL {"content": "mash: endpoint e01 is online; mail is on for this session."}
+    1793481939.926 recv id=mash-ping-1 method=ping
+    1793481941.369 CHANNEL {"content": "1 message from sender\n\n--- #2 from sender [verified] at 2026-10-31T21:24:20Z\ninstance: AkWFmz4d0KLpJsbuF1rM8i\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e01"}}
+21:25:43.447 [A-pre44] who --long: e01	online	seen 2s ago	live proof
+21:25:43.484 [A-pre44] mail inbox of e01: #1	from sender [verified]	2026-10-31T21:23:46Z	7 B	m-alive	instance vDdharUlOVe6XU8BL6i3tq|#2	from sender [verified]	2026-10-31T21:24:20Z	10 B	m-takeover	instance AkWFmz4d0KLpJsbuF1rM8i|
+21:25:50.564 [A-main-e02] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
+21:25:50.566 [A-main-e02] == step 1: serve #1 for endpoint e02 starts and takes the lease
+21:25:53.018 [A-main-e02] serve#1 pid=811079; who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:25:53.020 [A-main-e02] == step 2 (negative 1): serve #2 for e02 while #1 is alive and renewing (35 s, spans a 30 s renewal)
+21:25:54.024 [A-main-e02] serve#2 pid=812095 started
+21:25:59.038 [A-main-e02] mail m-alive sent while both run: sent #1 from sender to e02
+21:26:29.041 [A-main-e02] serve#1 alive: yes  serve#2 alive: yes
+21:26:29.043 [A-main-e02] serve#1 events:
+    1793481950.593 spawn pid=811079
+    1793481950.601 recv id=1 method=None
+    1793481950.793 handshake sent
+    1793481950.794 recv id=2 method=None
+    1793481951.294 recv id=mash-ping-1 method=ping
+    1793481959.137 CHANNEL {"content": "1 message from sender (task)\n\n--- #1 from sender [verified] at 2026-10-31T21:25:59Z\ninstance: 0N1uIeE6r5NUFA4kultHM2\nkind: task\n> m-alive\n", "meta": {"count": "1", "seqs": "1", "to": "e02"}}
+    1793481981.295 recv id=mash-ping-2 method=ping
+21:26:29.046 [A-main-e02] serve#2 events:
+    1793481953.047 spawn pid=812095
+    1793481953.054 recv id=1 method=None
+    1793481953.247 handshake sent
+    1793481953.248 recv id=2 method=None
+    1793481953.748 CHANNEL {"content": "mash: endpoint e02 is already in use by another session (host rdev-randyb-dev, pid 811079, since 2026-10-31T21:25:50Z); mail is off for this session. mash is retrying every 10s."}
+21:26:29.049 [A-main-e02] serve#2 stderr:
+21:26:29.363 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:30.366 [A-main-e02] serve#2 stopped (SIGTERM); serve#1 alive: yes
+21:26:30.368 [A-main-e02] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
+21:26:30.383 [A-main-e02] kill -9 811079 (epoch 1793481990.380)
+21:26:30.385 [A-main-e02] serve#1 gone: 
+21:26:30.414 [A-main-e02] serve#3 spawned (epoch 1793481990.397, +0.017 s after kill)
+21:26:30.755 [A-main-e02] mail m-takeover sent: sent #2 from sender to e02  (epoch 1793481990.752)
+21:26:31.376 [A-main-e02] serve#3 pid=820128 first CHANNEL (mail delivered): epoch 1793481991.284
+21:26:31.404 [A-main-e02] RESULT: kill -9 -> mail delivered by new serve in 0.9 s; serve#3 start -> mail 0.89 s
+21:26:31.407 [A-main-e02] serve#3 events:
+    1793481990.412 spawn pid=820128
+    1793481990.420 recv id=1 method=None
+    1793481990.613 handshake sent
+    1793481990.613 recv id=2 method=None
+    1793481991.114 recv id=mash-ping-1 method=ping
+    1793481991.284 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:26:30Z\ninstance: MOqVfSOkbOh1GylxJfKQYP\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e02"}}
+21:26:31.722 [A-main-e02] who --long: e02	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:31.736 [A-main-e02] mail inbox of e02: #1	from sender [verified]	2026-10-31T21:25:59Z	7 B	m-alive	kind task	instance 0N1uIeE6r5NUFA4kultHM2|#2	from sender [verified]	2026-10-31T21:26:30Z	10 B	m-takeover	kind task	instance MOqVfSOkbOh1GylxJfKQYP|
+21:26:32.749 [A-main-e03] binary: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)
+21:26:33.866 [A-main-e03] == step 1: serve #1 for endpoint e03 starts and takes the lease
+21:26:37.554 [A-main-e03] serve#1 pid=820582; who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:26:37.555 [A-main-e03] == step 2 (negative 1): serve #2 for e03 while #1 is alive and renewing (35 s, spans a 30 s renewal)
+21:26:38.560 [A-main-e03] serve#2 pid=821196 started
+21:26:43.574 [A-main-e03] mail m-alive sent while both run: sent #1 from sender to e03
+21:27:13.578 [A-main-e03] serve#1 alive: yes  serve#2 alive: yes
+21:27:13.579 [A-main-e03] serve#1 events:
+    1793481993.892 spawn pid=820582
+    1793481993.900 recv id=1 method=None
+    1793481994.093 handshake sent
+    1793481994.093 recv id=2 method=None
+    1793481994.594 recv id=mash-ping-1 method=ping
+    1793482003.673 CHANNEL {"content": "1 message from sender (task)\n\n--- #1 from sender [verified] at 2026-10-31T21:26:43Z\ninstance: woIJ3c4QyI42At9WTrSkHI\nkind: task\n> m-alive\n", "meta": {"count": "1", "seqs": "1", "to": "e03"}}
+    1793482024.595 recv id=mash-ping-2 method=ping
+21:27:13.582 [A-main-e03] serve#2 events:
+    1793481997.582 spawn pid=821196
+    1793481997.590 recv id=1 method=None
+    1793481997.782 handshake sent
+    1793481997.783 recv id=2 method=None
+    1793481998.283 CHANNEL {"content": "mash: endpoint e03 is already in use by another session (host rdev-randyb-dev, pid 820582, since 2026-10-31T21:26:33Z); mail is off for this session. mash is retrying every 10s."}
+21:27:13.585 [A-main-e03] serve#2 stderr:
+21:27:13.900 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:27:14.903 [A-main-e03] serve#2 stopped (SIGTERM); serve#1 alive: yes
+21:27:14.905 [A-main-e03] == step 3: kill -9 serve#1, immediately start serve#3 and send mail
+21:27:14.920 [A-main-e03] kill -9 820582 (epoch 1793482034.917)
+21:27:14.922 [A-main-e03] serve#1 gone: 
+21:27:14.951 [A-main-e03] serve#3 spawned (epoch 1793482034.934, +0.017 s after kill)
+21:27:15.281 [A-main-e03] mail m-takeover sent: sent #2 from sender to e03  (epoch 1793482035.277)
+21:27:15.798 [A-main-e03] serve#3 pid=829769 first CHANNEL (mail delivered): epoch 1793482035.757
+21:27:15.828 [A-main-e03] RESULT: kill -9 -> mail delivered by new serve in 0.84 s; serve#3 start -> mail 0.82 s
+21:27:15.830 [A-main-e03] serve#3 events:
+    1793482034.948 spawn pid=829769
+    1793482034.956 recv id=1 method=None
+    1793482035.149 handshake sent
+    1793482035.149 recv id=2 method=None
+    1793482035.650 recv id=mash-ping-1 method=ping
+    1793482035.757 CHANNEL {"content": "1 message from sender (task)\n\n--- #2 from sender [verified] at 2026-10-31T21:27:15Z\ninstance: UcxtilTXAhLEqcK3pQOJ4r\nkind: task\n> m-takeover\n", "meta": {"count": "1", "seqs": "2", "to": "e03"}}
+21:27:16.145 [A-main-e03] who --long: e03	online	seen 0s ago	live proof	lease host rdev-randyb-dev	lease version 0.0.0-dev
+21:27:16.160 [A-main-e03] mail inbox of e03: #1	from sender [verified]	2026-10-31T21:26:43Z	7 B	m-alive	kind task	instance woIJ3c4QyI42At9WTrSkHI|#2	from sender [verified]	2026-10-31T21:27:15Z	10 B	m-takeover	kind task	instance UcxtilTXAhLEqcK3pQOJ4r|
+21:27:52.947 [B1] == proxy t35 (7000 ms RTT) at nats://127.0.0.1:45699
+21:27:52.950 [B1] config.json: {"url":"nats://127.0.0.1:45699","owner":"o","open_timeout":"2s"}  (env has no MASH_URL override below)
+21:27:52.952 [B1] mash who, open_timeout=2s from config.json:
+21:27:54.998 [B1]   exit=1 elapsed=2.03s output: mash: connect nats://127.0.0.1:45699: context deadline exceeded|
+21:27:55.000 [B1] mash serve (MCP handshake sent), open_timeout=2s from config.json; stdout/stderr:
+21:28:10.019 [B1]   serve exit=0 elapsed=15.0s
+21:28:10.022 [B1]   serve stderr: mash: connect nats://127.0.0.1:45699: context deadline exceeded; retrying (a transient error does not end the wait)|
+21:28:10.025 [B1]   serve stdout: {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"experimental":{"claude/channel":{}},"tools":{}},"instructions":"You are mash endpoint \"sender\" (owner \"o\"): a durable mailbox on NATS, addressable by other agents.\n\nMail arrives by itself as \u003cchannel source=\"plugin:mash:mash\"\u003e even|
+21:28:10.029 [B1] == proxy t08 (1600 ms RTT) at nats://127.0.0.1:36701
+21:28:10.032 [B1] config.json: {"url":"nats://127.0.0.1:36701","owner":"o","open_timeout":"2s"}  (env has no MASH_URL override below)
+21:28:10.034 [B1] mash who, open_timeout=2s from config.json:
+21:28:12.059 [B1]   exit=1 elapsed=2.01s output: mash: connect nats://127.0.0.1:36701: context deadline exceeded|
+21:28:12.061 [B1] mash serve (MCP handshake sent), open_timeout=2s from config.json; stdout/stderr:
+21:28:27.081 [B1]   serve exit=0 elapsed=15.0s
+21:28:27.084 [B1]   serve stderr: mash: connect nats://127.0.0.1:36701: context deadline exceeded; retrying (a transient error does not end the wait)|
+21:28:27.087 [B1]   serve stdout: {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"experimental":{"claude/channel":{}},"tools":{}},"instructions":"You are mash endpoint \"sender\" (owner \"o\"): a durable mailbox on NATS, addressable by other agents.\n\nMail arrives by itself as \u003cchannel source=\"plugin:mash:mash\"\u003e even|
+21:28:46.871 [B2] == env override: no timeout in config.json, MASH_OPEN_TIMEOUT=2s, proxy RTT 7s
+21:28:48.898 [B2]   MASH_OPEN_TIMEOUT=2s who: elapsed=2.01s | mash: connect nats://127.0.0.1:45699: context deadline exceeded|
+21:28:48.899 [B2] == env wins over file: config.json open_timeout=60s, MASH_OPEN_TIMEOUT=2s
+21:28:50.925 [B2]   file 60s + env 2s who: elapsed=2.01s | mash: connect nats://127.0.0.1:45699: context deadline exceeded|
+21:28:50.927 [B2] == MASH_CALL_TIMEOUT: proxy RTT 1.6s, open_timeout 60s; call_timeout 1s must cut the requests, default 15s must pass
+21:28:56.565 [B2]   MASH_CALL_TIMEOUT=1s who: elapsed=5.62s | e01	offline	live proof|e02	offline	live proof|e03	offline	live proof|e04	offline	live proof|e05	offline	live proof|e06	offline	live proof|e07	offline	live proof|probe	offline	live proof|sender	offline	live proof|x	offline	live proof|
+21:29:00.600 [B2]   MASH_CALL_TIMEOUT=500ms inbox: elapsed=4.02s | inbox empty|
+21:29:06.239 [B2]   default call_timeout who (control): elapsed=5.62s | e01	offline	live proof|e02	offline	live proof|e03	offline	live proof|e04	offline	live proof|e05	offline	live proof|e06	offline	live proof|e07	offline	live proof|probe	offline	live proof|sender	offline	live proof|x	offline	live proof|
+21:29:11.874 [B2]   default call_timeout, open 60s, who (control, 1st lines): elapsed=5.62s | e01	offline	live proof|e02	offline	live proof|e03	offline	live proof|e04	offline	live proof|e05	offline	live proof|e06	offline	live proof|e07	offline	live proof|probe	offline	live proof|sender	offline	live proof|x	offline	live proof|
+21:29:11.876 [B2] == invalid values via env (direct URL, no proxy)
+21:29:11.901 [B2]   MASH_OPEN_TIMEOUT='0' who: elapsed=0.01s | mash: MASH_OPEN_TIMEOUT "0" is not a duration above zero (for example "20s" or "1m")|
+21:29:11.925 [B2]   MASH_OPEN_TIMEOUT='5' who: elapsed=0.01s | mash: MASH_OPEN_TIMEOUT "5" is not a duration above zero (for example "20s" or "1m")|
+21:29:11.949 [B2]   MASH_OPEN_TIMEOUT='abc' who: elapsed=0.01s | mash: MASH_OPEN_TIMEOUT "abc" is not a duration above zero (for example "20s" or "1m")|
+21:29:11.973 [B2]   MASH_OPEN_TIMEOUT='-1s' who: elapsed=0.01s | mash: MASH_OPEN_TIMEOUT "-1s" is not a duration above zero (for example "20s" or "1m")|
+21:29:11.998 [B2]   MASH_OPEN_TIMEOUT='0s' who: elapsed=0.01s | mash: MASH_OPEN_TIMEOUT "0s" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.022 [B2]   MASH_CALL_TIMEOUT='0' who: elapsed=0.01s | mash: MASH_CALL_TIMEOUT "0" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.064 [B2]   MASH_CALL_TIMEOUT='5' who: elapsed=0.03s | mash: MASH_CALL_TIMEOUT "5" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.089 [B2]   MASH_CALL_TIMEOUT='-1s' who: elapsed=0.01s | mash: MASH_CALL_TIMEOUT "-1s" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.090 [B2] == invalid values via config.json
+21:29:12.115 [B2]   config.json open_timeout="0" who: elapsed=0.01s | mash: config.json "open_timeout" "0" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.140 [B2]   config.json open_timeout="5" who: elapsed=0.01s | mash: config.json "open_timeout" "5" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.165 [B2]   config.json open_timeout=0 who: elapsed=0.01s | mash: <HOME>/.config/mash/config.json: json: cannot unmarshal number into Go struct field file.open_timeout of type string|
+21:29:12.190 [B2]   config.json open_timeout="0s" who: elapsed=0.01s | mash: config.json "open_timeout" "0s" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.214 [B2]   config.json call_timeout="0" who: elapsed=0.01s | mash: config.json "call_timeout" "0" is not a duration above zero (for example "20s" or "1m")|
+21:29:12.216 [B2] == valid control: MASH_OPEN_TIMEOUT=45s MASH_CALL_TIMEOUT=30s, direct
+21:29:12.545 [B2]   valid values who: elapsed=0.31s | e01	offline	live proof|e02	offline	live proof|e03	offline	live proof|e04	offline	live proof|e05	offline	live proof|e06	offline	live proof|e07	offline	live proof|probe	offline	live proof|sender	offline	live proof|x	offline	live proof|
+21:29:24.737 [B2] == MASH_CALL_TIMEOUT on a command whose requests run after open: send, proxy RTT 1.6s, open_timeout 60s (config.json)
+21:29:30.375 [B2]   default call_timeout (15s) send e07: elapsed=5.62s | sent #1 from sender to e07|
+21:29:35.409 [B2]   MASH_CALL_TIMEOUT=1s send e07: elapsed=5.02s | mash: send to e07 timed out; the message may or may not have been delivered. Retry with --id 317a24f5abcb35647ac5754ea8074e54 (the send tool's id) within 2 minutes to send it at most once; after that a retry may store a second copy. (context deadline exceeded)|
+21:29:41.047 [B2]   MASH_CALL_TIMEOUT=3s send e07: elapsed=5.62s | sent #3 from sender to e07|
+21:29:45.081 [B2]   MASH_CALL_TIMEOUT=500ms inbox: elapsed=4.02s | inbox empty|
+21:29:49.617 [B2]   MASH_CALL_TIMEOUT=500ms read 1: elapsed=4.52s | mash: no message #1 in sender's inbox|
+21:30:12.934 [B3] == main-N10: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=10, proxy 50 ms each way (RTT 100 ms), endpoint e05, 1 runs
+21:30:14.851 [B3]   warmup: tcp_accept=0.005 first_pull=1.380 waves_after_connect=7
+21:30:18.273 [B3]   run1: tcp_accept=0.005 first_pull=1.375 waves_after_connect=7
+21:30:18.276 [B3]   PROXYWAVES +0.15s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct+2 ; +0.26s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+6 ; +0.36s $KV.mash-leases.e05 ; +0.46s $JS.API.DIRECT.GET.KV_mash-directo ; +1.06s $JS.API.STREAM.INFO.inbox-e05 ; +1.27s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.37s _INBOX.e05.OBw6kTNS93DJ6N9KLnQT0H,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:30:28.059 [B3]   warmup: tcp_accept=0.005 first_pull=1.782 waves_after_connect=11
+21:30:31.890 [B3]   run1: tcp_accept=0.005 first_pull=1.780 waves_after_connect=11
+21:30:31.894 [B3]   PROXYWAVES +0.15s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct ; +0.25s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+6 ; +0.36s $JS.API.STREAM.INFO.KV_mash-leases ; +0.46s $KV.mash-leases.e05 ; +0.56s $JS.API.DIRECT.GET.KV_mash-leases. ; +0.66s $KV.mash-leases.e05 ; +0.76s $JS.API.DIRECT.GET.KV_mash-directo ; +1.36s $JS.API.STREAM.INFO.inbox-e05 ; +1.46s $JS.API.STREAM.INFO.inbox-e05 ; +1.67s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.77s _INBOX.e05.oPmUHtehor7V4dvYw6nt0P,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:30:35.724 [B3]   run2: tcp_accept=0.004 first_pull=1.779 waves_after_connect=11
+21:30:39.556 [B3]   run3: tcp_accept=0.004 first_pull=1.786 waves_after_connect=11
+21:30:44.172 [B3] == main-N10-rtt0: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=10, proxy 0 ms each way (RTT 0 ms), endpoint e05, 3 runs
+21:30:45.374 [B3]   warmup: tcp_accept=0.005 first_pull=0.709 waves_after_connect=2
+21:30:48.079 [B3]   run1: tcp_accept=0.004 first_pull=0.709 waves_after_connect=2
+21:30:48.083 [B3]   PROXYWAVES +0.00s $JS.API.STREAM.INFO.KV_mash-leases,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-leases.+13 ; +0.70s $JS.API.STREAM.INFO.inbox-e05,agents.hb.cc.o.e05,$SRV.INFO.agents+3
+21:30:50.790 [B3]   run2: tcp_accept=0.005 first_pull=0.711 waves_after_connect=2
+21:30:53.496 [B3]   run3: tcp_accept=0.004 first_pull=0.709 waves_after_connect=2
+21:30:55.020 [B3] == main-N10-rtt100: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=10, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:30:56.937 [B3]   warmup: tcp_accept=0.005 first_pull=1.374 waves_after_connect=7
+21:31:00.358 [B3]   run1: tcp_accept=0.005 first_pull=1.374 waves_after_connect=7
+21:31:00.362 [B3]   PROXYWAVES +0.15s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-leases+2 ; +0.25s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+6 ; +0.36s $KV.mash-leases.e05 ; +0.46s $JS.API.DIRECT.GET.KV_mash-directo ; +1.06s $JS.API.STREAM.INFO.inbox-e05 ; +1.27s agents.hb.cc.o.e05,$SRV.INFO.agents,$JS.API.CONSUMER.INFO.inbox-e05.de ; +1.37s _INBOX.e05.iBF0ZojDCrO0AKLPpcrsZN,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:31:03.785 [B3]   run2: tcp_accept=0.005 first_pull=1.374 waves_after_connect=7
+21:31:07.207 [B3]   run3: tcp_accept=0.005 first_pull=1.376 waves_after_connect=7
+21:31:13.181 [B3] == main-N40-rtt0: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=14, proxy 0 ms each way (RTT 0 ms), endpoint e05, 3 runs
+21:31:14.381 [B3]   warmup: tcp_accept=0.004 first_pull=0.709 waves_after_connect=2
+21:31:17.086 [B3]   run1: tcp_accept=0.004 first_pull=0.708 waves_after_connect=2
+21:31:17.090 [B3]   PROXYWAVES +0.00s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-leases,$JS.API.DIRECT.GET.KV_mash-directo+17 ; +0.70s $JS.API.STREAM.INFO.inbox-e05,agents.hb.cc.o.e05,$SRV.INFO.agents+3
+21:31:19.795 [B3]   run2: tcp_accept=0.004 first_pull=0.712 waves_after_connect=2
+21:31:22.500 [B3]   run3: tcp_accept=0.004 first_pull=0.709 waves_after_connect=2
+21:31:24.027 [B3] == main-N40-rtt100: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=14, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:31:25.943 [B3]   warmup: tcp_accept=0.004 first_pull=1.373 waves_after_connect=7
+21:31:29.362 [B3]   run1: tcp_accept=0.004 first_pull=1.373 waves_after_connect=7
+21:31:29.367 [B3]   PROXYWAVES +0.15s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct+2 ; +0.26s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+10 ; +0.36s $KV.mash-leases.e05 ; +0.46s $JS.API.DIRECT.GET.KV_mash-directo ; +1.06s $JS.API.STREAM.INFO.inbox-e05 ; +1.27s agents.hb.cc.o.e05,$SRV.INFO.agents,$JS.API.CONSUMER.INFO.inbox-e05.de ; +1.37s _INBOX.e05.9dh2zgYlltcvMAUs3Pov72,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:31:32.787 [B3]   run2: tcp_accept=0.004 first_pull=1.373 waves_after_connect=7
+21:31:36.207 [B3]   run3: tcp_accept=0.005 first_pull=1.374 waves_after_connect=7
+21:31:37.732 [B3] == pre121-N40-rtt100: mash 0.0.0-dev (commit unknown), endpoints registered=14, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:31:40.058 [B3]   warmup: tcp_accept=0.004 first_pull=1.777 waves_after_connect=11
+21:31:43.885 [B3]   run1: tcp_accept=0.005 first_pull=1.781 waves_after_connect=11
+21:31:43.889 [B3]   PROXYWAVES +0.15s $JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-directo ; +0.25s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+10 ; +0.36s $JS.API.STREAM.INFO.KV_mash-leases ; +0.46s $KV.mash-leases.e05 ; +0.56s $JS.API.DIRECT.GET.KV_mash-leases. ; +0.66s $KV.mash-leases.e05 ; +0.76s $JS.API.DIRECT.GET.KV_mash-directo ; +1.36s $JS.API.STREAM.INFO.inbox-e05 ; +1.46s $JS.API.STREAM.INFO.inbox-e05 ; +1.67s agents.hb.cc.o.e05,$SRV.INFO.agents,$JS.API.CONSUMER.INFO.inbox-e05.de ; +1.78s _INBOX.e05.bCN3mPSxGS1N3n84BmesBD,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:31:47.719 [B3]   run2: tcp_accept=0.004 first_pull=1.778 waves_after_connect=11
+21:31:51.548 [B3]   run3: tcp_accept=0.004 first_pull=1.777 waves_after_connect=11
+21:32:26.097 [B3] NOTE: first env (testenv defaults) capped at 14 endpoints (inbox stream storage 10047); B3 data below is from a second env with a larger JetStream disk limit (scratch-live/tenv, 8 GiB)
+21:32:33.345 [B3] ---- directory has 10 registered endpoints (target 10)
+21:32:33.377 [B3] == main-N10-rtt0: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=10, proxy 0 ms each way (RTT 0 ms), endpoint e05, 3 runs
+21:32:34.577 [B3]   warmup: tcp_accept=0.004 first_pull=0.715 waves_after_connect=2
+21:32:37.280 [B3]   run1: tcp_accept=0.005 first_pull=0.710 waves_after_connect=2
+21:32:37.284 [B3]   PROXYWAVES +0.00s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-leases.+46 ; +0.70s $JS.API.STREAM.INFO.inbox-e05,agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de+3
+21:32:39.988 [B3]   run2: tcp_accept=0.005 first_pull=0.711 waves_after_connect=2
+21:32:42.692 [B3]   run3: tcp_accept=0.005 first_pull=0.710 waves_after_connect=2
+21:32:44.240 [B3] == main-N10-rtt100: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=10, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:32:46.154 [B3]   warmup: tcp_accept=0.005 first_pull=1.376 waves_after_connect=7
+21:32:49.572 [B3]   run1: tcp_accept=0.005 first_pull=1.376 waves_after_connect=7
+21:32:49.576 [B3]   PROXYWAVES +0.15s $JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-leases,$JS.API.DIRECT.GET.KV_mash-leases.+2 ; +0.26s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+39 ; +0.36s $KV.mash-leases.e05 ; +0.46s $JS.API.DIRECT.GET.KV_mash-directo ; +1.06s $JS.API.STREAM.INFO.inbox-e05 ; +1.27s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.37s _INBOX.e05.t50AYE62HdPt18WIHZC1VQ,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:32:52.995 [B3]   run2: tcp_accept=0.004 first_pull=1.375 waves_after_connect=7
+21:32:56.416 [B3]   run3: tcp_accept=0.004 first_pull=1.374 waves_after_connect=7
+21:32:57.941 [B3] == pre121-N10-rtt100: mash 0.0.0-dev (commit unknown), endpoints registered=10, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:33:00.264 [B3]   warmup: tcp_accept=0.004 first_pull=1.782 waves_after_connect=11
+21:33:04.092 [B3]   run1: tcp_accept=0.004 first_pull=1.779 waves_after_connect=11
+21:33:04.096 [B3]   PROXYWAVES +0.15s $JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-directo ; +0.25s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+39 ; +0.36s $JS.API.STREAM.INFO.KV_mash-leases ; +0.46s $KV.mash-leases.e05 ; +0.56s $JS.API.DIRECT.GET.KV_mash-leases. ; +0.66s $KV.mash-leases.e05 ; +0.76s $JS.API.DIRECT.GET.KV_mash-directo ; +1.37s $JS.API.STREAM.INFO.inbox-e05 ; +1.47s $JS.API.STREAM.INFO.inbox-e05 ; +1.67s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.77s _INBOX.e05.4BC6MlKbgn5onTvkIhV9zO,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:33:08.027 [B3]   run2: tcp_accept=0.004 first_pull=1.899 waves_after_connect=11
+21:33:11.857 [B3]   run3: tcp_accept=0.004 first_pull=1.779 waves_after_connect=11
+21:33:13.791 [B3] ---- directory has 40 registered endpoints (target 40)
+21:33:13.834 [B3] == main-N40-rtt0: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=40, proxy 0 ms each way (RTT 0 ms), endpoint e05, 3 runs
+21:33:15.036 [B3]   warmup: tcp_accept=0.005 first_pull=0.710 waves_after_connect=2
+21:33:17.741 [B3]   run1: tcp_accept=0.005 first_pull=0.710 waves_after_connect=2
+21:33:17.745 [B3]   PROXYWAVES +0.00s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-leases,$JS.API.DIRECT.GET.KV_mash-directo+46 ; +0.70s $JS.API.STREAM.INFO.inbox-e05,agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de+3
+21:33:20.450 [B3]   run2: tcp_accept=0.004 first_pull=0.709 waves_after_connect=2
+21:33:23.158 [B3]   run3: tcp_accept=0.005 first_pull=0.709 waves_after_connect=2
+21:33:24.689 [B3] == main-N40-rtt100: mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff47059, endpoints registered=40, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:33:26.608 [B3]   warmup: tcp_accept=0.005 first_pull=1.379 waves_after_connect=7
+21:33:30.030 [B3]   run1: tcp_accept=0.005 first_pull=1.376 waves_after_connect=7
+21:33:30.034 [B3]   PROXYWAVES +0.15s $JS.API.DIRECT.GET.KV_mash-leases.,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-directo+2 ; +0.25s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+39 ; +0.36s $KV.mash-leases.e05 ; +0.46s $JS.API.DIRECT.GET.KV_mash-directo ; +1.06s $JS.API.STREAM.INFO.inbox-e05 ; +1.27s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.37s _INBOX.e05.A23FBRWvcy86TymbXWmKNs,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:33:33.456 [B3]   run2: tcp_accept=0.004 first_pull=1.375 waves_after_connect=7
+21:33:36.878 [B3]   run3: tcp_accept=0.004 first_pull=1.374 waves_after_connect=7
+21:33:38.408 [B3] == pre121-N40-rtt100: mash 0.0.0-dev (commit unknown), endpoints registered=40, proxy 50 ms each way (RTT 100 ms), endpoint e05, 3 runs
+21:33:40.734 [B3]   warmup: tcp_accept=0.004 first_pull=1.780 waves_after_connect=11
+21:33:44.564 [B3]   run1: tcp_accept=0.004 first_pull=1.779 waves_after_connect=11
+21:33:44.568 [B3]   PROXYWAVES +0.15s $JS.API.STREAM.INFO.KV_mash-direct,$JS.API.STREAM.INFO.KV_mash-direct,$JS.API.DIRECT.GET.KV_mash-directo ; +0.26s $JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo,$JS.API.DIRECT.GET.KV_mash-directo+39 ; +0.36s $JS.API.STREAM.INFO.KV_mash-leases ; +0.46s $KV.mash-leases.e05 ; +0.56s $JS.API.DIRECT.GET.KV_mash-leases. ; +0.66s $KV.mash-leases.e05 ; +0.76s $JS.API.DIRECT.GET.KV_mash-directo ; +1.36s $JS.API.STREAM.INFO.inbox-e05 ; +1.47s $JS.API.STREAM.INFO.inbox-e05 ; +1.67s agents.hb.cc.o.e05,$JS.API.CONSUMER.INFO.inbox-e05.de,$SRV.INFO.agents ; +1.78s _INBOX.e05.p9GwHaL0ilLS4DS6j6dfGF,$JS.API.CONSUMER.MSG.NEXT.inbox-e0
+21:33:48.425 [B3]   run2: tcp_accept=0.020 first_pull=1.800 waves_after_connect=11
+21:33:52.256 [B3]   run3: tcp_accept=0.004 first_pull=1.781 waves_after_connect=11
+
+# NOTE (env 1, B3 scale step): provisioning endpoints e08..e37 against testenv's default JetStream limits failed for 26 of the 30,
+# each with exactly:
+#   mash: inbox stream: nats: API error: code=500 err_code=10047 description=insufficient storage resources available
+# (testenv gives account MASH 256 MiB of disk; each inbox stream reserves 16 MiB, so the 14th endpoint is the last that fits).
+# Only 14 endpoints were registered in env 1. The 10-vs-40 comparison was therefore redone in env 2 (disk limit 8 GiB).

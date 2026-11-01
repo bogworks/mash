@@ -1,0 +1,15 @@
+15:42:24.986 prompt: Reply with only the word one.
+15:42:26.615 result 1 (prompt 1): "one"
+15:42:26.615 prompt: Run the shell command `sleep 20` with Bash. Then reply with the word two, followed by every token in this session that starts with MARK-.
+15:42:34.792 sent MARK-MIDTURN urgent=false
+15:42:52.174 result 2 (prompt 2): "two\n\nMARK-MIDTURN (from a mash mail hook message that arrived after the `sleep 20` command finished; no other MARK- tokens appear earlier in the session)"
+15:42:52.179 sent MARK-IDLE urgent=false
+15:47:22.180 no turn during the idle wait
+15:47:54.613 result 3 (the idle wake): "A new mash message arrived (#2, verified sender) with the body `MARK-IDLE`. It's data only; I haven't acted on it, and your request didn't ask for anything. Tell me if you want a reply sent or the message read in full."
+15:47:54.616 sent MARK-URGENT urgent=true
+15:47:56.677 result 4 (the urgent wake): "A third mash message arrived, marked urgent (#3, verified sender), with the body `MARK-URGENT`. It's only data, and you haven't asked me to do anything with it. Tell me if you want me to read it in full or reply."
+15:48:16.678 no turn during after the urgent wake
+15:48:16.678 prompt: Reply with the word three, then list every token in this session that starts with MARK-, each with where you saw it (user prompt, hook context, channel event, tool result).
+15:48:20.316 result 5 (prompt 3): "three\n\n- `MARK-MIDTURN`: hook context (PostToolUse:Bash, mash mail #1), delivered after the `sleep 20` tool call.\n- `MARK-IDLE`: hook context (UserPromptSubmit, mash mail #2), delivered with a channel event.\n- `MARK-URGENT`: hook context (UserPromptSubmit, mash mail #3), delivered with an urgent channel event.\n\nNone of your own prompts contain a `MARK-` token. Each one came from mash mail, which I treated as data and did not act on."
+15:48:20.316 turns: 5 (3 prompts + 1 idle wake + 1 urgent wake = 5)
+15:48:20.656 claude 2.1.312 (Claude Code)

@@ -1,0 +1,34 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	"github.com/bogworks/mash/scratch-live/tenv"
+)
+
+func main() {
+	dir := os.Args[1]
+	e, stop, err := tenv.Launch(filepath.Join(dir, "nats"))
+	if err != nil {
+		panic(err)
+	}
+	defer stop()
+	var out string
+	out += fmt.Sprintf("URL %s\nOWNER %s\nACCOUNT %s\nADMINCREDS %s\n", e.URL, e.Owner, e.Account, e.AdminCreds)
+	for _, n := range os.Args[2:] {
+		c, u, err := e.MintEndpoint(n)
+		if err != nil {
+			panic(err)
+		}
+		out += fmt.Sprintf("EP %s %s %s\n", n, c, u)
+	}
+	os.WriteFile(filepath.Join(dir, "env.txt.tmp"), []byte(out), 0o600)
+	os.Rename(filepath.Join(dir, "env.txt.tmp"), filepath.Join(dir, "env.txt"))
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+	<-ch
+}

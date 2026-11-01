@@ -1,0 +1,212 @@
+#!/bin/sh
+# mash launcher for the Claude Code plugin. Resolves, and if needed downloads and verifies, the mash binary,
+# then execs it. stdout belongs to the binary (it is the MCP stream); everything here goes to stderr.
+#
+# The release pin lives beside this script in `mash.pins` (written after a release by plugin/scripts/pin-plugin):
+#   version=<N.N.N>
+#   <sha256>  mash-<os>-<arch>
+# It is kept out of this file because this file is embedded in the mash binary; pinning it would change the binary.
+# Resolution order: $MASH_BIN; the managed copy for the pinned version; if pinned, download it (and only if that fails,
+# fall back to `mash` on PATH, logging it) so an older install on PATH never overrides the pin; if unpinned, `mash` on
+# PATH only. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
+# failed one leaves $BIN_DIR/.dl-failed-<version> and hooks skip the download for 300 s, going straight to PATH. Serve
+# keeps its 60 s fetch and prefetch 20 s, and neither honours the marker. A missing or empty mash.pins, or one without a version line, means unpinned: the launcher never downloads.
+case "$0" in
+  */*) SCRIPT_DIR=${0%/*}; [ -n "$SCRIPT_DIR" ] || SCRIPT_DIR=/ ;;
+  *) SCRIPT_DIR=. ;;
+esac
+PINS="$SCRIPT_DIR/mash.pins"
+MASH_VERSION=""
+if [ -f "$PINS" ]; then
+  MASH_VERSION=$(sed -n 's/^version=\([0-9][0-9A-Za-z.+-]*\)$/\1/p' "$PINS" 2>/dev/null | head -n 1)
+fi
+
+REPO_URL="https://github.com/bogworks/mash"
+HINT="mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)"
+
+log() { printf '%s\n' "mash launcher: $*" >&2; }
+
+PREFETCH=0
+[ "${1:-}" = "__prefetch" ] && PREFETCH=1
+HOOK=0
+[ "${1:-}" = "hook" ] && HOOK=1
+
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  DATA_DIR="$CLAUDE_PLUGIN_DATA"
+else
+  DATA_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/mash-plugin"
+fi
+BIN_DIR="$DATA_DIR/bin"
+# The managed binary's path is its version: sessions sharing one data dir with different pins never collide, and a
+# binary only reaches this path after sha256 and `version` verification. Unpinned: no managed binary, BIN is unset.
+BIN=""
+[ -n "$MASH_VERSION" ] && BIN="$BIN_DIR/mash-$MASH_VERSION"
+
+# Hook mode: a failed download leaves this marker (epoch seconds); hooks skip downloading while it is under 300 s old.
+MARKER="$BIN_DIR/.dl-failed-$MASH_VERSION"
+
+# True when a recent hook-mode download failure means hooks should not try again yet.
+dl_recently_failed() {
+  [ -f "$MARKER" ] || return 1
+  _t=$(cat "$MARKER" 2>/dev/null)
+  case "$_t" in ''|*[!0-9]*) return 1 ;; esac
+  _n=$(date +%s)
+  [ "$_n" -ge "$_t" ] && [ $((_n - _t)) -lt 300 ]
+}
+
+# True when the managed binary for the pinned version exists.
+managed_ok() {
+  [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
+}
+
+# `mash` on PATH that is not this script.
+path_mash() {
+  _oifs=$IFS
+  IFS=:
+  for _d in $PATH; do
+    [ -n "$_d" ] || _d=.
+    _c="$_d/mash"
+    if [ -f "$_c" ] && [ -x "$_c" ] && ! [ "$_c" -ef "$0" ]; then
+      IFS=$_oifs
+      printf '%s\n' "$_c"
+      return 0
+    fi
+  done
+  IFS=$_oifs
+  return 1
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+fetch() { # url dest
+  if [ "$HOOK" = 1 ]; then
+    # Hard 5 s budget: connect 2 s, total 4 s, no retries; `timeout` (where present) also bounds the whole process.
+    if command -v curl >/dev/null 2>&1; then
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 4 curl -fsSL --connect-timeout 2 --max-time 4 -o "$2" "$1" >&2
+      else
+        curl -fsSL --connect-timeout 2 --max-time 4 -o "$2" "$1" >&2
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 4 wget -q --tries=1 --timeout=2 -O "$2" "$1" >&2
+      else
+        wget -q --tries=1 --timeout=2 -O "$2" "$1" >&2
+      fi
+    else
+      log "neither curl nor wget is available"
+      return 1
+    fi
+    return
+  fi
+  if [ "$PREFETCH" = 1 ]; then _max=20; else _max=60; fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 2 --retry-delay 1 --connect-timeout 5 --max-time "$_max" -o "$2" "$1" >&2
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --tries=3 --timeout=10 -O "$2" "$1" >&2
+  else
+    log "neither curl nor wget is available"
+    return 1
+  fi
+}
+
+# Download, verify and install the pinned binary into $BIN. Non-zero on any failure; installs nothing then.
+download() {
+  case "$(uname -s)" in
+    Linux) _os=linux ;;
+    Darwin) _os=darwin ;;
+    *) log "unsupported OS $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _arch=amd64 ;;
+    aarch64|arm64) _arch=arm64 ;;
+    *) log "unsupported architecture $(uname -m)"; return 1 ;;
+  esac
+  _asset="mash-$_os-$_arch"
+  _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
+  if [ -z "$_want" ]; then
+    log "no pinned sha256 for $_asset; refusing to download"
+    return 1
+  fi
+  mkdir -p "$BIN_DIR" || { log "cannot create $BIN_DIR"; return 1; }
+  _tmp="$BIN_DIR/.mash.$$.tmp"
+  rm -f "$_tmp"
+  _base="${MASH_RELEASE_BASE:-$REPO_URL/releases/download}"
+  _url="$_base/v$MASH_VERSION/$_asset"
+  log "downloading $_url"
+  if ! fetch "$_url" "$_tmp"; then
+    rm -f "$_tmp"
+    log "download failed (offline?)"
+    return 1
+  fi
+  _got=$(sha256_of "$_tmp") || { rm -f "$_tmp"; log "no sha256sum or shasum available"; return 1; }
+  if [ "$_got" != "$_want" ]; then
+    rm -f "$_tmp"
+    log "sha256 mismatch for $_asset (want $_want, got $_got); refusing"
+    return 1
+  fi
+  chmod +x "$_tmp"
+  _out=$("$_tmp" version 2>/dev/null) || { rm -f "$_tmp"; log "downloaded binary failed to run"; return 1; }
+  case "$_out" in
+    *"$MASH_VERSION"*) ;;
+    *) rm -f "$_tmp"; log "downloaded binary reports '$_out', expected $MASH_VERSION"; return 1 ;;
+  esac
+  mv -f "$_tmp" "$BIN" || { rm -f "$_tmp"; log "cannot install $BIN"; return 1; }
+  rm -f "$MARKER"
+  return 0
+}
+
+# Print the resolved binary path; logs go to stderr.
+resolve() {
+  if [ -n "${MASH_BIN:-}" ]; then
+    printf '%s\n' "$MASH_BIN"
+    return 0
+  fi
+  if managed_ok; then
+    printf '%s\n' "$BIN"
+    return 0
+  fi
+  if [ -n "$MASH_VERSION" ]; then
+    if [ "$HOOK" = 1 ] && dl_recently_failed; then
+      log "hook: skipping download (failed recently)"
+    elif download; then
+      printf '%s\n' "$BIN"
+      return 0
+    elif [ "$HOOK" = 1 ]; then
+      mkdir -p "$BIN_DIR" 2>/dev/null && date +%s > "$MARKER" 2>/dev/null
+    fi
+    if _p=$(path_mash); then
+      log "pinned download failed; falling back to $_p"
+      printf '%s\n' "$_p"
+      return 0
+    fi
+    return 1
+  fi
+  if _p=$(path_mash); then
+    printf '%s\n' "$_p"
+    return 0
+  fi
+  return 1
+}
+
+if [ "$PREFETCH" = 1 ]; then
+  # Warm the managed copy only; an override needs no prefetch. Never fails, never writes stdout.
+  if [ -z "${MASH_BIN:-}" ] && ! managed_ok && [ -n "$MASH_VERSION" ]; then
+    download >/dev/null || log "prefetch did not install a binary"
+  fi
+  exit 0
+fi
+
+if ! TARGET=$(resolve); then
+  log "$HINT"
+  exit 127
+fi
+exec "$TARGET" "$@"

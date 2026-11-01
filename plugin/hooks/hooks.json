@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/mash\" __prefetch", "timeout": 45 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "d=\"${XDG_STATE_HOME:-$HOME/.local/state}/mash\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; sh \"${CLAUDE_PLUGIN_ROOT}/scripts/mash\" hook 2>>\"$l\"; exit 0", "timeout": 10 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "d=\"${XDG_STATE_HOME:-$HOME/.local/state}/mash\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; sh \"${CLAUDE_PLUGIN_ROOT}/scripts/mash\" hook 2>>\"$l\"; exit 0", "timeout": 10 }]
+      }
+    ]
+  }
+}

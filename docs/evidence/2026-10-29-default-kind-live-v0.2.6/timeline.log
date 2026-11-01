@@ -1,0 +1,23 @@
+18:40:30.083 sent MARK-EARLY urgent=false kind="task"
+18:40:35.087 sent MARK-EARLY2 urgent=false kind="task"
+18:40:45.097 early mail sent; 15s since start; unread=2
+18:40:45.097 prompt: Reply with the word one, then list every token in this session that starts with MARK-, each with where you saw it (user prompt, hook context, channel event, tool result).
+18:40:47.147 result 1 (prompt 1 (early mail)): "one\n\n- `MARK-EARLY`: mash mail #1 from sender (verified), delivered in the UserPromptSubmit hook context.\n- `MARK-EARLY2`: mash mail #2 from sender (verified), same UserPromptSubmit hook context.\n\nI found no `MARK-` tokens in your prompt, the SessionStart hook, or the tool schemas."
+18:40:47.147 MARK-EARLY seen in result text
+18:40:47.147 MARK-EARLY2 seen in result text
+18:40:47.185 sent MARK-UNKINDED urgent=false kind=""
+18:41:22.186 no turn during the unkinded idle wait
+18:41:34.083 result 2 (the unkinded wake): "New mash message #3 from a verified sender arrived with one `MARK-` token: `MARK-UNKINDED`. It came in the UserPromptSubmit hook context, and the body is only that token, with no request attached. Nothing needs doing from it."
+18:41:34.083 unkinded wake after 47s (idle wake 45s)
+18:41:54.084 no turn during after the unkinded wake
+18:41:54.087 sent MARK-FYI urgent=false kind="fyi"
+18:43:29.088 no turn during the fyi wait (2x idle wake)
+18:43:29.091 sent MARK-URGENT urgent=true kind="task"
+18:43:30.325 result 3 (the urgent wake): "Two new verified mash messages arrived, each with one `MARK-` token:\n\n- `MARK-FYI` (#4, kind fyi, 18:41:54Z)\n- `MARK-URGENT` (#5, kind task, marked urgent, 18:43:29Z)\n\nBoth arrived in the UserPromptSubmit hook context. The bodies are only the tokens, with no request attached, so nothing needs doing."
+18:43:45.326 no turn during after the urgent wake
+18:43:45.326 prompt: Reply with the word two, then list every token in this session that starts with MARK-, each with where you saw it (user prompt, hook context, channel event, tool result).
+18:43:47.599 result 4 (prompt 2 (final)): "two\n\n- `MARK-EARLY`: mash mail #1, in the UserPromptSubmit hook context.\n- `MARK-EARLY2`: mash mail #2, in the UserPromptSubmit hook context.\n- `MARK-UNKINDED`: mash mail #3, in a channel event (`plugin:mash:mash`, seq 3).\n- `MARK-FYI`: mash mail #4, in a channel event (seq 4).\n- `MARK-URGENT`: mash mail #5, in a channel event (seq 5).\n\nNone appeared in your prompts, the SessionStart hook, or any tool result."
+18:43:47.599 MARK-FYI seen in result text
+18:43:47.603 final unread=0
+18:43:47.603 turns: 4 (2 prompts + unkinded wake + urgent wake = 4)
+18:43:48.223 claude 2.1.312 (Claude Code)

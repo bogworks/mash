@@ -1,0 +1,137 @@
+name: ci
+# Every push to main runs the test matrix, docs-only too: the release gate reads main's test runs, and a docs-only
+# head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Jobs run on GitHub-hosted
+# runners by default (ubuntu-latest, macos-latest); vars.RUNNER_LINUX can point Linux jobs at a runner of the maintainers'
+# choice, never for a fork pull request, which always gets ubuntu-latest. No self-hosted runner is used on this public
+# repo. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the test matrix.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: go1.27.3
+# A new push to a pull request supersedes its older run; a run on main is never cancelled (the release gate reads
+# main's check runs).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # Does this pull request touch code? A push always counts as code: the release gate reads main's test runs.
+  changes:
+    timeout-minutes: 5
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          if [ "$EVENT" = pull_request ]; then
+            files="$(git diff --name-only "$BASE" HEAD)"
+            # Not piped into grep -q: an early grep exit would fail the diff under pipefail.
+            if ! grep -qvE '^docs/|\.md$' <<<"$files"; then code=false; fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+  test:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.code == 'true'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false # one OS failing must not cancel the other and hide its result
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    # GitHub-hosted: Linux on ubuntu-latest unless vars.RUNNER_LINUX names another runner (never for a fork pull request,
+    # which always gets ubuntu-latest), macOS on macos-latest for every run, fork or not. The matrix keeps GitHub's names, so
+    # the check names the release gate requires (test (macos-latest)) don't change. No self-hosted runner is used here.
+    # runs-on cannot read job env, so the fork test is spelled out in the Linux runs-on expression.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest') || 'macos-latest' }}
+    steps:
+      # Keep every Go cache and temp dir under RUNNER_TEMP, which is wiped below (harmless on a fresh hosted runner).
+      - name: Job-local Go and temp dirs (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
+          {
+            echo "GOPATH=$RUNNER_TEMP/go"
+            echo "GOCACHE=$RUNNER_TEMP/gocache"
+            echo "GOMODCACHE=$RUNNER_TEMP/gomod"
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ matrix.os != 'macos-latest' }}
+      - run: go vet ./...
+      # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner and about 4x that on the
+      # macOS runner, past go test's default 10 m (run 41292329623). A real hang still fails.
+      - run: go test -race -timeout 20m ./...
+      - name: Leave nothing behind (macOS)
+        if: always() && matrix.os == 'macos-latest'
+        run: |
+          # Go's module cache is read-only, so make it writable before removing it.
+          chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
+          rm -rf "$RUNNER_TOOL_CACHE/go"
+          git clean -ffdx || true
+  # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
+  # on the candidate, so the name is explicit and the job is neither conditional nor matrixed: every release target
+  # built from two fresh clones in different directories must give identical bytes, so a change that breaks
+  # reproducibility fails here, before a tag does.
+  reproducible:
+    name: reproducible
+    timeout-minutes: 30
+    # Same runner choice as the other Linux jobs: a fork pull request always gets ubuntu-latest, never vars.RUNNER_LINUX.
+    # This is the release-facing check (codex H1 on #39).
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build every release target twice in fresh clones and compare
+        run: |
+          set -euo pipefail
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            scripts/build-twice "${t%/*}" "${t#*/}" 0.0.0-ci "$GITHUB_SHA" "$RUNNER_TEMP/out/mash-${t%/*}-${t#*/}"
+          done
+      - name: The binary reports its version and commit
+        run: |
+          set -euo pipefail
+          got="$("$RUNNER_TEMP/out/mash-linux-amd64" version)"
+          want="mash 0.0.0-ci (commit $GITHUB_SHA)"
+          if [ "$got" != "$want" ]; then echo "mash version printed '$got', expected '$want'" >&2; exit 1; fi
+  # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed (test
+  # may skip a pull request that touches no code). always(), so a failed or skipped job still gives a verdict.
+  pr-check:
+    needs: [changes, test, reproducible]
+    if: always()
+    timeout-minutes: 5
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    steps:
+      - name: Every required job passed
+        env:
+          CODE: ${{ needs.changes.outputs.code }}
+          TEST: ${{ needs.test.result }}
+          REPRO: ${{ needs.reproducible.result }}
+        run: |
+          set -eu
+          echo "changes: code=$CODE; test: $TEST; reproducible: $REPRO"
+          [ "$REPRO" = success ] || { echo "reproducible: $REPRO" >&2; exit 1; }
+          case "$CODE/$TEST" in
+            */success | false/skipped) ;;
+            *) echo "test: $TEST (code changed: $CODE)" >&2; exit 1 ;;
+          esac

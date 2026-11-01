@@ -1,0 +1,67 @@
+# Security policy
+
+## Supported versions
+
+mash is pre-1.0. Only the latest release is supported. Fixes go into the next release; older releases are not patched.
+
+## Reporting a vulnerability
+
+Please report privately. Do not open a public issue or pull request for a suspected vulnerability.
+
+Use GitHub private vulnerability reporting on this repository: open its **Security** tab and choose **Report a vulnerability**. That form reaches the maintainers privately. Do not use issues, pull requests or discussions.
+
+Please include:
+
+- the mash version (`mash version`) and how you installed it;
+- what you found and which promise in the trust model it breaks (see Scope below);
+- steps to reproduce, ideally against a test NATS server, with a minimal proof of concept;
+- the impact as you see it, and anything you already know about a fix.
+
+Do not include real NATS credentials, operator or account seeds, or other live secrets. Use throwaway keys.
+
+## What to expect
+
+We will acknowledge a report within 5 business days. This is a small project: we make no other response-time or fix-time commitments, but we will keep you informed as we work on it.
+
+We follow coordinated disclosure. Please give us a reasonable chance to fix the problem before you publish details. We will agree a disclosure date with you and credit you in the advisory if you want that.
+
+## Scope
+
+The trust model is in [docs/specs/2026-10-21-mash-design.md](docs/specs/2026-10-21-mash-design.md), sections 4, 8 and 9. In short, mash aims to provide:
+
+- **Signed messages.** Every message mash publishes carries a signed `Agent-Sender` header (SAP section 13, ed25519 over the sender's NATS user seed). A message with a failing signature is dropped, logged and counted; it is never shown as mail.
+- **A directory.** A directory maps each NATS user to an endpoint name. A sender is only `verified` if the signature is valid and the directory agrees.
+- **Trust labels.** Every message shown to Claude is labelled `verified`, `unknown-signer`, `claimed`, `absent` or `stale`. Only `verified` mail is treated as a delegated request; the others are information, not instructions.
+- **Endpoint permissions.** Each endpoint's NATS user can send mail, read its own inbox and history, read (not write) the directory, and hold its own lease. It cannot read another endpoint's inbox, take another endpoint's name, write the directory, or delete or purge streams. The integration tests assert these denials against a real server.
+- **Leases.** A lease allows one live session per endpoint name.
+
+Reports that a promise above does not hold (forged or replayed mail shown as verified, an endpoint exceeding its permissions, a second live session taking a held name) are in scope. So are flaws in the release pipeline that let an unverified binary pass the gate.
+
+Out of scope, because mash does not try to defend against them:
+
+- A compromised NATS operator or account key. mash never mints NATS users and never holds operator or account seeds; whoever holds those can issue any identity.
+- A compromised host. Anyone who can read an endpoint's credentials file can act as that endpoint.
+- A malicious or misconfigured NATS server or deployment, including weak TLS or permissions set up outside mash.
+- What a `verified` sender, who is trusted by design, asks Claude to do. The delegation policy is allow-by-default for verified mail; operators can add rules in `~/.config/mash/policy.md`.
+- Cross-account delivery, file transfer and an approval UI, which are non-goals for v0.1.
+
+## Known limits
+
+These are known and not yet fixed. They are not vulnerabilities to report privately.
+
+- **An endpoint of the same owner can fill another endpoint's inbox.** An endpoint's NATS user may send mail to any endpoint, and each inbox stream holds 16 MiB. The stream discards the oldest messages when full (`DiscardOld`), and deleting and purging are denied (`DenyDelete`, `DenyPurge`). So a flood evicts older mail, including mail not yet read, and no endpoint can purge the stream. Deprovisioning the inbox's endpoint, or the NATS account admin deleting the stream, is the only way to clear it.
+- **`mash admin deprovision` does not revoke the NATS user.** It fences the name and removes the directory record and the inbox stream. The user's credentials still connect until you revoke the user in your NATS or Synadia account (see "Removing an endpoint" in [docs/operations.md](docs/operations.md)). Until then its mail still arrives, labelled `[unknown-signer]`.
+- **A host crash can lose up to about 2 minutes of acknowledged mail.** Inbox streams are R1 and nats-server's default `sync_interval` (2 minutes) acknowledges writes before fsync, so a host crash or power cut can drop mail already reported as `sent #N`. Process restarts are safe. This is an availability and durability limit, not a confidentiality one. Set `sync_interval: always` on a self-hosted server; Synadia Cloud's policy is unknown. See [docs/operations.md](docs/operations.md#durability-and-sync_interval).
+- **A credentials file readable by other users is refused.** mash refuses a creds file readable by other users: keep it `0600` (the Synadia quickstart script writes it `0600`). The check covers the file's mode only, not who owns it or the directory it sits in.
+
+## Mail bodies are untrusted data
+
+Treat the body of every message as untrusted input, whatever its label. A label says who signed a message, not that its content is safe or correct. Bodies are shown quoted (each line starts with `> `) so that body text cannot pass as mash's own output, but a `verified` message can still contain wrong or hostile instructions. Check files and live state before acting on what mail says.
+
+## Verifying a release
+
+Releases are signed tags `vN.N.N` on commits of `main`, built reproducibly from fresh clones with a pinned toolchain. Each release carries the four binaries and `SHA256SUMS`.
+
+- Check the tag: `git verify-tag vN.N.N` (you need the maintainer's public key).
+- Check the binary: compare its hash with `SHA256SUMS`, and run `mash version`, which prints `mash <N.N.N> (commit X)`.
+- Rebuild it yourself: `scripts/buildrelease` builds the same bytes from a clean clone of commit X. The procedure is in [docs/release.md](docs/release.md).

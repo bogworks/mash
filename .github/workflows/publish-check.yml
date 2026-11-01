@@ -1,0 +1,103 @@
+name: publish-check
+# "Publishing must be deterministic": a daily check of the repo this workflow runs in, three rules (scripts/publishcheck
+# has the code):
+#   R1  every v* tag has a release: a published one, or a draft younger than 2 h (R3 flags a draft older than that); a
+#       release-candidate tag (vX.Y.Z-rcN) with no release at all is exempt, because its draft was deleted
+#   R2  published releases, release candidates excluded, went out in version order (semver; published_at never goes down)
+#   R3  no draft release is older than 2 h, rc drafts included, measured from the latest of the release's and its assets'
+#       created/updated times (the release's own created_at is the tagged commit's date): an rc draft left over 2 h is a
+#       violation by design, since a draft that sits is a publish that did not finish
+# It audits ONLY the repo it runs in, with its own github.token. No long-lived cross-repo token is used, on purpose.
+# The releases API shows draft releases only to a caller with push access, so the job asks for `contents: write`:
+# that lets the token list this repo's own draft releases (the job reads and never writes them). The workflow-level
+# permission is contents: read, and the job overrides it.
+# The notification is an issue in this same repo (opened, or commented on if one is already open), plus a red run.
+on:
+  schedule:
+    # 06:47Z daily, off the hour, so it does not queue with jobs that start on it.
+    - cron: "47 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publish-check
+  cancel-in-progress: false
+env:
+  GOTOOLCHAIN: go1.27.3
+jobs:
+  check:
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Fetch tags and releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$REPO/git/matching-refs/tags/v" > "$RUNNER_TEMP/tags.json"
+          gh api --paginate --slurp "repos/$REPO/releases" > "$RUNNER_TEMP/releases.json"
+      - name: Check the rules
+        id: check
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rc=0
+          go run ./scripts/publishcheck -repo "$REPO" -tags "$RUNNER_TEMP/tags.json" -releases "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/violations.txt" || rc=$?
+          {
+            echo "## publish-check: $REPO (exit $rc)"
+            echo
+            if [ "$rc" = 0 ]; then
+              echo "No violations."
+            else
+              echo '```'
+              cat "$RUNNER_TEMP/violations.txt"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # Exit 1 is violations (reported below, then the job goes red); anything else is the tool failing: red now.
+          if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then
+            exit "$rc"
+          fi
+      # The notification: one open issue, kept up to date by a comment on each red day.
+      - name: Open or update the issue
+        if: steps.check.outputs.rc == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="publish-check: $REPO has release violations"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/violations.txt"
+            echo '```'
+            echo
+            echo "Run: $RUN_URL"
+          } > "$RUNNER_TEMP/body.md"
+          n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title \
+            | jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
+      # The signal: the job ends red when there are violations.
+      - name: Fail on violations
+        if: steps.check.outputs.rc == '1'
+        run: |
+          echo "publish-check found violations: see the summary and the issue" >&2
+          exit 1

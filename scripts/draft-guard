@@ -1,0 +1,53 @@
+#!/bin/sh
+# draft-guard <tag> [releases.json]
+# draft-guard --after-create <tag>
+#
+# Refuses (exit 1) while a DRAFT release exists for a v<N.N.N> tag with a LOWER version than <tag>: an older draft
+# left behind is a release nobody published or discarded, and release ordering and notes go wrong behind it. A draft of
+# <tag> itself (a rerun), a draft of a higher version, a published release and any tag not shaped v<N.N.N> are ignored.
+# Input is the JSON of `gh release list --limit 200 --json tagName,isDraft`, from the file argument or stdin.
+# Requires jq (preinstalled on GitHub runners). Exit 2 for a usage or input error.
+#
+# --after-create is the re-check run right after `gh release create`, because two runs of different tags can both pass
+# the check above before either has created its draft. It lists the releases again (`gh release list`) and, when a
+# DRAFT of a LOWER version or a PUBLISHED release of a HIGHER version exists, prints which release(s) stand in the way,
+# says this run's draft of <tag> is left in place for manual resolution, and exits 1. It NEVER deletes anything.
+set -eu
+after=0
+if [ "${1:-}" = "--after-create" ]; then after=1; shift; fi
+tag=${1:?usage: draft-guard [--after-create] <tag> [releases.json]}
+if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "draft-guard: not a version tag: $tag" >&2
+  exit 2
+fi
+if [ "$after" = 1 ]; then
+  input=$(gh release list --limit 200 --json tagName,isDraft) || { echo "draft-guard: cannot list releases" >&2; exit 2; }
+  conflict=$(printf '%s\n' "$input" | jq -r --arg tag "$tag" '
+    def ver: ltrimstr("v") | split(".") | map(tonumber);
+    ($tag | ver) as $t
+    | .[]
+    | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    | select(((.isDraft == true) and ((.tagName | ver) < $t)) or ((.isDraft != true) and ((.tagName | ver) > $t)))
+    | (if .isDraft == true then "draft " else "published " end) + .tagName') || { echo "draft-guard: cannot read the release list" >&2; exit 2; }
+  if [ -n "$conflict" ]; then
+    echo "draft-guard: another release now stands in the way of $tag (a race between two tag runs):" >&2
+    printf '%s\n' "$conflict" | sed 's/^/  /' >&2
+    echo "This run's draft of $tag is left in place for manual resolution: check its state, then \`gh release delete $tag\`, or publish the lower release first, then rerun this workflow." >&2
+    exit 1
+  fi
+  exit 0
+fi
+if [ $# -ge 2 ]; then input=$(cat "$2"); else input=$(cat); fi
+older=$(printf '%s\n' "$input" | jq -r --arg tag "$tag" '
+  def ver: ltrimstr("v") | split(".") | map(tonumber);
+  ($tag | ver) as $t
+  | .[]
+  | select(.isDraft == true and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+  | select((.tagName | ver) < $t)
+  | .tagName') || { echo "draft-guard: cannot read the release list" >&2; exit 2; }
+if [ -n "$older" ]; then
+  echo "draft-guard: refusing to draft $tag while older draft release(s) exist:" >&2
+  printf '%s\n' "$older" | sed 's/^/  /' >&2
+  echo "Publish or delete them (gh release delete <tag>) first, then rerun this workflow." >&2
+  exit 1
+fi

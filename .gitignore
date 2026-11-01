@@ -1,0 +1,6 @@
+.DS_Store
+*.creds
+/dist/
+/releasecheck
+/buildrelease
+/mash

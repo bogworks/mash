@@ -1,0 +1,9 @@
+# The keys trusted to sign a release's SHA256SUMS (SHA256SUMS.sig, ssh-keygen -Y sign, namespace mash-release):
+# release-check --assets signs with one and verifies against this file as it stands at the candidate X, and anyone can
+# verify a download against it: ssh-keygen -Y verify -f ci/release.allowed_signers -I release -n mash-release -s SHA256SUMS.sig < SHA256SUMS
+# The principal is "release". The key is the maintainer's release key, SHA256:plqtkAdqVCpdF/n+c54pPAFozFqXpXlJeeh2/aFnIS4,
+# the key that signs the tags. The namespace mash-release is part of what is signed, so a signature this key makes for
+# any other purpose is not valid here.
+# This file may list a second key slot for rotation: a release is signed by any listed key, and a rotation ships first
+# in a release signed by the old key.
+release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOUSpbYPrEMuCnfyBufZyZZ9pAjL1FjPxcXBp8IwFp9o

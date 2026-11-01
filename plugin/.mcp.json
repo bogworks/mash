@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mash": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/mash",
+      "args": ["serve"],
+      "env": {"MASH_SPOOL_FROM_START": "1", "MASH_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"}
+    }
+  }
+}

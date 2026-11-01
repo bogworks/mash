@@ -1,0 +1,13 @@
+{
+  "name": "mash",
+  "owner": { "name": "Bogworks", "url": "https://github.com/bogworks" },
+  "metadata": { "description": "mash: a messaging mesh for Claude Code sessions" },
+  "plugins": [
+    {
+      "name": "mash",
+      "source": "./plugin",
+      "description": "Durable, signed mail between Claude Code sessions over NATS (SAP 0.3 + a mail verb), delivered by hook, with a channel as a one-line wake for an idle session.",
+      "category": "productivity"
+    }
+  ]
+}

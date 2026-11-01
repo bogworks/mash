@@ -1,0 +1,47 @@
+10:28:59.097 [L1] before: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (baseline claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1)
+10:28:59.488 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:00.162 [L1] cleanup claude plugin uninstall mash@mash: err=exit status 1 out=✘ Failed to uninstall plugin "mash@mash": Plugin "mash@mash" not found in installed plugins
+10:29:00.763 [L1] cleanup claude plugin marketplace remove mash: err=exit status 1 out=✘ Failed to remove marketplace: Marketplace 'mash' not found
+10:29:00.764 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:01.069 [L1] after: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (err <nil>)
+10:29:01.070 [L2] not run: server-managed settings without mash (no organisation account)
+10:29:01.315 [L3] before: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (baseline claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1)
+10:29:01.316 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:02.042 [L3] claude plugin marketplace: err=<nil> out=Adding marketplace…✔ Successfully added marketplace: mash (declared in user settings)
+10:29:02.719 [L3] claude plugin install: err=<nil> out=Installing plugin "mash@mash"...✔ Successfully installed plugin: mash@mash (scope: user)
+10:29:03.426 [L3] PASS: plugin mash@mash installed from the checkout (plugin list: Installed plugins: ❯ mash@mash Version: 0.2.10 Read from: <checkout>/plugin Scope: user Status: ✔ enabled)
+10:29:08.210 [L3] claude exited after 5s: err=<nil> lines=15 results=1 turns=2 tools=[Bash]
+10:29:08.210 [L3] PASS: no mash on PATH: nothing hangs (finished inside the cap, a result produced) (elapsed 5s err <nil> results 1)
+10:29:08.210 [L3] RECORDED: no mash on PATH: MCP server state (init message) (plugin:mash:mash=failed, claude.ai Claude Docs=pending, claude.ai Google Slides=needs-auth, claude.ai Google Sheets=needs-auth, claude.ai Google Docs=needs-auth, claude.ai Google Calendar=needs-auth, claude.ai Gmail=needs-auth, claude.ai Google Drive=needs-auth, claude.ai Slack=needs-auth, claude.ai...)
+10:29:08.210 [L3] PASS: no mash on PATH: hook.log says so (hook.log (252 bytes): mash launcher: mash: no binary found. Install: go install github.com/randybias/mash/cmd/mash@latest (or see docs/install.md) / mash launcher: mash: no binary found. Install: go install github.com/randybias/mash/cmd/mash@latest (or see docs/install.md))
+10:29:08.210 [L3] RECORDED: a failed plugin MCP server is cached per config dir (a failed plugin MCP server is cached per config dir for ~15 min)
+10:29:08.210 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir)
+10:29:08.213 [L3] sent MARK-L3-911338
+10:29:20.891 [L3] claude exited after 13s: err=<nil> lines=20 results=1 turns=2 tools=[Bash]
+10:29:20.892 [L3] PASS: mash reachable: finished and named the marker (elapsed 13s err <nil> turns 2)
+10:29:20.892 [L3] RECORDED: mash reachable: MCP server state (init message) (plugin:mash:mash=connected, claude.ai Claude Docs=pending, claude.ai Google Slides=needs-auth, claude.ai Google Sheets=needs-auth, claude.ai Google Docs=needs-auth, claude.ai Google Calendar=needs-auth, claude.ai Gmail=needs-auth, claude.ai Google Drive=needs-auth, claude.ai Slack=needs-auth, claude...)
+10:29:20.892 [L3] RECORDED: mash reachable: the model's answer (MARK-L3-911338)
+10:29:20.892 [L3] RECORDED: serve's owner record (parent pid, session id, launch token) ({"pid":740236,"session":"f3b55c47-6858-4320-add0-44fbd16251ee"})
+10:29:20.892 [L3] PASS: MASH_HOOK_TRACE=1: the hook logged its pid chain and session ids (1 trace lines; first: mash hook: trace pid=746078 ancestors=[746074 740236 735729 734682 734652 2823614 2823309 2783795 703] hook-session="f3b55c47-6858-4320-add0-44fbd16251ee" match=true (session id))
+10:29:20.892 [L3] PASS: a traced hook matched serve's ownership (and so drained) (trace lines: mash hook: trace pid=746078 ancestors=[746074 740236 735729 734682 734652 2823614 2823309 2783795 703] hook-session="f3b55c47-6858-4320-add0-44fbd16251ee" match=true (session id))
+10:29:21.625 [L3] cleanup claude plugin uninstall mash@mash: err=<nil> out=✔ Successfully uninstalled plugin: mash (scope: user)
+10:29:23.075 [L3] cleanup claude plugin marketplace remove mash: err=<nil> out=✔ Successfully removed marketplace: mash
+10:29:23.075 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:23.323 [L3] after: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (err <nil>)
+10:29:23.568 [L4] before: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (baseline claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1)
+10:29:23.569 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:24.286 [L4] claude plugin marketplace: err=<nil> out=Adding marketplace…✔ Successfully added marketplace: mash (declared in user settings)
+10:29:24.967 [L4] claude plugin install: err=<nil> out=Installing plugin "mash@mash"...✔ Successfully installed plugin: mash@mash (scope: user)
+10:29:25.654 [L4] PASS: plugin mash@mash installed from the checkout (plugin list: Installed plugins: ❯ mash@mash Version: 0.2.10 Read from: <checkout>/plugin Scope: user Status: ✔ enabled)
+10:29:25.656 [L4] sent MARK-L4a-490474
+10:29:29.452 [L4] sent MARK-L4b-491570
+10:29:46.545 [L4] claude exited after 21s: err=<nil> lines=22 results=1 turns=6 tools=[ToolSearch mcp__plugin_mash_mash__who Bash mcp__plugin_mash_mash__who mcp__plugin_mash_mash__status]
+10:29:46.545 [L4] PASS: claude finished inside the 5 minute cap (elapsed 21s err <nil>)
+10:29:46.545 [L4] PASS: no hook ran (disableAllHooks) (hook lifecycle events 0)
+10:29:46.545 [L4] RECORDED: tool calls in order (ToolSearch, mcp__plugin_mash_mash__who, Bash, mcp__plugin_mash_mash__who, mcp__plugin_mash_mash__status (turns 6))
+10:29:46.545 [L4] PASS: status says delivery: DEGRADED after two tool calls (status facts: channel allowlist: OK - local managed settings file enables channels and lists mash@mash ;; delivery: DEGRADED - no mash hook has run since 2026-11-01T10:29:26Z although this session has made tool calls. Likely cause: hooks are disabled (disableAllHooks, or allowManagedHooksOnly withou...)
+10:29:46.545 [L4] not run: wake turns (at most 3) and the read-hint wake (needs a managed allowlist in /etc, which is never touched)
+10:29:47.280 [L4] cleanup claude plugin uninstall mash@mash: err=<nil> out=✔ Successfully uninstalled plugin: mash (scope: user)
+10:29:47.928 [L4] cleanup claude plugin marketplace remove mash: err=<nil> out=✔ Successfully removed marketplace: mash
+10:29:47.928 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+10:29:48.168 [L4] after: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (err <nil>)

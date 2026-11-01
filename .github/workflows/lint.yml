@@ -1,0 +1,34 @@
+name: lint
+# Docs-only changes run nothing (as in ci).
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**/*.md']
+  pull_request:
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: go1.27.3
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  lint:
+    name: lint
+    timeout-minutes: 15
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt reports nothing
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then echo "gofmt would change:" >&2; echo "$out" >&2; exit 1; fi
+      - run: go vet ./...
+      # TEMPORARY: the tree has 3 existing findings (SA4006 x2, ST1008 in internal/endpoint/endpoint_test.go), so this
+      # step lists them without failing the job. Remove continue-on-error once they are fixed.
+      - name: staticcheck
+        continue-on-error: true
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...

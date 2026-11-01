@@ -1,0 +1,27 @@
+#!/bin/sh
+# notes-base <tag> <commit> [releases.json]
+#
+# Prints the tag whose release is the base of <tag>'s release notes: the highest-version PUBLISHED, non-prerelease
+# v<N.N.N> release (other than <tag>) whose tag is an ancestor of <commit>. Prints nothing when there is none, and the
+# notes then cover the whole history. Unpublished drafts are skipped on purpose: their commits were never released.
+# Input is the JSON of `gh release list --json tagName,isDraft,isPrerelease`, from the file argument or stdin; the
+# ancestor test runs `git merge-base --is-ancestor` in the current directory. Requires jq (preinstalled on GitHub
+# runners). Exit 2 for a usage or input error.
+set -eu
+tag=${1:?usage: notes-base <tag> <commit> [releases.json]}
+commit=${2:?usage: notes-base <tag> <commit> [releases.json]}
+if [ $# -ge 3 ]; then input=$(cat "$3"); else input=$(cat); fi
+cands=$(printf '%s\n' "$input" | jq -r --arg tag "$tag" '
+  def ver: ltrimstr("v") | split(".") | map(tonumber);
+  [ .[]
+    | select(.isDraft == false and .isPrerelease == false and .tagName != $tag
+             and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+    | .tagName ]
+  | sort_by(ver) | reverse | .[]') || { echo "notes-base: cannot read the release list" >&2; exit 2; }
+for c in $cands; do
+  if git rev-parse -q --verify "refs/tags/$c^{commit}" >/dev/null 2>&1 &&
+     git merge-base --is-ancestor "refs/tags/$c^{commit}" "$commit"; then
+    echo "$c"
+    exit 0
+  fi
+done

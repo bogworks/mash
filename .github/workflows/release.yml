@@ -1,0 +1,131 @@
+name: release
+# Runs on a signed tag v<N.N.N> that the maintainer pushes at the candidate commit X after scripts/release-check passed. It
+# builds every target twice, in two fresh clones in different directories, and fails unless the two SHA-256s match.
+# It publishes a DRAFT release, then re-checks release order (scripts/draft-guard --after-create) and fails, leaving its draft in place
+# for manual resolution, if a lower draft or a higher published release stands beside it; the maintainer runs `scripts/release-check --assets <version> <X>` (tag signature, tag at X,
+# exactly our builds attached) before publishing. Jobs run GitHub-hosted (ubuntu-latest) by default; vars.RUNNER_LINUX can point them at a
+# runner of the maintainers' choice (a tag push is never a fork pull request). No self-hosted runner is used on this public repo.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # one tag, one release build; never abandon a build half way
+env:
+  GOTOOLCHAIN: go1.27.3
+  CGO_ENABLED: "0"
+jobs:
+  guard:
+    timeout-minutes: 10
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: write # `gh release list` shows drafts only to a token that can write; this job never writes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: The tag is v<N.N.N>, annotated, and carries a signature
+        # Shape, not validity: the runner holds no key. It stops a malformed name, a lightweight tag or a plainly
+        # unsigned one from producing a draft; `release-check --assets` runs `git verify-tag` with the maintainer's keyring.
+        run: |
+          # In an `if`, not bare: bash 3.2 (macOS, where the tests run this script) does not stop `set -e` on a lone [[ ]].
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "not a version tag: $GITHUB_REF_NAME" >&2; exit 1; fi
+          # actions/checkout writes the pushed tag as a lightweight ref to its commit (v0.1.1's run failed here), so
+          # the tag object itself is fetched from origin before it is judged.
+          git fetch -q --force --no-tags origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]
+          git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
+      - name: The candidate is on main
+        # The commit comes from the tag: what GITHUB_SHA holds on an annotated-tag push (commit or tag object) is not
+        # relied on anywhere in this workflow.
+        run: git merge-base --is-ancestor "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" origin/main
+      - name: No older draft release is left behind
+        # An unpublished older draft stops this one: publish or delete it first. Needs jq (on GitHub runners).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 200 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
+          scripts/draft-guard "$GITHUB_REF_NAME" "$RUNNER_TEMP/releases.json"
+  build:
+    needs: guard
+    timeout-minutes: 30
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm64}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build twice in fresh clones and compare
+        env:
+          GOOS_T: ${{ matrix.goos }}
+          GOARCH_T: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
+          name="mash-${GOOS_T}-${GOARCH_T}"
+          scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit" "dist/$name"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+  draft:
+    needs: build
+    timeout-minutes: 30
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
+          # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
+          [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $GITHUB_REF_NAME" >&2; exit 1; }
+          cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
+          (cd dist && sha256sum mash-* quickstart-synadia.sh > SHA256SUMS)
+          # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: commits of
+          # an unpublished tag belong in these notes. None (the first release) means the whole history.
+          gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
+          prev="$(scripts/notes-base "$GITHUB_REF_NAME" "$commit" "$RUNNER_TEMP/releases.json")"
+          if [ -n "$prev" ]; then
+            range="$prev..$commit"
+          else
+            range="$commit"
+          fi
+          { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file dist/CHANGELOG.md dist/mash-* dist/quickstart-synadia.sh dist/SHA256SUMS
+          # The guard job's check and this creation are not atomic, and the concurrency group is per tag, so two tags'
+          # runs can both pass the guard. Re-check now that the draft exists: a lower draft or a higher published
+          # release makes THIS run fail, naming it. The guard never deletes: the draft stays for the maintainer to resolve
+          # (`gh release delete <tag>` after checking its state, or publish the lower one first, then rerun; ADR 0001, rule 5).
+          scripts/draft-guard --after-create "$GITHUB_REF_NAME"

@@ -1,0 +1,4 @@
+# Tags that were pushed but never published as a release, one per line: `vX.Y.Z reason`.
+# release-check refuses to tag a later version while an earlier tag is a draft or has no release, unless it is listed here.
+v0.2.8 tagged, never published (superseded by v0.2.10)
+v0.2.9 tagged, never published (superseded by v0.2.10)

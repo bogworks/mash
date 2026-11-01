@@ -1,0 +1,15 @@
+16:35:30.412 prompt: Reply with only the word one.
+16:35:32.833 result 1 (prompt 1): "one"
+16:35:32.841 prompt: Run the shell command `sleep 20` with Bash. Then reply with the word two, followed by every token in this session that starts with MARK-.
+16:35:40.847 sent MARK-MIDTURN urgent=false
+16:35:59.188 result 2 (prompt 2): "two\n\nMARK-MIDTURN (from the mash mail hook that fired after the sleep; no other `MARK-` tokens appear earlier in this session.)"
+16:35:59.191 sent MARK-IDLE urgent=false
+16:40:29.192 no turn during the idle wait
+16:41:01.498 result 3 (the idle wake): "Mash mail #2 arrived from a verified sender with the body `MARK-IDLE`. It contains no request, so I've taken no action."
+16:41:01.503 sent MARK-URGENT urgent=true
+16:41:03.257 result 4 (the urgent wake): "Mash mail #3 arrived from a verified sender, marked urgent, with the body `MARK-URGENT`. It contains no request, so I've taken no action. Tell me if you want me to do something with it."
+16:41:23.258 no turn during after the urgent wake
+16:41:23.262 prompt: Reply with the word three, then list every token in this session that starts with MARK-, each with where you saw it (user prompt, hook context, channel event, tool result).
+16:41:26.531 result 5 (prompt 3): "three\n\n- `MARK-MIDTURN`: PostToolUse hook context, mash mail #1, after the `sleep 20` Bash call.\n- `MARK-IDLE`: channel event (`seqs=\"2\"`) and UserPromptSubmit hook context, mash mail #2.\n- `MARK-URGENT`: channel event (`seqs=\"3\"`) and UserPromptSubmit hook context, mash mail #3.\n\nNo `MARK-` tokens appear in your prompts or in any tool result other than the sleep call's empty output."
+16:41:26.531 turns: 5 (3 prompts + 1 idle wake + 1 urgent wake = 5)
+16:41:27.153 claude 2.1.312 (Claude Code)

@@ -1,0 +1,136 @@
+# Mergify merge queue for bogworks/mash, mirroring the orchestrator's queue (its .mergify.yml explains each choice in
+# full). Every key is documented at https://docs.mergify.com/ . The checks named here are ci.yml's job names;
+# internal/release/mergify_test.go fails if one of them is not a job ci.yml runs, since a name CI never publishes can
+# never be satisfied and the queue would time out.
+
+# One ordered queue, one queue run at a time: fast-forward allows only serial mode
+# (https://docs.mergify.com/merge-queue/queue-modes/).
+merge_queue:
+  mode: serial
+  max_parallel_checks: 1
+
+# A pull request is queued by itself once it is not a draft and not held; queue_conditions still make it wait for
+# codex-review and pr-check. `hold` is the operator's brake on one PR. These take effect only with Merge Protections
+# enabled on the repository (a dashboard setting; see the PR that added this file).
+merge_protections_settings:
+  auto_merge_conditions:
+    - -draft
+    - label != hold
+
+queue_rules:
+  - name: default
+    # To enter the queue (evaluated on the pull request). codex-review is the commit status the orchestrator's review
+    # watcher (scripts/review-pr) posts on the head; pr-check is ci.yml's aggregate of every required job.
+    queue_conditions:
+      - base = main
+      - -draft
+      - -conflict
+      - label != hold
+      - check-success = codex-review
+      - check-success = pr-check
+      # Outside contributors: a pull request reaches the queue only if a maintainer wrote it or approved it. The queue
+      # run executes the pull request's code in CI, and codex-review reads attacker-controlled
+      # text, so neither a green check nor the review is enough on its own (docs/security/threat-model.md). The
+      # logins are listed explicitly, not "any approval": Mergify's docs do not say that `approved-reviews-by` counts
+      # only reviewers with write access (they say it of other review conditions), so the list is what we rely on.
+      # Add a maintainer's login to BOTH lines.
+      - or:
+          - author = randybias
+          - approved-reviews-by = randybias
+    # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
+    # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
+    merge_conditions:
+      - check-success = pr-check
+    # mash sees a few pull requests a day: a batch is whatever is queued, up to 5, with no wait for company. The
+    # macOS leg is the slowest job, so fewer, larger runs are cheaper than many.
+    batch_size:
+      min: 1
+      max: 5
+    # A failed batch is run once more before it is bisected: a flaky check (mash#6) costs a rerun, not an innocent
+    # ejection. Allowed because max_parallel_checks is 1.
+    max_checks_retries: 1
+    # test and reproducible are allowed 30 minutes each, and the macOS runner may be busy with another job first.
+    checks_timeout: 60 min
+    # main moves to the queue branch's head, the exact commit the merge_conditions passed on, so main is always a
+    # tested commit. Branch protection must let Mergify bypass the pull request requirement: it pushes main itself.
+    merge_method: fast-forward
+
+# First matching rule wins; an unmatched pull request gets medium (2000). pipeline > critical > normal > docs.
+priority_rules:
+  - name: pipeline
+    conditions:
+      - label = pipeline
+    priority: 4000
+  - name: critical
+    conditions:
+      - label = critical
+    priority: 3000
+    allow_checks_interruption: true
+  - name: docs
+    conditions:
+      - label = docs
+    priority: 1000
+
+# Not expressible in Mergify: removing `safe-to-review` when an outside author pushes a new commit. Rules are
+# conditions on the pull request's current state, not on events, and no condition says "the head changed since the
+# label was set". That belongs to the review watcher, which sees each head.
+
+# A maintainer's approval must not carry over to code pushed after it: the first rule below has Mergify dismiss
+# approvals when an outside author pushes a new commit (`when: synchronize`), so `approved-reviews-by` in the queue
+# conditions turns false until a maintainer approves the new head. GitHub's own "Dismiss stale pull request approvals
+# when new commits are pushed" setting does the same (docs/branch-protection.md); the rule keeps it true even if that
+# setting is off.
+# Labels and notices, so a session sets only `critical` by hand (Workflow Automation, a dashboard setting).
+pull_request_rules:
+  - name: dismiss approvals when an outside author pushes
+    conditions:
+      - base = main
+      - -author = randybias
+    actions:
+      dismiss_reviews:
+        approved: true
+        changes_requested: false
+        when: synchronize
+        message: "A new commit was pushed after this approval, so it is dismissed: a maintainer approves the new head."
+  - name: docs label when every changed file is docs/** or *.md
+    conditions:
+      - base = main
+      - "#files >= 1"
+      - -files ~= ^(?!docs/|.*\.md$)
+    actions:
+      label:
+        toggle:
+          - docs
+  - name: pipeline label when the pipeline changes
+    conditions:
+      - base = main
+      - files ~= ^(\.github/|\.mergify\.yml$|internal/release/|scripts/)
+    actions:
+      label:
+        add:
+          - pipeline
+  - name: label reverts critical
+    conditions:
+      - base = main
+      - title ~= (?i)^revert
+    actions:
+      label:
+        toggle:
+          - critical
+  - name: tell the author about a conflict
+    conditions:
+      - base = main
+      - conflict
+      - -closed
+    actions:
+      label:
+        toggle:
+          - conflict
+      comment:
+        message: "@{{author}} this pull request conflicts with main: rebase it onto origin/main and push; the review watcher reviews the new head."
+  - name: tell the author about an ejection
+    conditions:
+      - queue-dequeue-reason = checks-failed
+    actions:
+      comment:
+        message: "@{{author}} dequeued: the queue run of your pull request failed. Read the failing job and fix it in a new commit; Mergify queues it again once codex-review and pr-check pass."

@@ -1,0 +1,160 @@
+# Operating mash
+
+mash needs a NATS server in operator mode with JetStream, and one account for mash. mash itself never mints NATS users and never holds an operator or account seed: you issue endpoint users with your own tooling (`nsc`, or any JWT issuer), using the permissions `mash admin permissions` prints, and mash creates the streams and directory entries behind them.
+
+## The account
+
+Create an account (these examples call it `MASH`) with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint.
+
+```sh
+nsc add account MASH
+nsc edit account MASH --sk generate --js-disk-storage 2G --js-streams 64 --js-consumer 128
+nsc push --account MASH
+```
+
+mash stores everything on file storage; it needs no memory store. A server with no memory store configured refuses an account that asks for one, so leave `--js-mem-storage` unset.
+
+Add an admin user for mash's admin commands (full access to the account), and keep its credentials only where you run `mash admin`:
+
+```sh
+nsc add user --account MASH mashadmin
+nsc generate creds --account MASH --name mashadmin > ~/.config/mash/admin.creds
+chmod 600 ~/.config/mash/admin.creds
+```
+
+Then create the directory and lease buckets once:
+
+```sh
+export MASH_URL=tls://nats.example.com:4222 MASH_OWNER=alice MASH_ADMIN_CREDS=~/.config/mash/admin.creds
+mash admin init
+```
+
+Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. The directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous. Running `mash admin init` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key, and a bucket that already has a cap keeps it, larger or smaller. Init never purges anything.
+
+## Adding an endpoint
+
+An endpoint is one named Claude Code session. Names are lower-case letters, digits and single hyphens, up to 48 characters, unique per owner.
+
+```sh
+(
+set -eu
+name=design
+perms=$(mash admin permissions "$name" --nsc)
+[ -n "$perms" ] || { echo "no permissions printed; refusing to add the user" >&2; exit 1; }
+set --
+while IFS= read -r arg; do set -- "$@" "$arg"; done <<EOF
+$perms
+EOF
+nsc add user --account MASH "$name" "$@"
+user=$(nsc describe user --account MASH --name "$name" --json | jq -r .sub)
+account=$(nsc describe account MASH --json | jq -r .sub)
+mash admin provision "$name" --user "$user" --account "$account" --note "design session on laptop"
+nsc generate creds --account MASH --name "$name" > ~/.config/mash/$name.creds
+chmod 600 ~/.config/mash/$name.creds
+)
+```
+
+This runs in a subshell under `set -eu`, so any failing step stops it, and an empty permission list never reaches `nsc add user` (a user created with no `--allow-*` flags would carry none of the restrictions above). It is plain POSIX `sh`, so it also works pasted into zsh or macOS bash 3.2.
+
+Deliver the credentials file to the machine that runs the session, and nowhere else.
+
+`mash admin permissions <name>` prints the permission set as JSON; `--nsc` prints the same set as `nsc add user` flags, one argument per line. The set lets an endpoint:
+
+- send mail to any endpoint of the owner, and send live SAP prompts and status probes to them;
+- publish its own heartbeat and answer SAP discovery;
+- read and acknowledge its own inbox, and read its own history;
+- read (never write) the directory;
+- hold its own lease and nothing else.
+
+It cannot read another endpoint's inbox, history or replies (each endpoint receives only under its own `_INBOX.<name>` prefix), take another endpoint's name, write the directory, create or delete consumers, or delete or purge any stream. It holds no response permission, because NATS grants that for any reply subject an endpoint receives; replies may only go to `_INBOX.>` subjects. The integration tests assert each of these denials against a real server.
+
+### Directory metadata
+
+An endpoint's directory record can carry optional fields: `--role` (what it is for), `--host` (the machine it is meant to run on) and up to 8 free-form labels, `--label key=value` (repeatable), for grouping or tagging endpoints, for example `team=acme` or `project=billing`. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
+
+```sh
+mash admin provision "$name" --user "$user" --account "$account" --role reviewer --host laptop --label team=acme --label tier=1
+mash admin set-meta "$name" --role builder --host - --label tier=- --label env=prod   # change role, clear host, clear one label, set another; everything else stays
+```
+
+`set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. The 8-label cap is checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. `mash admin list` is unchanged.
+
+`mash who` prints the same lines as before, so tools that parse it keep working. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
+
+## Removing an endpoint
+
+```sh
+mash admin deprovision design
+nsc revocations add-user --account MASH --name design
+nsc push --account MASH
+```
+
+Deprovisioning fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and provisioning the name again clears it at once. Revoking the user stops its credentials from connecting at all. Until you revoke, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
+
+## Inbox limits
+
+Each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest. Single messages are limited to 1 MiB including headers, or to the server's `max_payload` when that is smaller: mash reads it from the server at connect time and refuses an oversize send locally with a clear error before anything is published. Synadia Cloud's free tier caps a payload at 512 KiB, so there the limit is 512 KiB. Message deletion and purging are denied on the stream itself, so even the account admin cannot quietly rewrite history; deleting the whole stream (deprovisioning) is the only way to remove it.
+
+## Durability and sync_interval
+
+Every mash inbox is a JetStream stream with one replica (R1). nats-server's default `sync_interval` is 2 minutes: the server acknowledges a write before it has fsynced it. So a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as `sent #N`. Restarting or killing mash, or the nats-server process, is fine: the data is in the operating system's page cache and survives. See [Jepsen's analysis of NATS 2.12.1](https://jepsen.io/analyses/nats-2.12.1) and [Synadia's response](https://synadia.com/blog/jepsen-nats-2-12-1), which recommends `sync_interval: always` for a single server.
+
+- **Self-hosted server:** set it in `nats-server.conf`, then restart the server:
+
+  ```
+  jetstream { sync_interval: always }
+  ```
+
+  I could not confirm the block from the NATS configuration pages, so check the documentation for your server version. Replicated streams (R3) can survive the loss of one server when the replicas sit on independent hosts, but replication alone does not guarantee that acknowledged writes survive a crash (see the NATS JetStream documentation); mash does not provision replicated streams today and Synadia's free tier does not offer them.
+- **Cost:** `always` fsyncs on every write, so write latency and throughput suffer. A mail mesh sends little, so this is usually acceptable.
+- **Synadia Cloud:** its policy for this is not documented and unknown to us (we have asked). Treat a host crash there as able to lose recent mail.
+- **Visibility:** mash cannot read the server's setting today, so `mash status` does not warn about it.
+
+## Hook delivery
+
+The plugin ships two Claude Code hooks, PostToolUse and UserPromptSubmit, which run `mash hook` (`plugin/hooks/hooks.json`).
+
+The hook command always exits 0 (a mash too old to have `hook` would otherwise exit 2, which Claude Code treats as blocking) and appends the hook's stderr to `$XDG_STATE_HOME/mash/hook.log` (default `~/.local/state/mash/hook.log`, beside the spool). That is where a failing or too-old hook is found; an orchestrator's doctor can surface it.
+
+**Which hooks may drain the spool.** `mash serve` records its owner in `<spool>/.owner` as JSON: its parent pid, its `CLAUDE_CODE_SESSION_ID` and its `MASH_LAUNCH_TOKEN`. A hook drains the spool if any one of these holds: its session id (the `session_id` on its stdin, else `CLAUDE_CODE_SESSION_ID` from its environment) equals serve's; both sides have the same non-empty `MASH_LAUNCH_TOKEN` (this survives `/clear`); or serve's parent pid is among the hook's ancestors. A hook that matches none is refused: it prints nothing, leaves the mail spooled, writes one line to `hook.log` (`mash hook: not this session's spool (...); mail left for its owner`) and records `<spool>/.refused` (at most once a minute). This keeps a second session with the same `MASH_NAME` from draining this session's mail. `<spool>/.session` keeps the legacy text `pid:N`, so a hook from an older mash still enforces the process-ancestry rule (and nothing else) when serve is newer; a damaged `.owner` makes every hook refuse. Keep serve and hook on the same mash version for the session-id and launch-token rules. `MASH_HOOK_TRACE=1` makes every hook run log its pid chain, both session ids and the rule that matched.
+
+**`delivery: REFUSED` in `status`** means the plugin's hook runs in this session but was not recognised as this session's, so mail stays spooled, and serve wakes the session a few times (then stops: see below). It happens where hooks run outside the process tree of serve's parent (serve started through a wrapper that does not `exec`, a PID namespace or sandbox, some IDE or desktop hosts, a chain deeper than 10) and the session id does not match either. The fix: start Claude Code with `MASH_LAUNCH_TOKEN` set to a fresh value for each launch (for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude ...`); serve and its hooks inherit it. A value reused across launches, or one shared by two sessions with the same name, defeats the launch-token rule: a waiting session would then drain the holder's mail (serve warns on stderr when it sees this). If it still refuses, report your setup with the `hook.log` line and `MASH_HOOK_TRACE=1` output.
+
+**Hooks that never run** (ADR-0041). Mail waits in the spool for a hook, and only a hook drains it. If no mash hook runs in the session, waking it again would cost a turn each time and show nothing, so mash watches for that. Both states hold only while no main-session hook, and no hook of the session's own subagents, has run since `serve` bound the spool; a hook run ends them.
+
+* **Suspected:** three wakes (the first, at once, counts) and still no hook. Re-waking stops. A new waking message still rings once. Nothing is acked. `status` shows `delivery: SUSPECTED - <n> wakes and no hook since <time>; re-waking stopped`. A session that makes no tool calls stays here: no turn is wasted, and the mail is read if the model uses the `read` tool.
+* **Proven:** two mash tool calls at least 12 seconds apart (above the hook's 10 second timeout) with no hook between them. A PostToolUse hook runs after every successful tool call, so the first call's hook would have run by the second. Then one wake, and each later wake, ends "mash's hooks are not running in this session; read each message with the read tool (#seq)." The `read` tool marks the message it returns as seen once its result has been written to the client, so it is acked; the `inbox` tool never acks. The one notice in the proven state is sent for held mail of any kind, result and fyi included. `status` shows `delivery: DEGRADED - no mash hook has run since <time> although this session has made tool calls. Likely cause: ... Mail now: read each message with the read tool. Next: ...`. A hook refused as another session's (above) counts as no hook, and its refusal is named as the cause.
+
+mash does not read Claude Code's settings files, so `status` lists the causes that leave no trace: `disableAllHooks`, `allowManagedHooksOnly`, hooks not loaded, `mash` not on the hook's PATH. The fixes: remove `disableAllHooks: true` from the user, project, local or managed settings; under `allowManagedHooksOnly` an administrator force-enables `mash@mash` in managed `enabledPlugins` (hooks of plugins force-enabled there are exempt); check that the plugin is enabled in this project; read `hook.log` for `command not found` or a refusal. Mash tool calls a subagent makes count as the session's tool calls, and a session whose only running hooks are its subagents' is never proven.
+
+**Under the plugin** (`MASH_SPOOL_FROM_START=1`), mail is spooled from the first message and shown by the hooks; the channel event is only a one-line summary that wakes an idle session. Without that setting, `mash serve` pushes mail to the channel in full until the first hook has run in the session.
+
+Spooled delivery works like this (without `MASH_SPOOL_FROM_START`, it starts at the first hook run):
+- It writes each message to `$XDG_STATE_HOME/mash/spool/<owner>/<name>/<seq>.json` (directories 0700, files 0600).
+- It holds the message unacked and sends the channel nothing: a hook runs after every tool call and with every prompt, so a busy session sees the mail without a turn of its own.
+- If spooled mail that wakes waits 45 seconds by default with no hook draining it (`MASH_IDLE_WAKE` or `idle_wake` in config.json, 5s to 30m) (an idle session), serve sends one channel event, the summary line alone (`1 message from lead (question)`). That starts a turn, and its UserPromptSubmit hook shows the mail. If that wake starts no turn, serve wakes it again while the mail is still held: twice the idle wake later (90 seconds by default), then doubling each time, to every 30 minutes. A hook drain resets the backoff. If no hook has run in the session at all, the wakes stop after the third (see "Hooks that never run"). Under `MASH_SPOOL_FROM_START` (the Claude plugin sets it), mail that wakes arriving before the first hook has run in the session wakes it at once, with no idle wait, each message once, and that ring does not start the backoff, so the idle wake still follows if it starts no turn; result and fyi still wait, and once a hook has run the idle wake applies as above.
+- Which mail wakes is its kind (`mash send --kind K`, or the send tool's `kind`; the `Mash-Kind` header): `blocker`, `question` and `task` wake an idle session; `result` and `fyi` (opt-in; a send with no kind is `task`) never do (mail with no `Mash-Kind` header, from older mash, or with an unknown kind is `task`, and wakes), so they wait for the session's next hook run and cost no turn, except that a backlog of half the consumer's limit (500 messages) or a quarter of the inbox's 16 MiB byte limit wakes the session at once to drain, so waking mail behind it can still arrive. While only result or fyi mail is held there is no idle wake and no re-wake; once a waking message is held, the wake's summary covers all held mail and the drain shows it all. The kind is the sender's claim and is not signed. A reply (`in_reply_to`) sent as `question` with no `?` and at most 280 characters goes as `fyi`, and the send tool says so; a `task` or `blocker` is never downgraded. Every message shows its `kind:`.
+- Urgent mail (`mash send --urgent`, or the send tool's `urgent`) wakes the session at once, of any kind, with a summary led by `urgent,`. Each urgent message wakes it once. The mark is the sender's signature over the message (the `Mash-Urgent` header) and counts only for a [verified] sender; anyone else's urgent mail is normal mail.
+- The next hook run shows the session the spooled mail as hook context, framed with the trust notes, at most `MASH_BATCH_MSGS` messages per run.
+- The hook marks each message `drained/<seq>`. serve then acks it (confirmed by the server) and removes the tombstone. Until the ack is confirmed the tombstone stays, so a redelivery is acked rather than shown again.
+- Delivery is **at-least-once**. The hook records `shown/<seq>`, prints the batch, then marks it drained. A hook killed between the print and the mark (a timeout, a crash) shows the batch again on the next run, each message flagged `re-delivered after an interrupted hook` with its #seq, so the model does not act on it twice. No message is lost.
+- If the spool cannot be written (disk full, permissions), a message is retried 3 times and then, once a hook has run in the session, delivered by the channel instead (before that, held unacked in the inbox, readable with the inbox and read tools); the failure is logged once. A held message whose spool file goes missing or is damaged is rewritten from memory.
+
+What this means for operators:
+- **Unread means not yet shown by a hook.** The inbox consumer's unread count (pending plus ack-pending) counts a spooled message until a hook has printed it and serve has acked it. It is not proof the model read it: a digest prints one line per message, and a hook's output may still be on its way into the session.
+- **The spool is bounded.** The consumer's MaxAckPending (1000) caps the count, and `SpoolMaxBytes` (32 MiB) caps the bodies held. Past either cap, mail stays in NATS, still unread. The byte cap is tested; the count cap rests on NATS's MaxAckPending and is not exercised by a test.
+- **A restart re-spools.** Unacked messages are redelivered and spooled again, except one a hook already showed: its tombstone gets it acked instead. A Claude restart starts a new serve, which takes over the spool and delivers what the old session had not shown.
+- **A hook without serve does nothing.** It never creates a spool, so it is silent until serve has made one.
+- **Test failpoints.** `MASH_HOOK_FAILPOINT` (`before-print`, `after-print`, `after-first-drained`) makes `mash hook` print `mash hook: failpoint <name>` on stderr and block, and `MASH_SERVE_FAILPOINT=before-ack` makes `mash serve` print `mash serve: failpoint before-ack #<seq>` and block just before it acks a message a hook has drained (it never acks it), so a test can SIGKILL the process there. Both are for the crash tests only; never set them outside those.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| The session says it has no mash identity | `MASH_NAME` was not set when Claude Code started. |
+| The session says the name is already in use | Another live session holds the lease (it expires 90 s after that session dies). The session keeps retrying every 10 s and tells Claude when mail is on; no restart is needed. |
+| `--channels` says "not on the approved channels allowlist" | The managed settings allowlist is missing (see install.md, step 3). |
+| Mail arrives labelled `[unknown-signer]` | The sender's key is not in the directory: it was deprovisioned, or it is not a mash endpoint. |
+| `mash: endpoint X is not provisioned` | Run `mash admin provision`, or check `MASH_NAME` for a typo. |
+| `do not match endpoint` | The credentials file belongs to a different endpoint than `MASH_NAME`. |
+| Clients take 30-60 s to reconnect after a network blip | The server rate-limits new connections per source address. Clients retry with jitter; raise the limit for trusted sources if this matters. |

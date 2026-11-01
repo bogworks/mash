@@ -1,0 +1,144 @@
+#!/bin/sh
+# pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
+# pin-plugin <version> --attested <dir> [--repo owner/name]
+# pin-plugin <version> <SHA256SUMS> --unverified
+# Pins the plugin launcher to a release by writing scripts/mash.pins (beside the launcher), and sets
+# .claude-plugin/plugin.json's version to <version>-pin.1 (only that line) so installed plugins update, since Claude
+# Code updates a plugin only when its version changes. scripts/mash is embedded in the mash binary, so the pins must
+# live outside it. Idempotent (already <version>-pin.N: left alone). Run after a release.
+# Fails closed: mash.pins is written only from sums that were verified (signature or attestation), or when
+# --unverified is given explicitly (local testing only).
+set -eu
+usage() {
+  cat >&2 <<'U'
+usage: pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
+       pin-plugin <version> --attested <dir> [--repo owner/name]
+       pin-plugin <version> <SHA256SUMS> --unverified   (local testing only)
+exactly one mode is required
+also sets plugin.json's version to <version>-pin.1 (so installed plugins update)
+U
+  exit 2
+}
+die() { echo "pin-plugin: $*" >&2; exit 1; }
+
+[ $# -ge 1 ] || usage
+ver=${1#v}
+shift
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+pins="$here/mash.pins"
+case "$ver" in
+  ''|[!0-9]*|*[!0-9A-Za-z.+-]*) echo "pin-plugin: bad version '$ver'" >&2; exit 2 ;;
+esac
+
+sums=""; sig=""; signers=""; attdir=""; repo=""; unverified=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sig) [ $# -ge 2 ] || usage; sig=$2; shift 2 ;;
+    --signers) [ $# -ge 2 ] || usage; signers=$2; shift 2 ;;
+    --attested) [ $# -ge 2 ] || usage; attdir=$2; shift 2 ;;
+    --repo) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
+    --unverified) unverified=1; shift ;;
+    -*) usage ;;
+    *) [ -z "$sums" ] || usage; sums=$1; shift ;;
+  esac
+done
+
+modes=0
+[ -n "$sig" ] && modes=$((modes + 1))
+[ -n "$attdir" ] && modes=$((modes + 1))
+[ "$unverified" -eq 1 ] && modes=$((modes + 1))
+[ "$modes" -eq 1 ] || usage
+if [ -n "$attdir" ]; then
+  [ -z "$sums" ] && [ -z "$signers" ] || usage
+else
+  [ -n "$sums" ] || usage
+  [ -z "$repo" ] || usage
+  [ -z "$signers" ] || [ -n "$sig" ] || usage
+fi
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/pin-plugin.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+out="$work/pins"
+ASSETS="mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64"
+
+sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
+
+# check64 <name> <hex>: refuse anything but 64 lowercase hex digits.
+check64() {
+  case "$2" in
+    '') die "$1 missing from sums" ;;
+    *[!0-9a-f]*) die "bad sha256 for $1" ;;
+  esac
+  [ ${#2} -eq 64 ] || die "bad sha256 length for $1"
+}
+
+if [ -n "$attdir" ]; then
+  [ -d "$attdir" ] || die "$attdir is not a directory"
+  command -v gh >/dev/null 2>&1 || die "gh not found; cannot verify attestations"
+  if [ -z "$repo" ]; then
+    url=$(git -C "$root" remote get-url origin 2>/dev/null) || die "no --repo and no git origin to derive it from"
+    repo=$(printf '%s\n' "$url" | sed -E 's#^.*[:/]([^/:]+/[^/]+)$#\1#; s#\.git$##')
+    case "$repo" in */*) ;; *) die "cannot derive owner/name from origin '$url'; pass --repo" ;; esac
+  fi
+  for a in $ASSETS; do [ -f "$attdir/$a" ] || die "$attdir/$a not found"; done
+  for a in $ASSETS; do
+    gh attestation verify "$attdir/$a" -R "$repo" >&2 || die "attestation verification failed for $a (repo $repo)"
+  done
+  printf 'version=%s\n' "$ver" > "$out"
+  for a in $ASSETS; do
+    h=$(sha "$attdir/$a")
+    check64 "$a" "$h"
+    printf '%s  %s\n' "$h" "$a" >> "$out"
+  done
+else
+  [ -f "$sums" ] || die "$sums not found"
+  # Work on one private copy so what is verified is exactly what is parsed.
+  cp "$sums" "$work/SHA256SUMS"
+  if [ "$unverified" -eq 1 ]; then
+    echo "pin-plugin: WARNING: --unverified: SHA256SUMS is NOT authenticated; these pins give integrity only. Never use for a release." >&2
+  else
+    [ -f "$sig" ] || die "signature file $sig not found"
+    [ -n "$signers" ] || signers="$root/ci/release.allowed_signers"
+    [ -f "$signers" ] || die "signers file $signers not found"
+    keys=$(grep -v '^[[:space:]]*#' "$signers" | grep -v '^[[:space:]]*$' || true)
+    [ -n "$keys" ] || die "$signers has no key lines (placeholder only); add the release public key before pinning"
+    if printf '%s\n' "$keys" | grep -Eq '(^|[[:space:]])sk-(ssh|ecdsa)-'; then
+      die "$signers contains a hardware-token (sk-*) key; not supported"
+    fi
+    command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen not found; cannot verify signature"
+    ssh-keygen -Y verify -f "$signers" -I release -n mash-release -s "$sig" < "$work/SHA256SUMS" >&2 \
+      || die "signature verification failed for $sums"
+  fi
+  printf 'version=%s\n' "$ver" > "$out"
+  for a in $ASSETS; do
+    # sha256sum lines: "<hex>  <name>" or "<hex> *<name>"
+    h=$(awk -v n="$a" '$2 == n || $2 == "*" n {print $1}' "$work/SHA256SUMS" | head -n 1)
+    check64 "$a" "$h"
+    printf '%s  %s\n' "$h" "$a" >> "$out"
+  done
+fi
+
+# Stage the manifest edit first (changing only the version line) so a bad manifest fails before anything is written.
+manifest="$here/../.claude-plugin/plugin.json"
+[ -f "$manifest" ] || die "$manifest not found"
+[ "$(grep -c '^[[:space:]]*"version"[[:space:]]*:' "$manifest")" -eq 1 ] || die "$manifest must have exactly one \"version\" line"
+curver=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest")
+[ -n "$curver" ] || die "cannot read the version in $manifest"
+newmanifest=""
+case "$curver" in
+  "$ver"-pin.[0-9]*) ;;
+  *)
+    newmanifest="$work/plugin.json"
+    sed "s/^\([[:space:]]*\"version\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"/\1\"$ver-pin.1\"/" "$manifest" > "$newmanifest" || die "cannot edit $manifest"
+    ;;
+esac
+
+# Atomic writes: stage beside the target, then rename.
+tmp="$pins.tmp.$$"
+if ! { cat "$out" > "$tmp" && mv "$tmp" "$pins"; }; then rm -f "$tmp"; die "cannot write $pins"; fi
+if [ -n "$newmanifest" ]; then
+  mtmp="$manifest.tmp.$$"
+  if ! { cp -p "$manifest" "$mtmp" && cat "$newmanifest" > "$mtmp" && mv "$mtmp" "$manifest"; }; then rm -f "$mtmp"; die "cannot write $manifest"; fi
+fi
+echo "pinned mash $ver"

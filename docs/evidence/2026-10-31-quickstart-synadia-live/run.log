@@ -1,0 +1,21 @@
+note: ignoring MASH_URL from the environment for this run (set, it also overrides config.json in later sessions)
+note: ignoring MASH_OWNER from the environment for this run (set, it also overrides config.json in later sessions)
+note: ignoring MASH_CREDS from the environment for this run (set, it also overrides config.json in later sessions)
+note: ignoring MASH_NAME from the environment for this run (set, it also overrides config.json in later sessions)
+Synadia: team 'Mire's Personal Team', system 'NGS', account 'Default'
+NATS URL: tls://connect.ngs.global
+Plan: owner 'mashlive', 2 endpoint(s) (qs-a qs-b)
+Streams: 2 shared + 2 x 1 per endpoint = 4 (the account allows 5)
+Created the temporary admin user mash-quickstart-admin-c6c4c05f (deleted before this script ends).
+Wrote $HOME/home/.config/mash/config.json.
+mash: directory and lease buckets ready
+Endpoint qs-a: user created, creds in $HOME/home/.config/mash/qs-a.creds
+Endpoint qs-b: user created, creds in $HOME/home/.config/mash/qs-b.creds
+provisioned qs-a: inbox inbox-qs-a, mail agents.mail.cc.mashlive.qs-a
+provisioned qs-b: inbox inbox-qs-b, mail agents.mail.cc.mashlive.qs-b
+Deleted the temporary admin user. No standing admin credential exists.
+mash: MASH_LAUNCH_TOKEN is set but qs-a's lease can't be read (is its serve running?): nats: key was deleted; sending under this command's own instance
+Test mail: qs-a sent a message to qs-b, which read it as [verified].
+
+Done. Start a session as an endpoint, for example:
+  MASH_NAME=qs-a claude --channels plugin:mash@mash

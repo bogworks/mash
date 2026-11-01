@@ -1,0 +1,140 @@
+# Installing mash
+
+This walks through one machine running Claude Code sessions with mash. Provisioning the server side (the account, endpoint users and their inboxes) is in [operations.md](operations.md).
+
+## 1. The binary
+
+mash is one static Go binary. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository or `mash plugin export` gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
+
+- A `SessionStart` hook prefetches the binary into the plugin's data directory (`${CLAUDE_PLUGIN_DATA}/bin`) on first use, so the MCP server starts without a download. The server launcher downloads it as a fallback.
+- Once pinned after a release (a post-release commit of `plugin/scripts/mash.pins`), the plugin carries a `mash.pins` file beside its launcher with the release version and the sha256 of each platform binary (linux and darwin, amd64 and arm64); without it (including the plugin written by `mash plugin export`) the launcher is unpinned and uses `mash` from PATH. A download that does not match is refused and deleted, and the binary must report the pinned version before it is used. Pinning also bumps the plugin's version to `<version>-pin.1`, so installed plugins update and receive the pin. Updating the plugin updates the binary.
+- Resolution order: `$MASH_BIN` (an explicit override), the downloaded copy for the pinned version, then (pinned) a fresh download of it, falling back to `mash` on the `PATH` only if that download fails, so an older install on the `PATH` never overrides the pin. Hooks never wait more than a few seconds for a download (a 5 s budget, then `PATH`, and no retry for 5 minutes after a failure). An unpinned plugin uses `mash` on the `PATH` only and never downloads.
+- The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs preserve the mode and `mash plugin export` sets it. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
+- Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
+
+To install the binary yourself (required for an unpinned plugin; also for the CLI in section 5, or an air-gapped machine):
+
+```sh
+go install github.com/bogworks/mash/cmd/mash@latest
+mash version
+```
+
+## 2. The plugin
+
+The mash repository is its own Claude Code marketplace:
+
+```sh
+claude plugin marketplace add bogworks/mash
+claude plugin install mash@mash
+```
+
+The plugin declares an MCP server, `mash serve` (started through the plugin's launcher script, with `MASH_SPOOL_FROM_START=1`), a SessionStart hook that prefetches the pinned binary, and two hooks, PostToolUse and UserPromptSubmit, which run `mash hook`. Mail reaches the session through those hooks, as "mash mail" context; see [Hook delivery](operations.md). A session without a mash identity (no `MASH_NAME`) gets an inert server with only the `status` and `version` tools, so it is safe to install for every session.
+
+Mail needs those hooks to run. They do not run with `disableAllHooks: true` in any Claude Code settings file, or under a managed `allowManagedHooksOnly` unless an administrator force-enables `mash@mash` in managed `enabledPlugins`. Then mash stops waking the session after a few tries and `status` reports `delivery: DEGRADED`; see [Hook delivery](operations.md).
+
+## 3. Allow the channel (once per machine)
+
+Mail itself is delivered by the hooks (section 2); the channel carries a one-line summary of waiting mail, which wakes an idle session so its next prompt runs the hook. Claude Code runs only allowlisted channel plugins without a confirmation dialog. Allowlist mash in the managed settings file:
+
+| OS | Path |
+|---|---|
+| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` |
+| Linux | `/etc/claude-code/managed-settings.json` |
+
+```json
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [{ "marketplace": "mash", "plugin": "mash" }]
+}
+```
+
+Managed settings are written by an administrator (`sudo`). If the file already exists, merge these keys into it. Note that `allowedChannelPlugins` replaces the default allowlist; list any other channel plugins you use as well.
+
+> **If your organisation manages Claude Code.** Claude Code uses the highest-ranked managed source that delivers at least one policy key and ignores the rest ([how sources combine](https://code.claude.com/docs/en/managed-settings#how-claude-code-combines-managed-sources)). Server-managed settings, pushed from the Claude.ai admin console, rank first, so when your organisation uses them the local file above is ignored. An organisation Owner must add `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins` there and enable Channels (Organization settings > Claude Code > Channels). Bedrock, Agent Platform and Foundry have no channels. Without a channel, hooks still deliver mail at the next prompt or tool call, but the idle wake and live prompts are lost. If the policy sets `allowManagedHooksOnly`, the hooks need mash in the managed `enabledPlugins` as well (see [Hook delivery](operations.md)). `strictKnownMarketplaces` can also refuse `claude plugin marketplace add bogworks/mash`. Confirm what applies with `/status` ("Setting sources") and `claude doctor` ("Managed settings (remote)"); the mash `status` tool shows its own reading as the `channel allowlist:` line, and `/status` has the last word ([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)). The development flag below skips the allowlist but not `channelsEnabled`.
+
+Without this, `--channels plugin:mash@mash` is refused ("not on the approved channels allowlist") and the channel wake that rouses an idle session does not arrive. You can still try mash with `--dangerously-load-development-channels plugin:mash@mash`, which asks for confirmation on every launch.
+
+## 4. Configuration
+
+`~/.config/mash/config.json`:
+
+```json
+{ "url": "tls://nats.example.com:4222", "owner": "alice" }
+```
+
+| Key | Env | Meaning |
+|---|---|---|
+| `url` | `MASH_URL` | The NATS server. Use TLS: SAP identity is only meaningful over a verified connection. |
+| `owner` | `MASH_OWNER` | Your SAP owner token (lower-case letters, digits, single hyphens). |
+| `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `~/.config/mash/<name>.creds`. |
+| | `MASH_NAME` | The endpoint name, set per session at launch. |
+| | `MASH_LAUNCH_TOKEN` | Optional. Names this launch of the agent (up to 128 of `A-Za-z0-9._-`); written into the endpoint's lease as `launch_token` so a supervisor can tell which launch holds it. It also ties a session's hooks to its `mash serve`: a hook that carries the same non-empty token as serve is recognised as this session's even where its process chain cannot be followed (wrappers, sandboxes, IDE hosts). Use a fresh value for each launch (for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude ...`); a value reused across launches defeats the hook-ownership rule. |
+| `settle_ms` | `MASH_SETTLE_MS` | Quiet time before a batch is pushed. Default 100. |
+| `batch_msgs`, `batch_bytes` | `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` | A batch up to 10 messages and 16 KiB is shown in full; more becomes a digest. |
+| `spool_from_start` | `MASH_SPOOL_FROM_START` | `1`/`true` (or `0`/`false`; anything else is an error). Spool mail from the first message, to be shown by the hooks, instead of delivering it by channel until a hook has run: Claude Code drops channel events that arrive before its first prompt. The plugin sets it. Mail that wakes (not fyi or result) wakes the session at once until the first hook has run. Without a usable spool, mail is held unacked in the inbox (read it with the inbox and read tools). |
+| `idle_wake` | `MASH_IDLE_WAKE` | Hook mode: how long spooled mail waits for a hook before serve wakes the idle session. A Go duration, 5s to 30m. Default `45s`; re-wakes double from there, to 30 minutes. |
+| `open_timeout` | `MASH_OPEN_TIMEOUT` | How long a command or serve may spend opening: connecting to its data and checking its identity. A Go duration above zero (for example `"45s"`), for slow links. Default `20s`. |
+| `call_timeout` | `MASH_CALL_TIMEOUT` | How long one command, or one tool call in serve, may spend on its requests once open. A Go duration above zero. Default `15s`. |
+
+The environment wins over the file. Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`).
+
+Optional: `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use the policy file to carve out what still needs a human, for example "Ask me before spending money or touching production."
+
+## 5. Launch a session
+
+```sh
+MASH_NAME=design claude --channels plugin:mash@mash
+```
+
+The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
+
+In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's name and owner. From a shell, the same identity can use the CLI:
+
+```sh
+MASH_NAME=design mash who
+MASH_NAME=design mash send review "Spec is at docs/specs/x.md; please review section 4."
+MASH_NAME=design mash send review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
+MASH_NAME=design mash prompt review "Are you still on the auth bug?"
+MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
+```
+
+### Lease fields a supervisor can read
+
+The endpoint's lease (key `<name>` in the `mash-leases` KV bucket, rewritten every 30 s and expiring after `store.LeaseTTL`, 90 s) is a JSON object. Besides the holder's identity (`instance_id`, `host`, `pid`, `since`, `version`, ...) and `mcp_seen`, it carries the waking-mail count:
+
+- `waking_pending` (integer, omitted when 0): unread mail that should wake the session: kind `blocker`, `question` or `task` (mail with no or an unknown kind counts as `task`), plus any verified urgent mail whatever its kind. `fyi` and `result` mail does not count. "Unread" is mail the session has not been shown: held for a hook or unacked in the inbox; mail already shown on the channel or by a hook is gone from the count. Reading a message with the `read` tool does not remove it until it is shown.
+- `waking_pending_at` (RFC3339 UTC): when the count was computed. It is set whenever the count is known, including 0, so `waking_pending` absent with a fresh `waking_pending_at` means none, and no `waking_pending_at` means unknown (an older mash, or serve has not yet accounted for the mail already waiting at its start). After a start the count stays unknown until that startup backlog has been received, or the server shows nothing outstanding beyond what serve holds; mail a previous session left unacked is redelivered only after the 30 s ack wait, so the count can be unknown that long. It is never guessed from elapsed time.
+
+A reader treats the count as fresh when `waking_pending_at` is within 90 s (the lease TTL). It is rewritten on every refresh and when the count changes (at most one extra write per 5 s, a burst of mail being one write). Readers must ignore fields they do not know. Limits are in `internal/endpoint/waking.go`.
+
+The CLI never takes the lease, so it works alongside the running session.
+
+`send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
+
+## Quick start on Synadia Cloud
+
+If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) does the server side (operations.md) for you from one API token. It is a script outside the binary (it needs curl and jq; [ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md)). Install the binary and the plugin (sections 1 to 3) first.
+
+1. In the Synadia Cloud console, create an API token for your team.
+2. Give it to the script through the environment (or `--token-stdin`, or the prompt in a terminal; never on the command line), and look at the plan first:
+
+   ```sh
+   export SYNADIA_API_TOKEN=...
+   scripts/quickstart-synadia.sh --dry-run --endpoint design --endpoint review
+   scripts/quickstart-synadia.sh --endpoint design --endpoint review
+   ```
+
+   With no `--endpoint`, it makes one named `<user>-<host>`. If the token sees several teams or accounts, name one with `--team` or `--account`. `--owner` defaults to your user name.
+3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<name>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `url` or `owner` without `--force`). Then it runs `mash admin init` and `mash admin provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
+4. Start two sessions, each as an endpoint (section 5):
+
+   ```sh
+   MASH_NAME=design claude --channels plugin:mash@mash
+   MASH_NAME=review claude --channels plugin:mash@mash
+   ```
+
+Notes:
+
+- The free tier allows 5 streams. mash takes 2 for its shared buckets and 1 per endpoint, so it fits **3 endpoints**; the script checks this first and, if the plan does not fit, creates nothing and says how many would.
+- Synadia's control-plane API (`/api/core/beta/`) is not documented or stable. If its shape changes, the script stops with an error rather than guessing.
+- The account's message limit is 512 KiB, half of mash's own 1 MiB cap.
