@@ -216,7 +216,7 @@ func TestPiExtensionNodeTests(t *testing.T) {
 	if strings.TrimSpace(string(v)) != "1" {
 		t.Skip("node cannot strip types")
 	}
-	cmd := exec.Command(node, "--test", "plugin/pi/")
+	cmd := exec.Command(node, "--test", "plugin/pi/mash.test.ts") // a file: newer Node treats arguments as globs, not directories
 	cmd.Dir = "../.."
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("node --test: %v\n%s", err, out)
