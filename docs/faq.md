@@ -20,7 +20,7 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 
 ## Does it work with a NATS server that uses a token, user and password, or a plain nkey?
 
-No. The docs require operator mode. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT fails with an error starting `sap: creds JWT:`. The docs do not yet say this plainly (tracked in #32).
+No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash status` warns when the url carries a password or token. Use `nsc` or Synadia Cloud to create a user with JWT credentials.
 
 ## Do I have to run a server?
 
@@ -50,7 +50,7 @@ By default it treats verified mail as a delegated request from you and acts on i
 
 ## How are endpoints named, and can two people share an account?
 
-A name is 1 to 48 lower-case letters, digits and single hyphens, starting with a letter. You choose it at launch with `MASH_NAME`. Today the name is the key in the account's directory and lease buckets and in the stream name, so it is unique per NATS account, not per owner, and every endpoint can read the whole directory. Two owners in one account cannot both have `review`. [operations.md](operations.md) still says "unique per owner" (tracked in #33); the deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
+A name is 1 to 48 lower-case letters, digits and single hyphens, starting with a letter. You choose it at launch with `MASH_NAME`. Today the name is the key in the account's directory and lease buckets and in the stream name, so it is unique per NATS account, not per owner, and every endpoint can read the whole directory. Two owners in one account cannot both have `review`. [operations.md](operations.md) says the same. The deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
 
 ## Can two sessions use the same name?
 
