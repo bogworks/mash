@@ -61,3 +61,4 @@ on), or mash's own choice on top of them.
 | [0045](0045-product-code-carries-no-personal-convention-a-ratchet-lint-enforces-it.md) | Product code carries no personal convention; a ratchet lint enforces it | accepted | project | 2026-11-01 |
 | [0046](0046-a-digest-lists-mail-it-does-not-ack-it.md) | A digest lists mail and does not ack it; the read tool or a full showing does (amends 0026 and 0024; their files are unchanged) | accepted | mash | 2026-11-01 |
 | [0048](0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md) | Limit changes take a per-stream KV lock with expiry | accepted | NATS / mash | 2026-11-01 |
+| [0048](0048-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
