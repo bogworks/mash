@@ -53,7 +53,7 @@ The directory has no record for the name. Check `MASH_NAME` for a typo, then as 
 
 ## `do not match endpoint`
 
-Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record was provisioned with a different NATS user key. Use the right creds file for the `MASH_NAME`, or compare the user in `mash admin list` with the user in your creds. If you re-created the NATS user, deprovision and provision the name again.
+Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record was provisioned with a different NATS user key. Use the right creds file for the `MASH_NAME`, or compare the user in `mash admin list` with the user in your creds. If you re-created the NATS user, first try to restore the original creds. Deprovisioning deletes the endpoint's inbox stream, so every unread message in it is lost; only run `mash admin deprovision <name>` and provision the name again if you accept that loss.
 
 ## The session says the name is in use or waiting
 
