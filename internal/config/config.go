@@ -26,29 +26,40 @@ const (
 	DefaultCallTimeout = 15 * time.Second
 )
 
+// The defaults of the timeouts whose Config fields stay zero when unset.
+const (
+	DefaultCLITimeout   = 15 * time.Minute
+	DefaultAdminTimeout = 30 * time.Second
+)
+
 // Config is the resolved configuration for one process.
 type Config struct {
-	URL            string        // NATS URL
-	Owner          string        // SAP owner token
-	StateDir       string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
-	Name           string        // endpoint name (MASH_NAME); empty = inert
-	Creds          string        // endpoint credentials file
-	SettleMS       int           // quiet time before a batch is pushed
-	BatchMsgs      int           // a batch up to this many messages is shown in full
-	BatchBytes     int           // ... and up to this many body bytes
-	IdleWake       time.Duration // hook mode: spooled mail no hook shows within this wakes the idle session (5s-30m)
-	OpenTimeout    time.Duration // bound on opening a connection to the endpoint's data: the first requests (default 20s)
-	CallTimeout    time.Duration // bound on one command's or tool call's requests once open (default 15s)
-	AdminCreds     string        // admin credentials for `mash admin`
-	TLSCA          string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
-	TLSCert        string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
-	TLSKey         string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
-	LaunchToken    string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
-	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	Dir            string        // the config directory (ConfigDir); "" when none can be found
-	Legacy         string        // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
-	Limits         store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	URL             string        // NATS URL
+	Owner           string        // SAP owner token
+	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
+	Name            string        // endpoint name (MASH_NAME); empty = inert
+	Creds           string        // endpoint credentials file
+	SettleMS        int           // quiet time before a batch is pushed
+	BatchMsgs       int           // a batch up to this many messages is shown in full
+	BatchBytes      int           // ... and up to this many body bytes
+	IdleWake        time.Duration // hook mode: spooled mail no hook shows within this wakes the idle session (5s-30m)
+	OpenTimeout     time.Duration // bound on opening a connection to the endpoint's data: the first requests (default 20s)
+	CallTimeout     time.Duration // bound on one command's or tool call's requests once open (default 15s)
+	LeaseRetry      time.Duration // serve: wait between attempts to take a held lease (zero = serve's default, 10s)
+	TransientBudget time.Duration // serve: transient failures in a row for longer than this end the wait (zero = 15m)
+	TransientMax    time.Duration // serve: the retry backoff doubles up to this (zero = 2m)
+	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
+	AdminTimeout    time.Duration // total deadline of one `mash admin` command (zero = 30s)
+	AdminCreds      string        // admin credentials for `mash admin`
+	TLSCA           string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
+	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
+	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
+	LaunchToken     string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Host            string        // MASH_HOST / "host": the agent host adapter ("" = claude)
+	SpoolFromStart  bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	Dir             string        // the config directory (ConfigDir); "" when none can be found
+	Legacy          string        // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
+	Limits          store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 }
 
 type file struct {
@@ -62,6 +73,12 @@ type file struct {
 
 	OpenTimeout string `json:"open_timeout"`
 	CallTimeout string `json:"call_timeout"`
+
+	LeaseRetry      string `json:"lease_retry"`
+	TransientBudget string `json:"transient_budget"`
+	TransientMax    string `json:"transient_max"`
+	CLITimeout      string `json:"cli_timeout"`
+	AdminTimeout    string `json:"admin_timeout"`
 
 	AdminCreds string `json:"admin_creds"`
 	Host       string `json:"host"`
@@ -338,7 +355,10 @@ func Load(env func(string) string, home string) (Config, error) {
 		dst          *time.Duration
 		file, envKey string
 		fileKey      string
-	}{{&c.OpenTimeout, f.OpenTimeout, "MASH_OPEN_TIMEOUT", "open_timeout"}, {&c.CallTimeout, f.CallTimeout, "MASH_CALL_TIMEOUT", "call_timeout"}} {
+	}{{&c.OpenTimeout, f.OpenTimeout, "MASH_OPEN_TIMEOUT", "open_timeout"}, {&c.CallTimeout, f.CallTimeout, "MASH_CALL_TIMEOUT", "call_timeout"},
+		{&c.LeaseRetry, f.LeaseRetry, "MASH_LEASE_RETRY", "lease_retry"}, {&c.TransientBudget, f.TransientBudget, "MASH_TRANSIENT_BUDGET", "transient_budget"},
+		{&c.TransientMax, f.TransientMax, "MASH_TRANSIENT_MAX", "transient_max"}, {&c.CLITimeout, f.CLITimeout, "MASH_CLI_TIMEOUT", "cli_timeout"},
+		{&c.AdminTimeout, f.AdminTimeout, "MASH_ADMIN_TIMEOUT", "admin_timeout"}} {
 		raw, from := env(p.envKey), p.envKey
 		if raw == "" {
 			raw, from = p.file, fmt.Sprintf("config.json %q", p.fileKey)
