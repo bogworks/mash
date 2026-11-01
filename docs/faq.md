@@ -58,7 +58,7 @@ No. A lease allows one live session per name. A second session starts without ma
 
 ## What happens with `claude --resume`?
 
-The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_NAME` is inert. Started with a different name, it gets that name's mailbox. Set the same `MASH_NAME` when you resume. A laptop that sleeps longer than the 90 second lease can lose the name; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve` See [Sessions and resume](install.md#sessions-and-resume).
+The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_NAME` is inert. Started with a different name, it gets that name's mailbox. Set the same `MASH_NAME` when you resume. A laptop that sleeps longer than the 90 second lease can lose the name; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve` Resuming a session that is still running starts a second copy that does not get the mail: its hooks are refused and say so once in that session ([ADR-0043](decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)). See [Sessions and resume](install.md#sessions-and-resume).
 
 ## Do subagents get mail?
 

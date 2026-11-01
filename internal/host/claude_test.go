@@ -214,3 +214,35 @@ func TestOwnerTokenIsJSON(t *testing.T) {
 		t.Fatalf("empty fields not omitted: %s", got)
 	}
 }
+
+// A `claude --resume` of a running session shares the session id but not the launch token: the session id then proves
+// nothing (ADR 0043); rule 3 still applies, and an empty token on either side leaves rule 1 as it was.
+func TestMatchOtherLaunchOfTheSameSession(t *testing.T) {
+	unrelated(t)
+	pp := os.Getppid()
+	for _, c := range []struct {
+		name      string
+		owner     string
+		hook      HookIdentity
+		want      bool
+		otherLnch bool
+	}{
+		{"same session, equal tokens", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokA"}, true, false},
+		{"same session, other token", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, false, true},
+		{"same session, hook token empty", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S1"}, true, false},
+		{"same session, owner token empty", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, true, false},
+		{"empty tokens everywhere", ownerJSON(4242, "S1", ""), HookIdentity{SessionID: "S1"}, true, false},
+		{"other token, owner is an ancestor", ownerJSON(pp, "S1", "tokA"), HookIdentity{SessionID: "S1", LaunchToken: "tokB"}, true, false},
+		{"other session, other token", ownerJSON(4242, "S1", "tokA"), HookIdentity{SessionID: "S2", LaunchToken: "tokB"}, false, false},
+	} {
+		ok, why := (Claude{}).Match(c.owner, c.hook)
+		if ok != c.want || IsOtherLaunch(why) != c.otherLnch {
+			t.Errorf("%s: Match = %v %q, want %v (other launch %v)", c.name, ok, why, c.want, c.otherLnch)
+		}
+		for _, tok := range []string{"tokA", "tokB"} {
+			if strings.Contains(why, tok) {
+				t.Errorf("%s: reason %q contains a token", c.name, why)
+			}
+		}
+	}
+}

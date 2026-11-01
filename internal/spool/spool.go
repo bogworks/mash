@@ -56,6 +56,7 @@ const (
 	sessionFile = ".session"
 	ownerFile   = ".owner"
 	refusedFile = ".refused"
+	toldFile    = ".told"
 	aliveFile   = ".alive"
 
 	// refusedEvery is how often a refused hook rewrites .refused.
@@ -342,6 +343,9 @@ func (s Spool) OwnRecord(legacy, record string) error {
 	if err := os.Remove(filepath.Join(s.Dir, refusedFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(filepath.Join(s.Dir, toldFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if err := s.writeOrRemove(ownerFile, record); err != nil {
 		return err
 	}
@@ -476,3 +480,13 @@ func (s Spool) Has(seq uint64) bool {
 	var e Entry
 	return json.Unmarshal(b, &e) == nil && e.Seq == seq
 }
+
+// Told reports whether the in-session notice for key (a short hash of one copy of a session) was already printed.
+// Call it under Lock.
+func (s Spool) Told(key string) bool {
+	b, err := os.ReadFile(filepath.Join(s.Dir, toldFile))
+	return err == nil && strings.TrimSpace(string(b)) == key
+}
+
+// NoteTold records that the notice for key was printed, replacing any earlier key. Call it under Lock.
+func (s Spool) NoteTold(key string) error { return s.writeOrRemove(toldFile, key) }

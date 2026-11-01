@@ -1,0 +1,68 @@
+---
+status: accepted
+date: 2026-11-01
+decision-makers: Randy Bias (mash maintainer)
+---
+
+# A second launch of a running session is refused, and told once
+
+## Context and Problem Statement
+
+`claude --resume <id>` on a session that is still running starts a second Claude process with the same session id and
+the same `MASH_NAME`, but a new `MASH_LAUNCH_TOKEN`. Its `mash serve` waits for the lease. Its hooks, however, matched
+rule 1 of ADR-0040 (session id equal) and drained the lease holder's spool, so mail was split between two processes
+without a word. The refusal notice was also pull-only (`status`, `who`), so nobody in the second copy learned that it
+gets no mail. ADR-0040 listed this as a known bad consequence "to be settled before release".
+
+## Decision Drivers
+
+* A copy that does not hold the lease must never drain the holder's spool.
+* A refused copy has to be told, in its own session, without polling `status`.
+* `/clear` keeps the launch token and must stay unaffected.
+
+## Considered Options
+
+* Drop rule 1 (session id) altogether.
+* Narrow rule 1: it does not match when both launch tokens are non-empty and differ.
+* Keep rule 1 and only document the hazard.
+
+## Decision Outcome
+
+Chosen option: narrow rule 1, because a `--resume` always gets a new launch token while `/clear` and the holder's own
+hooks keep theirs, and where either token is empty nothing changes.
+
+This amends ADR-0040.
+
+* **Match.** Rule 1 does not match when the hook's and the owner's launch tokens are both non-empty and differ. Rule 2
+  cannot match then, and rule 3 (process ancestry) is unchanged: a hook that really descends from the recorded pid is
+  still accepted. The refusal reason starts `session id matches but launch token differs: another launch of this
+  session (a --resume of a running session?)` and prints no token. `host.IsOtherLaunch(why)` recognises it.
+* **Notice.** A hook refused for that reason, besides the stderr line and `.refused` of ADR-0040, prints once per
+  (session id, launch token) pair a hook `additionalContext`, in the shape and event name `Present` uses: "mash: this
+  copy of the session is not receiving mail. Another Claude process of this same session (pid N) holds the endpoint
+  NAME; mail goes to that process. End one of the two, or run this one under a different MASH_NAME." "Once" is the
+  spool's `.told`, a 16-hex-digit sha256 of session + NUL + launch token, written under the spool lock the hook already
+  holds. `Own` clears `.told` with `.refused`, so a new lease holder lets each copy be told again.
+* A refusal for any other reason is unchanged: stderr only, nothing on stdout. A refused hook never drains, touches
+  `.hooked` or marks anything else.
+
+### Consequences
+
+* Good, because two live processes on one session id no longer split the mail.
+* Good, because the second copy learns it is mailless in its own context, once.
+* Bad, because a legitimate relaunch whose serve has not bound yet (its hooks run with a new token before it owns the
+  spool) is briefly refused and told. Its mail stays spooled for its own serve, which delivers it once it binds, and
+  `Own` then clears `.told`.
+* Neutral, because `/clear` keeps the launch token, so it is unaffected; `--resume` gets a new token.
+* Neutral, because with no launch token on either side the session-id rule works as in ADR-0040.
+
+### Confirmation
+
+* `internal/host/claude_test.go`: `TestMatchOtherLaunchOfTheSameSession`.
+* `cmd/mash/hook_chain_test.go` (real processes): `TestHookOtherLaunchOfTheSameSessionIsRefusedAndToldOnce`.
+* Evidence: `docs/evidence/2026-11-01-dual-resume/RECEIPT.md`.
+
+## More Information
+
+* Amends ADR-0040 (rule 1 and its known-bad consequence). Related: ADR-0013 (one live session per name).
+* Code: `internal/host/claude.go`, `internal/spool/spool.go`, `cmd/mash/hook.go`.

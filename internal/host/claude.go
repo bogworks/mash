@@ -81,7 +81,8 @@ func (c Claude) Owns(owner string, h HookIdentity) bool {
 
 // Match decides whether the hook belongs to the session whose serve holds the lease. Any one of three rules, cheapest
 // first, is enough; a hook that matches none is refused, and no rule adopts an unknown session:
-//  1. session: the hook's session id equals serve's (both non-empty);
+//  1. session: the hook's session id equals serve's (both non-empty), unless both launch tokens are non-empty and
+//     differ (another launch of the same session, ADR 0043);
 //  2. launch: both launch tokens are non-empty and equal (stable across /clear);
 //  3. process: serve's parent pid is among the hook's ancestors (covers /clear on the plain CLI).
 //
@@ -102,7 +103,11 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	default:
 		return true, "no owner recorded"
 	}
-	if h.SessionID != "" && r.Session != "" && h.SessionID == r.Session {
+	// Two launches of one session (a `claude --resume` of a running session) share the session id but not the launch
+	// token: the session id then proves nothing (ADR 0043). Rule 3 still decides.
+	otherLaunch := h.LaunchToken != "" && r.Launch != "" && h.LaunchToken != r.Launch
+	sameSession := h.SessionID != "" && r.Session != "" && h.SessionID == r.Session
+	if sameSession && !otherLaunch {
 		return true, "session id"
 	}
 	if h.LaunchToken != "" && r.Launch != "" && h.LaunchToken == r.Launch {
@@ -115,8 +120,35 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 			}
 		}
 	}
+	if sameSession && otherLaunch {
+		return false, otherLaunchWhy + ", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"
+	}
 	return false, "session id " + differs(h.SessionID, r.Session) + ", launch token " + differs(h.LaunchToken, r.Launch) +
 		", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"
+}
+
+// otherLaunchWhy starts the refusal reason of a hook whose session id matches the owner's but whose launch token
+// differs. No token is printed.
+const otherLaunchWhy = "session id matches but launch token differs: another launch of this session (a --resume of a running session?)"
+
+// IsOtherLaunch reports whether a Match refusal reason is the other-launch case.
+func IsOtherLaunch(why string) bool { return strings.HasPrefix(why, otherLaunchWhy) }
+
+// OwnerPID is the Claude process pid an owner record (JSON or legacy "pid:N") names, 0 if none.
+func OwnerPID(owner string) int {
+	var r ownerRecord
+	if strings.HasPrefix(owner, "{") {
+		_ = json.Unmarshal([]byte(owner), &r)
+		return r.PID
+	}
+	n, _ := strconv.Atoi(strings.TrimPrefix(owner, "pid:"))
+	return n
+}
+
+// Notice renders text as Claude Code hook additionalContext for event, in the shape Present uses.
+func Notice(event, text string) []byte {
+	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": event, "additionalContext": text}})
+	return append(out, '\n')
 }
 
 // differs words why two ids did not match, without printing a launch token.
