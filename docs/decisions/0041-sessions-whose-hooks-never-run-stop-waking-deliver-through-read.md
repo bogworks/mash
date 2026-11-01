@@ -79,6 +79,9 @@ text is not rewritten (ADR-0002).
 
 ### Confirmation
 
+* Issue #40: once suspected, a message the spool will not take is held unacked (`spoolBatch`), not acked on a channel
+  write, because a wake that starts no turn means a channel write is not proof of delivery. A hook run clears this.
+  Test: `TestSuspectedHooklessHoldsSpoolFallbackUntilAHookRuns`.
 * `internal/endpoint/hookless_test.go`: `TestNoHookStopsReWakingAfterThreeWakes`, `TestNewMailRingsOnceWhileSuspected`,
   `TestToolCallsWithoutHooksProveHookless`, `TestToolCallsBeforeTheBindOrWithinTheGraceDoNotProve`,
   `TestReadAcksOnlyWhenProvenHookless` (the no-op cases), `TestAHookRunEndsHooklessMode`, `TestSubagentHookIsNotHookless`,

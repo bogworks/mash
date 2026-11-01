@@ -288,7 +288,7 @@ func deliveryLines(src *statusSource) []string {
 		if own == nil {
 			out = append(out, "delivery: hooks n/a - this session does not hold the lease yet")
 		} else if at, ok := sp.LastHook(); ok && !at.Before(*own) {
-			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s); mail also arrives with tool results", at.Format(time.RFC3339)))
+			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s); the last wake started a turn; mail also arrives with tool results", at.Format(time.RFC3339)))
 		} else if st, wakes := hooklessOf(src); st == endpoint.HooklessProven {
 			out = append(out, fmt.Sprintf("delivery: DEGRADED - no mash hook has run since %s although this session has made tool calls. Likely cause: %s. Mail now: read each message with the read tool. Next: %s",
 				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own)))
@@ -296,7 +296,9 @@ func deliveryLines(src *statusSource) []string {
 			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start Claude Code with MASH_LAUNCH_TOKEN=$(uuidgen) claude ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
 				redactText(why), rat.Format(time.RFC3339)))
 		} else if st == endpoint.HooklessSuspected {
-			out = append(out, fmt.Sprintf("delivery: SUSPECTED - %d wakes and no hook since %s; re-waking stopped", wakes, own.Format(time.RFC3339)))
+			out = append(out, fmt.Sprintf("delivery: SUSPECTED - the last %d wakes started no turn (no hook since %s); channel writes are not counted as delivery; re-waking stopped", wakes, own.Format(time.RFC3339)))
+		} else if wakes > 0 {
+			out = append(out, fmt.Sprintf("delivery: hooks have not run yet in this session; the last %d wake(s) started no turn", wakes))
 		} else {
 			out = append(out, "delivery: hooks have not run yet in this session (they run with the first prompt or tool call)")
 		}
