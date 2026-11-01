@@ -551,12 +551,107 @@ func (a *Admin) Deprovision(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
-	if _, err := lease.Put(ctx, name, store.LeaseTombstone()); err != nil {
-		return fmt.Errorf("mash: lease: %w", err)
+	if err := fence(ctx, lease, name); err != nil {
+		return err
 	}
 	if err := kv.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
 		return fmt.Errorf("mash: directory record: %w", err)
 	}
+	return a.deleteInbox(ctx, name)
+}
+
+// The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.
+var (
+	// ErrRecordOtherUser: the directory record's user is not the key given.
+	ErrRecordOtherUser = errors.New("its record belongs to another user key (left in place)")
+	// ErrRecordChanged: the record was replaced or changed between the read and the delete.
+	ErrRecordChanged = errors.New("the record changed; left in place")
+	// ErrNoRecord: there is no directory record, so nothing proves who owns the name (or its inbox stream).
+	ErrNoRecord = errors.New("it has no directory record, so nothing proves the key owns it (left in place)")
+)
+
+// afterDeprovisionGet is a test seam between DeprovisionIfUser's read and its delete; nil in production.
+var afterDeprovisionGet func()
+
+// DeprovisionIfUser is Deprovision for a record that must still belong to user (a public user key): it reads the
+// record's value and revision, refuses unless its user equals user, and deletes the record with a revision guard
+// (Purge with LastRevision), so a record replaced between the read and the delete is never removed.
+//
+// Order: guard and guarded record delete first, then the lease fence and the inbox delete. A refused call therefore
+// touches nothing: no tombstone, no stream delete. The gap between the record delete and the fence is safe because
+// a session cannot hold a record-less name: Open re-reads the directory record after taking the lease and gives the
+// lease back when it is gone (see Open), and a session that already held the lease is stopped by the tombstone at
+// its next refresh, exactly as in Deprovision. The cost of this order against Deprovision's is that a failure
+// between the two steps leaves a record-less name with an inbox and no fence; re-running `deprovision` (without
+// --user) finishes it.
+//
+// With no record nothing proves ownership, so it refuses even when the inbox stream exists (a provision that failed
+// before writing its record): remove that stream with a plain deprovision.
+func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error {
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return err
+	}
+	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		return fmt.Errorf("mash: lease bucket: %w", err)
+	}
+	e, err := kv.Get(ctx, name)
+	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+		return refusal(name, ErrNoRecord)
+	}
+	if err != nil {
+		return fmt.Errorf("mash: directory %s: %w", name, err)
+	}
+	rec, err := store.ParseRecord(name, e.Value())
+	if err != nil {
+		return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err)
+	}
+	if rec.User != user {
+		return refusal(name, ErrRecordOtherUser)
+	}
+	if afterDeprovisionGet != nil {
+		afterDeprovisionGet()
+	}
+	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
+		if isRevisionConflict(err) {
+			return &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
+		}
+		return fmt.Errorf("mash: directory record: %w", err)
+	}
+	if err := fence(ctx, lease, name); err != nil {
+		return err
+	}
+	return a.deleteInbox(ctx, name)
+}
+
+func refusal(name string, why error) error {
+	return &refusedError{name: name, why: why}
+}
+
+type refusedError struct {
+	name string
+	why  error
+	text string // overrides why's text when set
+}
+
+func (r *refusedError) Error() string {
+	if r.text != "" {
+		return "mash: refusing to deprovision " + r.name + ": " + r.text
+	}
+	return "mash: refusing to deprovision " + r.name + ": " + r.why.Error()
+}
+func (r *refusedError) Unwrap() error { return r.why }
+
+// fence writes the lease tombstone for name.
+func fence(ctx context.Context, lease jetstream.KeyValue, name string) error {
+	if _, err := lease.Put(ctx, name, store.LeaseTombstone()); err != nil {
+		return fmt.Errorf("mash: lease: %w", err)
+	}
+	return nil
+}
+
+func (a *Admin) deleteInbox(ctx context.Context, name string) error {
 	if err := a.js.DeleteStream(ctx, sap.InboxStream(name)); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 		return fmt.Errorf("mash: inbox stream: %w", err)
 	}

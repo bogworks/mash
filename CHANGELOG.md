@@ -8,6 +8,14 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 - Two admins changing the limits of one inbox at the same time can no longer leave the lower cap (and evict mail). `mash admin limits` and `mash admin provision` take a per-stream lock (`limits-lock.<name>` in the lease bucket, 30 s expiry) before reading the stream and hold it through the update; a second admin waits up to 20 s, then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`. Admins' clocks should agree to within a few seconds (see "Changing limits later" in [docs/operations.md](docs/operations.md), [ADR-0048](docs/decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), #27).
 
+### Added
+
+- `mash admin deprovision <name> --user <public-key>` removes the directory record and the inbox only if the record's user is still that NATS user public key, and refuses otherwise, leaving the record, inbox and lease untouched. The record is deleted against the revision that was read, so one replaced in between is never removed. With no record it refuses, even if an inbox stream exists. Without `--user` nothing changes (issue #9).
+
+### Changed
+
+- `quickstart-synadia.sh` cleans up a failed provision with one guarded `mash admin deprovision <name> --user <key>` call instead of listing and then deprovisioning, which closes the window in which another admin's record could be removed.
+
 ## [0.3.1] - 2026-11-01
 
 ### Added
