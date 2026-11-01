@@ -114,12 +114,12 @@ The `who` tool takes the same filters as optional parameters: `match`, `name`, `
 ## Removing an endpoint
 
 ```sh
-mash admin deprovision design
+mash admin deprovision design    # add --user <public-key> to remove it only if its record still carries that key
 nsc revocations add-user --account "$ACCOUNT" --name design
 nsc push --account "$ACCOUNT"
 ```
 
-Deprovisioning fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and provisioning the name again clears it at once. Revoking the user stops its credentials from connecting at all. Until you revoke, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
+Deprovisioning fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and provisioning the name again clears it at once. `mash admin deprovision <name> --user <public-key>` is the guarded form, for scripts that must not remove an endpoint someone else has since provisioned under the same name: it reads the directory record, refuses (touching nothing) unless the record's user equals the key, and deletes the record only if its revision is still the one it read, so a record replaced in between is never removed. If another admin changes only the record's metadata in between, it re-reads the record and retries on the new revision (up to 5 tries), so that change does not refuse; a changed user, a vanished record or exhausted tries refuse; it then fences the lease and deletes the inbox. Provision and both forms of deprovision hold the name's lock ([ADR-0048](decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), see [Limits](#limits)) for their whole run, so a second admin working on the same name waits for the first to finish (up to 20 s, then "try again") and cannot have its new endpoint fenced or its inbox deleted by it. With no record it refuses even if the inbox stream exists, because nothing proves who owns it; run it without `--user` to remove such a leftover. Revoking the user stops its credentials from connecting at all. Until you revoke, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
 
 ## Topologies
 

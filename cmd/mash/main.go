@@ -41,7 +41,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash admin permissions <name> [--nsc]        the NATS permissions an endpoint user needs
   mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]...
   mash admin set-meta <name> [--role R] [--host H] [--label k=v]...   (a value of - clears the field; --label k=- clears that label)
-  mash admin deprovision <name>
+  mash admin deprovision <name> [--user U]     remove the record and inbox; with --user, only if the record's user is still U
   mash admin list
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version

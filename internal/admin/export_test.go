@@ -32,3 +32,15 @@ func (a *Admin) AcquireLock(ctx context.Context, name string) (release func(), e
 	}
 	return func() { l.release(ctx) }, nil
 }
+
+// SetAfterDeprovisionGet installs a hook that runs between DeprovisionIfUser's read and its delete; it returns the previous one.
+func SetAfterDeprovisionGet(f func()) (prev func()) {
+	prev, afterDeprovisionGet = afterDeprovisionGet, f
+	return
+}
+
+// SetAfterDeprovisionPurge installs a hook that runs between DeprovisionIfUser's record delete and its fence; it returns the previous one.
+func SetAfterDeprovisionPurge(f func()) (prev func()) {
+	prev, afterDeprovisionPurge = afterDeprovisionPurge, f
+	return
+}

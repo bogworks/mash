@@ -317,6 +317,32 @@ func TestAdminCLI(t *testing.T) {
 		t.Fatalf("list: %d %s", code, out)
 	}
 	_ = c
+	for _, bad := range [][]string{
+		{"deprovision", "z", "--user"},
+		{"deprovision", "z", "--user", "notakey"},
+		{"deprovision", "z", "--user", "u" + u[1:]},
+		{"deprovision", "z", "--user", "A" + u[1:]},
+		{"deprovision", "z", "--user", u + "A"},
+		{"deprovision", "z", "--who", u},
+		{"deprovision", "z", u},
+	} {
+		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <name> [--user <public-key>]") {
+			t.Fatalf("%v: %d %s", bad, code, out)
+		}
+	}
+	_, other := e.Mint(t, "y")
+	if out, code := runAdmin("deprovision", "z", "--user", other); code == 0 || !strings.Contains(out, "refusing to deprovision z: its record belongs to another user key (left in place)") || strings.Contains(out, other[:9]) {
+		t.Fatalf("other key: %d %s", code, out)
+	}
+	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "z\t") {
+		t.Fatalf("a refused deprovision removed the record: %d %s", code, out)
+	}
+	if out, code := runAdmin("deprovision", "z", "--user", u); code != 0 || !strings.Contains(out, "deprovisioned z") || strings.Contains(out, u[:9]) {
+		t.Fatalf("deprovision --user: %d %s", code, out)
+	}
+	if out, code := runAdmin("provision", "z", "--user", u, "--account", e.Account); code != 0 {
+		t.Fatalf("re-provision: %d %s", code, out)
+	}
 	if out, code := runAdmin("deprovision", "z"); code != 0 {
 		t.Fatalf("deprovision: %s", out)
 	}

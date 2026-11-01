@@ -151,26 +151,26 @@ cleanup() {
   local rc=$?
   trap - EXIT
   if [ "$rc" -ne 0 ] && [ -n "$PROVISIONING" ] && [ -n "$ADMIN_ID" ] && [ -f "${ADMIN_CREDS:-}" ]; then
-    # provision can create the inbox stream and then fail. Deprovision only a record proven to be this run's (its NATS user
-    # public key is the one this run created): another admin may have provisioned the name since the directory check.
-    local lst en ek found=0 mine=0
-    if lst=$(MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin list 2>/dev/null); then
-      while IFS=$'\t' read -r en ek _; do
-        if [ "$en" = "$PROVISIONING" ]; then found=1; [ "$ek" != "$PROVISIONING_KEY" ] || mine=1; fi
-      done <<<"$lst"
-      if [ "$mine" -eq 1 ]; then
-        if MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin deprovision "$PROVISIONING" >/dev/null 2>&1; then
-          say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
-        else
-          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING'; remove it by hand (docs/synadia.md)." >&2
-        fi
-      elif [ "$found" -eq 1 ]; then
-        echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place." >&2
-      else
-        say "Setup failed: no directory record for $PROVISIONING to remove."
-      fi
+    # provision can create the inbox stream and then fail. One guarded call removes the record and inbox only if the record's
+    # NATS user public key is the one this run created: another admin may have provisioned the name since, and the guard
+    # compares and deletes on the directory revision, so it never removes theirs.
+    local derr
+    if derr=$(MASH_ADMIN_CREDS="$ADMIN_CREDS" mash admin deprovision "$PROVISIONING" --user "$PROVISIONING_KEY" 2>&1 >/dev/null); then
+      say "Setup failed: ran 'mash admin deprovision $PROVISIONING' to remove its half-created inbox or record."
     else
-      echo "quickstart-synadia: could not run 'mash admin list'; not deprovisioning $PROVISIONING. If it is this run's, remove it by hand: mash admin deprovision $PROVISIONING (docs/synadia.md)." >&2
+      case "$derr" in
+        *"belongs to another user key"*)
+          echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place." >&2 ;;
+        *"changed; left in place"*)
+          # The record changed again and again, or now names another user: either way it may still use this run's user.
+          PROVISIONED+=("$PROVISIONING")
+          echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place; its NATS user and creds file kept." >&2 ;;
+        *"has no directory record"*)
+          say "Setup failed: no directory record for $PROVISIONING to remove. If its inbox stream (inbox-$PROVISIONING) was left behind, remove it with 'mash admin deprovision $PROVISIONING' (docs/synadia.md)." ;;
+        *)
+          PROVISIONED+=("$PROVISIONING") # a record may exist and use this run's user: keep the user and creds
+          echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING --user ...'; remove it by hand if it is this run's (docs/synadia.md). Its NATS user and creds file kept." >&2 ;;
+      esac
     fi
   fi
   if [ -n "$ADMIN_ID" ]; then

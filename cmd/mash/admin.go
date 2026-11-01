@@ -174,8 +174,20 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels))
 	case "deprovision":
-		if len(args) != 2 {
-			return fail(errors.New("usage: mash admin deprovision <name>"))
+		const deprovisionUsage = "usage: mash admin deprovision <name> [--user <public-key>]"
+		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
+			return fail(errors.New(deprovisionUsage))
+		}
+		if len(args) == 4 {
+			// A public user key (U + 55 base32 characters); the guard compares it with the record's user.
+			if !validUserKeyShape(args[3]) {
+				return fail(errors.New(deprovisionUsage + "\nmash: --user wants a NATS user public key (U, then 55 upper-case base32 characters)"))
+			}
+			if err := a.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; revoke its NATS user with your operator tooling)\n", args[1], args[3][:8])
+			return 0
 		}
 		if err := a.Deprovision(ctx, args[1]); err != nil {
 			return fail(err)
@@ -218,4 +230,18 @@ func adminDeadline(cfg config.Config) time.Duration {
 		return cfg.AdminTimeout
 	}
 	return config.DefaultAdminTimeout
+}
+
+// validUserKeyShape is a light shape check for a public NATS user key: U, then base32 upper-case, 56 characters in
+// all. The directory comparison, not this, decides ownership.
+func validUserKeyShape(k string) bool {
+	if len(k) != 56 || k[0] != 'U' {
+		return false
+	}
+	for _, c := range k {
+		if !(c >= 'A' && c <= 'Z' || c >= '2' && c <= '7') {
+			return false
+		}
+	}
+	return true
 }

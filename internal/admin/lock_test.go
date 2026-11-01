@@ -209,6 +209,16 @@ func TestProvisionRacingProvisionNeverLowersCaps(t *testing.T) {
 	})
 	t.Cleanup(func() { admin.SetAfterStreamRead(prev) })
 	_, user := e.Mint(t, "gamma")
+	// A provision that failed after the stream and before the record, so both retries find the stream at the big
+	// caps. A Provision holds the name's lock whole, so one admin finishes before the other starts; the small one
+	// must be refused rather than lower the caps.
+	if _, err := pb.Provision(ctx, "gamma", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if err := dir.Purge(ctx, "gamma"); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	for i, ad := range []*admin.Admin{pa, pb} {
 		wg.Add(1)

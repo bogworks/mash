@@ -650,25 +650,38 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 }
 
-// failProvisionBody makes `admin provision alice-b` fail after remembering its --user key, and makes the next
-// `admin list` show a record for alice-b carrying listKey ("" means this run's own key).
-func failProvisionBody(listKey string) string {
-	return `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
-if [ "$1" = admin ] && [ "$2" = list ] && [ -f "$0.key" ]; then k='` + listKey + `'; [ -n "$k" ] || k=$(cat "$0.key"); printf 'alice-b\t%s\t2026-01-01T00:00:00Z\t\n' "$k"; exit 0; fi`
+// failProvisionBody makes `admin provision alice-b` fail after remembering its --user key. A guarded `admin deprovision
+// alice-b --user KEY` then behaves as mode says: "own" succeeds (the record is this run's), "foreign" refuses as the real
+// guard does for another admin's record, "changed" refuses because the record kept changing or now names another user, and "norecord"
+// runs the real mash against the live test server, where no record exists.
+func failProvisionBody(mode string) string {
+	body := `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
+if [ "$1" = admin ] && [ "$2" = deprovision ] && [ "$3" = alice-b ]; then
+  [ "$4" = --user ] && [ "$5" = "$(cat "$0.key")" ] || { echo "deprovision: wrong or missing --user" >&2; exit 1; }
+`
+	switch mode {
+	case "own":
+		body += "  exit 0\n"
+	case "foreign":
+		body += "  echo 'mash: refusing to deprovision alice-b: its record belongs to another user key (left in place)' >&2; exit 1\n"
+	case "changed":
+		body += "  echo 'mash: refusing to deprovision alice-b: the record for alice-b changed; left in place' >&2; exit 1\n"
+	}
+	return body + "fi"
 }
 
 func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 6)
-	wrapper, calls := wrapperMash(t, failProvisionBody(""))
+	wrapper, calls := wrapperMash(t, failProvisionBody("own"))
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
 	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "admin deprovision alice-b\n") || strings.Contains(string(b), "admin deprovision alice-a") {
-		t.Errorf("want exactly alice-b deprovisioned, calls:\n%s", b)
+	if !strings.Contains(string(b), "admin deprovision alice-b --user U") || strings.Contains(string(b), "admin deprovision alice-a") || strings.Count(string(b), "admin deprovision") != 1 {
+		t.Errorf("want exactly one guarded deprovision of alice-b, calls:\n%s", b)
 	}
 	if !strings.Contains(r.out, "deprovision alice-b") {
 		t.Errorf("output does not mention the deprovision:\n%s", r.out)
@@ -681,19 +694,63 @@ func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 }
 
 func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
+	for _, mode := range []string{"foreign", "changed"} {
+		t.Run(mode, func(t *testing.T) {
+			e := testenv.Start(t)
+			f := newFake(t, e, 6)
+			wrapper, calls := wrapperMash(t, failProvisionBody(mode))
+			home := t.TempDir()
+			r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+			if r.code == 0 {
+				t.Fatalf("want a failure:\n%s", r.out)
+			}
+			b, _ := os.ReadFile(calls)
+			if !strings.Contains(string(b), "admin deprovision alice-b --user U") {
+				t.Errorf("no guarded deprovision, calls:\n%s", b)
+			}
+			if !strings.Contains(r.out, "a record for alice-b exists that is not this run's; left in place") {
+				t.Errorf("output does not say the record was left:\n%s", r.out)
+			}
+			_, credsErr := os.Stat(filepath.Join(home, ".config", "mash", "alice-b.creds"))
+			kept := false
+			for _, n := range f.names() {
+				if n == "alice-b" {
+					kept = true
+				}
+			}
+			if mode == "changed" {
+				// The endpoint may still use this run's user: keep it and its creds file.
+				if !strings.Contains(r.out, "its NATS user and creds file kept") {
+					t.Errorf("output does not say the user and creds were kept:\n%s", r.out)
+				}
+				if !kept {
+					t.Errorf("the NATS user alice-b was deleted although its record remains")
+				}
+				if credsErr != nil {
+					t.Errorf("the creds file alice-b.creds was removed: %v", credsErr)
+				}
+			} else {
+				if kept {
+					t.Errorf("the never-used NATS user alice-b survived a foreign record")
+				}
+				if credsErr == nil {
+					t.Errorf("the creds file alice-b.creds survived a foreign record")
+				}
+			}
+		})
+	}
+}
+
+func TestQuickstartNoRecordAfterFailedProvision(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 6)
-	wrapper, calls := wrapperMash(t, failProvisionBody("UOTHERKEYNOTTHISRUNS"))
+	wrapper, _ := wrapperMash(t, failProvisionBody("norecord"))
 	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
-	b, _ := os.ReadFile(calls)
-	if strings.Contains(string(b), "admin deprovision") {
-		t.Errorf("deprovisioned a record that is not this run's, calls:\n%s", b)
-	}
-	if !strings.Contains(r.out, "a record for alice-b exists that is not this run's; left in place") {
-		t.Errorf("output does not say the record was left:\n%s", r.out)
+	if !strings.Contains(r.out, "no directory record for alice-b to remove") {
+		t.Errorf("output does not say there was no record:\n%s", r.out)
 	}
 }
 
