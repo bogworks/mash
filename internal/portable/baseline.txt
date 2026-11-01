@@ -3,8 +3,10 @@
 # Run MASH_PORTABLE_UPDATE=1 go test ./internal/portable/ to lower rows. A new row needs a real reason.
 
 # baseline 2026-11-01
+R2-home-and-tmp cmd/mash/main.go 1
 R2-home-and-tmp cmd/mash/status.go 1
 R2-home-and-tmp internal/claudesettings/claudesettings.go 1
+R2-home-and-tmp internal/config/config.go 1
 R2-home-and-tmp scripts/releasecheck/publish.go 1
 R2-home-and-tmp scripts/releasecheck/sums.go 1
 R4-long-timeout cmd/mash/cli.go 1
