@@ -5,7 +5,7 @@
 ## What the script does
 
 1. Finds your team, system and account (name one with `--team` / `--account` if the token sees several) and checks the stream limit.
-2. Creates one temporary admin NATS user (`mash-quickstart-admin-<hex>`), then one NATS user per endpoint with the permissions `mash admin permissions <name>` prints. Creds files go to `~/.config/mash/<name>.creds`, mode 0600.
+2. Creates one temporary admin NATS user (`mash-quickstart-admin-<hex>`), then one NATS user per endpoint with the permissions `mash admin permissions <name>` prints. Creds files go to `<name>.creds` in the config directory (`~/.config/mash` by default; `--config-dir`, else `$MASH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/mash`), mode 0600.
 3. Writes `~/.config/mash/config.json` (`url`, `owner`); it refuses to change a different one without `--force`.
 4. Runs `mash admin init` and `mash admin provision` with the admin creds, sends a test message between the first two endpoints, and deletes the admin user (also when it fails or is interrupted).
 

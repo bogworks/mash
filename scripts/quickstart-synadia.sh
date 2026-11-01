@@ -34,7 +34,9 @@
 #
 # Usage: quickstart-synadia.sh [--team T] [--account A] [--owner O] [--endpoint N]...
 #          [--dry-run] [--mash PATH] [--config-dir DIR] [--force] [--token-stdin] [--no-test]
-#   --config-dir must end in .config/mash (mash reads $HOME/.config/mash); default ~/.config/mash.
+#   --config-dir must be an absolute path; mash is run with MASH_CONFIG_DIR set to it, so any directory works. The default is
+#   $MASH_CONFIG_DIR, else $XDG_CONFIG_HOME/mash (when XDG_CONFIG_HOME is absolute and that holds a config.json, or
+#   ~/.config/mash holds none), else ~/.config/mash.
 #   SYNADIA_API_URL overrides the API base URL (for tests). The bearer token goes to that URL, so only
 #   https://HOST[:port][/path], http://127.0.0.1[:port][/path] and http://localhost[:port][/path] are accepted.
 set -euo pipefail
@@ -100,12 +102,15 @@ for n in "${ENDPOINTS[@]}"; do
 done
 [ "$(printf '%s\n' "${ENDPOINTS[@]}" | sort -u | wc -l)" -eq "${#ENDPOINTS[@]}" ] || die "an --endpoint is given twice"
 
-REAL_HOME="${HOME:?HOME is not set}"
-[ -n "$CONFIG_DIR" ] || CONFIG_DIR="$REAL_HOME/.config/mash"
-case "$CONFIG_DIR" in
-  */.config/mash) MASH_HOME="${CONFIG_DIR%/.config/mash}"; [ -n "$MASH_HOME" ] || MASH_HOME=/ ;;
-  *) die "--config-dir must end in .config/mash (mash reads \$HOME/.config/mash)" ;;
-esac
+if [ -z "$CONFIG_DIR" ]; then
+  LEGACY_DIR="${HOME:?HOME is not set}/.config/mash"
+  if [ -n "${MASH_CONFIG_DIR:-}" ]; then CONFIG_DIR="$MASH_CONFIG_DIR"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ "${XDG_CONFIG_HOME#/}" != "$XDG_CONFIG_HOME" ] &&
+    { [ -e "$XDG_CONFIG_HOME/mash/config.json" ] || [ ! -e "$LEGACY_DIR/config.json" ]; }; then CONFIG_DIR="$XDG_CONFIG_HOME/mash"
+  else CONFIG_DIR="$LEGACY_DIR"
+  fi
+fi
+case "$CONFIG_DIR" in /*) ;; *) die "the config directory '$CONFIG_DIR' must be an absolute path" ;; esac
 CONFIG="$CONFIG_DIR/config.json"
 
 # mash reads these in every later session and they beat config.json: do not let them skew this run.
@@ -113,7 +118,7 @@ for v in MASH_URL MASH_OWNER MASH_CREDS MASH_NAME MASH_ADMIN_CREDS MASH_LAUNCH_T
   if [ -n "${!v:-}" ]; then say "note: ignoring $v from the environment for this run (set, it also overrides config.json in later sessions)"; fi
   unset "$v"
 done
-mash() { HOME="$MASH_HOME" "$MASH" "$@"; }
+mash() { MASH_CONFIG_DIR="$CONFIG_DIR" "$MASH" "$@"; }
 
 # ---- token (never argv, never stored, never echoed) -------------------------------------------
 TOKEN="${SYNADIA_API_TOKEN:-}"

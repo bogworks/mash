@@ -45,9 +45,9 @@ type Entry struct {
 // Spool is one endpoint's spool directory.
 type Spool struct{ Dir string }
 
-// Dir is the spool of endpoint name of owner under stateHome (config.Config.StateHome).
-func Dir(stateHome, owner, name string) string {
-	return filepath.Join(stateHome, "mash", "spool", owner, name)
+// Dir is the spool of endpoint name of owner under stateDir (config.Config.StateDir).
+func Dir(stateDir, owner, name string) string {
+	return filepath.Join(stateDir, "spool", owner, name)
 }
 
 const (

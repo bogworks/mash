@@ -270,7 +270,7 @@ func TestStatusToolRunning(t *testing.T) {
 		id++
 		return strings.Contains(statusOf(t, s, id), "hooks have not run")
 	})
-	sp := spool.Spool{Dir: spool.Dir(filepath.Join(w.env["a"]["HOME"], ".local", "state"), w.e.Owner, "a")}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(w.env["a"]["HOME"], ".local", "state", "mash"), w.e.Owner, "a")}
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestStatusToolConfigParseErrorFirst(t *testing.T) {
 }
 
 func spoolFor(w *world, name string) spool.Spool {
-	return spool.Spool{Dir: spool.Dir(filepath.Join(w.env[name]["HOME"], ".local", "state"), w.e.Owner, name)}
+	return spool.Spool{Dir: spool.Dir(filepath.Join(w.env[name]["HOME"], ".local", "state", "mash"), w.e.Owner, name)}
 }
 
 // While the lease is held by another session, that holder's hooks are not this session's.

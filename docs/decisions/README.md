@@ -57,3 +57,4 @@ on), or mash's own choice on top of them.
 | [0041](0041-sessions-whose-hooks-never-run-stop-waking-deliver-through-read.md) | Sessions whose hooks never run stop waking and deliver through the read tool | accepted | mash | 2026-11-01 |
 | [0042](0042-sign-sha256sums-with-sshsig.md) | A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild | accepted | project | 2026-10-31 |
 | [0043](0043-second-launch-of-a-running-session-is-refused-and-told-once.md) | A second launch of a running session is refused and told once in-session (amends 0040) | accepted | mash | 2026-11-01 |
+| [0044](0044-config-and-state-directories-are-relocatable.md) | Config and state directories are relocatable by MASH_CONFIG_DIR and MASH_STATE_DIR | accepted | mash | 2026-11-01 |

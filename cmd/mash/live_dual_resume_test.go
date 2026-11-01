@@ -313,7 +313,7 @@ func liveDualResume(t *testing.T, id string, tokens bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lsDualTO)
 	t.Cleanup(cancel)
-	sp := spool.Spool{Dir: spool.Dir(sc.state, w.env["a"]["MASH_OWNER"], "a")}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], "a")}
 	spoolState := func() string {
 		var names []string
 		ents, _ := os.ReadDir(sp.Dir)

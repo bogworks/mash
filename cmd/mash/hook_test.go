@@ -58,7 +58,7 @@ func runHookAs(t *testing.T, env map[string]string, event, session string) strin
 }
 
 func spoolOf(env map[string]string) spool.Spool {
-	return spool.Spool{Dir: spool.Dir(filepath.Join(env["HOME"], ".local", "state"), env["MASH_OWNER"], env["MASH_NAME"])}
+	return spool.Spool{Dir: spool.Dir(filepath.Join(env["HOME"], ".local", "state", "mash"), env["MASH_OWNER"], env["MASH_NAME"])}
 }
 
 func unreadOf(t *testing.T, w *world, name string) uint64 {
@@ -107,6 +107,32 @@ func TestHookDeliveryEndToEnd(t *testing.T) {
 	eventually(t, 5*time.Second, "serve acks what the hook showed", func() bool { return unreadOf(t, w, "a") == 0 })
 	if again := runHook(t, w.env["a"], "PostToolUse"); again != "" {
 		t.Fatalf("shown twice: %q", again)
+	}
+}
+
+// MASH_STATE_DIR places the spool (and so what the hook reads) in that directory, not under HOME.
+func TestStateDirOverridePlacesTheSpool(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	state := filepath.Join(t.TempDir(), "mystate")
+	w.env["a"]["MASH_STATE_DIR"] = state
+	w.env["a"]["MASH_IDLE_WAKE"] = "5s"
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	want := filepath.Join(state, "spool", w.e.Owner, "a")
+	eventually(t, 10*time.Second, "serve made the spool under MASH_STATE_DIR", func() bool { _, err := os.Stat(want); return err == nil })
+	if _, err := os.Stat(filepath.Join(w.env["a"]["HOME"], ".local", "state", "mash")); err == nil {
+		t.Fatal("the default state directory was used too")
+	}
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	runHook(t, w.env["a"], "UserPromptSubmit") // the first hook switches the session to the spool
+	if _, code := w.cli(t, "b", "send", "a", "--kind", "question", "via the override"); code != 0 {
+		t.Fatal("send failed")
+	}
+	sp := spool.Spool{Dir: want}
+	eventually(t, 10*time.Second, "serve spooled the mail there", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
+	if got := runHook(t, w.env["a"], "PostToolUse"); !strings.Contains(got, "via the override") {
+		t.Fatalf("the hook did not read the overridden spool:\n%s", got)
 	}
 }
 

@@ -724,7 +724,7 @@ const hardenedHooks = `{"hooks": {
 const oldMash = "#!/bin/sh\ncase \"$1\" in serve) " + serveReply + " ;; *) echo 'mash: unknown command' >&2; exit 2 ;; esac\n"
 
 // loggingHooks is the shipped hook command shape: mash hook's stderr goes to the hook log, and it always exits 0.
-const loggingHooks = `{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "mash hook 2>/dev/null; exit 0"}]}], "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "d=\"${XDG_STATE_HOME:-$HOME/.local/state}/mash\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; mash hook 2>>\"$l\"; exit 0"}]}]}}
+const loggingHooks = `{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "mash hook 2>/dev/null; exit 0"}]}], "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "d=\"${MASH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mash}\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; mash hook 2>>\"$l\"; exit 0"}]}]}}
 `
 
 // withPrevious tags v0.0.9 (below the candidate's 0.1.0) and makes the previous release's binary the script body.
