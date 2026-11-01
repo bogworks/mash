@@ -10,7 +10,7 @@
 //	b  the first heading is "# <title>"; the "##" sections are present and in order; "### Consequences" and
 //	   "### Confirmation" sit under Decision Outcome
 //	c  README.md links every ADR and every README link to an ADR resolves; every relative link in an ADR resolves;
-//	   numbers are unique and there is no gap below the highest number
+//	   numbers are unique (gaps are allowed: a number may be reserved by an in-flight PR)
 //	d  no consumer vocabulary (see vocabRE); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
 //	   add or change a "Superseded by [..](..)" line
@@ -249,13 +249,11 @@ func lintDocs(dir string) ([]string, error) {
 		vs = append(vs, viol(filepath.Join(dir, n), 1, "file name must be NNNN-kebab-title.md (4 digits)"))
 	}
 
-	// c: numbers unique, no gaps.
+	// c: numbers unique (gaps are allowed).
 	byNum := map[int][]string{}
-	maxN := 0
 	for _, n := range files {
 		num, _ := strconv.Atoi(n[:4])
 		byNum[num] = append(byNum[num], n)
-		maxN = max(maxN, num)
 	}
 	nums := make([]int, 0, len(byNum))
 	for num := range byNum {
@@ -265,11 +263,6 @@ func lintDocs(dir string) ([]string, error) {
 	for _, num := range nums {
 		if ns := byNum[num]; len(ns) > 1 {
 			vs = append(vs, viol(filepath.Join(dir, ns[1]), 1, "number %04d is used by more than one ADR: %s", num, strings.Join(ns, ", ")))
-		}
-	}
-	for num := 1; num < maxN; num++ {
-		if len(byNum[num]) == 0 {
-			vs = append(vs, viol(filepath.Join(dir, "README.md"), 1, "ADR number %04d is missing (the highest is %04d)", num, maxN))
 		}
 	}
 
@@ -349,6 +342,17 @@ func headings(lines []string, from int) []heading {
 	return hs
 }
 
+// sectionName returns the required section a "##" heading text names: the name itself, or the name followed by a
+// space and "(" (a parenthetical note), or "" when it names none.
+func sectionName(text string) string {
+	for _, s := range sections {
+		if text == s || strings.HasPrefix(text, s+" (") {
+			return s
+		}
+	}
+	return ""
+}
+
 // lintADR applies rules a, b, d and the link half of c to one ADR.
 func lintADR(path, dir string, lines []string) []string {
 	var vs []string
@@ -389,8 +393,13 @@ func lintADR(path, dir string, lines []string) []string {
 	}
 	pos := map[string]heading{}
 	for _, h := range hs {
-		if _, dup := pos[h.text]; h.level == 2 && !dup {
-			pos[h.text] = h
+		if h.level != 2 {
+			continue
+		}
+		if name := sectionName(h.text); name != "" {
+			if _, dup := pos[name]; !dup {
+				pos[name] = h
+			}
 		}
 	}
 	lastSeen := -1
