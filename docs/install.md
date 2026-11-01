@@ -94,6 +94,8 @@ MASH_NAME=design claude --channels plugin:mash@mash
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
+Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. `status` shows a `clock:` line (see [Troubleshooting](operations.md)).
+
 In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's name and owner. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
 
 ```sh
