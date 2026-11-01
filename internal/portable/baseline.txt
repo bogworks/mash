@@ -1,0 +1,13 @@
+# Portable-code baseline: one row per "<rule> <path> <count>", sorted by rule then path, each group under a
+# "# reason" comment. A count can only fall: go test fails when a count rises or sits above what the scan finds.
+# Run MASH_PORTABLE_UPDATE=1 go test ./internal/portable/ to lower rows. A new row needs a real reason.
+
+# baseline 2026-11-01
+R2-home-and-tmp cmd/mash/status.go 1
+R2-home-and-tmp internal/claudesettings/claudesettings.go 1
+R2-home-and-tmp scripts/releasecheck/publish.go 1
+R2-home-and-tmp scripts/releasecheck/sums.go 1
+R4-long-timeout cmd/mash/cli.go 1
+R4-long-timeout internal/config/config.go 1
+R4-long-timeout internal/config/limits.go 3
+R4-long-timeout scripts/releasecheck/latency.go 1
