@@ -11,12 +11,20 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 - Build provenance: the release binaries carry a GitHub attestation, and the publish gate verifies it for all four binaries before a release is published. Check one with `gh attestation verify mash-linux-amd64 -R bogworks/mash` ([docs/release.md](docs/release.md)).
 - `MASH_CONFIG_DIR` and `MASH_STATE_DIR` name the config directory and the state directory (`spool/` and `hook.log`) exactly: absolute paths, a relative one is an error naming the variable. `MASH_CONFIG_DIR` wins over `XDG_CONFIG_HOME` and the legacy `~/.config/mash`; the state directory otherwise defaults to `$XDG_STATE_HOME/mash` (absolute only) or `~/.local/state/mash`, as before. The plugin hook and `quickstart-synadia.sh` follow, so `--config-dir` no longer has to end in `.config/mash` ([ADR-0044](docs/decisions/0044-config-and-state-directories-are-relocatable.md)).
 - Docs: [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md).
+- `tls_ca`, `tls_cert` and `tls_key` settings (config.json, or `MASH_TLS_CA`, `MASH_TLS_CERT`, `MASH_TLS_KEY`) for a server with a private CA or one that requires a client certificate; `tls_cert` and `tls_key` must be set together. `mash status` warns on a plain `nats://` url to a non-loopback host, and a server that closes right after the TLS 1.3 handshake gets a hint to check the client certificate settings (see [docs/operations.md](docs/operations.md#troubleshooting)).
+- `mash status` prints a `clock:` line and warns when this machine's clock differs from the server's by more than 10 s (live requests fail past 30 s; see [docs/operations.md](docs/operations.md#troubleshooting)).
+- `lease_retry`, `transient_budget`, `transient_max`, `cli_timeout` and `admin_timeout` settings (config.json; the `MASH_*` variable wins), with the defaults unchanged. The timings that stay fixed are listed in "Fixed protocol constants" in [docs/operations.md](docs/operations.md).
+- `MASH_MANAGED_SETTINGS_DIR` lets `mash status` read Claude Code managed settings from a non-standard install.
+- For contributors: a portable-code lint with a ratchet baseline that can only fall (see "Portable code" in [CONTRIBUTING.md](CONTRIBUTING.md), [ADR-0045](docs/decisions/0045-product-code-carries-no-personal-convention-a-ratchet-lint-enforces-it.md)).
 
 ### Changed
 
 - A `claude --resume` of a still-running session (same session id; a new `MASH_LAUNCH_TOKEN` is not required, a waiting serve records itself in the spool) no longer drains the lease holder's spool: its hooks are refused, and it is told once in its own session that it is not receiving mail ([ADR-0043](docs/decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)).
 - The config directory is `$XDG_CONFIG_HOME/mash` when `XDG_CONFIG_HOME` is absolute and holds a config.json, else `~/.config/mash` as before; `policy.md` and default creds files follow it, falling back to `~/.config/mash` when the XDG directory has no copy (the XDG copy wins when both exist).
 - `mash admin provision` refuses to lower the caps of an inbox stream that already exists (a retried provision no longer shrinks an inbox the limits command had raised).
+- While wakes are not landing, the endpoint holds a message the spool will not take instead of writing it to the channel, and `status` says whether the last wake started a turn (#40).
+- `mash plugin export` derives the marketplace owner from the embedded plugin.json author; the output for the shipped plugin is unchanged.
+- Docs: neutral wording for a public repo, and redacted evidence.
 
 ### Fixed
 
