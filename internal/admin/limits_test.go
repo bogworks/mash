@@ -191,3 +191,41 @@ func TestApplyLimitsRefusesToLower(t *testing.T) {
 		})
 	}
 }
+
+// An unlimited cap (MaxBytes -1 or 0, MaxAge 0) is larger than any finite one: a finite configured limit is refused
+// rather than "raised" over it, and the stream is left as it was (codex H1).
+func TestApplyLimitsRefusesToLowerUnlimited(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		field string
+		mod   func(*jetstream.StreamConfig)
+	}{
+		{"max_bytes -1", "max_bytes", func(c *jetstream.StreamConfig) { c.MaxBytes = -1 }},
+		{"max_bytes 0", "max_bytes", func(c *jetstream.StreamConfig) { c.MaxBytes = 0 }},
+		{"max_age 0", "max_age", func(c *jetstream.StreamConfig) { c.MaxAge = 0 }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, a, js := setup(t)
+			ctx := context.Background()
+			provisionTwo(t, e, a)
+			cfg := inboxCfg(t, js, "alpha")
+			c.mod(&cfg)
+			if _, err := js.UpdateStream(ctx, cfg); err != nil {
+				t.Skipf("server refuses this unlimited config: %v", err)
+			}
+			before := inboxCfg(t, js, "alpha")
+			l := store.DefaultLimits()
+			l.InboxMaxConsumers = 3
+			if err := a.SetLimits(l); err != nil {
+				t.Fatal(err)
+			}
+			lines, err := a.ApplyLimits(ctx, "alpha")
+			if err == nil || !strings.Contains(err.Error(), c.field) || !strings.Contains(err.Error(), "unlimited") || len(lines) != 0 {
+				t.Fatalf("lines %v err %v", lines, err)
+			}
+			if after := inboxCfg(t, js, "alpha"); after.MaxBytes != before.MaxBytes || after.MaxAge != before.MaxAge || after.MaxConsumers != before.MaxConsumers {
+				t.Fatalf("changed despite refusal: %+v -> %+v", before, after)
+			}
+		})
+	}
+}

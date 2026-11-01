@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -293,6 +294,29 @@ func (a *Admin) ApplyLimits(ctx context.Context, names ...string) ([]string, err
 	return lines, errors.Join(errs...)
 }
 
+// unlimited reports whether a NATS cap value means no cap: MaxBytes is -1 (or 0), MaxAge is 0.
+func unlimited(n int64) bool { return n <= 0 }
+
+// lowers reports whether moving a cap from existing to configured would lower it. An unlimited cap is larger than
+// any finite one, so a finite configured value lowers an unlimited existing one.
+func lowers(existing, configured int64) bool {
+	return !unlimited(configured) && (unlimited(existing) || existing > configured)
+}
+
+// raises reports whether moving a cap from existing to configured would raise it. Only a finite existing cap can
+// be raised; an unlimited one is already as large as it gets.
+func raises(existing, configured int64) bool {
+	return !unlimited(existing) && (unlimited(configured) || existing < configured)
+}
+
+// capText renders an existing cap (n, finite text) for an error message, saying so when the stream is unlimited.
+func capText(n int64, finite string) string {
+	if unlimited(n) {
+		return "unlimited"
+	}
+	return finite
+}
+
 func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, error) {
 	if !config.ValidName(name) {
 		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
@@ -303,20 +327,20 @@ func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, erro
 	}
 	cfg := s.CachedInfo().Config
 	l := a.limits
-	if cfg.MaxBytes > l.InboxMaxBytes {
-		return "", fmt.Errorf("mash: inbox of %s has max_bytes %d, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, cfg.MaxBytes, l.InboxMaxBytes, name)
+	if lowers(cfg.MaxBytes, l.InboxMaxBytes) {
+		return "", fmt.Errorf("mash: inbox of %s has max_bytes %s, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(cfg.MaxBytes, strconv.FormatInt(cfg.MaxBytes, 10)), l.InboxMaxBytes, name)
 	}
-	if cfg.MaxAge > l.InboxMaxAge {
+	if lowers(int64(cfg.MaxAge), int64(l.InboxMaxAge)) {
 		return "", fmt.Errorf("mash: inbox of %s has max_age %s, above the configured %s; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, cfg.MaxAge, l.InboxMaxAge, name)
+			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(int64(cfg.MaxAge), cfg.MaxAge.String()), l.InboxMaxAge, name)
 	}
 	var changed []string
-	if cfg.MaxBytes < l.InboxMaxBytes {
+	if raises(cfg.MaxBytes, l.InboxMaxBytes) {
 		changed = append(changed, fmt.Sprintf("max_bytes %d -> %d", cfg.MaxBytes, l.InboxMaxBytes))
 		cfg.MaxBytes = l.InboxMaxBytes
 	}
-	if cfg.MaxAge < l.InboxMaxAge {
+	if raises(int64(cfg.MaxAge), int64(l.InboxMaxAge)) {
 		changed = append(changed, fmt.Sprintf("max_age %s -> %s", cfg.MaxAge, l.InboxMaxAge))
 		cfg.MaxAge = l.InboxMaxAge
 	}
