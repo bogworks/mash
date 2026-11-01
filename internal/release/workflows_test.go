@@ -105,11 +105,11 @@ func TestWorkflows_everyJobHasATimeout(t *testing.T) {
 
 var shaRef = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
-func TestWorkflows_thirdPartyActionsArePinnedToACommit(t *testing.T) {
+func TestWorkflows_everyActionIsPinnedToACommit(t *testing.T) {
 	for name, w := range all(t) {
 		for jn, j := range w.Jobs {
 			for _, s := range j.Steps {
-				if s.Uses == "" || strings.HasPrefix(s.Uses, "actions/") || strings.HasPrefix(s.Uses, "./") {
+				if s.Uses == "" || strings.HasPrefix(s.Uses, "./") {
 					continue
 				}
 				if _, ref, ok := strings.Cut(s.Uses, "@"); !ok || !shaRef.MatchString(ref) {
