@@ -1,6 +1,6 @@
 # mash
 
-**Mail for a swarm of AI agents.** mash gives each of your agent sessions a durable inbox on NATS. Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
+**Mash ("mail mesh") is an inbox mechanism for distributed AI agents.** mash gives each of your agent sessions a durable inbox on NATS. Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
 by its sender, until the recipient has seen it, whether that session is busy, idle or stopped, on this machine or
 another. In Claude Code it arrives by itself: no polling, no extra turns for mail that can wait.
 
