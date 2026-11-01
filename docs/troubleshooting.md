@@ -4,11 +4,16 @@ Symptoms, their causes, how to check, and the fix, using the exact messages mash
 
 ## First check
 
-In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_NAME`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery` and `version`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
+In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_NAME`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery`, `version`, `client` and (only when it applies) `plugin`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
 
 From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_NAME` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs `MASH_NAME` set and does not take the lease, so it works beside a running session.
 
 The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
+
+## `client: WARN` or `plugin: WARN`
+
+- `client: WARN - Claude Code <v> is older than 2.1.312, the oldest version mash has a passing live receipt on.` mash does not refuse the version, but it has no live receipt on it, so channels, hook context or hook fields may behave differently. Update Claude Code. The `version` and `status` tools show `client: Claude Code <v>` from what the client sent at startup; a client other than Claude Code is shown without a warning.
+- `plugin: WARN - plugin <pv> and binary <bv> differ in major or minor.` The plugin (hooks and MCP command) and the `mash` binary are from different releases. Update both to the same one: `claude plugin update mash@mash`, and reinstall the binary (`go install github.com/bogworks/mash/cmd/mash@<tag>`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step.
 
 ## The session has no mail tools, or says it has no mash identity
 

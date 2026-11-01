@@ -588,7 +588,7 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	shared := func(s string) []string {
 		var out []string
 		for _, l := range strings.Split(s, "\n") {
-			if !strings.HasPrefix(l, "connection:") && !strings.HasPrefix(l, "delivery:") {
+			if !strings.HasPrefix(l, "connection:") && !strings.HasPrefix(l, "delivery:") && !strings.HasPrefix(l, "client:") { // client is live-only too
 				out = append(out, l)
 			}
 		}

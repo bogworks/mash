@@ -248,3 +248,7 @@ func (Claude) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.En
 
 // Utf16Len exposes utf16Len to tests of other packages that assert the Claude Code cap.
 func Utf16Len(s string) int { return utf16Len(s) }
+
+// MinClaudeCode is the oldest Claude Code a live receipt passed on; raise it with each receipt, never lower it.
+// mash does not refuse older versions; `status` warns below it.
+const MinClaudeCode = "2.1.312"

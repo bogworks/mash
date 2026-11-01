@@ -51,8 +51,18 @@ type Server struct {
 	pingN   int
 	writing atomic.Bool // a ping's write has not returned: the client is not reading stdout
 
+	cmu                   sync.Mutex
+	clientName, clientVer string // clientInfo from the client's initialize request
+
 	notified   atomic.Int64 // channel notifications written
 	notifiedAt atomic.Int64 // unix nanoseconds of the last one
+}
+
+// ClientInfo is the name and version the client sent in its initialize request; both are empty before one is seen.
+func (s *Server) ClientInfo() (name, version string) {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	return s.clientName, s.clientVer
 }
 
 // ErrPingBusy is Ping's answer while an earlier ping is still being written: the client is not draining stdout, so
@@ -273,8 +283,15 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 	case "initialize":
 		var p struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			ClientInfo      struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
+		s.cmu.Lock()
+		s.clientName, s.clientVer = p.ClientInfo.Name, p.ClientInfo.Version
+		s.cmu.Unlock()
 		_ = s.result(req.ID, map[string]any{
 			"protocolVersion": negotiateVersion(p.ProtocolVersion),
 			"serverInfo":      map[string]string{"name": s.name, "version": s.version},
