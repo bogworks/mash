@@ -75,6 +75,7 @@ var lsScenarios = []struct{ id, title string }{
 	{"L2", "team policy: server-managed settings without mash"},
 	{"L3", "minimal environment (IDE-like launch)"},
 	{"L4", "hooks disabled"},
+	{"D1", "two live processes on one session id"},
 }
 
 // ---- recording: timeline.log and RECEIPT.md ----

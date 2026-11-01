@@ -1,0 +1,42 @@
+16:04:37.606 [D1] before: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (baseline claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1)
+16:04:38.061 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+16:04:38.891 [D1] claude plugin marketplace: err=<nil> out=Adding marketplace…✔ Successfully added marketplace: mash (declared in user settings)
+16:04:39.608 [D1] claude plugin install: err=<nil> out=Installing plugin "mash@mash"...✔ Successfully installed plugin: mash@mash (scope: user)
+16:04:40.317 [D1] PASS: plugin mash@mash installed from the checkout (plugin list: Installed plugins: ❯ mash@mash Version: 0.3.0 Read from: <checkout>/plugin Scope: user Status: ✔ enabled)
+16:04:40.319 [D1] sent MARK-D1a-187969
+16:04:40.319 [D1] RECORDED: spool before any process started (owner record: ""; files: ; waiting entries 0 (err open <scrubbed>/state/mash/spool/o/a: no such file or directory))
+16:04:46.336 [D1] PASS: process A produced a session id and a result (result true, session id "71b2fbc0-acba-4856-9479-79ee7cf7f797", stderr tail:)
+16:04:46.336 [D1] RECORDED: A: MCP state (init) (plugin:mash:mash=connected)
+16:04:46.336 [D1] RECORDED: A: status facts (name: OK - a ;; channel allowlist: OK - local managed settings file enables channels and lists mash@mash ;; delivery: hooks have run in this session (last at 2026-11-01T16:04:43Z); mail also arrives with tool results ;; delivery: channel notifications sent: 1 (Claude Code delivers them only if this ...)
+16:04:46.336 [D1] RECORDED: A: status text, first 15 lines (name: OK - a / config: OK - url <scrubbed>, owner o / creds: OK - <scrubbed> exists and is readable / connection: OK - endpoint a is running / channel allowlist: OK - local managed settings file enables channels and lists mash@mash / delivery: hooks have run in this session (last at 2026-11-01T16:04...)
+16:04:46.336 [D1] RECORDED: A: spool after turn 1 (is M0 drained?) (owner record: "{\"pid\":3857184,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
+16:04:53.605 [D1] RECORDED: B: first turn finished (true; exited false)
+16:04:53.605 [D1] RECORDED: B: session id same as A's (true (B has "71b2fbc0-acba-4856-9479-79ee7cf7f797"))
+16:04:53.605 [D1] RECORDED: B: MCP state (init) (plugin:mash:mash=connected, claude.ai Claude Docs=pending, claude.ai Google Slides=needs-auth, claude.ai Google Sheets=needs-auth, claude.ai Google Docs=needs-auth, claude.ai Google Calendar=needs-auth, claude.ai Gmail=needs-auth, claude.ai Google Drive=needs-auth, claude.ai Slack=needs-auth, claude...)
+16:04:53.605 [D1] RECORDED: B: status facts (name: OK - a ;; channel allowlist: OK - local managed settings file enables channels and lists mash@mash ;; delivery: hooks n/a - this session does not hold the lease yet ;; delivery: channel notifications sent: 1 (Claude Code delivers them only if this plugin is on its channel allowlist and the ses...)
+16:04:53.605 [D1] RECORDED: B: status text, first 15 lines (name: OK - a / config: OK - url <scrubbed>, owner o / creds: OK - <scrubbed> exists and is readable / connection: WAITING - the lease for endpoint a is held by another session (host <host>, pid 3857318, since 2026-11-01T16:04:45Z). mash retries on its own. Next: end that session, or start t...)
+16:04:53.605 [D1] RECORDED: B: stderr lines about mash, lease or bind ()
+16:04:53.606 [D1] RECORDED: B: who output (mash is waiting for endpoint a (held by <host> pid 3857318 since 2026-11-01T16:04:45Z); mail is off until it is free)
+16:04:53.606 [D1] RECORDED: spool after B started (owner record: "{\"pid\":3857184,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
+16:04:53.608 [D1] sent MARK-D1b-199426
+16:04:58.622 [D1] RECORDED: M1 round, A (finished true; names [M0 M1]; answer: MARK-D1a-187969 MARK-D1b-199426)
+16:04:58.623 [D1] RECORDED: M1 round, B (finished true; names [M0]; answer: MARK-D1a-187969)
+16:04:58.623 [D1] RECORDED: spool after M1 round (owner record: "{\"pid\":3857184,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
+16:04:58.625 [D1] sent MARK-D1c-259254
+16:05:03.639 [D1] RECORDED: M2 round, only B asked (finished true; names [M0 M2]; answer: MARK-D1a-187969 MARK-D1c-259254)
+16:05:03.642 [D1] sent MARK-D1d-113207
+16:05:08.657 [D1] RECORDED: M3 round, only A asked (finished true; names [M0 M1 M3]; answer: MARK-D1a-187969 MARK-D1b-199426 MARK-D1d-113207)
+16:05:08.661 [D1] RECORDED: transcript of the session id (lines 151, unparsable 0, distinct uuid 85, null-parent roots 1, uuids referenced as parent by 2+ lines 2, lines per sessionId: 71b2fbc0=151)
+16:05:08.661 [D1] RECORDED: jsonl files in the same project dir (71b2fbc0-acba-4856-9479-79ee7cf7f797.jsonl)
+16:05:13.676 [D1] RECORDED: after killing A: B alive (true; spool owner record: "{\"pid\":3857184,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
+16:05:13.678 [D1] sent MARK-D1e-508837
+16:05:18.442 [D1] RECORDED: M4 round, only B asked (A dead) (finished true; exited false; names [M0 M2 M4]; answer: MARK-D1a-187969 MARK-D1c-259254 MARK-D1e-508837)
+16:05:18.442 [D1] RECORDED: B: status facts after A died (name: OK - a ;; channel allowlist: OK - local managed settings file enables channels and lists mash@mash ;; delivery: hooks n/a - this session does not hold the lease yet ;; delivery: channel notifications sent: 1 (Claude Code delivers them only if this plugin is on its channel allowlist and the ses...)
+16:05:18.745 [D1] RECORDED: who from endpoint b after A died (code 0: a online seen 0s ago / b offline)
+16:05:19.049 [D1] RECORDED: endpoint a online within 90s of A's death (B serving) (true; last who: a online seen 0s ago / b offline)
+16:05:19.049 [D1] RECORDED: spool at the end (owner record: "{\"pid\":3858449,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
+16:05:19.557 [D1] RECORDED: B: exit (code 0 err <nil>)
+16:05:20.334 [D1] cleanup claude plugin uninstall mash@mash: err=<nil> out=✔ Successfully uninstalled plugin: mash (scope: user)
+16:05:20.989 [D1] cleanup claude plugin marketplace remove mash: err=<nil> out=✔ Successfully removed marketplace: mash
+16:05:20.989 [-] cleared the cached MCP failure for plugin:mash:mash (Claude Code caches it for ~15 minutes per config dir): no such key cached
+16:05:21.292 [D1] after: claude 2.1.316 (Claude Code) at ~/.local/share/claude/versions/2.1.316 sha256 55cdb8e162d1 (err <nil>)
