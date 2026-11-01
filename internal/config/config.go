@@ -137,10 +137,10 @@ func ConfigDir(env func(string) string, home string) string {
 	return xdg
 }
 
-// absent reports whether p is definitely not there: Lstat says not-exist or not-a-directory. Anything else, a symlink
+// Absent reports whether p is definitely not there: Lstat says not-exist or not-a-directory. Anything else, a symlink
 // (even a dangling or inaccessible one) or a permission or I/O error, counts as present so the caller's read fails
 // loudly instead of silently picking a file from another directory.
-func absent(p string) bool {
+func Absent(p string) bool {
 	_, err := os.Lstat(p)
 	return err != nil && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR))
 }
@@ -158,7 +158,7 @@ func FindFile(env func(string) string, home, name string) string {
 	}
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
-		if !absent(p) {
+		if !Absent(p) {
 			return p
 		}
 	}
@@ -175,7 +175,7 @@ func (c Config) Find(name string) string {
 			continue
 		}
 		p := filepath.Join(d, name)
-		if !absent(p) {
+		if !Absent(p) {
 			return p
 		}
 	}

@@ -154,13 +154,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
-	// A missing policy.md is an empty policy; one that exists but cannot be read is a configuration failure, never
+	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
 	var policy []byte
 	if cfg.Dir != "" {
 		path := cfg.Find("policy.md")
 		var perr error
-		if policy, perr = os.ReadFile(path); perr != nil && !errors.Is(perr, fs.ErrNotExist) {
+		if policy, perr = os.ReadFile(path); perr != nil && !(errors.Is(perr, fs.ErrNotExist) && config.Absent(path)) {
 			perr = fmt.Errorf("mash: reading %s: %w", path, perr)
 			src.cfgErr = perr
 			fmt.Fprintln(stderr, perr)
