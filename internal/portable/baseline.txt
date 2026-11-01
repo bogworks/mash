@@ -9,7 +9,6 @@ R2-home-and-tmp internal/claudesettings/claudesettings.go 1
 R2-home-and-tmp internal/config/config.go 1
 R2-home-and-tmp scripts/releasecheck/publish.go 1
 R2-home-and-tmp scripts/releasecheck/sums.go 1
-R4-long-timeout cmd/mash/cli.go 1
 R4-long-timeout internal/config/config.go 1
 R4-long-timeout internal/config/limits.go 3
 R4-long-timeout scripts/releasecheck/latency.go 1
