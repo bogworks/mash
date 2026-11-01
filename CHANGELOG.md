@@ -2,11 +2,19 @@
 
 All notable user-facing changes to mash are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mash follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor releases may change behaviour).
 
-## [Unreleased]
+## [0.3.1] - unreleased
 
-Nothing yet.
+### Added
 
-## [0.3.0] - unreleased (planned 2026-11)
+- Inbox, bucket and consumer limits are configurable in the `limits` section of config.json, with the defaults unchanged. `mash admin limits [name...]` raises existing inboxes in place and `--show` prints the effective limits. mash never lowers a limit, because that could discard mail; a lower value is refused, naming the endpoint and field, and an unlimited stream is never given a finite cap. `mash admin init` raises a bucket cap that is below the configured one (see "Limits" in [docs/operations.md](docs/operations.md)).
+- Build provenance: the release binaries carry a GitHub attestation, and the publish gate verifies it for all four binaries before a release is published. Check one with `gh attestation verify mash-linux-amd64 -R bogworks/mash` ([docs/release.md](docs/release.md)).
+- Docs: [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md).
+
+### Changed
+
+- `mash admin provision` refuses to lower the caps of an inbox stream that already exists (a retried provision no longer shrinks an inbox the limits command had raised).
+
+## [0.3.0] - 2026-11-01
 
 Changes since 0.2.10.
 
