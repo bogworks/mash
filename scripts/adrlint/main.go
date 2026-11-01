@@ -51,10 +51,12 @@ const (
 )
 
 // protected are the paths where "Decision: none" needs a reviewer's decision-confirmed label. A trailing slash is a
-// directory prefix; anything else is one file.
+// directory prefix; anything else is one file. They are the decision-bearing code: the SAP wire, the store, permissions,
+// config, the endpoint, the plugin, the MCP server (ADR 0023), the host adapter seam (ADR 0032), the spool (ADR 0025), the
+// render compatibility contract (ADR 0034), and the records themselves.
 var protected = []string{
 	"internal/sap/", "internal/store/", "internal/admin/permissions.go", "internal/config/", "internal/endpoint/", "plugin/",
-	"docs/decisions/",
+	"internal/mcp/", "internal/host/", "internal/spool/", "internal/render/", "docs/decisions/",
 }
 
 // sections are the required "##" headings, in order.
