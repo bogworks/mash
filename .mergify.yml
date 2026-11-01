@@ -28,6 +28,9 @@ queue_rules:
       - label != hold
       - check-success = codex-review
       - check-success = pr-check
+      # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
+      # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
+      - check-success = adr-lint
       # Outside contributors: a pull request reaches the queue only if a maintainer wrote it or approved it. The queue
       # run executes the pull request's code in CI, and codex-review reads attacker-controlled
       # text, so neither a green check nor the review is enough on its own (docs/security/threat-model.md). The
