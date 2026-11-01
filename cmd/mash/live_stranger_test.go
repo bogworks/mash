@@ -911,7 +911,7 @@ func TestLiveStrangerL3MinimalEnvironment(t *testing.T) {
 	m := lsMarker("L3")
 	lsSend(t, w, id, m)
 	env2 := sc.env(sc.mashPath(), true, sc.identity(w, "a", map[string]string{"MASH_HOOK_TRACE": "1"}))
-	sp := spool.Spool{Dir: spool.Dir(sc.state, w.env["a"]["MASH_OWNER"], "a")}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], "a")}
 	var owner string
 	prompt2 := "Run the shell command `sleep 8`, then reply with one line listing every token in this session starting with MARK-L3 (look in any mash mail context too), and nothing else."
 	seen := false

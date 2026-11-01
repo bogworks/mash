@@ -44,8 +44,9 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 
-Configuration: ~/.config/mash/config.json (or $XDG_CONFIG_HOME/mash) {"url","owner"}, overridden by MASH_URL,
-MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
+Configuration: config.json {"url","owner"} in $MASH_CONFIG_DIR (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by
+MASH_URL, MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
+State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.local/state/mash).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 `
 

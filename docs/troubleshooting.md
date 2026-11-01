@@ -8,7 +8,7 @@ In the session, ask Claude to call the `status` tool. It answers in every sessio
 
 From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_NAME` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs `MASH_NAME` set and does not take the lease, so it works beside a running session.
 
-The hook's stderr goes to `$XDG_STATE_HOME/mash/hook.log` (default `~/.local/state/mash/hook.log`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
+The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
 
 ## The session has no mail tools, or says it has no mash identity
 
@@ -38,7 +38,7 @@ Messages: `mash: no NATS url (config.json "url" or MASH_URL)` and `mash: no owne
 
 Fix: set `url` and `owner` in `~/.config/mash/config.json`, or `MASH_URL` and `MASH_OWNER`. The environment wins over the file. The owner is 1 to 48 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
 
-mash reads `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
+mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute path; no other directory is consulted), else `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
 
 ## `creds: MISSING`, or the creds file is refused
 

@@ -37,7 +37,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if !ok {
 		return 0
 	}
-	sp := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
+	sp := spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}
 	// The lock is held from the owner check to the drained marks, so a new lease holder cannot rebind and re-own the
 	// spool in between and have its new mail drained into this old session (codex H1 on #21, round 7).
 	unlock, err := sp.Lock()

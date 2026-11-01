@@ -18,7 +18,7 @@ func launcherScript(prefetch string) string {
 
 const launcherMCP = `{"mcpServers": {"mash": {"command": "${CLAUDE_PLUGIN_ROOT}/scripts/mash", "args": ["serve"], "env": {"MASH_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"}}}}` + "\n"
 
-const launcherHookCmd = `d=\"${XDG_STATE_HOME:-$HOME/.local/state}/mash\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; sh \"${CLAUDE_PLUGIN_ROOT}/scripts/mash\" hook 2>>\"$l\"; exit 0`
+const launcherHookCmd = `d=\"${MASH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mash}\"; mkdir -p \"$d\" 2>/dev/null; l=\"$d/hook.log\"; (: >>\"$l\") 2>/dev/null || l=/dev/null; sh \"${CLAUDE_PLUGIN_ROOT}/scripts/mash\" hook 2>>\"$l\"; exit 0`
 
 func launcherHooks(withPrefetch bool) string {
 	pre := ""

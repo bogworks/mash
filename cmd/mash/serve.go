@@ -253,7 +253,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			ep.NoChannel()
 		}
 		boundAt := time.Now() // before the bind, so a hook run once this session owns the spool is never missed
-		if err := ep.SetSpool(spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}, adapter.OwnerToken(os.Getenv)); err != nil {
+		if err := ep.SetSpool(spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}, adapter.OwnerToken(os.Getenv)); err != nil {
 			if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
@@ -744,7 +744,7 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
 // removes the record. A spool that cannot be written costs only that detection.
 func noteWaiting(cfg config.Config) func() {
-	s := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
+	s := spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}
 	ppid := os.Getppid()
 	if s.Init() != nil {
 		return func() {}

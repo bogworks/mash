@@ -216,7 +216,7 @@ func runScript(t *testing.T, f *fakeSynadia, home string, extraEnv []string, arg
 	cmd := exec.Command("bash", append(margs, args...)...)
 	var env []string
 	for _, kv := range os.Environ() { // a developer's own MASH_* settings must not leak into the run
-		if !strings.HasPrefix(kv, "MASH_") {
+		if !strings.HasPrefix(kv, "MASH_") && !strings.HasPrefix(kv, "XDG_CONFIG_HOME=") {
 			env = append(env, kv)
 		}
 	}
@@ -285,6 +285,53 @@ func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 	}
 	if !strings.Contains(r.out, "[verified]") {
 		t.Errorf("no verified test message in output:\n%s", r.out)
+	}
+}
+
+// A --config-dir that does not end in .config/mash works: mash is run with MASH_CONFIG_DIR set to it, and HOME is untouched.
+func TestQuickstartCustomConfigDir(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 5)
+	home := t.TempDir()
+	custom := filepath.Join(t.TempDir(), "elsewhere")
+	r := runScript(t, f, home, nil, "--config-dir", custom, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	if r.code != 0 {
+		t.Fatalf("exit %d:\n%s", r.code, r.out)
+	}
+	for _, n := range []string{"config.json", "alice-a.creds", "alice-b.creds"} {
+		if _, err := os.Stat(filepath.Join(custom, n)); err != nil {
+			t.Errorf("%s not in the custom config dir: %v", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config")); err == nil {
+		t.Errorf("the default config directory was created")
+	}
+	if !strings.Contains(r.out, "[verified]") {
+		t.Errorf("no verified test message in output:\n%s", r.out)
+	}
+}
+
+// With no --config-dir, XDG_CONFIG_HOME/mash is the default.
+func TestQuickstartXDGConfigHomeDefault(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 5)
+	home := t.TempDir()
+	xdg := t.TempDir()
+	r := runScript(t, f, home, []string{"XDG_CONFIG_HOME=" + xdg}, "--no-test", "--owner", "alice", "--endpoint", "alice-a")
+	if r.code != 0 {
+		t.Fatalf("exit %d:\n%s", r.code, r.out)
+	}
+	if _, err := os.Stat(filepath.Join(xdg, "mash", "config.json")); err != nil {
+		t.Errorf("config.json not under XDG_CONFIG_HOME/mash: %v", err)
+	}
+}
+
+func TestQuickstartRelativeConfigDirRefused(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 5)
+	r := runScript(t, f, t.TempDir(), nil, "--dry-run", "--config-dir", "rel/dir")
+	if r.code == 0 || !strings.Contains(r.out, "absolute") {
+		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
 }
 

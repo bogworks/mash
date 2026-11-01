@@ -30,7 +30,7 @@ const (
 type Config struct {
 	URL            string        // NATS URL
 	Owner          string        // SAP owner token
-	StateHome      string        // $XDG_STATE_HOME, else ~/.local/state: where serve and its hook keep the spool
+	StateDir       string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
 	Name           string        // endpoint name (MASH_NAME); empty = inert
 	Creds          string        // endpoint credentials file
 	SettleMS       int           // quiet time before a batch is pushed
@@ -117,10 +117,27 @@ func ValidateFile(raw []byte) error {
 // absolute XDG_CONFIG_HOME is available.
 var ErrNoConfigDir = errors.New("mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables")
 
-// ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds: $XDG_CONFIG_HOME/mash
+// explicitDir is the absolute directory named by the mash variable v, "" when it is unset. A relative value is an error
+// naming the variable.
+func explicitDir(env func(string) string, v string) (string, error) {
+	d := env(v)
+	if d == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(d) {
+		return "", fmt.Errorf("mash: %s=%q is not an absolute path", v, d)
+	}
+	return filepath.Clean(d), nil
+}
+
+// ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds: an absolute
+// $MASH_CONFIG_DIR when set (an explicit choice, with no legacy fallback; Load rejects a relative one), else $XDG_CONFIG_HOME/mash
 // when XDG_CONFIG_HOME is absolute and that directory holds a config.json, else $HOME/.config/mash (where existing
 // installs keep theirs). With no home it is the XDG directory if one is set, else "": never a relative path.
 func ConfigDir(env func(string) string, home string) string {
+	if d, _ := explicitDir(env, "MASH_CONFIG_DIR"); d != "" {
+		return d
+	}
 	xdg := ""
 	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
 		xdg = filepath.Join(x, "mash")
@@ -149,6 +166,9 @@ func Absent(p string) bool {
 // the legacy $HOME/.config/mash when it is there, else in ConfigDir, so messages and creation paths stay where they
 // were. The XDG copy wins when both exist.
 func FindFile(env func(string) string, home, name string) string {
+	if d, _ := explicitDir(env, "MASH_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, name)
+	}
 	var dirs []string
 	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
 		dirs = append(dirs, filepath.Join(x, "mash"))
@@ -202,19 +222,29 @@ func ExpandHome(p, home string) string {
 // Load resolves the configuration. env is os.Getenv in production; home is $HOME, or the OS's idea of the user's home
 // when that is unset ("" when unknown).
 func Load(env func(string) string, home string) (Config, error) {
+	if _, err := explicitDir(env, "MASH_CONFIG_DIR"); err != nil {
+		return Config{}, err
+	}
+	state, err := explicitDir(env, "MASH_STATE_DIR")
+	if err != nil {
+		return Config{}, err
+	}
+	if state == "" {
+		if x := env("XDG_STATE_HOME"); filepath.IsAbs(x) {
+			state = filepath.Join(x, "mash")
+		} else {
+			state = filepath.Join(home, ".local", "state", "mash")
+		}
+	}
 	dir := ConfigDir(env, home)
 	legacy := ""
-	if home != "" {
+	if home != "" && env("MASH_CONFIG_DIR") == "" {
 		legacy = filepath.Join(home, ".config", "mash")
 	}
-	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateHome: env("XDG_STATE_HOME"), Limits: store.DefaultLimits()}
-	if c.StateHome == "" {
-		c.StateHome = filepath.Join(home, ".local", "state")
-	}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
 
 	var f file
 	var raw []byte
-	var err error
 	if dir != "" { // no directory means no file: the pure-environment case still loads
 		raw, err = os.ReadFile(filepath.Join(dir, "config.json"))
 	} else {

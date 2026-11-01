@@ -656,3 +656,81 @@ func TestFindDoesNotFallBackWhenXDGFileIsPresentButUnusable(t *testing.T) {
 	}
 	check("symlink to inaccessible target")
 }
+
+func TestMashDirVariables(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	writeXDG(t, xdg, `{"url":"u-xdg","owner":"o"}`) // an XDG config exists, and so does a legacy one
+	legacy := filepath.Join(home, ".config", "mash")
+	writeFile(t, home, `{"url":"u-legacy","owner":"o"}`)
+	mdir := t.TempDir()
+	cases := []struct {
+		name       string
+		env        map[string]string
+		dir, state string
+		legacy     bool
+		err        string
+	}{
+		{"defaults", nil, legacy, filepath.Join(home, ".local", "state", "mash"), true, ""},
+		{"xdg state", map[string]string{"XDG_STATE_HOME": "/x/s"}, legacy, "/x/s/mash", true, ""},
+		{"xdg state relative ignored", map[string]string{"XDG_STATE_HOME": "rel"}, legacy, filepath.Join(home, ".local", "state", "mash"), true, ""},
+		{"config dir beats xdg and legacy", map[string]string{"MASH_CONFIG_DIR": mdir, "XDG_CONFIG_HOME": xdg}, mdir, filepath.Join(home, ".local", "state", "mash"), false, ""},
+		{"state dir beats xdg", map[string]string{"MASH_STATE_DIR": "/m/s", "XDG_STATE_HOME": "/x/s"}, legacy, "/m/s", true, ""},
+		{"relative config dir", map[string]string{"MASH_CONFIG_DIR": "rel/c"}, "", "", false, "MASH_CONFIG_DIR"},
+		{"relative state dir", map[string]string{"MASH_STATE_DIR": "rel/s"}, "", "", false, "MASH_STATE_DIR"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := tc.env
+			if env == nil {
+				env = map[string]string{}
+			}
+			if _, ok := env["XDG_CONFIG_HOME"]; !ok {
+				env["XDG_CONFIG_HOME"] = ""
+			}
+			c, err := Load(envOf(env), home)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("err %v, want one naming %s", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Dir != tc.dir || c.StateDir != tc.state || (c.Legacy != "") != tc.legacy {
+				t.Fatalf("dir %q state %q legacy %q, want %q %q (legacy %v)", c.Dir, c.StateDir, c.Legacy, tc.dir, tc.state, tc.legacy)
+			}
+		})
+	}
+}
+
+// MASH_CONFIG_DIR is used for config.json, policy.md and default creds with no fallback to XDG or legacy.
+func TestMashConfigDirHasNoFallback(t *testing.T) {
+	home, xdg, mdir := t.TempDir(), t.TempDir(), t.TempDir()
+	writeXDG(t, xdg, `{"url":"u-xdg","owner":"o"}`)
+	legacy := filepath.Join(home, ".config", "mash")
+	writeFile(t, home, `{"url":"u-legacy","owner":"o"}`)
+	if err := os.WriteFile(filepath.Join(legacy, "policy.md"), []byte("p"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := envOf(map[string]string{"MASH_CONFIG_DIR": mdir, "XDG_CONFIG_HOME": xdg, "MASH_NAME": "a"})
+	if got, want := FindFile(env, home, "policy.md"), filepath.Join(mdir, "policy.md"); got != want {
+		t.Fatalf("FindFile %q, want %q", got, want)
+	}
+	c, err := Load(env, home)
+	if !errors.Is(err, ErrNoURL) { // nothing in MASH_CONFIG_DIR yet: neither the XDG nor the legacy url is read
+		t.Fatalf("err %v, want ErrNoURL", err)
+	}
+	if got, want := c.Find("policy.md"), filepath.Join(mdir, "policy.md"); got != want {
+		t.Fatalf("Find %q, want %q", got, want)
+	}
+	if c.URL != "" {
+		t.Fatalf("read another directory: url %q", c.URL)
+	}
+	if err := os.WriteFile(filepath.Join(mdir, "config.json"), []byte(`{"url":"tls://x:4222","owner":"o"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(env, home); err != nil || c.URL != "tls://x:4222" || c.Creds != filepath.Join(mdir, "a.creds") {
+		t.Fatalf("url %q creds %q err %v", c.URL, c.Creds, err)
+	}
+}

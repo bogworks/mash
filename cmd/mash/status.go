@@ -336,7 +336,7 @@ func deliveryLines(src *statusSource) []string {
 	case cfg.Name == "" || cfg.Owner == "":
 		out = append(out, "delivery: hooks n/a - no endpoint")
 	default:
-		sp := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
+		sp := spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}
 		own := src.owned.Load()
 		if own == nil {
 			out = append(out, "delivery: hooks n/a - this session does not hold the lease yet")
