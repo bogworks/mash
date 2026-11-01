@@ -63,5 +63,4 @@ on), or mash's own choice on top of them.
 | [0048](0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md) | Limit changes take a per-stream KV lock with expiry | accepted | NATS / mash | 2026-11-01 |
 | [0049](0049-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
 | [0048](0048-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
-| [0047](0047-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
-| [0048](0048-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
+| [0049](0049-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
