@@ -121,17 +121,11 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 			return store.Record{}, fmt.Errorf("mash: lease: %w", err)
 		}
 	}
-	// A retried provision finds its inbox stream already there: never let the update lower its caps.
-	if existing, err := a.js.Stream(ctx, sap.InboxStream(name)); err == nil {
-		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
-			return store.Record{}, err
-		}
-	} else if !errors.Is(err, jetstream.ErrStreamNotFound) {
-		return store.Record{}, fmt.Errorf("mash: inbox stream: %w", err)
-	}
-	s, err := a.js.CreateOrUpdateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits))
+	// A retried provision finds its inbox stream already there: never let the update lower its caps. The read, the
+	// check and the write run under the stream's limits lock, so a concurrent limits change cannot slip between them.
+	s, err := a.createInbox(ctx, name)
 	if err != nil {
-		return store.Record{}, fmt.Errorf("mash: inbox stream: %w", err)
+		return store.Record{}, err
 	}
 	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
 		return store.Record{}, fmt.Errorf("mash: inbox consumer: %w", err)
@@ -152,6 +146,37 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	return rec, nil
 }
 
+// createInbox creates name's inbox stream, or updates an existing one to the configured limits unless that would
+// lower a cap, under the stream's limits lock.
+func (a *Admin) createInbox(ctx context.Context, name string) (jetstream.Stream, error) {
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer lk.release(ctx)
+	existing, err := a.js.Stream(ctx, sap.InboxStream(name))
+	if err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return nil, fmt.Errorf("mash: inbox stream: %w", err)
+	}
+	if afterStreamRead != nil {
+		afterStreamRead(a.limits.InboxMaxBytes)
+	}
+	if err == nil {
+		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
+			return nil, err
+		}
+	}
+	s, err := a.js.CreateOrUpdateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits))
+	if err != nil {
+		return nil, fmt.Errorf("mash: inbox stream: %w", err)
+	}
+	return s, nil
+}
+
+// afterStreamRead is a test seam between reading an inbox stream's caps and writing them; it gets the writer's
+// configured inbox max_bytes so a test can tell admins apart. Nil in production.
+var afterStreamRead func(inboxMaxBytes int64)
+
 // EnsureInbox makes sure name's inbox stream and its durable consumer exist, creating whichever is missing with the
 // same configuration Provision uses. It is for an endpoint whose directory record already exists (Provision refuses
 // those) and reports what it had to create: "stream", "consumer", both, or neither. An existing stream or consumer is
@@ -163,16 +188,12 @@ func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) 
 		return nil, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
 	var made []string
-	s, err := a.js.Stream(ctx, sap.InboxStream(name))
-	if errors.Is(err, jetstream.ErrStreamNotFound) {
-		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
-			return nil, fmt.Errorf("mash: inbox stream: %w", err)
-		}
-		made = append(made, "stream")
-	} else if err != nil {
-		return nil, fmt.Errorf("mash: inbox stream: %w", err)
-	} else if err := checkInboxStream(name, s.CachedInfo().Config, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
+	s, created, err := a.ensureInboxStream(ctx, name)
+	if err != nil {
 		return nil, err
+	}
+	if created {
+		made = append(made, "stream")
 	}
 	c, err := s.Consumer(ctx, store.Consumer)
 	if errors.Is(err, jetstream.ErrConsumerNotFound) {
@@ -189,6 +210,29 @@ func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) 
 		return nil, err
 	}
 	return made, nil
+}
+
+// ensureInboxStream finds name's inbox stream, creating it if missing, or checks an existing one against the
+// configuration, under the stream's limits lock.
+func (a *Admin) ensureInboxStream(ctx context.Context, name string) (s jetstream.Stream, created bool, err error) {
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return nil, false, err
+	}
+	defer lk.release(ctx)
+	s, err = a.js.Stream(ctx, sap.InboxStream(name))
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
+			return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
+		}
+		return s, true, nil
+	} else if err != nil {
+		return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
+	}
+	if err := checkInboxStream(name, s.CachedInfo().Config, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
+		return nil, false, err
+	}
+	return s, false, nil
 }
 
 // inboxField is one configuration field of an existing inbox next to the value mash wants.
@@ -343,6 +387,12 @@ func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, erro
 	if !config.ValidName(name) {
 		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
+	// The read, the check and the write run under the stream's limits lock.
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	defer lk.release(ctx)
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
 		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
@@ -367,6 +417,9 @@ func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, erro
 	}
 	if len(changed) == 0 {
 		return name + ": unchanged", nil
+	}
+	if afterStreamRead != nil {
+		afterStreamRead(a.limits.InboxMaxBytes)
 	}
 	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
 		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
