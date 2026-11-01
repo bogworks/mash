@@ -1,5 +1,5 @@
 #!/bin/bash
-. /tmp/claude-1000/lrl/lib.sh
+. "${LRL_DIR:?set LRL_DIR}/lib.sh"
 TL=$D/timeline.log
 log(){ echo "$(ts) [B2] $*" | tee -a $TL; }
 H=$R/home-sender; mkdir -p $H/.config/mash

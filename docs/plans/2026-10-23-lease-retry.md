@@ -5,7 +5,7 @@
 **Goal:** a `mash serve` that starts while its endpoint's lease is held keeps retrying the take until it gets
 it, then comes online with no restart of Claude.
 
-**Revision 3** answers Codex's second review (4 new findings, 4 partly-closed) and the lead's rulings; approved on
+**Revision 3** answers Codex's second review (4 new findings, 4 partly-closed) and the maintainer's rulings; approved on
 commit, no further review round. **Revision 2** answered Codex's reject (10 findings, `.codex-review-lease-retry.md`, untracked): one MCP server
 and one joined worker; tools registered once; serialized, readiness-ordered notices; cancellation is never
 "held"; a defined terminal state; a narrowed guarantee; honest scope on MCP I/O leaks; real tests.
@@ -16,15 +16,15 @@ handler loads an atomic state and uses the endpoint it finds.
 
 **Tech stack:** Go, the existing `internal/testenv` in-process operator-mode NATS.
 
-**Evidence:** the orchestrator's `docs/spikes/s5-s6.md` (variant B: claude and `mash serve` killed together; the resumed
+**Evidence:** a downstream project's `docs/spikes/s5-s6.md` (private, not in this repo) (variant B: claude and `mash serve` killed together; the resumed
 session stayed offline 3+ minutes past the 90 s lease because a startup lease conflict is terminal,
-`cmd/mash/serve.go:53`); the orchestrator spec §15 (mash fix) and §18 M4. Scope approved by the operator: this fix.
+`cmd/mash/serve.go:53`); the downstream project's spec §15 (mash fix) and §18 M4 (private, not in this repo). Scope approved by the operator: this fix.
 
 ## Global Constraints
 
 - **Files allowed:** `cmd/mash/serve.go`, `cmd/mash/main_test.go`, `internal/testenv/testenv.go` (a connection
   count accessor), `cmd/mash/main.go` (`mash version` prints the commit), `docs/operations.md` (one troubleshooting line), and **one narrow change in
-  `internal/endpoint/endpoint.go` `takeLease`** (approved by the lead, confined to the held-error branch):
+  `internal/endpoint/endpoint.go` `takeLease`** (approved by the maintainer, confined to the held-error branch):
   immediately before `return held`, `if ctx.Err() != nil { return ctx.Err() }`. **No** unconditional
   post-success cancellation return (`Open` closes the connection only on failure, so that could strand a
   created lease). Its test goes in `internal/endpoint/endpoint_test.go` (in scope). No change to `store.LeaseTTL` (90 s), the protocol, `internal/mcp`,
@@ -139,14 +139,14 @@ First `Open` succeeds → state is pre-stored `ep` and the worker skips the loop
 
 **Files:** `cmd/mash/main.go`, `main_test.go`. `mash version` prints `mash 0.1.0 (commit <rev>)`, where `<rev>`
 is `main.commit` from `-ldflags "-X main.commit=…"` when set, else `debug.ReadBuildInfo` `vcs.revision`
-(`+dirty` if `vcs.modified`), else `unknown`; so the orchestrator's `compat.json` can pin and check the S5-fixed commit.
+(`+dirty` if `vcs.modified`), else `unknown`; so a downstream consumer can pin and check the S5-fixed commit.
 - [ ] Test (function takes the build info as an argument): ldflags wins; vcs.revision used; modified marks
   `+dirty`; none → `unknown`; the existing `version` assertions are updated. Commit separately.
 
 ## Task 2: live check on the scratch NATS
 
-- [ ] Rerun S5 variant B from the orchestrator's `docs/spikes/s5-s6.md` (scratch operator-mode `nats-server`, two real
+- [ ] Rerun S5 variant B from a downstream project's `docs/spikes/s5-s6.md` (private, not in this repo) (scratch operator-mode `nats-server`, two real
   claude sessions): kill claude and `mash serve` together, resume at once; expect `mash who` to show the session
   online within about 100 s of the kill with no restart, and mail answered. Also run it with the holder still
   alive (kill nothing) and confirm the waiter stays out. Write the evidence to `docs/evidence/` and commit;
-  report the SHA to the lead for `compat.json` (spec §15).
+  report the SHA to the maintainer for a downstream pin (spec §15).

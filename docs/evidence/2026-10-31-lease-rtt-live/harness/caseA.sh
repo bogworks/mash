@@ -1,6 +1,6 @@
 #!/bin/bash
 # caseA.sh LABEL BIN : lease handoff after kill -9. Appends to $TL.
-. /tmp/claude-1000/lrl/lib.sh
+. "${LRL_DIR:?set LRL_DIR}/lib.sh"
 LABEL=$1; export BIN=$2; M=$BIN
 TL=${TL:-$D/timeline.log}
 log(){ echo "$(ts) [$LABEL] $*" | tee -a $TL; }

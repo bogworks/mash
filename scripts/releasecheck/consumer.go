@@ -4,7 +4,7 @@ package main
 // of mash, run against the candidate. The consumer drives it: its manifest (.mash-consumer-check, see consumerManifest)
 // names its entry point and which environment variables receive the candidate. This file builds the candidate for the
 // consumer's container, hands it over by environment, and judges the results file the consumer leaves. It never makes
-// a consumer receipt (the compat.json pin is what certifies); it only decides whether the candidate may be pinned.
+// a consumer receipt (the consumer's own pin is what certifies); it only decides whether the candidate may be pinned.
 
 import (
 	"bufio"

@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-31
-decision-makers: the release maintainer (lead), 2026-10-31
+decision-makers: the release maintainer, 2026-10-31
 ---
 
 # A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild
@@ -46,7 +46,7 @@ the binaries are what the tagged commit builds to, and the signature then vouche
 6. **Resumable, and publishing needs it.** A draft whose `SHA256SUMS.sig` already verifies keeps it, and the rerun needs
    no key. One that does not verify is refused, not replaced. Publishing re-verifies the draft's signature and refuses
    without it. A published release is never amended.
-7. **The key.** `RELEASE_SIGNING_KEY`, the key that signs the tag (default `~/.ssh/id_ed25519_rdev.pub`, signing through
+7. **The key.** `RELEASE_SIGNING_KEY`, the key that signs the tag (default `~/.ssh/id_ed25519.pub`, signing through
    ssh-agent). There is no second flag or variable. The key is used only by `ssh-keygen`, and only when a draft has no
    verifying signature. `RELEASE_SIGNERS` (the maintainer's file for the tag) is not used for the sums, which are
    verified against the committed `ci/release.allowed_signers` that downloaders use.

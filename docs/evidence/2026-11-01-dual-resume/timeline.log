@@ -12,7 +12,7 @@
 16:04:46.336 [D1] RECORDED: A: spool after turn 1 (is M0 drained?) (owner record: "{\"pid\":3857184,\"session\":\"71b2fbc0-acba-4856-9479-79ee7cf7f797\"}"; files: .hooked,.lock,.owner,.session,.stream,drained,shown; waiting entries 0 (err <nil>))
 16:04:53.605 [D1] RECORDED: B: first turn finished (true; exited false)
 16:04:53.605 [D1] RECORDED: B: session id same as A's (true (B has "71b2fbc0-acba-4856-9479-79ee7cf7f797"))
-16:04:53.605 [D1] RECORDED: B: MCP state (init) (plugin:mash:mash=connected, claude.ai Claude Docs=pending, claude.ai Google Slides=needs-auth, claude.ai Google Sheets=needs-auth, claude.ai Google Docs=needs-auth, claude.ai Google Calendar=needs-auth, claude.ai Gmail=needs-auth, claude.ai Google Drive=needs-auth, claude.ai Slack=needs-auth, claude...)
+16:04:53.605 [D1] RECORDED: B: MCP state (init) (plugin:mash:mash=connected, [connector list redacted])
 16:04:53.605 [D1] RECORDED: B: status facts (name: OK - a ;; channel allowlist: OK - local managed settings file enables channels and lists mash@mash ;; delivery: hooks n/a - this session does not hold the lease yet ;; delivery: channel notifications sent: 1 (Claude Code delivers them only if this plugin is on its channel allowlist and the ses...)
 16:04:53.605 [D1] RECORDED: B: status text, first 15 lines (name: OK - a / config: OK - url <scrubbed>, owner o / creds: OK - <scrubbed> exists and is readable / connection: WAITING - the lease for endpoint a is held by another session (host <host>, pid 3857318, since 2026-11-01T16:04:45Z). mash retries on its own. Next: end that session, or start t...)
 16:04:53.605 [D1] RECORDED: B: stderr lines about mash, lease or bind ()

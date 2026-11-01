@@ -1,6 +1,6 @@
 # `mash init synadia` live proof (PR #130): 2026-10-31 21:16-21:17Z
-Binary /tmp/claude-1000/mash-main, `mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)` (main). Real Synadia
-free-tier test account (team "Mire's Personal Team", system NGS, account Default, url tls://connect.ngs.global). The token
+Binary <scratch>/mash-main, `mash 0.0.0-dev (commit 7ebf0ab4a05dbe47116d3fd2bd9452ff470598d3)` (main). Real Synadia
+free-tier test account (team "<team>", system NGS, account Default, url tls://connect.ngs.global). The token
 was piped from `secrets get` into `--token-stdin`, never in env, argv, disk or this directory. HOME was a temp dir
 (deleted afterwards). Ambient MASH_URL, MASH_CREDS, MASH_NAME, MASH_OWNER, MASH_LAUNCH_TOKEN were unset for the mash
 command only (see Surprises). Full output: timeline.log. Nothing was deleted in the account.

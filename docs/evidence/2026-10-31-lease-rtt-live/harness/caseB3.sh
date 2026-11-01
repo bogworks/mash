@@ -1,6 +1,6 @@
 #!/bin/bash
 # caseB3.sh LABEL BIN DELAY_MS NAME RUNS
-. /tmp/claude-1000/lrl/lib.sh
+. "${LRL_DIR:?set LRL_DIR}/lib.sh"
 LABEL=$1; export BIN=$2; M=$BIN; DELAY=$3; X=$4; RUNS=$5
 TL=$D/timeline.log
 log(){ echo "$(ts) [B3] $*" | tee -a $TL; }

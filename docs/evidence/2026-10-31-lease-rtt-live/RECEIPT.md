@@ -9,7 +9,7 @@ a throwaway helper (`harness/natsenv-main.go.txt`; the second run used a copy wi
 was not used; testenv was the shorter path to the same server configuration. Each endpoint ran under its own temp HOME and XDG_STATE_HOME, so
 nothing touched `~/.config/mash`. `mash serve` is an MCP stdio server, so a small client (`harness/drv.py`) does the MCP handshake and logs channel
 notifications with timestamps. The delay proxy is `harness/proxy.py` (python3 asyncio TCP proxy, fixed delay each way, logs the PUB subjects it forwards).
-No credential file contents appear anywhere here. Full output: `timeline.log`; scripts: `harness/`.
+No credential file contents appear anywhere here. Full output: `timeline.log`; scripts: `harness/`. The harness scripts take their work directory from `LRL_DIR` (holding `lib.sh` and `run/`) and the binary under test from `BIN`; the original run used a scratch directory, shown as `<scratch>` in this receipt.
 
 ## Verdict
 
@@ -104,9 +104,9 @@ not discriminate the two builds; the wave count (11 to 7) does.
   `mash: inbox stream: nats: API error: code=500 err_code=10047 description=insufficient storage resources available` (256 MiB of disk, 16 MiB reserved per inbox stream). A throwaway copy of testenv
   with an 8 GiB limit was used for the final 10-vs-40 runs. The first pass at N=14 gave the same 1.373 s and 7 waves.
 - My first A script counted serve's "already in use" notice as delivered mail, which made one pre-#44 run look instant (0.73 s). That run is discarded and omitted from timeline.log; the table's pre-#44 row is the corrected rerun.
-- A shared `/tmp/claude-1000/live` directory (the brief's suggested location) was deleted by another process mid-run, so work moved to `/tmp/claude-1000/lrl`. No data was lost.
+- A shared `<scratch>/live` directory (the brief's suggested location) was deleted by another process mid-run, so work moved to `<scratch>/lrl`. No data was lost.
 
 ## Cleanup
 
-Every process started (NATS helper, proxies, serve clients) was stopped; `scratch-live/` was removed; the temp dirs under `/tmp/claude-1000/lrl` hold the NATS store and per-endpoint HOME dirs, which contain minted
+Every process started (NATS helper, proxies, serve clients) was stopped; `scratch-live/` was removed; the temp dirs under `<scratch>/lrl` hold the NATS store and per-endpoint HOME dirs, which contain minted
 creds for a throwaway operator and are not part of the evidence. No source file, git ref or commit was changed.
