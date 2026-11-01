@@ -111,6 +111,29 @@ The CLI never takes the lease, so it works alongside the running session.
 
 `send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
 
+## 6. Pi sessions
+
+mash also runs under [Pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-coding-agent`, proved with 1.4.0). Pi does not take MCP channel events, so a small Pi extension delivers mail instead. It is written by the binary, so it always matches it:
+
+```sh
+mash plugin export --host pi ~/.pi/agent/extensions
+```
+
+That writes only `mash.ts`, which Pi loads from its user extensions directory; alternatively export elsewhere and pass `-e <dir>/mash.ts`, or list the file under `extensions` in Pi's settings. Re-run the export after upgrading mash. The extension registers `mash serve` as Pi's `mash` MCP server with `MASH_HOST=pi`, so do not also configure a `mash` server in Pi's `mcp.json`: Pi gives that entry precedence, and without `MASH_HOST=pi` it would take channel delivery Pi never shows. The binary is `mash` on `PATH`, or `MASH_BIN`.
+
+Configuration and launch are as above, with Pi in place of Claude Code:
+
+```sh
+MASH_NAME=design pi
+```
+
+Delivery matches Claude Code's: mail is shown with each prompt and appended to each tool result, an idle session is woken for waking mail (task, question, blocker, urgent) after `idle_wake`, and fyi and result mail waits for the next prompt or tool call. Live prompts start a turn when Pi is idle and are steered into a busy run; the model answers with the `reply` tool. Two differences:
+
+- Pi reconnects its MCP servers on `/new`, so serve restarts there and takes the lease back.
+- After Pi itself is killed, mail it never showed reappears once the inbox's 30 s ack wait has passed.
+
+Live proof: [docs/evidence/2026-10-29-pi-live](evidence/2026-10-29-pi-live/RECEIPT.md).
+
 ## Quick start on Synadia Cloud
 
 If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) does the server side (operations.md) for you from one API token. It is a script outside the binary (it needs curl and jq; [ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md)). Install the binary and the plugin (sections 1 to 3) first.

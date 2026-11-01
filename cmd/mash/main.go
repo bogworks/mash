@@ -16,6 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
+	"github.com/bogworks/mash/internal/spool"
 )
 
 const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
@@ -38,10 +39,11 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash admin deprovision <name>
   mash admin list
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
+  mash plugin export --host pi <dir>           write this build's Pi extension (mash.ts) into <dir>
   mash version
 
 Configuration: ~/.config/mash/config.json {"url","owner"}, overridden by MASH_URL,
-MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
+MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (claude or pi; see docs/install.md).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 `
 
@@ -148,7 +150,7 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 		// An unknown host is refused loudly, never read as claude: a hook that ran with the wrong adapter would
 		// drain mail into the wrong place.
 		var herr error
-		if adapter, herr = host.Select(cfg.Host); herr != nil {
+		if adapter, herr = host.Select(cfg.Host, spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)); herr != nil {
 			fmt.Fprintln(stderr, herr)
 			return 1
 		}

@@ -11,16 +11,31 @@ import (
 	"github.com/bogworks/mash/plugin"
 )
 
-const pluginUsage = "usage: mash plugin export <dir>"
+const pluginUsage = "usage: mash plugin export [--host pi] <dir>"
 
 // pluginCmd runs `mash plugin ...`. It needs no config: it runs during an install, before any endpoint exists.
 func pluginCmd(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 2 || args[0] != "export" {
+	if len(args) < 2 || args[0] != "export" {
 		fmt.Fprintln(stderr, pluginUsage)
 		return 2
 	}
-	dir, err := filepath.Abs(args[1])
-	if err == nil {
+	args = args[1:]
+	pi := false
+	if len(args) > 0 && args[0] == "--host" {
+		if len(args) < 2 || args[1] != "pi" {
+			fmt.Fprintln(stderr, "mash: unknown host: --host takes pi")
+			return 2
+		}
+		pi, args = true, args[2:]
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, pluginUsage)
+		return 2
+	}
+	dir, err := filepath.Abs(args[0])
+	if err == nil && pi {
+		err = exportPi(dir, plugin.PiFiles)
+	} else if err == nil {
 		err = exportPlugin(dir, plugin.Files)
 	}
 	if err != nil {
@@ -29,6 +44,16 @@ func pluginCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, dir)
 	return 0
+}
+
+// exportPi writes the Pi extension, as mash.ts, into dir (atomically). Pi loads it from the path in its `extensions`
+// setting.
+func exportPi(dir string, files fs.FS) error {
+	data, err := fs.ReadFile(files, "pi/mash.ts")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dir, "mash.ts"), data, 0o644)
 }
 
 // exportPlugin writes the plugin in files, and a one-entry marketplace that points at it, into dir. Only those
