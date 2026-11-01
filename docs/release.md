@@ -206,7 +206,8 @@ and tick it off in the repository's setup issue.
       processed when the default setup is enabled").
 - [ ] Actions: require approval for fork pull requests from all outside collaborators; the default workflow token is
       read-only.
-- [ ] Ruleset for `main`: no deletion, no force push, merges only through the merge queue. Do **not** require signed
+- [ ] Ruleset for `main`: no deletion, no force push, and the required status check `Mergify Merge Protections` (Merge
+      Protections is only enforced once the ruleset requires that check); merges go through the merge queue. Do **not** require signed
       commits: contributors' and automation's commits are not all signed. (Releases are signed with the key in
       `docs/allowed_signers`, see "Signing".)
 - [ ] Ruleset for `v*` tags: no deletion, no update.
