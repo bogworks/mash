@@ -35,7 +35,7 @@ type Config struct {
 	CallTimeout    time.Duration // bound on one command's or tool call's requests once open (default 15s)
 	AdminCreds     string        // admin credentials for `mash admin`
 	LaunchToken    string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host           string        // MASH_HOST / "host": the agent host adapter ("" = claude)
+	Host           string        // MASH_HOST / "host": the agent host adapter ("claude" or "pi"; "" = claude)
 	SpoolFromStart bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
 	Dir            string        // ~/.config/mash
 }

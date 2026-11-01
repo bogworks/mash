@@ -34,6 +34,13 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if !ok {
 		return 0
 	}
+	// An answer-only event (Pi's init) prints and returns before the lock: it touches and drains nothing.
+	if in, ok := adapter.(host.Initer); ok {
+		if out, handled := in.Init(trig); handled {
+			_, _ = stdout.Write(out)
+			return 0
+		}
+	}
 	sp := spool.Spool{Dir: spool.Dir(cfg.StateHome, cfg.Owner, cfg.Name)}
 	// The lock is held from the owner check to the drained marks, so a new lease holder cannot rebind and re-own the
 	// spool in between and have its new mail drained into this old session (codex H1 on #21, round 7).
