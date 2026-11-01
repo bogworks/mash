@@ -16,6 +16,8 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   - `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible` (from `ci.yml`; the release gate in
     `scripts/release-check` requires exactly these names, so never rename them),
   - `lint` (from `lint.yml`),
+  - `adr-lint` (from `adr-lint.yml`; it checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify
+    queue condition, so add it as required once the workflow is on `main`),
   - `govulncheck` and `codeql` (from `security.yml`; `codeql` runs on public repositories only, since code scanning is not
     available on a private one),
   - **Code scanning results** (the separate check GitHub adds once code scanning is on): the `codeql` job passing only
