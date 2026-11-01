@@ -206,10 +206,13 @@ and tick it off in the repository's setup issue.
       processed when the default setup is enabled").
 - [ ] Actions: require approval for fork pull requests from all outside collaborators; the default workflow token is
       read-only.
-- [ ] Ruleset for `main`: no deletion, no force push, and the required status check `Mergify Merge Protections` (Merge
-      Protections is only enforced once the ruleset requires that check); merges go through the merge queue. Do **not** require signed
-      commits: contributors' and automation's commits are not all signed. (Releases are signed with the key in
-      `docs/allowed_signers`, see "Signing".)
+- [ ] Ruleset for `main`, as specified in [branch-protection.md](branch-protection.md) (follow that file; the points
+      that are easy to miss): require a pull request, with the Mergify app as the bypass actor for its tested
+      fast-forward merges; require the status checks `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible`,
+      `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
+      ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
+      Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
+      signed with the key in `docs/allowed_signers`, see "Signing".)
 - [ ] Ruleset for `v*` tags: no deletion, no update.
 - [ ] Immutable releases: switch on after the first release is published.
 
