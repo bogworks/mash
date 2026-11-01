@@ -195,9 +195,19 @@ func TestHookDrainWithZeroBatchMsgs(t *testing.T) {
 	if !strings.Contains(out, "#1") || !strings.Contains(out, "#2") {
 		t.Fatalf("digest missing seqs:\n%s", out)
 	}
-	if w, _ := sp.Waiting(); len(w) != 0 {
-		t.Fatalf("left %+v", w)
+	// A digest lists, it does not drain: both stay waiting and listed, unacked, until read (ADR 0046).
+	if w, _ := sp.Waiting(); len(w) != 2 || !w[0].Listed || !w[1].Listed {
+		t.Fatalf("waiting %+v, want both listed", w)
 	}
+	if sp.IsDrained(1) || sp.IsDrained(2) {
+		t.Fatal("a digest drained what it listed")
+	}
+}
+
+// unlisted is what a hook run would still show: waiting entries no digest has listed.
+func unlisted(sp spool.Spool) []spool.Entry {
+	w, _ := sp.Waiting()
+	return slices.DeleteFunc(w, func(e spool.Entry) bool { return e.Listed })
 }
 
 // stubAncestors makes the hook's ancestor process ids pids for the test.
@@ -273,7 +283,7 @@ func TestHookContextFitsClaudeCodeLimit(t *testing.T) {
 	if n := len([]rune(first)); n == 0 || n > 10000 {
 		t.Fatalf("first context is %d runes", n)
 	}
-	w, _ := sp.Waiting()
+	w := unlisted(sp) // shown in full is drained and shown in a digest is listed: either way not left to show
 	shown := 0
 	for i := 1; i <= 3; i++ {
 		if strings.Contains(first, "#"+strconv.Itoa(i)) {
@@ -281,14 +291,14 @@ func TestHookContextFitsClaudeCodeLimit(t *testing.T) {
 		}
 	}
 	if shown == 0 || len(w) != 3-shown {
-		t.Fatalf("shown %d, waiting %d", shown, len(w))
+		t.Fatalf("shown %d, left to show %d", shown, len(w))
 	}
 	for len(w) > 0 {
 		next := runHook(t, env, "PostToolUse")
 		if n := len([]rune(next)); n == 0 || n > 10000 {
 			t.Fatalf("next context is %d runes", n)
 		}
-		w2, _ := sp.Waiting()
+		w2 := unlisted(sp)
 		if len(w2) >= len(w) {
 			t.Fatalf("no progress: %d -> %d", len(w), len(w2))
 		}
@@ -318,9 +328,9 @@ func TestHookContextCountsUTF16Units(t *testing.T) {
 			shown++
 		}
 	}
-	w, _ := sp.Waiting()
+	w := unlisted(sp)
 	if shown == 0 || len(w) != 10-shown {
-		t.Fatalf("shown %d, waiting %d", shown, len(w))
+		t.Fatalf("shown %d, left to show %d", shown, len(w))
 	}
 }
 
@@ -668,5 +678,75 @@ func TestHookSubagentTouchesAlive(t *testing.T) {
 	}
 	if w, err := sp.Waiting(); err != nil || len(w) != 1 {
 		t.Fatalf("a subagent's hook drained: %+v (%v)", w, err)
+	}
+}
+
+// A digest lists what it shows and drains none of it: the entries stay waiting with a listed mark (so serve does not
+// ack them), the text says they stay unread until read, and the next run, with nothing new, shows nothing again.
+func TestHookDigestListsAndDoesNotDrain(t *testing.T) {
+	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+		"MASH_BATCH_BYTES": "100"}
+	sp := spoolOf(env)
+	if err := sp.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		if err := sp.Put(spool.Entry{Seq: uint64(i), From: "b", Trust: "verified", At: time.Now(), Body: []byte(strings.Repeat("x", 80))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := runHook(t, env, "PostToolUse")
+	if !strings.Contains(out, "digest") || !strings.Contains(out, "they stay unread until you do") {
+		t.Fatalf("no digest with the unread note:\n%s", out)
+	}
+	for i := uint64(1); i <= 2; i++ {
+		if !sp.IsListed(i) || sp.IsDrained(i) || !sp.Has(i) {
+			t.Fatalf("#%d: listed %v drained %v has %v, want listed, undrained, waiting", i, sp.IsListed(i), sp.IsDrained(i), sp.Has(i))
+		}
+	}
+	if again := runHook(t, env, "PostToolUse"); again != "" {
+		t.Fatalf("the next run listed them again:\n%s", again)
+	}
+}
+
+// New mail shown in full takes the listed mail with it when the whole batch fits in full, and drains both; when it
+// does not fit, the new mail is shown alone and the listed mail is not repeated.
+func TestHookALaterFullShowingDrainsListedMail(t *testing.T) {
+	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+		"MASH_BATCH_BYTES": "100"}
+	sp := spoolOf(env)
+	if err := sp.Init(); err != nil {
+		t.Fatal(err)
+	}
+	put := func(seq uint64, body string) {
+		t.Helper()
+		if err := sp.Put(spool.Entry{Seq: seq, From: "b", Trust: "verified", At: time.Now(), Body: []byte(body)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(1, strings.Repeat("a", 60))
+	put(2, strings.Repeat("b", 60))
+	if out := runHook(t, env, "PostToolUse"); !strings.Contains(out, "digest") { // 120 B > 100 B: a digest
+		t.Fatalf("not a digest:\n%s", out)
+	}
+	put(3, strings.Repeat("c", 90)) // listed 1 and 2 would push the batch past the limit
+	out := runHook(t, env, "PostToolUse")
+	if strings.Contains(out, "digest") || !strings.Contains(out, "> "+strings.Repeat("c", 90)) || strings.Contains(out, "#1") {
+		t.Fatalf("new mail alone expected:\n%s", out)
+	}
+	if !sp.IsDrained(3) || !sp.IsListed(1) || !sp.IsListed(2) || sp.IsDrained(1) {
+		t.Fatal("the new message is drained and the listed ones left listed")
+	}
+	put(4, "small")
+	// 60 + 60 + 5 bytes is still over 100 B: not taken together. Read the first (as the read tool does), leaving one.
+	if err := sp.Drained(1); err != nil {
+		t.Fatal(err)
+	}
+	out = runHook(t, env, "PostToolUse")
+	if strings.Contains(out, "digest") || !strings.Contains(out, "> small") || !strings.Contains(out, "> "+strings.Repeat("b", 60)) {
+		t.Fatalf("listed #2 should be shown in full with #4:\n%s", out)
+	}
+	if !sp.IsDrained(2) || !sp.IsDrained(4) || sp.IsListed(2) {
+		t.Fatal("a full showing did not drain the listed message")
 	}
 }

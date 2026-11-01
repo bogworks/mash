@@ -117,6 +117,30 @@ func Line(m Mail) string {
 // bodies total at most maxBytes, otherwise as a digest. The first line is a short summary of the count and the
 // senders, since Claude Code shows it as the terminal line after its own "← mash:".
 func Batch(to, owner string, msgs []Mail, maxMsgs, maxBytes int) string {
+	return batch(msgs, owner, maxMsgs, maxBytes, digestNote)
+}
+
+// HookBatch is Batch for the hook, whose digest says plainly that a listed message stays unread until the model
+// reads it with the read tool (ADR 0046). A batch shown in full is the same as Batch's.
+func HookBatch(to, owner string, msgs []Mail, maxMsgs, maxBytes int) string {
+	return batch(msgs, owner, maxMsgs, maxBytes, hookDigestNote)
+}
+
+// IsDigest reports whether Batch and HookBatch render msgs as a digest, not in full.
+func IsDigest(msgs []Mail, maxMsgs, maxBytes int) bool {
+	total := 0
+	for _, m := range msgs {
+		total += len(m.Body)
+	}
+	return !(len(msgs) <= maxMsgs && total <= maxBytes)
+}
+
+const (
+	digestNote     = "Read the ones you need with the read tool (by #seq)."
+	hookDigestNote = "Read each with the read tool (#seq); they stay unread until you do."
+)
+
+func batch(msgs []Mail, owner string, maxMsgs, maxBytes int, note string) string {
 	total := 0
 	for _, m := range msgs {
 		total += len(m.Body)
@@ -135,8 +159,8 @@ func Batch(to, owner string, msgs []Mail, maxMsgs, maxBytes int) string {
 		}
 		return b.String()
 	}
-	fmt.Fprintf(&b, "%s, digest, from %s%s\nShown as a digest (%d B). Read the ones you need with the read tool (by #seq).\n\n",
-		plural(len(msgs)), senders(owner, msgs, digestSenders), kinds(msgs), total)
+	fmt.Fprintf(&b, "%s, digest, from %s%s\nShown as a digest (%d B). %s\n\n",
+		plural(len(msgs)), senders(owner, msgs, digestSenders), kinds(msgs), total, note)
 	for _, m := range msgs {
 		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s\tkind %s%s\n", m.Seq, m.From, m.Trust, len(m.Body), firstLine(m.Body), m.Kind, instField(m))
 	}

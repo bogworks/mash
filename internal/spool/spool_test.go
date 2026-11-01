@@ -503,3 +503,56 @@ func TestWaiters(t *testing.T) {
 		t.Fatal("ClearWaiting removed a waiter record")
 	}
 }
+
+// A listed message stays waiting and undrained, flagged by Waiting; a restart's ClearWaiting and a stream rebind
+// forget the mark (the redelivery is shown again), and a drain or an ack removes it (ADR 0046).
+func TestListedMarkLifecycle(t *testing.T) {
+	s := newSpool(t)
+	put := func(seq uint64) {
+		t.Helper()
+		if err := s.Put(Entry{Seq: seq, From: "b", At: time.Now(), Body: []byte("x")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(1)
+	put(2)
+	if err := s.MarkShown(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Listed(1); err != nil {
+		t.Fatal(err)
+	}
+	w, _ := s.Waiting()
+	if len(w) != 2 || !w[0].Listed || w[1].Listed || w[0].Redelivered || s.IsDrained(1) || !s.IsListed(1) || s.IsListed(2) {
+		t.Fatalf("after Listed(1): %+v drained %v", w, s.IsDrained(1))
+	}
+	if mode(t, filepath.Join(s.Dir, "listed", "1")) != 0o600 {
+		t.Fatal("listed mark is not 0600")
+	}
+	if err := s.Listed(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Drained(2); err != nil || s.IsListed(2) || !s.IsDrained(2) {
+		t.Fatalf("a drain keeps the listed mark: %v", err)
+	}
+	if err := s.Acked(2); err != nil || s.IsDrained(2) {
+		t.Fatal(err)
+	}
+	if err := s.ClearWaiting(); err != nil || s.IsListed(1) {
+		t.Fatalf("ClearWaiting kept the listed mark: %v", err)
+	}
+	put(1)
+	if err := s.Listed(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Bind("stream-a"); err != nil || s.IsListed(1) {
+		t.Fatalf("Bind to a new stream kept the listed mark: %v", err)
+	}
+	put(3)
+	if err := s.Listed(3); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Acked(3); err != nil || s.IsListed(3) {
+		t.Fatalf("Acked kept the listed mark: %v", err)
+	}
+}

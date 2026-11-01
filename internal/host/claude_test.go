@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/spool"
 )
 
 // The real ancestry on this OS includes the parent process.
@@ -277,5 +279,31 @@ func TestMatchWaiterAncestorIsAnotherLaunch(t *testing.T) {
 	}
 	if got := WaiterAncestor(5002, []int{pp}); got != 0 {
 		t.Errorf("WaiterAncestor with the owner an ancestor = %d, want 0", got)
+	}
+}
+
+// Present marks the entries it rendered as digest lines Listed, and the rest not, whatever the input said; the
+// caller's slice is not changed (ADR 0046).
+func TestPresentMarksDigestEntriesListed(t *testing.T) {
+	mk := func(listed bool) []spool.Entry {
+		return []spool.Entry{{Seq: 1, From: "b", Trust: "verified", Body: []byte("one"), Listed: listed}, {Seq: 2, From: "b", Trust: "verified", Body: []byte("two"), Listed: listed}}
+	}
+	p := Presentation{Name: "a", Owner: "o", Event: "PostToolUse", BatchMsgs: 10, BatchBytes: 1000}
+	in := mk(false)
+	_, shown := Claude{}.Present(p, in)
+	if len(shown) != 2 || shown[0].Listed || shown[1].Listed {
+		t.Fatalf("full batch: %+v", shown)
+	}
+	p.BatchBytes = 1
+	out, shown := Claude{}.Present(p, in)
+	if len(shown) != 2 || !shown[0].Listed || !shown[1].Listed || in[0].Listed {
+		t.Fatalf("digest: shown %+v, input %+v", shown, in)
+	}
+	if !strings.Contains(string(out), "they stay unread until you do") {
+		t.Fatalf("no unread note: %s", out)
+	}
+	p.BatchBytes = 1000
+	if _, shown = (Claude{}).Present(p, mk(true)); shown[0].Listed {
+		t.Fatal("a mark Waiting set survived a full showing")
 	}
 }

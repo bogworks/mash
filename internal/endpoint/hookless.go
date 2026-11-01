@@ -141,17 +141,23 @@ func (e *Endpoint) Hookless() (Hookless, int) {
 	return st, e.hl.wakes
 }
 
-// MarkRead marks a held message drained, so serve acks it, when the session is proven hookless and the message is
-// waiting in the spool: the read tool has just shown the model its body, and no hook will. In every other state it
-// does nothing, and the message stays held until a hook shows it. It reports whether it drained. Call it only after
-// a successful Read; the inbox tool never calls it.
+// MarkRead marks a held message drained, so serve acks it, once the read tool has shown the model its body, in two
+// cases. (1) The message was listed in a hook's digest and not yet read (ADR 0046): in every mode, since a digest
+// never drains what it lists, the read is what makes it seen. (2) The session is proven hookless and the message is
+// waiting in the spool: no hook will show it. In every other state it does nothing, and the message stays held until
+// a hook shows it. It reports whether it drained. Call it only after a successful Read; the inbox tool never calls it.
 func (e *Endpoint) MarkRead(seq uint64) bool {
-	if e.hl.state(time.Now()) != HooklessProven {
+	e.hl.mu.Lock()
+	sp, bound := e.hl.sp, e.hl.bound
+	e.hl.mu.Unlock()
+	if !bound {
 		return false
 	}
-	e.hl.mu.Lock()
-	sp := e.hl.sp
-	e.hl.mu.Unlock()
+	// A cheap look before the lock: most reads are of a message that is neither listed nor held.
+	listed := sp.IsListed(seq)
+	if !listed && e.hl.state(time.Now()) != HooklessProven {
+		return false
+	}
 	// Under the spool lock, as a hook's drain is: the message is either waiting or already drained.
 	unlock, err := sp.Lock()
 	if err != nil {

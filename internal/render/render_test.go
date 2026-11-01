@@ -291,3 +291,22 @@ func TestSummaryNamesTheKinds(t *testing.T) {
 		t.Fatalf("urgent first line %q", first)
 	}
 }
+
+// The hook's digest says plainly that a listed message stays unread until read; the channel's digest, and a batch in
+// full, are unchanged (ADR 0046).
+func TestHookBatchDigestSaysListedMailStaysUnread(t *testing.T) {
+	m := []Mail{mail(1, "b", "one"), mail(2, "b", "two")}
+	d := HookBatch("a", "o", m, 10, 0)
+	if !strings.Contains(d, "Read each with the read tool (#seq); they stay unread until you do.") {
+		t.Fatalf("hook digest:\n%s", d)
+	}
+	if c := Batch("a", "o", m, 10, 0); strings.Contains(c, "stay unread") {
+		t.Fatalf("channel digest changed:\n%s", c)
+	}
+	if HookBatch("a", "o", m, 10, 1000) != Batch("a", "o", m, 10, 1000) {
+		t.Fatal("a batch in full differs")
+	}
+	if !IsDigest(m, 10, 0) || IsDigest(m, 10, 1000) || !IsDigest(m, 1, 1000) {
+		t.Fatal("IsDigest disagrees with Batch")
+	}
+}

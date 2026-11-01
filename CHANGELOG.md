@@ -19,6 +19,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Changed
 
+- A digest no longer acks what it lists: a message the hook only listed (a batch past 10 messages or 16 KiB) stays unread in the inbox until the model calls `read` for its `#seq`, or a later hook run shows it in full, and it never wakes the session or counts in `waking_pending`. The digest says so ("Read each with the read tool (#seq); they stay unread until you do."). After a restart, unread listed mail is listed again once. Amends ADR-0026 and ADR-0024 ([ADR-0046](docs/decisions/0046-a-digest-lists-mail-it-does-not-ack-it.md), #44).
 - A `claude --resume` of a still-running session (same session id; a new `MASH_LAUNCH_TOKEN` is not required, a waiting serve records itself in the spool) no longer drains the lease holder's spool: its hooks are refused, and it is told once in its own session that it is not receiving mail ([ADR-0043](docs/decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)).
 - The config directory is `$XDG_CONFIG_HOME/mash` when `XDG_CONFIG_HOME` is absolute and holds a config.json, else `~/.config/mash` as before; `policy.md` and default creds files follow it, falling back to `~/.config/mash` when the XDG directory has no copy (the XDG copy wins when both exist).
 - `mash admin provision` refuses to lower the caps of an inbox stream that already exists (a retried provision no longer shrinks an inbox the limits command had raised).

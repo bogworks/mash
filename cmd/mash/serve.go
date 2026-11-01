@@ -527,9 +527,9 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				return fmt.Sprintf("sent #%d to %s", seq, a.To), nil
 			})},
 		{Name: "read", Description: "Read one message from your inbox by #seq.",
-			// Only after the result is written to the client has the model the body. Only in a session proven
-			// hookless (no hook will show it) does that count as seen: serve acks it. Everywhere else the message
-			// stays held for a hook.
+			// Only after the result is written to the client has the model the body. That counts as seen, so serve
+			// acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one waiting in a
+			// session proven hookless (no hook will show it). Everywhere else the message stays held for a hook.
 			AfterWrite: func(raw json.RawMessage) {
 				var a struct {
 					Seq uint64 `json:"seq"`

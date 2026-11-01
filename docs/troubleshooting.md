@@ -135,7 +135,7 @@ Subagents have no mailbox, and their tool calls do not deliver mail. It waits fo
 
 ## A digest lists messages, but their text is missing
 
-A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the `#seq`. Listed messages count as shown and are acked; `inbox` lists recent messages and never acks. A digest line counts as delivery (see [Hook delivery](operations.md#hook-delivery)), so senders should put the action in the first line.
+A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the `#seq`. Listed messages are not acked: they stay unread until `read` is called for their `#seq`, and they do not wake the session again. `inbox` lists recent messages and never acks. After a restart of the session, unread listed mail is listed again once (see [Hook delivery](operations.md#hook-delivery)). Senders should still put the action in the first line.
 
 ## Mail from the recipient's side seems to be missing
 

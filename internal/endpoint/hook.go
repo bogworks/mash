@@ -135,6 +135,7 @@ type held struct {
 	alive  time.Time       // the last keep-alive
 	wakeAt time.Time       // when the session was last woken; zero once a hook has drained since
 	wakes  int             // wakes since a hook last drained: the backoff exponent
+	listed map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
 	rung   map[uint64]bool // urgent messages a wake has already announced
 	fails  map[uint64]int  // consecutive spool failures per message
 	failed bool            // a spool failure is logged for the current spell
@@ -206,6 +207,16 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 	}
 	ran := false
 	for seq, p := range h.msgs {
+		if !h.listed[seq] && e.spool.IsListed(seq) {
+			// Listed in a digest: the model was told of it, so it neither rings nor wakes again and is not a waking
+			// message for orchestrators, but it stays unacked until read (ADR 0046). The hook ran: the idle spell restarts.
+			if h.listed == nil {
+				h.listed = map[uint64]bool{}
+			}
+			h.listed[seq] = true
+			e.waking.listed(seq)
+			h.wakeAt, h.wakes = time.Time{}, 0
+		}
 		if e.spool.IsDrained(seq) {
 			ran = true
 			e.ackDrained(p)
@@ -214,6 +225,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			delete(h.msgs, seq)
 			delete(h.at, seq)
 			delete(h.rung, seq)
+			delete(h.listed, seq)
 			h.full = false
 			h.wakeAt, h.wakes = time.Time{}, 0 // a hook ran: the session is not idle, and the next idle spell may wake it again
 		}
@@ -251,11 +263,18 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		return
 	}
 	var ring []uint64
+	// Listed mail was announced by the digest and waits for the model to read it: it never wakes (ADR 0046).
+	if len(h.msgs) == len(h.listed) {
+		return
+	}
 	// Before the first hook, waking mail rings at once (see above).
 	prehook := e.fromStart && !e.spool.HookedSince(e.since)
 	oldest := time.Time{} // the longest-held waking message
 	crowded := len(h.msgs) >= SpoolWakeCount || h.stored >= SpoolWakeBytes || h.full
 	for seq, p := range h.msgs {
+		if h.listed[seq] {
+			continue
+		}
 		if (p.mail.Urgent || (prehook && p.mail.Kind.Wakes())) && !h.rung[seq] {
 			ring = append(ring, seq)
 		}
@@ -295,7 +314,9 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	}
 	seqs := make([]uint64, 0, len(h.msgs))
 	for seq := range h.msgs {
-		seqs = append(seqs, seq)
+		if !h.listed[seq] { // the summary does not announce listed mail again
+			seqs = append(seqs, seq)
+		}
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
 	mails := make([]render.Mail, len(seqs))
