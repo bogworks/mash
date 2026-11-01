@@ -2,7 +2,7 @@ note: ignoring MASH_URL from the environment for this run (set, it also override
 note: ignoring MASH_OWNER from the environment for this run (set, it also overrides config.json in later sessions)
 note: ignoring MASH_CREDS from the environment for this run (set, it also overrides config.json in later sessions)
 note: ignoring MASH_NAME from the environment for this run (set, it also overrides config.json in later sessions)
-Synadia: team 'Mire's Personal Team', system 'NGS', account 'Default'
+Synadia: team '<team>', system 'NGS', account 'Default'
 NATS URL: tls://connect.ngs.global
 Plan: owner 'mashlive', 2 endpoint(s) (qs-a qs-b)
 Streams: 2 shared + 2 x 1 per endpoint = 4 (the account allows 5)

@@ -1,5 +1,5 @@
 #!/bin/bash
-. /tmp/claude-1000/lrl/lib.sh
+. "${LRL_DIR:?set LRL_DIR}/lib.sh"
 TL=$D/timeline.log
 log(){ echo "$(ts) [B1] $*" | tee -a $TL; }
 t(){ local s=$(date +%s.%N); "$@" > $R/b1.out 2>&1; local rc=$?; local e=$(date +%s.%N); log "  exit=$rc elapsed=$(python3 -c "print(round($e-$s,2))")s output: $(head -c 400 $R/b1.out | tr '\n' '|')"; }

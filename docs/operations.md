@@ -177,7 +177,7 @@ Every mash inbox is a JetStream stream with one replica (R1). nats-server's defa
 
 The plugin ships two Claude Code hooks, PostToolUse and UserPromptSubmit, which run `mash hook` (`plugin/hooks/hooks.json`).
 
-The hook command always exits 0 (a mash too old to have `hook` would otherwise exit 2, which Claude Code treats as blocking) and appends the hook's stderr to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`), beside the spool. That is where a failing or too-old hook is found; an orchestrator's doctor can surface it.
+The hook command always exits 0 (a mash too old to have `hook` would otherwise exit 2, which Claude Code treats as blocking) and appends the hook's stderr to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`), beside the spool. That is where a failing or too-old hook is found; a diagnostic tool can surface it.
 
 **Subagents have no mailbox.** Claude Code runs hooks for a subagent's tool calls too, and mash ignores them (a hook input carrying `agent_id`): they show no mail and drain nothing. Mail waits for the main session's next tool call or prompt, or for the idle wake. A session busy in a long subagent run therefore sees no mail until then. Such a hook only counts as proof that hooks run (see "Hooks that never run").
 

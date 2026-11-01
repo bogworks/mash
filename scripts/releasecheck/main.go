@@ -1246,7 +1246,7 @@ func checkInitializeResponse(line string) error {
 	return nil
 }
 
-// renderContractPath is the golden file pinning render.One and render.Line, which a downstream parser (for example an orchestrator) may depend on.
+// renderContractPath is the golden file pinning render.One and render.Line, which a downstream parser (for example another program) may depend on.
 const renderContractPath = "internal/render/testdata/contract.txt"
 
 // renderContractPrefix starts the subject of a commit that calls a render-contract change out; the subject lands in

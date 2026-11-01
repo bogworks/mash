@@ -3,8 +3,8 @@
 - **Date:** 2026-10-23, host-c. **Build under test:** mash `dd2f033095a3fa8201a03fec269dd87c7c7a13a7`
   (`mash version` prints `mash 0.1.0 (commit dd2f033095a3fa8201a03fec269dd87c7c7a13a7)`, built with
   `-ldflags "-X main.commit=<sha>"`). Claude Code 2.1.309, nats-server v2.15.1 (operator mode, JetStream, local
-  scratch, no real credentials, no terminal multiplexer, no other orchestrator).
-- Method as in the orchestrator's `docs/spikes/s5-s6.md`, variant B: two real claude sessions `alpha` and `beta`.
+  scratch, no real credentials, no terminal multiplexer, no other agent orchestration).
+- Method as in a downstream project's `docs/spikes/s5-s6.md` (private, not in this repo), variant B: two real claude sessions `alpha` and `beta`.
 
 ## Variant B (claude and `mash serve` killed together, then resumed at once)
 

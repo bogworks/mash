@@ -26,12 +26,12 @@ Then do step 6 (the pin).
 ## Signing
 
 The `--assets` gate signs `SHA256SUMS`, and `publish` always runs it. There is no flag to skip it. First it checks
-every line of `SHA256SUMS`. Each `mash-<os>-<arch>` line must equal a fresh, reproducible build of X made on the lead's
+every line of `SHA256SUMS`. Each `mash-<os>-<arch>` line must equal a fresh, reproducible build of X made on the maintainer's
 machine with the release recipe, and the `quickstart-synadia.sh` line must equal the script at X, so the signature covers the script too. A malformed line, a duplicate, a name that is not attached, or an attached `mash-*`
 asset that is not listed is refused. Then it signs with `ssh-keygen -Y sign -n mash-release` and uploads
 `SHA256SUMS.sig` to the draft. It verifies the signature against `ci/release.allowed_signers` as it stands at X, before
 the upload and again on the draft read back. The key is the maintainer's release key, the one that signs the tag, named the one way the tag's is: `RELEASE_SIGNING_KEY`
-(default `~/.ssh/id_ed25519_rdev.pub`, signing through ssh-agent; a private key file also works). It is looked up only
+(default `~/.ssh/id_ed25519.pub`, signing through ssh-agent; a private key file also works). It is looked up only
 when the draft has no signature yet. `RELEASE_SIGNERS` is for the tag only: the sums are checked against the committed
 `ci/release.allowed_signers`. A draft that already
 has a `SHA256SUMS.sig` that verifies keeps it, and the rerun needs no key. One that does not verify is refused, never
@@ -51,7 +51,7 @@ The numbered steps are what the command does in each state, and the manual path 
 2. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
    the release repository (never a configured origin), checks X is an ancestor, reads X's check runs through `gh`
    (every page, latest run per name, from `github-actions` only), builds X twice in fresh clones, and runs the binary to
-   compare `mash <version> (commit X)` exactly. It prints the pin for the orchestrator's `compat.json`. Exit 0 passed, 3 refused,
+   compare `mash <version> (commit X)` exactly. It prints the pin (a `compat.json:` line with the version and commit) for a downstream consumer that pins mash releases. Exit 0 passed, 3 refused,
    4 could not decide (gh, the network), 2 usage.
    The release repository (owner/name) is `$RELEASE_CHECK_REPO` if set, else taken from the checkout's `origin` when that
    is a github.com URL (https, `git@github.com:` or `ssh://git@github.com/`), else `bogworks/mash`. Main and the tag
@@ -64,7 +64,7 @@ The numbered steps are what the command does in each state, and the manual path 
    session whose hook has run (5 s). The previous release's own violations are notes. The baseline is the previous release as shipped, its binary under its own plugin's `.mcp.json` args and env. The candidate is also measured launched as the previous release's plugin launches serve (its `.mcp.json` args and env at its tag), judged as strictly as the candidate (an older plugin without `MASH_SPOOL_FROM_START` must not make mail late); that is skipped with a note when there is no previous release or its `.mcp.json` cannot be read. It adds about the previous
    release's first-mail time (up to ~45 s) to the gate, since the two are measured at once.
    It also pins the render contract: `internal/render/testdata/contract.txt` (what `render.One` and `render.Line` print
-   for a fixed set of messages, which a downstream parser, such as an orchestrator's, may depend on) must equal its
+   for a fixed set of messages, which a downstream parser, such as a downstream consumer's, may depend on) must equal its
    content at the previous release, or some commit since then must have a subject starting with `render-contract:`
    (that subject lands in the release notes). Changing the file (`go test ./internal/render -run TestRenderContract
    -update`) therefore takes a `render-contract:` commit describing the change, and any downstream parser updating its fixtures.
@@ -85,7 +85,7 @@ The numbered steps are what the command does in each state, and the manual path 
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing all five; and `SHA256SUMS.sig` is made, verified and uploaded (see Signing); and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash` passes on the binary downloaded from the release (a missing or failing attestation is refused, exit 3, naming the binary; this covers an older or hand-made draft that `attest` never saw, and runs only after the earlier checks passed). Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
-6. **Pin:** in the orchestrator's `compat.json` set `mash` to `{"version": "<version>", "commit": "<X>"}`.
+6. **Pin (optional):** a downstream consumer that pins mash releases records `{"version": "<version>", "commit": "<X>"}` in its own manifest.
 
 ## Optional: check a downstream consumer
 
@@ -146,7 +146,7 @@ cleans up its containers); after a 10 minute grace the whole group is killed.
 
 The results (`results.jsonl`, part logs in `results.jsonl.logs/` if the script writes them) are in a
 `release-check-consumer-*` directory under the temp directory whose path is printed whatever the outcome; it is kept.
-This never makes a consumer receipt: only the compat.json pin certifies, and a candidate run keeps results alone.
+This never makes a consumer receipt: only the downstream consumer's own pin certifies, and a candidate run keeps results alone.
 
 ## Before 0.3.0 and later minors: the live stranger tier
 
@@ -229,7 +229,7 @@ or outlive a failed attestation, and a failed attestation leaves no draft (rerun
 ## Not covered
 
 Public publication is `release-check publish` (or its steps by hand) and follows the gate. Third-party GitHub Actions: none are used; the first-party
-`actions/*` are referenced by major tag (as in the orchestrator), not by commit SHA.
+`actions/*` are referenced by major tag (as in the maintainer's other projects), not by commit SHA.
 
 ## Daily publish check
 

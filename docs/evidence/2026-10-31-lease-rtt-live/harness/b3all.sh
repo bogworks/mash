@@ -1,6 +1,6 @@
 #!/bin/bash
-. /tmp/claude-1000/lrl/lib.sh
-B=/tmp/claude-1000/mash-main
+. "${LRL_DIR:?set LRL_DIR}/lib.sh"
+B=$M
 set_n(){ # set_n N : register sender,x,probe,e01.. so that N endpoints are registered
   for i in $(seq 8 40); do n=$(printf 'e%02d' $i); idx=$((i+3)); 
     if [ $idx -le $1 ]; then adm provision $n --user $(user_of $n) --account $ACCT --note "live proof" >/dev/null 2>&1; else adm deprovision $n >/dev/null 2>&1; fi; done; }

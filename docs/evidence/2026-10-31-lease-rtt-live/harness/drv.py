@@ -3,7 +3,7 @@
 # Writes $R/TAG.pid (mash pid), $R/TAG.log (timestamped events), $R/TAG.err. Stays until mash exits.
 import subprocess, sys, os, time, json, threading
 tag, name, url = sys.argv[1:4]
-R = "/tmp/claude-1000/lrl/run"
+R = os.environ["LRL_DIR"] + "/run"
 creds = [l.split()[2] for l in open(R + "/env.txt") if l.startswith("EP ") and l.split()[1] == name][0]
 H = f"{R}/home-{name}"; os.makedirs(H + "/state", exist_ok=True)
 env = {"PATH": "/usr/bin:/bin", "HOME": H, "XDG_STATE_HOME": H + "/state", "MASH_NAME": name, "MASH_URL": url,
@@ -12,7 +12,7 @@ for kv in sys.argv[4:]:
     k, v = kv.split("=", 1); env[k] = v
 log = open(f"{R}/{tag}.log", "a", buffering=1)
 def L(s): log.write(f"{time.time():.3f} {s}\n")
-p = subprocess.Popen([os.environ.get("BIN", "/tmp/claude-1000/mash-main"), "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+p = subprocess.Popen([os.environ["BIN"], "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                      stderr=open(f"{R}/{tag}.err", "w"), env=env)
 open(f"{R}/{tag}.pid", "w").write(str(p.pid))
 L(f"spawn pid={p.pid}")

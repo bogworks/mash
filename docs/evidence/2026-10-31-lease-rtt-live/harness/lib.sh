@@ -1,6 +1,6 @@
 # source me
-D=/tmp/claude-1000/lrl
-M=${BIN:-/tmp/claude-1000/mash-main}
+D=${LRL_DIR:?set LRL_DIR to the work directory holding lib.sh and run/}
+M=${BIN:?set BIN to the mash binary under test}
 R=$D/run
 URL=$(awk '$1=="URL"{print $2}' $R/env.txt)
 ADMIN=$(awk '$1=="ADMINCREDS"{print $2}' $R/env.txt)
