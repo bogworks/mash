@@ -290,12 +290,27 @@ func lsTranscript(cfg, sid string) (summary, others string) {
 
 // ---- D1 ----
 
-func TestLiveDualResumeD1(t *testing.T) {
-	sc := lsStart(t, "D1", true)
-	const id = "D1"
+func TestLiveDualResumeD1(t *testing.T) { liveDualResume(t, "D1", false) }
+
+// D2: as D1, but the two processes carry distinct MASH_LAUNCH_TOKENs (ADR 0043): the second launch's hooks are
+// refused, mail stays with the lease holder, and the refused hook tells the session once that this copy is not
+// receiving mail. The mail-routing and notice observations are asserted; the rest is recorded as in D1.
+func TestLiveDualResumeD2(t *testing.T) { liveDualResume(t, "D2", true) }
+
+func liveDualResume(t *testing.T, id string, tokens bool) {
+	sc := lsStart(t, id, true)
 	w := newWorld(t, "a", "b")
 	env := sc.env(sc.mashPath(), false, sc.identity(w, "a", map[string]string{"MASH_HOOK_TRACE": "1"}))
 	sc.installPlugin(env)
+	envA, envB := env, env
+	if tokens {
+		envA, envB = map[string]string{}, map[string]string{}
+		for k, v := range env {
+			envA[k], envB[k] = v, v
+		}
+		envA["MASH_LAUNCH_TOKEN"] = "live-token-a"
+		envB["MASH_LAUNCH_TOKEN"] = "live-token-b"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), lsDualTO)
 	t.Cleanup(cancel)
 	sp := spool.Spool{Dir: spool.Dir(sc.state, w.env["a"]["MASH_OWNER"], "a")}
@@ -321,10 +336,10 @@ func TestLiveDualResumeD1(t *testing.T) {
 	}
 
 	// a. A: a fresh session, with mail waiting from before anything started (does it drain?).
-	m0 := lsMarker("D1a")
+	m0 := lsMarker(id + "a")
 	lsSend(t, w, id, m0)
 	ls.info(t, id, "spool before any process started", "%s", spoolState())
-	a := sc.startLive(ctx, "A", env)
+	a := sc.startLive(ctx, "A", envA)
 	okA := ask(a, "Run the shell command `sleep 1`, then call the mash status tool, then reply with the single word ready.", 1, 3*time.Minute)
 	ls.check(t, id, "process A produced a session id and a result", okA && a.sessionID() != "", "result %v, session id %q, stderr tail: %s", okA, a.sessionID(), a.stderrTail(3))
 	if a.sessionID() == "" {
@@ -337,8 +352,12 @@ func TestLiveDualResumeD1(t *testing.T) {
 	ls.info(t, id, "A: spool after turn 1 (is M0 drained?)", "%s", spoolState())
 
 	// b. B resumes A's session id, same env, no --fork-session.
-	b := sc.startLive(ctx, "B", env, "--resume", a.sessionID())
-	okB := ask(b, "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready.", 1, 3*time.Minute)
+	b := sc.startLive(ctx, "B", envB, "--resume", a.sessionID())
+	bPrompt := "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready."
+	if tokens {
+		bPrompt = "Run the shell command `sleep 1`, then call the mash status tool, then call the mash who tool, then reply with the single word ready, and also tell me verbatim any line from mash that says this copy of the session is not receiving mail, or say none."
+	}
+	okB := ask(b, bPrompt, 1, 3*time.Minute)
 	ls.info(t, id, "B: first turn finished", "%v; exited %v", okB, b.isExited())
 	if b.isExited() {
 		b.mu.Lock()
@@ -353,9 +372,14 @@ func TestLiveDualResumeD1(t *testing.T) {
 	ls.info(t, id, "B: stderr lines about mash, lease or bind", "%s", b.stderrMash())
 	ls.info(t, id, "B: who output", "%s", firstLines(b.who(), 10))
 	ls.info(t, id, "spool after B started", "%s", spoolState())
+	if tokens {
+		ls.info(t, id, "B: turn-1 result, first line", "%s", firstLines(stB.resultText, 1))
+		ls.check(t, id, "B's answer carries the not-receiving-mail notice", strings.Contains(strings.ToLower(stB.resultText), "not receiving mail"), "answer: %s", firstLines(stB.resultText, 2))
+	}
 
 	// c. Mail: who sees what.
-	const listPrompt = "Run the shell command `sleep 3`, then reply with one line listing every token starting with MARK-D1 that you saw in any mash mail context in this session, and nothing else (write none if there are none)."
+	listPrompt := "Run the shell command `sleep 3`, then reply with one line listing every token starting with MARK-" + id + " that you saw in any mash mail context in this session, and nothing else (write none if there are none)."
+	has := func(p *lsLive, m string) bool { return strings.Contains(p.snapshot().resultText, m) }
 	named := func(p *lsLive, ms map[string]string) string {
 		text := p.snapshot().resultText
 		var got []string
@@ -367,7 +391,7 @@ func TestLiveDualResumeD1(t *testing.T) {
 		sort.Strings(got)
 		return fmt.Sprintf("names [%s]; answer: %s", strings.Join(got, " "), firstLines(text, 2))
 	}
-	m1 := lsMarker("D1b")
+	m1 := lsMarker(id + "b")
 	lsSend(t, w, id, m1)
 	ra, rb := a.snapshot().results, b.snapshot().results
 	var wg sync.WaitGroup
@@ -388,18 +412,28 @@ func TestLiveDualResumeD1(t *testing.T) {
 	ls.info(t, id, "M1 round, A", "finished %v; %s", doneA, named(a, marks))
 	ls.info(t, id, "M1 round, B", "finished %v; %s", doneB, named(b, marks))
 	ls.info(t, id, "spool after M1 round", "%s", spoolState())
+	if tokens {
+		ls.check(t, id, "M1 round: A names M1", has(a, m1), "%s", named(a, marks))
+		ls.check(t, id, "M1 round: B does not name M1 (mail stays with A)", !has(b, m1), "%s", named(b, marks))
+	}
 
-	m2 := lsMarker("D1c")
+	m2 := lsMarker(id + "c")
 	lsSend(t, w, id, m2)
 	marks["M2"] = m2
 	ok := ask(b, listPrompt, b.snapshot().results+1, 3*time.Minute)
 	ls.info(t, id, "M2 round, only B asked", "finished %v; %s", ok, named(b, marks))
+	if tokens {
+		ls.check(t, id, "M2 round: B does not name M2 (mail stays with A)", !has(b, m2), "%s", named(b, marks))
+	}
 
-	m3 := lsMarker("D1d")
+	m3 := lsMarker(id + "d")
 	lsSend(t, w, id, m3)
 	marks["M3"] = m3
 	ok = ask(a, listPrompt, a.snapshot().results+1, 3*time.Minute)
 	ls.info(t, id, "M3 round, only A asked", "finished %v; %s", ok, named(a, marks))
+	if tokens {
+		ls.check(t, id, "M3 round: A names M2 (left for A) and M3", has(a, m2) && has(a, m3), "%s", named(a, marks))
+	}
 
 	// d. Transcript shape.
 	sum, others := lsTranscript(sc.cfg, a.sessionID())
@@ -414,7 +448,7 @@ func TestLiveDualResumeD1(t *testing.T) {
 	}
 	time.Sleep(5 * time.Second)
 	ls.info(t, id, "after killing A: B alive", "%v; spool %s", !b.isExited(), spoolState())
-	m4 := lsMarker("D1e")
+	m4 := lsMarker(id + "e")
 	lsSend(t, w, id, m4)
 	marks["M4"] = m4
 	ok = ask(b, listPrompt, b.snapshot().results+1, 3*time.Minute)
