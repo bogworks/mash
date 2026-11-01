@@ -74,7 +74,7 @@ func adminCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		return fail(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), adminDeadline(cfg))
 	defer cancel()
 
 	opt := func(name string) string {
@@ -204,4 +204,12 @@ func labelList(l map[string]string) string {
 		keys[i] = k + "=" + l[k]
 	}
 	return strings.Join(keys, " ")
+}
+
+// adminDeadline is the total deadline of one admin command: admin_timeout, else 30 seconds.
+func adminDeadline(cfg config.Config) time.Duration {
+	if cfg.AdminTimeout > 0 {
+		return cfg.AdminTimeout
+	}
+	return config.DefaultAdminTimeout
 }
