@@ -2,7 +2,7 @@
 //
 //	release-check <X> <version>            judge candidate X for release v<version>
 //	release-check --assets <version> <X>   after CI drafted the release: is the tag right and are the assets ours?
-//	release-check --rangehand <checkout> <X> <version>   as the first form, plus rangehand's tier c (mash set) run against X (maintainers only)
+//	release-check --consumer <checkout> <X> <version>   as the first form, plus the consumer's check run against X (maintainers only)
 //	release-check publish [--wait <d>] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
@@ -11,7 +11,7 @@
 // X, and that the draft release carries exactly the four binaries and SHA256SUMS, each equal to our own build of X.
 // It then signs SHA256SUMS (ssh-keygen -Y sign, namespace mash-release) after checking every line against those builds, verifies
 // the signature against ci/release.allowed_signers at X and uploads SHA256SUMS.sig; RELEASE_SIGNING_KEY names the key (the one that signs the tag).
-// With --rangehand (maintainers only: needs access to the rangehand repo) it also runs rangehand's live tier c for mash (docker, the host's Claude login) against X: opt-in, as it takes 30+ minutes.
+// With --consumer (maintainers only: needs a downstream consumer's checkout) it also runs that checkout's own check of mash against X, as its .mash-consumer-check manifest directs (docs/release.md): opt-in, as it can take 30+ minutes.
 // It refuses to tag while an earlier vN.N.N tag has a release that is a draft or missing, unless docs/skipped-releases.txt
 // at X records it with a reason. It reports every problem, not the first. Exit 0 passed, 3 refused, 4 the gate could not decide, 2 usage.
 package main
@@ -53,24 +53,24 @@ type Options struct {
 	// runs it, and a key a machine happens to trust cannot pass a release.
 	Signers string
 	Out     io.Writer
-	// Rangehand is a rangehand checkout: when set, check adds the step that runs rangehand's tier c (mash set) against
-	// the candidate (release-check --rangehand). Empty: no such step.
-	Rangehand string
+	// Consumer is a consumer checkout: when set, check adds the step that runs the consumer's check against
+	// the candidate (release-check --consumer). Empty: no such step.
+	Consumer string
 	// Publish selects `release-check publish`; Wait is how long it waits for release.yml's draft (default 45m).
 	Publish bool
 	Wait    time.Duration
 
 	prevFetched *string // the tag already fetched into prevTagRef, so the plugin and render-contract steps fetch it once; nil: always fetch
 
-	build            func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) // test seam: default release.Build
-	afterAssets      func()                                                                                    // test seam: called after the release assets were read
-	afterTagList     func()                                                                                    // test seam: called between listing the tag and fetching it
-	prevBinary       func(ctx context.Context, tag, dir string) (string, error)                                // test seam: the previous release's binary for this host, in dir; default gh release download
-	candBinary       func(ctx context.Context, dir string) (string, error)                                     // test seam: the candidate's binary for this host, in dir; default a fresh build of X
-	measure          measureFunc                                                                               // test seam: the delivery-latency measurement of a binary; default measureLatencies
-	rangehand        rangehandRun                                                                              // test seam: rangehand's runner; default sh test/scenarios/live/run-in-container.sh in the checkout
-	rangehandTimeout time.Duration                                                                             // test seam: the runner's deadline; default rangehandTimeout
-	hostGOOS         string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
+	build           func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) // test seam: default release.Build
+	afterAssets     func()                                                                                    // test seam: called after the release assets were read
+	afterTagList    func()                                                                                    // test seam: called between listing the tag and fetching it
+	prevBinary      func(ctx context.Context, tag, dir string) (string, error)                                // test seam: the previous release's binary for this host, in dir; default gh release download
+	candBinary      func(ctx context.Context, dir string) (string, error)                                     // test seam: the candidate's binary for this host, in dir; default a fresh build of X
+	measure         measureFunc                                                                               // test seam: the delivery-latency measurement of a binary; default measureLatencies
+	consumer        consumerRun                                                                               // test seam: the consumer's script runner; default sh <manifest command> in a fresh clone
+	consumerTimeout time.Duration                                                                             // test seam: the script's deadline; default consumerTimeout
+	hostGOOS        string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
 }
 
 var versionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -80,7 +80,7 @@ func main() { os.Exit(mainRun(os.Args[1:], os.Stdout)) }
 // versionTimeout bounds the candidate's `version` run.
 var versionTimeout = 30 * time.Second
 
-// parseArgs reads the command line: the modes do not combine, and --assets and --rangehand are only the first argument.
+// parseArgs reads the command line: the modes do not combine, and --assets and --consumer are only the first argument.
 func parseArgs(args []string) (o Options, assets bool, err error) {
 	o = Options{Repo: "."}
 	if len(args) > 0 && args[0] == "publish" {
@@ -90,7 +90,7 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 		for i := 0; i < len(rest); i++ {
 			a := rest[i]
 			switch {
-			case a == "--assets" || a == "--rangehand" || a == "publish":
+			case a == "--assets" || a == "--consumer" || a == "publish":
 				return o, false, errors.New("publish does not combine with other modes")
 			case a == "--wait" || strings.HasPrefix(a, "--wait="):
 				v := strings.TrimPrefix(a, "--wait=")
@@ -117,10 +117,10 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 		}
 		return withArgs(o, pos[1], pos[0]), false, nil
 	}
-	if len(args) > 0 && (args[0] == "--assets" || args[0] == "--rangehand") {
+	if len(args) > 0 && (args[0] == "--assets" || args[0] == "--consumer") {
 		for _, a := range args[1:] {
-			if a == "--assets" || a == "--rangehand" {
-				return o, false, errors.New("--assets and --rangehand do not combine")
+			if a == "--assets" || a == "--consumer" {
+				return o, false, errors.New("--assets and --consumer do not combine")
 			}
 		}
 	}
@@ -130,11 +130,11 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 			return o, false, errors.New("usage: release-check --assets <version> <X>")
 		}
 		return withArgs(o, args[2], args[1]), true, nil
-	case len(args) > 0 && args[0] == "--rangehand":
+	case len(args) > 0 && args[0] == "--consumer":
 		if len(args) != 4 {
-			return o, false, errors.New("usage: release-check --rangehand <checkout> <X> <version>")
+			return o, false, errors.New("usage: release-check --consumer <checkout> <X> <version>")
 		}
-		o.Rangehand = args[1]
+		o.Consumer = args[1]
 		return withArgs(o, args[2], args[3]), false, nil
 	case len(args) != 2:
 		return o, false, errors.New("usage: release-check <X> <version>")
@@ -387,8 +387,8 @@ func check(ctx context.Context, o Options) error {
 	r.step("the plugin runs against the candidate and the previous release, and the previous plugin against the candidate", pluginCompat(ctx, o, x, bins))
 	r.step("the render contract is unchanged since the previous release, or the change is called out", renderContract(o, x))
 	r.step("fresh-session mail arrives no slower than the previous release", latencyStep(ctx, o, bins))
-	if o.Rangehand != "" { // opt-in: it takes 30+ minutes, a container and the host's Claude login
-		r.step("rangehand's tier c (mash set) passes against the candidate", rangehandStep(ctx, o, x, bins))
+	if o.Consumer != "" { // opt-in: it takes 30+ minutes,
+		r.step("the consumer's check passes against the candidate", consumerStep(ctx, o, x, bins))
 	}
 	if err := r.result(x); err != nil {
 		return err

@@ -14,30 +14,47 @@ import (
 	"time"
 )
 
-const rangehandStepName = "rangehand's tier c (mash set) passes against the candidate"
+// consumerScript is the entry point the test manifest names; testManifest is the consumer's committed manifest.
+const consumerScript = "ci/check.sh"
+
+const testManifest = `# the consumer's check of mash
+command='ci/check.sh'
+bin_env=MASH_CONSUMER_BIN
+plugin_env=MASH_CONSUMER_PLUGIN
+set_env=MASH_CONSUMER_SET
+set="mash"
+results_env=MASH_CONSUMER_RESULTS
+marketplace_env=MASH_CONSUMER_MARKETPLACE
+drop_env=MASH_CONSUMER_DROP, OTHER_DROP
+parts=PartA,PartB,PartC,PartD
+`
+
+var testParts = []string{"PartA", "PartB", "PartC", "PartD"}
+
+const consumerStepName = "the consumer's check passes against the candidate"
 
 func TestParseArgs(t *testing.T) {
 	cases := []struct {
 		args       []string
 		ok         bool
 		assets     bool
-		rangehand  string
+		consumer   string
 		x, version string
 	}{
 		{args: []string{"X", "0.1.0"}, ok: true, x: "X", version: "0.1.0"},
 		{args: []string{"--assets", "0.1.0", "X"}, ok: true, assets: true, x: "X", version: "0.1.0"},
-		{args: []string{"--rangehand", "/rh", "X", "0.1.0"}, ok: true, rangehand: "/rh", x: "X", version: "0.1.0"},
+		{args: []string{"--consumer", "/rh", "X", "0.1.0"}, ok: true, consumer: "/rh", x: "X", version: "0.1.0"},
 		{args: []string{}},
-		{args: []string{"--rangehand"}},
-		{args: []string{"--rangehand", "/rh"}},
-		{args: []string{"--rangehand", "/rh", "X"}},
-		{args: []string{"--rangehand", "/rh", "X", "0.1.0", "extra"}},
+		{args: []string{"--consumer"}},
+		{args: []string{"--consumer", "/rh"}},
+		{args: []string{"--consumer", "/rh", "X"}},
+		{args: []string{"--consumer", "/rh", "X", "0.1.0", "extra"}},
 		{args: []string{"--assets", "0.1.0"}},
-		{args: []string{"--assets", "--rangehand", "/rh", "X"}},
-		{args: []string{"--rangehand", "/rh", "--assets", "X"}},
-		{args: []string{"--rangehand", "--assets", "X", "0.1.0"}},
-		{args: []string{"--assets", "0.1.0", "--rangehand"}},
-		{args: []string{"X", "--rangehand", "/rh", "0.1.0"}}, // the flag is only the first argument: three arguments, not two
+		{args: []string{"--assets", "--consumer", "/rh", "X"}},
+		{args: []string{"--consumer", "/rh", "--assets", "X"}},
+		{args: []string{"--consumer", "--assets", "X", "0.1.0"}},
+		{args: []string{"--assets", "0.1.0", "--consumer"}},
+		{args: []string{"X", "--consumer", "/rh", "0.1.0"}}, // the flag is only the first argument: three arguments, not two
 	}
 	for _, c := range cases {
 		o, assets, err := parseArgs(c.args)
@@ -48,23 +65,23 @@ func TestParseArgs(t *testing.T) {
 		if !c.ok {
 			continue
 		}
-		if assets != c.assets || o.Rangehand != c.rangehand || o.X != c.x || o.Version != c.version {
-			t.Errorf("%v: assets %v rangehand %q x %q version %q", c.args, assets, o.Rangehand, o.X, o.Version)
+		if assets != c.assets || o.Consumer != c.consumer || o.X != c.x || o.Version != c.version {
+			t.Errorf("%v: assets %v consumer %q x %q version %q", c.args, assets, o.Consumer, o.X, o.Version)
 		}
 	}
 	var out bytes.Buffer
-	for _, args := range [][]string{{"--rangehand", "/rh", "X"}, {"--rangehand", "/rh", "X", "0.1"}, {"--assets", "--rangehand", "/rh", "X"}} {
+	for _, args := range [][]string{{"--consumer", "/rh", "X"}, {"--consumer", "/rh", "X", "0.1"}, {"--assets", "--consumer", "/rh", "X"}} {
 		if got := mainRun(args, &out); got != 2 {
 			t.Errorf("%v: exit %d, want 2", args, got)
 		}
 	}
 }
 
-// rangehandCheckout is a rangehand checkout: v0.3.0 and v0.3.1 tagged, then a commit after the newest tag, and a tag on a
+// consumerCheckout is a consumer checkout: v0.3.0 and v0.3.1 tagged, then a commit after the newest tag, and a tag on a
 // side branch that HEAD does not reach.
-func rangehandCheckout(t *testing.T) (dir, head string) {
+func consumerCheckout(t *testing.T) (dir, head string) {
 	t.Helper()
-	dir = filepath.Join(t.TempDir(), "rangehand")
+	dir = filepath.Join(t.TempDir(), "consumer")
 	gitT(t, filepath.Dir(dir), "init", "-q", "-b", "main", dir)
 	commit := func(name string) {
 		write(t, dir, name, name)
@@ -81,25 +98,29 @@ func rangehandCheckout(t *testing.T) (dir, head string) {
 	gitT(t, dir, "tag", "v9.9.9")
 	gitT(t, dir, "checkout", "-q", "main")
 	commit("c")
+	write(t, dir, ".mash-consumer-check", testManifest)
+	write(t, dir, consumerScript, "exit 0\n")
+	gitT(t, dir, "add", ".mash-consumer-check", consumerScript)
+	gitT(t, dir, "commit", "-q", "-m", "manifest")
 	return dir, gitT(t, dir, "rev-parse", "HEAD")
 }
 
-func TestRangehandInputs(t *testing.T) {
-	dir, head := rangehandCheckout(t)
-	got, rx, v, err := rangehandInputs(dir)
+func TestConsumerInputs(t *testing.T) {
+	dir, head := consumerCheckout(t)
+	got, rx, v, err := consumerInputs(dir)
 	if err != nil || got != dir || rx != head || v != "0.3.1" {
 		t.Fatalf("got %q %q %q %v, want %q %q 0.3.1", got, rx, v, err, dir, head)
 	}
 	// A relative path is made absolute.
 	wd, _ := os.Getwd()
 	if rel, err := filepath.Rel(wd, dir); err == nil {
-		if got, _, _, err := rangehandInputs(rel); err != nil || got != dir {
+		if got, _, _, err := consumerInputs(rel); err != nil || got != dir {
 			t.Errorf("relative %q: got %q %v, want %q", rel, got, err, dir)
 		}
 	}
 	// A checkout at the tag itself, and one at a detached older commit.
 	gitT(t, dir, "checkout", "-q", "--detach", "v0.3.0")
-	if _, _, v, err := rangehandInputs(dir); err != nil || v != "0.3.0" {
+	if _, _, v, err := consumerInputs(dir); err != nil || v != "0.3.0" {
 		t.Errorf("at v0.3.0: %q %v", v, err)
 	}
 	// No release tag reachable, a missing checkout and a directory that is not a repository are the gate's failures.
@@ -110,7 +131,7 @@ func TestRangehandInputs(t *testing.T) {
 	gitT(t, bare, "commit", "-q", "-m", "f")
 	gitT(t, bare, "tag", "not-a-release")
 	for name, d := range map[string]string{"no v tag": bare, "missing": filepath.Join(t.TempDir(), "nope"), "not a repository": t.TempDir()} {
-		_, _, _, err := rangehandInputs(d)
+		_, _, _, err := consumerInputs(d)
 		var oe opError
 		if !errors.As(err, &oe) {
 			t.Errorf("%s: err %v, want an op error", name, err)
@@ -118,8 +139,8 @@ func TestRangehandInputs(t *testing.T) {
 	}
 }
 
-func TestRangehandInputs_highestReachableTagNotTheNearest(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "rangehand")
+func TestConsumerInputs_highestReachableTagNotTheNearest(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "consumer")
 	gitT(t, filepath.Dir(dir), "init", "-q", "-b", "main", dir)
 	commit := func(name string) {
 		write(t, dir, name, name)
@@ -136,21 +157,22 @@ func TestRangehandInputs_highestReachableTagNotTheNearest(t *testing.T) {
 	gitT(t, dir, "tag", "v2.0.0-rc1") // not a release
 	gitT(t, dir, "merge", "-q", "--no-ff", "-m", "merge", "high")
 	commit("after")
-	if _, _, v, err := rangehandInputs(dir); err != nil || v != "1.10.0" {
+	if _, _, v, err := consumerInputs(dir); err != nil || v != "1.10.0" {
 		t.Fatalf("got %q %v, want 1.10.0", v, err)
 	}
 }
 
-// rangehandFixture is a check fixture with a rangehand checkout, the runner faked: results is what it writes to
-// RANGE_SCENARIO_RESULTS (nil: no file), code and err what it returns.
-type rangehandFixture struct {
+// consumerFixture is a check fixture with a consumer checkout, the runner faked: results is what it writes to
+// MASH_CONSUMER_RESULTS (nil: no file), code and err what it returns.
+type consumerFixture struct {
 	*fixture
 	dir, head string
 	calls     int
 	gotDir    string
+	gotScript string
 	gotArgs   []string
 	gotEnv    []string
-	gotBin    []byte // RANGE_MASH_BIN's content, read while the runner runs
+	gotBin    []byte // MASH_CONSUMER_BIN's content, read while the runner runs
 	gotHead   string // the commit checked out in the runner's directory, and
 	gotFile   string // the content of the checkout's file "a" there, both read while the runner runs
 	results   *string
@@ -160,9 +182,9 @@ type rangehandFixture struct {
 
 // mashSetPass is a start and a pass line for each part of the mash set, the minimum a passing run leaves.
 func mashSetPass(cand string) string {
-	ids := map[string]string{"TestV3_MailLive": "V3", "TestV10_MashCrashLive": "V10", "TestV11_TwoHerdsLive": "V11", "TestV23_HookDeliveryLive": "V23"}
+	ids := map[string]string{"PartA": "V3", "PartB": "V10", "PartC": "V11", "PartD": "V23"}
 	var b strings.Builder
-	for _, p := range rangehandMashSet {
+	for _, p := range testParts {
 		for _, r := range []string{"start", "pass"} {
 			b.WriteString(`{"id":"` + ids[p] + `","tier":"c","part":"` + p + `","result":"` + r + `","candidate_mash":"` + cand + `"}` + "\n")
 		}
@@ -170,23 +192,23 @@ func mashSetPass(cand string) string {
 	return b.String()
 }
 
-func newRangehandFixture(t *testing.T) *rangehandFixture {
+func newConsumerFixture(t *testing.T) *consumerFixture {
 	t.Helper()
-	h := &rangehandFixture{fixture: newFixture(t), code: 0}
-	h.dir, h.head = rangehandCheckout(t)
-	h.o.Rangehand = h.dir
+	h := &consumerFixture{fixture: newFixture(t), code: 0}
+	h.dir, h.head = consumerCheckout(t)
+	h.o.Consumer = h.dir
 	h.results = strp(mashSetPass("@BIN@"))
-	h.o.rangehand = func(_ context.Context, dir string, args, env []string, _ io.Writer) (int, error) {
+	h.o.consumer = func(_ context.Context, dir, script string, args, env []string, _ io.Writer) (int, error) {
 		h.calls++
-		h.gotDir, h.gotArgs, h.gotEnv = dir, args, env
-		t.Cleanup(func() { os.RemoveAll(filepath.Dir(h.env("RANGE_SCENARIO_RESULTS"))) }) // the step keeps it for the operator
-		h.gotBin, _ = os.ReadFile(h.env("RANGE_MASH_BIN"))
+		h.gotDir, h.gotScript, h.gotArgs, h.gotEnv = dir, script, args, env
+		t.Cleanup(func() { os.RemoveAll(filepath.Dir(h.env("MASH_CONSUMER_RESULTS"))) }) // the step keeps it for the operator
+		h.gotBin, _ = os.ReadFile(h.env("MASH_CONSUMER_BIN"))
 		h.gotHead, _ = git(dir, "rev-parse", "HEAD")
 		b, _ := os.ReadFile(filepath.Join(dir, "a"))
 		h.gotFile = string(b)
-		if h.results != nil { // "@BIN@" is the stamp a faithful rangehand writes: the binary it was given
-			res := strings.ReplaceAll(*h.results, "@BIN@", h.env("RANGE_MASH_BIN"))
-			if err := os.WriteFile(h.env("RANGE_SCENARIO_RESULTS"), []byte(res), 0o644); err != nil {
+		if h.results != nil { // "@BIN@" is the stamp a faithful consumer writes: the binary it was given
+			res := strings.ReplaceAll(*h.results, "@BIN@", h.env("MASH_CONSUMER_BIN"))
+			if err := os.WriteFile(h.env("MASH_CONSUMER_RESULTS"), []byte(res), 0o644); err != nil {
 				t.Error(err)
 			}
 		}
@@ -196,7 +218,7 @@ func newRangehandFixture(t *testing.T) *rangehandFixture {
 }
 
 // env is the last value of the variable the runner was given.
-func (h *rangehandFixture) env(k string) string {
+func (h *consumerFixture) env(k string) string {
 	v := ""
 	for _, kv := range h.gotEnv {
 		if strings.HasPrefix(kv, k+"=") {
@@ -206,9 +228,9 @@ func (h *rangehandFixture) env(k string) string {
 	return v
 }
 
-func (h *rangehandFixture) out() string { return h.o.Out.(*bytes.Buffer).String() }
+func (h *consumerFixture) out() string { return h.o.Out.(*bytes.Buffer).String() }
 
-func TestCheck_rangehandVerdict(t *testing.T) {
+func TestCheck_consumerVerdict(t *testing.T) {
 	line := func(id, part, result, cand string) string {
 		return `{"id":"` + id + `","tier":"c","part":"` + part + `","result":"` + result + `","candidate_mash":"` + cand + `"}` + "\n"
 	}
@@ -221,8 +243,8 @@ func TestCheck_rangehandVerdict(t *testing.T) {
 		says    string // what the failure must say
 	}{
 		{name: "0 with passing lines", code: 0, results: strp(mashSetPass("@BIN@")), want: 0},
-		{name: "0 with one part of the set missing", code: 0, results: strp(strings.ReplaceAll(mashSetPass("@BIN@"), "TestV11_TwoHerdsLive", "TestV11_Other")), want: 3, says: "TestV11_TwoHerdsLive did not run"},
-		{name: "0 with only V3", code: 0, results: strp(line("V3", "TestV3_MailLive", "pass", "@BIN@")), want: 3, says: "TestV23_HookDeliveryLive did not run"},
+		{name: "0 with one part of the set missing", code: 0, results: strp(strings.ReplaceAll(mashSetPass("@BIN@"), "PartC", "TestV11_Other")), want: 3, says: "PartC did not run"},
+		{name: "0 with only V3", code: 0, results: strp(line("V3", "PartA", "pass", "@BIN@")), want: 3, says: "PartD did not run"},
 		{name: "0 with an empty file", code: 0, results: strp(""), want: 3, says: "empty"},
 		{name: "0 with blank lines only", code: 0, results: strp("\n\n"), want: 3, says: "empty"},
 		{name: "0 with no file", code: 0, results: nil, want: 3, says: "no results file"},
@@ -231,42 +253,42 @@ func TestCheck_rangehandVerdict(t *testing.T) {
 		{name: "0 with a part that only started", code: 0, results: strp(mashSetPass("@BIN@") + line("V3", "P1", "start", "@BIN@")), want: 3, says: "V3/P1 never passed"},
 		{name: "0 with a line that names no candidate", code: 0, results: strp(mashSetPass("@BIN@") + line("V3", "P1", "pass", "@BIN@") + line("V10", "P2", "pass", "")), want: 3, says: "V10/P2 has no candidate_mash"},
 		{name: "0 with an unreadable line", code: 0, results: strp("not json\n"), want: 3, says: "unreadable"},
-		{name: "3 names the failing parts and the results", code: 3, results: strp(line("V3", "P1", "pass", "@BIN@") + line("V11", "TestV11_TwoHerdsLive", "fail", "@BIN@")), want: 3, says: "V11/TestV11_TwoHerdsLive fail"},
+		{name: "3 names the failing parts and the results", code: 3, results: strp(line("V3", "P1", "pass", "@BIN@") + line("V11", "PartC", "fail", "@BIN@")), want: 3, says: "V11/PartC fail"},
 		{name: "3 without a failing part is a setup failure: could not decide", code: 3, results: nil, want: 4, says: "no failing part could be read"},
 		{name: "2 is usage: could not decide", code: 2, results: nil, want: 4, says: "exited 2"},
 		{name: "7 is a failure of the run", code: 7, results: strp(line("V3", "P1", "fail", "@BIN@")), want: 4, says: "exited 7"},
-		{name: "failure to start", code: 0, results: nil, runErr: errors.New("starting the rangehand runner: no sh"), want: 4, says: "no sh"},
+		{name: "failure to start", code: 0, results: nil, runErr: errors.New("starting the consumer runner: no sh"), want: 4, says: "no sh"},
 		{name: "a run that does not finish", code: 0, results: nil, runErr: context.DeadlineExceeded, want: 4, says: "deadline exceeded"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := newRangehandFixture(t)
+			h := newConsumerFixture(t)
 			h.code, h.results, h.err = c.code, c.results, c.runErr
 			err := h.check()
 			if got := exitCode(err); got != c.want {
 				t.Fatalf("exit %d, want %d: %v\n%s", got, c.want, err, h.out())
 			}
 			if c.want == 0 {
-				if !strings.Contains(h.out(), "ok    "+rangehandStepName) {
+				if !strings.Contains(h.out(), "ok    "+consumerStepName) {
 					t.Fatalf("no ok line for the step:\n%s", h.out())
 				}
 				return
 			}
-			if !strings.Contains(err.Error(), c.says) || !strings.Contains(err.Error(), rangehandStepName) {
+			if !strings.Contains(err.Error(), c.says) || !strings.Contains(err.Error(), consumerStepName) {
 				t.Fatalf("the failure does not say %q under the step:\n%v", c.says, err)
 			}
-			if c.code == 3 && !strings.Contains(err.Error(), h.env("RANGE_SCENARIO_RESULTS")) {
-				t.Fatalf("a refusal must name the results path %s:\n%v", h.env("RANGE_SCENARIO_RESULTS"), err)
+			if c.code == 3 && !strings.Contains(err.Error(), h.env("MASH_CONSUMER_RESULTS")) {
+				t.Fatalf("a refusal must name the results path %s:\n%v", h.env("MASH_CONSUMER_RESULTS"), err)
 			}
-			if !strings.Contains(h.out(), h.env("RANGE_SCENARIO_RESULTS")) { // printed whatever the outcome
+			if !strings.Contains(h.out(), h.env("MASH_CONSUMER_RESULTS")) { // printed whatever the outcome
 				t.Fatalf("the results path was not printed:\n%s", h.out())
 			}
 		})
 	}
 }
 
-func TestCheck_rangehandIsPassedTheCandidateNotTheRunningCheckout(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_consumerIsPassedTheCandidateNotTheRunningCheckout(t *testing.T) {
+	h := newConsumerFixture(t)
 	if err := h.check(); err != nil {
 		t.Fatal(err)
 	}
@@ -279,23 +301,23 @@ func TestCheck_rangehandIsPassedTheCandidateNotTheRunningCheckout(t *testing.T) 
 	if _, err := os.Stat(h.gotDir); !os.IsNotExist(err) {
 		t.Errorf("the runner's clone survived the run: %v", err)
 	}
-	for _, want := range []string{"rangehand checkout " + h.dir, h.head, "v0.3.1", "fresh clone " + h.gotDir + " at commit " + h.head} {
+	for _, want := range []string{"consumer checkout " + h.dir, h.head, "v0.3.1", "fresh clone " + h.gotDir + " at commit " + h.head} {
 		if !strings.Contains(h.out(), want) {
 			t.Errorf("the output does not name %q:\n%s", want, h.out())
 		}
 	}
-	bin, plugin, mk, res := h.env("RANGE_MASH_BIN"), h.env("RANGE_MASH_PLUGIN"), h.env("RANGE_LIVE_MASH_MARKETPLACE"), h.env("RANGE_SCENARIO_RESULTS")
-	if h.env("RANGE_LIVE_SET") != "mash" {
-		t.Errorf("RANGE_LIVE_SET=%q", h.env("RANGE_LIVE_SET"))
+	bin, plugin, mk, res := h.env("MASH_CONSUMER_BIN"), h.env("MASH_CONSUMER_PLUGIN"), h.env("MASH_CONSUMER_MARKETPLACE"), h.env("MASH_CONSUMER_RESULTS")
+	if h.env("MASH_CONSUMER_SET") != "mash" {
+		t.Errorf("MASH_CONSUMER_SET=%q", h.env("MASH_CONSUMER_SET"))
 	}
-	for k, v := range map[string]string{"RANGE_MASH_BIN": bin, "RANGE_MASH_PLUGIN": plugin, "RANGE_LIVE_MASH_MARKETPLACE": mk, "RANGE_SCENARIO_RESULTS": res} {
+	for k, v := range map[string]string{"MASH_CONSUMER_BIN": bin, "MASH_CONSUMER_PLUGIN": plugin, "MASH_CONSUMER_MARKETPLACE": mk, "MASH_CONSUMER_RESULTS": res} {
 		if !filepath.IsAbs(v) {
 			t.Errorf("%s=%q is not absolute", k, v)
 		}
 	}
 	// On a linux host the candidate's own host build is the container's binary: one build, not two.
 	if runtime.GOOS == "linux" && string(h.gotBin) != goodMash {
-		t.Errorf("RANGE_MASH_BIN held %q, want the candidate's build", h.gotBin)
+		t.Errorf("MASH_CONSUMER_BIN held %q, want the candidate's build", h.gotBin)
 	}
 	// The plugin and marketplace are a fresh clone of X, never the checkout running the gate.
 	if plugin != filepath.Join(mk, "plugin") || strings.HasPrefix(mk, h.repo) || mk == h.repo {
@@ -309,18 +331,18 @@ func TestCheck_rangehandIsPassedTheCandidateNotTheRunningCheckout(t *testing.T) 
 		t.Errorf("the results did not survive the run: %v", err)
 	}
 	for _, kv := range h.gotEnv {
-		if strings.HasPrefix(kv, "RANGE_LIVE_ONLY=") || strings.Contains(kv, "RECEIPT") {
+		if strings.HasPrefix(kv, "MASH_CONSUMER_DROP=") || strings.Contains(kv, "RECEIPT") {
 			t.Errorf("the runner was given %q", kv)
 		}
 	}
 }
 
-func TestCheck_rangehandEnvironmentKeepsOursAndDropsInheritedCopiesOfTheFive(t *testing.T) {
-	t.Setenv("RANGE_MASH_BIN", "/inherited")
-	t.Setenv("RANGE_LIVE_SET", "other")
+func TestCheck_consumerEnvironmentKeepsOursAndDropsInheritedCopiesOfTheFive(t *testing.T) {
+	t.Setenv("MASH_CONSUMER_BIN", "/inherited")
+	t.Setenv("MASH_CONSUMER_SET", "other")
 	t.Setenv("KEEP_ME", "yes")
-	t.Setenv("RANGE_LIVE_ONLY", "TestV3_MailLive")
-	h := newRangehandFixture(t)
+	t.Setenv("MASH_CONSUMER_DROP", "PartA")
+	h := newConsumerFixture(t)
 	if err := h.check(); err != nil {
 		t.Fatal(err)
 	}
@@ -329,29 +351,29 @@ func TestCheck_rangehandEnvironmentKeepsOursAndDropsInheritedCopiesOfTheFive(t *
 		k, _, _ := strings.Cut(kv, "=")
 		n[k]++
 	}
-	for _, k := range []string{"RANGE_MASH_BIN", "RANGE_MASH_PLUGIN", "RANGE_LIVE_SET", "RANGE_SCENARIO_RESULTS", "RANGE_LIVE_MASH_MARKETPLACE"} {
+	for _, k := range []string{"MASH_CONSUMER_BIN", "MASH_CONSUMER_PLUGIN", "MASH_CONSUMER_SET", "MASH_CONSUMER_RESULTS", "MASH_CONSUMER_MARKETPLACE"} {
 		if n[k] != 1 {
 			t.Errorf("%s is given %d times, want once", k, n[k])
 		}
 	}
-	if got := rangehandEnv([]string{"RANGE_LIVE_ONLY=x", "KEEP_ME=yes"}, "b", "p", "m", "r"); slices.Contains(got, "RANGE_LIVE_ONLY=x") || !slices.Contains(got, "KEEP_ME=yes") {
-		t.Errorf("an inherited RANGE_LIVE_ONLY must be dropped: %v", got)
+	if got := consumerEnv([]string{"MASH_CONSUMER_DROP=x", "KEEP_ME=yes"}, mustManifest(t), "b", "p", "m", "r"); slices.Contains(got, "MASH_CONSUMER_DROP=x") || !slices.Contains(got, "KEEP_ME=yes") {
+		t.Errorf("an inherited MASH_CONSUMER_DROP must be dropped: %v", got)
 	}
-	if h.env("RANGE_LIVE_ONLY") != "" {
-		t.Errorf("RANGE_LIVE_ONLY reached the runner: %q", h.env("RANGE_LIVE_ONLY"))
+	if h.env("MASH_CONSUMER_DROP") != "" {
+		t.Errorf("MASH_CONSUMER_DROP reached the runner: %q", h.env("MASH_CONSUMER_DROP"))
 	}
-	if h.env("RANGE_MASH_BIN") == "/inherited" || h.env("RANGE_LIVE_SET") != "mash" || h.env("KEEP_ME") != "yes" {
-		t.Errorf("env: bin %q set %q keep %q", h.env("RANGE_MASH_BIN"), h.env("RANGE_LIVE_SET"), h.env("KEEP_ME"))
+	if h.env("MASH_CONSUMER_BIN") == "/inherited" || h.env("MASH_CONSUMER_SET") != "mash" || h.env("KEEP_ME") != "yes" {
+		t.Errorf("env: bin %q set %q keep %q", h.env("MASH_CONSUMER_BIN"), h.env("MASH_CONSUMER_SET"), h.env("KEEP_ME"))
 	}
 }
 
-func TestCheck_withoutTheFlagThereIsNoRangehandStep(t *testing.T) {
-	h := newRangehandFixture(t)
-	h.o.Rangehand = ""
+func TestCheck_withoutTheFlagThereIsNoConsumerStep(t *testing.T) {
+	h := newConsumerFixture(t)
+	h.o.Consumer = ""
 	if err := h.check(); err != nil {
 		t.Fatal(err)
 	}
-	if h.calls != 0 || strings.Contains(h.out(), "rangehand") {
+	if h.calls != 0 || strings.Contains(h.out(), "consumer") {
 		t.Fatalf("the runner ran %d times without the flag:\n%s", h.calls, h.out())
 	}
 	if !strings.Contains(h.out(), "ok    fresh-session mail arrives no slower") {
@@ -359,20 +381,20 @@ func TestCheck_withoutTheFlagThereIsNoRangehandStep(t *testing.T) {
 	}
 }
 
-// The rangehand step is the last one, after the latency step.
-func TestCheck_theRangehandStepComesLast(t *testing.T) {
-	h := newRangehandFixture(t)
+// The consumer step is the last one, after the latency step.
+func TestCheck_theConsumerStepComesLast(t *testing.T) {
+	h := newConsumerFixture(t)
 	if err := h.check(); err != nil {
 		t.Fatal(err)
 	}
 	out := h.out()
-	if a, b := strings.Index(out, "ok    fresh-session mail"), strings.Index(out, "ok    "+rangehandStepName); a < 0 || b < a {
+	if a, b := strings.Index(out, "ok    fresh-session mail"), strings.Index(out, "ok    "+consumerStepName); a < 0 || b < a {
 		t.Fatalf("the steps are out of order:\n%s", out)
 	}
 }
 
-func TestCheck_rangehandOnANonLinuxHostBuildsTheCandidateForLinux(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_consumerOnANonLinuxHostBuildsTheCandidateForLinux(t *testing.T) {
+	h := newConsumerFixture(t)
 	h.o.hostGOOS = "darwin"
 	var targets []string
 	h.o.build = func(_ context.Context, _, out, goos, goarch, version, commit string) (string, error) {
@@ -397,7 +419,7 @@ func TestCheck_rangehandOnANonLinuxHostBuildsTheCandidateForLinux(t *testing.T) 
 		t.Fatalf("builds %v, want the last for linux/%s", targets, want)
 	}
 	if string(h.gotBin) != "linux build linux/"+runtime.GOARCH {
-		t.Fatalf("RANGE_MASH_BIN held %q, want the linux build", h.gotBin)
+		t.Fatalf("MASH_CONSUMER_BIN held %q, want the linux build", h.gotBin)
 	}
 	if builds != 1 {
 		t.Fatalf("the host candidate was built %d times", builds)
@@ -405,7 +427,7 @@ func TestCheck_rangehandOnANonLinuxHostBuildsTheCandidateForLinux(t *testing.T) 
 }
 
 func TestCheck_aLinuxBuildThatFailsIsNotRunAndNamesTheStep(t *testing.T) {
-	h := newRangehandFixture(t)
+	h := newConsumerFixture(t)
 	h.o.hostGOOS = "darwin"
 	h.o.build = func(_ context.Context, _, out, goos, _, _, _ string) (string, error) {
 		if goos == "linux" {
@@ -419,8 +441,8 @@ func TestCheck_aLinuxBuildThatFailsIsNotRunAndNamesTheStep(t *testing.T) {
 	}
 }
 
-func TestCheck_rangehandIsNotRunWithoutACandidateBuild(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_consumerIsNotRunWithoutACandidateBuild(t *testing.T) {
+	h := newConsumerFixture(t)
 	h.o.candBinary = func(context.Context, string) (string, error) { return "", errors.New("build failed") }
 	err := h.check()
 	if err == nil || h.calls != 0 || !strings.Contains(err.Error(), "not run") {
@@ -428,25 +450,25 @@ func TestCheck_rangehandIsNotRunWithoutACandidateBuild(t *testing.T) {
 	}
 }
 
-func TestCheck_aRangehandCheckoutWithoutATagIsFourAndNotRun(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_aConsumerCheckoutWithoutATagIsFourAndNotRun(t *testing.T) {
+	h := newConsumerFixture(t)
 	bare := filepath.Join(t.TempDir(), "r")
 	gitT(t, filepath.Dir(bare), "init", "-q", "-b", "main", bare)
 	write(t, bare, "f", "f")
 	gitT(t, bare, "add", "f")
 	gitT(t, bare, "commit", "-q", "-m", "f")
-	h.o.Rangehand = bare
+	h.o.Consumer = bare
 	err := h.check()
 	if got := exitCode(err); got != 4 || h.calls != 0 {
 		t.Fatalf("exit %d (%v), runner called %d times", got, err, h.calls)
 	}
 }
 
-func TestCheck_aRangehandRunThatOutlastsItsDeadlineIsFour(t *testing.T) {
-	h := newRangehandFixture(t)
-	h.o.rangehandTimeout = 50 * time.Millisecond
+func TestCheck_aConsumerRunThatOutlastsItsDeadlineIsFour(t *testing.T) {
+	h := newConsumerFixture(t)
+	h.o.consumerTimeout = 50 * time.Millisecond
 	var ctxErr error
-	h.o.rangehand = func(ctx context.Context, _ string, _, env []string, _ io.Writer) (int, error) {
+	h.o.consumer = func(ctx context.Context, _, _ string, _, env []string, _ io.Writer) (int, error) {
 		<-ctx.Done()
 		ctxErr = ctx.Err()
 		return 0, ctx.Err()
@@ -459,11 +481,11 @@ func TestCheck_aRangehandRunThatOutlastsItsDeadlineIsFour(t *testing.T) {
 
 // The default runner: `sh <script> <RX> <RVersion>` in the checkout with exactly the given environment, output
 // streamed to the writer, the exit code returned as it is.
-func TestRunRangehand_runsTheScriptInTheCheckoutAndStreamsItsOutput(t *testing.T) {
+func TestRunConsumer_runsTheScriptInTheCheckoutAndStreamsItsOutput(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, rangehandScript, "echo \"args=$*\"; echo \"pwd=$(pwd)\"; echo \"v=$FOO\"; echo err >&2; exit 3\n")
+	write(t, dir, consumerScript, "echo \"args=$*\"; echo \"pwd=$(pwd)\"; echo \"v=$FOO\"; echo err >&2; exit 3\n")
 	var out bytes.Buffer
-	code, err := runRangehand(context.Background(), dir, []string{"abc", "0.3.1"}, []string{"PATH=" + os.Getenv("PATH"), "FOO=bar"}, &out)
+	code, err := runConsumer(context.Background(), dir, consumerScript, []string{"abc", "0.3.1"}, []string{"PATH=" + os.Getenv("PATH"), "FOO=bar"}, &out)
 	if err != nil || code != 3 {
 		t.Fatalf("code %d err %v", code, err)
 	}
@@ -473,29 +495,29 @@ func TestRunRangehand_runsTheScriptInTheCheckoutAndStreamsItsOutput(t *testing.T
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}
 	}
-	if code, err := runRangehand(context.Background(), filepath.Join(dir, "nope"), nil, nil, &out); err == nil {
+	if code, err := runConsumer(context.Background(), filepath.Join(dir, "nope"), consumerScript, nil, nil, &out); err == nil {
 		t.Errorf("a missing directory started: code %d", code)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	write(t, dir, rangehandScript, "sleep 30\n")
-	if _, err := runRangehand(ctx, dir, nil, []string{"PATH=" + os.Getenv("PATH")}, &out); err == nil {
+	write(t, dir, consumerScript, "sleep 30\n")
+	if _, err := runConsumer(ctx, dir, consumerScript, nil, []string{"PATH=" + os.Getenv("PATH")}, &out); err == nil {
 		t.Errorf("a run past its deadline reported no error")
 	}
 }
 
 // Uncommitted changes in the checkout (the runner builds from the tree it runs in) must not reach the run.
-func TestCheck_rangehandRunsFromACleanCloneNotTheDirtyCheckout(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_consumerRunsFromACleanCloneNotTheDirtyCheckout(t *testing.T) {
+	h := newConsumerFixture(t)
 	write(t, h.dir, "a", "edited, uncommitted")
-	write(t, h.dir, rangehandScript, "echo untracked script")
+	write(t, h.dir, consumerScript, "echo untracked script")
 	if err := h.check(); err != nil {
 		t.Fatal(err)
 	}
 	if h.gotFile != "a" || h.gotHead != h.head {
 		t.Errorf("the run saw file a = %q at %q, want the committed %q at %q", h.gotFile, h.gotHead, "a", h.head)
 	}
-	if _, err := os.Stat(filepath.Join(h.gotDir, rangehandScript)); err == nil {
+	if _, err := os.Stat(filepath.Join(h.gotDir, consumerScript)); err == nil {
 		t.Errorf("the run dir has the checkout's untracked script")
 	}
 	if b, _ := os.ReadFile(filepath.Join(h.dir, "a")); string(b) != "edited, uncommitted" {
@@ -503,20 +525,98 @@ func TestCheck_rangehandRunsFromACleanCloneNotTheDirtyCheckout(t *testing.T) {
 	}
 }
 
-func TestCheck_rangehandRefusesResultsStampedWithAnotherMash(t *testing.T) {
-	h := newRangehandFixture(t)
+func TestCheck_consumerRefusesResultsStampedWithAnotherMash(t *testing.T) {
+	h := newConsumerFixture(t)
 	h.results = strp(strings.Replace(mashSetPass("@BIN@"), `"candidate_mash":"@BIN@"`, `"candidate_mash":"/usr/bin/mash"`, 1) + mashSetPass("/also/other"))
 	err := h.check()
-	if exitCode(err) != 3 || !strings.Contains(err.Error(), `"/usr/bin/mash", not the candidate "`+h.env("RANGE_MASH_BIN")+`"`) {
+	if exitCode(err) != 3 || !strings.Contains(err.Error(), `"/usr/bin/mash", not the candidate "`+h.env("MASH_CONSUMER_BIN")+`"`) {
 		t.Fatalf("exit %d: %v", exitCode(err), err)
 	}
 	// A relative stamp is not the absolute path either.
-	h = newRangehandFixture(t)
+	h = newConsumerFixture(t)
 	h.results = strp(mashSetPass("mash"))
 	if err := h.check(); exitCode(err) != 3 {
 		t.Fatalf("exit %d: %v", exitCode(err), err)
 	}
-	if !filepath.IsAbs(h.env("RANGE_MASH_BIN")) || filepath.Clean(h.env("RANGE_MASH_BIN")) != h.env("RANGE_MASH_BIN") {
-		t.Errorf("RANGE_MASH_BIN %q is not absolute and clean", h.env("RANGE_MASH_BIN"))
+	if !filepath.IsAbs(h.env("MASH_CONSUMER_BIN")) || filepath.Clean(h.env("MASH_CONSUMER_BIN")) != h.env("MASH_CONSUMER_BIN") {
+		t.Errorf("MASH_CONSUMER_BIN %q is not absolute and clean", h.env("MASH_CONSUMER_BIN"))
+	}
+}
+
+func mustManifest(t *testing.T) consumerManifest {
+	t.Helper()
+	m, err := parseConsumerManifest(testManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func TestParseConsumerManifest(t *testing.T) {
+	m := mustManifest(t)
+	if m.Command != "ci/check.sh" || m.BinEnv != "MASH_CONSUMER_BIN" || m.PluginEnv != "MASH_CONSUMER_PLUGIN" || m.SetEnv != "MASH_CONSUMER_SET" ||
+		m.Set != "mash" || m.ResultsEnv != "MASH_CONSUMER_RESULTS" || m.MarketplaceEnv != "MASH_CONSUMER_MARKETPLACE" ||
+		!slices.Equal(m.DropEnv, []string{"MASH_CONSUMER_DROP", "OTHER_DROP"}) || !slices.Equal(m.Parts, testParts) {
+		t.Errorf("parsed %+v", m)
+	}
+	base := strings.ReplaceAll(testManifest, "marketplace_env=MASH_CONSUMER_MARKETPLACE\n", "")
+	if m, err := parseConsumerManifest(base); err != nil || m.MarketplaceEnv != "" {
+		t.Errorf("marketplace_env is optional: %+v %v", m, err)
+	}
+	for name, c := range map[string]struct{ from, to, says string }{
+		"no command":       {"command='ci/check.sh'\n", "", "command is required"},
+		"no bin_env":       {"bin_env=MASH_CONSUMER_BIN\n", "", "bin_env is required"},
+		"no parts":         {"parts=PartA,PartB,PartC,PartD\n", "", "parts is required"},
+		"unknown key":      {"set=", "sett=", "unknown key"},
+		"not key=value":    {"parts=", "parts\nparts=", "want key=value"},
+		"duplicate":        {"set=\"mash\"\n", "set=a\nset=b\n", "given twice"},
+		"absolute command": {"'ci/check.sh'", "/bin/sh", "inside the checkout"},
+		"escaping command": {"'ci/check.sh'", "../x.sh", "inside the checkout"},
+		"bad env name":     {"bin_env=MASH_CONSUMER_BIN", "bin_env=A-B", "not an environment variable name"},
+		"shared env":       {"plugin_env=MASH_CONSUMER_PLUGIN", "plugin_env=MASH_CONSUMER_BIN", "named for two values"},
+	} {
+		if _, err := parseConsumerManifest(strings.Replace(testManifest, c.from, c.to, 1)); err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: err %v, want %q", name, err, c.says)
+		}
+	}
+}
+
+func TestCheck_consumerManifestIsHandedOver(t *testing.T) {
+	h := newConsumerFixture(t)
+	if err := h.check(); err != nil {
+		t.Fatal(err)
+	}
+	if h.gotScript != consumerScript || h.env("MASH_CONSUMER_SET") != "mash" || len(h.gotArgs) != 2 || h.gotArgs[0] != h.head || h.gotArgs[1] != "0.3.1" {
+		t.Errorf("script %q set %q args %v", h.gotScript, h.env("MASH_CONSUMER_SET"), h.gotArgs)
+	}
+}
+
+func TestCheck_aConsumerCheckoutWithoutAManifestIsFourAndNotRun(t *testing.T) {
+	h := newConsumerFixture(t)
+	gitT(t, h.dir, "rm", "-q", ".mash-consumer-check")
+	gitT(t, h.dir, "commit", "-q", "-m", "drop manifest")
+	err := h.check()
+	if got := exitCode(err); got != 4 || h.calls != 0 || !strings.Contains(err.Error(), ".mash-consumer-check") {
+		t.Fatalf("exit %d (%v), runner called %d times", got, err, h.calls)
+	}
+}
+
+func TestCheck_aManifestNamingNoScriptIsFourAndNotRun(t *testing.T) {
+	h := newConsumerFixture(t)
+	gitT(t, h.dir, "rm", "-q", consumerScript)
+	gitT(t, h.dir, "commit", "-q", "-m", "drop script")
+	err := h.check()
+	if got := exitCode(err); got != 4 || h.calls != 0 || !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("exit %d (%v), runner called %d times", got, err, h.calls)
+	}
+}
+
+func TestCheck_aManifestOnlyInTheDirtyCheckoutIsNotUsed(t *testing.T) {
+	h := newConsumerFixture(t)
+	gitT(t, h.dir, "rm", "-q", ".mash-consumer-check")
+	gitT(t, h.dir, "commit", "-q", "-m", "drop manifest")
+	write(t, h.dir, ".mash-consumer-check", testManifest) // untracked: the run is from a clean clone
+	if err := h.check(); exitCode(err) != 4 || h.calls != 0 {
+		t.Fatalf("err %v, runner called %d times", err, h.calls)
 	}
 }

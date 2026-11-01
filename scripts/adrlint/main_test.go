@@ -138,7 +138,7 @@ func TestDocs(t *testing.T) {
 		{"b: heading with parenthetical suffix", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options (reconstructed 2026-10-31; not recorded at the time)")), nil},
 		{"b: heading with another word after the name", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options Extra")), []string{`missing section "## Considered Options"`}},
 		{"c: bad file name", with(good(), "2-Bad.md", goodADR), []string{"file name must be NNNN-kebab-title.md"}},
-		{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, Rangehand, orchestrator.")), []string{`forbidden vocabulary "Lane"`, `"lead"`, `"herds"`, `"herdr"`, `"Rangehand"`, `"orchestrator"`}},
+		{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orchestrator.")), []string{`forbidden vocabulary "Lane"`, `"lead"`, `"herds"`, `"herdr"`, `"orchestrator"`}},
 		{"d: escape on the same line", with(good(), adr, edit(goodADR, "A driver.", "A lane. <!-- adrlint:allow vocabulary -->")), nil},
 		{"d: escape on another line does not count", with(good(), adr, edit(goodADR, "A driver.", "<!-- adrlint:allow vocabulary -->\nA lane.")), []string{`forbidden vocabulary "lane"`}},
 		{"d: whole word only", with(good(), adr, edit(goodADR, "A driver.", "leading planes lanes_x")), nil},

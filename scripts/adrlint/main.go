@@ -74,7 +74,7 @@ var (
 	statusRE    = regexp.MustCompile(`(?i)^(proposed|accepted|rejected|deprecated|superseded by ADR-\d{4})(?:\s*;\s*(.*))?$`)
 	noteRefRE   = regexp.MustCompile(`(?i)\bADR-(\d{4})\b`)
 	linkRE      = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]*)[^)]*\)`)
-	vocabRE     = regexp.MustCompile(`(?i)\b(rangehand|herds?|herdr|lanes?|lead|orchestrator)\b`)
+	vocabRE     = regexp.MustCompile(`(?i)\b(herds?|herdr|lanes?|lead|orchestrator)\b`)
 	supersedeLn = regexp.MustCompile(`^Superseded by \[[^\]]+\]\([^)]+\)\.?$`)
 	decisionRE  = regexp.MustCompile(`(?i)^decision:\s*(none|ADR-\d{4})\s*$`)
 	adrRefRE    = regexp.MustCompile(`^(?i:ADR)-(\d{4})$`)

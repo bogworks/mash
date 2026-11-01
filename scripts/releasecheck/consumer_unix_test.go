@@ -18,23 +18,23 @@ func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 // A timeout sends TERM to the shell only (which forwards it); a child that ignores TERM survives that, so the grace
 // ends with the whole group killed and nothing left behind.
-func TestRunRangehand_theGroupIsKilledAfterTheGrace(t *testing.T) {
-	old := rangehandKillGrace
-	rangehandKillGrace = 500 * time.Millisecond
-	defer func() { rangehandKillGrace = old }()
+func TestRunConsumer_theGroupIsKilledAfterTheGrace(t *testing.T) {
+	old := consumerKillGrace
+	consumerKillGrace = 500 * time.Millisecond
+	defer func() { consumerKillGrace = old }()
 
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
 	termFile := filepath.Join(dir, "shell.term")
 	// The shell records a TERM it receives, then exits; the child ignores TERM and outlives it.
-	write(t, dir, rangehandScript, "trap 'echo got > "+termFile+"; exit 0' TERM\n"+
+	write(t, dir, consumerScript, "trap 'echo got > "+termFile+"; exit 0' TERM\n"+
 		"(trap '' TERM; echo $$ > "+pidFile+"; while :; do sleep 1; done) &\n"+
 		"while :; do sleep 0.1; done\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()
 	var out bytes.Buffer
 	start := time.Now()
-	code, err := runRangehand(ctx, dir, nil, []string{"PATH=" + os.Getenv("PATH")}, &out)
+	code, err := runConsumer(ctx, dir, consumerScript, nil, []string{"PATH=" + os.Getenv("PATH")}, &out)
 	if err == nil || !strings.Contains(err.Error(), "did not finish") {
 		t.Fatalf("code %d err %v", code, err)
 	}
@@ -59,16 +59,16 @@ func TestRunRangehand_theGroupIsKilledAfterTheGrace(t *testing.T) {
 }
 
 // With a runner that exits on TERM promptly, nothing waits out the grace.
-func TestRunRangehand_aRunnerThatStopsOnTermIsNotWaitedOn(t *testing.T) {
-	old := rangehandKillGrace
-	rangehandKillGrace = time.Minute
-	defer func() { rangehandKillGrace = old }()
+func TestRunConsumer_aRunnerThatStopsOnTermIsNotWaitedOn(t *testing.T) {
+	old := consumerKillGrace
+	consumerKillGrace = time.Minute
+	defer func() { consumerKillGrace = old }()
 	dir := t.TempDir()
-	write(t, dir, rangehandScript, "sleep 30 &\ntrap 'kill $!; exit 0' TERM\nwait\n")
+	write(t, dir, consumerScript, "sleep 30 &\ntrap 'kill $!; exit 0' TERM\nwait\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := runRangehand(ctx, dir, nil, []string{"PATH=" + os.Getenv("PATH")}, &bytes.Buffer{})
+	_, err := runConsumer(ctx, dir, consumerScript, nil, []string{"PATH=" + os.Getenv("PATH")}, &bytes.Buffer{})
 	if err == nil || time.Since(start) > 10*time.Second {
 		t.Fatalf("err %v after %v", err, time.Since(start))
 	}
