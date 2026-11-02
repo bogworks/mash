@@ -233,6 +233,20 @@ func (e *Endpoint) directoryKeys(ctx context.Context) ([]string, error) {
 	}
 }
 
+// directoryState reads the directory stream's state with an unfiltered stream info: a few hundred bytes whatever the
+// directory's size, and the same permission the key list needs.
+func (e *Endpoint) directoryState(ctx context.Context) (DirState, error) {
+	m, err := e.apiRequest(ctx, "$JS.API.STREAM.INFO.KV_"+store.DirectoryBucket, []byte("{}"))
+	if err != nil {
+		return DirState{}, fmt.Errorf("mash: reading the directory state: %w", err)
+	}
+	st, err := ParseDirState(m.Data)
+	if err != nil {
+		return DirState{}, fmt.Errorf("mash: reading the directory state: %w", err)
+	}
+	return st, nil
+}
+
 // init binds the directory, checks the identity and reads what the command that follows asked for, all of it in the
 // first wave: the requests that do not depend on one another go out together. Reading the whole directory takes a
 // second wave, for the values of the keys the first one listed.

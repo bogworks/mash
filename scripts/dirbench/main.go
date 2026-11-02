@@ -14,7 +14,11 @@
 // bucket at the end, on error and on SIGINT/SIGTERM. It still loads the server with N connections and polls: do not
 // point it at a deployment.
 //
-// Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1]
+// -mode old (default) is the behaviour measured in docs/evidence/2026-11-02-directory-polling: every poll is a full
+// load. -mode new runs each endpoint's poll through endpoint.DirPoller, the decision logic of ADR 0065 (one unfiltered
+// stream info per poll, a full load only when the state moved or the forced reload is due, jittered waits).
+//
+// Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1] [-mode old|new]
 package main
 
 import (
@@ -42,6 +46,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -63,6 +68,7 @@ type ep struct {
 
 var (
 	cStream, cGet, cFail, cTimeout, cLoads, cLoadFail atomic.Int64
+	cState, cReloads                                  atomic.Int64 // mode new: unfiltered state requests; polls that reloaded
 	cHBPub, cHBDel                                    atomic.Int64
 	measuring                                         atomic.Bool
 	durMu                                             sync.Mutex
@@ -115,6 +121,7 @@ func run() int {
 	hb := flag.Duration("hb", defHB, "heartbeat interval")
 	warm := flag.Duration("warm", defWarm, "wait after ramp-up before measuring")
 	measure := flag.Duration("measure", defMeasure, "measured window")
+	mode := flag.String("mode", "old", "old: every poll is a full load (as measured); new: poll through endpoint.DirPoller (ADR 0065)")
 	scratch := flag.Bool("i-know-this-is-a-scratch-server", false, "allow non-loopback -urls (the tool creates and deletes its own dirbench-* bucket only)")
 	flag.Parse()
 	u := strings.Split(*urls, ",")
@@ -122,6 +129,10 @@ func run() int {
 	pl := strings.Split(*pids, ",")
 	if *urls == "" || len(m) != len(pl) {
 		fmt.Fprintln(os.Stderr, "need -urls, and -mon and -pids of equal length")
+		return 2
+	}
+	if *mode != "old" && *mode != "new" {
+		fmt.Fprintln(os.Stderr, "-mode must be old or new")
 		return 2
 	}
 	if !*scratch {
@@ -189,14 +200,18 @@ func run() int {
 		if !*syncStart {
 			offP, offH = rand.N(*poll), rand.N(*hb)
 		}
-		go loop(stop, offP, *poll, func() { loadDirectory(e.nc) })
+		if *mode == "new" {
+			go pollNew(stop, e.nc, *poll)
+		} else {
+			go loop(stop, offP, *poll, func() { _ = loadDirectory(e.nc) })
+		}
 		go loop(stop, offH, *hb, func() { _ = e.nc.Publish("agents.hb.cc."+owner+"."+e.name, make([]byte, 300)); cHBPub.Add(1) })
 	}
 	time.Sleep(*warm)
 
 	// measured window
 	measuring.Store(true)
-	var s0, g0, f0, t0, l0, lf0, hp0, hd0 = cStream.Load(), cGet.Load(), cFail.Load(), cTimeout.Load(), cLoads.Load(), cLoadFail.Load(), cHBPub.Load(), cHBDel.Load()
+	var st0, rl0, s0, g0, f0, t0, l0, lf0, hp0, hd0 = cState.Load(), cReloads.Load(), cStream.Load(), cGet.Load(), cFail.Load(), cTimeout.Load(), cLoads.Load(), cLoadFail.Load(), cHBPub.Load(), cHBDel.Load()
 	v0 := varz(m)
 	c0 := cpu(pl)
 	self0 := cpu([]string{"self"})
@@ -210,9 +225,10 @@ func run() int {
 	close(stop)
 
 	d := func(a, b int64) float64 { return float64(a-b) / el }
-	fmt.Printf("n=%d sync=%v replicas=%d window_s=%.1f\n", *n, *syncStart, *replicas, el)
+	fmt.Printf("n=%d sync=%v replicas=%d mode=%s window_s=%.1f\n", *n, *syncStart, *replicas, *mode, el)
 	fmt.Printf("loads_per_s=%.3f streaminfo_per_s=%.3f directget_per_s=%.3f requests_per_s=%.3f\n", d(cLoads.Load(), l0),
-		d(cStream.Load(), s0), d(cGet.Load(), g0), d(cStream.Load()+cGet.Load(), s0+g0))
+		d(cStream.Load(), s0), d(cGet.Load(), g0), d(cStream.Load()+cState.Load()+cGet.Load(), s0+st0+g0))
+	fmt.Printf("streaminfo_state_per_s=%.3f reloads_per_s=%.3f\n", d(cState.Load(), st0), d(cReloads.Load(), rl0))
 	fmt.Printf("request_failures=%d timeouts=%d load_failures=%d\n", cFail.Load()-f0, cTimeout.Load()-t0, cLoadFail.Load()-lf0)
 	durMu.Lock()
 	sort.Float64s(durs)
@@ -252,6 +268,32 @@ func loop(stop chan struct{}, off, every time.Duration, f func()) {
 			return
 		case <-t.C:
 			f()
+		}
+	}
+}
+
+// pollNew is one endpoint's poll in -mode new: the real DirPoller decides, with its jittered first wait and waits.
+func pollNew(stop chan struct{}, nc *nats.Conn, every time.Duration) {
+	p := endpoint.NewDirPoller(nil, nil)
+	state := func(context.Context) (endpoint.DirState, error) {
+		cState.Add(1)
+		m, err := req(nc, "$JS.API.STREAM.INFO.KV_"+bucket, []byte("{}"))
+		if err != nil {
+			return endpoint.DirState{}, err
+		}
+		return endpoint.ParseDirState(m.Data)
+	}
+	t := time.NewTimer(p.FirstWait(every))
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if reloaded, _ := p.Tick(context.Background(), state, func(context.Context) error { return loadDirectory(nc) }); reloaded {
+				cReloads.Add(1)
+			}
+			t.Reset(p.Wait(every))
 		}
 	}
 }
@@ -315,7 +357,7 @@ func setup(ctx context.Context, url, name string, n, replicas int, created *atom
 }
 
 // loadDirectory is internal/endpoint's loadDirectory: keys by filtered stream info, then one direct get per key.
-func loadDirectory(nc *nats.Conn) {
+func loadDirectory(nc *nats.Conn) error {
 	t0 := time.Now()
 	prefix := "$KV." + bucket + "."
 	var keys []string
@@ -325,7 +367,7 @@ func loadDirectory(nc *nats.Conn) {
 		m, err := req(nc, "$JS.API.STREAM.INFO.KV_"+bucket, body)
 		if err != nil {
 			cLoadFail.Add(1)
-			return
+			return errors.New("load failed")
 		}
 		var resp struct {
 			Total int `json:"total"`
@@ -335,7 +377,7 @@ func loadDirectory(nc *nats.Conn) {
 		}
 		if json.Unmarshal(m.Data, &resp) != nil {
 			cLoadFail.Add(1)
-			return
+			return errors.New("load failed")
 		}
 		for s := range resp.State.Subjects {
 			keys = append(keys, strings.TrimPrefix(s, prefix))
@@ -362,7 +404,7 @@ func loadDirectory(nc *nats.Conn) {
 	wg.Wait()
 	if bad.Load() {
 		cLoadFail.Add(1)
-		return
+		return errors.New("load failed")
 	}
 	cLoads.Add(1)
 	if measuring.Load() {
@@ -370,6 +412,7 @@ func loadDirectory(nc *nats.Conn) {
 		durs = append(durs, float64(time.Since(t0).Microseconds())/1000)
 		durMu.Unlock()
 	}
+	return nil
 }
 
 func req(nc *nats.Conn, subj string, body []byte) (*nats.Msg, error) {

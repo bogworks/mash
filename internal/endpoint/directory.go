@@ -28,18 +28,21 @@ type Presence struct {
 // consumers on the directory (one could exhaust or delete another's).
 var DirectoryPoll = 15 * time.Second
 
-// pollDirectory re-reads the directory every interval until ctx ends.
+// pollDirectory polls the directory until ctx ends: one small unfiltered stream-info request per poll, and a full
+// reload only when the stream moved or DirectoryFullReload is due (ADR 0065). Polls are jittered.
 func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
+	p := NewDirPoller(nil, nil)
+	t := time.NewTimer(p.FirstWait(every))
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := e.loadDirectory(ctx); err != nil && ctx.Err() == nil {
+			if _, err := p.Tick(ctx, e.directoryState, e.loadDirectory); err != nil && ctx.Err() == nil {
 				e.log.Print(err)
 			}
+			t.Reset(p.Wait(every))
 		}
 	}
 }

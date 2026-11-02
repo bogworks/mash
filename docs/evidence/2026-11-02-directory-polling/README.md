@@ -61,3 +61,29 @@ The model matches to within a fraction of a percent. Request rate grows 100x for
 - One 60 s window per case, no repeats; CPU numbers at N=10 and 100 are tiny and noisy (the 100 sync run reads lower than the staggered one).
 - Records are written once; no churn, so no change traffic. Directory size equals N; a real directory may hold more or fewer records than endpoints running.
 - What this says about a hosted account's request metering: only the request counts (stream info + direct gets, quadratic in N) apply if the service counts JetStream API requests; whether it does, how direct gets are metered, and any rate limits or per-account message quotas of a hosted service were not measured here.
+
+## After: ADR 0065 poll (`MODE=new`)
+
+`results-new.txt`: the same host, cluster and harness, `-mode new` (each simulated endpoint's poll runs through the real `endpoint.DirPoller`: one unfiltered stream-info request per poll, a full reload only when the stream's state moved, jittered waits), 40 s warm-up so that every endpoint has made its first (start-up) full load before the 60 s measured window. Random offsets unless noted. Nothing failed: 0 timeouts, 0 failed loads.
+
+| N | reloads/s | state info/s | filtered stream info/s | direct gets/s | requests/s | srv CPU cores (sum / max) | srv out MB/s |
+|---|---|---|---|---|---|---|---|
+| 10 | 0 | 0.63 | 0 | 0 | 0.63 | 0.007 / 0.002 | 0.004 |
+| 100 | 0 | 6.58 | 0 | 0 | 6.58 | 0.022 / 0.008 | 0.118 |
+| 500 | 0 | 34.0 | 0 | 0 | 34.0 | 0.163 / 0.058 | 2.58 |
+| 1000 | 0 | 66.6 | 0 | 0 | 66.6 | 0.522 / 0.180 | 10.2 |
+| 100 sync | 0 | 6.62 | 0 | 0 | 6.62 | 0.014 / 0.005 | 0.118 |
+| 500 sync | 0 | 33.3 | 0 | 0 | 33.3 | 0.059 / 0.023 | 2.58 |
+
+Before and after, steady state:
+
+| N | requests/s before | after | srv CPU cores (sum) before | after | srv out MB/s before | after |
+|---|---|---|---|---|---|---|
+| 100 | 673 | 6.6 | 0.050 | 0.022 | 0.61 | 0.12 |
+| 500 | 16,686 | 34.0 | 0.77 | 0.163 | 15.0 | 2.58 |
+| 1000 | 66,733 | 66.6 | 3.20 | 0.522 | 59.8 | 10.2 |
+
+- The idle request count is now N/15 per second, as designed (66.6 at 1,000, against 66,733): about 1,000 times fewer at 1,000 endpoints, 100 times fewer at 100. Direct gets and filtered stream infos are zero in steady state, and the synchronised-start variants no longer produce a wave (there is nothing to synchronise: each poll is one small request, and the jitter spreads them).
+- What is left on the servers is the heartbeat fan-out (33,333 deliveries per second at 1,000 endpoints, 10 MB/s out), which this change does not touch; it is now the whole of the server's load.
+- A first run with the default 10 s warm-up (not kept in the results) mixed start-up reloads into the window: the first poll of each endpoint after start is a full reload at a random offset inside the first 15 s, so a window that opens earlier than that measures them as well. The numbers above use the longer warm-up. A directory change makes every endpoint reload once within an interval (about N(N+1) requests spread over the 15 s), the same cost as one old poll; this window contains no change.
+- The forced reload (every 20 minutes, jittered) is outside a 60 s window by construction; its cost is one old-style poll per endpoint per 20 minutes.
