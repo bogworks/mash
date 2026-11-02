@@ -214,6 +214,10 @@ func (l *streamLock) check(ctx context.Context) error {
 
 // explain words err for an operation op whose context (from bound) ended because the lock was about to expire.
 func (l *streamLock) explain(ctx context.Context, op string, err error) error {
+	var p *partialError
+	if errors.As(err, &p) {
+		return err // already says what was and was not done
+	}
 	if err != nil && errors.Is(context.Cause(ctx), ErrLockExpiring) {
 		return fmt.Errorf("mash: %s ran past the lock of %s; nothing after the point it stopped was changed; try again: %w", op, l.name, err)
 	}

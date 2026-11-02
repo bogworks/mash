@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -51,6 +52,13 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error {
+		n, err := parseServers(env)
+		if err != nil {
+			return err
+		}
+		return revokeUsers(ctx, cfg, env, n, users, stdout)
 	}
 	return ctl.Run("mashctl", cfg, args, stdout, stderr)
 }

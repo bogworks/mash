@@ -42,3 +42,11 @@ func TestAdminMetaFlags(t *testing.T) {
 		t.Fatalf("%+v %v", m, err)
 	}
 }
+
+func TestShortKey(t *testing.T) {
+	for in, want := range map[string]string{"": "", "abc": "abc", "12345678": "12345678", "UABCDEFGHIJK": "UABCDEFG"} {
+		if got := ShortKey(in); got != want {
+			t.Errorf("ShortKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

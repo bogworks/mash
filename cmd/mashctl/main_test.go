@@ -130,7 +130,7 @@ func TestMashctlSuspendVerbs(t *testing.T) {
 		t.Fatalf("suspended before: %d %q", code, out)
 	}
 	out, errb, code := ctlRun(t, e, "suspend", "c")
-	if code != 0 || !regexp.MustCompile(`^suspended c: id [0-9a-f]{32}, last_seq 0, msgs 0\n$`).MatchString(out) {
+	if code != 0 || !regexp.MustCompile(`^suspended c: id [0-9a-f]{32}, last_seq 0, msgs 0 \(new mail parked; the endpoint's credentials are still valid\)\n$`).MatchString(out) {
 		t.Fatalf("suspend: %d %q %q", code, out, errb)
 	}
 	if out, _, code := ctlRun(t, e, "suspended", "c"); code != 0 || !strings.HasPrefix(out, "suspended c since ") || !regexp.MustCompile(`: id [0-9a-f]{32}, last_seq 0, msgs 0\n$`).MatchString(out) {

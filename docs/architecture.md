@@ -247,7 +247,7 @@ have happened ([ADR-0025][0025]).
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
 | Users | Issued with your own tooling from `mash admin permissions <name>` (JSON or `nsc` flags). mash never holds a seed | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
 | Endpoints | `mash admin init` once, then `mash admin provision <name>` per endpoint | Created by `scripts/quickstart-synadia.sh`, which runs `mash admin provision`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
-| Removing | `mash admin deprovision`, then revoke the user yourself | Same, with an admin user made in the console |
+| Removing | `mashctl retire` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
 `MASH_NAME` set at launch. The idle wake also needs channels allowed for the plugin on that machine.
@@ -393,7 +393,7 @@ service's API token, which only the quickstart script ever sees.
 
 **Residual risks, summarised.** The model rests on each endpoint's seed staying private. A verified sender is trusted
 by design, so one compromised endpoint can direct its peers. Any endpoint can evict another's old mail by flooding it.
-Deprovisioning does not revoke a user. The operator of the account keys can impersonate anyone.
+`mash admin deprovision` does not revoke a user; `mashctl retire` and `mashctl deprovision` do, unless `--no-revoke`. The operator of the account keys can impersonate anyone.
 
 ### 8.4 Naming and addressing
 

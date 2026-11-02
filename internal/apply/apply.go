@@ -203,6 +203,24 @@ func (u unknownKey) describe() string {
 	return fmt.Sprintf("scoped signing key %s (role %s)", u.key, u.role)
 }
 
+// knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
+// public key of every zone key in the key store.
+func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, error) {
+	known := map[string]bool{acctPub: true}
+	zones, err := ks.Zones()
+	if err != nil {
+		return nil, err
+	}
+	for _, z := range zones {
+		pub, err := ks.ZonePublic(z)
+		if err != nil {
+			return nil, err
+		}
+		known[pub] = true
+	}
+	return known, nil
+}
+
 // unknownKeyNote is the one explanation printed with every unknown signing key.
 const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry signing keys it did not create. Remove it with the tool that added it before apply can run. Only a scoped signer whose role is exactly a zone of the policy file can be dropped, by --replace-zone-key naming that zone (or --remove-zone for a zone the file lacks)."
 
@@ -344,37 +362,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		what = "the re-send of the unchanged claims"
 	}
 	set, kerr := p.Resolver.Servers(ctx)
-	known := set.Names
-	acks, perr := p.Resolver.Push(ctx, token, known)
-	acked := map[string]bool{}
-	var bad []string
-	for _, a := range acks {
-		acked[a.Server] = true
-		if !a.OK() {
-			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, a.Message))
-		}
-	}
-	var silent []string
-	for _, k := range known {
-		if !acked[k] {
-			silent = append(silent, k)
-		}
-	}
-	if perr != nil || len(bad) > 0 || len(acks) == 0 || len(silent) > 0 {
-		var why []string
-		switch {
-		case perr != nil:
-			why = append(why, perr.Error())
-		case len(acks) == 0:
-			why = append(why, "no server answered")
-		}
-		if len(bad) > 0 {
-			why = append(why, "refused by "+strings.Join(bad, "; "))
-		}
-		if len(silent) > 0 {
-			why = append(why, "no acknowledgement from "+strings.Join(silent, ", ")+" (known from the system account ping)")
-		}
-		return partial(out, p, createdList, fmt.Sprintf("%s was not acknowledged: %s", what, strings.Join(why, "; ")), verifyState(ctx, p, acctPub, desired))
+	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
+	if why != "" {
+		return partial(out, p, createdList, fmt.Sprintf("%s was not acknowledged: %s", what, why), verifyState(ctx, p, acctPub, desired))
 	}
 	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
 		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
@@ -396,6 +386,43 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	notCovered(out, p)
 	pf("%s\n", NotATransaction)
 	return 0
+}
+
+// pushAndCheck pushes token to the resolver and checks the answers against known (the servers the ping found): every
+// known server must have acknowledged with code 200 and at least one must have answered. why is "" when all did.
+func pushAndCheck(ctx context.Context, r Resolver, token string, known []string) (acks []ServerAck, why string) {
+	acks, perr := r.Push(ctx, token, known)
+	acked := map[string]bool{}
+	var bad []string
+	for _, a := range acks {
+		acked[a.Server] = true
+		if !a.OK() {
+			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, a.Message))
+		}
+	}
+	var silent []string
+	for _, k := range known {
+		if !acked[k] {
+			silent = append(silent, k)
+		}
+	}
+	if perr == nil && len(bad) == 0 && len(acks) > 0 && len(silent) == 0 {
+		return acks, ""
+	}
+	var parts []string
+	switch {
+	case perr != nil:
+		parts = append(parts, perr.Error())
+	case len(acks) == 0:
+		parts = append(parts, "no server answered")
+	}
+	if len(bad) > 0 {
+		parts = append(parts, "refused by "+strings.Join(bad, "; "))
+	}
+	if len(silent) > 0 {
+		parts = append(parts, "no acknowledgement from "+strings.Join(silent, ", ")+" (known from the system account ping)")
+	}
+	return acks, strings.Join(parts, "; ")
 }
 
 // build computes the desired account JWT from cur. It creates missing zone keys only when nothing conflicts and the
@@ -439,17 +466,9 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	}
 	// Known keys: the account identity key and every zone key in the key store (the zone keys apply creates are not
 	// on the server yet). Any other signing key of the JWT is unknown and refused.
-	known := map[string]bool{acctPub: true}
-	storeZones, zerr := p.Keys.Zones()
-	if zerr != nil {
-		return nil, zerr
-	}
-	for _, z := range storeZones {
-		pub, perr := p.Keys.ZonePublic(z)
-		if perr != nil {
-			return nil, perr
-		}
-		known[pub] = true
+	known, kerr2 := knownSigningKeys(p.Keys, acctPub)
+	if kerr2 != nil {
+		return nil, kerr2
 	}
 	oldKeys := map[string][]string{}
 	remove, keep := map[string]bool{}, map[string]bool{}

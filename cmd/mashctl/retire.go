@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +19,7 @@ import (
 	"github.com/bogworks/mash/internal/policyfile"
 )
 
-const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds] [--force]
+const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]
 `
 
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
@@ -54,14 +56,14 @@ func looksInterrupted(cfg config.Config, credsPath, name string) bool {
 	return false
 }
 
-// revocationNote is printed after every retire: mashctl does not revoke users.
-const revocationNote = "revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off"
+// noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
+const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the zone key is rotated"
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
 func runRetire(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	var name, file string
-	var deleteCreds, force bool
+	var deleteCreds, force, noRevoke bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -69,6 +71,8 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 			deleteCreds = true
 		case a == "--force":
 			force = true
+		case a == "--no-revoke":
+			noRevoke = true
 		case a == "--policy" || strings.HasPrefix(a, "--policy="):
 			if v, has := strings.CutPrefix(a, "--policy="); has {
 				file = v
@@ -92,6 +96,11 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	if name == "" {
 		fmt.Fprintf(stderr, "mashctl: retire: no endpoint name\n%s", retireUsage)
+		return 2
+	}
+	servers, err := parseServers(env)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: retire: %v\n%s", err, retireUsage)
 		return 2
 	}
 	fail := func(format string, a ...any) int {
@@ -175,19 +184,40 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 			user = r.User
 		}
 	}
+	var revokeOut bytes.Buffer
 	switch {
 	case user != "":
+		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
+		// a failed revocation removes nothing, a refused removal revokes nothing.
+		var revokeErr error
+		if noRevoke {
+			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
+		} else {
+			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
+				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut); err != nil {
+					revokeErr = err
+					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
+				}
+				return nil
+			})
+		}
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
+				if revokeErr != nil && errors.Is(err, revokeErr) {
+					return fail("%v: nothing was changed (--no-revoke retires without revoking)", err)
+				}
 				return fail("%v: nothing was changed", err)
+			}
+			if admin.IsPartial(err) {
+				return fail("%v; the policy file was not changed; run mashctl retire %s again", err, name)
 			}
 			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left); the policy file was not changed. Then run: mashctl retire %s --force (it removes the policy entry)", err, name, name)
 		}
 	case force:
-		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server; only the policy file and creds are handled\n", name)
+		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server, so no user key is known and nothing was revoked; only the policy file and creds are handled\n", name)
 	default:
 		return fail("no directory record on the server (--force edits the policy file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", name)
 	}
@@ -247,7 +277,15 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 			fmt.Fprintln(stdout, l)
 		}
 	}
-	fmt.Fprintf(stdout, "%s's user is not revoked at the server: %s\n", name, revocationNote)
+	switch {
+	case user == "":
+	case noRevoke:
+		fmt.Fprintf(stdout, "%s: %s\n", name, noRevokeNote)
+		fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
+	default:
+		io.WriteString(stdout, revokeOut.String())
+		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file and the policy entry are separate\n", ctl.ShortKey(user))
+	}
 	return code
 }
 

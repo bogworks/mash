@@ -24,6 +24,42 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
+// RevokeUsers revokes NATS user keys in the account JWT; mashctl sets it, which has the key store. The system account
+// credentials come from MASH_SYS_CREDS or the init server's sys.creds, the server count from MASH_SERVERS. It stays nil
+// in `mash admin`, which has neither: deprovision then only advises.
+var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error
+
+// NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
+func NoRevokeWarning(name, user string) string {
+	return "WARNING: --no-revoke: " + name + "'s NATS user key " + user + " is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid. (--no-revoke is a temporary flag name: it will be renamed with the CLI redesign.)\n"
+}
+
+// ShortKey is the first 8 characters of a key for messages, or all of it when it is shorter: a user key read from a
+// directory record may be short or malformed, and slicing it must never panic.
+func ShortKey(k string) string { return fmt.Sprintf("%.8s", k) }
+
+// splitRevokeFlags takes --no-revoke out of args (name and the rest keep their order).
+func splitRevokeFlags(args []string) ([]string, bool, error) {
+	noRevoke := false
+	out := args[:0:0]
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if i < 2 {
+			out = append(out, a)
+			continue
+		}
+		switch {
+		case a == "--no-revoke":
+			noRevoke = true
+		case strings.HasPrefix(a, "--no-revoke="):
+			return nil, false, fmt.Errorf("--no-revoke takes no value")
+		default:
+			out = append(out, a)
+		}
+	}
+	return out, noRevoke, nil
+}
+
 func limitsUsage(prog string) string {
 	return "usage: " + prog + " limits [name...] | " + prog + " limits --show"
 }
@@ -63,10 +99,14 @@ func Usage(prog string) string {
 	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]", "")
 	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
 	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
-	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence")
+	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
 	line("resume <name>", "undo suspend")
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
-	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", "remove the record and inbox; with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
+	removal := "remove the record and inbox;"
+	if prog == "mashctl" {
+		removal = "revoke the endpoint's user in the account JWT (--no-revoke skips it), then remove the record and inbox;"
+	}
+	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		adoptLines(line)
@@ -87,7 +127,7 @@ func mintLines(line func(left, right string)) {
 }
 
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--policy FILE] [--delete-creds] [--force]", "remove NAME's record and inbox, then its policy entry; its user is not revoked")
+	line("retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox and its policy entry")
 	line("label NAME k=v... [--policy FILE] [--dry-run] [--sync]", "set labels in the policy file (offline unless --sync updates the directory record)")
 	line("unlabel NAME k... [--policy FILE] [--dry-run] [--sync]", "remove labels from the policy file (offline unless --sync)")
 }
@@ -277,7 +317,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d\n", args[1], st.ID, st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", args[1], st.ID, st.LastSeq, st.Msgs)
 		case "resume":
 			if err := a.Resume(ctx, args[1]); err != nil {
 				return fail(err)
@@ -296,6 +336,14 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 	case "deprovision":
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
+		var noRevoke bool
+		if prog == "mashctl" {
+			deprovisionUsage += " [--no-revoke]"
+			var err error
+			if args, noRevoke, err = splitRevokeFlags(args); err != nil {
+				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": " + err.Error()))
+			}
+		}
 		if len(args) < 2 || !config.ValidName(args[1]) {
 			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": <name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)"))
 		}
@@ -306,6 +354,57 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		hasDrained, hasSusp := slices.Contains(rest, "--drained-to"), slices.Contains(rest, "--suspension")
 		if (hasDrained || hasSusp) && slices.Contains(rest, "--user") {
 			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --user and --drained-to cannot be combined"))
+		}
+		// The revocation runs inside the admin's removal, under the name's lock, after its guards passed and before
+		// anything is removed (see madmin.RevokeHook): a refused removal revokes nothing, a failed revocation removes
+		// nothing, and the key revoked is the one in the record the removal accepted.
+		adm, revokedUser, revokeErr := a, "", error(nil)
+		if RevokeUsers != nil && !noRevoke {
+			adm = a.WithRevoker(func(ctx context.Context, user string) error {
+				if err := RevokeUsers(ctx, cfg, []string{user}, stdout); err != nil {
+					revokeErr = err
+					return fmt.Errorf("user key %s...: %w", ShortKey(user), err)
+				}
+				revokedUser = user
+				return nil
+			})
+		}
+		// failRemoval reports a failed removal; a failed revocation also names the way around it.
+		failRemoval := func(err error) int {
+			if revokeErr != nil && errors.Is(err, revokeErr) {
+				return fail(fmt.Errorf("%w (--no-revoke deprovisions without revoking)", err))
+			}
+			return fail(err)
+		}
+		// note closes the success text.
+		note := func() string {
+			switch {
+			case revokedUser != "":
+				return "user key " + ShortKey(revokedUser) + "... revoked in the account JWT"
+			case RevokeUsers == nil:
+				return "revoke its NATS user with your operator tooling"
+			case noRevoke:
+				return "--no-revoke: its NATS user is not revoked; revoke it with your operator tooling"
+			}
+			return "no directory record, so no user key is known and nothing was revoked"
+		}
+		// noRevokeWarn prints the --no-revoke warning for user; the user key is informational.
+		noRevokeWarn := func(user string) {
+			if noRevoke && user != "" && RevokeUsers != nil {
+				fmt.Fprint(stderr, NoRevokeWarning(args[1], user))
+			}
+		}
+		recordUser := func() string {
+			recs, err := a.List(ctx)
+			if err != nil {
+				return ""
+			}
+			for _, r := range recs {
+				if r.Name == args[1] {
+					return r.User
+				}
+			}
+			return ""
 		}
 		if hasDrained || hasSusp {
 			if len(args) != 6 || !hasDrained || !hasSusp {
@@ -327,10 +426,16 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if id == "" {
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --suspension wants the id that suspend printed"))
 			}
-			if err := a.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
-				return fail(err)
+			warnUser := ""
+			if noRevoke {
+				warnUser = recordUser()
+				noRevokeWarn(warnUser)
 			}
-			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; revoke its NATS user with your operator tooling)\n", args[1], id, seq)
+			if err := adm.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
+				return failRemoval(err)
+			}
+			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; %s)\n", args[1], id, seq, note())
+			noRevokeWarn(warnUser)
 			return 0
 		}
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
@@ -341,10 +446,13 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if !validUserKeyShape(args[3]) {
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --user wants a NATS user public key (U, then 55 upper-case base32 characters)"))
 			}
-			if err := a.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
-				return fail(err)
+			// The given key is revoked inside the removal, and only when the record names it.
+			noRevokeWarn(args[3])
+			if err := adm.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
+				return failRemoval(err)
 			}
-			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; revoke its NATS user with your operator tooling)\n", args[1], args[3][:8])
+			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; %s)\n", args[1], ShortKey(args[3]), strings.Replace(note(), "user key "+ShortKey(args[3])+"... ", "", 1))
+			noRevokeWarn(args[3])
 			return 0
 		}
 		// Deprovision is idempotent, so rollbacks can call it freely; this verb refuses a name that was never there.
@@ -354,10 +462,16 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			fmt.Fprintf(stderr, "no endpoint named %s\n", args[1])
 			return 1
 		}
-		if err := a.Deprovision(ctx, args[1]); err != nil {
-			return fail(err)
+		warnUser := ""
+		if noRevoke {
+			warnUser = recordUser()
+			noRevokeWarn(warnUser)
 		}
-		fmt.Fprintf(stdout, "deprovisioned %s (revoke its NATS user with your operator tooling)\n", args[1])
+		if err := adm.Deprovision(ctx, args[1]); err != nil {
+			return failRemoval(err)
+		}
+		fmt.Fprintf(stdout, "deprovisioned %s (%s)\n", args[1], note())
+		noRevokeWarn(warnUser)
 	case "list":
 		recs, err := a.List(ctx)
 		if err != nil {

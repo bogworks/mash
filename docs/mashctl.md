@@ -87,33 +87,41 @@ After the save the policy is compiled before and after, and each consequence is 
 
 ## Suspending an endpoint's inbound mail
 
-- `mashctl suspend NAME` refuses all inbound mail to NAME's inbox and prints `suspended NAME: id ID, last_seq N, msgs M`. The id is a random token naming this one suspension. Stored mail stays readable; the sequence is final while the suspension holds.
+- `mashctl suspend NAME` refuses all inbound mail to NAME's inbox and prints `suspended NAME: id ID, last_seq N, msgs M (new mail parked; the endpoint's credentials are still valid)`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. The id is a random token naming this one suspension. Stored mail stays readable; the sequence is final while the suspension holds.
 - `mashctl resume NAME` restores delivery and prints `resumed NAME`.
 - `mashctl suspended NAME` prints `suspended NAME since T: id ID, last_seq N, msgs M` and exits 0, or `NAME is not suspended` and exits 3. Any error exits 1.
-- To remove an endpoint after reading its last mail: `mashctl suspend NAME` (note `id ID` and `last_seq N`), drain through N, then `mashctl deprovision NAME --suspension ID --drained-to N` (both flags are required together; either alone is a usage error). The deprovision refuses, changing nothing, unless the inbox is still suspended under that same id and at last_seq N when it runs, and the directory record still belongs to the user key it had at suspend time, so a `resume` by another admin cannot lose mail. The id ties the drain to that one suspension, so a re-provisioned endpoint of the same name cannot be removed by an old command. Example: `mashctl deprovision design --suspension 9f3c... --drained-to 41`. Plain `deprovision` does not check, and `--drained-to` cannot be combined with `--user`.
+- To remove an endpoint after reading its last mail: `mashctl suspend NAME` (note `id ID` and `last_seq N`), drain through N, then `mashctl deprovision NAME --suspension ID --drained-to N` (both flags are required together; either alone is a usage error). The deprovision refuses, changing nothing, unless the inbox is still suspended under that same id and at last_seq N when it runs, and the directory record still belongs to the user key it had at suspend time, so a `resume` by another admin cannot lose mail. The id ties the drain to that one suspension, so a re-provisioned endpoint of the same name cannot be removed by an old command. Example: `mashctl deprovision design --suspension 9f3c... --drained-to 41`. The revocation of the endpoint's user key happens in this command, only once those checks hold (see below). Plain `deprovision` does not check, and `--drained-to` cannot be combined with `--user`.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
 ## Retiring an endpoint
 
 ```sh
-mashctl retire NAME [--policy FILE] [--delete-creds] [--force]
+mashctl retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]
 ```
 
 Without `--force`, a NAME that has a record or creds file but no policy entry refuses with the interrupted-add recovery shown under [A killed add](#a-killed-add).
 
-Needs the server and admin credentials. Order of operations (a failure leaves the earlier, safer state):
+Needs the server and admin credentials, and, to revoke the user, the operator and account keys in the key store and the system account credentials (`MASH_SYS_CREDS`, or the `sys.creds` that `mashctl init --local` wrote; `MASH_SERVERS` as for `policy apply`; revocation has no flags for these). Order of operations (a failure leaves the earlier, safer state):
 
 1. Lock and load the policy file. NAME must be declared, unless `--force` (then only the server side is cleaned up).
 2. Remove the entry in memory. If tests still name NAME the command refuses (`tests still name NAME: tests[N] from->to; remove them first`); with `--force` the file is then left as it is (it would not parse) and the command exits 1 after the server step, telling you to edit the file by hand.
-3. Read NAME's user key from the directory record and delete the record and inbox only if the record still holds that key (`DeprovisionIfUser`, under the name's lock). A record someone replaced meanwhile is left in place, and a failure here changes nothing. With no record the command refuses (and says to finish a partly removed endpoint with `mashctl deprovision NAME`); with `--force` it says so and goes on to the file.
+3. Read NAME's user key from the directory record and **revoke it** (see Revocation below); if the revocation fails the command stops here, with nothing removed, and says why and that `--no-revoke` skips it (`--no-revoke` is a temporary flag name, to be renamed with the CLI redesign). Then delete the record and inbox only if the record still holds that key (`DeprovisionIfUser`, under the name's lock). A record someone replaced meanwhile is left in place, and a failure here changes nothing. With no record the command refuses (and says to finish a partly removed endpoint with `mashctl deprovision NAME`); with `--force` it says so and goes on to the file.
 
    A refusal prints `nothing was changed`. Any other error from this step is reported as `PARTIAL`: the record may already be gone but the lease fence or the inbox delete did not finish, and the policy file is untouched. A retry of `mashctl retire NAME` now refuses (no record), so finish with two commands: `mashctl deprovision NAME` (removes what is left), then `mashctl retire NAME --force` (removes the policy entry; creds and the revocation note as in steps 5 and 6).
 4. Save the policy file. If it changed since it was loaded, NAME is already gone from the server: the command says so and to remove the entry by hand, and exits 1.
 5. Creds file: renamed to `NAME.creds.retired-<UTC yyyymmddThhmmssZ>` in the same directory (mode kept), so `mashctl add NAME` works again at once, and the rename is reported. `--delete-creds` removes `NAME.creds` instead. Only a regular file is touched (a symlink or other file is left and reported); a missing file is fine and nothing is printed. The retired file still holds the user's seed: delete it when you no longer need it. `retire` does not revoke the user: anyone holding the old creds keeps access until the zone key is rotated or the user is revoked with nsc (see Before you push with nsc), same as after `--delete-creds`.
-6. Print `retired NAME`, the consequences above (`reissue needed` for other endpoints, `account update needed`), and always the revocation note.
+6. Print `retired NAME`, the consequences above (`reissue needed` for other endpoints, `account update needed`), and the revocation line (`user key U... revoked in the account JWT`, or the `--no-revoke` warning).
 
-What it does not do: **revoke the user.** mashctl has no revocation yet (`nsc` has: see [Before you push with nsc](#before-you-push-with-nsc)), so NAME's old creds still authenticate; the note says `revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off`. It also does not push the account JWT: run `mashctl policy apply` when told to.
+Retire does not push policy changes: run `mashctl policy apply` when told to.
+
+### Revocation
+
+`retire` and `deprovision` revoke the endpoint's NATS user in the same command (`mashctl suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed, and `policy apply` keeps revocations when it re-signs the account JWT.
+
+`deprovision NAME` revokes the user of NAME's directory record, `deprovision NAME --user U` revokes U (unless the record names another user: then it refuses and revokes nothing), and `--suspension ID --drained-to N` revokes only when its checks pass. With no record there is nothing to revoke. `--no-revoke` (same warning, same temporary name) is the one mashctl option for it, and the system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`; `mash admin deprovision` has no key store and still only advises revoking with your operator tooling.
+
+Because revocation is by key and time, a reissue (`mashctl reissue`, `mashctl add`) for a retired name needs a new user key (a new nkey), and a user JWT issued in the same second as the revocation is revoked too. Rotating a zone key (`--replace-zone-key`) is the other way to cut off every credential a zone signed.
 
 ## Exit codes and arguments
 
