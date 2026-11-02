@@ -14,7 +14,7 @@ func (w *world) admin(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	var out, errb bytes.Buffer
 	code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, args, &out, &errb)
-	return out.String() + errb.String(), code
+	return out.String() + strings.TrimPrefix(errb.String(), adminDeprecation+"\n"), code // the notice has its own test
 }
 
 // whoLine is name's line from out.
@@ -125,7 +125,7 @@ func TestAdminLimitsCLI(t *testing.T) {
 	run := func(l store.Limits, args ...string) (string, int) {
 		var out, errb bytes.Buffer
 		code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, Limits: l}, args, &out, &errb)
-		return out.String() + errb.String(), code
+		return out.String() + strings.TrimPrefix(errb.String(), adminDeprecation+"\n"), code
 	}
 	// --show needs no server and prints the defaults for a Config with no limits.
 	const defaults = "inbox_max_bytes 16MiB\ninbox_max_age 30d\ndirectory_max_bytes 16MiB\nlease_max_bytes 4MiB\ninbox_max_consumers -1\n"
@@ -152,5 +152,22 @@ func TestAdminLimitsCLI(t *testing.T) {
 	}
 	if out, code := run(store.DefaultLimits(), "limits", "c"); code != 1 || !strings.Contains(out, "max_bytes") {
 		t.Fatalf("lower: %d %q", code, out)
+	}
+}
+
+func TestAdminDeprecatedAlias(t *testing.T) {
+	w := newWorld(t, "a")
+	var out, errb bytes.Buffer
+	code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, []string{"list"}, &out, &errb)
+	if code != 0 || !strings.HasPrefix(out.String(), "a\t") {
+		t.Fatalf("list: %d %q %q", code, out.String(), errb.String())
+	}
+	if got, want := errb.String(), "mash admin is deprecated and will be removed; use mashctl (same verbs, e.g. mashctl list)\n"; got != want {
+		t.Fatalf("stderr %q, want %q", got, want)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := adminCmd(config.Config{}, nil, &out, &errb); code != 2 || strings.Contains(errb.String(), "deprecated and will") {
+		t.Fatalf("no args: %d %q", code, errb.String())
 	}
 }

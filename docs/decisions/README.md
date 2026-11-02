@@ -21,7 +21,7 @@ on), or mash's own choice on top of them.
 | [0005](0005-subjects-follow-sap-hierarchy.md) | Subjects follow SAP's hierarchy, `agents.<verb>.cc.<owner>.<name>` | accepted | SAP | 2026-10-21 |
 | [0006](0006-one-shared-nats-account-one-owner-per-deployment.md) | All endpoints share one NATS account; one owner per deployment; names are unique in the account | accepted | NATS / mash | 2026-10-21 |
 | [0007](0007-one-nats-user-per-endpoint-least-privilege.md) | One NATS user per endpoint, and a fixed least-privilege permission set is the whole security model | accepted | NATS / mash | 2026-10-21 |
-| [0008](0008-mash-never-mints-users-or-holds-seeds.md) | mash never mints NATS users or holds operator or account seeds; credentials stay 0600 on the endpoint's host | accepted | NATS / mash | 2026-10-21 |
+| [0008](0008-mash-never-mints-users-or-holds-seeds.md) | mash never mints NATS users or holds operator or account seeds; credentials stay 0600 on the endpoint's host | superseded by [0052](0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md) | NATS / mash | 2026-10-21 |
 | [0009](0009-one-inbox-stream-and-consumer-per-endpoint.md) | One inbox stream and one durable pull consumer per endpoint | accepted | NATS / mash | 2026-10-21 |
 | [0010](0010-inbox-limits-and-append-only-history.md) | Inboxes keep 30 days or 16 MiB, drop the oldest, and deny delete and purge | accepted | NATS / mash | 2026-10-21 |
 | [0011](0011-directory-is-the-root-of-identity-and-addressing.md) | The directory KV bucket is the root of identity and addressing | accepted | mash (bends SAP §2) | 2026-10-21 |
@@ -65,3 +65,5 @@ on), or mash's own choice on top of them.
 | [0049](0049-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
 | [0050](0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
 | [0051](0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) | Releases carry an SBOM per binary and SLSA provenance from an isolated generator | proposed | project | 2026-11-01 |
+| [0052](0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md) | `mashctl` mints NATS users under one scoped signing key per zone and holds the account signing key; it supersedes 0008 | accepted | NATS / mash | 2026-11-02 |
+| [0053](0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) | Who may mail whom is a policy file; one label, the zone, lives in the mail subject, and `mashctl` compiles the rules into each zone's NATS permissions | accepted | NATS / mash | 2026-11-02 |

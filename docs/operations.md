@@ -16,6 +16,8 @@ nsc push --account "$ACCOUNT"
 
 mash stores everything on file storage; it needs no memory store. A server with no memory store configured refuses an account that asks for one, so leave `--js-mem-storage` unset.
 
+`mashctl` is the admin tool: every `mash admin <verb>` below is also `mashctl <verb>`, and `mash admin` remains as a deprecated alias that prints a one-line notice to stderr.
+
 Add an admin user for mash's admin commands (full access to the account), and keep its credentials only where you run `mash admin`:
 
 ```sh
