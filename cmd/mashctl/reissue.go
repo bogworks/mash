@@ -39,7 +39,7 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		case strings.HasPrefix(a, "--policy=") && len(a) > len("--policy="):
 			file = strings.TrimPrefix(a, "--policy=")
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: reissue: unknown option %q\n%s", a, reissueUsage)
+			fmt.Fprintf(stderr, "mashctl: reissue: unknown %s\n%s", config.RejectedArg(a), reissueUsage)
 			return 2
 		default:
 			names = append(names, a)

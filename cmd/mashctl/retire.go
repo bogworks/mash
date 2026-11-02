@@ -50,7 +50,7 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 				return 2
 			}
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: retire: unknown option %q\n%s", a, retireUsage)
+			fmt.Fprintf(stderr, "mashctl: retire: unknown %s\n%s", config.RejectedArg(a), retireUsage)
 			return 2
 		case name != "":
 			fmt.Fprintf(stderr, "mashctl: retire: one endpoint name only\n%s", retireUsage)
@@ -68,7 +68,8 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		return 1
 	}
 	if !config.ValidName(name) {
-		return fail("endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "retire")
+		return 2
 	}
 	cfg, err := loadCtlConfig(env, true)
 	if err != nil {

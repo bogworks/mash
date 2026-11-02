@@ -17,7 +17,7 @@ rules:
     action: allow | deny
     from: {KEY: VALUE}     # required; {} is every endpoint
     to: {KEY: VALUE}       # required
-    log: true              # optional; carried, no effect on the compiled permissions
+    # log: true            # not implemented: Check refuses it (ADR 0062)
 tests:
   - {from: NAME, to: NAME, expect: allow | deny}
 ```
@@ -37,7 +37,7 @@ Rules are a union and their order means nothing. For a sender and a recipient: i
 
 ## What check, test and compile say
 
-- `check` reports errors (a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint) and warnings. Warnings: a rule whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), an endpoint whose user would need more than 150 tags (see below), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
+- `check` reports errors (a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint, `log: true` on a rule: it is not implemented yet) and warnings. Warnings: label values for one key that differ only in case across endpoints (`Finance` and `finance` are different values to a selector); a rule whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), an endpoint whose user would need more than 150 tags (see below), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
 - `test` evaluates the `tests` section against the rules.
 - `explain FROM TO` names the deciding rule and the selectors that selected it, or says no rule matched and the default applied. When several rules match, a deny decides over any allow, and the text lists the others.
 
@@ -101,7 +101,6 @@ rules:
     action: deny
     from: {role: agent}
     to: {risk: high}
-    log: true
 
 tests:
   - {from: coder, to: reviewer, expect: allow}
@@ -148,7 +147,6 @@ rules:
     action: deny
     from: {internet: "yes"}
     to: {team: finance}
-    log: true
   - name: hr-is-private
     action: deny
     from: {}
@@ -174,7 +172,7 @@ tests:
 
 | Command | What it does | Exit code |
 | --- | --- | --- |
-| `mashctl policy check` | Parses and validates the file. Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error, 0 otherwise (warnings do not fail) |
+| `mashctl policy check` | Parses and validates the file, then runs the JWT size budget (the 1 MiB account JWT and the user JWT limit, as `show --budget` and `apply` do). Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error or an over-budget file, 0 otherwise (warnings do not fail) |
 | `mashctl policy test` | Runs the `tests` section: `PASS from->to expect allow`, or `FAIL from->to expect allow got deny: <why>`. A file with no tests prints `test: no tests in the file`. | 1 if any test fails |
 | `mashctl policy explain FROM TO` | Says whether FROM may mail TO and which rule (or the default) decided, then the line `note: rules cover mail only; prompt and status probes are not covered by rules yet (open)`. Both must be declared endpoints. | 0 whether allowed or denied; 2 for an unknown endpoint or bad usage |
 | `mashctl policy show [--json] [--budget]` | Prints the who-may-mail-whom matrix (or the JSON form), then a summary of zones, wildcard zones and tags per endpoint, then the same `note:` line (rules cover mail only; prompt and status probes are open). With `--json` there is no note; the document carries top-level `"covers": ["mail"]` and `"open": ["prompt", "status"]` instead. `--budget` also prints the account and worst user JWT sizes against their limits (to stderr with `--json`). Needs the owner (`MASH_OWNER` or `config.json`). | 1 on an invalid file, a missing owner, or a budget over its limit |

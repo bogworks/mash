@@ -43,7 +43,6 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 
 	switch args[0] {
 	case "send":
-		const sendUsage = "usage: mash send <to> [--urgent] [--kind blocker|question|task|result|fyi] [--id KEY] [text... | --file F | -]"
 		urgent, k, sendID := false, kind.Task, ""
 		for len(args) > 2 {
 			if args[2] == "--urgent" {

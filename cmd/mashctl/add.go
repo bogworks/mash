@@ -68,7 +68,7 @@ func parseAddArgs(args []string) (addOpts, error) {
 			}
 			k, lv, ok := strings.Cut(v, "=")
 			if !ok || k == "" || lv == "" {
-				return o, fmt.Errorf("--label wants k=v, got %q", v)
+				return o, errors.New("--label wants k=v (the value is not shown)")
 			}
 			if _, dup := o.labels[k]; dup {
 				return o, fmt.Errorf("label %q given twice", k)
@@ -91,7 +91,7 @@ func parseAddArgs(args []string) (addOpts, error) {
 			o.note = v
 		default:
 			if strings.HasPrefix(a, "-") {
-				return o, fmt.Errorf("unknown option %q", a)
+				return o, fmt.Errorf("unknown %s", config.RejectedArg(a))
 			}
 			if o.name != "" {
 				return o, errors.New("one endpoint name only")
@@ -248,7 +248,8 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 		return 1
 	}
 	if !config.ValidName(o.name) {
-		return fail("endpoint name %q: 1-48 lower-case letters, digits and single hyphens", o.name)
+		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "add")
+		return 2
 	}
 	cfg, err := loadCtlConfig(env, true)
 	if err != nil {

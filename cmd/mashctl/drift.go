@@ -132,11 +132,11 @@ func parseDriftArgs(args []string) (driftOpts, error) {
 			o.credsDir, err = val()
 		case "--json":
 			if hasInline {
-				err = fmt.Errorf("unknown argument %q", a)
+				err = fmt.Errorf("unexpected %s", config.RejectedArg(a))
 			}
 			o.json = true
 		default:
-			err = fmt.Errorf("unknown argument %q", a)
+			err = fmt.Errorf("unexpected %s", config.RejectedArg(a))
 		}
 		if err != nil {
 			return o, err
@@ -572,7 +572,7 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 	}
 	if sv := o.servers; sv != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(sv)); err != nil || n < 1 {
-			fmt.Fprintf(stderr, "%s--servers must be a whole number of servers, 1 or more, got %q\n%s", pfx, sv, repairUsage())
+			fmt.Fprintf(stderr, "%s--servers must be a whole number of servers, 1 or more (the value is not shown)\n%s", pfx, repairUsage())
 			return 2
 		}
 	}

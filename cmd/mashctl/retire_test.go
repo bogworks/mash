@@ -290,9 +290,10 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 		t.Error("policy changed by the retry")
 	}
 
-	// after the operator's deprovision, --force removes the policy entry
-	if _, errb, code := h.run("deprovision", "b"); code != 0 {
-		t.Fatal(errb)
+	// the stand-in removed everything, so deprovision has nothing left to finish and says so; --force removes the
+	// policy entry
+	if _, errb, code := h.run("deprovision", "b"); code != 1 || !strings.Contains(errb, "no endpoint named b") {
+		t.Fatal(code, errb)
 	}
 	out, errb, code = h.run("retire", "b", "--force")
 	if code != 0 || !strings.HasPrefix(out, "retired b\n") || strings.Contains(h.policyText(), "  b:") {

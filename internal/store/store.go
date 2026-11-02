@@ -210,7 +210,7 @@ func ValidLabels(l map[string]string) error {
 	}
 	for k, v := range l {
 		if !ValidLabelKey(k) {
-			return fmt.Errorf("mash: label key %q: a letter, then up to 31 of a-z 0-9 _ . -", k)
+			return fmt.Errorf("mash: label key: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)")
 		}
 		if err := ValidMeta("label "+k, v); err != nil {
 			return err
@@ -236,7 +236,7 @@ func ValidCaps(caps []string) error {
 	seen := map[string]bool{}
 	for _, c := range caps {
 		if !ValidCap(c) {
-			return fmt.Errorf("mash: capability %q: a letter, then up to 31 of a-z 0-9 _ . -", c)
+			return fmt.Errorf("mash: capability: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)")
 		}
 		if seen[c] {
 			return fmt.Errorf("mash: capability %q is listed twice", c)
