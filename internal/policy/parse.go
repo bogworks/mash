@@ -48,6 +48,9 @@ func Parse(data []byte) (*File, error) {
 	if f.Default == "" {
 		f.Default = Allow
 	}
+	if f.SubjectLabel == "" {
+		f.SubjectLabel = DefaultSubjectLabel
+	}
 	f.lines = collectLines(top)
 	if err := f.checked(); err != nil {
 		return nil, err

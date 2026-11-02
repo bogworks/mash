@@ -83,17 +83,30 @@ func TestGolden(t *testing.T) {
 			golden(t, base+".json.golden", js)
 
 			type perms struct {
-				Pub []string `json:"pub"`
-				Sub []string `json:"sub"`
+				Pub     []string `json:"pub"`
+				PubDeny []string `json:"pub_deny,omitempty"`
+				Sub     []string `json:"sub"`
 			}
-			all := map[string]perms{}
+			type zoneOut struct {
+				Wildcards []string `json:"wildcards"`
+				Endpoints []string `json:"endpoints"`
+				Template  perms    `json:"template"`
+			}
+			out := struct {
+				Zones map[string]zoneOut  `json:"zones"`
+				Tags  map[string][]string `json:"tags"`
+			}{map[string]zoneOut{}, map[string][]string{}}
+			for _, z := range c.Zones {
+				out.Zones[z.Name] = zoneOut{Wildcards: z.Wildcards, Endpoints: z.Endpoints, Template: perms{
+					Pub:     slices.Sorted(slices.Values([]string(z.Perms.Pub.Allow))),
+					PubDeny: slices.Sorted(slices.Values([]string(z.Perms.Pub.Deny))),
+					Sub:     slices.Sorted(slices.Values([]string(z.Perms.Sub.Allow))),
+				}}
+			}
 			for _, e := range c.Endpoints {
-				all[e.Name] = perms{
-					Pub: slices.Sorted(slices.Values([]string(e.Perms.Pub.Allow))),
-					Sub: slices.Sorted(slices.Values([]string(e.Perms.Sub.Allow))),
-				}
+				out.Tags[e.Name] = e.Tags
 			}
-			pj, err := json.MarshalIndent(all, "", "  ")
+			pj, err := json.MarshalIndent(out, "", "  ")
 			if err != nil {
 				t.Fatal(err)
 			}

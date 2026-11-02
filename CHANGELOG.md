@@ -6,7 +6,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Added
 
-- `internal/policy`: the policy file (labels, allow and deny rules, tests) parsed strictly, checked, explained and compiled to each endpoint's full per-recipient permission set, with a JWT size budget; `admin.PermissionsTo` narrows the peer lines to a recipient list. Not wired to any command yet; see [docs/policy-file.md](docs/policy-file.md).
+- `internal/policy`: the policy file (labels, allow and deny rules, a `subject_label` naming the zone, tests) parsed strictly, checked, explained and compiled to one scoped signing key per zone (wildcard lines per allowed zone pair, `{{name()}}` fixed lines) plus `allow:`/`deny:` tags on each endpoint's user for exceptions, with a budget for the account JWT (independent of the number of endpoints) and each user JWT; `admin.ZonePermissions` and `admin.PermissionsTo` build the permission lines. The zone token in the subject lands separately. Not wired to any command yet; see [docs/policy-file.md](docs/policy-file.md).
 - Releases carry a CycloneDX 1.5 SBOM per binary (`mash-<os>-<arch>.cdx.json`, attested and listed in the signed `SHA256SUMS`) and SLSA provenance (`mash.intoto.jsonl`) from the `slsa-github-generator` generic generator, and the publish gate verifies all of them before a release is published. How to verify a download is in [docs/release.md](docs/release.md#verify-a-release) ([ADR-0052](docs/decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md)).
 
 ### Fixed
