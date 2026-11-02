@@ -275,6 +275,12 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	if !ok {
 		return fail("internal error: the new endpoint did not compile")
 	}
+	// The JWTs the policy needs must fit before anything is created, provisioned or written.
+	rep, berr := policy.Budget(after)
+	if rerr := budgetRefusal(o.name, rep, berr); rerr != nil {
+		fmt.Fprintf(stderr, "mashctl: %v\n", rerr)
+		return 1
+	}
 
 	credsPath, err := credsFileFor(cfg, o.name)
 	if err != nil {
@@ -343,7 +349,39 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	if zoneSetChanged(before, after) {
 		fmt.Fprintln(stdout, "account update needed: run mashctl apply")
 	}
+	if w := budgetWarning(rep); w != "" {
+		fmt.Fprintln(stderr, w)
+	}
 	return 0
+}
+
+// budgetRefusal is the error for an add whose compiled policy does not fit the JWT budgets, or nil when it fits.
+// err and r come from policy.Budget; the budget message names the biggest contributor.
+func budgetRefusal(name string, r policy.BudgetReport, err error) error {
+	if err == nil && r.OK {
+		return nil
+	}
+	reason := "the JWT budgets are exceeded"
+	if err != nil {
+		reason = strings.TrimPrefix(err.Error(), "policy: ")
+	}
+	return fmt.Errorf("adding %s would make the policy unusable: %s; nothing was changed", name, reason)
+}
+
+// budgetWarning is a one-line warning when the budget passes but the worst user JWT or the account JWT is above 80%
+// of its limit, else "".
+func budgetWarning(r policy.BudgetReport) string {
+	var parts []string
+	if r.UserLimit > 0 && r.WorstUserJWTBytes*5 > r.UserLimit*4 {
+		parts = append(parts, fmt.Sprintf("the user JWT of %s is %d of %d bytes", r.WorstUser, r.WorstUserJWTBytes, r.UserLimit))
+	}
+	if r.AccountLimit > 0 && r.AccountJWTBytes*5 > r.AccountLimit*4 {
+		parts = append(parts, fmt.Sprintf("the account JWT is %d of %d bytes", r.AccountJWTBytes, r.AccountLimit))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "warning: above 80% of a JWT budget: " + strings.Join(parts, "; ")
 }
 
 // addLabels is the labels the new endpoint is declared with: --label pairs, plus kind=tool for --tool and the

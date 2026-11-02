@@ -96,7 +96,24 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		}
 	}
 	code := 0
+	warned := false
 	for _, name := range names {
+		if ep, ok := findEndpoint(c, name); ok {
+			// Measure this endpoint alone: Budget reports only the worst user.
+			one := *c
+			one.Endpoints = []policy.CompiledEndpoint{ep}
+			rep, berr := policy.Budget(&one)
+			if berr != nil && rep.WorstUserJWTBytes > rep.UserLimit {
+				fmt.Fprintf(stderr, "mashctl: reissue %s: its user JWT would be %d bytes with %d tags, over the %d byte limit of the connect line; nothing was changed\n",
+					name, rep.WorstUserJWTBytes, len(ep.Tags), rep.UserLimit)
+				code = 1
+				continue
+			}
+			if w := budgetWarning(rep); w != "" && berr == nil && !warned {
+				fmt.Fprintln(stderr, w)
+				warned = true
+			}
+		}
 		tags, err := reissueOne(keys, cfg, c, name)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)

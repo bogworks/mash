@@ -10,6 +10,8 @@ mashctl add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]
 
 `--tool` adds the label `kind=tool`. `--zone Z` sets the policy's subject label (default `zone`) to Z. The policy file is `--policy`, else `MASH_POLICY`, else `<config dir>/policy.yaml`. It needs the server and admin credentials (as `provision` does) and the account key.
 
+`add` refuses a policy that would exceed the JWT budgets (the 1 MiB account JWT, the per-user connect limit) before changing anything.
+
 Order of operations; a failure at any step undoes the earlier ones, so no half-made endpoint is left:
 
 1. Lock and load the policy file; the name must be valid and not declared.

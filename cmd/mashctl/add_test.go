@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
+	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -371,5 +374,103 @@ func TestAddUsageListsVerbs(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("usage lacks %q", want)
 		}
+	}
+}
+
+// bigPolicy is a default-deny policy of n peers in zone red, each with a unique id label, and one allow rule per
+// peer for sender id=big. Without a declared big the rules match nothing; once big is added (--label id=big) it is
+// named in n exceptions and its user JWT carries a tag per peer.
+func bigPolicy(n int, withBig bool) string {
+	var b strings.Builder
+	b.WriteString("default: deny\n\nendpoints:\n")
+	if withBig {
+		b.WriteString("  big:\n    labels: {zone: red, id: big}\n")
+	}
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "  p%03d:\n    labels: {zone: red, id: p%03d}\n", i, i)
+	}
+	b.WriteString("\nrules:\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "  - {name: big-p%03d, action: allow, from: {id: big}, to: {id: p%03d}}\n", i, i)
+	}
+	b.WriteString("\ntests: []\n")
+	return b.String()
+}
+
+func TestBudgetRefusal(t *testing.T) {
+	if err := budgetRefusal("x", policy.BudgetReport{OK: true}, nil); err != nil {
+		t.Errorf("ok report: %v", err)
+	}
+	err := budgetRefusal("x", policy.BudgetReport{}, errors.New("policy: the user JWT of x would be 9000 bytes with 300 tags"))
+	want := "adding x would make the policy unusable: the user JWT of x would be 9000 bytes with 300 tags; nothing was changed"
+	if err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+	if err := budgetRefusal("x", policy.BudgetReport{}, nil); err == nil || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Errorf("not OK without an error: %v", err)
+	}
+}
+
+func TestBudgetWarning(t *testing.T) {
+	ok := policy.BudgetReport{OK: true, UserLimit: 4000, AccountLimit: 1 << 20, WorstUserJWTBytes: 3200, AccountJWTBytes: 1000, WorstUser: "w"}
+	if w := budgetWarning(ok); w != "" {
+		t.Errorf("exactly 80%%: %q", w)
+	}
+	ok.WorstUserJWTBytes = 3300
+	if w := budgetWarning(ok); !strings.HasPrefix(w, "warning: ") || !strings.Contains(w, "user JWT of w") || strings.Contains(w, "account") {
+		t.Errorf("user: %q", w)
+	}
+	ok.AccountJWTBytes = (1 << 20) * 9 / 10
+	if w := budgetWarning(ok); !strings.Contains(w, "account JWT") || !strings.Contains(w, "user JWT") {
+		t.Errorf("both: %q", w)
+	}
+}
+
+func TestAddRefusedOverBudget(t *testing.T) {
+	src := bigPolicy(260, false)
+	// confirm the setup is really over the limit before asserting add's refusal
+	_, c, err := compileBytes([]byte(bigPolicy(260, true)), "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ := policy.Budget(c); rep.OK {
+		t.Fatalf("setup is not over budget: %+v", rep)
+	}
+
+	h := newAddEnv(t, src)
+	before, _ := os.ReadFile(h.policy)
+	_, errb, code := h.run("add", "big", "--zone", "red", "--label", "id=big")
+	if code != 1 || !strings.Contains(errb, "adding big would make the policy unusable") ||
+		!strings.Contains(errb, "user JWT of big") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("add: %d %q", code, errb)
+	}
+	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
+		t.Error("policy changed")
+	}
+	if _, err := os.Lstat(h.creds("big")); err == nil {
+		t.Error("creds file written")
+	}
+	if r := h.records(); len(r) != 0 {
+		t.Errorf("records %v", r)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(h.dir, "keys")); len(ents) > 0 {
+		for _, e := range ents {
+			if strings.Contains(e.Name(), "red") {
+				t.Errorf("zone key file %s", e.Name())
+			}
+		}
+	}
+}
+
+func TestReissueRefusedOverBudget(t *testing.T) {
+	h := newAddEnv(t, bigPolicy(260, true))
+	h.seed("big")
+	before, _ := os.ReadFile(h.creds("big"))
+	_, errb, code := h.run("reissue", "big")
+	if code != 1 || !strings.Contains(errb, "reissue big: its user JWT would be") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("reissue: %d %q", code, errb)
+	}
+	if after, _ := os.ReadFile(h.creds("big")); !bytes.Equal(before, after) {
+		t.Error("creds changed")
 	}
 }
