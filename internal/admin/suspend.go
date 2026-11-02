@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 type SuspendState struct {
 	Suspended bool
 	Since     string // RFC 3339 UTC; empty when not suspended
+	ID        string // names this one suspension; empty when not suspended or when parked by hand without one
 	Msgs      uint64
 	LastSeq   uint64
 }
@@ -59,14 +62,14 @@ func suspendState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 	}
 	st := SuspendState{Msgs: info.State.Msgs, LastSeq: info.State.LastSeq}
 	if _, ok := suspendedSubjects(name, info.Config); ok {
-		st.Suspended, st.Since = true, info.Config.Metadata[store.MetaSuspendedAt]
+		st.Suspended, st.Since, st.ID = true, info.Config.Metadata[store.MetaSuspendedAt], info.Config.Metadata[store.MetaSuspendedID]
 	}
 	return st, nil
 }
 
 // Suspend parks name's inbox stream: it saves the stream's subjects in its metadata and replaces them with the one
 // subject mash.suspended.<name>, so a sender's publish finds no stream. Only the subjects and metadata change and
-// nothing is purged. It is idempotent: a suspended inbox is reported as it is. The state's LastSeq is read after the
+// nothing is purged. It also stores a fresh random suspension id. It is idempotent: a suspended inbox is reported as it is, with its existing id. The state's LastSeq is read after the
 // update.
 func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) {
 	if !config.ValidName(name) {
@@ -99,6 +102,11 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 	}
 	meta[store.MetaSuspendedSubjects] = string(saved)
 	meta[store.MetaSuspendedAt] = time.Now().UTC().Format(time.RFC3339)
+	var idb [16]byte
+	if _, err := rand.Read(idb[:]); err != nil {
+		return SuspendState{}, fmt.Errorf("mash: suspend %s: suspension id: %w", name, err)
+	}
+	meta[store.MetaSuspendedID] = hex.EncodeToString(idb[:])
 	cfg.Subjects, cfg.Metadata = []string{store.SuspendedSubject(name)}, meta
 	if s, err = a.js.UpdateStream(ctx, cfg); err != nil {
 		return SuspendState{}, fmt.Errorf("mash: suspend %s: %w", name, err)
@@ -129,6 +137,9 @@ func (a *Admin) Resume(ctx context.Context, name string) error {
 	cfg := info.Config
 	saved, ok := suspendedSubjects(name, cfg)
 	_, hasMeta := cfg.Metadata[store.MetaSuspendedSubjects]
+	if _, hasID := cfg.Metadata[store.MetaSuspendedID]; hasID {
+		hasMeta = true
+	}
 	parked := slices.Equal(cfg.Subjects, []string{store.SuspendedSubject(name)})
 	switch {
 	case !ok && parked:
@@ -141,6 +152,7 @@ func (a *Admin) Resume(ctx context.Context, name string) error {
 	meta := maps.Clone(cfg.Metadata)
 	delete(meta, store.MetaSuspendedSubjects)
 	delete(meta, store.MetaSuspendedAt)
+	delete(meta, store.MetaSuspendedID)
 	if len(meta) == 0 {
 		meta = nil
 	}

@@ -815,10 +815,11 @@ func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 }
 
 // DeprovisionDrained is Deprovision for an inbox that was suspended and read through sequence seq (the last_seq that
-// Suspend reported). Under the name's lock it reads the stream fresh and refuses, touching nothing, unless the inbox is
-// still suspended and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
+// Suspend reported); id is the suspension id Suspend reported. Under the name's lock it reads the stream fresh and
+// refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
+// matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
 // check fail instead of losing mail. A name with no inbox stream is removed as Deprovision does.
-func (a *Admin) DeprovisionDrained(ctx context.Context, name string, seq uint64) error {
+func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) error {
 	if !config.ValidName(name) {
 		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -840,6 +841,9 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name string, seq uint64)
 	}
 	if _, ok := suspendedSubjects(name, info.Config); !ok {
 		return fmt.Errorf("mash: inbox of %s is not suspended; run suspend first", name)
+	}
+	if cur := info.Config.Metadata[store.MetaSuspendedID]; id == "" || cur != id {
+		return fmt.Errorf("mash: inbox of %s: this is not the suspension you drained (id %s, you hold %s); suspend state changed, read it again", name, cur, id)
 	}
 	if info.State.LastSeq != seq {
 		return fmt.Errorf("mash: inbox of %s is at last_seq %d, not the drained %d; drain the rest and try again", name, info.State.LastSeq, seq)

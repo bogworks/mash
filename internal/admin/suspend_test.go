@@ -89,7 +89,7 @@ func TestResumeRestoresSubjectsAndDelivery(t *testing.T) {
 			t.Fatalf("%s: subjects %v, want %v", name, got, want)
 		}
 		s, _ := js.Stream(ctx, "inbox-"+name)
-		for _, k := range []string{store.MetaSuspendedSubjects, store.MetaSuspendedAt} {
+		for _, k := range []string{store.MetaSuspendedSubjects, store.MetaSuspendedAt, store.MetaSuspendedID} {
 			if _, ok := s.CachedInfo().Config.Metadata[k]; ok {
 				t.Fatalf("%s: metadata %s left", name, k)
 			}
@@ -346,10 +346,10 @@ func TestSuspendReparksWhenMetadataButSubjectsNotParked(t *testing.T) {
 	ctx := context.Background()
 	provisionFor(t, e, a, "alpha", "")
 	updateInbox(t, js, "alpha", func(c *jetstream.StreamConfig) {
-		c.Metadata = map[string]string{store.MetaSuspendedSubjects: `["stale.subject"]`, store.MetaSuspendedAt: "2000-01-01T00:00:00Z"}
+		c.Metadata = map[string]string{store.MetaSuspendedSubjects: `["stale.subject"]`, store.MetaSuspendedAt: "2000-01-01T00:00:00Z", store.MetaSuspendedID: "stale-id"}
 	})
 	st, err := a.Suspend(ctx, "alpha")
-	if err != nil || !st.Suspended || st.Since == "2000-01-01T00:00:00Z" {
+	if err != nil || !st.Suspended || st.Since == "2000-01-01T00:00:00Z" || st.ID == "" || st.ID == "stale-id" {
 		t.Fatalf("Suspend: %+v %v", st, err)
 	}
 	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"mash.suspended.alpha"}) {
@@ -459,7 +459,7 @@ func TestDeprovisionDrained(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Not suspended.
-	if err := a.DeprovisionDrained(ctx, "d", 1); err == nil || !strings.Contains(err.Error(), "not suspended; run suspend first") {
+	if err := a.DeprovisionDrained(ctx, "d", "x", 1); err == nil || !strings.Contains(err.Error(), "not suspended; run suspend first") {
 		t.Fatalf("not suspended: %v", err)
 	}
 	intact(t, a, js, "d")
@@ -468,7 +468,7 @@ func TestDeprovisionDrained(t *testing.T) {
 		t.Fatalf("%+v %v", st, err)
 	}
 	// Wrong sequence.
-	if err := a.DeprovisionDrained(ctx, "d", 0); err == nil || !strings.Contains(err.Error(), "last_seq 1, not the drained 0") {
+	if err := a.DeprovisionDrained(ctx, "d", st.ID, 0); err == nil || !strings.Contains(err.Error(), "last_seq 1, not the drained 0") {
 		t.Fatalf("seq differs: %v", err)
 	}
 	intact(t, a, js, "d")
@@ -476,15 +476,27 @@ func TestDeprovisionDrained(t *testing.T) {
 	if err := a.Resume(ctx, "d"); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.DeprovisionDrained(ctx, "d", st.LastSeq); err == nil || !strings.Contains(err.Error(), "not suspended") {
+	if err := a.DeprovisionDrained(ctx, "d", st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "not suspended") {
 		t.Fatalf("after resume: %v", err)
 	}
 	intact(t, a, js, "d")
 	// Suspended and matching.
-	if _, err := a.Suspend(ctx, "d"); err != nil {
-		t.Fatal(err)
+	st2, err := a.Suspend(ctx, "d")
+	if err != nil || st2.ID == "" || st2.ID == st.ID || len(st2.ID) != 32 {
+		t.Fatalf("resume then suspend: %+v (first %q) %v", st2, st.ID, err)
 	}
-	if err := a.DeprovisionDrained(ctx, "d", 1); err != nil {
+	if err := a.DeprovisionDrained(ctx, "d", st.ID, 1); err == nil || !strings.Contains(err.Error(), "not the suspension you drained") {
+		t.Fatalf("old id: %v", err)
+	}
+	intact(t, a, js, "d")
+	if err := a.DeprovisionDrained(ctx, "d", "", 1); err == nil || !strings.Contains(err.Error(), "not the suspension you drained") {
+		t.Fatalf("empty id: %v", err)
+	}
+	intact(t, a, js, "d")
+	if again, err := a.Suspend(ctx, "d"); err != nil || again.ID != st2.ID {
+		t.Fatalf("idempotent suspend id: %+v %v", again, err)
+	}
+	if err := a.DeprovisionDrained(ctx, "d", st2.ID, 1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := js.Stream(ctx, "inbox-d"); err == nil {
@@ -493,7 +505,52 @@ func TestDeprovisionDrained(t *testing.T) {
 	if recs, err := a.List(ctx); err != nil || len(recs) != 0 {
 		t.Fatalf("records %v %v", recs, err)
 	}
-	if err := a.DeprovisionDrained(ctx, "Bad Name", 0); err == nil {
+	if err := a.DeprovisionDrained(ctx, "Bad Name", "x", 0); err == nil {
 		t.Fatal("bad name accepted")
 	}
+}
+
+// A re-provisioned endpoint of the same name with the same last_seq must not fall to an old drain command.
+func TestDeprovisionDrainedRefusesOldSuspensionOfReprovisionedName(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "r", "")
+	old, err := a.Suspend(ctx, "r")
+	if err != nil || old.ID == "" {
+		t.Fatalf("%+v %v", old, err)
+	}
+	if err := a.DeprovisionDrained(ctx, "r", old.ID, old.LastSeq); err != nil {
+		t.Fatal(err)
+	}
+	provisionFor(t, e, a, "r", "")
+	cur, err := a.Suspend(ctx, "r")
+	if err != nil || cur.LastSeq != old.LastSeq || cur.ID == old.ID {
+		t.Fatalf("new suspension %+v old %+v %v", cur, old, err)
+	}
+	if err := a.DeprovisionDrained(ctx, "r", old.ID, old.LastSeq); err == nil || !strings.Contains(err.Error(), "not the suspension you drained") {
+		t.Fatalf("old id accepted: %v", err)
+	}
+	intact(t, a, js, "r")
+	if got, err := a.Suspended(ctx, "r"); err != nil || !got.Suspended || got.ID != cur.ID {
+		t.Fatalf("state after refusal: %+v %v", got, err)
+	}
+}
+
+// A hand-made suspension without an id is suspended, with an empty ID, and never satisfies a drained guard.
+func TestDeprovisionDrainedEmptyIDNeverMatches(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "h", "")
+	updateInbox(t, js, "h", func(c *jetstream.StreamConfig) {
+		c.Metadata = map[string]string{store.MetaSuspendedSubjects: `["agents.mail.cc.o.h"]`}
+		c.Subjects = []string{store.SuspendedSubject("h")}
+	})
+	st, err := a.Suspended(ctx, "h")
+	if err != nil || !st.Suspended || st.ID != "" {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if err := a.DeprovisionDrained(ctx, "h", "", st.LastSeq); err == nil || !strings.Contains(err.Error(), "not the suspension you drained") {
+		t.Fatalf("empty id matched: %v", err)
+	}
+	intact(t, a, js, "h")
 }

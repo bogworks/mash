@@ -231,13 +231,13 @@ Deprovisioning fences the name, then removes the directory record and the inbox 
 To read the last of an endpoint's mail before removing it, stop new mail first, then drain, then deprovision ([ADR 0057](decisions/0057-an-admin-can-suspend-an-endpoints-inbound-mail-by-parking-its-inbox-stream-subjects.md)):
 
 ```sh
-mashctl suspend design      # suspended design: last_seq 41, msgs 38
+mashctl suspend design      # suspended design: id 9f3c..., last_seq 41, msgs 38
 mashctl suspended design    # exit 0 if suspended, 3 if not, 1 on any error
 # read the inbox through sequence 41 (the last_seq above); it is final while the endpoint stays suspended
-mashctl deprovision design --drained-to 41
+mashctl deprovision design --suspension 9f3c... --drained-to 41
 ```
 
-`--drained-to N` is the check that makes this safe: under the name's lock it refuses, touching nothing, unless the inbox is still suspended and its last sequence is exactly N. If another admin ran `resume` meanwhile, or mail arrived after it, the command fails instead of deleting mail you have not read. A plain `mashctl deprovision design` does not check, so use it only when you do not need the mail. `--drained-to` cannot be combined with `--user`.
+`--suspension ID --drained-to N` (both are required together) is the check that makes this safe: under the name's lock it refuses, touching nothing, unless the inbox is still suspended under that id and its last sequence is exactly N. The id, a random token `suspend` stores and prints, ties the drain to that one suspension, so an endpoint re-provisioned under the same name (which can have the same last sequence, commonly 0) cannot be removed by an old command. If another admin ran `resume` meanwhile, or mail arrived after it, the command fails instead of deleting mail you have not read. A plain `mashctl deprovision design` does not check, so use it only when you do not need the mail. `--drained-to` cannot be combined with `--user`.
 
 `suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl resume design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; `set-zone` refuses on a suspended endpoint, and so does provisioning over its stream. Both `suspend` and `resume` can be repeated safely. `mash admin` carries the same three verbs. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
 

@@ -61,10 +61,10 @@ After the save the policy is compiled before and after, and each consequence is 
 
 ## Suspending an endpoint's inbound mail
 
-- `mashctl suspend NAME` refuses all inbound mail to NAME's inbox and prints `suspended NAME: last_seq N, msgs M`. Stored mail stays readable; the sequence is final while the suspension holds.
+- `mashctl suspend NAME` refuses all inbound mail to NAME's inbox and prints `suspended NAME: id ID, last_seq N, msgs M`. The id is a random token naming this one suspension. Stored mail stays readable; the sequence is final while the suspension holds.
 - `mashctl resume NAME` restores delivery and prints `resumed NAME`.
-- `mashctl suspended NAME` prints `suspended NAME since T: last_seq N, msgs M` and exits 0, or `NAME is not suspended` and exits 3. Any error exits 1.
-- To remove an endpoint after reading its last mail: `mashctl suspend NAME` (note `last_seq N`), drain through N, then `mashctl deprovision NAME --drained-to N`. The deprovision refuses, changing nothing, unless the inbox is still suspended and at last_seq N when it runs, so a `resume` by another admin cannot lose mail. Plain `deprovision` does not check, and `--drained-to` cannot be combined with `--user`.
+- `mashctl suspended NAME` prints `suspended NAME since T: id ID, last_seq N, msgs M` and exits 0, or `NAME is not suspended` and exits 3. Any error exits 1.
+- To remove an endpoint after reading its last mail: `mashctl suspend NAME` (note `id ID` and `last_seq N`), drain through N, then `mashctl deprovision NAME --suspension ID --drained-to N` (both flags are required together; either alone is a usage error). The deprovision refuses, changing nothing, unless the inbox is still suspended under that same id and at last_seq N when it runs, so a `resume` by another admin cannot lose mail. The id ties the drain to that one suspension, so a re-provisioned endpoint of the same name cannot be removed by an old command. Example: `mashctl deprovision design --suspension 9f3c... --drained-to 41`. Plain `deprovision` does not check, and `--drained-to` cannot be combined with `--user`.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 

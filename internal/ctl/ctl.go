@@ -64,7 +64,7 @@ func Usage(prog string) string {
 	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence")
 	line("resume <name>", "undo suspend")
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
-	line("deprovision <name> [--user U | --drained-to SEQ]", "remove the record and inbox; with --user, only if the record's user is still U; with --drained-to, only if suspended and at last_seq SEQ")
+	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", "remove the record and inbox; with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		mintLines(line)
@@ -251,7 +251,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "suspended %s: last_seq %d, msgs %d\n", args[1], st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d\n", args[1], st.ID, st.LastSeq, st.Msgs)
 		case "resume":
 			if err := a.Resume(ctx, args[1]); err != nil {
 				return fail(err)
@@ -266,22 +266,42 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				fmt.Fprintf(stdout, "%s is not suspended\n", args[1])
 				return 3
 			}
-			fmt.Fprintf(stdout, "suspended %s since %s: last_seq %d, msgs %d\n", args[1], st.Since, st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", args[1], st.Since, st.ID, st.LastSeq, st.Msgs)
 		}
 	case "deprovision":
-		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ]"
-		if len(args) >= 4 && slices.Contains(args[2:], "--drained-to") && slices.Contains(args[2:], "--user") {
+		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
+		var rest []string
+		if len(args) > 2 {
+			rest = args[2:]
+		}
+		hasDrained, hasSusp := slices.Contains(rest, "--drained-to"), slices.Contains(rest, "--suspension")
+		if (hasDrained || hasSusp) && slices.Contains(rest, "--user") {
 			return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --user and --drained-to cannot be combined"))
 		}
-		if len(args) == 4 && args[2] == "--drained-to" {
-			seq, err := strconv.ParseUint(args[3], 10, 64)
+		if hasDrained || hasSusp {
+			if len(args) != 6 || !hasDrained || !hasSusp {
+				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to and --suspension go together (both from suspend's output)"))
+			}
+			var seqArg, id string
+			for i := 2; i < 6; i += 2 {
+				switch args[i] {
+				case "--drained-to":
+					seqArg = args[i+1]
+				case "--suspension":
+					id = args[i+1]
+				}
+			}
+			seq, err := strconv.ParseUint(seqArg, 10, 64)
 			if err != nil {
 				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to wants a non-negative integer (the last_seq that suspend printed)"))
 			}
-			if err := a.DeprovisionDrained(ctx, args[1], seq); err != nil {
+			if id == "" {
+				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --suspension wants the id that suspend printed"))
+			}
+			if err := a.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "deprovisioned %s (suspended and drained to %d; revoke its NATS user with your operator tooling)\n", args[1], seq)
+			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; revoke its NATS user with your operator tooling)\n", args[1], id, seq)
 			return 0
 		}
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {

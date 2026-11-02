@@ -44,6 +44,7 @@ func SuspendedSubject(name string) string { return "mash.suspended." + name }
 const (
 	MetaSuspendedSubjects = "mash_suspended_subjects"
 	MetaSuspendedAt       = "mash_suspended_at"
+	MetaSuspendedID       = "mash_suspended_id" // random 128-bit hex token naming one suspension
 )
 
 // InboxDuplicateWindow is how long the inbox stream remembers a Nats-Msg-Id: a publish with the same id inside it is
