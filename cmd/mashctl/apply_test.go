@@ -48,6 +48,13 @@ var threeZones = strings.Replace(twoZones, "  y: {labels: {zone: b}}\n", "  y: {
 
 func newApplyEnv(t *testing.T, policyYAML string) *applyEnv {
 	t.Helper()
+	return newApplyEnvTweak(t, policyYAML, nil)
+}
+
+// newApplyEnvTweak is newApplyEnv with a hook that runs after the server files are written and before the server
+// starts, so a test can rewrite the operator or account JWTs on disk.
+func newApplyEnvTweak(t *testing.T, policyYAML string, tweak func(e *applyEnv)) *applyEnv {
+	t.Helper()
 	root := t.TempDir()
 	e := &applyEnv{t: t, root: root, keyDir: filepath.Join(root, "keys")}
 	ks, err := ctlkeys.Open(e.keyDir)
@@ -64,6 +71,9 @@ func newApplyEnv(t *testing.T, policyYAML string) *applyEnv {
 	}
 	e.pl = pl
 	e.acctPub = pl.Account
+	if tweak != nil {
+		tweak(e)
+	}
 	opts, err := server.ProcessConfigFile(pl.ConfPath())
 	if err != nil {
 		t.Fatal(err)
