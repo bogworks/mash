@@ -208,3 +208,19 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 		t.Errorf("agreeing: %q", errb)
 	}
 }
+
+// A password (or user name) with the letter s in it is masked like any other: the character classes of the pattern
+// exclude whitespace, not the letter s (codex on #208).
+func TestMaskURLHidesPasswordsWithTheLetterS(t *testing.T) {
+	for in, want := range map[string]string{
+		"tls://sam:secret@host":                "tls://sam:***@host",
+		"tls://sam:secret@host:4222":           "tls://sam:***@host:4222",
+		"nats://a:b@h1:4222,tls://sam:ssss@h2": "nats://a:***@h1:4222,tls://sam:***@h2",
+		"tls://h:4222":                         "tls://h:4222",
+		"tls://user@h:4222":                    "tls://user@h:4222",
+	} {
+		if got := maskURL(in); got != want {
+			t.Errorf("maskURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
