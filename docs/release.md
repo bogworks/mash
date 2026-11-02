@@ -257,6 +257,10 @@ generator), a check that the provenance's workflow entry point is `release.yml`,
 `release-check --assets` does. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
 ref builds nothing.
 
+A dry run is only meaningful if the verify job ran: check that `dry-run-verify` shows success, not skipped. A skipped job anywhere
+in a job's `needs` chain skips everything below it unless the job has its own status-function `if`, which is why each job below
+`build` has one; a green run in which `dry-run-verify` was skipped verified nothing.
+
 It does not exercise the tag guard (tag shape, signature, on main, older drafts), the maintainer's signing, the draft job or
 publishing, and it does not run `release-check`. It must be green on `main` before a release that changes the pipeline is tagged.
 
