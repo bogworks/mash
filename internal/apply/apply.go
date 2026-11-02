@@ -204,7 +204,7 @@ func (u unknownKey) describe() string {
 }
 
 // unknownKeyNote is the one explanation printed with every unknown signing key.
-const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry signing keys it did not create. Remove it with the tool that added it before apply can run."
+const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry signing keys it did not create. Remove it with the tool that added it before apply can run. Only a scoped signer whose role is exactly a zone of the policy file can be dropped, by --replace-zone-key naming that zone (or --remove-zone for a zone the file lacks)."
 
 func (b *built) refused() bool {
 	return len(b.conflicts) > 0 || len(b.unacked) > 0 || len(b.unknown) > 0
@@ -865,7 +865,7 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 			fmt.Fprintf(out, "  zone %s: changed\n", zp.name)
 		}
 		for _, o := range zp.replaced {
-			fmt.Fprintf(out, "      replaces the signing key %s (--replace-zone-key): credentials signed by it stop working\n", o)
+			fmt.Fprintf(out, "      replaces the signing key %s (role %s) on the explicit --replace-zone-key %s: it is dropped from the account JWT, and credentials signed by it, by mashctl or by any other tool, stop working\n", o, zp.name, zp.name)
 		}
 		for _, l := range zp.changes {
 			fmt.Fprintf(out, "      %s\n", l)

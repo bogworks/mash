@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
@@ -335,7 +336,7 @@ func TestReplaceZoneKeyReplacesTheOldSigner(t *testing.T) {
 	var out bytes.Buffer
 	// a dry run with the flag reports the replacement and changes nothing
 	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"a"}}, &out); code != 0 ||
-		!strings.Contains(out.String(), "replaces the signing key "+oldPub) {
+		!strings.Contains(out.String(), "replaces the signing key "+oldPub+" (role a)") || !strings.Contains(out.String(), "by any other tool, stop working") {
 		t.Fatalf("%d\n%s", code, out.String())
 	}
 	out.Reset()
@@ -540,5 +541,42 @@ func TestNotCoveredBlockOnSuccess(t *testing.T) {
 		if i == 2 && !strings.Contains(s, "account claims already up to date") {
 			t.Fatalf("%s", s)
 		}
+	}
+}
+
+// --replace-zone-key drops the named zone's own signer only: a plain signing key, a scoped key of a role that is not a
+// zone of the file, and one whose role differs from a zone's in case are still refused.
+func TestReplaceZoneKeyDoesNotCoverForeignKeys(t *testing.T) {
+	ks, fk, c, scoped, plain, _ := unknownSetup(t)
+	op, _, _ := ks.Operator()
+	ck, _ := nkeys.CreateAccount()
+	caseKey := pubOf(t, ck)
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		cl.SigningKeys.Add(plain)
+		for key, role := range map[string]string{scoped: "legacy", caseKey: "A"} {
+			sc := jwt.NewUserScope()
+			sc.Key, sc.Role = key, role
+			cl.SigningKeys.AddScopedSigner(sc)
+		}
+	})
+	before := fk.token
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	for _, mode := range []Mode{Apply, DryRun} {
+		var out bytes.Buffer
+		p := c
+		p.Mode, p.Keys, p.Resolver, p.ReplaceZoneKeys = mode, ks, fk, []string{"a"}
+		code := Run(context.Background(), p, &out)
+		s := out.String()
+		for _, w := range []string{"REFUSED", scoped, plain, caseKey, "role A"} {
+			if !strings.Contains(s, w) {
+				t.Fatalf("%s: missing %q:\n%s", mode, w, s)
+			}
+		}
+		if code != 1 || fk.pushes != 0 || fk.token != before {
+			t.Fatalf("%s: exit %d, pushes %d", mode, code, fk.pushes)
+		}
+	}
+	if z, _ := ks.Zones(); len(z) != 0 {
+		t.Fatalf("created zone keys %v", z)
 	}
 }

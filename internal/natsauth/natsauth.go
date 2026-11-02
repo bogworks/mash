@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
@@ -187,8 +188,35 @@ func RequireTLS(url string, insecureLoopback bool) ([]nats.Option, error) {
 			return nil, fmt.Errorf("mash: refusing a plain %s:// connection to %q with admin or system credentials: use tls:// with the server's certificate (tls_ca for a private CA). Only a loopback server may be used without TLS, and only with insecure_loopback set", scheme, host)
 		}
 	}
+	// Servers a server advertises are never added to the client's pool: the connection goes only to the configured URL.
 	if insecureLoopback {
-		return nil, nil
+		return []nats.Option{nats.IgnoreDiscoveredServers(), nats.SetCustomDialer(LoopbackDialer{})}, nil
 	}
-	return []nats.Option{nats.Secure()}, nil
+	return []nats.Option{nats.IgnoreDiscoveredServers(), nats.Secure()}, nil
+}
+
+// LoopbackDialer dials only localhost or a loopback IP literal, at the first connect and at every reconnect. It is the
+// guarantee behind insecure_loopback: whatever address the client is handed, a plain connection with admin or system
+// credentials is never opened to a host that is not on this machine.
+type LoopbackDialer struct{}
+
+// Dial implements nats.CustomDialer.
+func (LoopbackDialer) Dial(network, address string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("mash: insecure_loopback: refusing to dial %q: %w", address, err)
+	}
+	if !isLoopbackHost(host) {
+		return nil, fmt.Errorf("mash: insecure_loopback allows a plain connection only to localhost or a loopback address: refusing to dial %q", address)
+	}
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).Dial(network, address)
+	if err != nil {
+		return nil, err
+	}
+	// a name such as localhost is checked again against the address it resolved to
+	if ta, ok := conn.RemoteAddr().(*net.TCPAddr); ok && !ta.IP.IsLoopback() {
+		conn.Close()
+		return nil, fmt.Errorf("mash: insecure_loopback: %q resolved to %s, which is not a loopback address", address, ta.IP)
+	}
+	return conn, nil
 }
