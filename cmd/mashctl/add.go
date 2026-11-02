@@ -209,6 +209,33 @@ func zoneSetChanged(before, after *policy.Compiled) bool {
 	return false
 }
 
+// consequences is what an edit from the before compile to the after compile leaves for the operator, one line each
+// and none when nothing needs doing: an endpoint whose zone changed (its creds are signed by the old zone's key until
+// reissued, and the directory record is in the old zone), other endpoints whose tags changed (their user JWTs are
+// stale), and a changed account JWT (a zone added or removed, or a zone's permission template changed).
+func consequences(before, after *policy.Compiled) []string {
+	var out []string
+	var stale []string
+	for _, e := range before.Endpoints {
+		ne, ok := findEndpoint(after, e.Name)
+		switch {
+		case !ok:
+		case e.Zone != ne.Zone:
+			out = append(out, fmt.Sprintf("%s moves from zone %s to zone %s: its mail address changes. A directory record with no zone takes `mashctl set-zone %s %s`, then `mashctl reissue %s`; a record already in zone %s cannot be moved (set-zone refuses): retire %s and add it again with --zone %s. Until it is reissued its creds are signed by zone %s's key and keep zone %s's permissions",
+				e.Name, e.Zone, ne.Zone, e.Name, ne.Zone, e.Name, e.Zone, e.Name, ne.Zone, e.Zone, e.Zone))
+		case !slices.Equal(e.Tags, ne.Tags):
+			stale = append(stale, e.Name)
+		}
+	}
+	if len(stale) > 0 {
+		out = append(out, fmt.Sprintf("reissue needed: %s (run: mashctl reissue %s)", strings.Join(stale, ", "), strings.Join(stale, " ")))
+	}
+	if zoneSetChanged(before, after) {
+		out = append(out, "account update needed: run mashctl apply")
+	}
+	return out
+}
+
 // runAdd is `mashctl add`.
 func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	o, err := parseAddArgs(args)
@@ -343,17 +370,8 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 
 	// (7) report.
 	fmt.Fprintf(stdout, "added %s (zone %s) creds %s\n", o.name, ep.Zone, credsPath)
-	var stale []string
-	for _, e := range before.Endpoints {
-		if ne, ok := findEndpoint(after, e.Name); ok && !slices.Equal(e.Tags, ne.Tags) {
-			stale = append(stale, e.Name)
-		}
-	}
-	if len(stale) > 0 {
-		fmt.Fprintf(stdout, "reissue needed: %s (run: mashctl reissue %s)\n", strings.Join(stale, ", "), strings.Join(stale, " "))
-	}
-	if zoneSetChanged(before, after) {
-		fmt.Fprintln(stdout, "account update needed: run mashctl apply")
+	for _, l := range consequences(before, after) {
+		fmt.Fprintln(stdout, l)
 	}
 	if w := budgetWarning(rep); w != "" {
 		fmt.Fprintln(stderr, w)

@@ -34,6 +34,10 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		return runPolicy(args[1:], env, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, stdout, stderr)
+	case "label", "unlabel": // the policy file; the server only with --sync
+		return runLabel(args[0] == "unlabel", args[1:], env, stdout, stderr)
+	case "retire":
+		return runRetire(args[1:], env, stdout, stderr)
 	case "reissue": // needs the key directory and creds files, no server
 		return runReissue(args[1:], env, stdout, stderr)
 	case "init", "limits", "permissions", "provision", "set-meta", "set-zone", "deprovision", "list":
