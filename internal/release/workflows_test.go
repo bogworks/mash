@@ -1,6 +1,7 @@
 package release
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,8 @@ type job struct {
 	If              string            `yaml:"if"`
 	ContinueOnError any               `yaml:"continue-on-error"`
 	Needs           any               `yaml:"needs"`
+	Uses            string            `yaml:"uses"` // a reusable-workflow caller job
+	With            map[string]any    `yaml:"with"`
 	Outputs         map[string]string `yaml:"outputs"`
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
 	RunsOn          string            `yaml:"runs-on"`
@@ -97,6 +100,9 @@ func TestWorkflows_noRunnerContextOutsideSteps(t *testing.T) {
 func TestWorkflows_everyJobHasATimeout(t *testing.T) {
 	for name, w := range all(t) {
 		for jn, j := range w.Jobs {
+			if j.Uses != "" {
+				continue // a reusable-workflow caller job cannot set timeout-minutes; the called workflow does
+			}
 			if j.TimeoutMinutes <= 0 || j.TimeoutMinutes > 60 {
 				t.Errorf("%s: job %s has timeout-minutes %d", name, jn, j.TimeoutMinutes)
 			}
@@ -104,11 +110,22 @@ func TestWorkflows_everyJobHasATimeout(t *testing.T) {
 	}
 }
 
+// slsaGeneratorUses is the one `uses:` that is not pinned to a commit.
+const slsaGeneratorUses = "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0"
+
 var shaRef = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 func TestWorkflows_everyActionIsPinnedToACommit(t *testing.T) {
 	for name, w := range all(t) {
 		for jn, j := range w.Jobs {
+			if j.Uses != "" {
+				// The single exemption: the generator's reusable workflow is referenced by tag (it refuses a SHA ref), and
+				// TestRelease_generatorPinJobHoldsTheTagToTheRecordedCommit keeps that tag on the recorded commit.
+				if !(name == "release.yml" && jn == "provenance" && j.Uses == slsaGeneratorUses) {
+					t.Errorf("%s: job %s calls reusable workflow %q: only release.yml's provenance may call %q", name, jn, j.Uses, slsaGeneratorUses)
+				}
+				continue
+			}
 			for _, s := range j.Steps {
 				if s.Uses == "" || strings.HasPrefix(s.Uses, "./") {
 					continue
@@ -121,11 +138,18 @@ func TestWorkflows_everyActionIsPinnedToACommit(t *testing.T) {
 	}
 }
 
+// permissionedJobs are the release jobs that set permissions of their own; every other job takes the workflow's
+// contents: read.
+var permissionedJobs = map[string]bool{"guard": true, "draft": true, "attest": true, "attest-sbom": true, "provenance": true, "sbom": true, "hashes": true, "generator-pin": true, "dry-run-verify": true}
+
 func TestRelease_isTriggeredOnlyByVersionTagsAndPinsTheBuild(t *testing.T) {
 	w := load(t, "release.yml")
 	on, _ := w.On.(map[string]any)
-	if len(on) != 1 || on["push"] == nil {
-		t.Fatalf("release.yml must trigger only on push of tags, got %v", w.On)
+	if len(on) != 2 || on["push"] == nil {
+		t.Fatalf("release.yml must trigger only on push of tags and workflow_dispatch (the dry run), got %v", w.On)
+	}
+	if _, ok := on["workflow_dispatch"]; !ok {
+		t.Fatalf("release.yml has no workflow_dispatch trigger: %v", w.On)
 	}
 	push := on["push"].(map[string]any)
 	if len(push) != 1 || fmt.Sprint(push["tags"]) != "[v*]" {
@@ -138,7 +162,7 @@ func TestRelease_isTriggeredOnlyByVersionTagsAndPinsTheBuild(t *testing.T) {
 		t.Errorf("workflow permissions: %v (want contents: read only)", w.Permissions)
 	}
 	for jn, j := range w.Jobs {
-		if jn != "draft" && jn != "guard" && jn != "attest" && len(j.Permissions) != 0 {
+		if !permissionedJobs[jn] && len(j.Permissions) != 0 {
 			t.Errorf("job %s widens permissions: %v", jn, j.Permissions)
 		}
 	}
@@ -184,8 +208,16 @@ func TestRelease_buildsExactlyTheFourTargetsTwiceInFreshClones(t *testing.T) {
 func TestRelease_jobOrderAndDraftOnly(t *testing.T) {
 	w := load(t, "release.yml")
 	need := func(j string) string { return strings.Join(jobNeeds(w.Jobs[j].Needs), ",") }
-	if need("build") != "guard" || need("draft") != "build,attest" {
+	sorted := func(j string) string {
+		n := jobNeeds(w.Jobs[j].Needs)
+		sort.Strings(n)
+		return strings.Join(n, ",")
+	}
+	if need("build") != "guard" || sorted("draft") != "attest,attest-sbom,build,provenance,sbom" {
 		t.Fatalf("job order: build needs %s, draft needs %s", need("build"), need("draft"))
+	}
+	if need("sbom") != "build" || need("attest-sbom") != "sbom" || sorted("provenance") != "build,generator-pin,hashes" || need("hashes") != "build" {
+		t.Fatalf("job order: sbom needs %s, attest-sbom %s, provenance %s, hashes %s", need("sbom"), need("attest-sbom"), sorted("provenance"), need("hashes"))
 	}
 	var run string
 	for _, s := range w.Jobs["draft"].Steps {
@@ -261,8 +293,11 @@ func TestCI_producesTheCheckNamesTheGateRequires(t *testing.T) {
 func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 	w := load(t, "release.yml")
 	for jn, j := range w.Jobs {
-		if j.If != "" || j.ContinueOnError != nil {
-			t.Errorf("job %s has if/continue-on-error: %q %v", jn, j.If, j.ContinueOnError)
+		if j.ContinueOnError != nil {
+			t.Errorf("job %s has continue-on-error: %v", jn, j.ContinueOnError)
+		}
+		if want, ok := jobConditions[jn]; j.If != want {
+			t.Errorf("job %s has if %q, want %q (listed in jobConditions: %v)", jn, j.If, want, ok)
 		}
 		for _, st := range j.Steps {
 			if st.If != "" || st.ContinueOnError != nil {
@@ -279,6 +314,17 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 			}
 		}
 	}
+}
+
+// jobConditions are the only job-level conditions release.yml has: the event split between a tag push and the dry run
+// (workflow_dispatch). Every other job has none. None of them is a status function that could run a job after a failure,
+// except build's !cancelled(), which still demands the guard's success on a push.
+var jobConditions = map[string]string{
+	"guard":          "${{ github.event_name == 'push' }}",
+	"draft":          "${{ github.event_name == 'push' }}",
+	"build":          "${{ !cancelled() && (needs.guard.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.guard.result == 'skipped')) }}",
+	"provenance":     "${{ github.event_name == 'push' || github.ref == 'refs/heads/main' }}",
+	"dry-run-verify": "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
 }
 
 // ci.yml's check names are the job names (plus matrix values): a name that differs from the job id, a condition or a
@@ -531,8 +577,10 @@ func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-amd64"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, n := range append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64"}, releaseCIAssets...) {
+		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The runner is Linux and has sha256sum; the test also runs where only shasum exists (macOS).
 	shim := t.TempDir()
@@ -581,8 +629,21 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
 	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	if len(sl) != 2 || !strings.HasSuffix(sl[0], "  mash-linux-amd64") || !strings.HasSuffix(sl[1], "  quickstart-synadia.sh") {
+	wantSums := append(append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets[:4]...), releaseCIAssets[4])
+	if len(sl) != len(wantSums) {
 		t.Fatalf("SHA256SUMS:\n%s", sums)
+	}
+	for i, n := range wantSums {
+		if !strings.HasSuffix(sl[i], "  "+n) {
+			t.Fatalf("SHA256SUMS line %d is not %s:\n%s", i+1, n, sums)
+		}
+	}
+	// Whatever a binary is missing, the sums are not made.
+	if err := os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runScript(); err == nil {
+		t.Fatalf("the sums were made without an SBOM:\n%s", out)
 	}
 	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("the script was not copied with its mode: %v", err)
@@ -592,6 +653,9 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 		t.Fatalf("changelog:\n%s", b)
 	}
 }
+
+// releaseCIAssets are the SBOMs and the SLSA provenance the draft job attaches besides the binaries and the script.
+var releaseCIAssets = []string{"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json", "mash.intoto.jsonl"}
 
 // The attest job, and only it, holds the signing permissions (and no contents); it attests the four binaries.
 // jobNeeds normalises a job's `needs`, which YAML allows as a string or a list.
@@ -637,13 +701,15 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	if !found {
 		t.Error("attest job has no attest-build-provenance step pinned to a full commit")
 	}
-	// Least privilege: no other job and not the workflow gets the signing permissions.
+	// Least privilege: no other job and not the workflow gets the signing permissions. The two attest jobs sign;
+	// the SLSA provenance job holds id-token (the generator signs with it) and no attestations permission.
 	for _, p := range []string{"id-token", "attestations"} {
 		if w.Permissions[p] != "" {
 			t.Errorf("workflow-level %s permission must not be set", p)
 		}
 		for id, o := range w.Jobs {
-			if id != "attest" && o.Permissions[p] != "" {
+			ok := id == "attest" || id == "attest-sbom" || (p == "id-token" && id == "provenance")
+			if !ok && o.Permissions[p] != "" {
 				t.Errorf("job %s must not hold %s", id, p)
 			}
 		}
@@ -1005,11 +1071,15 @@ func TestWorkflows_noSelfHostedRunners(t *testing.T) {
 			if strings.HasPrefix(text, "#") {
 				continue
 			}
+			text = strings.ReplaceAll(text, "--deny-self-hosted-runners", "") // gh's flag that REFUSES self-hosted runners
 			if strings.Contains(text, "bf1") || strings.Contains(strings.ToLower(text), "self-hosted") {
 				t.Errorf("%s:%d names a self-hosted runner: %s", name, n+1, text)
 			}
 		}
 		for id, j := range load(t, name).Jobs {
+			if j.Uses != "" {
+				continue // a reusable-workflow caller job: the called workflow picks its runners
+			}
 			r := strings.TrimSpace(j.RunsOn)
 			switch {
 			case r == "ubuntu-latest" || r == "macos-latest":
@@ -1047,10 +1117,13 @@ func TestCI_linuxRunnersReadRUNNER_LINUX(t *testing.T) {
 }
 
 // release.yml builds what gets signed; a tag push is never a fork pull request, so each job reads RUNNER_LINUX with the
-// ubuntu-latest default and no fork routing.
+// ubuntu-latest default and no fork routing. (A reusable-workflow caller job has no runs-on of its own.)
 func TestRelease_runsOnRunnerLinuxDefaultHosted(t *testing.T) {
 	const want = "${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}"
 	for id, j := range load(t, "release.yml").Jobs {
+		if j.Uses != "" {
+			continue
+		}
 		if r := strings.TrimSpace(j.RunsOn); r != want {
 			t.Errorf("release.yml job %s runs on %q; want %s", id, r, want)
 		}
@@ -1077,9 +1150,17 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 			if j.Permissions["contents"] != "write" || len(j.Permissions) != 1 {
 				t.Errorf("job %s permissions = %v, want contents: write only", id, j.Permissions)
 			}
-		case "attest":
+		case "attest", "attest-sbom":
 			if j.Permissions["id-token"] != "write" || j.Permissions["attestations"] != "write" || len(j.Permissions) != 2 {
-				t.Errorf("job attest permissions = %v, want id-token: write and attestations: write only", j.Permissions)
+				t.Errorf("job %s permissions = %v, want id-token: write and attestations: write only", id, j.Permissions)
+			}
+		case "provenance":
+			if j.Permissions["id-token"] != "write" || j.Permissions["actions"] != "read" || j.Permissions["contents"] != "read" || len(j.Permissions) != 3 {
+				t.Errorf("job provenance permissions = %v, want actions: read, id-token: write, contents: read only", j.Permissions)
+			}
+		case "sbom", "hashes", "generator-pin", "dry-run-verify":
+			if j.Permissions["contents"] != "read" || len(j.Permissions) != 1 {
+				t.Errorf("job %s permissions = %v, want contents: read only", id, j.Permissions)
 			}
 		default:
 			if len(j.Permissions) != 0 {
@@ -1206,5 +1287,369 @@ func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
 		if strings.Contains(st.Run, "github.event") {
 			t.Errorf("step %q puts event data in the script text", st.Name)
 		}
+	}
+}
+
+// cyclonedxGomod is the SBOM tool and the one version the release builds with.
+const cyclonedxGomod = "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0"
+
+func matrixTargets(t *testing.T, j job) []string {
+	t.Helper()
+	inc, _ := j.Strategy.Matrix["include"].([]any)
+	var got []string
+	for _, e := range inc {
+		m := e.(map[string]any)
+		got = append(got, fmt.Sprintf("%v/%v", m["goos"], m["goarch"]))
+	}
+	sort.Strings(got)
+	return got
+}
+
+func allTargets() []string {
+	var want []string
+	for _, tg := range Targets {
+		want = append(want, tg.GOOS+"/"+tg.GOARCH)
+	}
+	sort.Strings(want)
+	return want
+}
+
+// The sbom job makes one CycloneDX 1.5 SBOM per binary from the built binary, with the pinned tool, and may only read.
+func TestRelease_sbomJobMakesAPinnedCycloneDXSBOMPerBinary(t *testing.T) {
+	j := load(t, "release.yml").Jobs["sbom"]
+	if strings.Join(jobNeeds(j.Needs), ",") != "build" {
+		t.Errorf("sbom needs %v, want build", j.Needs)
+	}
+	if got := matrixTargets(t, j); strings.Join(got, ",") != strings.Join(allTargets(), ",") {
+		t.Errorf("sbom matrix %v, want the four targets", got)
+	}
+	var run, uploads string
+	for _, st := range j.Steps {
+		run += st.Run + "\n"
+		if strings.HasPrefix(st.Uses, "actions/upload-artifact@") {
+			uploads = fmt.Sprint(st.With["name"], " ", st.With["path"])
+		}
+	}
+	if strings.Count(run, "cyclonedx-gomod/cmd/cyclonedx-gomod@") != 1 || !strings.Contains(run, "go install "+cyclonedxGomod) {
+		t.Errorf("the SBOM tool is not installed at exactly %s:\n%s", cyclonedxGomod, run)
+	}
+	for _, must := range []string{" bin ", "-json", "-output-version 1.5", `"dist/$name.cdx.json" "dist/$name"`, "set -euo pipefail"} {
+		if !strings.Contains(run, must) {
+			t.Errorf("the SBOM step lacks %q:\n%s", must, run)
+		}
+	}
+	if uploads != "sbom-${{ matrix.goos }}-${{ matrix.goarch }} dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json" {
+		t.Errorf("sbom upload: %s", uploads)
+	}
+}
+
+// attest-sbom attests each SBOM with its binary as the subject, through actions/attest-sbom pinned to a commit.
+func TestRelease_attestSBOMJobAttestsEachBinarysSBOM(t *testing.T) {
+	j := load(t, "release.yml").Jobs["attest-sbom"]
+	if strings.Join(jobNeeds(j.Needs), ",") != "sbom" {
+		t.Errorf("attest-sbom needs %v, want sbom", j.Needs)
+	}
+	if got := matrixTargets(t, j); strings.Join(got, ",") != strings.Join(allTargets(), ",") {
+		t.Errorf("attest-sbom matrix %v, want the four targets", got)
+	}
+	pin := regexp.MustCompile(`^actions/attest-sbom@[0-9a-f]{40}$`)
+	found := false
+	for _, st := range j.Steps {
+		if pin.MatchString(st.Uses) {
+			found = true
+			if st.With["subject-path"] != "dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}" ||
+				st.With["sbom-path"] != "dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json" {
+				t.Errorf("attest-sbom with: %v", st.With)
+			}
+		}
+	}
+	if !found {
+		t.Error("attest-sbom has no actions/attest-sbom step pinned to a full commit")
+	}
+}
+
+// The subjects are the four binaries only: the download takes the build artifacts (mash-*), never an SBOM or provenance
+// artifact, and the script, run for real, prints the base64 of sha256sum over exactly the binaries.
+func TestRelease_hashesJobOutputsTheFourBinariesAsBase64Subjects(t *testing.T) {
+	w := load(t, "release.yml")
+	j := w.Jobs["hashes"]
+	if strings.Join(jobNeeds(j.Needs), ",") != "build" {
+		t.Errorf("hashes needs %v, want build", j.Needs)
+	}
+	if j.Outputs["base64-subjects"] != "${{ steps.subjects.outputs.base64-subjects }}" {
+		t.Errorf("hashes outputs: %v", j.Outputs)
+	}
+	for jn, o := range map[string]job{"hashes": j, "attest": w.Jobs["attest"]} {
+		for _, st := range o.Steps {
+			if strings.HasPrefix(st.Uses, "actions/download-artifact@") && st.With["pattern"] != "mash-*" {
+				t.Errorf("%s downloads %v, not just the binaries (pattern mash-*)", jn, st.With)
+			}
+		}
+	}
+	var script string
+	for _, st := range j.Steps {
+		if st.Run != "" {
+			script = st.Run
+		}
+	}
+	if !strings.Contains(script, "(cd dist && sha256sum mash-* | base64 -w0)") {
+		t.Fatalf("the subjects are not `(cd dist && sha256sum mash-* | base64 -w0)`:\n%s", script)
+	}
+	if out, err := exec.Command("bash", "-c", "echo x | base64 -w0").CombinedOutput(); err != nil {
+		t.Skipf("no GNU base64 here: %v %s", err, out)
+	}
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		t.Skip("no sha256sum here")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func() (string, error) {
+		out := filepath.Join(dir, "out")
+		os.Remove(out)
+		cmd := exec.Command("bash", "-e", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GITHUB_OUTPUT="+out)
+		_, err := cmd.CombinedOutput()
+		b, _ := os.ReadFile(out)
+		return string(b), err
+	}
+	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64"} {
+		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := run(); err == nil {
+		t.Error("three binaries produced subjects")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-arm64"), []byte("mash-linux-arm64"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	enc, ok := strings.CutPrefix(strings.TrimSpace(out), "base64-subjects=")
+	if !ok {
+		t.Fatalf("GITHUB_OUTPUT: %q", out)
+	}
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		t.Fatalf("not base64: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("subjects:\n%s", raw)
+	}
+	for i, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64"} {
+		if !strings.HasSuffix(lines[i], "  "+n) || strings.Contains(lines[i], "/") { // the subject name is the bare file name
+			t.Errorf("subject %d: %q", i, lines[i])
+		}
+	}
+	// A stray file (an SBOM that slipped into dist) is refused, not attested.
+	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(); err == nil {
+		t.Error("an extra file in dist produced subjects")
+	}
+}
+
+// The provenance job calls the SLSA generator's reusable workflow at its release TAG (the generator refuses a SHA ref;
+// the one deliberate exception to SHA pinning), with the hashes job's subjects, and does not upload by itself.
+func TestRelease_provenanceJobCallsTheSLSAGeneratorByTag(t *testing.T) {
+	j := load(t, "release.yml").Jobs["provenance"]
+	if got := j.Uses; got != slsaGeneratorUses {
+		t.Errorf("provenance uses %q", got)
+	}
+	n := jobNeeds(j.Needs)
+	sort.Strings(n)
+	if strings.Join(n, ",") != "build,generator-pin,hashes" {
+		t.Errorf("provenance needs %v, want build, generator-pin and hashes", j.Needs)
+	}
+	if j.With["base64-subjects"] != "${{ needs.hashes.outputs.base64-subjects }}" || j.With["provenance-name"] != "mash.intoto.jsonl" || j.With["upload-assets"] != false {
+		t.Errorf("provenance with: %v", j.With)
+	}
+	if len(j.Steps) != 0 || j.RunsOn != "" || j.TimeoutMinutes != 0 {
+		t.Errorf("a reusable-workflow caller takes no steps, runs-on or timeout: %+v", j)
+	}
+	raw, err := os.ReadFile("../../.github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "TAG, not a commit SHA") {
+		t.Error("release.yml does not say why the generator is referenced by tag")
+	}
+	for name, w := range all(t) {
+		for jn, o := range w.Jobs {
+			if o.Uses != "" && !(name == "release.yml" && jn == "provenance") {
+				t.Errorf("%s job %s calls a reusable workflow %q: only release.yml's provenance may, by tag", name, jn, o.Uses)
+			}
+		}
+	}
+}
+
+// generator-pin resolves the generator's tag through the GitHub API and fails unless it is the recorded commit; the
+// recorded commit sits next to the tag in the workflow env, and the tag there is the one the provenance job's `uses:` names.
+func TestRelease_generatorPinJobHoldsTheTagToTheRecordedCommit(t *testing.T) {
+	w := load(t, "release.yml")
+	j, ok := w.Jobs["generator-pin"]
+	if !ok {
+		t.Fatal("release.yml has no generator-pin job")
+	}
+	if j.If != "" || j.TimeoutMinutes <= 0 || len(j.Permissions) != 1 || j.Permissions["contents"] != "read" {
+		t.Errorf("generator-pin: if %q, timeout %d, permissions %v (want no condition, a timeout, contents: read only)", j.If, j.TimeoutMinutes, j.Permissions)
+	}
+	var run string
+	for _, st := range j.Steps {
+		if st.Uses != "" {
+			t.Errorf("generator-pin uses %q: it needs no checkout or action", st.Uses)
+		}
+		run += st.Run + "\n"
+	}
+	for _, must := range []string{"gh api", "git/ref/tags/$SLSA_GENERATOR_TAG", "git/tags/", `"$type" = tag`, `"$sha" != "$SLSA_GENERATOR_SHA"`, "exit 1"} {
+		if !strings.Contains(run, must) {
+			t.Errorf("generator-pin lacks %q:\n%s", must, run)
+		}
+	}
+	tag, sha := w.Env["SLSA_GENERATOR_TAG"], w.Env["SLSA_GENERATOR_SHA"]
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) || sha != "f7dd8c54c2067bafc12ca7a55595d5ee9b75204a" {
+		t.Errorf("SLSA_GENERATOR_SHA = %q", sha)
+	}
+	if !strings.HasSuffix(w.Jobs["provenance"].Uses, "@"+tag) {
+		t.Errorf("provenance uses %q, but SLSA_GENERATOR_TAG is %q", w.Jobs["provenance"].Uses, tag)
+	}
+	if !strings.HasSuffix(slsaGeneratorUses, "@"+tag) {
+		t.Errorf("the test's exemption %q is not at tag %q", slsaGeneratorUses, tag)
+	}
+	if w.Jobs["generator-pin"].Env["GH_TOKEN"] != "" {
+		t.Error("GH_TOKEN belongs on the step")
+	}
+}
+
+// The draft attaches and lists every asset the contract names, and only the signing and provenance jobs hold id-token.
+func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
+	w := load(t, "release.yml")
+	var sums, create string
+	for _, st := range w.Jobs["draft"].Steps {
+		if strings.Contains(st.Run, "sha256sum") {
+			sums = st.Run
+		}
+		if strings.Contains(st.Run, "gh release create") {
+			create = st.Run
+		}
+	}
+	names := append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets...)
+	for _, n := range names {
+		if !strings.Contains(sums, n) {
+			t.Errorf("SHA256SUMS does not list %s:\n%s", n, sums)
+		}
+		if !strings.Contains(create, "dist/"+n) {
+			t.Errorf("the draft does not attach %s:\n%s", n, create)
+		}
+	}
+	for id, j := range w.Jobs {
+		if j.Permissions["id-token"] != "" && id != "attest" && id != "attest-sbom" && id != "provenance" {
+			t.Errorf("job %s holds id-token", id)
+		}
+	}
+	if w.Jobs["draft"].Permissions["contents"] != "write" || len(w.Jobs["draft"].Permissions) != 1 {
+		t.Errorf("draft permissions: %v", w.Jobs["draft"].Permissions)
+	}
+}
+
+// The dry run: a workflow_dispatch on main runs build to provenance and dry-run-verify, and never the guard, the draft or
+// anything that publishes. A tag push never runs dry-run-verify.
+func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
+	w := load(t, "release.yml")
+	push := "${{ github.event_name == 'push' }}"
+	for _, id := range []string{"guard", "draft"} {
+		if w.Jobs[id].If != push {
+			t.Errorf("job %s if %q, want %q: it must never run on a dispatch", id, w.Jobs[id].If, push)
+		}
+	}
+	// A tag push needs the guard's success; only a dispatch on main may build past a skipped guard.
+	b := w.Jobs["build"].If
+	for _, must := range []string{"!cancelled()", "needs.guard.result == 'success'", "github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'", "needs.guard.result == 'skipped'"} {
+		if !strings.Contains(b, must) {
+			t.Errorf("build if %q lacks %q", b, must)
+		}
+	}
+	if strings.Contains(b, "needs.guard.result != ") || strings.Contains(b, "always()") {
+		t.Errorf("build if %q could run after a failed guard", b)
+	}
+	j, ok := w.Jobs["dry-run-verify"]
+	if !ok {
+		t.Fatal("release.yml has no dry-run-verify job")
+	}
+	if !strings.Contains(j.If, "github.event_name == 'workflow_dispatch'") || !strings.Contains(j.If, "github.ref == 'refs/heads/main'") || strings.Contains(j.If, "push") {
+		t.Errorf("dry-run-verify if %q", j.If)
+	}
+	if len(j.Permissions) != 1 || j.Permissions["contents"] != "read" || j.Permissions["id-token"] != "" {
+		t.Errorf("dry-run-verify permissions %v, want contents: read only", j.Permissions)
+	}
+	n := jobNeeds(j.Needs)
+	sort.Strings(n)
+	if strings.Join(n, ",") != "attest,attest-sbom,build,provenance,sbom" {
+		t.Errorf("dry-run-verify needs %v", n)
+	}
+	for id, o := range w.Jobs {
+		for _, d := range jobNeeds(o.Needs) {
+			if d == "dry-run-verify" {
+				t.Errorf("job %s needs dry-run-verify: the dry run must not gate anything", id)
+			}
+		}
+	}
+	var run string
+	for _, st := range j.Steps {
+		run += st.Run + "\n"
+		if strings.Contains(st.Run, "gh release") || strings.Contains(st.Run, "git tag") || strings.Contains(st.Run, "git push") {
+			t.Errorf("dry-run-verify step %q releases, tags or pushes", st.Name)
+		}
+	}
+	for _, must := range []string{
+		"slsa-verifier/v2/cli/slsa-verifier@v2.7.1",
+		"slsa-verifier verify-artifact",
+		"--provenance-path mash.intoto.jsonl",
+		`--source-uri "github.com/${{ github.repository }}"`,
+		"--source-branch main",
+		`gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners`,
+		"--builder-id https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0",
+		"(.dsseEnvelope.payload // .payload)",
+		".predicate.invocation.configSource.entryPoint",
+		".predicate.buildDefinition.externalParameters.workflow.path",
+		`".github/workflows/release.yml"`,
+		"--predicate-type https://cyclonedx.org/bom --format json",
+		"jq -S",
+		"mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64",
+	} {
+		if !strings.Contains(run, must) {
+			t.Errorf("dry-run-verify lacks %q:\n%s", must, run)
+		}
+	}
+	if strings.Count(run, "--signer-workflow") != 2 || strings.Count(run, "--source-ref refs/heads/main") != 2 || strings.Count(run, "--deny-self-hosted-runners") != 2 {
+		t.Errorf("both gh attestation verify calls (build provenance and SBOM) need the signer, ref and runner flags:\n%s", run)
+	}
+	if strings.Contains(run, "--source-tag") {
+		t.Error("the dry run's provenance comes from a branch: --source-tag cannot apply")
+	}
+	// The tag is read from the ref in guard and draft only; everything else uses RELEASE_TAG / RELEASE_REF, which are the
+	// tag and its ref on a push and a non-release version and HEAD on a dispatch.
+	if w.Env["RELEASE_TAG"] != "${{ github.event_name == 'push' && github.ref_name || 'v0.0.0-dryrun' }}" || w.Env["RELEASE_REF"] != "${{ github.event_name == 'push' && github.ref_name || 'HEAD' }}" {
+		t.Errorf("release env: %v", w.Env)
+	}
+	for id, o := range w.Jobs {
+		if id == "guard" || id == "draft" {
+			continue
+		}
+		for _, st := range o.Steps {
+			if strings.Contains(st.Run, "GITHUB_REF_NAME") {
+				t.Errorf("job %s step %q reads GITHUB_REF_NAME; a dry run has no tag", id, st.Name)
+			}
+		}
+	}
+	if !strings.Contains(w.Jobs["provenance"].If, "github.ref == 'refs/heads/main'") {
+		t.Errorf("provenance may run from a branch only on main: %q", w.Jobs["provenance"].If)
 	}
 }

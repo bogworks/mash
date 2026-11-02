@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -82,11 +83,43 @@ func newFixture(t *testing.T) *fixture {
 	gitT(t, repo, "push", "-q", "origin", "v0.1.0")
 	f := &fixture{t: t, repo: repo, origin: origin, x: x}
 	gh := filepath.Join(root, "gh")
-	write(t, root, "gh", "#!/bin/sh\necho \"$*\" >> \""+filepath.Join(root, "gh.log")+"\"\ncase \"$1\" in\n  api) case \"$2\" in *page=2*) cat \""+filepath.Join(root, "ci-2.json")+"\" ;; *) cat \""+filepath.Join(root, "ci-1.json")+"\" ;; esac ;;\n  release) case \"$2\" in list) cat \""+filepath.Join(root, "releases.json")+"\" ;;\n    download) n=; p=; for a in \"$@\"; do [ \"$p\" = --pattern ] && n=$a; p=$a; done\n      case \"$n\" in mash-*) echo \"bin-$n\"; exit 0 ;; esac\n      if [ -f \""+filepath.Join(root, "files")+"/$n\" ]; then cat \""+filepath.Join(root, "files")+"/$n\"; else echo \"no assets match the file pattern\" >&2; exit 1; fi ;;\n    upload) mkdir -p \""+filepath.Join(root, "files")+"\"; cp \"$4\" \""+filepath.Join(root, "files")+"/$(basename \"$4\")\" ;;\n    *) cat \""+filepath.Join(root, "assets.json")+"\" ;; esac ;;\n  attestation) if [ -f \""+filepath.Join(root, "noattest")+"/$(basename \"$3\")\" ]; then echo \"no attestations found\" >&2; exit 1; fi ;;\n  *) echo \"unexpected gh $*\" >&2; exit 1 ;;\nesac\n")
+	ghScript := `#!/bin/sh
+echo "$*" >> "ROOT/gh.log"
+case "$1" in
+  api) case "$2" in *page=2*) cat "ROOT/ci-2.json" ;; *) cat "ROOT/ci-1.json" ;; esac ;;
+  release) case "$2" in list) cat "ROOT/releases.json" ;;
+    download) n=; p=; for a in "$@"; do [ "$p" = --pattern ] && n=$a; p=$a; done
+      case "$n" in *.cdx.json|*.jsonl) ;; mash-*) echo "bin-$n"; exit 0 ;; esac
+      if [ -f "ROOT/files/$n" ]; then cat "ROOT/files/$n"; else echo "no assets match the file pattern" >&2; exit 1; fi ;;
+    upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
+    *) cat "ROOT/assets.json" ;; esac ;;
+  attestation) b=$(basename "$3"); sbom=
+    for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; done
+    if [ -n "$sbom" ]; then [ -f "ROOT/noattest-sbom/$b" ] && { echo "no attestations found" >&2; exit 1; }
+    else [ -f "ROOT/noattest/$b" ] && { echo "no attestations found" >&2; exit 1; }; fi
+    if [ -n "$sbom" ]; then
+      h=$( (sha256sum "$3" 2>/dev/null || shasum -a 256 "$3") | cut -d' ' -f1)
+      [ -f "ROOT/badsubject/$b" ] && h=0000
+      if [ -f "ROOT/predicate/$b" ]; then pred=$(cat "ROOT/predicate/$b"); else pred=$(cat "$(dirname "$3")/$b.cdx.json"); fi
+      printf '[{"verificationResult":{"statement":{"predicateType":"https://cyclonedx.org/bom","subject":[{"name":"%s","digest":{"sha256":"%s"}}],"predicate":%s}}}]\n' "$b" "$h" "$pred"
+    fi ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+`
+	write(t, root, "gh", strings.ReplaceAll(ghScript, "ROOT", root))
+	// slsa-verifier: logs its arguments; fails for a binary named in noslsa/.
+	write(t, root, "slsa-verifier", strings.ReplaceAll(`#!/bin/sh
+echo "slsa-verifier $*" >> "ROOT/gh.log"
+[ -f "ROOT/noslsa/$(basename "$2")" ] && { echo "FAILED: no matching provenance" >&2; exit 1; }
+exit 0
+`, "ROOT", root))
+	if err := os.Chmod(filepath.Join(root, "slsa-verifier"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(gh, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
+	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{}, SLSAVerifier: filepath.Join(root, "slsa-verifier"),
 		Signers: filepath.Join(root, "allowed_signers")}
 	t.Setenv("RELEASE_SIGNING_KEY", sumsKey.priv)
 	f.setCI(release.RequiredChecks...)
@@ -189,6 +222,26 @@ func (f *fixture) ourBuilds() map[release.Target]string {
 	return h
 }
 
+// dsseLine is one line of an .intoto.jsonl file in the shape slsa-github-generator v2 writes: a Sigstore bundle whose
+// dsseEnvelope.payload is the given in-toto statement.
+func dsseLine(statement string) string {
+	return `{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.2","verificationMaterial":{},"dsseEnvelope":{"payload":"` + base64.StdEncoding.EncodeToString([]byte(statement)) + `","payloadType":"application/vnd.in-toto+json","signatures":[]}}` + "\n"
+}
+
+// bareDSSELine is one line holding a bare DSSE envelope (top-level payload), which is also accepted.
+func bareDSSELine(statement string) string {
+	return `{"payloadType":"application/vnd.in-toto+json","payload":"` + base64.StdEncoding.EncodeToString([]byte(statement)) + `","signatures":[]}` + "\n"
+}
+
+// goodCIAsset is the content the fixture gives an SBOM (a CycloneDX 1.5 document) or the provenance (a Sigstore-bundle
+// line naming release.yml).
+func goodCIAsset(name string) string {
+	if name == release.ProvenanceName {
+		return dsseLine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`)
+	}
+	return `{"bomFormat":"CycloneDX","specVersion":"1.5","metadata":{"component":{"name":"` + name + `"}},"components":[{"type":"library","name":"x"}]}` + "\n"
+}
+
 // setAssets serves a draft release carrying exactly our builds, then lets mutate change it.
 func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	t.Helper()
@@ -197,7 +250,15 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	for _, tg := range release.Targets {
 		have[tg.AssetName()] = "sha256:" + h[tg]
 	}
-	sums := release.ExpectedSums(h, shaOf("#!/bin/sh\necho quickstart\n"))
+	filesDir := filepath.Join(filepath.Dir(f.o.GH), "files")
+	ci := map[string]string{}
+	for _, n := range release.CIAssetNames() {
+		body := goodCIAsset(n)
+		write(t, filesDir, n, body)
+		have[n] = "sha256:" + shaOf(body)
+		ci[n] = shaOf(body)
+	}
+	sums := release.ExpectedSums(h, shaOf("#!/bin/sh\necho quickstart\n"), ci)
 	have[release.ScriptName] = "sha256:" + shaOf("#!/bin/sh\necho quickstart\n")
 	have[release.SumsName] = "sha256:" + shaOf(sums)
 	if mutate != nil {

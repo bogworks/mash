@@ -5,9 +5,17 @@ name: release
 # for manual resolution, if a lower draft or a higher published release stands beside it; the maintainer runs `scripts/release-check --assets <version> <X>` (tag signature, tag at X,
 # exactly our builds attached) before publishing. Jobs run GitHub-hosted (ubuntu-latest) by default; vars.RUNNER_LINUX can point them at a
 # runner of the maintainers' choice (a tag push is never a fork pull request). No self-hosted runner is used on this public repo.
+# Besides the four binaries a release carries a CycloneDX SBOM per binary (mash-<os>-<arch>.cdx.json, attested with
+# actions/attest-sbom) and SLSA provenance for the four binaries (mash.intoto.jsonl, from the SLSA generator's reusable
+# workflow); mash meets SLSA v1.0 Build L2, not L3 (ADR 0051). `release-check --assets` verifies all of it before the
+# maintainer signs SHA256SUMS.
+# A workflow_dispatch run on main is a DRY RUN (docs/release.md, "Dry run"): it builds, makes the SBOMs, attests and makes
+# the SLSA provenance exactly as a tag does, then the dry-run-verify job verifies all of it. It has no guard, no draft, no
+# release, no tag and uploads nothing to a release; its version is 0.0.0-dryrun and its commit is the dispatched HEAD.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -16,8 +24,20 @@ concurrency:
 env:
   GOTOOLCHAIN: go1.27.3
   CGO_ENABLED: "0"
+  # What the build and the SBOMs are named after and made at: the pushed tag and its commit; on a dry run, a plainly
+  # non-release version and the dispatched HEAD. Nothing else in this workflow reads the tag from the ref.
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || 'v0.0.0-dryrun' }}
+  RELEASE_REF: ${{ github.event_name == 'push' && github.ref_name || 'HEAD' }}
+  # The SLSA generator is referenced by TAG (it refuses a SHA ref), and a tag can move. The generator-pin job fails unless
+  # the tag still resolves to this commit. To update: pick the new release tag, read its commit with
+  # `gh api repos/slsa-framework/slsa-github-generator/git/ref/tags/<tag>` (dereference a `tag` object through git/tags/<sha>),
+  # review that release, then change this SHA, SLSA_GENERATOR_TAG, the `uses:` tag of the provenance job, and the --builder-id
+  # in scripts/releasecheck/supply.go, docs/release.md and the dry-run-verify job together.
+  SLSA_GENERATOR_TAG: v2.1.0
+  SLSA_GENERATOR_SHA: f7dd8c54c2067bafc12ca7a55595d5ee9b75204a
 jobs:
   guard:
+    if: ${{ github.event_name == 'push' }} # a dry run has no tag to judge
     timeout-minutes: 10
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -50,7 +70,11 @@ jobs:
           gh release list --limit 200 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
           scripts/draft-guard "$GITHUB_REF_NAME" "$RUNNER_TEMP/releases.json"
   build:
+    # On a tag push the guard must have succeeded. On a dispatch the guard is skipped (a skipped needed job skips its
+    # dependents unless the condition says otherwise), so a dispatch on main builds anyway, and on any other ref nothing
+    # builds, which skips every job below too. !cancelled() keeps a failed guard (not skipped) from running the build.
     needs: guard
+    if: ${{ !cancelled() && (needs.guard.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.guard.result == 'skipped')) }}
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     strategy:
@@ -74,8 +98,8 @@ jobs:
           GOARCH_T: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
+          version="${RELEASE_TAG#v}"
+          commit="$(git rev-parse "$RELEASE_REF^{commit}")"
           name="mash-${GOOS_T}-${GOARCH_T}"
           scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit" "dist/$name"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -84,9 +108,11 @@ jobs:
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
   draft:
-    # A draft exists only once provenance does, so publishing can never precede or outlive a failed attestation.
+    # A draft exists only once provenance, the SBOMs and their attestations do, so publishing can never precede or outlive a
+    # failed attestation.
     # Attestation requires a public repository (or GitHub Enterprise Cloud); this repository is public.
-    needs: [build, attest]
+    needs: [build, attest, sbom, attest-sbom, provenance]
+    if: ${{ github.event_name == 'push' }} # never on a dry run: it creates the release
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -108,7 +134,13 @@ jobs:
           # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
           [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $GITHUB_REF_NAME" >&2; exit 1; }
           cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
-          (cd dist && sha256sum mash-* quickstart-synadia.sh > SHA256SUMS)
+          # The maintainer's signature on SHA256SUMS covers every asset: the binaries, the script, the SBOMs and the SLSA
+          # provenance. Named, not globbed, so a missing file fails here and a stray one is never listed.
+          (cd dist && sha256sum \
+            mash-darwin-amd64 mash-darwin-arm64 mash-linux-amd64 mash-linux-arm64 \
+            quickstart-synadia.sh \
+            mash-darwin-amd64.cdx.json mash-darwin-arm64.cdx.json mash-linux-amd64.cdx.json mash-linux-arm64.cdx.json \
+            mash.intoto.jsonl > SHA256SUMS)
           # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: commits of
           # an unpublished tag belong in these notes. None (the first release) means the whole history.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
@@ -125,7 +157,10 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file dist/CHANGELOG.md dist/mash-* dist/quickstart-synadia.sh dist/SHA256SUMS
+            --notes-file dist/CHANGELOG.md \
+            dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/mash-linux-amd64 dist/mash-linux-arm64 \
+            dist/mash-darwin-amd64.cdx.json dist/mash-darwin-arm64.cdx.json dist/mash-linux-amd64.cdx.json dist/mash-linux-arm64.cdx.json \
+            dist/mash.intoto.jsonl dist/quickstart-synadia.sh dist/SHA256SUMS
           # The guard job's check and this creation are not atomic, and the concurrency group is per tag, so two tags'
           # runs can both pass the guard. Re-check now that the draft exists: a lower draft or a higher published
           # release makes THIS run fail, naming it. The guard never deletes: the draft stays for the maintainer to resolve
@@ -141,6 +176,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          pattern: mash-* # the binaries only: never an SBOM artifact (sbom-*) another job may already have uploaded
           path: dist
           merge-multiple: true
       - name: Attest build provenance
@@ -148,3 +184,193 @@ jobs:
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: dist/mash-*
+  sbom:
+    # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
+    # exactly the bytes a consumer downloads. The tool version is pinned; the job reads and uploads, nothing else.
+    needs: build
+    timeout-minutes: 15
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm64}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+      - name: SBOM of the binary
+        env:
+          GOOS_T: ${{ matrix.goos }}
+          GOARCH_T: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          GOBIN="$RUNNER_TEMP/tools" go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
+          name="mash-${GOOS_T}-${GOARCH_T}"
+          chmod +x "dist/$name" # artifact downloads drop the mode; the tool reads the build info of an executable
+          "$RUNNER_TEMP/tools/cyclonedx-gomod" bin -json -output-version 1.5 -version "$RELEASE_TAG" -output "dist/$name.cdx.json" "dist/$name"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json
+          if-no-files-found: error
+  attest-sbom:
+    needs: sbom
+    timeout-minutes: 15
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      id-token: write # the OIDC token the attestation is signed with
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm64}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sbom-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+      - name: Attest the SBOM, with the binary as its subject
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.4.0
+        with:
+          subject-path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
+          sbom-path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json
+  generator-pin:
+    # The SLSA generator is referenced by tag, which can move. Fail unless the tag still resolves to the commit recorded in
+    # SLSA_GENERATOR_SHA. Needs no checkout and only reads public data.
+    timeout-minutes: 5
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - name: The generator tag is the recorded commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo=slsa-framework/slsa-github-generator
+          ref="$(gh api "repos/$repo/git/ref/tags/$SLSA_GENERATOR_TAG" --jq '.object.type + " " + .object.sha')"
+          type="${ref% *}"
+          sha="${ref#* }"
+          if [ "$type" = tag ]; then
+            sha="$(gh api "repos/$repo/git/tags/$sha" --jq '.object.sha')"
+          fi
+          if [ "$sha" != "$SLSA_GENERATOR_SHA" ]; then
+            echo "$repo $SLSA_GENERATOR_TAG is $sha, not the recorded $SLSA_GENERATOR_SHA" >&2
+            exit 1
+          fi
+  hashes:
+    # The subjects the SLSA generator attests: the four binaries only, as `sha256sum` prints them, base64 encoded.
+    needs: build
+    timeout-minutes: 10
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    outputs:
+      base64-subjects: ${{ steps.subjects.outputs.base64-subjects }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mash-* # the binaries only
+          path: dist
+          merge-multiple: true
+      - name: Subjects
+        id: subjects
+        run: |
+          set -euo pipefail
+          [ "$(ls dist | wc -l | tr -d ' ')" = 4 ] || { echo "dist does not hold exactly the four binaries" >&2; ls dist >&2; exit 1; }
+          echo "base64-subjects=$(cd dist && sha256sum mash-* | base64 -w0)" >> "$GITHUB_OUTPUT"
+  provenance:
+    # SLSA provenance for the four binaries. The generator's reusable workflow signs with its own identity, which mash's
+    # steps cannot use; the digests it attests come from the hashes job, so this does not raise mash above Build L2. It
+    # must be referenced by a TAG, not a commit SHA (the generator refuses a SHA ref): this is a deliberate exception to
+    # the SHA pinning of every other `uses:` here, held in place by the generator-pin job, and the gate verifies the result
+    # with slsa-verifier. A reusable-workflow caller job sets neither runs-on nor timeout-minutes.
+    needs: [build, hashes, generator-pin]
+    if: ${{ github.event_name == 'push' || github.ref == 'refs/heads/main' }} # a dry run only on main
+    permissions:
+      actions: read
+      id-token: write
+      contents: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.hashes.outputs.base64-subjects }}
+      provenance-name: mash.intoto.jsonl
+      upload-assets: false # the draft job attaches it, with the rest, and SHA256SUMS covers it
+  dry-run-verify:
+    # The dry run's verdict: everything the release gate checks about the attestations and provenance, here, with nothing
+    # published. Only a dispatch on main runs it; on a tag push the draft job takes its place. It reads and verifies, and
+    # holds no id-token.
+    needs: [build, attest, sbom, attest-sbom, provenance]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 20
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Install slsa-verifier
+        run: |
+          set -euo pipefail
+          GOBIN="$RUNNER_TEMP/tools" go install github.com/slsa-framework/slsa-verifier/v2/cli/slsa-verifier@v2.7.1
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist # the four binaries, the four SBOMs and mash.intoto.jsonl
+          merge-multiple: true
+      - name: Verify the SLSA provenance, the build attestations and the SBOM attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          [ -f mash.intoto.jsonl ] || { echo "no mash.intoto.jsonl was downloaded" >&2; ls >&2; exit 1; }
+          # The workflow that ran the generator must be release.yml: every line (a Sigstore bundle, or a bare DSSE envelope) of the provenance names it as
+          # its entry point (SLSA v0.2 configSource.entryPoint, or v1 externalParameters.workflow.path).
+          jq -r '(.dsseEnvelope.payload // .payload)' mash.intoto.jsonl | while read -r p; do
+            echo "$p" | base64 -d | jq -e '(.predicate.invocation.configSource.entryPoint // .predicate.buildDefinition.externalParameters.workflow.path) == ".github/workflows/release.yml"' > /dev/null \
+              || { echo "mash.intoto.jsonl was not made by .github/workflows/release.yml" >&2; exit 1; }
+          done
+          for n in mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64; do
+            echo "== $n"
+            # The provenance was made from a branch ref (main), not a tag, so no source tag applies: the source is
+            # pinned by repository and branch instead. A release's gate pins the tag v<version>. --builder-id refuses
+            # another generator version; the signer workflow, source ref and hosted-runner flags keep gh from
+            # accepting any same-repository workflow, ref or runner.
+            slsa-verifier verify-artifact "$n" --provenance-path mash.intoto.jsonl \
+              --source-uri "github.com/${{ github.repository }}" --source-branch main \
+              --builder-id https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom --format json > "$RUNNER_TEMP/$n.sbom-verify.json"
+            # actions/attest-sbom stores the SBOM verbatim as the predicate: a verified statement about THIS binary must
+            # carry exactly the attached .cdx.json (`jq -S` sorts keys, so only content is compared).
+            sum="$(sha256sum "$n" | cut -d' ' -f1)"
+            jq -S --arg sum "$sum" '[.[].verificationResult.statement | select(any(.subject[]; .digest.sha256 == $sum)) | .predicate] | first' \
+              "$RUNNER_TEMP/$n.sbom-verify.json" > "$RUNNER_TEMP/$n.predicate.json"
+            jq -S . "$n.cdx.json" > "$RUNNER_TEMP/$n.sbom.json"
+            if ! cmp -s "$RUNNER_TEMP/$n.predicate.json" "$RUNNER_TEMP/$n.sbom.json"; then
+              echo "the verified SBOM attestation for $n does not carry $n.cdx.json" >&2
+              exit 1
+            fi
+          done

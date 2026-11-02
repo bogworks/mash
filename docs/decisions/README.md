@@ -64,3 +64,4 @@ on), or mash's own choice on top of them.
 | [0048](0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md) | Limit changes take a per-stream KV lock with expiry | accepted | NATS / mash | 2026-11-01 |
 | [0049](0049-who-filters-and-its-json-form-are-a-stable-shared-contract.md) | `who` filters and its JSON form are a stable, shared contract | accepted | mash | 2026-11-01 |
 | [0050](0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md) | The directory record says what an endpoint does with a description and capabilities | accepted | mash | 2026-11-01 |
+| [0051](0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) | Releases carry an SBOM per binary and SLSA provenance from an isolated generator | proposed | project | 2026-11-01 |

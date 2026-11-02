@@ -45,9 +45,11 @@ type Options struct {
 	X       string
 	Version string // N.N.N, without the leading v
 	GH      string // the gh command; default $RELEASE_CHECK_GH, else gh
-	GHRepo  string // the release repository (owner/name): default $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash
-	Remote  string // the release repository, for main and the tag; default https://github.com/<GHRepo>.git
-	NoFetch bool   // do not fetch main first (tests that supply their own origin/main)
+	// SLSAVerifier is the slsa-verifier command; default slsa-verifier on PATH. Not finding it is a refusal; no flag skips it.
+	SLSAVerifier string
+	GHRepo       string // the release repository (owner/name): default $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash
+	Remote       string // the release repository, for main and the tag; default https://github.com/<GHRepo>.git
+	NoFetch      bool   // do not fetch main first (tests that supply their own origin/main)
 	// Signers is the allowed_signers file a release tag must verify against: default docs/allowed_signers of Repo,
 	// the checkout running the check. Never the machine's own git config, so the gate is the same for anyone who
 	// runs it, and a key a machine happens to trust cannot pass a release.
@@ -706,6 +708,10 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 			// It covers a resumed or hand-made draft that release.yml's attest job never saw.
 			if r.ok() {
 				r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
+			}
+			// The SBOMs and the SLSA provenance, after the checks above and on the same terms.
+			if r.ok() {
+				r.step("every binary has an attested CycloneDX SBOM and SLSA provenance that verifies", verifySupplyChain(o, tag))
 			}
 		}
 	}

@@ -57,10 +57,16 @@ var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 // by buildFresh from the tagged commit) and the quickstart-synadia.sh line to scriptHash (the script at X). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> of a
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
+// The SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
 func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Target]string, scriptHash string) error {
 	byName := map[string]release.Target{}
 	for _, t := range release.Targets {
 		byName[t.AssetName()] = t
+	}
+	ciNames := release.CIAssetNames()
+	isCI := map[string]bool{}
+	for _, n := range ciNames {
+		isCI[n] = true
 	}
 	listed := map[string]string{}
 	for i, line := range strings.Split(string(sums), "\n") {
@@ -82,9 +88,12 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Tar
 			}
 			continue
 		}
+		if isCI[name] {
+			continue // its digest is held to the attached asset's below
+		}
 		t, ok := byName[name]
 		if !ok {
-			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> of a release target nor %s", name, release.ScriptName)
+			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> of a release target, nor %s, nor an SBOM or the provenance of the release", name, release.ScriptName)
 		}
 		if want := hashes[t]; hash != want {
 			return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, a fresh reproducible build of X gives sha256:%s", name, hash, want)
@@ -103,7 +112,13 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Tar
 	if _, ok := listed[release.ScriptName]; !ok {
 		return fmt.Errorf("SHA256SUMS does not list %s", release.ScriptName)
 	}
+	for _, n := range ciNames {
+		if _, ok := listed[n]; !ok {
+			return fmt.Errorf("SHA256SUMS does not list %s", n)
+		}
+	}
 	names = append(names, release.ScriptName)
+	names = append(names, ciNames...)
 	for _, n := range names {
 		digest, ok := have[n]
 		switch {
@@ -115,7 +130,7 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Tar
 	}
 	var extra []string
 	for n := range have {
-		if strings.HasPrefix(n, "mash-") {
+		if strings.HasPrefix(n, "mash") {
 			if _, ok := listed[n]; !ok {
 				extra = append(extra, n)
 			}
@@ -429,7 +444,7 @@ func signedSums(o Options, tag, x string, draft bool, have map[string]string, ha
 }
 
 // verifyAttestations downloads each of the four binaries from the release into a temporary directory and runs
-// `gh attestation verify <file> -R <owner/name>` on it (the repository is the release repository, o.GHRepo). A binary
+// `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags). A binary
 // with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
 // gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by
 // hand) from being published without provenance. Attestations need a public repository.
@@ -450,7 +465,7 @@ func verifyAttestations(o Options, tag string) error {
 		if err := os.WriteFile(p, b, 0o644); err != nil {
 			return op(err)
 		}
-		if _, err := gh(o, "attestation", "verify", p, "-R", o.GHRepo); err != nil {
+		if _, err := gh(o, append([]string{"attestation", "verify", p}, attestFlags(o, tag)...)...); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
 		}
 	}

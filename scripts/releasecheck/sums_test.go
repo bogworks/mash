@@ -111,6 +111,11 @@ func TestSums_checkEntries(t *testing.T) {
 		have[tg.AssetName()] = "sha256:" + h
 		lines = append(lines, h+"  "+tg.AssetName())
 	}
+	for i, n := range release.CIAssetNames() {
+		h := strings.Repeat(string(rune('0'+i)), 64)
+		have[n] = "sha256:" + h
+		lines = append(lines, h+"  "+n)
+	}
 	script := strings.Repeat("d", 64)
 	have[release.ScriptName] = "sha256:" + script
 	lines = append(lines, script+"  "+release.ScriptName)
@@ -144,10 +149,23 @@ func TestSums_checkEntries(t *testing.T) {
 		"script missing from sums":            func(s *string, h map[string]string) { *s = strings.Join(lines[:len(lines)-1], "\n") + "\n" },
 		"script listed but not attached":      func(s *string, h map[string]string) { delete(h, release.ScriptName) },
 		"script attached with another digest": func(s *string, h map[string]string) { h[release.ScriptName] = "sha256:" + strings.Repeat("0", 64) },
-		"target missing from sums":            func(s *string, h map[string]string) { *s = strings.Join(lines[1:], "\n") + "\n" },
-		"listed but not attached":             func(s *string, h map[string]string) { delete(h, first) },
-		"attached digest differs":             func(s *string, h map[string]string) { h[first] = "sha256:" + strings.Repeat("0", 64) },
-		"attached but not listed":             func(s *string, h map[string]string) { h["mash-linux-riscv64"] = "sha256:" + strings.Repeat("f", 64) },
+		"sbom missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, strings.Repeat("0", 64)+"  "+release.Targets[0].SBOMName()+"\n", "", 1)
+		},
+		"provenance missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, strings.Repeat("4", 64)+"  "+release.ProvenanceName+"\n", "", 1)
+		},
+		"sbom listed but not attached":       func(s *string, h map[string]string) { delete(h, release.Targets[1].SBOMName()) },
+		"provenance listed but not attached": func(s *string, h map[string]string) { delete(h, release.ProvenanceName) },
+		"sbom attached with another digest": func(s *string, h map[string]string) {
+			h[release.Targets[0].SBOMName()] = "sha256:" + strings.Repeat("f", 64)
+		},
+		"provenance attached with other digest": func(s *string, h map[string]string) { h[release.ProvenanceName] = "sha256:" + strings.Repeat("f", 64) },
+		"attached provenance twin not listed":   func(s *string, h map[string]string) { h["mash.other.jsonl"] = "sha256:" + strings.Repeat("f", 64) },
+		"target missing from sums":              func(s *string, h map[string]string) { *s = strings.Join(lines[1:], "\n") + "\n" },
+		"listed but not attached":               func(s *string, h map[string]string) { delete(h, first) },
+		"attached digest differs":               func(s *string, h map[string]string) { h[first] = "sha256:" + strings.Repeat("0", 64) },
+		"attached but not listed":               func(s *string, h map[string]string) { h["mash-linux-riscv64"] = "sha256:" + strings.Repeat("f", 64) },
 	}
 	for name, f := range cases {
 		s, h := mod(f)
@@ -555,7 +573,7 @@ func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 		other[tg] = strings.Repeat(string(rune('a'+i)), 64) // binaries that were never built from X
 		assets = append(assets, map[string]string{"name": tg.AssetName(), "digest": "sha256:" + other[tg]})
 	}
-	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"))
+	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"), nil)
 	sig := mustSign(t, keyOfFixture(t, f), sums) // validly signed by the release key
 	files := filepath.Join(f.ghDir(), "files")
 	write(t, files, release.SumsName, sums)
@@ -606,6 +624,22 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
 			}
 		}
+		// every gh attestation verify call (build provenance and SBOM) is pinned to the release workflow, tag and runners
+		calls := 0
+		for _, ln := range strings.Split(log, "\n") {
+			if !strings.HasPrefix(ln, "attestation verify") {
+				continue
+			}
+			calls++
+			for _, want := range []string{"--signer-workflow " + f.o.GHRepo + "/.github/workflows/release.yml", "--source-ref refs/tags/v0.1.0", "--deny-self-hosted-runners"} {
+				if !strings.Contains(ln, want) {
+					t.Errorf("gh call lacks %q: %s", want, ln)
+				}
+			}
+		}
+		if calls != 8 {
+			t.Errorf("%d gh attestation verify calls, want 8 (4 build provenance, 4 SBOM)", calls)
+		}
 	})
 	t.Run("one missing is refused naming it, and publishing does not happen", func(t *testing.T) {
 		f := signedDraft(t)
@@ -634,6 +668,249 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 		}
 		if strings.Contains(f.ghLog(), "attestation") {
 			t.Errorf("attestations were checked after a refusal:\n%s", f.ghLog())
+		}
+	})
+}
+
+// ---- SBOMs and SLSA provenance ----
+
+func (f *fixture) markerFor(t *testing.T, dir, name string) {
+	t.Helper()
+	write(t, filepath.Join(f.ghDir(), dir), name, "x")
+}
+
+// setSums serves newSums as SHA256SUMS and reports its digest.
+func (f *fixture) setSums(t *testing.T, newSums string) {
+	t.Helper()
+	write(t, filepath.Join(f.ghDir(), "files"), release.SumsName, newSums)
+	f.editAssets(t, func(s string) string {
+		var v struct {
+			IsDraft bool                `json:"isDraft"`
+			Assets  []map[string]string `json:"assets"`
+		}
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range v.Assets {
+			if a["name"] == release.SumsName {
+				a["digest"] = "sha256:" + shaOf(newSums)
+			}
+		}
+		b, _ := json.Marshal(v)
+		return string(b)
+	})
+}
+
+// replaceCIAsset swaps an attached SBOM or the provenance for other bytes and keeps SHA256SUMS consistent with it, so
+// the only thing wrong with the release is what the bytes say.
+func (f *fixture) replaceCIAsset(t *testing.T, name, body string) {
+	t.Helper()
+	write(t, filepath.Join(f.ghDir(), "files"), name, body)
+	var out []string
+	for _, ln := range strings.Split(strings.TrimSpace(string(sumsOfFixture(t, f))), "\n") {
+		if strings.HasSuffix(ln, "  "+name) {
+			ln = shaOf(body) + "  " + name
+		}
+		out = append(out, ln)
+	}
+	f.editAssets(t, func(s string) string {
+		var v struct {
+			IsDraft bool                `json:"isDraft"`
+			Assets  []map[string]string `json:"assets"`
+		}
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range v.Assets {
+			if a["name"] == name {
+				a["digest"] = "sha256:" + shaOf(body)
+			}
+		}
+		b, _ := json.Marshal(v)
+		return string(b)
+	})
+	f.setSums(t, strings.Join(out, "\n")+"\n")
+}
+
+func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
+	t.Run("a correct release passes and every check ran against the release repository", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		if err := checkAssets(context.Background(), f.o); err != nil {
+			t.Fatalf("a correct draft was refused: %v", err)
+		}
+		log := f.ghLog()
+		for _, tg := range release.Targets {
+			n := tg.AssetName()
+			if !strings.Contains(log, "/"+n+" -R bogworks/mash ") || !strings.Contains(log, "--predicate-type https://cyclonedx.org/bom") {
+				t.Errorf("the SBOM attestation of %s was not verified:\n%s", n, log)
+			}
+			if !strings.Contains(log, "verify-artifact") || !strings.Contains(log, "--provenance-path") || !strings.Contains(log, "/"+n+" ") {
+				t.Errorf("%s was not verified with slsa-verifier:\n%s", n, log)
+			}
+		}
+		for _, want := range []string{"--source-uri github.com/bogworks/mash", "--source-tag v0.1.0", "--builder-id " + slsaBuilderID, "mash.intoto.jsonl"} {
+			if !strings.Contains(log, want) {
+				t.Errorf("slsa-verifier was not called with %q:\n%s", want, log)
+			}
+		}
+	})
+	t.Run("the source uri follows the release repository", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.o.GHRepo = "someone/else"
+		_ = checkAssets(context.Background(), f.o) // the fake serves any repository; only the arguments matter
+		if !strings.Contains(f.ghLog(), "--source-uri github.com/someone/else ") {
+			t.Errorf("source-uri is not derived from GHRepo:\n%s", f.ghLog())
+		}
+	})
+	refused := func(t *testing.T, f *fixture, want string) {
+		t.Helper()
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v (exit %d), want a refusal naming %q", err, exitCode(err), want)
+		}
+	}
+	t.Run("a missing SBOM", func(t *testing.T) {
+		f := signedFixture(t, func(h map[string]string) { delete(h, "mash-linux-arm64.cdx.json") })
+		refused(t, f, "mash-linux-arm64.cdx.json")
+	})
+	t.Run("a missing provenance", func(t *testing.T) {
+		f := signedFixture(t, func(h map[string]string) { delete(h, release.ProvenanceName) })
+		refused(t, f, "mash.intoto.jsonl")
+	})
+	t.Run("an SBOM attached but not listed in SHA256SUMS", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		var out []string
+		for _, ln := range strings.Split(strings.TrimSpace(string(sumsOfFixture(t, f))), "\n") {
+			if !strings.HasSuffix(ln, "  mash-darwin-amd64.cdx.json") {
+				out = append(out, ln)
+			}
+		}
+		f.setSums(t, strings.Join(out, "\n")+"\n")
+		refused(t, f, "SHA256SUMS") // the sums are held to exactly what the attached files hash to
+	})
+	t.Run("an SBOM whose bytes do not match SHA256SUMS", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.editAssets(t, func(s string) string {
+			return strings.Replace(s, "sha256:"+shaOf(goodCIAsset("mash-linux-amd64.cdx.json")), "sha256:"+strings.Repeat("0", 64), 1)
+		})
+		refused(t, f, "SHA256SUMS")
+	})
+	t.Run("an SBOM that is not CycloneDX", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"not json":          "<xml/>",
+			"another format":    `{"bomFormat":"SPDX","specVersion":"1.5","components":[{"name":"x"}],"metadata":{"component":{"name":"m"}}}`,
+			"older spec":        `{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"name":"x"}],"metadata":{"component":{"name":"m"}}}`,
+			"no components":     `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[],"metadata":{"component":{"name":"m"}}}`,
+			"nothing described": `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"x"}],"metadata":{}}`,
+		} {
+			f := signedFixture(t, nil)
+			f.replaceCIAsset(t, "mash-darwin-arm64.cdx.json", body)
+			t.Run(name, func(t *testing.T) { refused(t, f, "mash-darwin-arm64.cdx.json") })
+		}
+	})
+	t.Run("an SBOM attestation that fails", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.markerFor(t, "noattest-sbom", "mash-darwin-arm64")
+		refused(t, f, "mash-darwin-arm64")
+	})
+	t.Run("an SBOM attestation whose subject is not the binary", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.markerFor(t, "badsubject", "mash-linux-amd64")
+		refused(t, f, "mash-linux-amd64")
+	})
+	t.Run("an SBOM attestation whose predicate is a different SBOM", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		write(t, filepath.Join(f.ghDir(), "predicate"), "mash-linux-amd64", `{"bomFormat":"CycloneDX","specVersion":"1.5","metadata":{"component":{"name":"other"}},"components":[{"type":"library","name":"y"}]}`)
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-linux-amd64.cdx.json") || !strings.Contains(err.Error(), "does not match") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+	})
+	t.Run("an SBOM attestation whose predicate differs only in key order and whitespace", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		write(t, filepath.Join(f.ghDir(), "predicate"), "mash-linux-amd64", "{ \"components\": [ {\"name\":\"x\", \"type\":\"library\"} ],\n \"metadata\":{\"component\":{\"name\":\"mash-linux-amd64.cdx.json\"}}, \"specVersion\":\"1.5\", \"bomFormat\":\"CycloneDX\" }")
+		if err := checkAssets(context.Background(), f.o); err != nil {
+			t.Fatalf("an equal predicate was refused: %v", err)
+		}
+	})
+	t.Run("slsa-verifier absent", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.o.SLSAVerifier = filepath.Join(f.ghDir(), "no-such-slsa-verifier")
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "go install github.com/slsa-framework/slsa-verifier/v2/cli/slsa-verifier@v2.7.1") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+	})
+	t.Run("a provenance whose workflow entry point is not release.yml, or is missing, or is correct", func(t *testing.T) {
+		for name, tc := range map[string]struct{ body, want string }{
+			"wrong v0.2":      {dsseLine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/other.yml"}}}}`), "other.yml"},
+			"wrong v1":        {dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/other.yml"}}}}}`), "other.yml"},
+			"missing":         {dsseLine(`{"predicate":{}}`), "no workflow entry point"},
+			"second line bad": {goodCIAsset(release.ProvenanceName) + dsseLine(`{"predicate":{"invocation":{"configSource":{"entryPoint":"x.yml"}}}}`), "x.yml"},
+			"not an envelope": {"nonsense\n", "DSSE"},
+			"neither shape":   {`{"mediaType":"x","signatures":[]}` + "\n", "neither a Sigstore bundle"},
+			"bare wrong":      {bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/other.yml"}}}}`), "other.yml"},
+		} {
+			f := signedFixture(t, nil)
+			f.replaceCIAsset(t, release.ProvenanceName, tc.body)
+			t.Run(name, func(t *testing.T) {
+				err := checkAssets(context.Background(), f.o)
+				if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash.intoto.jsonl") || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+				}
+			})
+		}
+		for name, body := range map[string]string{
+			"v1":        dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`),
+			"bare":      bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
+			"mixed":     goodCIAsset(release.ProvenanceName) + bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
+			"two lines": goodCIAsset(release.ProvenanceName) + goodCIAsset(release.ProvenanceName),
+		} {
+			f := signedFixture(t, nil)
+			f.replaceCIAsset(t, release.ProvenanceName, body)
+			if err := checkAssets(context.Background(), f.o); err != nil {
+				t.Errorf("%s: a correct provenance was refused: %v", name, err)
+			}
+		}
+	})
+	t.Run("an SBOM with a duplicate key at any level", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"top":    `{"bomFormat":"CycloneDX","specVersion":"1.5","specVersion":"1.5","components":[{"name":"x"}],"metadata":{"component":{"name":"m"}}}`,
+			"nested": `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"x","name":"y"}],"metadata":{"component":{"name":"m"}}}`,
+		} {
+			f := signedFixture(t, nil)
+			f.replaceCIAsset(t, "mash-darwin-arm64.cdx.json", body)
+			t.Run(name, func(t *testing.T) { refused(t, f, "duplicate key") })
+		}
+	})
+	t.Run("slsa-verifier failing", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.markerFor(t, "noslsa", "mash-linux-arm64")
+		refused(t, f, "mash-linux-arm64")
+	})
+	t.Run("publish refuses the same way and does not publish", func(t *testing.T) {
+		f := signedDraft(t)
+		f.markerFor(t, "noslsa", "mash-darwin-amd64")
+		err := f.publish()
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-darwin-amd64") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+		if strings.Contains(f.ghLog(), "release edit") {
+			t.Error("published without verifying provenance")
+		}
+		g := signedDraft(t)
+		g.o.SLSAVerifier = filepath.Join(g.ghDir(), "no-such-slsa-verifier")
+		if err := g.publish(); err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "slsa-verifier") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+	})
+	t.Run("not run when an earlier check refused", func(t *testing.T) {
+		f := signedFixture(t, func(h map[string]string) { h["mash-linux-amd64"] = "sha256:" + strings.Repeat("0", 64) })
+		if err := checkAssets(context.Background(), f.o); err == nil {
+			t.Fatal("a wrong binary passed")
+		}
+		if strings.Contains(f.ghLog(), "verify-artifact") || strings.Contains(f.ghLog(), "--predicate-type") {
+			t.Errorf("the supply chain was checked after a refusal:\n%s", f.ghLog())
 		}
 	})
 }

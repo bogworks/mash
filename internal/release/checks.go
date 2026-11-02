@@ -90,6 +90,22 @@ type Target struct{ GOOS, GOARCH string }
 // AssetName is the release asset's name for the target.
 func (t Target) AssetName() string { return "mash-" + t.GOOS + "-" + t.GOARCH }
 
+// SBOMName is the CycloneDX SBOM asset of the target's binary.
+func (t Target) SBOMName() string { return t.AssetName() + ".cdx.json" }
+
+// ProvenanceName is the SLSA Build L3 provenance asset covering the four binaries.
+const ProvenanceName = "mash.intoto.jsonl"
+
+// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: each target's SBOM, in target order,
+// then the SLSA provenance. They are attached by name and listed in SHA256SUMS; the gate verifies their contents.
+func CIAssetNames() []string {
+	var n []string
+	for _, t := range Targets {
+		n = append(n, t.SBOMName())
+	}
+	return append(n, ProvenanceName)
+}
+
 // SumsName is the checksums asset.
 const SumsName = "SHA256SUMS"
 
@@ -105,14 +121,20 @@ const SumsSigName = "SHA256SUMS.sig"
 // signature this key makes for any other purpose cannot be replayed as a mash release signature.
 const SumsNamespace = "mash-release"
 
-// ExpectedSums is the exact SHA256SUMS content for the given per-target hashes (hex SHA-256 of each binary) and the
-// quickstart script's hash: the output of `sha256sum mash-* quickstart-synadia.sh` in the dist directory.
-func ExpectedSums(hashes map[Target]string, scriptHash string) string {
+// ExpectedSums is the exact SHA256SUMS content for the given per-target hashes (hex SHA-256 of each binary), the
+// quickstart script's hash and the hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the script, the
+// SBOMs and the provenance, in that order, as release.yml's draft job lists them. A name missing from ci is left out.
+func ExpectedSums(hashes map[Target]string, scriptHash string, ci map[string]string) string {
 	var b strings.Builder
 	for _, t := range Targets {
 		fmt.Fprintf(&b, "%s  %s\n", hashes[t], t.AssetName())
 	}
 	fmt.Fprintf(&b, "%s  %s\n", scriptHash, ScriptName)
+	for _, n := range CIAssetNames() {
+		if h, ok := ci[n]; ok {
+			fmt.Fprintf(&b, "%s  %s\n", h, n)
+		}
+	}
 	return b.String()
 }
 
@@ -122,13 +144,30 @@ func sha(b []byte) string {
 }
 
 // CheckAssets judges a draft release's assets (name -> GitHub's "sha256:<hex>" digest) against our own fresh builds
-// of the candidate: exactly the four binaries, the quickstart script and SHA256SUMS, nothing else; each binary's digest
-// is the hash of our build for that target, the script's is scriptHash (the tagged source's); and SHA256SUMS is exactly
-// the file those hashes produce. It names every problem.
+// of the candidate: exactly the four binaries, their four SBOMs, the SLSA provenance, the quickstart script and
+// SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target, the script's is scriptHash
+// (the tagged source's); the SBOMs and the provenance must be attached (their contents are verified separately, as
+// they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
+// every problem.
 func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash string) error {
 	var problems []string
 	add := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
-	want := map[string]string{SumsName: "sha256:" + sha([]byte(ExpectedSums(hashes, scriptHash)))}
+	want := map[string]string{}
+	ci := map[string]string{}
+	for _, n := range CIAssetNames() {
+		got, ok := have[n]
+		hex, found := strings.CutPrefix(got, "sha256:")
+		switch {
+		case !ok:
+			add("asset %s is missing from the release", n)
+		case !found || len(hex) != 64:
+			add("asset %s has digest %q, not a sha256", n, got)
+		default:
+			ci[n] = hex
+			want[n] = got
+		}
+	}
+	want[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes, scriptHash, ci)))
 	if len(scriptHash) != 64 {
 		add("no usable hash for %s", ScriptName)
 	} else {
