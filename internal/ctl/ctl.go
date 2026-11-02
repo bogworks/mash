@@ -60,6 +60,7 @@ func Usage(prog string) string {
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		mintLines(line)
+		retireLines(line)
 		policyLines(line)
 	}
 	return b.String()
@@ -68,6 +69,12 @@ func Usage(prog string) string {
 func mintLines(line func(left, right string)) {
 	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
 	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (same user key, offline)")
+}
+
+func retireLines(line func(left, right string)) {
+	line("retire NAME [--policy FILE] [--delete-creds] [--force]", "remove NAME's record and inbox, then its policy entry; its user is not revoked")
+	line("label NAME k=v... [--policy FILE] [--dry-run]", "set labels in the policy file (offline; nothing changes until apply)")
+	line("unlabel NAME k... [--policy FILE] [--dry-run]", "remove labels from the policy file (offline)")
 }
 
 func policyLines(line func(left, right string)) {
