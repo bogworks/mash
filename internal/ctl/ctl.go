@@ -82,6 +82,8 @@ func policyLines(line func(left, right string)) {
 	line("policy test [--policy FILE]", "run the file's tests")
 	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
 	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
+	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
+	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: zone keys, the account push, directory zone and labels; lists stale creds")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the

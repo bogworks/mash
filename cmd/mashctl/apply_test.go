@@ -267,6 +267,57 @@ func TestApplyPushesZonesAndUsersGetExactlyTheirPermissions(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 
+	// ADR 0055: only mail is policed. The same zone-a user prompts and status-probes every peer on the five-token
+	// subjects, the zone it may not mail and a name nobody has included; mail on the five-token subject is refused,
+	// since mail uses the six-token one.
+	probes := make(chan string, 16)
+	for _, verb := range []string{"prompt", "status"} {
+		if _, err := admin.Subscribe("agents."+verb+".>", func(m *nats.Msg) { probes <- m.Subject }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admin.Flush()
+	var wantProbes []string
+	for _, verb := range []string{"prompt", "status"} {
+		for _, name := range []string{"y", "z", "nobody"} {
+			subj := "agents." + verb + ".cc.alice." + name
+			wantProbes = append(wantProbes, subj)
+			if err := ux.Publish(subj, []byte("probe")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ux.Flush()
+	probed := map[string]bool{}
+	for len(probed) < len(wantProbes) {
+		select {
+		case s := <-probes:
+			probed[s] = true
+		case v := <-violations:
+			t.Fatalf("a prompt or status probe was refused: %s", v)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("probes delivered %d of %d: %v", len(probed), len(wantProbes), probed)
+		}
+	}
+	fiveTokenMail := "agents.mail.cc.alice.y"
+	if err := ux.Publish(fiveTokenMail, []byte("legacy subject")); err != nil {
+		t.Fatal(err)
+	}
+	ux.Flush()
+	select {
+	case v := <-violations:
+		if !strings.Contains(strings.ToLower(v), "permissions violation") {
+			t.Fatalf("unexpected error %q", v)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("mail on the five-token subject was not refused")
+	}
+	select {
+	case s := <-seen:
+		t.Fatalf("five-token mail was delivered: %s", s)
+	case <-time.After(200 * time.Millisecond):
+	}
+
 	// Second apply: nothing to push.
 	jwtNow := e.accountJWT()
 	out, errb, code = e.run("policy", "apply")

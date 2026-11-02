@@ -80,7 +80,7 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			}
 		case a == "--servers" || strings.HasPrefix(a, "--servers="):
 			o.servers, err = val(&i, a, "--servers")
-		case a == "--dry-run" && verb == "apply":
+		case a == "--dry-run" && (verb == "apply" || verb == "repair"):
 			o.dryRun = true
 		default:
 			err = fmt.Errorf("unknown argument %q", a)
@@ -116,6 +116,28 @@ func sysCredsPath(flagVal string, env func(string) string, cfg config.Config) (s
 	return "", errors.New("no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)")
 }
 
+// connectSys connects with the system account credentials (flagVal, MASH_SYS_CREDS or the init server's).
+func connectSys(cfg config.Config, flagVal string, env func(string) string) (*nats.Conn, error) {
+	credsPath, err := sysCredsPath(flagVal, env, cfg)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(credsPath)
+	if err != nil {
+		return nil, fmt.Errorf("system account credentials: %v", err)
+	}
+	if err := natsauth.CheckCreds(credsPath, raw); err != nil {
+		return nil, fmt.Errorf("system account credentials: %v", err)
+	}
+	opts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-policy"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
+	nc, err := nats.Connect(cfg.URL, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s with the system account credentials: %v", cfg.URL, natsauth.TLSHint(err))
+	}
+	return nc, nil
+}
+
 // runPolicyApply is `mashctl policy apply` and `mashctl policy diff`.
 func runPolicyApply(verb string, args []string, env func(string) string, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
@@ -124,6 +146,22 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, applyUsage(verb))
 		return 2
 	}
+	return runPolicyApplyOpts(verb, o, nil, env, stdout, stderr)
+}
+
+// policySnapshot is a policy file read, parsed and compiled once: `policy repair` hands the same snapshot to every
+// step, so a file edited while repair runs cannot make one step act on a different policy than another.
+type policySnapshot struct {
+	path string
+	f    *policy.File
+	c    *policy.Compiled
+}
+
+// runPolicyApplyOpts is runPolicyApply after argument parsing. With a nil snap it reads the policy file itself; with a
+// snapshot it uses that and never reads the file again (the file's tests still run, against the snapshot).
+func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func(string) string, stdout, stderr io.Writer) int {
+	pfx := "mashctl: policy " + verb + ": "
+	var err error
 	servers := 0
 	if sv := o.servers; sv != "" || env("MASH_SERVERS") != "" {
 		src := "--servers"
@@ -141,20 +179,24 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 		return 1
 	}
 	fail := func(format string, a ...any) int { fmt.Fprintf(stderr, pfx+format+"\n", a...); return 1 }
-	path, err := policyPath(o.file, env, cfg)
-	if err != nil {
-		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fail("%v", err)
-	}
-	f, err := policy.Parse(data)
-	if err != nil { // Parse folds the Check errors into one error
-		for _, m := range strings.Split(strings.TrimPrefix(err.Error(), "policy: "), "; ") {
-			fmt.Fprintf(stderr, "%s%s: error: %s\n", pfx, path, m)
+	var path string
+	var f *policy.File
+	if snap != nil {
+		path, f = snap.path, snap.f
+	} else {
+		if path, err = policyPath(o.file, env, cfg); err != nil {
+			return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
 		}
-		return fail("refusing: the policy file does not check (nothing was changed)")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if f, err = policy.Parse(data); err != nil { // Parse folds the Check errors into one error
+			for _, m := range strings.Split(strings.TrimPrefix(err.Error(), "policy: "), "; ") {
+				fmt.Fprintf(stderr, "%s%s: error: %s\n", pfx, path, m)
+			}
+			return fail("refusing: the policy file does not check (nothing was changed)")
+		}
 	}
 	// The file's own tests run before anything is read or created: a file whose tests contradict its rules is not pushed.
 	var failed []string
@@ -185,8 +227,10 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	if cfg.URL == "" {
 		return fail(`no server URL (config.json "url" or MASH_URL)`)
 	}
-	c, err := policy.Compile(f, cfg.Owner)
-	if err != nil {
+	var c *policy.Compiled
+	if snap != nil {
+		c = snap.c
+	} else if c, err = policy.Compile(f, cfg.Owner); err != nil {
 		return fail("%v", err)
 	}
 	keyDir, err := ctlkeys.DirFor(cfg, env)
@@ -197,22 +241,9 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	if err != nil {
 		return fail("%v", err)
 	}
-	credsPath, err := sysCredsPath(o.sysCreds, env, cfg)
+	nc, err := connectSys(cfg, o.sysCreds, env)
 	if err != nil {
 		return fail("%v", err)
-	}
-	raw, err := os.ReadFile(credsPath)
-	if err != nil {
-		return fail("system account credentials: %v", err)
-	}
-	if err := natsauth.CheckCreds(credsPath, raw); err != nil {
-		return fail("system account credentials: %v", err)
-	}
-	opts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
-		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-policy"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
-	nc, err := nats.Connect(cfg.URL, opts...)
-	if err != nil {
-		return fail("connect %s with the system account credentials: %v", cfg.URL, natsauth.TLSHint(err))
 	}
 	defer nc.Close()
 

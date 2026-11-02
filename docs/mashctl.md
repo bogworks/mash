@@ -77,3 +77,12 @@ Needs the server and admin credentials. Order of operations (a failure leaves th
 6. Print `retired NAME`, the consequences above (`reissue needed` for other endpoints, `account update needed`), and always the revocation note.
 
 What it does not do: **revoke the user.** mashctl has no revocation yet, so NAME's old creds still authenticate; the note says `revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off`. It also does not push the account JWT: run `mashctl apply` when told to.
+
+## Checking and repairing drift
+
+```sh
+mashctl policy drift  [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
+mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]...
+```
+
+`drift` compares the policy file with the account JWT's zone keys, the key store, the directory records and the creds files `add` and `reissue` write, reports each state as `ok` or a list, fixes nothing, and exits 0 only when all four match. The creds files are read from `--creds-dir`, else where `add` writes them, and compared as `reissue --changed` does; `drift` then names each stale endpoint and what differs. `repair` is additive EXCEPT that it clears labels the file does not name on endpoints the file declares. It creates missing zone key files, pushes the account through `apply`, sets a record's zone and makes its labels equal to the file's (setting differing ones and clearing the ones the file lacks), and prints the `mashctl reissue` command for stale creds without running it; it never revokes a credential or deletes a key file, a record or a creds file, and never touches an endpoint the file does not declare. Every label it clears or changes is listed, one line each (`clear label NAME key=oldvalue`, `set label NAME key=value (was oldvalue)`). `repair --dry-run` writes nothing (no key file, no account push, no directory change) and prints the same lines. See [Checking and repairing drift](operations.md#checking-and-repairing-drift) for the four states, the steps and the limits.

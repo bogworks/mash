@@ -18,6 +18,9 @@ const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy show [--json] [--budget] [--policy FILE]
        mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
        mashctl policy diff [--policy FILE] [--sys-creds FILE]
+       mashctl policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
+       mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]...
+       (repair is additive EXCEPT that it clears labels the file does not name on endpoints the file declares)
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.
@@ -92,6 +95,10 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 		allowed = []string{"--json", "--budget"}
 	case "apply", "diff":
 		return runPolicyApply(verb, rest, env, stdout, stderr)
+	case "drift":
+		return runPolicyDrift(rest, env, stdout, stderr)
+	case "repair":
+		return runPolicyRepair(rest, env, stdout, stderr)
 	default:
 		return usage()
 	}
