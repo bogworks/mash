@@ -2,6 +2,28 @@
 
 mash needs a NATS server in operator mode with JetStream, and one account for mash. mash itself never mints NATS users and never holds an operator or account seed: you issue endpoint users with your own tooling (`nsc`, or any JWT issuer), using the permissions `mash admin permissions` prints, and mash creates the streams and directory entries behind them.
 
+## Local setup with `mashctl init --local`
+
+For one developer on one machine, `mashctl init --local` writes the whole NATS side in one command, so the manual `nsc` steps below are not needed. It needs no `config.json` and no running server:
+
+```sh
+mashctl init --local --owner alice [--dir D] [--port P] [--start]
+```
+
+It creates, in `D` (default `<config dir>/server`; mode 0700): `server.conf` (an operator-mode server listening on `127.0.0.1:P`, default 4222, with JetStream on file storage and the accounts preloaded into a full resolver), `operator.jwt`, and the credentials `mashadmin.creds` (full access within the MASH account, for `mashctl`) and `sys.creds` (system account), all 0600. The operator, system-account and MASH-account signing seeds go to the `mashctl` key store (`operator.nk`, `system.nk`, `account.nk`, 0600, in `<config dir>/keys` or `$MASH_KEYS_DIR`); they are never printed. The MASH account gets the limits [below](#limits) describe (2G of disk, 64 streams, 128 consumers). If none exists it also writes an open `policy.yaml` ([the policy file](policy-file.md), `default: allow`) and a `config.json` with `url`, `owner` and `admin_creds`; an existing `config.json` or `policy.yaml` is never touched, and for `config.json` the three settings to add are printed.
+
+The server is loopback only and has no TLS: it is for development on this machine, not for remote endpoints. For those, follow the manual steps below with a TLS-terminated server.
+
+`init --local` refuses, and changes nothing, if `D` already holds any file it would create. Then:
+
+```sh
+nats-server -c ~/.config/mash/server/server.conf   # or: add --start to the command above
+mashctl init                                        # the directory and lease buckets
+mashctl provision <name> --user U --account A       # then add endpoints (`mashctl add` is coming)
+```
+
+With `--start`, `mashctl` looks for `nats-server` on `PATH` (if it is missing it says so, and the files stay), starts it detached with its output in `D/server.log` and its pid in `D/server.pid`, waits up to 15 seconds for a connection with `mashadmin.creds`, and creates the buckets. To stop the server: `kill $(cat D/server.pid)`.
+
 ## The account
 
 Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.

@@ -69,6 +69,8 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 ## 4. Configuration
 
+On one machine with no NATS server yet, `mashctl init --local --owner <name> --start` sets up a local operator-mode server with JetStream and writes this configuration for you (see [Local setup](operations.md#local-setup-with-mashctl-init---local)); the rest of this section is for an existing server.
+
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist).
 
 ```json

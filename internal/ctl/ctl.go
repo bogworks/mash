@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ func Usage(prog string) string {
 		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
 	}
 	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
+	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, no TLS), keys and credentials, for one developer; --start also starts it and creates the buckets")
 	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <name> [--nsc]", "the NATS permissions an endpoint user needs")
@@ -66,6 +68,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	if len(args) == 0 {
 		fmt.Fprint(stderr, Usage(prog))
 		return 2
+	}
+	if args[0] == "init" && slices.Contains(args[1:], "--local") {
+		return runInitLocal(prog, cfg, args[1:], stdout, stderr)
 	}
 	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
 		cfg.Limits = store.DefaultLimits()

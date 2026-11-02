@@ -23,14 +23,33 @@ import (
 var (
 	// ErrNoZoneKey is wrapped by ZoneKey when the zone has no key file and create is false.
 	ErrNoZoneKey = errors.New("mashctl: no signing key for zone")
+	// ErrNoOperatorKey is returned by Operator when operator.nk is absent.
+	ErrNoOperatorKey = errors.New("mashctl: no operator key (operator.nk): it exists only for a server `mashctl init --local` stood up")
+	// ErrNoSystemKey is returned by System when system.nk is absent.
+	ErrNoSystemKey = errors.New("mashctl: no system account key (system.nk): it exists only for a server `mashctl init --local` stood up")
 	// ErrNoAccountKey is returned by Account when account.nk is absent.
 	ErrNoAccountKey = errors.New("mashctl: no account signing key: run `mashctl init`")
 )
 
 const (
-	accountFile = "account.nk"
-	zonesDir    = "zones"
-	seedExt     = ".nk"
+	accountFile  = "account.nk"
+	operatorFile = "operator.nk"
+	systemFile   = "system.nk"
+	zonesDir     = "zones"
+	seedExt      = ".nk"
+)
+
+// kind is a type of key the store holds: how to make one and how to recognise its public key.
+type kind struct {
+	what   string
+	create func() (nkeys.KeyPair, error)
+	valid  func(pub string) bool
+}
+
+var (
+	accountKind  = kind{"account signing", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
+	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
 
 // zoneRE is the shape of a zone name, identical to sap.ValidZone (zone-in-subject, ADR 0054; not on main yet): swap it for that
@@ -133,7 +152,7 @@ func (a *Authority) checkDirs(create bool) error {
 var syncDirHook = syncDir
 
 // readSeed reads and verifies the seed file at path. A missing file returns an error wrapping fs.ErrNotExist.
-func readSeed(path string) (nkeys.KeyPair, error) {
+func readSeed(path string, k kind) (nkeys.KeyPair, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -154,13 +173,13 @@ func readSeed(path string) (nkeys.KeyPair, error) {
 	seed := []byte(strings.TrimSpace(string(b)))
 	clear(b)
 	defer clear(seed)
-	bad := fmt.Errorf("mashctl: %s does not hold a valid account signing seed", path)
+	bad := fmt.Errorf("mashctl: %s does not hold a valid %s seed", path, k.what)
 	kp, err := nkeys.FromSeed(seed)
 	if err != nil {
 		return nil, bad
 	}
 	pub, err := kp.PublicKey()
-	if err != nil || !nkeys.IsValidPublicAccountKey(pub) {
+	if err != nil || !k.valid(pub) {
 		kp.Wipe()
 		return nil, bad
 	}
@@ -169,8 +188,8 @@ func readSeed(path string) (nkeys.KeyPair, error) {
 
 // createSeed makes a new account-type key and installs it at path without clobbering. If the file appears first
 // (another process), that file is read and returned instead.
-func createSeed(path string) (nkeys.KeyPair, bool, error) {
-	nk, err := nkeys.CreateAccount()
+func createSeed(path string, k kind) (nkeys.KeyPair, bool, error) {
+	nk, err := k.create()
 	if err != nil {
 		return nil, false, fmt.Errorf("mashctl: generate key: %w", err)
 	}
@@ -204,7 +223,7 @@ func createSeed(path string) (nkeys.KeyPair, bool, error) {
 	if err := os.Link(tmp, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			nk.Wipe()
-			kp, err := readSeed(path)
+			kp, err := readSeed(path, k)
 			return kp, false, err
 		}
 		return nil, false, fmt.Errorf("mashctl: install %s: %w", path, err)
@@ -219,25 +238,25 @@ func createSeed(path string) (nkeys.KeyPair, bool, error) {
 }
 
 // getOrCreate reads path, creating it first when create is set and it is absent.
-func getOrCreate(path string, create bool) (nkeys.KeyPair, bool, error) {
-	kp, err := readSeed(path)
+func getOrCreate(path string, k kind, create bool) (nkeys.KeyPair, bool, error) {
+	kp, err := readSeed(path, k)
 	if err == nil {
 		return kp, false, nil
 	}
 	if !errors.Is(err, fs.ErrNotExist) || !create {
 		return nil, false, err
 	}
-	return createSeed(path)
+	return createSeed(path, k)
 }
 
-// InitAccount creates the account signing key if absent. It never overwrites an existing seed.
-func (a *Authority) InitAccount() (pub string, created bool, err error) {
+// initKind creates the key file name of kind k if absent (never overwriting) and reports its public key.
+func (a *Authority) initKind(name string, k kind) (pub string, created bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := a.checkDirs(true); err != nil {
 		return "", false, err
 	}
-	kp, created, err := getOrCreate(filepath.Join(a.dir, accountFile), true)
+	kp, created, err := getOrCreate(filepath.Join(a.dir, name), k, true)
 	if err != nil {
 		return "", false, err
 	}
@@ -246,16 +265,16 @@ func (a *Authority) InitAccount() (pub string, created bool, err error) {
 	return pub, created, err
 }
 
-// Account returns the account signing key pair and its public key.
-func (a *Authority) Account() (nkeys.KeyPair, string, error) {
+// getKind reads the key file name of kind k; missing is returned when the file is absent.
+func (a *Authority) getKind(name string, k kind, missing error) (nkeys.KeyPair, string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, err := checkDir(a.dir); err != nil {
 		return nil, "", err
 	}
-	kp, err := readSeed(filepath.Join(a.dir, accountFile))
+	kp, err := readSeed(filepath.Join(a.dir, name), k)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, "", ErrNoAccountKey
+		return nil, "", missing
 	}
 	if err != nil {
 		return nil, "", err
@@ -268,6 +287,36 @@ func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return kp, pub, nil
 }
 
+// InitOperator creates the operator key (operator.nk) if absent; used by `mashctl init --local`. It never overwrites.
+func (a *Authority) InitOperator() (pub string, created bool, err error) {
+	return a.initKind(operatorFile, operatorKind)
+}
+
+// Operator returns the operator key pair and its public key.
+func (a *Authority) Operator() (nkeys.KeyPair, string, error) {
+	return a.getKind(operatorFile, operatorKind, ErrNoOperatorKey)
+}
+
+// InitSystem creates the system account's identity key (system.nk) if absent. It never overwrites.
+func (a *Authority) InitSystem() (pub string, created bool, err error) {
+	return a.initKind(systemFile, systemKind)
+}
+
+// System returns the system account's identity key pair and its public key.
+func (a *Authority) System() (nkeys.KeyPair, string, error) {
+	return a.getKind(systemFile, systemKind, ErrNoSystemKey)
+}
+
+// InitAccount creates the account signing key if absent. It never overwrites an existing seed.
+func (a *Authority) InitAccount() (pub string, created bool, err error) {
+	return a.initKind(accountFile, accountKind)
+}
+
+// Account returns the account signing key pair and its public key.
+func (a *Authority) Account() (nkeys.KeyPair, string, error) {
+	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
+}
+
 // ZoneKey returns zone's scoped signing key; with create it generates and writes one if absent. It never overwrites.
 func (a *Authority) ZoneKey(zone string, create bool) (nkeys.KeyPair, error) {
 	if !validZone(zone) {
@@ -278,7 +327,7 @@ func (a *Authority) ZoneKey(zone string, create bool) (nkeys.KeyPair, error) {
 	if err := a.checkDirs(create); err != nil {
 		return nil, err
 	}
-	kp, _, err := getOrCreate(filepath.Join(a.zonesPath(), zone+seedExt), create)
+	kp, _, err := getOrCreate(filepath.Join(a.zonesPath(), zone+seedExt), accountKind, create)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w %q", ErrNoZoneKey, zone)
 	}
