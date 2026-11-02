@@ -138,6 +138,7 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	_, declared := beforeFile.Endpoints[name]
 	if !declared && !force {
+		announceTarget(cfg, env, stderr, nil)
 		if looksInterrupted(cfg, credsPath, name) {
 			return fail("endpoint %q is not declared in %s (--force removes it from the server only); %s", name, path, orphanText(name))
 		}
@@ -169,6 +170,7 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 
 	// (3) the guarded server removal. The user key comes from the directory record, so a record someone replaced
 	// meanwhile is never deleted.
+	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("%v", err)

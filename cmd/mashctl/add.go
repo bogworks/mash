@@ -334,6 +334,7 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	}
 
 	// The server connection is opened before any key or record is made, so an unreachable server changes nothing.
+	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("%v", err)
