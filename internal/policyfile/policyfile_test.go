@@ -207,7 +207,7 @@ func TestCreateThenAdd(t *testing.T) {
 		t.Fatalf("%s", b)
 	}
 	d.Close()
-	if _, err := Create(p, "allow"); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := Create(p, "allow"); err == nil || !strings.Contains(err.Error(), "exists, not overwritten") || !errors.Is(err, os.ErrExist) {
 		t.Fatalf("overwrite: %v", err)
 	}
 	if _, err := Create(filepath.Join(t.TempDir(), "q.yaml"), "maybe"); err == nil {
@@ -339,4 +339,94 @@ func TestLockContention(t *testing.T) {
 		t.Fatalf("after Close: %v", err)
 	}
 	d3.Close()
+}
+
+func noTemps(t *testing.T, dir string) {
+	t.Helper()
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Fatalf("temp file left: %s", e.Name())
+		}
+	}
+}
+
+func TestSaveRefusesChangedFile(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	d := load(t, p)
+	orig, _ := os.ReadFile(p)
+	hand := append(append([]byte(nil), orig...), []byte("# hand edit\n")...)
+	if err := os.WriteFile(p, hand, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddEndpoint("z", nil); err != nil {
+		t.Fatal(err)
+	}
+	err := d.Save()
+	if !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), p) {
+		t.Fatalf("%v", err)
+	}
+	if now, _ := os.ReadFile(p); string(now) != string(hand) {
+		t.Fatal("the hand edit was overwritten")
+	}
+	noTemps(t, filepath.Dir(p))
+
+	// same length, same mtime: only the contents differ
+	p2 := copyTo(t, "commented.yaml")
+	d2 := load(t, p2)
+	st, _ := os.Stat(p2)
+	same, _ := os.ReadFile(p2)
+	same = append([]byte(nil), same...)
+	i := strings.Index(string(same), "allow")
+	if i < 0 {
+		i = strings.Index(string(same), "deny")
+	}
+	same[i], same[i+1] = same[i+1], same[i]
+	os.WriteFile(p2, same, 0o600)
+	os.Chtimes(p2, st.ModTime(), st.ModTime())
+	if err := d2.AddEndpoint("z", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d2.Save(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("same-length change: %v", err)
+	}
+
+	// a file removed since Load
+	p3 := copyTo(t, "commented.yaml")
+	d3 := load(t, p3)
+	os.Remove(p3)
+	if err := d3.Save(); !errors.Is(err, ErrChanged) {
+		t.Fatalf("removed: %v", err)
+	}
+}
+
+func TestSaveTwice(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	d := load(t, p)
+	for _, n := range []string{"y", "z"} {
+		if err := d.AddEndpoint(n, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Save(); err != nil {
+			t.Fatalf("save %s: %v", n, err)
+		}
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), "  y:") || !strings.Contains(string(b), "  z:") {
+		t.Fatalf("%s", b)
+	}
+}
+
+func TestCreateDoesNotReplaceRacingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "policy.yaml")
+	beforeCreatePublish = func() { os.WriteFile(p, []byte("competing\n"), 0o600) }
+	defer func() { beforeCreatePublish = nil }()
+	_, err := Create(p, "deny")
+	if !errors.Is(err, os.ErrExist) || !strings.Contains(err.Error(), "exists, not overwritten") {
+		t.Fatalf("%v", err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "competing\n" {
+		t.Fatalf("competing file changed: %q", b)
+	}
+	noTemps(t, filepath.Dir(p))
 }

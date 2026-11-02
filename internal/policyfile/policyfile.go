@@ -8,6 +8,7 @@
 package policyfile
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -24,6 +25,12 @@ import (
 // ErrLocked is returned when another mashctl holds the policy file's lock.
 var ErrLocked = errors.New("policy file is being edited by another mashctl")
 
+// ErrChanged is returned by Save when the policy file changed on disk since it was loaded.
+var ErrChanged = errors.New("changed since it was loaded; reload and redo the edit")
+
+// beforeCreatePublish is a test seam called between Create's checks and its publish.
+var beforeCreatePublish func()
+
 // rename is os.Rename; tests replace it to simulate a failing rename.
 var rename = os.Rename
 
@@ -31,6 +38,7 @@ var rename = os.Rename
 type Doc struct {
 	path string
 	data []byte
+	orig []byte // the bytes on disk when loaded or last saved; Save refuses if the file no longer holds them
 	mode fs.FileMode
 	lock *os.File
 }
@@ -61,7 +69,7 @@ func read(path string, lock *os.File) (*Doc, error) {
 	if _, err := policy.Parse(data); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return &Doc{path: path, data: data, mode: st.Mode().Perm(), lock: lock}, nil
+	return &Doc{path: path, data: data, orig: append([]byte(nil), data...), mode: st.Mode().Perm(), lock: lock}, nil
 }
 
 const template = `# mash policy file: who may mail whom, as labels and rules.
@@ -92,17 +100,67 @@ func Create(path string, defaultMode string) (*Doc, error) {
 	}
 	if _, err := os.Stat(path); err == nil {
 		lock.Close()
-		return nil, fmt.Errorf("%s already exists", path)
+		return nil, existsErr(path)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		lock.Close()
 		return nil, err
 	}
-	d := &Doc{path: path, data: []byte(fmt.Sprintf(template, defaultMode)), mode: 0o600, lock: lock}
-	if err := d.Save(); err != nil {
+	data := []byte(fmt.Sprintf(template, defaultMode))
+	if err := publishNew(path, data); err != nil {
 		lock.Close()
 		return nil, err
 	}
-	return d, nil
+	return &Doc{path: path, data: data, orig: append([]byte(nil), data...), mode: 0o600, lock: lock}, nil
+}
+
+func existsErr(path string) error {
+	return fmt.Errorf("policy file %s exists, not overwritten: %w", path, os.ErrExist)
+}
+
+// publishNew puts data at path with mode 0600 only if nothing is there, atomically: the content is written and
+// fsynced to a temp file, which is then hard-linked to path (link fails with EEXIST rather than replacing a file that
+// appeared after the caller's check).
+func publishNew(path string, data []byte) error {
+	name, err := writeTemp(path, data, 0o600)
+	if err != nil {
+		return err
+	}
+	if beforeCreatePublish != nil {
+		beforeCreatePublish()
+	}
+	err = os.Link(name, path)
+	os.Remove(name)
+	switch {
+	case err == nil:
+		syncDir(path)
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		return existsErr(path)
+	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EOPNOTSUPP):
+		// The filesystem has no hard links: fall back to an O_EXCL create, which is also no-replace but not
+		// atomic in content (a crash can leave a short file).
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return existsErr(path)
+			}
+			return err
+		}
+		if _, err := f.Write(data); err == nil {
+			err = f.Sync()
+		}
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			os.Remove(path)
+			return err
+		}
+		syncDir(path)
+		return nil
+	default:
+		return err
+	}
 }
 
 func acquire(path string) (*os.File, error) {
@@ -137,28 +195,22 @@ func (d *Doc) Path() string { return d.path }
 // Bytes is the file as it would be saved.
 func (d *Doc) Bytes() ([]byte, error) { return append([]byte(nil), d.data...), nil }
 
-// Save writes the file atomically: a temp file in the same directory, fsync, rename. It keeps the old file's
-// permission bits (0600 for a file that did not exist). It refuses, writing nothing, when the result does not pass
-// policy.Parse.
-func (d *Doc) Save() error {
-	if _, err := policy.Parse(d.data); err != nil {
-		return fmt.Errorf("refusing to save an invalid policy: %w", err)
-	}
-	dir := filepath.Dir(d.path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(d.path)+".tmp-*")
+// writeTemp writes data to a fsynced temp file next to path with the given mode and returns its name.
+func writeTemp(path string, data []byte, mode fs.FileMode) (string, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return err
+		return "", err
 	}
 	name := tmp.Name()
-	fail := func(err error) error {
+	fail := func(err error) (string, error) {
 		tmp.Close()
 		os.Remove(name)
-		return err
+		return "", err
 	}
-	if err := tmp.Chmod(d.mode); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		return fail(err)
 	}
-	if _, err := tmp.Write(d.data); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		return fail(err)
 	}
 	if err := tmp.Sync(); err != nil {
@@ -166,16 +218,47 @@ func (d *Doc) Save() error {
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
+func syncDir(path string) {
+	if df, err := os.Open(filepath.Dir(path)); err == nil {
+		df.Sync()
+		df.Close()
+	}
+}
+
+// Save writes the file atomically: a temp file in the same directory, fsync, rename. It keeps the old file's
+// permission bits. It refuses, writing nothing, when the result does not pass policy.Parse, and with ErrChanged when
+// the file on disk no longer holds the bytes this Doc loaded (or last saved): a hand edit made while the Doc was open
+// is never overwritten. The comparison is of contents, under the lock; the lock is advisory, so an editor that does
+// not take it can still slip in between the comparison and the rename, a window of microseconds.
+func (d *Doc) Save() error {
+	if _, err := policy.Parse(d.data); err != nil {
+		return fmt.Errorf("refusing to save an invalid policy: %w", err)
+	}
+	cur, err := os.ReadFile(d.path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("policy file %s: %w", d.path, ErrChanged)
+		}
+		return err
+	}
+	if !bytes.Equal(cur, d.orig) {
+		return fmt.Errorf("policy file %s: %w", d.path, ErrChanged)
+	}
+	name, err := writeTemp(d.path, d.data, d.mode)
+	if err != nil {
 		return err
 	}
 	if err := rename(name, d.path); err != nil {
 		os.Remove(name)
 		return err
 	}
-	if df, err := os.Open(dir); err == nil {
-		df.Sync()
-		df.Close()
-	}
+	syncDir(d.path)
+	d.orig = append([]byte(nil), d.data...)
 	return nil
 }
 

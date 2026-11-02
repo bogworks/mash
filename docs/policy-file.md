@@ -176,6 +176,8 @@ tests:
 
 `mashctl policy` with no verb, or an unknown one, prints the usage to stderr and exits 2.
 
+A command that edits the file saves it atomically and refuses, leaving the file as it is, if the file changed on disk since the command loaded it.
+
 ## What the file is not
 
 It is not a place for content rules, rate limits or anything about what a message says: it decides reachability between endpoints and nothing else. A rule that lets a sender mail a recipient lets it ask for anything. It does not stop one endpoint asking another to forward a message (relay by asking), and it does not replace the receiving agent's judgement.
