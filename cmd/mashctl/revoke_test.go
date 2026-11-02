@@ -226,7 +226,7 @@ func TestDeprovisionWithoutRecordRevokesNothing(t *testing.T) {
 	e := testenv.Start(t)
 	ctlRun(t, e, "init")
 	s := stubRevoke(t)
-	if _, errb, code := ctlRun(t, e, "deprovision", "ghost"); code != 0 || len(s.calls) != 0 {
+	if _, errb, code := ctlRun(t, e, "deprovision", "ghost"); code != 1 || len(s.calls) != 0 || !strings.Contains(errb, "no endpoint named ghost") {
 		t.Fatalf("%d %v %q", code, s.calls, errb)
 	}
 }
