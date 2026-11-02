@@ -30,7 +30,7 @@ tests:
 
 ## Selectors and rules
 
-A selector is a map of `key: value` pairs, all of which must match an endpoint's labels. `{}` matches every endpoint. An endpoint without the label does not match. A rule that leaves out `from` or `to` is an error, so forgetting one never widens a rule to everyone.
+A selector is a map of `key: value` pairs, all of which must match an endpoint's labels. `{}` matches every endpoint. An endpoint without the label does not match. An endpoint without the subject label is in zone `default`, and selectors match it as such (`{zone: default}` selects it, as it does an endpoint labeled `zone: default`). A rule that leaves out `from` or `to` is an error, so forgetting one never widens a rule to everyone.
 
 Rules are a union and their order means nothing. For a sender and a recipient: if any matching rule denies, the pair is denied; otherwise if any matching rule allows, it is allowed; otherwise `default` decides. One rule covers every verb an endpoint addresses to a peer: mail, live prompt and status probe. Self-mail follows the same rules as any other pair: an endpoint is its own recipient exactly when a rule or the default says so (`from: {}, to: {}` includes it).
 

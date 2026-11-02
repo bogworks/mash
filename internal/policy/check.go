@@ -150,7 +150,7 @@ func (f *File) Check() Report {
 		}{{"from", rule.From}, {"to", rule.To}} {
 			matched := false
 			for _, n := range names {
-				if sel.s.matches(f.Endpoints[n].Labels) {
+				if sel.s.matches(f.effectiveLabels(n)) {
 					matched = true
 					break
 				}

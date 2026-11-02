@@ -119,6 +119,22 @@ func (f *File) zoneOf(name string) string {
 	return DefaultZone
 }
 
+// effectiveLabels is a copy of the endpoint's labels plus, when it lacks the subject label, that label set to
+// DefaultZone: the labels selectors are matched against. What the file stores is unchanged.
+func (f *File) effectiveLabels(name string) map[string]string {
+	src := f.Endpoints[name].Labels
+	out := make(map[string]string, len(src)+1)
+	for k, v := range src {
+		out[k] = v
+	}
+	if sl := f.subjectLabel(); !has(out, sl) {
+		out[sl] = DefaultZone
+	}
+	return out
+}
+
+func has(m map[string]string, k string) bool { _, ok := m[k]; return ok }
+
 func (f *File) defaultAllow() bool { return f.Default != Deny }
 
 func (f *File) defaultName() string {
@@ -147,7 +163,7 @@ type decision struct {
 // decide applies the rules to from -> to. Both must be declared. Any matching deny beats any matching allow; the
 // default applies only when no rule matched.
 func (f *File) decide(from, to string) decision {
-	fl, tl := f.Endpoints[from].Labels, f.Endpoints[to].Labels
+	fl, tl := f.effectiveLabels(from), f.effectiveLabels(to)
 	var d decision
 	for _, r := range f.Rules {
 		if !r.From.matches(fl) || !r.To.matches(tl) {
@@ -172,9 +188,8 @@ func (f *File) decide(from, to string) decision {
 	return d
 }
 
-// permits is decide(from, to).allowed without building the explanation: no allocation.
-func (f *File) permits(from, to string) bool {
-	fl, tl := f.Endpoints[from].Labels, f.Endpoints[to].Labels
+// permits is decide(from, to).allowed, given both endpoints' effective labels, without building the explanation.
+func (f *File) permits(fl, tl map[string]string) bool {
 	allowed := false
 	for _, r := range f.Rules {
 		if !r.From.matches(fl) || !r.To.matches(tl) {
@@ -203,11 +218,11 @@ type matrix struct {
 func (f *File) matrix(names []string) matrix {
 	m := matrix{cls: make([]int, len(names))}
 	byKey := map[string]int{}
-	var reps []string
+	var reps []map[string]string
 	key := make([]byte, 0, 2*len(f.Rules))
 	for i, n := range names {
 		key = key[:0]
-		labels := f.Endpoints[n].Labels
+		labels := f.effectiveLabels(n)
 		for _, r := range f.Rules {
 			key = append(key, b2c(r.From.matches(labels)), b2c(r.To.matches(labels)))
 		}
@@ -215,7 +230,7 @@ func (f *File) matrix(names []string) matrix {
 		if !ok {
 			c = len(reps)
 			byKey[string(key)] = c
-			reps = append(reps, n)
+			reps = append(reps, labels)
 		}
 		m.cls[i] = c
 	}
