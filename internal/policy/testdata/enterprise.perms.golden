@@ -26,6 +26,9 @@
           "agents.prompt.*.acme.*",
           "agents.status.*.acme.*"
         ],
+        "pub_deny": [
+          "agents.mail.*.acme.{{tag(deny)}}"
+        ],
         "sub": [
           "$SRV.\u003e",
           "_INBOX.{{name()}}.\u003e",
@@ -84,26 +87,33 @@
   },
   "tags": {
     "billing-agent": [
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "build-bot": [
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "deploy-tool": [
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "hr-agent": [
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "ledger-agent": [
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "support-bot": [
       "allow:dmz.web-intake",
+      "deny:_none",
       "deny:internal.hr-agent"
     ],
     "web-intake": [
-      "allow:internal.support-bot"
+      "allow:internal.support-bot",
+      "deny:_none"
     ]
   }
 }

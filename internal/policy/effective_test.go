@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/nats-io/jwt/v2"
+
+	"github.com/bogworks/mash/internal/admin"
 )
 
 // subjectMatches evaluates a NATS subject pattern against a literal subject: "*" matches one token, ">" (last
@@ -119,7 +121,7 @@ func TestEffectiveMatchesRecipients(t *testing.T) {
 		for _, from := range c.Endpoints {
 			for _, tag := range from.Tags {
 				sawAllow = sawAllow || strings.HasPrefix(tag, "allow:")
-				sawDeny = sawDeny || strings.HasPrefix(tag, "deny:") && tag != "deny:0"
+				sawDeny = sawDeny || strings.HasPrefix(tag, "deny:") && tag != admin.NoDenyTag
 				sawStar = sawStar || strings.HasSuffix(tag, ".*")
 			}
 			perms, err := c.Effective(from.Name)

@@ -1,8 +1,8 @@
 package policy
 
 import (
-	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -156,6 +156,12 @@ func (h *liveServer) user(name string, tags []string) (*liveConn, error) {
 	tok, err := uc.Encode(h.keys[e.Zone])
 	if err != nil {
 		h.t.Fatal(err)
+	}
+	// What is on the wire carries no permission or limit of its own: the zone key's template is all there is.
+	if dec, err := jwt.DecodeUserClaims(tok); err != nil {
+		h.t.Fatal(err)
+	} else if !reflect.DeepEqual(dec.UserPermissionLimits, jwt.UserPermissionLimits{}) {
+		h.t.Fatalf("%s: the decoded JWT has permissions or limits of its own: %+v", name, dec.UserPermissionLimits)
 	}
 	return h.connect(name, tok, uk)
 }
@@ -350,25 +356,80 @@ func TestLiveEnterprise(t *testing.T) {
 	}
 }
 
-// TestLiveDenyTagOnlyWhereKeyHasTemplate: a zone key without deny templates admits tagless users, and the account
-// built from random compiles is accepted by the server.
-func TestLiveTaglessUserOfPlainZone(t *testing.T) {
+// TestLiveFirstDenyExceptionLeavesZoneKeys: a policy with no deny exception already puts both tag templates on every
+// zone key and the deny:_none placeholder on every user, so the users connect and behave as compiled. Adding a deny
+// exception for one endpoint then leaves every zone key template identical (the same account claims serve both
+// compiles) and changes the tags of only the endpoint it names. A user with no deny tag at all is refused.
+func TestLiveFirstDenyExceptionLeavesZoneKeys(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts a nats-server")
 	}
-	f := mustParse(t, "endpoints:\n  a: {labels: {zone: red}}\n  b: {labels: {zone: blue}}\nrules:\n  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}\ndefault: deny\n")
-	c, err := Compile(f, "o")
+	const head = `
+default: deny
+endpoints:
+  a1: {labels: {zone: red, team: x}}
+  a2: {labels: {zone: red}}
+  a3: {labels: {zone: red}}
+  b1: {labels: {zone: blue}}
+  b2: {labels: {zone: blue, tier: secret}}
+rules:
+  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}
+  - {name: red-red, action: allow, from: {zone: red}, to: {zone: red}}
+  - {name: blue-red, action: allow, from: {zone: blue}, to: {zone: red}}
+`
+	c1, err := Compile(mustParse(t, head), "o")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := startLive(t, c)
-	a, err := h.user("a", c.Endpoints[0].Tags)
+	c2, err := Compile(mustParse(t, head+"  - {name: d, action: deny, from: {team: x}, to: {tier: secret}}\n"), "o")
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed, denied := h.probe(a, []string{"agents.mail.cc.o.blue.b", "agents.mail.cc.o.red.a", fmt.Sprint("agents.hb.cc.o.a")})
-	if len(allowed) != 2 || len(denied) != 1 || denied[0] != "agents.mail.cc.o.red.a" {
-		t.Errorf("allowed %v denied %v", allowed, denied)
+	// Before: both templates on every key, only the placeholder on every user.
+	for _, z := range c1.Zones {
+		if !slices.Contains(z.Perms.Pub.Allow, "agents.mail.*.o.{{tag(allow)}}") || !slices.Equal(z.Perms.Pub.Deny, []string{"agents.mail.*.o.{{tag(deny)}}"}) {
+			t.Errorf("zone %s lacks a template: allow %v deny %v", z.Name, z.Perms.Pub.Allow, z.Perms.Pub.Deny)
+		}
+	}
+	for _, e := range c1.Endpoints {
+		if !slices.Equal(e.Tags, []string{admin.NoDenyTag}) {
+			t.Errorf("%s before the deny exception: tags %v", e.Name, e.Tags)
+		}
+	}
+	// After: identical keys, one endpoint's tags changed.
+	for i := range c1.Zones {
+		if !reflect.DeepEqual(c1.Zones[i].Perms, c2.Zones[i].Perms) {
+			t.Errorf("zone %s: key template changed with the first deny exception:\n%+v\n%+v", c1.Zones[i].Name, c1.Zones[i].Perms, c2.Zones[i].Perms)
+		}
+	}
+	for i, e := range c1.Endpoints {
+		changed := !slices.Equal(e.Tags, c2.Endpoints[i].Tags)
+		if changed != (e.Name == "a1") {
+			t.Errorf("%s: tags %v -> %v (only a1 may change)", e.Name, e.Tags, c2.Endpoints[i].Tags)
+		}
+	}
+	if got := c2.Endpoints[0].Tags; !slices.Equal(got, []string{admin.NoDenyTag, "deny:blue.b2"}) {
+		t.Errorf("a1 tags after: %v", got)
+	}
+
+	h := startLive(t, c1)
+	h.liveMatrix(t)
+	// The same account claims (same zone keys) serve the second compile: new users only, one JWT different.
+	h.c = c2
+	h.admin.mu.Lock()
+	h.admin.seen = map[string]bool{} // forget what the first compile's users delivered
+	h.admin.mu.Unlock()
+	conns := h.liveMatrix(t)
+	// deny:_none and the real deny tag both expand: a1 is refused b2 and keeps b1.
+	if _, d := h.probe(conns["a1"], []string{"agents.mail.cc.o.blue.b1", "agents.mail.cc.o.blue.b2"}); len(d) != 1 || d[0] != "agents.mail.cc.o.blue.b2" {
+		t.Errorf("a1 refused %v, want only b2", d)
+	}
+	if eff, err := c2.Effective("a1"); err != nil || !slices.Contains(eff.Pub.Deny, "agents.mail.*.o._none") || !slices.Contains(eff.Pub.Deny, "agents.mail.*.o.blue.b2") {
+		t.Errorf("Effective deny lines %v %v", eff.Pub.Deny, err)
+	}
+	// nats-server refuses a user with no deny tag at all under these keys: why every user carries the placeholder.
+	if _, err := h.user("a2", nil); err == nil {
+		t.Error("a user without a deny tag connected on a zone key with the {{tag(deny)}} template")
 	}
 }
 

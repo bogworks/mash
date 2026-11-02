@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -301,5 +302,46 @@ func TestMintZoneKeyCreationIsTheCallers(t *testing.T) {
 	}
 	if _, err := Mint(keys, c, "a", nil, false); err != nil {
 		t.Fatalf("an existing key with create false: %v", err)
+	}
+}
+
+// TestMintScopedUserCarriesEmptyPermissions: every minted JWT, decoded, has no permissions of its own (pub and sub
+// allow and deny, response) and no subscription, data or payload limit set; the zone key's template is the only
+// source of permissions. Every endpoint also carries the deny:_none placeholder whatever its zone.
+func TestMintScopedUserCarriesEmptyPermissions(t *testing.T) {
+	c := compile(t, `
+default: deny
+endpoints:
+  a1: {labels: {zone: red, team: x}}
+  a2: {labels: {zone: red}}
+  b1: {labels: {zone: blue, tier: secret}}
+  b2: {labels: {zone: blue}}
+rules:
+  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}
+  - {name: d, action: deny, from: {team: x}, to: {tier: secret}}
+`)
+	keys := newFakeKeys(t)
+	for _, e := range c.Endpoints {
+		m, err := Mint(keys, c, e.Name, nil, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		uc, err := jwt.DecodeUserClaims(m.JWT)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pl := uc.UserPermissionLimits
+		if len(pl.Pub.Allow)+len(pl.Pub.Deny)+len(pl.Sub.Allow)+len(pl.Sub.Deny) != 0 || pl.Resp != nil {
+			t.Errorf("%s: permissions set: %+v", e.Name, pl.Permissions)
+		}
+		if pl.Subs != 0 || pl.Data != 0 || pl.Payload != 0 {
+			t.Errorf("%s: limits set: subs %d data %d payload %d", e.Name, pl.Subs, pl.Data, pl.Payload)
+		}
+		if !reflect.DeepEqual(pl, jwt.UserPermissionLimits{}) {
+			t.Errorf("%s: permission limits not zero: %+v", e.Name, pl)
+		}
+		if !slices.Contains([]string(uc.Tags), admin.NoDenyTag) {
+			t.Errorf("%s: tags %v lack %s", e.Name, uc.Tags, admin.NoDenyTag)
+		}
 	}
 }

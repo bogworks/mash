@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/admin"
 )
 
 func mustParse(t *testing.T, src string) *File {
@@ -210,7 +212,7 @@ func TestCompileOwnerAndNoRecipients(t *testing.T) {
 		}
 	}
 	for _, e := range c.Endpoints {
-		if len(e.Recipients) != 0 || e.Recipients == nil || len(e.Tags) != 0 || e.Tags == nil {
+		if len(e.Recipients) != 0 || e.Recipients == nil || !slices.Equal(e.Tags, []string{admin.NoDenyTag}) {
 			t.Fatalf("%s recipients %#v tags %#v", e.Name, e.Recipients, e.Tags)
 		}
 		p, err := c.Effective(e.Name)
@@ -271,36 +273,36 @@ endpoints:
 		t.Fatalf("wildcards %v", w)
 	}
 	for n, got := range tags(c) {
-		if strings.Contains(got, ":") {
-			t.Errorf("%s has tags: %s", n, got)
+		if strings.Contains(got, ":") && !strings.HasSuffix(got, " "+admin.NoDenyTag) {
+			t.Errorf("%s has tags beyond the placeholder: %s", n, got)
 		}
 	}
-	if !slices.Contains(zoneKey(c, "red").Perms.Pub.Allow, "agents.mail.*.o.blue.*") || len(zoneKey(c, "red").Perms.Pub.Deny) != 0 {
+	if !slices.Contains(zoneKey(c, "red").Perms.Pub.Allow, "agents.mail.*.o.blue.*") || len(zoneKey(c, "red").Perms.Pub.Deny) != 1 {
 		t.Errorf("red key: %+v", zoneKey(c, "red").Perms)
 	}
 
 	// A deny for one pair in a zone of three: the wildcard plus one deny tag (cheaper than allow tags), and a2, who
-	// has no deny tag, carries the placeholder because the key now has deny templates.
+	// has no real deny tag, carries only the placeholder; every user carries it.
 	c = compile("  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}\n  - {name: d, action: deny, from: {team: x}, to: {tier: secret}}\n")
 	want := map[string]string{
-		"a1": "red deny:blue.b2", "a2": "red deny:0", "b1": "blue ", "b2": "blue ", "b3": "blue ", "n1": "default ",
+		"a1": "red deny:_none,deny:blue.b2", "a2": "red deny:_none", "b1": "blue deny:_none", "b2": "blue deny:_none", "b3": "blue deny:_none", "n1": "default deny:_none",
 	}
 	if got := tags(c); !maps.Equal(got, want) {
 		t.Errorf("tags %v want %v", got, want)
 	}
-	if len(zoneKey(c, "red").Perms.Pub.Deny) != 1 || len(zoneKey(c, "blue").Perms.Pub.Deny) != 0 {
+	if len(zoneKey(c, "red").Perms.Pub.Deny) != 1 || len(zoneKey(c, "blue").Perms.Pub.Deny) != 1 {
 		t.Errorf("deny templates: red %v blue %v", zoneKey(c, "red").Perms.Pub.Deny, zoneKey(c, "blue").Perms.Pub.Deny)
 	}
 
 	// Mostly denied: allow tags, and allow:blue.* for a sender who may mail the whole zone.
 	c = compile("  - {name: r, action: allow, from: {team: x}, to: {zone: blue}}\n  - {name: r2, action: allow, from: {zone: red}, to: {tier: secret}}\n")
 	want = map[string]string{
-		"a1": "red allow:blue.*", "a2": "red allow:blue.b2", "b1": "blue ", "b2": "blue ", "b3": "blue ", "n1": "default ",
+		"a1": "red allow:blue.*,deny:_none", "a2": "red allow:blue.b2,deny:_none", "b1": "blue deny:_none", "b2": "blue deny:_none", "b3": "blue deny:_none", "n1": "default deny:_none",
 	}
 	if got := tags(c); !maps.Equal(got, want) {
 		t.Errorf("tags %v want %v", got, want)
 	}
-	if len(zoneKey(c, "red").Wildcards) != 0 || len(zoneKey(c, "red").Perms.Pub.Deny) != 0 {
+	if len(zoneKey(c, "red").Wildcards) != 0 {
 		t.Errorf("red key: %+v", zoneKey(c, "red"))
 	}
 
@@ -321,7 +323,7 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := tags(c)["a1"] + "|" + tags(c)["a2"]; got != "red allow:blue.b1|red allow:blue.b2" {
+	if got := tags(c)["a1"] + "|" + tags(c)["a2"]; got != "red allow:blue.b1,deny:_none|red allow:blue.b2,deny:_none" {
 		t.Errorf("tie: %s", got)
 	}
 }
@@ -382,7 +384,7 @@ func TestCheckZoneWarnings(t *testing.T) {
 	for _, w := range f.Check().Warnings {
 		warn = append(warn, w.String())
 	}
-	if len(warn) == 0 || !strings.Contains(warn[0], "endpoint hub") || !strings.Contains(warn[0], "200 tags") {
+	if len(warn) == 0 || !strings.Contains(warn[0], "endpoint hub") || !strings.Contains(warn[0], "201 tags") {
 		t.Errorf("%q", warn[:min(len(warn), 3)])
 	}
 }
@@ -540,7 +542,7 @@ func TestBudgetUserOverLimit(t *testing.T) {
 		c.Endpoints[1].Tags = append(c.Endpoints[1].Tags, fmt.Sprintf("allow:default.peer-%03d", j))
 	}
 	rep, err := Budget(c)
-	if err == nil || rep.OK || rep.WorstUser != "tagged" || !strings.Contains(err.Error(), "user JWT of tagged") || !strings.Contains(err.Error(), "200 tags") {
+	if err == nil || rep.OK || rep.WorstUser != "tagged" || !strings.Contains(err.Error(), "user JWT of tagged") || !strings.Contains(err.Error(), "201 tags") {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	if rep.AccountJWTBytes > rep.AccountLimit {
@@ -572,7 +574,7 @@ func TestBudgetScale1000(t *testing.T) {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	for _, e := range c.Endpoints {
-		if len(e.Tags) != 0 {
+		if !slices.Equal(e.Tags, []string{admin.NoDenyTag}) {
 			t.Fatalf("%s has tags %v", e.Name, e.Tags)
 		}
 	}

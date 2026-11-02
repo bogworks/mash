@@ -23,8 +23,9 @@ func TestZonePermissions(t *testing.T) {
 			t.Errorf("sub allow lacks %s: %v", w, p.Sub.Allow)
 		}
 	}
-	if len(p.Pub.Deny) != 0 {
-		t.Errorf("deny lines without ZonePermissionsWithDeny: %v", p.Pub.Deny)
+	// Both templates are always present, so a zone's first deny exception never changes the key.
+	if !slices.Equal(p.Pub.Deny, []string{"agents.mail.*.acme.{{tag(deny)}}"}) {
+		t.Errorf("deny: %v", p.Pub.Deny)
 	}
 	for _, s := range p.Pub.Allow {
 		if (strings.HasPrefix(s, "agents.prompt.") || strings.HasPrefix(s, "agents.status.")) && s != "agents."+strings.Split(s, ".")[1]+".*.acme.*" {
@@ -34,14 +35,13 @@ func TestZonePermissions(t *testing.T) {
 			t.Errorf("a literal recipient in a zone key: %s", s)
 		}
 	}
-	d := ZonePermissionsWithDeny("acme", "red", nil)
-	if !slices.Equal(d.Pub.Deny, []string{"agents.mail.*.acme.{{tag(deny)}}"}) {
-		t.Errorf("deny: %v", d.Pub.Deny)
+	if d := ZonePermissions("acme", "red", nil); !slices.Equal(d.Pub.Deny, p.Pub.Deny) || !slices.Contains(d.Pub.Allow, "agents.mail.*.acme.{{tag(allow)}}") {
+		t.Errorf("a zone with no wildcard differs in its tag templates: %v %v", d.Pub.Allow, d.Pub.Deny)
 	}
 	if len(ZonePermissions("acme", "red", nil).Pub.Allow) == 0 {
 		t.Error("empty block")
 	}
-	if NoDenyTag != "deny:0" {
+	if NoDenyTag != "deny:_none" {
 		t.Error(NoDenyTag)
 	}
 }

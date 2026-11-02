@@ -35,6 +35,7 @@
       ],
       "may_mail_nobody": false,
       "tags": [
+        "deny:_none",
         "deny:default.deploy-bot"
       ]
     },
@@ -52,7 +53,7 @@
       ],
       "may_mail_nobody": false,
       "tags": [
-        "deny:0"
+        "deny:_none"
       ]
     },
     {
@@ -67,6 +68,7 @@
       ],
       "may_mail_nobody": false,
       "tags": [
+        "deny:_none",
         "deny:default.deploy-bot"
       ]
     }
