@@ -56,7 +56,17 @@ func Usage(prog string) string {
 	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
 	line("deprovision <name> [--user U]", "remove the record and inbox; with --user, only if the record's user is still U")
 	line("list", "")
+	if prog == "mashctl" { // offline verbs: `mash admin` does not carry them
+		policyLines(line)
+	}
 	return b.String()
+}
+
+func policyLines(line func(left, right string)) {
+	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
+	line("policy test [--policy FILE]", "run the file's tests")
+	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
+	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
 }
 
 // Run executes one admin verb. prog is the command prefix used in usage and error text: "mashctl" or "mash admin".
