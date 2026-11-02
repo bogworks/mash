@@ -110,34 +110,37 @@ const (
 	NoDenyTag = DenyTag + ":0"
 )
 
-// ZonePermissions is the permission template of the scoped signing key of zone under owner, in the subject layout
-// agents.<verb>.<kind>.<owner>.<zone>.<name> (heartbeats keep SAP's five tokens). Every endpoint of the zone is a
-// user signed by this key and gets, by expansion, its own copy of the fixed per-endpoint lines ({{name()}} is the
-// user's name) and these peer-addressing lines:
+// ZonePermissions is the permission template of the scoped signing key of zone under owner. Only MAIL carries the zone
+// token (ADR 0054): agents.mail.<kind>.<owner>.<zone>.<name>. Prompt, status and heartbeat keep SAP's five-token
+// subjects, so the key grants those as they are. Every endpoint of the zone is a user signed by this key and gets, by
+// expansion, its own copy of the fixed per-endpoint lines ({{name()}} is the user's name) and these peer-addressing
+// lines:
 //
-//   - one publish line per verb (mail, prompt, status) and wildcard zone: agents.<verb>.*.<owner>.<zone>.*, so
-//     every endpoint of the zone may address every endpoint of each wildcardZones entry;
-//   - the exception line agents.<verb>.*.<owner>.{{tag(allow)}}, one subject per "allow:" tag of the user; a user
-//     with no allow tag gets none.
+//   - one MAIL publish line per wildcard zone: agents.mail.*.<owner>.<zone>.*, so every endpoint of the zone may mail
+//     every endpoint of each wildcardZones entry;
+//   - the mail exception line agents.mail.*.<owner>.{{tag(allow)}}, one subject per "allow:" tag of the user; a user
+//     with no allow tag gets none;
+//   - two fixed, open lines, agents.prompt.*.<owner>.* and agents.status.*.<owner>.*: live prompts and status probes
+//     to any endpoint of the owner are not policed until a later decision (ADR 0054).
 //
-// Nothing else addresses a peer. The block is never empty. See ZonePermissionsWithDeny for deny exceptions. The
-// templates need the scoped-key user to carry empty permissions of its own.
+// The endpoint's own prompt and status subscriptions are the five-token sap.For subjects with {{name()}}. Nothing else
+// addresses a peer. The block is never empty. See ZonePermissionsWithDeny for deny exceptions. The templates need the
+// scoped-key user to carry empty permissions of its own. zone names the key; no line spells it out except through
+// the mail wildcards it is a recipient of.
 func ZonePermissions(owner, zone string, wildcardZones []string) jwt.Permissions {
 	const name = "{{name()}}"
 	var pub []string
 	for _, z := range slices.Sorted(slices.Values(wildcardZones)) {
-		for _, verb := range zoneVerbs {
-			pub = append(pub, "agents."+verb+".*."+owner+"."+z+".*")
-		}
+		pub = append(pub, "agents.mail.*."+owner+"."+z+".*")
 	}
-	for _, verb := range zoneVerbs {
-		pub = append(pub, "agents."+verb+".*."+owner+".{{tag("+AllowTag+")}}")
-	}
+	pub = append(pub, "agents.mail.*."+owner+".{{tag("+AllowTag+")}}")
+	pub = append(pub, "agents.prompt.*."+owner+".*", "agents.status.*."+owner+".*")
 	pub = append(pub, fixedPub(owner, name)...)
+	subj := sap.For(owner, name)
 	sub := []string{
 		sap.InboxPrefix(name) + ".>",
-		"agents.prompt." + sap.AgentToken + "." + owner + "." + zone + "." + name,
-		"agents.status." + sap.AgentToken + "." + owner + "." + zone + "." + name,
+		subj.Prompt,
+		subj.Status,
 		"$SRV.>",
 		"agents.hb.*." + owner + ".*",
 	}
@@ -147,15 +150,12 @@ func ZonePermissions(owner, zone string, wildcardZones []string) jwt.Permissions
 	return p
 }
 
-// ZonePermissionsWithDeny is ZonePermissions plus the publish deny lines agents.<verb>.*.<owner>.{{tag(deny)}}: a
-// user's "deny:" tags remove peers from what the zone's wildcards grant (a deny beats any allow). Every user of the
-// zone must then carry at least one deny tag, NoDenyTag if it has no real one.
+// ZonePermissionsWithDeny is ZonePermissions plus the MAIL publish deny line agents.mail.*.<owner>.{{tag(deny)}}: a
+// user's "deny:" tags remove peers from what the zone's mail wildcards grant (a deny beats any allow). Prompt and
+// status are open and have no deny line. Every user of the zone must then carry at least one deny tag, NoDenyTag if
+// it has no real one.
 func ZonePermissionsWithDeny(owner, zone string, wildcardZones []string) jwt.Permissions {
 	p := ZonePermissions(owner, zone, wildcardZones)
-	for _, verb := range zoneVerbs {
-		p.Pub.Deny.Add("agents." + verb + ".*." + owner + ".{{tag(" + DenyTag + ")}}")
-	}
+	p.Pub.Deny.Add("agents.mail.*." + owner + ".{{tag(" + DenyTag + ")}}")
 	return p
 }
-
-var zoneVerbs = []string{"mail", "prompt", "status"}

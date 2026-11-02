@@ -226,12 +226,17 @@ func (h *liveServer) liveMatrix(t *testing.T) map[string]*liveConn {
 	for _, from := range c.Endpoints {
 		var subjects, want []string
 		for _, to := range c.Endpoints {
-			for _, verb := range []string{"mail", "prompt", "status"} {
-				subj := strings.Replace(subjectPattern(verb, c.Owner, to.Zone, to.Name), "*", "cc", 1)
-				subjects = append(subjects, subj)
-				if slices.Contains(from.Recipients, to.Name) {
-					want = append(want, subj)
-				}
+			// Mail is policed and carries the zone token (six tokens): allowed exactly for the compiled recipients.
+			mail := strings.Replace(MailSubjectPattern(c.Owner, to.Zone, to.Name), "*", "cc", 1)
+			subjects = append(subjects, mail)
+			if slices.Contains(from.Recipients, to.Name) {
+				want = append(want, mail)
+			}
+			// Prompt and status keep the five-token SAP subjects and are open: every peer, whatever the rules say.
+			for _, verb := range []string{"prompt", "status"} {
+				open := "agents." + verb + ".cc." + c.Owner + "." + to.Name
+				subjects = append(subjects, open)
+				want = append(want, open)
 			}
 		}
 		slices.Sort(want)
@@ -242,7 +247,7 @@ func (h *liveServer) liveMatrix(t *testing.T) map[string]*liveConn {
 			t.Errorf("%s (zone %s, tags %v): the server allowed\n  %v\nCompile says\n  %v\n(refused %v)", from.Name, from.Zone, from.Tags, allowed, want, denied)
 		}
 	}
-	t.Logf("%d sender-recipient-verb publishes over %d endpoints: %d allowed, %d refused, all as compiled", pairs, len(c.Endpoints), allowedPairs, pairs-allowedPairs)
+	t.Logf("%d sender-recipient-subject publishes (mail policed, prompt and status open) over %d endpoints: %d allowed, %d refused, all as compiled", pairs, len(c.Endpoints), allowedPairs, pairs-allowedPairs)
 	return conns
 }
 
@@ -311,11 +316,11 @@ func TestLiveEnterprise(t *testing.T) {
 		}
 	}
 
-	// Subscriptions: the own prompt subject (with the zone) is allowed, a peer's is not.
+	// Subscriptions: the own five-token prompt subject is allowed, a peer's is not, and neither is a zoned one.
 	u := conns["billing-agent"]
-	subOK, subBad := "agents.prompt.cc.acme.internal.billing-agent", "agents.prompt.cc.acme.internal.ledger-agent"
+	subOK, subBad := "agents.prompt.cc.acme.billing-agent", "agents.prompt.cc.acme.ledger-agent"
 	before := len(u.violations())
-	for _, s := range []string{subOK, subBad, "agents.prompt.cc.acme.dmz.billing-agent"} {
+	for _, s := range []string{subOK, subBad, "agents.prompt.cc.acme.internal.billing-agent"} {
 		if _, err := u.nc.Subscribe(s, func(*nats.Msg) {}); err != nil {
 			t.Fatal(err)
 		}
@@ -325,7 +330,7 @@ func TestLiveEnterprise(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 	got := strings.Join(u.violations()[before:], "\n")
-	if strings.Contains(got, subOK) || !strings.Contains(got, subBad) || !strings.Contains(got, "acme.dmz.billing-agent") {
+	if strings.Contains(got, subOK) || !strings.Contains(got, subBad) || !strings.Contains(got, "acme.internal.billing-agent") {
 		t.Errorf("subscription violations:\n%s", got)
 	}
 

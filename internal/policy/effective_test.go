@@ -58,7 +58,7 @@ func TestSubjectMatches(t *testing.T) {
 	}
 }
 
-// TestEffectiveMatchesRecipients: for random files, the set of (verb, recipient) pairs the expanded permissions of a
+// TestEffectiveMatchesRecipients: for random files, the set of (mail) recipient set the expanded permissions of a
 // sender let it publish to, over every declared endpoint, equals its Recipients: never wider, never narrower. The
 // files mix zone-wide rules with rules on other labels, so every encoding (wildcard, allow tags, deny tags) occurs.
 func TestEffectiveMatchesRecipients(t *testing.T) {
@@ -135,11 +135,16 @@ func TestEffectiveMatchesRecipients(t *testing.T) {
 				if err != nil || x.Allowed != in {
 					t.Fatalf("%s -> %s: recipients %v, explain %v %v", from.Name, to.Name, in, x.Allowed, err)
 				}
-				for _, verb := range []string{"mail", "prompt", "status"} {
-					subj := strings.Replace(subjectPattern(verb, "o", to.Zone, to.Name), "*", "cc", 1)
-					if got := canPublish(perms, subj); got != in {
-						t.Fatalf("%s -> %s %s: effective permissions say %v, recipients say %v\ntags %v\nzone key %+v\n%s",
-							from.Name, to.Name, verb, got, in, from.Tags, zoneOf(t, c, from.Zone).Perms.Pub, b.String())
+				// Mail is the one policed verb: the six-token subject is publishable exactly for the recipients.
+				subj := strings.Replace(MailSubjectPattern("o", to.Zone, to.Name), "*", "cc", 1)
+				if got := canPublish(perms, subj); got != in {
+					t.Fatalf("%s -> %s mail: effective permissions say %v, recipients say %v\ntags %v\nzone key %+v\n%s",
+						from.Name, to.Name, got, in, from.Tags, zoneOf(t, c, from.Zone).Perms.Pub, b.String())
+				}
+				// Prompt and status are open: five tokens, always publishable, whatever the rules say.
+				for _, verb := range []string{"prompt", "status"} {
+					if open := "agents." + verb + ".cc.o." + to.Name; !canPublish(perms, open) {
+						t.Fatalf("%s may not publish %s (prompt and status are open)\n%s", from.Name, open, b.String())
 					}
 				}
 			}
@@ -147,6 +152,16 @@ func TestEffectiveMatchesRecipients(t *testing.T) {
 			for _, subj := range []string{"agents.mail.cc.other." + from.Zone + ".x", "agents.hb.cc.o.not-" + from.Name} {
 				if canPublish(perms, subj) {
 					t.Fatalf("%s may publish %s", from.Name, subj)
+				}
+			}
+			// Its own prompt and status subscriptions are the five-token SAP subjects, no zone token.
+			for _, verb := range []string{"prompt", "status"} {
+				want := "agents." + verb + ".cc.o." + from.Name
+				if !slices.ContainsFunc(perms.Sub.Allow, func(s string) bool { return s == want }) {
+					t.Fatalf("%s: sub allow lacks %s: %v", from.Name, want, perms.Sub.Allow)
+				}
+				if slices.ContainsFunc(perms.Sub.Allow, func(s string) bool { return strings.HasPrefix(s, "agents."+verb+".") && strings.Count(s, ".") != 4 }) {
+					t.Fatalf("%s: a non-five-token %s subscription: %v", from.Name, verb, perms.Sub.Allow)
 				}
 			}
 			if !canPublish(perms, "agents.hb.cc.o."+from.Name) {
@@ -189,17 +204,17 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"agents.hb.cc.o.a1", "$KV.mash-leases.a1", "agents.mail.*.o.blue.*", "agents.status.*.o.blue.*"} {
+	for _, w := range []string{"agents.hb.cc.o.a1", "$KV.mash-leases.a1", "agents.mail.*.o.blue.*", "agents.prompt.*.o.*", "agents.status.*.o.*"} {
 		if !slices.Contains(p.Pub.Allow, w) {
 			t.Errorf("a1 pub allow lacks %s: %v", w, p.Pub.Allow)
 		}
 	}
-	for _, w := range []string{"agents.mail.*.o.blue.b2", "agents.prompt.*.o.blue.b2", "agents.status.*.o.blue.b2", "agents.mail.*.o.0"} {
-		if w != "agents.mail.*.o.0" && !slices.Contains(p.Pub.Deny, w) {
+	for _, w := range []string{"agents.mail.*.o.blue.b2"} {
+		if !slices.Contains(p.Pub.Deny, w) {
 			t.Errorf("a1 pub deny lacks %s: %v", w, p.Pub.Deny)
 		}
 	}
-	for _, w := range []string{"_INBOX.a1.>", "agents.prompt.cc.o.red.a1", "agents.status.cc.o.red.a1"} {
+	for _, w := range []string{"_INBOX.a1.>", "agents.prompt.cc.o.a1", "agents.status.cc.o.a1"} {
 		if !slices.Contains(p.Sub.Allow, w) {
 			t.Errorf("a1 sub allow lacks %s: %v", w, p.Sub.Allow)
 		}

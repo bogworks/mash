@@ -14,8 +14,8 @@ import (
 )
 
 // Compiled is a policy file resolved against its declared endpoints into the layout of one scoped signing key per
-// zone: the key's permission template (fixed per-endpoint lines, one wildcard line per allowed recipient zone, and
-// tag templates for exceptions) and, per endpoint, the recipients it may address and the tags its user JWT carries.
+// zone: the key's permission template (fixed per-endpoint lines, one MAIL wildcard line per allowed recipient zone, and
+// MAIL tag templates for exceptions; prompt and status are two open fixed lines, not policed: ADR 0054) and, per endpoint, the recipients it may address and the tags its user JWT carries.
 // The account JWT holds one key per zone, so its size does not depend on the number of endpoints.
 type Compiled struct {
 	Owner        string
@@ -28,7 +28,7 @@ type Compiled struct {
 // CompiledZone is one zone's scoped signing key.
 type CompiledZone struct {
 	Name string
-	// Perms is the key's permission template (admin.ZonePermissions, or ZonePermissionsWithDeny when some sender of
+	// Perms is the key's permission template for MAIL (admin.ZonePermissions, or ZonePermissionsWithDeny when some sender of
 	// the zone has deny exceptions). Its {{name()}} and {{tag()}} templates expand per user; see Effective.
 	Perms jwt.Permissions
 	// Wildcards are the recipient zones the key lets every endpoint of this zone address whole, sorted.
@@ -42,8 +42,8 @@ type CompiledEndpoint struct {
 	Name   string
 	Zone   string
 	Labels map[string]string
-	// Recipients are the declared endpoints this sender may mail, prompt and probe, sorted. Never nil: empty means
-	// none.
+	// Recipients are the declared endpoints this sender may MAIL, sorted. Prompt and status probes are open and not
+	// listed here (ADR 0054). Never nil: empty means none.
 	Recipients []string
 	// Tags are the tags the endpoint's user JWT carries, sorted: allow:<zone>.<name> or allow:<zone>.* for what the
 	// zone key does not grant it, deny:<zone>.<name> or deny:<zone>.* for what it grants but the file forbids, and
@@ -52,8 +52,8 @@ type CompiledEndpoint struct {
 }
 
 // MailSubjectPattern is the subject pattern of the mail addressed to endpoint name of zone under owner, from any
-// agent token: agents.mail.*.<owner>.<zone>.<name>. The zone token in the subject lands in sap with the next change;
-// until then this is the compile target, not what `mash admin permissions` prints.
+// agent token: agents.mail.*.<owner>.<zone>.<name>. Only mail carries the zone token; prompt and status keep SAP's
+// five-token subjects (ADR 0054).
 func MailSubjectPattern(owner, zone, name string) string {
 	return subjectPattern("mail", owner, zone, name)
 }
@@ -62,11 +62,11 @@ func subjectPattern(verb, owner, zone, name string) string {
 	return "agents." + verb + ".*." + owner + "." + zone + "." + name
 }
 
-// Compile resolves the file for owner. The recipients of a declared sender are the declared endpoints (itself
+// Compile resolves the file for owner. The (mail) recipients of a declared sender are the declared endpoints (itself
 // included) that some allow rule grants and no deny rule forbids, or, where no rule matches the pair, what the
 // default says; the order of rules never matters. Compile fails on an invalid owner (config.ValidName, the rule sap
 // subjects need) or an invalid file. Expanding each endpoint's permissions (Effective) yields exactly those
-// recipients: never more, never fewer.
+// mail recipients: never more, never fewer.
 func Compile(f *File, owner string) (*Compiled, error) {
 	if !config.ValidName(owner) {
 		return nil, fmt.Errorf("policy: owner %q is not a valid name (lower-case letters, digits and single hyphens, starting with a letter, 1-48 characters)", owner)
@@ -116,7 +116,7 @@ func (c *Compiled) endpoint(name string) (CompiledEndpoint, bool) {
 // replaced by the name and {{tag(x)}} by one subject per "x:" tag of the user (a line whose tag template finds no tag
 // is dropped from an allow list; in a deny list nats-server refuses the user instead, and so does Effective). It
 // evaluates the same expansion nats-server does at connect time, so tests can compare the file's decisions with what
-// would be enforced.
+// would be enforced. Only mail is policed: prompt and status publishes are open, five-token lines.
 func (c *Compiled) Effective(name string) (jwt.Permissions, error) {
 	e, ok := c.endpoint(name)
 	if !ok {

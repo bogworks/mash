@@ -6,7 +6,7 @@
 // the empty selector matches every endpoint. A rule allows or denies mail from the endpoints its from selector
 // selects to the endpoints its to selector selects. Rules are a union and their order means nothing: a sender may
 // address a recipient when some allow rule matches and no deny rule does; when no rule matches the pair, the file's
-// default decides. One rule covers every verb an endpoint addresses to a peer (mail, prompt, status). Self-mail
+// default decides. Today a rule covers mail; prompt and status probes stay open (ADR 0054; they join the policy when the maintainer decides). Self-mail
 // follows the same rules as any other pair: a sender is its own recipient when the rules (or the default) say so.
 package policy
 

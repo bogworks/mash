@@ -28,22 +28,18 @@
           "agents.hb.cc.acme.{{name()}}",
           "agents.mail.*.acme.default.*",
           "agents.mail.*.acme.{{tag(allow)}}",
-          "agents.prompt.*.acme.default.*",
-          "agents.prompt.*.acme.{{tag(allow)}}",
-          "agents.status.*.acme.default.*",
-          "agents.status.*.acme.{{tag(allow)}}"
+          "agents.prompt.*.acme.*",
+          "agents.status.*.acme.*"
         ],
         "pub_deny": [
-          "agents.mail.*.acme.{{tag(deny)}}",
-          "agents.prompt.*.acme.{{tag(deny)}}",
-          "agents.status.*.acme.{{tag(deny)}}"
+          "agents.mail.*.acme.{{tag(deny)}}"
         ],
         "sub": [
           "$SRV.\u003e",
           "_INBOX.{{name()}}.\u003e",
           "agents.hb.*.acme.*",
-          "agents.prompt.cc.acme.default.{{name()}}",
-          "agents.status.cc.acme.default.{{name()}}"
+          "agents.prompt.cc.acme.{{name()}}",
+          "agents.status.cc.acme.{{name()}}"
         ]
       }
     }

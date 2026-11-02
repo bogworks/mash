@@ -41,7 +41,7 @@ func (c *Compiled) Matrix() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\n+ may mail, prompt and probe; - may not\n")
+	b.WriteString("\n+ may mail; - may not\n")
 	lines := strings.Split(b.String(), "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " ")

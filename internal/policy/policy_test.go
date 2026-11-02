@@ -218,8 +218,9 @@ func TestCompileOwnerAndNoRecipients(t *testing.T) {
 			t.Fatalf("%s: %+v %v", e.Name, p, err)
 		}
 		for _, s := range p.Pub.Allow {
-			if strings.HasPrefix(s, "agents.mail") || strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
-				t.Fatalf("%s may still address peers: %s", e.Name, s)
+			// Mail is policed; the two open lines (prompt, status; ADR 0054) are fixed for every endpoint.
+			if strings.HasPrefix(s, "agents.mail") {
+				t.Fatalf("%s may still mail peers: %s", e.Name, s)
 			}
 		}
 	}
@@ -287,7 +288,7 @@ endpoints:
 	if got := tags(c); !maps.Equal(got, want) {
 		t.Errorf("tags %v want %v", got, want)
 	}
-	if len(zoneKey(c, "red").Perms.Pub.Deny) != 3 || len(zoneKey(c, "blue").Perms.Pub.Deny) != 0 {
+	if len(zoneKey(c, "red").Perms.Pub.Deny) != 1 || len(zoneKey(c, "blue").Perms.Pub.Deny) != 0 {
 		t.Errorf("deny templates: red %v blue %v", zoneKey(c, "red").Perms.Pub.Deny, zoneKey(c, "blue").Perms.Pub.Deny)
 	}
 
@@ -472,7 +473,7 @@ rules:
 func TestMatrixAndJSON(t *testing.T) {
 	f := mustParse(t, "default: deny\n"+trio+"rules:\n  - {name: r, action: allow, from: {team: x}, to: {team: y}}\n")
 	c, _ := Compile(f, "o")
-	want := "from \\ to  a  b  c\na          -  -  +\nb          -  -  +\nc          -  -  -\n\n+ may mail, prompt and probe; - may not\n"
+	want := "from \\ to  a  b  c\na          -  -  +\nb          -  -  +\nc          -  -  -\n\n+ may mail; - may not\n"
 	if got := c.Matrix(); got != want {
 		t.Errorf("got\n%q\nwant\n%q", got, want)
 	}
