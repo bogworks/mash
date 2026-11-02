@@ -302,16 +302,29 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	// The servers asked for the base, the push and the read-back: the ping and the inventory say how many there are.
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
+	if p.Mode == Apply && !set.Complete(p.Servers) {
+		why := set.Why(p.Servers)
+		if kerr != nil {
+			why = kerr.Error()
+		}
+		return fail(fmt.Errorf("refusing: %s (nothing was changed)", notCompleteRefusal(why)))
+	}
 
 	created := map[string]bool{}
 	var b *built
-	var warn string
+	var warn, short string
 	for attempt := 0; ; attempt++ {
 		base, err := lookupBase(ctx, p.Resolver, acctPub, p.trust, expect, "look up the account JWT")
 		if err != nil {
 			return fail(fmt.Errorf("%w (nothing was changed)", err))
 		}
 		warn = base.warn
+		if base.short != "" {
+			if p.Mode == Apply {
+				return fail(fmt.Errorf("refusing: %s (nothing was changed)", shortRefusal(base.short)))
+			}
+			short = base.short
+		}
 		b, err = build(p, opKP, acctPub, base.token, replace, created)
 		if err != nil {
 			return fail(err)
@@ -324,6 +337,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if err != nil {
 			return fail(fmt.Errorf("%w (nothing was pushed)", err))
 		}
+		if again.short != "" {
+			return fail(fmt.Errorf("refusing: %s (nothing was pushed)", shortRefusal(again.short)))
+		}
 		if again.token == b.cur {
 			break
 		}
@@ -333,6 +349,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	}
 	if warn != "" {
 		pf("warning: %s\n", warn)
+	}
+	if short != "" {
+		pf("warning: %s; this comparison may be stale\n", short)
 	}
 	var createdList []string
 	for _, z := range c.Zones {

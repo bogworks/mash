@@ -18,6 +18,9 @@ type baseJWT struct {
 	claims *jwt.AccountClaims
 	// warn is "" when every answering server holds the base, else a neutral line naming how many hold an older copy.
 	warn string
+	// short is "" when at least expect servers answered the lookup, else the neutral sentence saying how many did. A
+	// writer refuses on it; a read-only run prints it as a warning.
+	short string
 }
 
 // serverExpect is the number of servers a lookup should wait for: what the ping and the inventory say, or 0 (unknown,
@@ -59,8 +62,12 @@ func lookupBase(ctx context.Context, r Resolver, acct string, trust Trust, expec
 		}
 		copies[t] = &copyT{claims: claims, n: 1}
 	}
+	short := ""
+	if expect > 0 && len(toks) < expect {
+		short = fmt.Sprintf("only %d of %d servers answered the account lookup", len(toks), expect)
+	}
 	if len(copies) == 0 {
-		return baseJWT{}, nil
+		return baseJWT{short: short}, nil
 	}
 	var newest int64
 	for _, c := range copies {
@@ -81,7 +88,7 @@ func lookupBase(ctx context.Context, r Resolver, acct string, trust Trust, expec
 		}
 		return baseJWT{}, fmt.Errorf("the servers hold %d distinct account JWTs issued at the same time (iat %s; %s): which one is current cannot be told, so none is used; make the servers agree (for example with nsc push or by restoring the lagging server), then run the command again", len(top), isoTime(newest), strings.Join(parts, ", "))
 	}
-	b := baseJWT{token: top[0], claims: copies[top[0]].claims}
+	b := baseJWT{token: top[0], claims: copies[top[0]].claims, short: short}
 	older := empty
 	var iats []string
 	seen := map[int64]bool{}
@@ -109,6 +116,18 @@ func lookupBase(ctx context.Context, r Resolver, acct string, trust Trust, expec
 		b.warn = fmt.Sprintf("%d of %d servers hold an older copy (iat %s); building from the newest (iat %s)", older, len(toks), strings.Join(iats, ", "), isoTime(newest))
 	}
 	return b, nil
+}
+
+// shortRefusal is the refusal of a write whose lookup was not answered by every known server: the silent one may hold a
+// newer copy than the one a write would build from.
+func shortRefusal(short string) string {
+	return short + "; mashctl will not write from a copy that may be older than the newest one a silent server holds. Bring the silent server back (or fix --servers) and run it again"
+}
+
+// notCompleteRefusal is the refusal of a write whose server set could not be confirmed complete before anything is
+// created or pushed.
+func notCompleteRefusal(why string) string {
+	return fmt.Sprintf("the server set could not be verified (%s); a write needs a complete, confirmed server set. Fix the cause (or pass --servers N) and run it again", why)
 }
 
 // readBack asks every server for the account JWT until each one that answers holds want, at least need of them

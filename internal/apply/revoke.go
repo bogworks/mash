@@ -98,6 +98,13 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
+	if !set.Complete(p.Servers) {
+		why := set.Why(p.Servers)
+		if kerr != nil {
+			why = kerr.Error()
+		}
+		return res, fmt.Errorf("revoke: refusing: %s (nothing was changed)", notCompleteRefusal(why))
+	}
 
 	var claims *jwt.AccountClaims
 	var token string
@@ -106,6 +113,9 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		base, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT")
 		if err != nil {
 			return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
+		}
+		if base.short != "" {
+			return res, fmt.Errorf("revoke: refusing: %s (nothing was changed)", shortRefusal(base.short))
 		}
 		cur := base.token
 		claims = base.claims
@@ -163,6 +173,9 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		again, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT before the push")
 		if err != nil {
 			return res, fmt.Errorf("revoke: %w (nothing was pushed)", err)
+		}
+		if again.short != "" {
+			return res, fmt.Errorf("revoke: refusing: %s (nothing was pushed)", shortRefusal(again.short))
 		}
 		if again.token == cur {
 			break
