@@ -67,3 +67,4 @@ on), or mash's own choice on top of them.
 | [0051](0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) | Releases carry an SBOM per binary and SLSA provenance from an isolated generator | proposed | project | 2026-11-01 |
 | [0052](0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md) | `mashctl` mints NATS users under one scoped signing key per zone and holds the account signing key; it supersedes 0008 | accepted | NATS / mash | 2026-11-02 |
 | [0053](0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) | Who may mail whom is a policy file; one label, the zone, lives in the mail subject, and `mashctl` compiles the rules into each zone's NATS permissions | accepted | NATS / mash | 2026-11-02 |
+| [0054](0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md) | Mail subjects carry a zone token and the legacy subjects stay valid (amends 0005 for the mail verb) | accepted | mash | 2026-11-02 |

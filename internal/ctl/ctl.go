@@ -25,7 +25,11 @@ func limitsUsage(prog string) string {
 }
 
 func provisionUsage(prog string) string {
-	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..."
+	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]"
+}
+
+func setZoneUsage(prog string) string {
+	return "usage: " + prog + " set-zone <name> <zone>   (moves an existing endpoint into the zone: its inbox also takes the zone mail subject, mail to the old subject still arrives; a zone is 1-32 lower-case letters, digits and hyphens)"
 }
 
 func setMetaUsage(prog string) string {
@@ -47,8 +51,9 @@ func Usage(prog string) string {
 	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <name> [--nsc]", "the NATS permissions an endpoint user needs")
-	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]...", "")
+	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]", "")
 	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
+	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
 	line("deprovision <name> [--user U]", "remove the record and inbox; with --user, only if the record's user is still U")
 	line("list", "")
 	return b.String()
@@ -167,6 +172,18 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels), metaSuffix(rec))
+	case "set-zone":
+		if len(args) != 3 || !config.ValidName(args[1]) {
+			return fail(errors.New(setZoneUsage(prog)))
+		}
+		if args[2] == "-" {
+			return fail(errors.New(pfx + ": set-zone: an endpoint in a zone cannot return to the legacy subject in this version (the zone - is refused)"))
+		}
+		rec, err := a.SetZone(ctx, args[1], args[2])
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", rec.Name, rec.Zone, rec.MailSubject)
 	case "deprovision":
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key>]"
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
@@ -193,7 +210,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", r.Name, r.User, r.Created, r.Note)
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", r.Name, r.User, r.Created, r.Note, zoneSuffix(r))
 		}
 	default:
 		if prog == "mash admin" {
@@ -206,6 +223,14 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	return 0
 }
 
+// zoneSuffix is a list line's tail for the zone: a tab and zone=<z>, empty for an endpoint with the legacy subject.
+func zoneSuffix(r store.Record) string {
+	if r.Zone == "" {
+		return ""
+	}
+	return "\tzone=" + r.Zone
+}
+
 // metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
 func metaSuffix(r store.Record) string {
 	var b strings.Builder
@@ -214,6 +239,9 @@ func metaSuffix(r store.Record) string {
 	}
 	if len(r.Caps) > 0 {
 		fmt.Fprintf(&b, ", caps %s", strings.Join(r.Caps, ","))
+	}
+	if r.Zone != "" {
+		fmt.Fprintf(&b, ", zone %s", r.Zone)
 	}
 	return b.String()
 }
@@ -234,7 +262,7 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 			caps = append(caps, args[i+1])
 		}
 	}
-	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps}, nil
+	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps, Zone: opt("--zone")}, nil
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.

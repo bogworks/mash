@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -145,5 +146,52 @@ func TestValidCapsAndDescription(t *testing.T) {
 	}
 	if !ValidCap("a") || ValidCap("A") {
 		t.Fatal("ValidCap")
+	}
+}
+
+func TestRecordZone(t *testing.T) {
+	// A record written by an older mash has no zone and loads, with its legacy subject.
+	r, err := ParseRecord("a", []byte(`{`+baseRecord+`}`))
+	if err != nil || r.Zone != "" {
+		t.Fatalf("legacy: %+v %v", r, err)
+	}
+	if b, _ := json.Marshal(r); strings.Contains(string(b), `"zone"`) {
+		t.Fatalf("a record without a zone writes the key: %s", b)
+	}
+	// A zoned record round trips.
+	zoned := strings.Replace(baseRecord, "agents.mail.cc.o.a", "agents.mail.cc.o.z1.a", 1)
+	r, err = ParseRecord("a", []byte(`{`+zoned+`,"zone":"z1"}`))
+	if err != nil || r.Zone != "z1" || r.MailSubject != "agents.mail.cc.o.z1.a" {
+		t.Fatalf("zoned: %+v %v", r, err)
+	}
+	b, _ := json.Marshal(r)
+	if r2, err := ParseRecord("a", b); err != nil || !reflect.DeepEqual(r, r2) {
+		t.Fatalf("round trip: %+v %v", r2, err)
+	}
+	// Mismatches are refused.
+	for name, v := range map[string]string{
+		"zone with legacy subject":   `{` + baseRecord + `,"zone":"z1"}`,
+		"zoned subject without zone": `{` + zoned + `}`,
+		"zone for another subject":   `{` + zoned + `,"zone":"z2"}`,
+		"bad zone token":             `{` + strings.Replace(baseRecord, "agents.mail.cc.o.a", "agents.mail.cc.o.Z.a", 1) + `,"zone":"Z"}`,
+	} {
+		if _, err := ParseRecord("a", []byte(v)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestInboxConfigZoned(t *testing.T) {
+	legacy := InboxConfigFor("o", "a", DefaultLimits())
+	if !reflect.DeepEqual(legacy.Subjects, []string{"agents.mail.*.o.a"}) {
+		t.Fatalf("%v", legacy.Subjects)
+	}
+	z := InboxConfigZoned("o", "z1", "a", DefaultLimits())
+	if !reflect.DeepEqual(z.Subjects, []string{"agents.mail.*.o.a", "agents.mail.*.o.*.a"}) {
+		t.Fatalf("%v", z.Subjects)
+	}
+	z.Subjects = legacy.Subjects
+	if !reflect.DeepEqual(z, legacy) {
+		t.Fatal("a zoned inbox differs from a legacy one in more than its subjects")
 	}
 }

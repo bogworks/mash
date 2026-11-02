@@ -297,6 +297,8 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 			e.cfg.Creds, e.id.User, e.cfg.Name, self.User)
 	}
 	e.self = self
+	// The endpoint's own mail subject is the one its record says: a zoned endpoint advertises its zoned subject.
+	e.subj.Mail = self.MailSubject
 	if opts.FullDirectory {
 		if keysErr != nil {
 			return fmt.Errorf("mash: reading the directory: %w", keysErr)

@@ -64,7 +64,7 @@ Deliver the credentials file to the machine that runs the session, and nowhere e
 
 `mash admin permissions <name>` prints the permission set as JSON; `--nsc` prints the same set as `nsc add user` flags, one argument per line. The set lets an endpoint:
 
-- send mail to any endpoint of the owner, and send live SAP prompts and status probes to them;
+- send mail to any endpoint of the owner, and send live SAP prompts and status probes to them. Mail has two publish lines, `agents.mail.*.<owner>.*` (an endpoint with the legacy subject) and `agents.mail.*.<owner>.*.*` (an endpoint in a zone, see [Zones](#zones-the-mail-subject-carries-a-zone-token)); prompt and status have one each;
 - publish its own heartbeat and answer SAP discovery;
 - read and acknowledge its own inbox, and read its own history;
 - read (never write) the directory;
@@ -88,6 +88,19 @@ mash admin set-meta "$name" --describe - --cap -                              # 
 `set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. `--describe -` clears the description. `--cap C` adds a capability, `--uncap C` removes one, and `--cap -` clears them all (added in the same command afterwards). The 8-label and 8-capability caps are checked after the merge. The confirmation line also shows the description and capabilities when set. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. `mash admin list` is unchanged.
 
 `mash who` prints the same lines as before, so tools that parse it keep working. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then `desc TEXT` and `caps a,b,c` columns when set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
+
+### Zones: the mail subject carries a zone token
+
+An endpoint can be put in a zone. A zoned endpoint's mail subject is `agents.mail.cc.<owner>.<zone>.<name>` (6 tokens) instead of the legacy `agents.mail.cc.<owner>.<name>`. A zone is one token of 1 to 32 lower-case letters, digits and hyphens (`default` is the conventional name, `sap.DefaultZone`). An endpoint with no zone on record keeps the legacy subject and works exactly as before; it is not in the `default` zone. Prompt, status and heartbeat subjects do not change ([ADR-0054](decisions/0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md)).
+
+```sh
+mash admin provision "$name" --user "$user" --account "$account" --zone default   # a new endpoint in a zone
+mash admin set-zone "$name" default                                               # move an existing endpoint into a zone
+```
+
+A zoned endpoint's inbox stream takes both subjects (`agents.mail.*.<owner>.<name>` and `agents.mail.*.<owner>.*.<name>`), so mail that a sender not yet updated publishes to the old subject still arrives. `set-zone` appends the zone subject to the existing stream with an update that changes nothing else and purges nothing, then rewrites the directory record's `zone` and `mail_subject` against the revision it read, keeping every other field. It is idempotent. A zone of `-` is refused, and so is moving an endpoint from one zone to another: in this version a zoned endpoint stays in its zone. `mash admin list` and `mash who --long` show the zone (`zone=Z` and `zone Z`); `who --json` has a `zone` key only for a zoned endpoint.
+
+Roll it out in this order. First upgrade the mash binaries: they read both subjects. Then re-issue each user's permissions (`mash admin permissions <name>`) so they include the zoned publish line; a user minted before this change can only publish the 5-token mail subject, so it cannot mail a zoned endpoint. Then run `set-zone` or `provision --zone` per endpoint, in any order: senders resolve the recipient's subject from the directory, so they follow the record. A user minted with per-recipient lines (the policy compiler's form) keeps its legacy line per recipient and cannot mail a zoned endpoint until its lines are reissued.
 
 ### Finding endpoints: `who` filters and `--json`
 
@@ -113,6 +126,7 @@ mash who --cap nats-accounts --online --names   # who can do this right now, for
 | `online` | boolean | always |
 | `last_seen` | string, RFC 3339 UTC | when a heartbeat was seen |
 | `role`, `host`, `note`, `description` | string | when set |
+| `zone` | string | when the endpoint is in a zone (an optional key added by [ADR-0054](decisions/0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md); consumers must ignore keys they do not know) |
 | `labels` | object, key to value | when there is at least one |
 | `caps` | array of strings, sorted | when there is at least one |
 | `lease` | object with `host` and `version` | with `--long`, when this endpoint's own live lease is known |

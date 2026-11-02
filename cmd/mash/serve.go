@@ -723,7 +723,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		}
 		if long {
 			r := p.Record
-			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}} {
+			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}, {"zone", r.Zone}} {
 				if f.v != "" {
 					fmt.Fprintf(&b, "\t%s %s", f.k, f.v)
 				}

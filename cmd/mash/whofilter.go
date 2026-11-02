@@ -101,6 +101,7 @@ type whoEntry struct {
 	Description string            `json:"description,omitempty"`
 	Caps        []string          `json:"caps,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
+	Zone        string            `json:"zone,omitempty"` // additive (ADR 0054): present only for a zoned endpoint
 	Lease       *whoLease         `json:"lease,omitempty"`
 }
 
@@ -110,7 +111,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
-		e := whoEntry{Name: r.Name, Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description}
+		e := whoEntry{Name: r.Name, Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description, Zone: r.Zone}
 		if len(r.Caps) > 0 {
 			e.Caps = r.Caps
 		}
