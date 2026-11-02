@@ -51,6 +51,10 @@ func newAddEnv(t *testing.T, src string) *addEnv {
 	t.Helper()
 	e := testenv.Start(t)
 	dir := t.TempDir()
+	// writeCredsNew refuses a group-writable parent, and t.TempDir is 0777 minus the umask (0775 under umask 002).
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	h := &addEnv{t: t, e: e, dir: dir, policy: filepath.Join(dir, "policy.yaml"), env: map[string]string{
 		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1",
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),

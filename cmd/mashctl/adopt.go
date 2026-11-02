@@ -480,10 +480,7 @@ func configJSON(m map[string]string) []byte {
 
 // readCreds reads a user creds file (0600, operator-mode JWT creds).
 func readUserCreds(path string) ([]byte, error) {
-	if err := config.CheckCredsMode(path); err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := config.ReadCredsFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -532,10 +529,7 @@ func checkDestinations(o adoptOpts, st *adoptState) error {
 		return err
 	}
 	if o.mintAdmin {
-		if b, err := os.ReadFile(st.adminDst); err == nil {
-			if err := config.CheckCredsMode(st.adminDst); err != nil {
-				return err
-			}
+		if b, err := config.ReadCredsFile(st.adminDst); err == nil {
 			uc, err := userClaims(b)
 			if err != nil || !(uc.IssuerAccount == st.acctPub || uc.Issuer == st.acctPub) {
 				return fmt.Errorf("%s exists but is not valid creds for this account: refusing to replace it. Move it aside to mint a new one (nothing was changed)", st.adminDst)

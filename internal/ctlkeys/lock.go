@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/bogworks/mash/internal/config"
 )
 
 // lockName is the advisory lock file in the key directory that serializes `mashctl policy apply`.
@@ -22,9 +24,22 @@ func (a *Authority) Lock(wait time.Duration) (unlock func(), err error) {
 		return nil, err
 	}
 	path := filepath.Join(a.dir, lockName)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := config.OpenNoFollow(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		if config.IsSymlinkRefusal(err) {
+			return nil, fmt.Errorf("mashctl: the lock file %s is a symlink: refusing it", path)
+		}
 		return nil, fmt.Errorf("mashctl: open the lock file %s: %w", path, err)
+	}
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = fmt.Errorf("mashctl: the lock file %s is not a regular file", path)
+	} else if err == nil {
+		err = ownerErr(fi, path, "lock file")
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
 	}
 	deadline := time.Now().Add(wait)
 	for {

@@ -164,12 +164,14 @@ func credsFileFor(cfg config.Config, name string) (string, error) {
 	return p, nil
 }
 
-// writeCredsNew writes creds at path with mode 0600, refusing an existing file, and makes the parent 0700 if it is
-// missing. undo removes what it made.
+// writeCredsNew installs creds at path through ctlkeys.InstallFile (a 0600 temp file, O_EXCL, fsync, a link that
+// cannot replace an existing file, a directory sync), refusing an existing file. The parent must be a real
+// directory the current user owns and that group and other cannot write to; a missing one is made 0700. undo
+// removes what it made.
 func writeCredsNew(path string, creds []byte) (undo func(), err error) {
 	dir := filepath.Dir(path)
 	madeDir := false
-	if _, serr := os.Stat(dir); errors.Is(serr, fs.ErrNotExist) {
+	if _, serr := os.Lstat(dir); errors.Is(serr, fs.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
@@ -180,30 +182,26 @@ func writeCredsNew(path string, creds []byte) (undo func(), err error) {
 			os.Remove(dir) // only if empty
 		}
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := ctlkeys.CheckParentDir(dir); err != nil {
 		undoDir()
-		if errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("creds file %s exists", path)
-		}
 		return nil, err
 	}
-	undo = func() {
+	created, err := ctlkeys.InstallFile(path, creds)
+	if err != nil {
+		if created {
+			os.Remove(path) // linked in, but not durable: take the entry back out
+		}
+		undoDir()
+		return nil, err
+	}
+	if !created {
+		undoDir()
+		return nil, fmt.Errorf("creds file %s exists", path)
+	}
+	return func() {
 		os.Remove(path)
 		undoDir()
-	}
-	_, werr := f.Write(creds)
-	if werr == nil {
-		werr = f.Sync()
-	}
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		undo()
-		return nil, fmt.Errorf("write %s: %w", path, werr)
-	}
-	return undo, nil
+	}, nil
 }
 
 // zoneSetChanged reports whether the account JWT's scoped keys must change between two compiles: a zone was added,

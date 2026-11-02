@@ -3,10 +3,12 @@
 package ctlkeys
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -90,7 +92,11 @@ func Open(dir string) (*Authority, error) {
 	return a, nil
 }
 
-// checkDir refuses a symlinked, non-directory or group/other-accessible dir. exists is false for a missing one.
+// checkDir refuses a symlinked, non-directory, group/other-accessible or foreign-owned dir. exists is false for a
+// missing one. Only the final component is checked: a key directory path commonly runs through a legitimately
+// symlinked ancestor (a home directory on another volume, /home -> /var/home), so refusing every symlinked
+// ancestor would break real installs; the final directory is the one whose mode and owner decide who can reach the
+// keys, and an ancestor another user controls cannot get past that directory's 0700 mode and owner.
 func checkDir(d string) (exists bool, err error) {
 	fi, err := os.Lstat(d)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -108,7 +114,45 @@ func checkDir(d string) (exists bool, err error) {
 	if tooOpen(fi.Mode()) {
 		return true, fmt.Errorf("mashctl: key directory %s has mode %04o: it is accessible to other users. Run: chmod 700 %s", d, fi.Mode().Perm(), d)
 	}
+	if err := ownerErr(fi, d, "key directory"); err != nil {
+		return true, err
+	}
 	return true, nil
+}
+
+// geteuid is the effective uid files and directories must belong to; tests replace it.
+var geteuid = os.Geteuid
+
+// ownerErr refuses a file or directory that the effective uid does not own. It is a no-op where the platform
+// reports no owner.
+func ownerErr(fi fs.FileInfo, path, what string) error {
+	if uid, ok := config.FileUID(fi); ok && int(uid) != geteuid() {
+		return fmt.Errorf("mashctl: %s %s is owned by uid %d, not the effective uid %d: refusing it", what, path, uid, geteuid())
+	}
+	return nil
+}
+
+// CheckParentDir refuses a directory that is not a real directory (a symlink is refused), is not owned by the
+// effective uid, or is writable by other users (group-writable is allowed: under the usual user-private-group umask 002 a config directory is 0775 and the group is the owner alone): a place where a creds file may be created without another user
+// being able to swap or replace it. A missing directory is an error wrapping fs.ErrNotExist.
+func CheckParentDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("directory %s is a symlink: refusing it", d)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", d)
+	}
+	if fi.Mode().Perm()&0o002 != 0 {
+		return fmt.Errorf("directory %s has mode %04o: it is writable by every user. Run: chmod o-w %s", d, fi.Mode().Perm(), d)
+	}
+	if err := ownerErr(fi, d, "directory"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *Authority) zonesPath() string { return filepath.Join(a.dir, zonesDir) }
@@ -151,14 +195,24 @@ func (a *Authority) checkDirs(create bool) error {
 // syncDirHook is syncDir, replaceable by tests to inject failures.
 var syncDirHook = syncDir
 
-// readSeed reads and verifies the seed file at path. A missing file returns an error wrapping fs.ErrNotExist.
+// maxSeedFile bounds how much of a seed file is read: a seed is about 58 bytes.
+const maxSeedFile = 4096
+
+// readSeed reads and verifies the seed file at path. A missing file returns an error wrapping fs.ErrNotExist. The
+// file is opened once with O_NOFOLLOW and every check runs on that descriptor, which is then read: there is no
+// window between checking the path and reading it.
 func readSeed(path string, k kind) (nkeys.KeyPair, error) {
-	fi, err := os.Lstat(path)
+	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
 	if err != nil {
+		if config.IsSymlinkRefusal(err) {
+			return nil, fmt.Errorf("mashctl: seed file %s is a symlink: refusing it", path)
+		}
 		return nil, err
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, fmt.Errorf("mashctl: seed file %s is a symlink: refusing it", path)
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("mashctl: read seed file %s: %w", path, err)
 	}
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("mashctl: seed file %s is not a regular file", path)
@@ -166,14 +220,21 @@ func readSeed(path string, k kind) (nkeys.KeyPair, error) {
 	if tooOpen(fi.Mode()) {
 		return nil, fmt.Errorf("mashctl: seed file %s has mode %04o: it is readable by other users. Run: chmod 600 %s", path, fi.Mode().Perm(), path)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
+	if err := ownerErr(fi, path, "seed file"); err != nil {
+		return nil, err
+	}
+	bad := fmt.Errorf("mashctl: %s does not hold a valid %s seed", path, k.what)
+	if fi.Size() > maxSeedFile {
+		return nil, bad
+	}
+	// One buffer, sized up front, so no grown copy of the seed is left behind; it is wiped whole on return.
+	buf := make([]byte, fi.Size()+1)
+	defer clear(buf)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("mashctl: read seed file %s: %w", path, err)
 	}
-	seed := []byte(strings.TrimSpace(string(b)))
-	clear(b)
-	defer clear(seed)
-	bad := fmt.Errorf("mashctl: %s does not hold a valid %s seed", path, k.what)
+	seed := bytes.TrimSpace(buf[:n])
 	kp, err := nkeys.FromSeed(seed)
 	if err != nil {
 		return nil, bad
@@ -486,6 +547,17 @@ func InstallFile(path string, data []byte) (created bool, err error) {
 		return true, fmt.Errorf("mashctl: sync %s: %w", filepath.Dir(path), err)
 	}
 	return true, nil
+}
+
+// SyncDir fsyncs the directory at path so a new or renamed entry in it survives power loss.
+func SyncDir(path string) error { return syncDirHook(path) }
+
+// SetSyncDirHook replaces the directory sync that InstallFile and SyncDir use and returns the function that
+// restores it. It exists so tests in other packages can inject a failure.
+func SetSyncDirHook(h func(string) error) (restore func()) {
+	old := syncDirHook
+	syncDirHook = h
+	return func() { syncDirHook = old }
 }
 
 // OperatorJWTFile is the name, in the key directory, of the copy of the operator JWT that tells mashctl which keys

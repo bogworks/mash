@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/policyfile"
@@ -304,6 +305,9 @@ func replaceCreds(path string, creds []byte) error {
 	if err := os.Rename(name, path); err != nil {
 		os.Remove(name)
 		return err
+	}
+	if err := ctlkeys.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync %s: %w", filepath.Dir(path), err)
 	}
 	return nil
 }
