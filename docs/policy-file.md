@@ -18,6 +18,7 @@ rules:
     from: {KEY: VALUE}     # required; {} is every endpoint
     to: {KEY: VALUE}       # required
     # log: true            # not implemented: Check refuses it (ADR 0062)
+    allow_empty: true      # optional; lets a selector of this rule match no endpoint (see check below); no effect on permissions
 tests:
   - {from: NAME, to: NAME, expect: allow | deny}
 ```
@@ -25,7 +26,7 @@ tests:
 - An endpoint name is lower-case letters, digits and single hyphens, starting with a letter, 1 to 48 characters (the same rule as an owner or endpoint name everywhere else in mash).
 - Map keys must be plain strings: quote a name like `"null"`; an unquoted `null`, `~`, number or boolean as a key is refused with its line number.
 - Label keys and values follow the directory record: a key is a lowercase letter then up to 31 of `a-z`, `0-9`, `_`, `.`, `-`; a value is non-empty printable text of up to 64 characters with no tab or newline. Quote values YAML would read as booleans if you mean the string (`internet: "yes"`); unquoted `yes` and `1` are read as the strings `yes` and `1`.
-- `subject_label` names a label key. An endpoint's zone is the value of that label, or `default` when it has none. A zone is one subject token, so the value must be a valid name (lower-case letters, digits and single hyphens, starting with a letter, 1 to 48 characters); `check` rejects any other value of that label. Lower case matters twice: NATS lower-cases tags.
+- `subject_label` names a label key. An endpoint's zone is the value of that label, or `default` when it has none. A zone is one subject token, so the value must be a valid zone (lower-case letters, digits and single hyphens, starting with a letter, 1 to 32 characters, the same limit `add`, `set-zone` and `apply` enforce, ADR 0054); `check` rejects any other value of that label. Endpoint names keep their 48. Lower case matters twice: NATS lower-cases tags.
 - A rule name is non-empty and unique; it is what `explain` and test failures quote.
 - A test names declared endpoints on both sides.
 
@@ -37,8 +38,9 @@ Rules are a union and their order means nothing. For a sender and a recipient: i
 
 ## What check, test and compile say
 
-- `check` reports errors (a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint, `log: true` on a rule: it is not implemented yet) and warnings. Warnings: label values for one key that differ only in case across endpoints (`Finance` and `finance` are different values to a selector); a rule whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), an endpoint whose user would need more than 150 tags (see below), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
+- `check` reports errors (a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint, `log: true` on a rule: it is not implemented yet, and a deny rule whose `from` or `to` selects no endpoint) and warnings. A deny that selects nobody denies nothing, and under `default: allow` a misspelled label fails open, so it is an error that names the rule, the selector and the line; set `allow_empty: true` on the rule if the group is intentionally empty (a zone with no endpoints yet), and it is a warning again (ADR 0060). Warnings: label values for one key that differ only in case across endpoints (`Finance` and `finance` are different values to a selector); an allow rule, or a deny rule with `allow_empty`, whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), an endpoint whose user would need more than 150 tags (see below), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
 - `test` evaluates the `tests` section against the rules.
+- `mashctl policy apply`, `mashctl add` and `mashctl reissue` all parse the file (so a file that does not check is refused) and run its `tests` before anything is created, minted or pushed. If any test fails they print the `FAIL` lines and `refusing: N of M policy tests in FILE fail (...)`, and exit 1; `add` creates no key, creds file or record and `reissue` rewrites no creds file (ADR 0059).
 - `explain FROM TO` names the deciding rule and the selectors that selected it, or says no rule matched and the default applied. When several rules match, a deny decides over any allow, and the text lists the others.
 
 ## Zones, wildcards and tag exceptions

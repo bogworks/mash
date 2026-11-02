@@ -92,10 +92,16 @@ func TestPolicyCheckBrokenAndWarnings(t *testing.T) {
 	if code != 1 || strings.Count(out, "error: ") != 2 || !strings.Contains(out, "error: default: ") || !strings.Contains(out, "maybe") {
 		t.Fatalf("invalid: %d %q", code, out)
 	}
-	warn := write(t, dir, "warn.yaml", "default: allow\nendpoints:\n  a:\n    labels: {zone: x}\nrules:\n  - name: ghost\n    action: deny\n    from: {nosuch: label}\n    to: {}\n")
+	warn := write(t, dir, "warn.yaml", "default: allow\nendpoints:\n  a:\n    labels: {zone: x}\nrules:\n  - name: ghost\n    action: deny\n    from: {nosuch: label}\n    to: {}\n    allow_empty: true\n")
 	out, _, code = policyRun(t, nil, "policy", "check", "--policy", warn)
 	if code != 0 || !strings.HasPrefix(out, "warning: ") || !strings.Contains(out, "ghost") || !strings.HasSuffix(out, "check: OK - 1 endpoints, 1 rules\n") {
 		t.Fatalf("warning: %d %q", code, out)
+	}
+	// without allow_empty the same deny rule is an error naming the way out
+	noEmpty := write(t, dir, "noempty.yaml", "default: allow\nendpoints:\n  a:\n    labels: {zone: x}\nrules:\n  - name: ghost\n    action: deny\n    from: {nosuch: label}\n    to: {}\n")
+	out, _, code = policyRun(t, nil, "policy", "check", "--policy", noEmpty)
+	if code != 1 || strings.Count(out, "error: ") != 1 || !strings.Contains(out, "rule ghost (line 6)") || !strings.Contains(out, "set allow_empty: true on the rule if the group is intentionally empty") {
+		t.Fatalf("deny selecting nobody: %d %q", code, out)
 	}
 }
 

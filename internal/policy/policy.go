@@ -69,6 +69,10 @@ type Rule struct {
 	// Log asks that what a deny rule refuses be recorded. Nothing records yet, so Check refuses a rule that sets it
 	// (ADR 0062); the field stays parsed so the refusal is a clear message, not an unknown-field error.
 	Log bool `yaml:"log"`
+	// AllowEmpty says a from or to selector of this rule may match no endpoint (a group that is empty on purpose, such
+	// as a zone with no endpoints yet). Without it a deny rule that selects nobody is a Check error. It is carried
+	// through the file and has no effect on the compiled permissions.
+	AllowEmpty bool `yaml:"allow_empty"`
 }
 
 // Test asserts the decision for one sender-recipient pair; apply refuses a file whose tests fail.

@@ -48,7 +48,7 @@ rules:
 	}
 
 	// A zone selector with no endpoint in it still warns.
-	h := mustParse(t, "endpoints:\n  b: {labels: {zone: prod}}\nrules:\n  - {name: r, action: deny, from: {}, to: {zone: default}}\n")
+	h := mustParse(t, "endpoints:\n  b: {labels: {zone: prod}}\nrules:\n  - {name: r, action: deny, from: {}, to: {zone: default}, allow_empty: true}\n")
 	if w := h.Check().Warnings; len(w) != 1 || !strings.Contains(w[0].Message, "matches no endpoint") {
 		t.Errorf("warnings %+v", w)
 	}

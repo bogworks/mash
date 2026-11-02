@@ -70,10 +70,15 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		return 1
 	}
 	data, _ := doc.Bytes()
-	doc.Close() // nothing is written back
-	_, c, err := compileBytes(data, cfg.Owner)
+	doc.Close()                                // nothing is written back
+	f, c, err := compileBytes(data, cfg.Owner) // Parse runs Check: a file that does not check is refused here
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: reissue: %s: %v\n", path, err)
+		return 1
+	}
+	// The file's own tests gate the mint exactly as they gate apply: no creds file is read or rewritten first.
+	if failed, total := policyTestFailures(f); len(failed) > 0 {
+		fmt.Fprintf(stderr, "mashctl: reissue: %s\n", refuseFailedTests(failed, total, path, "nothing was changed, no creds file was rewritten", stdout))
 		return 1
 	}
 

@@ -105,7 +105,7 @@ func TestEffectiveMatchesRecipients(t *testing.T) {
 			if rng.Intn(3) == 0 {
 				act = "deny"
 			}
-			fmt.Fprintf(&b, "  - {name: r%d, action: %s, from: %s, to: %s}\n", i, act, randSel(), randSel())
+			fmt.Fprintf(&b, "  - {name: r%d, action: %s, from: %s, to: %s, allow_empty: true}\n", i, act, randSel(), randSel())
 		}
 		f, err := Parse([]byte(b.String()))
 		if err != nil {

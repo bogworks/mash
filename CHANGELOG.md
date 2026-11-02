@@ -27,6 +27,9 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 - `mashctl add`, a plain `mashctl retire` and `mashctl policy drift` (`record-extra`) say, for a record or creds file with no policy entry, that it looks like an interrupted add and give the exact fix: `mashctl retire NAME --force --delete-creds`, then `mashctl add NAME` (issue #184).
 - The policy file lock file (`policy.yaml.lock`) is removed when the command finishes, and a leftover from a killed run is reused; the lock was always released by the kernel on exit, and the lock error now says a leftover file is harmless (issue #184).
 
+- `mashctl add` and `mashctl reissue` run the policy file's `tests:` as `policy apply` does and refuse, with the same `FAIL` lines and `refusing: N of M policy tests in FILE fail (...)`, before any key, record or creds file is created or rewritten (#180, ADR 0060).
+- A deny rule whose `from` or `to` selector matches no endpoint is now a `policy check` error, not a warning (a misspelled label fails open under `default: allow`). Set `allow_empty: true` on the rule if the group is intentionally empty and it is a warning again; allow rules keep the warning. The key has no effect on permissions (#180, ADR 0060).
+- `policy check` validates the zone label value as a zone (1 to 32 characters, ADR 0054), not as a name (48), so it no longer accepts a zone that `add`, `set-zone` and `apply` refuse. Endpoint names stay 1 to 48 (#180).
 - The release gate and the dry run now prove which `slsa-github-generator` commit signed `mash.intoto.jsonl`: every line's Fulcio certificate must carry the commit recorded in `SLSA_GENERATOR_SHA` (`release.yml`, read at the release commit) as its Build Signer Digest and the generic generator at `SLSA_GENERATOR_TAG` as its Build Signer URI, so a tag moved and restored around the run is caught (issue #108). See [docs/release.md](docs/release.md#sbom-and-slsa-provenance).
 
 ### Added
