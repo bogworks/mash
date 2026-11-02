@@ -291,3 +291,40 @@ func TestDirFor(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateSyncsDirectories(t *testing.T) {
+	var synced []string
+	old := syncDirHook
+	syncDirHook = func(p string) error { synced = append(synced, p); return old(p) }
+	defer func() { syncDirHook = old }()
+	a, dir := newStore(t)
+	if _, _, err := a.InitAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ZoneKey("alpha", true); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(filepath.Join(dir, "zones"))
+	if len(ents) != 1 {
+		t.Fatalf("zones dir entries: %v", ents)
+	}
+	if got := mode(t, filepath.Join(dir, "zones", ents[0].Name())); got.Perm() != 0o600 {
+		t.Fatalf("zone key mode %v", got)
+	}
+	if len(synced) < 3 {
+		t.Fatalf("expected directory syncs, got %v", synced)
+	}
+}
+
+func TestSyncDirFailureIsAnError(t *testing.T) {
+	old := syncDirHook
+	syncDirHook = func(string) error { return errors.New("injected") }
+	defer func() { syncDirHook = old }()
+	a, _ := newStore(t)
+	if _, _, err := a.InitAccount(); err == nil {
+		t.Fatal("InitAccount reported success despite a failing directory sync")
+	}
+	if _, err := a.ZoneKey("beta", true); err == nil {
+		t.Fatal("ZoneKey(create) reported success despite a failing directory sync")
+	}
+}

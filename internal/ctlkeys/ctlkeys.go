@@ -104,8 +104,23 @@ func (a *Authority) checkDirs(create bool) error {
 		if ok || !create {
 			continue
 		}
+		// Remember which ancestors are missing so each new one can be made durable.
+		var made []string
+		for p := d; ; p = filepath.Dir(p) {
+			if _, err := os.Lstat(p); err == nil || filepath.Dir(p) == p {
+				break
+			}
+			made = append(made, p)
+		}
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("mashctl: create %s: %w", d, err)
+		}
+		for _, m := range made {
+			for _, p := range []string{m, filepath.Dir(m)} {
+				if err := syncDirHook(p); err != nil {
+					return fmt.Errorf("mashctl: sync %s: %w", p, err)
+				}
+			}
 		}
 		if _, err := checkDir(d); err != nil {
 			return err
@@ -113,6 +128,9 @@ func (a *Authority) checkDirs(create bool) error {
 	}
 	return nil
 }
+
+// syncDirHook is syncDir, replaceable by tests to inject failures.
+var syncDirHook = syncDir
 
 // readSeed reads and verifies the seed file at path. A missing file returns an error wrapping fs.ErrNotExist.
 func readSeed(path string) (nkeys.KeyPair, error) {
@@ -190,6 +208,12 @@ func createSeed(path string) (nkeys.KeyPair, bool, error) {
 			return kp, false, err
 		}
 		return nil, false, fmt.Errorf("mashctl: install %s: %w", path, err)
+	}
+	// Drop the temp name, then make the new entry durable before reporting success.
+	_ = os.Remove(tmp)
+	if err := syncDirHook(filepath.Dir(path)); err != nil {
+		nk.Wipe()
+		return nil, false, fmt.Errorf("mashctl: sync %s: %w", filepath.Dir(path), err)
 	}
 	return nk, true, nil
 }
