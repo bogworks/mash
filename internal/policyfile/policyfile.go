@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"syscall"
@@ -30,6 +31,9 @@ var ErrChanged = errors.New("changed since it was loaded; reload and redo the ed
 
 // beforeCreatePublish is a test seam called between Create's checks and its publish.
 var beforeCreatePublish func()
+
+// afterSplice is a test seam: it receives an edit's result before the post-condition checks it.
+var afterSplice func([]byte) []byte
 
 // rename is os.Rename; tests replace it to simulate a failing rename.
 var rename = os.Rename
@@ -271,7 +275,12 @@ func (d *Doc) AddEndpoint(name string, labels map[string]string) error {
 	if t.endpoint(name) != nil {
 		return fmt.Errorf("endpoint %q already exists in %s", name, d.path)
 	}
-	return d.apply(t.addEndpoint(name, labels))
+	want, err := d.snapshot()
+	if err != nil {
+		return err
+	}
+	want.endpoints[name] = copyLabels(labels)
+	return d.apply(want)(t.addEndpoint(name, labels))
 }
 
 // SetLabels sets the labels in set and removes the keys in unset (a key not present is ignored). An endpoint with no
@@ -284,7 +293,18 @@ func (d *Doc) SetLabels(name string, set map[string]string, unset []string) erro
 	if t.endpoint(name) == nil {
 		return fmt.Errorf("endpoint %q is not declared in %s", name, d.path)
 	}
-	return d.apply(t.setLabels(name, set, unset))
+	want, err := d.snapshot()
+	if err != nil {
+		return err
+	}
+	l := want.endpoints[name]
+	for _, k := range unset {
+		delete(l, k)
+	}
+	for k, v := range set {
+		l[k] = v
+	}
+	return d.apply(want)(t.setLabels(name, set, unset))
 }
 
 // RemoveEndpoint deletes the endpoint's entry. It returns, as refs, the tests that still name it as from or to
@@ -302,26 +322,96 @@ func (d *Doc) RemoveEndpoint(name string) (refs []string, err error) {
 	if err != nil {
 		return nil, err
 	}
+	want, err := d.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	delete(want.endpoints, name)
 	for i, tc := range f.Tests {
 		if tc.From == name || tc.To == name {
 			refs = append(refs, fmt.Sprintf("tests[%d] %s->%s", i+1, tc.From, tc.To))
 		}
 	}
-	return refs, d.apply(t.removeEndpoint(name))
+	if err := d.apply(want)(t.removeEndpoint(name)); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
-// apply performs the splices an operation planned, checks that the text is still YAML and keeps it.
-func (d *Doc) apply(edits []edit, err error) error {
-	if err != nil {
-		return err
+// snap is what an edit may change: the endpoints and their labels, as the YAML decoder reads them, and everything
+// else in the file, which an edit must leave as it is.
+type snap struct {
+	endpoints map[string]map[string]string
+	rest      map[string]any
+}
+
+func parseSnap(data []byte) (*snap, error) {
+	var doc struct {
+		Endpoints map[string]struct {
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"endpoints"`
 	}
-	out := splice(d.data, edits)
-	var n yaml.Node
-	if err := yaml.Unmarshal(out, &n); err != nil {
-		return fmt.Errorf("internal error: the edit produced invalid YAML: %w", err)
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
 	}
-	d.data = out
-	return nil
+	var rest map[string]any
+	if err := yaml.Unmarshal(data, &rest); err != nil {
+		return nil, err
+	}
+	delete(rest, "endpoints")
+	s := &snap{endpoints: map[string]map[string]string{}, rest: rest}
+	for n, e := range doc.Endpoints {
+		s.endpoints[n] = copyLabels(e.Labels)
+	}
+	return s, nil
+}
+
+func copyLabels(m map[string]string) map[string]string {
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		c[k] = v
+	}
+	return c
+}
+
+func (d *Doc) snapshot() (*snap, error) { return parseSnap(d.data) }
+
+// apply returns the function that performs the splices an operation planned, with want as the file's content
+// afterwards. It checks that the text is still YAML and that re-reading it gives exactly want: the same endpoint
+// names, each with the same labels, and the rest of the file unchanged. It keeps the text only then, so a splice that
+// went wrong in a shape nobody anticipated is an error, never a policy that differs from what was asked.
+func (d *Doc) apply(want *snap) func([]edit, error) error {
+	return func(edits []edit, err error) error {
+		if err != nil {
+			return err
+		}
+		out := splice(d.data, edits)
+		if afterSplice != nil {
+			out = afterSplice(out)
+		}
+		got, err := parseSnap(out)
+		if err != nil {
+			return fmt.Errorf("internal error: the edit produced invalid YAML: %w", err)
+		}
+		if !reflect.DeepEqual(got.endpoints, want.endpoints) || !reflect.DeepEqual(got.rest, want.rest) {
+			return fmt.Errorf("internal error: the edit would not have produced the intended policy (endpoints now %s, wanted %s); nothing changed, edit %s by hand", describe(got.endpoints), describe(want.endpoints), d.path)
+		}
+		d.data = out
+		return nil
+	}
+}
+
+func describe(m map[string]map[string]string) string {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		parts = append(parts, n+flowLabels(m[n], sortedKeys(m[n])))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
 }
 
 func sortedKeys(m map[string]string) []string {

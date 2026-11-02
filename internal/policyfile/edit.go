@@ -1,6 +1,7 @@
 package policyfile
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sort"
@@ -35,6 +36,7 @@ func splice(data []byte, edits []edit) []byte {
 
 // tree is the file's text with its parsed node tree: the nodes say where things are, the text is what gets edited.
 type tree struct {
+	path      string
 	data      []byte
 	top       *yaml.Node
 	lineStart []int // lineStart[i] is the offset of line i+1
@@ -52,13 +54,121 @@ func (d *Doc) tree() (*tree, error) {
 	if top.Kind != yaml.MappingNode {
 		return nil, errors.New("policy file: not a mapping")
 	}
-	t := &tree{data: d.data, top: top, lineStart: []int{0}}
+	t := &tree{path: d.path, data: d.data, top: top, lineStart: []int{0}}
 	for i, b := range d.data {
 		if b == '\n' {
 			t.lineStart = append(t.lineStart, i+1)
 		}
 	}
+	if err := t.vet(); err != nil {
+		return nil, err
+	}
 	return t, nil
+}
+
+// flowErr is the refusal for a node written in flow style, which edits cannot splice without touching its siblings.
+func (t *tree) flowErr(what string, n *yaml.Node) error {
+	return fmt.Errorf("policy file %s: line %d: %s is written in flow style ({...}); edit it by hand or rewrite it in block style", t.path, n.Line, what)
+}
+
+// unsupported is the refusal for a shape the editor does not splice.
+func (t *tree) unsupported(n *yaml.Node, why string) error {
+	return fmt.Errorf("policy file %s: line %d: %s; edit it by hand", t.path, n.Line, why)
+}
+
+// vet refuses files whose endpoints section has a shape the editor does not splice: a flow-style top level, anchors
+// and aliases, and scalars that span lines. (Flow-style maps are refused where an edit would touch them, since a
+// flow node shares its lines with its siblings; see the edit operations.)
+func (t *tree) vet() error {
+	if isFlow(t.top) {
+		return t.flowErr("the top level of the file", t.top)
+	}
+	_, ev := get(t.top, "endpoints")
+	if ev == nil {
+		return nil
+	}
+	var walk func(n *yaml.Node) error
+	walk = func(n *yaml.Node) error {
+		switch {
+		case n.Kind == yaml.AliasNode || n.Anchor != "":
+			return t.unsupported(n, "endpoints uses a YAML anchor or alias")
+		case (n.Kind == yaml.MappingNode || n.Kind == yaml.SequenceNode) && isFlow(n) && t.flowHasComment(n):
+			return t.unsupported(n, "endpoints has a comment inside a {...} or [...]")
+		case n.Kind == yaml.ScalarNode:
+			if t.multiline(n) {
+				return t.unsupported(n, "endpoints has a scalar that spans several lines")
+			}
+		}
+		for _, c := range n.Content {
+			if err := walk(c); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(ev)
+}
+
+// multiline reports whether the quoted or plain scalar n spans more than one line.
+func (t *tree) multiline(n *yaml.Node) bool {
+	if n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		return false
+	}
+	o, end := t.nodeOff(n), t.tokenEnd(n)
+	return end > o && t.lineOf(end-1) != t.lineOf(o)
+}
+
+// nodeEnd is the offset just past n's last token.
+func (t *tree) nodeEnd(n *yaml.Node) int {
+	switch n.Kind {
+	case yaml.MappingNode, yaml.SequenceNode:
+		if isFlow(n) {
+			return t.closeOff(n)
+		}
+		if len(n.Content) == 0 {
+			return t.nodeOff(n)
+		}
+		last := n.Content[len(n.Content)-1]
+		if n.Kind == yaml.MappingNode && isEmptyNull(last) {
+			return t.tokenEnd(n.Content[len(n.Content)-2])
+		}
+		return t.nodeEnd(last)
+	case yaml.ScalarNode:
+		if n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+			return t.lineOff(t.endLine(n) + 1)
+		}
+		return t.tokenEnd(n)
+	}
+	return t.nodeOff(n)
+}
+
+// soleOnLines reports whether data[start:end] is all there is on its lines but whitespace and a trailing comment.
+func (t *tree) soleOnLines(start, end int) bool {
+	if end > len(t.data) {
+		end = len(t.data)
+	}
+	for _, b := range t.data[t.lineOff(t.lineOf(start)):start] {
+		if b != ' ' && b != '\t' {
+			return false
+		}
+	}
+	rest := t.data[end:]
+	if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[:i]
+	}
+	rest = bytes.TrimLeft(rest, " \t\r")
+	return len(rest) == 0 || rest[0] == '#'
+}
+
+// flowHasComment reports whether a '#' that could start a comment sits inside the flow collection n.
+func (t *tree) flowHasComment(n *yaml.Node) bool {
+	o, end := t.nodeOff(n), t.closeOff(n)
+	for i := o; i < end; i++ {
+		if t.data[i] == '#' && i > 0 && strings.IndexByte(" \t\n", t.data[i-1]) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // off is the byte offset of a node position (1-based line, column counted in characters).
@@ -300,9 +410,12 @@ func (t *tree) addEndpoint(name string, labels map[string]string) ([]edit, error
 		}
 		return append(edits, t.insertAfterLine(line, entryText(name, indent, step, false, flowLab, labels))), nil
 	case ev.Kind == yaml.MappingNode && isFlow(ev):
-		return nil, errors.New("endpoints is written in flow style ({...}): rewrite it as a block mapping so mashctl can edit it")
+		return nil, t.flowErr("endpoints", ev)
 	case ev.Kind != yaml.MappingNode:
-		return nil, errors.New("endpoints is not a mapping")
+		return nil, t.unsupported(ev, "endpoints is not a mapping")
+	}
+	if last := ev.Content[len(ev.Content)-1]; !t.soleOnLines(t.nodeOff(ev.Content[0]), t.nodeEnd(last)) {
+		return nil, t.unsupported(last, "the last endpoint shares its line with other content")
 	}
 	ind := indentOf(ev.Content[0])
 	st := strings.Repeat(" ", blockStep(ev))
@@ -322,13 +435,26 @@ func (t *tree) addEndpoint(name string, labels map[string]string) ([]edit, error
 
 func (t *tree) removeEndpoint(name string) ([]edit, error) {
 	e := t.endpoint(name)
-	from, to := t.lineSpan(e.key.Line, t.endLine(e.val))
+	if _, ev := get(t.top, "endpoints"); isFlow(ev) {
+		return nil, t.flowErr("endpoints", ev)
+	}
+	end := t.tokenEnd(e.key)
+	if !isEmptyNull(e.val) {
+		end = t.nodeEnd(e.val)
+	}
+	if !t.soleOnLines(t.nodeOff(e.key), end) {
+		return nil, t.unsupported(e.key, fmt.Sprintf("endpoint %q shares its line with other content", name))
+	}
+	from, to := t.lineSpan(e.key.Line, t.lineOf(end-1))
 	return []edit{{from, to, ""}}, nil
 }
 
 func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]edit, error) {
 	e := t.endpoint(name)
 	v := e.val
+	if _, ev := get(t.top, "endpoints"); isFlow(ev) {
+		return nil, t.flowErr("endpoints", ev)
+	}
 	lk, lv := get(v, "labels")
 
 	// The labels as they will be: existing keys in file order minus unset, then new keys sorted.
@@ -339,8 +465,8 @@ func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]
 			cur[lv.Content[i].Value] = lv.Content[i+1]
 			order = append(order, lv.Content[i].Value)
 		}
-	} else if lv != nil && !(lv.Kind == yaml.ScalarNode && lv.Tag == "!!null") {
-		return nil, fmt.Errorf("endpoint %q: labels is not a mapping", name)
+	} else if lv != nil && !isEmptyNull(lv) {
+		return nil, t.unsupported(lv, fmt.Sprintf("endpoint %q: labels is not a mapping", name))
 	}
 	drop := map[string]bool{}
 	for _, k := range unset {
@@ -365,6 +491,10 @@ func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]
 
 	switch {
 	case v.Kind == yaml.MappingNode && isFlow(v): // name: {labels: {...}} or name: {}
+		// Only this node's own braces are replaced, and the endpoints map is block style, so no sibling is touched.
+		if len(v.Content) > 2 || len(v.Content) == 2 && v.Content[0].Value != "labels" {
+			return nil, t.unsupported(v, fmt.Sprintf("endpoint %q has keys other than labels", name))
+		}
 		text := "{}"
 		if len(fin) > 0 {
 			text = "{labels: " + flowLabels(final, fin) + "}"
@@ -378,7 +508,7 @@ func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]
 		return []edit{t.insertAfterLine(e.key.Line, labelLines(indentOf(e.key)+step, step, flowLab, final, fin))}, nil
 
 	case v.Kind != yaml.MappingNode:
-		return nil, fmt.Errorf("endpoint %q: its value is not a mapping", name)
+		return nil, t.unsupported(v, fmt.Sprintf("endpoint %q: its value is not a mapping", name))
 	}
 
 	// name: followed by an indented block mapping.
@@ -390,11 +520,14 @@ func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]
 		return []edit{t.insertAfterLine(t.endLine(v), labelLines(indentOf(v.Content[0]), st, flowLab, final, fin))}, nil
 	}
 	if len(fin) == 0 {
-		last := lk.Line
+		end := t.tokenEnd(lk)
 		if !isEmptyNull(lv) {
-			last = t.endLine(lv)
+			end = t.nodeEnd(lv)
 		}
-		from, to := t.lineSpan(lk.Line, last)
+		if !t.soleOnLines(t.nodeOff(lk), end) {
+			return nil, t.unsupported(lk, fmt.Sprintf("endpoint %q: labels shares its line with other content", name))
+		}
+		from, to := t.lineSpan(lk.Line, t.lineOf(end-1))
 		return []edit{{from, to, ""}}, nil
 	}
 	if lv.Kind == yaml.MappingNode && isFlow(lv) {
@@ -406,9 +539,19 @@ func (t *tree) setLabels(name string, set map[string]string, unset []string) ([]
 	for i := 0; i+1 < len(lv.Content); i += 2 {
 		k, val := lv.Content[i], lv.Content[i+1]
 		if drop[k.Value] {
-			from, to := t.lineSpan(k.Line, t.endLine(val))
+			end := t.tokenEnd(k)
+			if !isEmptyNull(val) {
+				end = t.nodeEnd(val)
+			}
+			if !t.soleOnLines(t.nodeOff(k), end) {
+				return nil, t.unsupported(k, fmt.Sprintf("endpoint %q: label %q shares its line with other content", name, k.Value))
+			}
+			from, to := t.lineSpan(k.Line, t.lineOf(end-1))
 			edits = append(edits, edit{from, to, ""})
 		} else if nv, ok := set[k.Value]; ok && nv != val.Value {
+			if isEmptyNull(val) {
+				return nil, t.unsupported(k, fmt.Sprintf("endpoint %q: label %q has an empty value", name, k.Value))
+			}
 			edits = append(edits, edit{t.nodeOff(val), t.tokenEnd(val), scalar(nv)})
 		}
 	}

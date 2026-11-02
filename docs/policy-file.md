@@ -176,6 +176,8 @@ tests:
 
 `mashctl policy` with no verb, or an unknown one, prints the usage to stderr and exits 2.
 
+An edit refuses, naming the line, to change a flow-style (`{...}`) `endpoints:` map or a flow-style entry or `labels:` inside one, so write those in block style (a flow-style entry or `labels:` on its own line under a block-style `endpoints:` is edited in place).
+
 A command that edits the file saves it atomically and refuses, leaving the file as it is, if the file changed on disk since the command loaded it.
 
 ## What the file is not
