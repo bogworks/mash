@@ -270,7 +270,9 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 | Directory / lease bucket size | 16 MiB / 4 MiB | A hosted account refuses a stream without a size cap ([ADR-0010][0010]) | Fixed. `admin init` keeps an existing cap |
 | Lease TTL / refresh | 90 s / 30 s | No recorded reason. The TTL equals the presence window ([ADR-0013][0013]) | Fixed |
 | Held-name retry; transient backoff and budget | 10 s; up to 2 min, within 15 min | No recorded reason ([ADR-0014][0014]) | Fixed |
-| Directory poll | 15 s | No recorded reason. A watch would need consumer rights ([ADR-0011][0011]) | Fixed |
+| Directory poll | 15 s, each wait jittered plus or minus 25 percent | No recorded reason for 15 s. A watch would need consumer rights ([ADR-0011][0011]). Each poll is one small stream-info request and reloads only when the stream moved ([ADR-0065][0065]) | Fixed |
+| Directory forced reload | 20 min, due time jittered plus or minus 25 percent per endpoint | A stale view cannot outlive it, whatever the stream state says ([ADR-0065][0065]) | Fixed |
+| Relay window | 60 s | How soon after mail from one sender a send to another endpoint is traced as a relay candidate ([ADR-0064][0064]) | `relay_window` or `MASH_RELAY_WINDOW`, 1s to 1h |
 | Heartbeat / online window | 30 s / 90 s | SAP's cadence and three intervals (SAP §8.2) | Fixed |
 | Live prompt keepalive / timeout | 30 s / 10 min | Keeps SAP's 60 s caller window open. No recorded reason for 10 min ([ADR-0030][0030]) | Fixed |
 | Batch settle time | 100 ms | No recorded reason ([ADR-0026][0026]) | `settle_ms` or `MASH_SETTLE_MS` |
@@ -380,7 +382,7 @@ service's API token, which only the quickstart script ever sees.
 | Deleting another inbox by answering a forged reply subject | No response permission. Replies may go only to `_INBOX.>` ([ADR-0007][0007]) | None known |
 | Rewriting history | Delete and purge are denied on every inbox ([ADR-0010][0010]) | The admin can delete a whole stream |
 | Taking over a name, or splitting its mail | A lease with create and compare-and-set. Each user may write only its own lease key ([ADR-0013][0013]) | A stolen credential can hold the lease |
-| Changing who is who | Only the admin writes the directory. Endpoints have no write or consumer rights on it ([ADR-0011][0011]) | Directory changes reach running endpoints within 15 s |
+| Changing who is who | Only the admin writes the directory. Endpoints have no write or consumer rights on it ([ADR-0011][0011]) | Directory changes reach running endpoints within about 15 s (a poll sees the stream move and reloads) |
 | Replaying a stored message | `stale` label after 5 min. A repeat of the same user and nonce within 2 min is dropped ([ADR-0019][0019], [ADR-0031][0031]) | A replay stored between 2 and 5 min after the original reads `verified`. Only the original sender or the admin holds the signed bytes |
 | Prompt injection through the body | Bodies are quoted line by line, with every kind of line break normalised. Names that are not valid are shown as a key fragment. A frame says bodies are data ([ADR-0021][0021]) | A `verified` sender's text is acted on by default ([ADR-0020][0020]) |
 | Waking a session at will | Urgent counts only when signed and the sender is `verified` ([ADR-0029][0029]) | Any sender of the owner can claim a waking kind ([ADR-0027][0027]) |
@@ -766,3 +768,5 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 [0038]: decisions/0038-synadia-setup-is-a-script-outside-the-binary.md
 [0040]: decisions/0040-hook-ownership-session-id-launch-token-then-process-chain.md
 [0046]: decisions/0046-a-digest-lists-mail-it-does-not-ack-it.md
+[0064]: decisions/0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md
+[0065]: decisions/0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md

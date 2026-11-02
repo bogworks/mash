@@ -1,0 +1,73 @@
+# nproc=16 kernel=6.1.0-54-cloud-arm64 nats-server: v2.15.1 2026-11-02T21:26:39Z
+## case n=10 -warm 40s
+bucket=dirbench-f589cf30
+ramp_seconds=0.0 connected=10 connect_failures=0
+n=10 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=0.633
+streaminfo_state_per_s=0.633 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=0.333 hb_delivered_per_s=3.333
+server_in_msgs_per_s=12.6 out_msgs_per_s=15.6 in_bytes_per_s=2593 out_bytes_per_s=4121
+server_cpu_cores_sum=0.007 server_cpu_cores_max=0.002 server_rss_mb=19/18/19
+bench_cpu_cores=0.000
+## case n=100 -warm 40s
+bucket=dirbench-d3a8318f
+ramp_seconds=0.0 connected=100 connect_failures=0
+n=100 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.583
+streaminfo_state_per_s=6.583 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=333.328
+server_in_msgs_per_s=46.6 out_msgs_per_s=376.6 in_bytes_per_s=12242 out_bytes_per_s=117783
+server_cpu_cores_sum=0.022 server_cpu_cores_max=0.008 server_rss_mb=26/23/25
+bench_cpu_cores=0.010
+## case n=500 -warm 40s
+bucket=dirbench-94e01bba
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=34.000
+streaminfo_state_per_s=34.000 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.667 hb_delivered_per_s=8333.285
+server_in_msgs_per_s=189.0 out_msgs_per_s=8505.6 in_bytes_per_s=55746 out_bytes_per_s=2584527
+server_cpu_cores_sum=0.163 server_cpu_cores_max=0.058 server_rss_mb=48/47/49
+bench_cpu_cores=0.126
+## case n=1000 -warm 40s
+bucket=dirbench-1e5a1669
+ramp_seconds=0.2 connected=1000 connect_failures=0
+n=1000 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=66.649
+streaminfo_state_per_s=66.649 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=33.333 hb_delivered_per_s=33332.988
+server_in_msgs_per_s=359.0 out_msgs_per_s=33658.7 in_bytes_per_s=108291 out_bytes_per_s=10164758
+server_cpu_cores_sum=0.522 server_cpu_cores_max=0.180 server_rss_mb=86/76/79
+bench_cpu_cores=0.434
+## case n=100 -sync -warm 40s
+bucket=dirbench-9de516bb
+ramp_seconds=0.0 connected=100 connect_failures=0
+n=100 sync=true replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.617
+streaminfo_state_per_s=6.617 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=333.328
+server_in_msgs_per_s=46.4 out_msgs_per_s=376.4 in_bytes_per_s=12324 out_bytes_per_s=117905
+server_cpu_cores_sum=0.014 server_cpu_cores_max=0.005 server_rss_mb=34/34/35
+bench_cpu_cores=0.003
+## case n=500 -sync -warm 40s
+bucket=dirbench-63d86231
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=true replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.266
+streaminfo_state_per_s=33.266 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.666 hb_delivered_per_s=8333.198
+server_in_msgs_per_s=186.4 out_msgs_per_s=8503.0 in_bytes_per_s=55043 out_bytes_per_s=2583131
+server_cpu_cores_sum=0.059 server_cpu_cores_max=0.023 server_rss_mb=57/61/61
+bench_cpu_cores=0.020

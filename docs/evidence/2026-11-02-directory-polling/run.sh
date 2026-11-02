@@ -1,5 +1,5 @@
 #!/bin/bash
-# Starts a 3-server NATS cluster in a temp dir, runs the dirbench cases, kills the servers. Usage: run.sh <dirbench-binary> <out-file>
+# Starts a 3-server NATS cluster in a temp dir, runs the dirbench cases, kills the servers. Usage: [MODE=new] [CASES=...] run.sh <dirbench-binary> <out-file>
 set -u
 BENCH=$1; OUT=$2
 C=(23817 23829 23841); R=(24517 24529 24541); M=(25617 25629 25641)
@@ -26,10 +26,12 @@ MON=http://127.0.0.1:${M[0]},http://127.0.0.1:${M[1]},http://127.0.0.1:${M[2]}
 P=$(IFS=,; echo "${PIDS[*]}")
 ulimit -n 200000
 { echo "# nproc=$(nproc) kernel=$(uname -r) $(/home/randyb/.local/bin/nats-server --version) $(date -u +%FT%TZ)"
+# MODE: old (default, as recorded in results.txt) or new (the poll of ADR 0065, endpoint.DirPoller)
+MODE=${MODE:-old}
 # CASES: newline separated dirbench argument lists (default: the full matrix)
 CASES=${CASES:-$'10\n100\n500\n1000\n100 -sync\n500 -sync'}
 while IFS= read -r case; do
   echo "## case n=$case"
-  nice -n 10 $BENCH -urls $URLS -mon $MON -pids $P -n $case 2>&1
+  nice -n 10 $BENCH -urls $URLS -mon $MON -pids $P -mode $MODE -n $case 2>&1
   sleep 5
 done <<<"$CASES"; } | tee $OUT

@@ -28,18 +28,21 @@ type Presence struct {
 // consumers on the directory (one could exhaust or delete another's).
 var DirectoryPoll = 15 * time.Second
 
-// pollDirectory re-reads the directory every interval until ctx ends.
+// pollDirectory polls the directory until ctx ends: one small unfiltered stream-info request per poll, and a full
+// reload only when the stream moved or DirectoryFullReload is due (ADR 0065). Polls are jittered.
 func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
+	p := NewDirPoller(nil, nil)
+	t := time.NewTimer(p.FirstWait(every))
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := e.loadDirectory(ctx); err != nil && ctx.Err() == nil {
+			if _, err := p.Tick(ctx, e.directoryState, e.loadDirectory); err != nil && ctx.Err() == nil {
 				e.log.Print(err)
 			}
+			t.Reset(p.Wait(every))
 		}
 	}
 }
@@ -166,30 +169,49 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 }
 
 // loadDirectory reads every directory record and replaces the in-memory copy: the keys come from stream info (subjects
-// filter), the values by direct gets, many at a time.
+// filter), the values by direct gets, many at a time. A key that is gone is dropped (the new state reflects it); a key
+// whose read failed keeps its previous record and makes the load return an error after installing what was read, so
+// the poll loop does not record the stream state and reloads at its next poll.
 func (e *Endpoint) loadDirectory(ctx context.Context) error {
 	keys, err := e.directoryKeys(ctx)
 	if err != nil {
 		return fmt.Errorf("mash: reading the directory: %w", err)
 	}
-	e.installDirectory(e.fetchRecords(ctx, keys))
+	if failed := e.installDirectory(e.fetchRecords(ctx, keys)); failed > 0 {
+		return &partialLoadError{failed: failed, total: len(keys)}
+	}
 	return nil
 }
 
-// installDirectory replaces the in-memory directory with the records read; a key that is gone or unreadable is left out.
-func (e *Endpoint) installDirectory(got map[string]recordResult) {
-	dir := make(map[string]store.Record, len(got))
-	for key, r := range got {
-		if r.err == nil {
-			dir[key] = r.rec
-		}
-	}
+// partialLoadError: some records could not be read (transiently) in a directory load that otherwise worked.
+type partialLoadError struct{ failed, total int }
+
+func (p *partialLoadError) Error() string {
+	return fmt.Sprintf("mash: directory: %d of %d records could not be read; retrying at the next poll", p.failed, p.total)
+}
+
+// installDirectory replaces the in-memory directory with the records read. A key that is gone (absent, deleted, not a
+// usable record) is left out; a key whose read failed keeps its previous record, if any. It returns how many reads failed.
+func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	dir := make(map[string]store.Record, len(got))
+	for key, r := range got {
+		switch {
+		case r.err == nil:
+			dir[key] = r.rec
+		case !r.gone:
+			failed++
+			if old, ok := e.dir[key]; ok {
+				dir[key] = old
+			}
+		}
+	}
 	e.dir = dir
 	e.byUser = make(map[string]string, len(dir))
 	for n, r := range dir {
 		e.byUser[r.User] = n
 	}
 	e.fullDir = true
+	return failed
 }
