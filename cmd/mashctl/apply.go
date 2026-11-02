@@ -161,6 +161,27 @@ type policySnapshot struct {
 	c    *policy.Compiled
 }
 
+// policyTestFailures runs the file's own tests and returns one line per failing test and the number of tests run.
+// It is the one gate behind apply, add and reissue.
+func policyTestFailures(f *policy.File) (failed []string, total int) {
+	res := policy.RunTests(f)
+	for _, r := range res {
+		if !r.Pass {
+			failed = append(failed, fmt.Sprintf("FAIL %s->%s expect %s got %s: %s", r.From, r.To, r.Expect, r.Got, r.Text))
+		}
+	}
+	return failed, len(res)
+}
+
+// refuseFailedTests prints the failing test lines to stdout and returns the refusal text; what says what was left
+// untouched, which differs by verb.
+func refuseFailedTests(failed []string, total int, path, what string, stdout io.Writer) string {
+	for _, l := range failed {
+		fmt.Fprintln(stdout, l)
+	}
+	return fmt.Sprintf("refusing: %d of %d policy tests in %s fail (%s)", len(failed), total, path, what)
+}
+
 // runPolicyApplyOpts is runPolicyApply after argument parsing. With a nil snap it reads the policy file itself; with a
 // snapshot it uses that and never reads the file again (the file's tests still run, against the snapshot).
 func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func(string) string, stdout, stderr io.Writer) int {
@@ -203,26 +224,17 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 		}
 	}
 	// The file's own tests run before anything is read or created: a file whose tests contradict its rules is not pushed.
-	var failed []string
-	res := policy.RunTests(f)
-	for _, r := range res {
-		if !r.Pass {
-			failed = append(failed, fmt.Sprintf("FAIL %s->%s expect %s got %s: %s", r.From, r.To, r.Expect, r.Got, r.Text))
-		}
-	}
+	failed, total := policyTestFailures(f)
 	switch {
 	case len(failed) > 0 && verb == "diff":
-		fmt.Fprintf(stdout, "policy tests FAIL: %d of %d tests in %s do not hold; apply would refuse this file\n", len(failed), len(res), path)
+		fmt.Fprintf(stdout, "policy tests FAIL: %d of %d tests in %s do not hold; apply would refuse this file\n", len(failed), total, path)
 		for _, l := range failed {
 			fmt.Fprintf(stdout, "  %s\n", l)
 		}
 		fmt.Fprintln(stdout)
 	case len(failed) > 0:
-		for _, l := range failed {
-			fmt.Fprintln(stdout, l)
-		}
-		return fail("refusing: %d of %d policy tests in %s fail (nothing was changed, no key was created, nothing was pushed)", len(failed), len(res), path)
-	case len(res) == 0:
+		return fail("%s", refuseFailedTests(failed, total, path, "nothing was changed, no key was created, nothing was pushed", stdout))
+	case total == 0:
 		fmt.Fprintf(stdout, "note: %s has no tests section, so the rules were not checked against any expectation\n", path)
 	}
 	if cfg.Owner == "" {

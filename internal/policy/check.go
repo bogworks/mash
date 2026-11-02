@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -36,11 +37,15 @@ type Report struct {
 // value; a test naming an endpoint the file does not declare or expecting something other than allow or deny.
 //
 // Further errors for the zone: subject_label that is not a label key, and an endpoint whose subject label value is not
-// one subject token (config.ValidName).
+// one subject token (sap.ValidZone: 1-32 characters, ADR 0054).
+//
+// A deny rule whose from or to selector matches no declared endpoint is also an error (a misspelled label matches
+// nothing, so under default allow the pair silently stays allowed), unless the rule sets allow_empty: true.
 //
 // Errors also: `log: true` on a rule (the field is parsed but nothing records refusals yet, so it is refused rather than ignored).
 //
-// Warnings: label values that differ only in case across endpoints for one key (Finance and finance); a rule whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
+// Warnings: label values that differ only in case across endpoints for one key (Finance and finance); an allow rule, or a deny
+// rule with allow_empty, whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
 // the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); an endpoint whose user JWT
 // would need more than MaxTagsWarn tags (the connect line); under default deny, an endpoint that can neither send
 // nor receive.
@@ -74,8 +79,8 @@ func (f *File) Check() Report {
 				errf(where, "label %s has an empty value", k)
 			}
 		}
-		if z, ok := labels[f.subjectLabel()]; ok && z != "" && !config.ValidName(z) {
-			errf(where, "%s=%q is the zone, which is one subject token: lower-case letters, digits and single hyphens, starting with a letter, 1-48 characters", f.subjectLabel(), z)
+		if z, ok := labels[f.subjectLabel()]; ok && z != "" && !sap.ValidZone(z) {
+			errf(where, "%s=%q is the zone, which is one subject token: lower-case letters, digits and single hyphens, starting with a letter, 1-32 characters", f.subjectLabel(), z)
 		}
 	}
 
@@ -165,9 +170,16 @@ func (f *File) Check() Report {
 				if z, ok := sel.s[f.subjectLabel()]; ok && !slices.ContainsFunc(names, func(n string) bool { return f.zoneOf(n) == z }) {
 					msg += fmt.Sprintf(" (zone %s has no endpoints)", z)
 				}
+				if rule.Action == Deny && !rule.AllowEmpty {
+					errf(where, "deny rule: %s, so it denies nothing: fix the selector, or set allow_empty: true on the rule if the group is intentionally empty", msg)
+					continue
+				}
 				r.Warnings = append(r.Warnings, Diagnostic{where, msg})
 			}
 		}
+	}
+	if len(r.Errors) > 0 {
+		return r
 	}
 	r.Warnings = append(r.Warnings, f.caseVariantWarnings(names)...)
 	p := f.plan()

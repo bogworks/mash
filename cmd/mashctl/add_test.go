@@ -580,3 +580,81 @@ func TestAddOrphanRefusalText(t *testing.T) {
 		t.Fatalf("record orphan: %d %q", code, errb)
 	}
 }
+
+// A policy file whose tests fail gates add and reissue exactly as it gates apply: nothing is minted or written.
+func TestFailingPolicyTestsRefuseAddAndReissue(t *testing.T) {
+	const failing = "tests:\n  - {from: a, to: b, expect: allow}\n" // the rules deny a->b
+	bad := strings.Replace(addPolicy, "tests: []\n", failing, 1)
+	h := newAddEnv(t, addPolicy)
+	h.seed("a")
+	h.seed("b")
+	credsA, _ := os.ReadFile(h.creds("a"))
+	zonesBefore, _ := h.keys().Zones()
+	if err := os.WriteFile(h.policy, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	polBefore, _ := os.ReadFile(h.policy)
+	recs := h.records()
+
+	out, errb, code := h.run("add", "g", "--zone", "green", "--tool")
+	if code != 1 || !strings.Contains(out, "FAIL a->b expect allow got deny") || !strings.Contains(errb, "refusing: 1 of 1 policy tests in "+h.policy+" fail (nothing was changed, no key or creds file was created") {
+		t.Fatalf("add: %d %q %q", code, out, errb)
+	}
+	if _, err := os.Lstat(h.creds("g")); err == nil {
+		t.Error("add wrote a creds file")
+	}
+	if z, _ := h.keys().Zones(); !slices.Equal(z, zonesBefore) {
+		t.Errorf("zone keys %v -> %v", zonesBefore, z)
+	}
+	if got := h.records(); !slices.Equal(got, recs) {
+		t.Errorf("records %v -> %v", recs, got)
+	}
+	if after, _ := os.ReadFile(h.policy); !bytes.Equal(polBefore, after) {
+		t.Error("policy changed by a refused add")
+	}
+
+	for _, args := range [][]string{{"reissue", "a"}, {"reissue", "--changed"}} {
+		out, errb, code = h.run(args...)
+		if code != 1 || !strings.Contains(out, "FAIL a->b expect allow got deny") || !strings.Contains(errb, "refusing: 1 of 1 policy tests in "+h.policy+" fail (nothing was changed, no creds file was rewritten)") {
+			t.Fatalf("%v: %d %q %q", args, code, out, errb)
+		}
+	}
+	if got, _ := os.ReadFile(h.creds("a")); !bytes.Equal(got, credsA) {
+		t.Error("a refused reissue rewrote the creds")
+	}
+
+	// the same file with a test that holds mints and reissues
+	good := strings.Replace(addPolicy, "tests: []\n", "tests:\n  - {from: a, to: b, expect: deny}\n", 1)
+	if err := os.WriteFile(h.policy, []byte(good), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, errb, code := h.run("add", "g", "--zone", "green", "--tool"); code != 0 {
+		t.Fatalf("add with passing tests: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := h.run("reissue", "a"); code != 0 || !strings.HasPrefix(out, "reissued a ") {
+		t.Fatalf("reissue with passing tests: %d %q %q", code, out, errb)
+	}
+}
+
+// A file that does not check (a deny rule selecting nobody) is refused by add and reissue before anything is minted.
+func TestAddAndReissueRefuseAFileThatDoesNotCheck(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seed("a")
+	credsA, _ := os.ReadFile(h.creds("a"))
+	bad := strings.Replace(addPolicy, "\ntests: []", "  - {name: typo, action: deny, from: {tema: x}, to: {}}\n\ntests: []", 1)
+	if err := os.WriteFile(h.policy, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, code := h.run("add", "n", "--zone", "red"); code != 1 || !strings.Contains(errb, "set allow_empty: true on the rule") {
+		t.Fatalf("add: %d %q", code, errb)
+	}
+	if _, err := os.Lstat(h.creds("n")); err == nil {
+		t.Error("add wrote a creds file")
+	}
+	if _, errb, code := h.run("reissue", "a"); code != 1 || !strings.Contains(errb, "set allow_empty: true on the rule") {
+		t.Fatalf("reissue: %d %q", code, errb)
+	}
+	if got, _ := os.ReadFile(h.creds("a")); !bytes.Equal(got, credsA) {
+		t.Error("creds rewritten")
+	}
+}

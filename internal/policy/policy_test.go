@@ -451,7 +451,7 @@ func TestCheckWarnings(t *testing.T) {
 	f := mustParse(t, "default: deny\n"+trio+`
 rules:
   - {name: x-to-x, action: allow, from: {team: x}, to: {team: x}}
-  - {name: typo, action: deny, from: {team: xx}, to: {}}
+  - {name: typo, action: deny, from: {team: xx}, to: {}, allow_empty: true}
 `)
 	r := f.Check()
 	if len(r.Errors) != 0 {

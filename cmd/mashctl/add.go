@@ -306,9 +306,13 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 		return fail("%v", err)
 	}
 	afterBytes, _ := doc.Bytes()
-	_, after, err := compileBytes(afterBytes, cfg.Owner)
+	afterFile, after, err := compileBytes(afterBytes, cfg.Owner) // Parse runs Check: a file that does not check is refused here
 	if err != nil {
 		return fail("the new endpoint does not make a valid policy: %v", err)
+	}
+	// The file's own tests gate the mint exactly as they gate apply: nothing is created, provisioned or written first.
+	if failed, total := policyTestFailures(afterFile); len(failed) > 0 {
+		return fail("%s", refuseFailedTests(failed, total, path, "nothing was changed, no key or creds file was created, nothing was provisioned", stdout))
 	}
 	ep, ok := findEndpoint(after, o.name)
 	if !ok {

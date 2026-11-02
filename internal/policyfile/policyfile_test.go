@@ -527,3 +527,26 @@ func TestSameLockFile(t *testing.T) {
 		t.Error("replaced path reported same")
 	}
 }
+
+func TestAllowEmptySurvivesAnEdit(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "policy.yaml")
+	src := "default: allow\nendpoints:\n  a:\n    labels: {zone: red}\nrules:\n  - {name: later, action: deny, from: {zone: blue}, to: {}, allow_empty: true}\n"
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := load(t, p)
+	if err := d.SetLabels("a", map[string]string{"team": "x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddEndpoint("b", map[string]string{"zone": "red"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := d.Bytes()
+	if !strings.Contains(string(b), "allow_empty: true") {
+		t.Fatalf("%s", b)
+	}
+	f, err := policy.Parse(b)
+	if err != nil || !f.Rules[0].AllowEmpty {
+		t.Fatalf("%v %+v", err, f)
+	}
+}
