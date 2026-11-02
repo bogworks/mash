@@ -47,8 +47,10 @@ func clean(s string, max int) string {
 }
 
 // RedactURL hides the userinfo of a server URL: "nats://user:pass@host" becomes "nats://***@host". A comma-separated
-// list is redacted entry by entry. A string with no "://" or no userinfo is returned unchanged. It is safe on input
-// that is not a valid URL: anything between "://" and the last "@" before the next "/" is replaced.
+// list is redacted entry by entry. An entry without "://" is read the way the NATS client reads it (it prepends
+// nats://), so "user:pass@host:4222" becomes "***@host:4222". An entry with no userinfo is returned unchanged. It is
+// safe on input that is not a valid URL: anything before the last "@" in the authority (up to the next "/", "?" or
+// "#") is replaced.
 func RedactURL(s string) string {
 	if strings.Contains(s, ",") {
 		parts := strings.Split(s, ",")
@@ -61,11 +63,14 @@ func RedactURL(s string) string {
 }
 
 func redactOne(s string) string {
-	i := strings.Index(s, "://")
-	if i < 0 {
-		return s
+	prefix := ""
+	rest := s
+	if i := strings.Index(s, "://"); i >= 0 {
+		prefix, rest = s[:i+3], s[i+3:]
+	} else {
+		trimmed := strings.TrimLeft(s, " \t")
+		prefix, rest = s[:len(s)-len(trimmed)], trimmed
 	}
-	rest := s[i+3:]
 	end := len(rest)
 	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
 		end = j
@@ -74,16 +79,27 @@ func redactOne(s string) string {
 	if at < 0 {
 		return s
 	}
-	return s[:i+3] + "***@" + rest[at+1:]
+	return prefix + "***@" + rest[at+1:]
 }
 
-// RedactErr returns err with every occurrence of the server URL u in its text replaced by RedactURL(u). An error
-// whose text does not carry the URL, or a URL without credentials, comes back as it was.
+// RedactErr returns err with every occurrence of the server URL u (or, for a list, of any one of its entries that
+// carries credentials) in its text replaced by the redacted form. An error whose text does not carry the URL, or a
+// URL without credentials, comes back as it was.
 func RedactErr(err error, u string) error {
-	if err == nil || RedactURL(u) == u || !strings.Contains(err.Error(), u) {
+	if err == nil || RedactURL(u) == u {
 		return err
 	}
-	return errors.New(strings.ReplaceAll(err.Error(), u, RedactURL(u)))
+	msg := err.Error()
+	out := strings.ReplaceAll(msg, u, RedactURL(u))
+	for _, p := range strings.Split(u, ",") {
+		if r := redactOne(p); r != p && strings.TrimSpace(p) != "" {
+			out = strings.ReplaceAll(out, strings.TrimSpace(p), strings.TrimSpace(r))
+		}
+	}
+	if out == msg {
+		return err
+	}
+	return errors.New(out)
 }
 
 // HasUserinfo reports whether a server URL carries credentials ("user@" or "user:pass@" before the host).

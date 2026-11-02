@@ -300,6 +300,8 @@ func TestAdoptRefusals(t *testing.T) {
 	t.Run("credentials in the URL", func(t *testing.T) {
 		a.t = t
 		a.refuses(2, []string{"credentials in the URL are not supported", "--sys-creds"}, "--server", "tls://bob:hunter2@127.0.0.1:4222")
+		a.refuses(2, []string{"credentials in the URL are not supported"}, "--server", "bob:hunter2@127.0.0.1:4222")
+		a.refuses(2, []string{"credentials in the URL are not supported"}, "--server", "127.0.0.1:4222,tok@127.0.0.2:4222")
 	})
 	t.Run("wrong seed prefix", func(t *testing.T) {
 		a.t = t

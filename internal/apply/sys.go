@@ -20,6 +20,9 @@ const (
 	maxServers = 1024
 	// maxReplies is the most replies LookupAll or Push collects.
 	maxReplies = 4096
+	// maxNameBytes is the longest server or cluster name taken as an identity. A longer one is refused, never cut:
+	// a cut name would make two distinct servers one.
+	maxNameBytes = 4096
 )
 
 var errTooManyReplies = fmt.Errorf("more than %d replies: refusing", maxReplies)
@@ -156,7 +159,7 @@ func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
 		wait = pingSettle
 		if addPingReply(&set, seen, msg.Data) {
 			sort.Strings(set.Names)
-			return set, fmt.Errorf("more than %d servers answered: refusing", maxServers)
+			return set, fmt.Errorf("more than %d servers answered, or a server or cluster name is over %d bytes: refusing", maxServers, maxNameBytes)
 		}
 	}
 	sort.Strings(set.Names)
@@ -249,7 +252,9 @@ func parseAck(b []byte) ServerAck {
 	if name == "" {
 		name = r.Server.ID
 	}
-	name = config.Clean(name)
+	if len(name) > maxNameBytes {
+		name = "" // never cut: an over-long name matches no known server, so the push stays unconfirmed
+	}
 	switch {
 	case r.Error != nil:
 		return ServerAck{Server: name, Code: r.Error.Code, Message: config.Clean(r.Error.Description)}
@@ -270,8 +275,9 @@ func hintNoAnswer(err error) error {
 // an unparsable reply, one naming no server, or a repeat is ignored. The cluster name is the first non-empty one
 // seen; a reply naming a different cluster marks the set ClusterConflict, which keeps it from being complete.
 //
-// Names are cleaned (control characters escaped, capped in length). A name beyond maxServers distinct ones is not
-// recorded and the result is true: the caller must stop and refuse.
+// Names are kept raw: they are the identity that acknowledgements are matched on, and config.Clean (which cuts and
+// escapes) is applied only where one is printed. A server or cluster name over maxNameBytes, or a name beyond
+// maxServers distinct ones, is not recorded and the result is true: the caller must stop and refuse.
 func addPingReply(set *ServerSet, seen map[string]bool, data []byte) (overflow bool) {
 	var r struct {
 		Server struct {
@@ -293,8 +299,9 @@ func addPingReply(set *ServerSet, seen map[string]bool, data []byte) (overflow b
 	if name == "" {
 		name = r.Server.ID
 	}
-	name = config.Clean(name)
-	r.Server.Cluster = config.Clean(r.Server.Cluster)
+	if len(name) > maxNameBytes || len(r.Server.Cluster) > maxNameBytes {
+		return true
+	}
 	if name == "" || seen[name] {
 		return false
 	}

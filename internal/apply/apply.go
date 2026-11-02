@@ -45,7 +45,8 @@ type Resolver interface {
 
 // ServerSet is the answer to the system-account ping.
 type ServerSet struct {
-	// Names are the distinct servers that replied.
+	// Names are the distinct servers that replied, as the servers sent them (raw: they are the identity acknowledgements
+	// match on; print one through config.Clean).
 	Names []string
 	// Expected is the largest 1 + route peers any reply reported: how many servers the cluster has.
 	Expected int
@@ -81,11 +82,11 @@ func (s ServerSet) Why(inventory int) string {
 	case len(s.Names) == 0:
 		return "the system account ping was answered by no server"
 	case s.ClusterConflict:
-		return fmt.Sprintf("%d server(s) replied and they name different clusters (first seen: %s): membership cannot be verified from here", len(s.Names), s.Cluster)
+		return fmt.Sprintf("%d server(s) replied and they name different clusters (first seen: %s): membership cannot be verified from here", len(s.Names), config.Clean(s.Cluster))
 	case s.Gateways:
 		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
 	case inventory <= 0 && s.Cluster != "" && len(s.Names) >= s.Expected:
-		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", s.Cluster)
+		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", config.Clean(s.Cluster))
 	case s.Expected >= inventory:
 		return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
 	}
@@ -437,7 +438,7 @@ func pushAndCheck(ctx context.Context, r Resolver, token string, known []string)
 	var silent []string
 	for _, k := range known {
 		if !acked[k] {
-			silent = append(silent, k)
+			silent = append(silent, config.Clean(k))
 		}
 	}
 	if perr == nil && len(bad) == 0 && len(acks) > 0 && len(silent) == 0 {
@@ -793,7 +794,7 @@ func serverName(a ServerAck) string {
 	if a.Server == "" {
 		return "a server"
 	}
-	return config.Clean(a.Server)
+	return config.Clean(a.Server) // a.Server is raw, the identity; clean it only to print
 }
 
 func sortedKeys(sk jwt.SigningKeys) []string {

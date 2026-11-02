@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,10 +41,27 @@ func TestRedactURL(t *testing.T) {
 		{"nats://u:p%zz@host", "nats://***@host"},
 		{"nats://host/a@b", "nats://host/a@b"},
 		{"", ""},
+		{"user:pass@h:4222", "***@h:4222"},
+		{"tok@h", "***@h"},
+		{"h:4222", "h:4222"},
+		{"h:4222/a@b", "h:4222/a@b"},
+		{"u:p@h?x=y@z", "***@h?x=y@z"},
+		{"nats://u:p@h,u2:p2@h2", "nats://***@h,***@h2"},
+		{"h1:4222, u:p@h2:4222,tok@h3", "h1:4222, ***@h2:4222,***@h3"},
 	} {
 		if got := RedactURL(c.in); got != c.want {
 			t.Errorf("RedactURL(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+	if !HasUserinfo("u:p@h:4222") || !HasUserinfo("a:1,tok@b:2") || HasUserinfo("a:1,b:2") {
+		t.Fatal("HasUserinfo scheme-less")
+	}
+	e := RedactErr(errors.New("dial u:p@h:4222: refused; dial tok@h2: refused"), "u:p@h:4222,tok@h2")
+	if strings.Contains(e.Error(), "u:p") || strings.Contains(e.Error(), "tok") {
+		t.Fatalf("RedactErr leaks: %v", e)
+	}
+	if e := RedactErr(errors.New("dial u:p@h:4222"), "u:p@h:4222"); strings.Contains(e.Error(), "u:p") {
+		t.Fatalf("RedactErr leaks: %v", e)
 	}
 	if !HasUserinfo("nats://u:p@h") || !HasUserinfo("nats://u:p%zz@h") || HasUserinfo("tls://h:4222") {
 		t.Fatal("HasUserinfo")
