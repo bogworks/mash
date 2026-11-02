@@ -348,7 +348,7 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 	for _, r := range recs {
 		if !declared[r.Name] {
 			out = append(out, apply.Finding{Kind: kindRecordExtra, Subject: r.Name,
-				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record)"})
+				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record): " + orphanText(r.Name)})
 		}
 	}
 	sortFindings(out)

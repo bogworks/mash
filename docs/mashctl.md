@@ -40,6 +40,20 @@ Order of operations; a failure at any step undoes the earlier ones, so no half-m
 6. Save the policy file, comments kept. If the file changed since it was loaded, the creds file and the provision are rolled back and the command says to re-run it.
 7. Report `added NAME (zone Z) creds PATH`. Seeds, JWTs and creds contents are never printed.
 
+### A killed add
+
+The rollback above covers errors, not kills. If `mashctl add` is killed mid-run (SIGKILL, power loss), it can leave an orphan that nothing can undo: a directory record and inbox and/or a `NAME.creds` file, with no endpoint `NAME` in the policy file. `add NAME` then refuses, and so does a plain `retire NAME`; `mashctl policy drift` reports `record-extra NAME`. All three say:
+
+```
+NAME looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint NAME): run mashctl retire NAME --force --delete-creds, then mashctl add NAME again
+```
+
+That is the whole recovery; add never resumes by itself. A zone signing key that a failed or killed add created is kept: an unused key is in no account JWT, and the retry reuses it.
+
+### The policy file lock
+
+Every command that edits the policy file holds an advisory `flock` on `<policy file>.lock` and a second one fails at once with `policy file is being edited by another mashctl`. The kernel releases the lock when the holder exits, even when it is killed, so a leftover `policy.yaml.lock` file is harmless and is not a reason to refuse: the next run reuses it and removes it when it finishes. Never remove it by hand while a mashctl is running. `Close` removes the file only while it holds the lock and only if the path is still the file it locked.
+
 ## Follow-ups it reports
 
 - `reissue needed: a, b (run: mashctl reissue a b)`: adding the endpoint changed the tags of existing endpoints (an `allow:` or `deny:` exception now names it), so their user JWTs are stale.
@@ -86,6 +100,8 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 mashctl retire NAME [--policy FILE] [--delete-creds] [--force]
 ```
 
+Without `--force`, a NAME that has a record or creds file but no policy entry refuses with the interrupted-add recovery shown under [A killed add](#a-killed-add).
+
 Needs the server and admin credentials. Order of operations (a failure leaves the earlier, safer state):
 
 1. Lock and load the policy file. NAME must be declared, unless `--force` (then only the server side is cleaned up).
@@ -94,10 +110,10 @@ Needs the server and admin credentials. Order of operations (a failure leaves th
 
    A refusal prints `nothing was changed`. Any other error from this step is reported as `PARTIAL`: the record may already be gone but the lease fence or the inbox delete did not finish, and the policy file is untouched. A retry of `mashctl retire NAME` now refuses (no record), so finish with two commands: `mashctl deprovision NAME` (removes what is left), then `mashctl retire NAME --force` (removes the policy entry; creds and the revocation note as in steps 5 and 6).
 4. Save the policy file. If it changed since it was loaded, NAME is already gone from the server: the command says so and to remove the entry by hand, and exits 1.
-5. Creds file: kept, unless `--delete-creds`, which removes `NAME.creds` if it is a regular file (a symlink or other file is left and reported; a missing file is fine).
+5. Creds file: renamed to `NAME.creds.retired-<UTC yyyymmddThhmmssZ>` in the same directory (mode kept), so `mashctl add NAME` works again at once, and the rename is reported. `--delete-creds` removes `NAME.creds` instead. Only a regular file is touched (a symlink or other file is left and reported); a missing file is fine and nothing is printed. The retired file still holds the user's seed: delete it when you no longer need it. `retire` does not revoke the user: anyone holding the old creds keeps access until the zone key is rotated or the user is revoked with nsc (see Before you push with nsc), same as after `--delete-creds`.
 6. Print `retired NAME`, the consequences above (`reissue needed` for other endpoints, `account update needed`), and always the revocation note.
 
-What it does not do: **revoke the user.** mashctl has no revocation yet (`nsc` has: see [Before you push with nsc](#before-you-push-with-nsc)), so NAME's old creds still authenticate; the note says `revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off`. It also does not push the account JWT: run `mashctl policy apply` when told to.
+What it does not do: **revoke the user.** mashctl has no revocation yet (`nsc` has: see [Before you push with nsc](#before-you-push-with-nsc)), so NAME's old creds still authenticate; the note says `revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off`. It also does not push the account JWT: run `mashctl policy apply` when told to.
 
 ## Exit codes and arguments
 

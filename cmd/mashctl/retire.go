@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
@@ -23,8 +26,36 @@ var afterRetireRead func()
 // deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
 var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
+// retireNow is the clock for the renamed creds file's suffix; a test replaces it.
+var retireNow = time.Now
+
+// looksInterrupted reports whether a creds file or a directory record exists for a name the policy file lacks. A
+// server that cannot be reached counts as no record.
+func looksInterrupted(cfg config.Config, credsPath, name string) bool {
+	if credsPath != "" {
+		if _, err := os.Lstat(credsPath); err == nil {
+			return true
+		}
+	}
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return false
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, r := range recs {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // revocationNote is printed after every retire: mashctl does not revoke users.
-const revocationNote = "revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off"
+const revocationNote = "revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off"
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
@@ -80,11 +111,9 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
 	}
-	credsPath := ""
-	if deleteCreds {
-		if credsPath, err = credsFileFor(cfg, name); err != nil {
-			return fail("%v", err)
-		}
+	credsPath, credsErr := credsFileFor(cfg, name)
+	if credsErr != nil && deleteCreds {
+		return fail("%v", credsErr)
 	}
 
 	// (1) the policy file, locked for the whole command.
@@ -100,6 +129,9 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	_, declared := beforeFile.Endpoints[name]
 	if !declared && !force {
+		if looksInterrupted(cfg, credsPath, name) {
+			return fail("endpoint %q is not declared in %s (--force removes it from the server only); %s", name, path, orphanText(name))
+		}
 		return fail("endpoint %q is not declared in %s (--force removes it from the server only)", name, path)
 	}
 
@@ -174,9 +206,11 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		}
 	}
 
-	// (5) the creds file, last; a symlink or anything but a regular file is left alone.
+	// (5) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
+	// aside so the name can be added again at once; --delete-creds removes it.
 	code := 0
-	if deleteCreds {
+	renamed := ""
+	if credsErr == nil {
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -186,16 +220,28 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		case !fi.Mode().IsRegular():
 			fmt.Fprintf(stderr, "mashctl: retire %s: %s is not a regular file: left in place\n", name, credsPath)
 			code = 1
-		default:
+		case deleteCreds:
 			if err := os.Remove(credsPath); err != nil {
 				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
 				code = 1
+			}
+		default:
+			dest := credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
+			final, err := archiveNoReplace(credsPath, dest)
+			if err != nil {
+				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
+				code = 1
+			} else {
+				renamed = final
 			}
 		}
 	}
 
 	// (6) report.
 	fmt.Fprintf(stdout, "retired %s\n", name)
+	if renamed != "" {
+		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
+	}
 	if after != nil {
 		for _, l := range consequences(before, after) {
 			fmt.Fprintln(stdout, l)
@@ -203,4 +249,108 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stdout, "%s's user is not revoked at the server: %s\n", name, revocationNote)
 	return code
+}
+
+// archiveNoReplace moves src to dest without ever replacing an existing file. If dest exists it tries dest.1,
+// dest.2, ... up to dest.100, then fails with src left in place. It returns the path the file ended up at.
+func archiveNoReplace(src, dest string) (string, error) {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return "", err
+	}
+	for i := 0; i <= 100; i++ {
+		d := dest
+		if i > 0 {
+			d = fmt.Sprintf("%s.%d", dest, i)
+		}
+		err := os.Link(src, d)
+		if err == nil {
+			// The new name must be durable before the old one goes: a crash or a failed sync here leaves both
+			// names, never neither. On a sync failure the original stays and the link is reported.
+			if err := syncDir(filepath.Dir(d)); err != nil {
+				return "", fmt.Errorf("archived to %s but could not make it durable (%w); %s was left in place", d, err, src)
+			}
+			if err := os.Remove(src); err != nil {
+				return "", fmt.Errorf("archived to %s but could not remove %s: %w", d, src, err)
+			}
+			_ = syncDir(filepath.Dir(d)) // best effort: the removal
+			return d, nil
+		}
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		// Link unsupported here (EPERM, EXDEV, ENOTSUP, ...): copy into a new file, never over an existing one.
+		out, cerr := os.OpenFile(d, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
+		if cerr != nil {
+			if errors.Is(cerr, os.ErrExist) {
+				continue
+			}
+			return "", cerr
+		}
+		if cerr := copyAndRemove(src, out, fi.Mode().Perm()); cerr != nil {
+			os.Remove(d)
+			return "", cerr
+		}
+		return d, nil
+	}
+	return "", fmt.Errorf("could not archive %s: %s and %s.1 to %s.100 all exist; nothing was moved", src, dest, dest, dest)
+}
+
+// syncFile flushes a file to stable storage; a variable so tests can make it fail.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
+// syncDir fsyncs a directory so a created or removed entry is durable. Filesystems that cannot fsync a
+// directory (EINVAL, ENOTSUP, ENOSYS) are not an error.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS) {
+		return nil
+	}
+	return err
+}
+
+// copyAndRemove copies src into out, makes the archive durable (file, then its directory), and only then
+// removes src. On any failure before removal the half-written archive is deleted and src is left in place.
+func copyAndRemove(src string, out *os.File, mode os.FileMode) error {
+	fail := func(err error) error {
+		out.Close()
+		os.Remove(out.Name())
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return fail(err)
+	}
+	defer in.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return fail(err)
+	}
+	if err := out.Chmod(mode); err != nil {
+		return fail(err)
+	}
+	if err := syncFile(out); err != nil {
+		return fail(err)
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(out.Name())
+		return err
+	}
+	dir := filepath.Dir(out.Name())
+	if err := syncDir(dir); err != nil {
+		os.Remove(out.Name())
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return err
+	}
+	// Best effort: the archive is already durable, and failing here must not make the caller delete it.
+	_ = syncDir(dir)
+	return nil
 }

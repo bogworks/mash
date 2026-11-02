@@ -560,3 +560,23 @@ func TestReissueChangedFindsCredsWithoutDenyNone(t *testing.T) {
 		t.Fatalf("second --changed: %d %q", code, out)
 	}
 }
+
+func TestAddOrphanRefusalText(t *testing.T) {
+	const fix = "looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint %s): run mashctl retire %s --force --delete-creds, then mashctl add %s again"
+	h := newAddEnv(t, addPolicy)
+	// creds file only
+	os.WriteFile(h.creds("c"), []byte("old"), 0o600)
+	_, errb, code := h.run("add", "c")
+	if code != 1 || !strings.Contains(errb, "c "+fmt.Sprintf(fix, "c", "c", "c")) {
+		t.Fatalf("creds orphan: %d %q", code, errb)
+	}
+	// directory record only
+	_, u := h.e.Mint(h.t, "d")
+	if _, errb, code := h.run("provision", "d", "--user", u, "--account", h.e.Account); code != 0 {
+		t.Fatal(errb)
+	}
+	_, errb, code = h.run("add", "d")
+	if code != 1 || !strings.Contains(errb, "d "+fmt.Sprintf(fix, "d", "d", "d")) {
+		t.Fatalf("record orphan: %d %q", code, errb)
+	}
+}

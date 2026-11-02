@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 )
@@ -35,7 +37,7 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "retired c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "c's user is not revoked at the server: revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off") {
+	if !strings.Contains(out, "c's user is not revoked at the server: revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off") {
 		t.Errorf("revocation note: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -45,8 +47,61 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if p := h.policyText(); strings.Contains(p, "  c:") || !strings.Contains(p, "# a keeps its comment") || !strings.Contains(p, "# team x may mail any tool") {
 		t.Errorf("policy:\n%s", p)
 	}
-	if _, err := os.Stat(h.creds("c")); err != nil {
-		t.Errorf("creds were removed without --delete-creds: %v", err)
+	if _, err := os.Lstat(h.creds("c")); !os.IsNotExist(err) {
+		t.Errorf("creds still at the old name: %v", err)
+	}
+}
+
+func TestRetireRenamesCredsByDefault(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	if _, errb, code := h.run("add", "c"); code != 0 {
+		t.Fatal(errb)
+	}
+	want, _ := os.ReadFile(h.creds("c"))
+	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
+	t.Cleanup(func() { retireNow = time.Now })
+	out, errb, code := h.run("retire", "c")
+	if code != 0 {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	moved := h.creds("c") + ".retired-20261102T030405Z"
+	if !strings.Contains(out, "creds file renamed to "+moved) {
+		t.Errorf("report: %q", out)
+	}
+	got, err := os.ReadFile(moved)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("renamed content: %v", err)
+	}
+	if fi, _ := os.Stat(moved); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", fi.Mode())
+	}
+	if _, err := os.Lstat(h.creds("c")); !os.IsNotExist(err) {
+		t.Error("old name remains")
+	}
+	if _, errb, code := h.run("add", "c"); code != 0 {
+		t.Fatalf("re-add: %q", errb)
+	}
+}
+
+func TestRetireNoCredsFileIsFine(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("a")
+	out, errb, code := h.run("retire", "a")
+	if code != 0 || strings.Contains(out, "renamed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+}
+
+func TestRetireUndeclaredOrphanSaysFix(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("zz")
+	_, errb, code := h.run("retire", "zz")
+	if code != 1 || !strings.Contains(errb, "zz looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint zz): run mashctl retire zz --force --delete-creds, then mashctl add zz again") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	_, errb, code = h.run("retire", "nothing-here")
+	if code != 1 || strings.Contains(errb, "interrupted") || !strings.Contains(errb, "not declared") {
+		t.Fatalf("%d %q", code, errb)
 	}
 }
 
@@ -315,5 +370,121 @@ func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
 	_, errb, code := h.run("retire", "b")
 	if code != 1 || !strings.Contains(errb, "nothing was changed") || strings.Contains(errb, "PARTIAL") {
 		t.Fatalf("%d %q", code, errb)
+	}
+}
+
+func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
+	t.Cleanup(func() { retireNow = time.Now })
+	var seeds []string
+	for i := 0; i < 2; i++ {
+		if _, errb, code := h.run("add", "c"); code != 0 {
+			t.Fatal(errb)
+		}
+		b, _ := os.ReadFile(h.creds("c"))
+		seeds = append(seeds, string(b))
+		if out, errb, code := h.run("retire", "c"); code != 0 {
+			t.Fatalf("%d %q %q", code, out, errb)
+		}
+	}
+	first := h.creds("c") + ".retired-20261102T030405Z"
+	for i, p := range []string{first, first + ".1"} {
+		got, err := os.ReadFile(p)
+		if err != nil || string(got) != seeds[i] {
+			t.Errorf("%s: %v (content kept: %v)", p, err, string(got) == seeds[i])
+		}
+	}
+	if seeds[0] == seeds[1] {
+		t.Error("seeds identical; test proves nothing")
+	}
+}
+
+func TestArchiveNoReplaceNeverOverwritesAndKeepsMode(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	if err := os.WriteFile(src, []byte("new"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := archiveNoReplace(src, dest)
+	if err != nil || got != dest+".1" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "old" {
+		t.Errorf("existing archive overwritten: %q", b)
+	}
+	if b, _ := os.ReadFile(got); string(b) != "new" {
+		t.Errorf("content %q", b)
+	}
+	if fi, _ := os.Stat(got); fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v", fi.Mode())
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Error("source remains")
+	}
+}
+
+func TestArchiveNoReplaceExhaustedLeavesSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	os.WriteFile(src, []byte("new"), 0o600)
+	os.WriteFile(dest, []byte("old"), 0o600)
+	for i := 1; i <= 100; i++ {
+		os.WriteFile(dest+"."+strconv.Itoa(i), []byte("old"), 0o600)
+	}
+	_, err := archiveNoReplace(src, dest)
+	if err == nil || !strings.Contains(err.Error(), "nothing was moved") {
+		t.Fatalf("err %v", err)
+	}
+	if b, _ := os.ReadFile(src); string(b) != "new" {
+		t.Error("source lost")
+	}
+}
+
+func TestCopyAndRemoveKeepsContent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	os.WriteFile(src, []byte("seed"), 0o640)
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyAndRemove(src, out, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "seed" {
+		t.Errorf("archive %q", b)
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Error("source remains")
+	}
+}
+
+func TestCopyAndRemoveSyncFailureKeepsSource(t *testing.T) {
+	old := syncFile
+	syncFile = func(*os.File) error { return errors.New("disk on fire") }
+	defer func() { syncFile = old }()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	os.WriteFile(src, []byte("seed"), 0o600)
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyAndRemove(src, out, 0o600); err == nil {
+		t.Fatal("expected error")
+	}
+	if b, _ := os.ReadFile(src); string(b) != "seed" {
+		t.Error("source lost")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Error("half archive remains")
 	}
 }

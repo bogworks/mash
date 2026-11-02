@@ -144,6 +144,17 @@ func findEndpoint(c *policy.Compiled, name string) (policy.CompiledEndpoint, boo
 	return policy.CompiledEndpoint{}, false
 }
 
+// orphanFix is the exact recovery for an add that was killed after it made a directory record or creds file.
+func orphanFix(name string) string {
+	return fmt.Sprintf("run mashctl retire %s --force --delete-creds, then mashctl add %s again", name, name)
+}
+
+// orphanText says an existing record or creds file for a name the policy file lacks looks like an interrupted add.
+// Callers use it only after checking that the policy file has no endpoint of that name.
+func orphanText(name string) string {
+	return fmt.Sprintf("%s looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint %s): %s", name, name, orphanFix(name))
+}
+
 // credsFileFor is where name's creds live: an existing file in the config directories, else <config dir>/name.creds.
 func credsFileFor(cfg config.Config, name string) (string, error) {
 	p := cfg.Find(name + ".creds")
@@ -315,7 +326,7 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 		return fail("%v", err)
 	}
 	if _, err := os.Lstat(credsPath); err == nil {
-		return fail("creds file %s exists", credsPath)
+		return fail("creds file %s exists; %s", credsPath, orphanText(o.name))
 	}
 
 	// The server connection is opened before any key or record is made, so an unreachable server changes nothing.
@@ -341,6 +352,9 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 
 	// (4) the directory record and inbox.
 	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels, Zone: ep.Zone}); err != nil {
+		if strings.Contains(err.Error(), "is already provisioned") {
+			return fail("%v; %s", err, orphanText(o.name))
+		}
 		return fail("%v", err)
 	}
 	rollbackProvision := func() string {

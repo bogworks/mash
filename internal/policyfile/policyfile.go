@@ -4,7 +4,8 @@
 // result is checked with policy.Parse before Save writes it, so an invalid policy is never written.
 //
 // A Doc holds an advisory lock on <path>.lock from Load (or Create) until Close, so two mashctl runs do not
-// interleave their edits. The lock fails fast with ErrLocked rather than waiting.
+// interleave their edits. The lock fails fast with ErrLocked rather than waiting. Close removes the lock file; one left
+// behind by a killed run is reused by the next.
 package policyfile
 
 import (
@@ -24,7 +25,7 @@ import (
 )
 
 // ErrLocked is returned when another mashctl holds the policy file's lock.
-var ErrLocked = errors.New("policy file is being edited by another mashctl")
+var ErrLocked = errors.New("policy file is being edited by another mashctl (a leftover policy.yaml.lock file is harmless: the lock is released when its holder exits)")
 
 // ErrChanged is returned by Save when the policy file changed on disk since it was loaded.
 var ErrChanged = errors.New("changed since it was loaded; reload and redo the edit")
@@ -167,25 +168,58 @@ func publishNew(path string, data []byte) error {
 	}
 }
 
-func acquire(path string) (*os.File, error) {
-	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+// lockRetries bounds how often acquire starts over when the lock file was removed between its open and its flock.
+const lockRetries = 5
+
+// afterLockOpen is a test seam called between the open of the lock file and the flock.
+var afterLockOpen func()
+
+// sameLockFile reports whether path still names the file f is open on.
+func sameLockFile(f *os.File, path string) bool {
+	fi, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return false
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, ErrLocked
-		}
-		return nil, err
+	pi, err := os.Stat(path)
+	if err != nil {
+		return false
 	}
-	return f, nil
+	return os.SameFile(fi, pi)
 }
 
-// Close releases the lock. It is safe to call more than once.
+func acquire(path string) (*os.File, error) {
+	for range lockRetries {
+		f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		if afterLockOpen != nil {
+			afterLockOpen()
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			f.Close()
+			if errors.Is(err, syscall.EWOULDBLOCK) {
+				return nil, ErrLocked
+			}
+			return nil, err
+		}
+		// A holder that closed meanwhile removed the file: the lock we hold is on a dead inode, so start over.
+		if sameLockFile(f, path+".lock") {
+			return f, nil
+		}
+		f.Close()
+	}
+	return nil, ErrLocked
+}
+
+// Close removes the lock file while still holding the lock (only if the path is still the file held), then releases
+// the lock. It is safe to call more than once.
 func (d *Doc) Close() error {
 	if d.lock == nil {
 		return nil
+	}
+	if sameLockFile(d.lock, d.path+".lock") {
+		os.Remove(d.path + ".lock")
 	}
 	syscall.Flock(int(d.lock.Fd()), syscall.LOCK_UN)
 	err := d.lock.Close()
