@@ -6,6 +6,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Changed
 
+- The policy parser refuses a map key that is not a plain string (for example an unquoted null, ~, number or boolean), with the line number; quote such names.
 - The release gate and the dry run now prove which `slsa-github-generator` commit signed `mash.intoto.jsonl`: every line's Fulcio certificate must carry the commit recorded in `SLSA_GENERATOR_SHA` (`release.yml`, read at the release commit) as its Build Signer Digest and the generic generator at `SLSA_GENERATOR_TAG` as its Build Signer URI, so a tag moved and restored around the run is caught (issue #108). See [docs/release.md](docs/release.md#sbom-and-slsa-provenance).
 
 ### Added

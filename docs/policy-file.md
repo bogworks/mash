@@ -23,6 +23,7 @@ tests:
 ```
 
 - An endpoint name is lower-case letters, digits and single hyphens, starting with a letter, 1 to 48 characters (the same rule as an owner or endpoint name everywhere else in mash).
+- Map keys must be plain strings: quote a name like `"null"`; an unquoted `null`, `~`, number or boolean as a key is refused with its line number.
 - Label keys and values follow the directory record: a key is a lowercase letter then up to 31 of `a-z`, `0-9`, `_`, `.`, `-`; a value is non-empty printable text of up to 64 characters with no tab or newline. Quote values YAML would read as booleans if you mean the string (`internet: "yes"`); unquoted `yes` and `1` are read as the strings `yes` and `1`.
 - `subject_label` names a label key. An endpoint's zone is the value of that label, or `default` when it has none. A zone is one subject token, so the value must be a valid name (lower-case letters, digits and single hyphens, starting with a letter, 1 to 48 characters); `check` rejects any other value of that label. Lower case matters twice: NATS lower-cases tags.
 - A rule name is non-empty and unique; it is what `explain` and test failures quote.
