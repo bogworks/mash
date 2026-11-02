@@ -2,6 +2,13 @@
 
 All notable user-facing changes to mash are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mash follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor releases may change behaviour).
 
+## [Unreleased]
+
+### Added
+
+- `mashctl init --local [--dir D] [--owner O] [--port P] [--start]` stands up a local operator-mode NATS server with JetStream for one developer: operator, system and MASH account keys in the `mashctl` key store, the account and user JWTs, `mashadmin.creds` and `sys.creds` (0600), a `server.conf` listening on 127.0.0.1 only (no TLS), an open `policy.yaml` and a `config.json` if none exists (an existing one is left alone and the settings to add are printed). It refuses and changes nothing if the target directory already holds any of its files. `--start` starts `nats-server` detached and creates the directory and lease buckets. Plain `mashctl init` is unchanged. See [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local).
+- Mail subjects carry a zone token (`agents.mail.<kind>.<owner>.<zone>.<name>`), the one label the policy file (`subject_label`) can name: `mashctl set-zone <name> <zone>` moves an endpoint into a zone and `mashctl provision --zone Z` places a new one. Mail to the legacy subject (no zone) still arrives, and an endpoint without a zone keeps it ([ADR-0054](docs/decisions/0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md)). The 0.3.2 release did not carry these.
+
 ## [0.3.2] - 2026-11-02
 
 ### Added
