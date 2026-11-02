@@ -133,7 +133,7 @@ mash who --cap nats-accounts --online --names   # who can do this right now, for
 
 The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `cap` (an array of capability words), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
 
-The policy file that will restrict who may mail whom (compiled by `mashctl`, not shipped yet) is described in [policy-file.md](policy-file.md).
+The policy file that will restrict who may mail whom (compiled by `mashctl`, not shipped yet) is described in [policy-file.md](policy-file.md). Its `mashctl policy check|test|explain|show` verbs are listed under "Using it" there.
 
 ## Removing an endpoint
 

@@ -1,0 +1,27 @@
+# Our policy. Edited by hand and by mashctl.
+default: deny   # closed unless a rule opens it
+
+endpoints:
+  # the front desk
+  web-intake:
+    labels: {zone: dmz, internet: "yes"}
+
+  support-bot:
+    labels:
+      zone: dmz
+      team: support   # who answers
+
+  billing-agent:   # no labels yet
+  # the tools
+  deploy-bot: {labels: {zone: internal}}
+
+# rules follow
+
+rules:
+  - name: dmz-talks
+    action: allow
+    from: {zone: dmz}
+    to: {zone: dmz}
+
+tests:
+  - {from: web-intake, to: support-bot, expect: allow}
