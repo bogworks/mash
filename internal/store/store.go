@@ -36,6 +36,17 @@ func LeaseTombstone() []byte {
 	return []byte(`{"deprovisioned":true,"since":"` + time.Now().UTC().Format(time.RFC3339) + `"}`)
 }
 
+// SuspendedSubject is the one subject a suspended endpoint's inbox stream takes (ADR 0057). It sits outside agents.>,
+// so no endpoint's publish allow-list reaches it. MetaSuspendedSubjects (a JSON list) and MetaSuspendedAt (RFC 3339,
+// UTC) are the stream metadata keys that hold the subjects it had and when they were parked.
+func SuspendedSubject(name string) string { return "mash.suspended." + name }
+
+const (
+	MetaSuspendedSubjects = "mash_suspended_subjects"
+	MetaSuspendedAt       = "mash_suspended_at"
+	MetaSuspendedID       = "mash_suspended_id" // random 128-bit hex token naming one suspension
+)
+
 // InboxDuplicateWindow is how long the inbox stream remembers a Nats-Msg-Id: a publish with the same id inside it is
 // dropped, after it the message is stored again. It bounds what "send --id" can promise.
 const InboxDuplicateWindow = 2 * time.Minute

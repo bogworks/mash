@@ -179,6 +179,9 @@ func (a *Admin) createInboxLocked(ctx context.Context, name, zone string) (jetst
 		afterStreamRead(a.limits.InboxMaxBytes)
 	}
 	if err == nil {
+		if _, ok := suspendedSubjects(name, existing.CachedInfo().Config); ok {
+			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", name, name)
+		}
 		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
 			return nil, err
 		}
@@ -271,16 +274,21 @@ func (a *Admin) ensureInboxStreamLocked(ctx context.Context, name, zone string) 
 	// subject must enter, and mail addressed to another zone must not. A legacy record accepts [legacy] or the legacy
 	// filter plus one exact zone filter, as set-zone adds that filter before it rewrites the record.
 	want := store.InboxConfigZoned(a.owner, zone, name, a.limits)
+	got := s.CachedInfo().Config
+	// A suspended stream is the endpoint's own: its saved subjects stand in for the parked one (ADR 0057).
+	if saved, ok := suspendedSubjects(name, got); ok {
+		got.Subjects = saved
+	}
 	var alt []string
 	if zone == "" {
-		for _, sub := range s.CachedInfo().Config.Subjects {
+		for _, sub := range got.Subjects {
 			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
 				alt = []string{sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, z, name)}
 				break
 			}
 		}
 	}
-	if err := checkInboxStream(name, s.CachedInfo().Config, want, alt); err != nil {
+	if err := checkInboxStream(name, got, want, alt); err != nil {
 		return nil, false, err
 	}
 	return s, false, nil
@@ -751,6 +759,9 @@ func (a *Admin) addZoneFilterLocked(ctx context.Context, name, zone string) erro
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}
 	cfg := s.CachedInfo().Config
+	if _, ok := suspendedSubjects(name, cfg); ok {
+		return fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` before set-zone", name, name)
+	}
 	legacy, zoned := sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, zone, name)
 	switch got := sortedCopy(cfg.Subjects); {
 	case slices.Equal(got, sortedCopy([]string{legacy, zoned})):
@@ -776,6 +787,16 @@ func isRevisionConflict(err error) bool {
 // Deprovision fences name's lease with a tombstone, then removes its directory record and inbox stream. The fence
 // comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10).
 func (a *Admin) Deprovision(ctx context.Context, name string) error {
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer lk.release(ctx)
+	return a.deprovisionLocked(ctx, name)
+}
+
+// deprovisionLocked is Deprovision's body; the caller holds name's lock.
+func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
@@ -784,11 +805,6 @@ func (a *Admin) Deprovision(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
-	lk, err := a.lockStream(ctx, name)
-	if err != nil {
-		return err
-	}
-	defer lk.release(ctx)
 	if err := fence(ctx, lease, name); err != nil {
 		return err
 	}
@@ -796,6 +812,43 @@ func (a *Admin) Deprovision(ctx context.Context, name string) error {
 		return fmt.Errorf("mash: directory record: %w", err)
 	}
 	return a.deleteInbox(ctx, name)
+}
+
+// DeprovisionDrained is Deprovision for an inbox that was suspended and read through sequence seq (the last_seq that
+// Suspend reported); id is the suspension id Suspend reported. Under the name's lock it reads the stream fresh and
+// refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
+// matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
+// check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
+func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) error {
+	if !config.ValidName(name) {
+		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer lk.release(ctx)
+	s, err := a.js.Stream(ctx, sap.InboxStream(name))
+	switch {
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+		return fmt.Errorf("mash: endpoint %s has no inbox stream, so nothing proves it is the suspension you drained; run plain `deprovision` if it is a leftover", name)
+	case err != nil:
+		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	if _, ok := suspendedSubjects(name, info.Config); !ok {
+		return fmt.Errorf("mash: inbox of %s is not suspended; run suspend first", name)
+	}
+	if cur := info.Config.Metadata[store.MetaSuspendedID]; id == "" || cur != id {
+		return fmt.Errorf("mash: inbox of %s: this is not the suspension you drained (id %s, you hold %s); suspend state changed, read it again", name, cur, id)
+	}
+	if info.State.LastSeq != seq {
+		return fmt.Errorf("mash: inbox of %s is at last_seq %d, not the drained %d; drain the rest and try again", name, info.State.LastSeq, seq)
+	}
+	return a.deprovisionLocked(ctx, name)
 }
 
 // The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.
