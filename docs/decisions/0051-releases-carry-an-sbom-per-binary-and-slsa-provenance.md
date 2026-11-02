@@ -64,9 +64,10 @@ bytes to the reproducible recipe. mash meets SLSA v1.0 **Build L2**; it does not
    identity mash's steps cannot use and a fixed provenance format; it does not raise the release to L3. The control
    that goes beyond L2 is the two-clone reproducibility check in CI plus the maintainer's independent rebuild before
    signing `SHA256SUMS`.
-6. **The gate.** `release-check --assets` and therefore `publish` verify, before publishing: each binary's build
+6. **The gate.** `release-check --assets` and therefore `publish` verify, before publishing and before signing: each binary's build
    provenance attestation, each binary's SBOM attestation, and `mash.intoto.jsonl` with `slsa-verifier`. There is no
-   skip flag. A missing `slsa-verifier` is a refusal, not a pass. `gh attestation verify` is pinned with
+   skip flag. The maintainer's signature over `SHA256SUMS` is made only after all of these pass, so a draft they
+   reject is never signed. A missing `slsa-verifier` is a refusal, not a pass. `gh attestation verify` is pinned with
    `--signer-workflow <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and
    `--deny-self-hosted-runners`, since `-R` alone accepts any workflow of the repository on any ref. `slsa-verifier` is
    pinned with `--builder-id` to the generic generator at `refs/tags/v2.1.0`, and the gate requires the provenance's

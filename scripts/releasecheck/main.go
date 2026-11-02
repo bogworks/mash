@@ -703,15 +703,16 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	if buildOK && scriptHash != "" {
 		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
-			r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, have, hashes, scriptHash, rec))
-			// Provenance is checked after the signature and only for a release that already passed every earlier check.
-			// It covers a resumed or hand-made draft that release.yml's attest job never saw.
-			if r.ok() {
-				r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
-			}
-			// The SBOMs and the SLSA provenance, after the checks above and on the same terms.
+			// Attestations, SBOMs and SLSA provenance are verified first, so no maintainer signature is ever made over
+			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
+			// saw, including one that already carries a verifying SHA256SUMS.sig.
+			r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
 			if r.ok() {
 				r.step("every binary has an attested CycloneDX SBOM and SLSA provenance that verifies", verifySupplyChain(o, tag))
+			}
+			// The signature is made (or an attached one verified) only after all of the above passed.
+			if r.ok() {
+				r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, have, hashes, scriptHash, rec))
 			}
 		}
 	}

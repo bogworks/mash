@@ -914,3 +914,54 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 		}
 	})
 }
+
+// H1: the maintainer's signature is made only after attestations, SBOMs and SLSA provenance verified, so a draft that
+// fails any of them is never signed: no SHA256SUMS.sig is uploaded and the signing key is never even looked up.
+func TestAssets_neverSignsWhatVerificationRejected(t *testing.T) {
+	cases := map[string]func(t *testing.T, f *fixture){
+		"a build provenance attestation that fails": func(t *testing.T, f *fixture) { f.noAttestation(t, "mash-darwin-arm64") },
+		"an SBOM attestation that fails":            func(t *testing.T, f *fixture) { f.markerFor(t, "noattest-sbom", "mash-darwin-arm64") },
+		"an SBOM that is not CycloneDX": func(t *testing.T, f *fixture) {
+			f.replaceCIAsset(t, "mash-darwin-arm64.cdx.json", "not json")
+		},
+		"SLSA provenance that is not valid": func(t *testing.T, f *fixture) {
+			f.replaceCIAsset(t, "mash.intoto.jsonl", "not a bundle")
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := signedFixture(t, nil)
+			stubSigning := filepath.Join(t.TempDir(), "signing-stub-invoked")
+			t.Setenv("RELEASE_SIGNING_KEY", stubSigning) // a key path that is only ever read when signing is attempted
+			setup(t, f)
+			err := checkAssets(context.Background(), f.o)
+			if err == nil || exitCode(err) != 3 {
+				t.Fatalf("err = %v (exit %d), want a refusal", err, exitCode(err))
+			}
+			if strings.Contains(err.Error(), "signing") || strings.Contains(err.Error(), stubSigning) {
+				t.Errorf("signing was attempted: %v", err)
+			}
+			if f.uploaded() != "" || strings.Contains(f.ghLog(), "release upload") {
+				t.Errorf("a signature was uploaded over a rejected draft:\n%s", f.ghLog())
+			}
+		})
+	}
+	t.Run("the happy path still signs", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		if err := checkAssets(context.Background(), f.o); err != nil {
+			t.Fatalf("a correct draft was refused: %v", err)
+		}
+		if f.uploaded() == "" {
+			t.Error("a verified draft was not signed")
+		}
+	})
+	t.Run("a resumed draft with a good signature is still verified", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		f.attachSig(t, mustSign(t, keyOfFixture(t, f), string(sumsOfFixture(t, f))), true)
+		f.noAttestation(t, "mash-linux-arm64")
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-linux-arm64") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+	})
+}
