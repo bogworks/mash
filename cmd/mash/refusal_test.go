@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -39,7 +40,12 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 }
 
-const refusal = "refused by policy: you may not mail denied"
+const refusalBase = "refused by policy: you may not mail denied." +
+	" If the policy file allows this pair, or lists the recipient at all (mashctl policy explain)," +
+	" your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
+
+// refusal is the CLI's text for a send with --id k1; the retry sentence names that key.
+var refusal = refusalBase + " If you retry, use --id k1 (the send tool's id): it sends at most once within " + endpoint.DuplicateWindowText() + "."
 
 // The CLI prints a refusal verbatim, fast, exits 1, and says nothing about a message that may have been delivered.
 func TestCLISendRefusedByPolicy(t *testing.T) {
@@ -53,7 +59,7 @@ func TestCLISendRefusedByPolicy(t *testing.T) {
 	if code != 1 || out != refusal+"\n" {
 		t.Fatalf("exit %d, output %q, want exactly %q", code, out, refusal)
 	}
-	for _, bad := range []string{"may or may not", "timed out", "--id", "nats:"} {
+	for _, bad := range []string{"may or may not", "timed out", "nats:"} {
 		if strings.Contains(out, bad) {
 			t.Fatalf("output mentions %q: %q", bad, out)
 		}
@@ -69,7 +75,7 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 	addRestricted(t, w, "ok")
 	s := startServe(t, w.env["s"])
 	s.initialize(t)
-	r := s.call(t, 7, "send", `{"to":"denied","text":"hello"}`)
+	r := s.call(t, 7, "send", `{"to":"denied","text":"hello","id":"k1"}`)
 	if r["isError"] != true || strings.TrimSpace(resultText(r)) != refusal {
 		t.Fatalf("result %v, want an error with the single line %q", r, refusal)
 	}
