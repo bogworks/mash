@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,13 +31,16 @@ type applyOpts struct {
 	file, sysCreds string
 	dryRun         bool
 	replaceZones   []string
+	removeZones    []string
+	keepZones      []string
+	servers        string // --servers as given, "" when not
 }
 
 func applyUsage(verb string) string {
 	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]...\n"
+		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
 	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]...\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {
@@ -64,6 +68,18 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			if z, err = val(&i, a, "--replace-zone-key"); err == nil {
 				o.replaceZones = append(o.replaceZones, z)
 			}
+		case a == "--remove-zone" || strings.HasPrefix(a, "--remove-zone="):
+			var z string
+			if z, err = val(&i, a, "--remove-zone"); err == nil {
+				o.removeZones = append(o.removeZones, z)
+			}
+		case a == "--keep-zone" || strings.HasPrefix(a, "--keep-zone="):
+			var z string
+			if z, err = val(&i, a, "--keep-zone"); err == nil {
+				o.keepZones = append(o.keepZones, z)
+			}
+		case a == "--servers" || strings.HasPrefix(a, "--servers="):
+			o.servers, err = val(&i, a, "--servers")
 		case a == "--dry-run" && verb == "apply":
 			o.dryRun = true
 		default:
@@ -107,6 +123,17 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, applyUsage(verb))
 		return 2
+	}
+	servers := 0
+	if sv := o.servers; sv != "" || env("MASH_SERVERS") != "" {
+		src := "--servers"
+		if sv == "" {
+			sv, src = env("MASH_SERVERS"), "MASH_SERVERS"
+		}
+		if servers, err = strconv.Atoi(strings.TrimSpace(sv)); err != nil || servers < 1 {
+			fmt.Fprintf(stderr, "%s%s must be a whole number of servers, 1 or more, got %q\n%s", pfx, src, sv, applyUsage(verb))
+			return 2
+		}
 	}
 	cfg, err := config.Load(env, env("HOME"))
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
@@ -198,5 +225,6 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
-	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc}, ReplaceZoneKeys: o.replaceZones}, stdout)
+	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
+		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
 }

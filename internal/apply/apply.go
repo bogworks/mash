@@ -1,7 +1,7 @@
 // Package apply pushes a compiled policy to the MASH account (ADR 0052, 0053): one scoped signing key per zone in
 // the account JWT. It looks the current account JWT up on the resolver through the system account, replaces or adds
 // only the scoped signing keys of the policy's zones, signs the result with the operator key, pushes it, and reads it
-// back to verify. It removes a zone key only when asked (--replace-zone-key) and it is not a transaction across NATS claims, JetStream resources and
+// back to verify. It removes or replaces a zone key only when asked (--replace-zone-key, --remove-zone), refuses a zone the file lacks unless told to remove or keep it, and it is not a transaction across NATS claims, JetStream resources and
 // local files; a partial result says what was and was not done. Seed text is never put in output or errors.
 package apply
 
@@ -45,23 +45,41 @@ type ServerSet struct {
 	Expected int
 	// Gateways is set when any reply reports gateways: super-cluster membership cannot be verified from here.
 	Gateways bool
+	// Cluster is the cluster name any reply gave ("" when no reply names a cluster: a standalone server).
+	Cluster string
 }
 
-// Complete says the set is authoritative: no gateways, at least one reply, and as many replies as the cluster
-// reports servers.
-func (s ServerSet) Complete() bool {
-	return !s.Gateways && len(s.Names) > 0 && len(s.Names) >= s.Expected
+// need is how many distinct replies make the set complete: what the routes say, or the operator's inventory
+// (--servers) when that is larger.
+func (s ServerSet) need(inventory int) int { return max(s.Expected, inventory) }
+
+// Complete says the set is authoritative. It needs at least one reply, no gateways, and as many replies as the
+// routes report and as the operator's inventory says (--servers; 0 is none given). Without an inventory, a reply
+// that names a cluster is not enough, even with zero routes: an isolated cluster member sees no peers, so the
+// number of servers cannot be verified from here. A reply naming no cluster is a standalone server.
+func (s ServerSet) Complete(inventory int) bool {
+	if s.Gateways || len(s.Names) == 0 {
+		return false
+	}
+	if inventory <= 0 && s.Cluster != "" {
+		return false
+	}
+	return len(s.Names) >= s.need(inventory)
 }
 
 // Why says, for an incomplete set, why it cannot be trusted.
-func (s ServerSet) Why() string {
+func (s ServerSet) Why(inventory int) string {
 	switch {
 	case len(s.Names) == 0:
 		return "the system account ping was answered by no server"
 	case s.Gateways:
 		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
+	case inventory <= 0 && s.Cluster != "" && len(s.Names) >= s.Expected:
+		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", s.Cluster)
+	case s.Expected >= inventory:
+		return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
 	}
-	return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
+	return fmt.Sprintf("%d server(s) replied but --servers says %d", len(s.Names), inventory)
 }
 
 // ServerAck is one server's answer to a claims update.
@@ -111,6 +129,11 @@ type Params struct {
 	// ReplaceZoneKeys names zones whose scoped signer on the server may be replaced by the key apply holds
 	// (--replace-zone-key): credentials signed by the old key stop working.
 	ReplaceZoneKeys []string
+	// RemoveZones and KeepZones say what to do with a scoped signer on the server whose role is a zone the policy
+	// file lacks (--remove-zone, --keep-zone). Without one of them apply refuses.
+	RemoveZones, KeepZones []string
+	// Servers is the number of servers in the deployment (--servers, MASH_SERVERS); 0 means not given.
+	Servers int
 	// LockWait is how long an apply waits for the key directory lock (default 5s).
 	LockWait time.Duration
 }
@@ -146,11 +169,18 @@ type built struct {
 	cur       string
 	desired   *jwt.AccountClaims
 	plans     []*zonePlan
-	extras    []string
+	kept      []string // outside-policy zones acknowledged with --keep-zone
+	removed   []outside
+	unacked   []outside // outside-policy zones nobody said what to do with
 	changed   bool
 	token     string
 	conflicts []conflict
 }
+
+// outside is a scoped signer on the server whose role is not a zone of the policy file.
+type outside struct{ zone, key string }
+
+func (b *built) refused() bool { return len(b.conflicts) > 0 || len(b.unacked) > 0 }
 
 // conflict is a scoped signer on the server under a file zone's role whose key is not the zone key apply holds.
 type conflict struct {
@@ -186,6 +216,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		replace[r] = true
 	}
 
+	if p.Servers < 0 {
+		return fail(fmt.Errorf("--servers must be a positive number, got %d (nothing was changed)", p.Servers))
+	}
 	opKP, _, err := p.Keys.Operator()
 	if err != nil {
 		return fail(err)
@@ -221,7 +254,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if err != nil {
 			return fail(err)
 		}
-		if len(b.conflicts) > 0 || p.Mode != Apply || !b.changed {
+		if b.refused() || p.Mode != Apply || !b.changed {
 			break
 		}
 		// Someone else may have pushed since the read: compute again from what is there now, once.
@@ -242,17 +275,17 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 			createdList = append(createdList, z.Name)
 		}
 	}
-	plans, desired, extras, changed, token, cur := b.plans, b.desired, b.extras, b.changed, b.token, b.cur
+	plans, desired, changed, token, cur := b.plans, b.desired, b.changed, b.token, b.cur
 
-	if len(b.conflicts) > 0 {
-		refuse(out, p, b.conflicts)
+	if b.refused() {
+		refuse(out, p, b.conflicts, b.unacked)
 		if p.Mode == Diff {
 			return 0
 		}
 		return 1
 	}
 
-	report(out, p, plans, extras, len(cur), len(token), changed)
+	report(out, p, plans, b, len(cur), len(token), changed)
 
 	if p.Mode != Apply {
 		if changed {
@@ -311,8 +344,8 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
 		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
 	}
-	if !set.Complete() {
-		why := set.Why()
+	if !set.Complete(p.Servers) {
+		why := set.Why(p.Servers)
 		if kerr != nil {
 			why = kerr.Error()
 		}
@@ -370,26 +403,66 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		}
 	}
 	oldKeys := map[string][]string{}
-	removed := map[string]bool{}
+	remove, keep := map[string]bool{}, map[string]bool{}
+	for _, z := range p.RemoveZones {
+		remove[z] = true
+	}
+	for _, z := range p.KeepZones {
+		if remove[z] {
+			return nil, fmt.Errorf("zone %s is named by both --remove-zone and --keep-zone (nothing was changed)", z)
+		}
+		keep[z] = true
+	}
+	onServer := map[string]bool{}
 	for _, k := range sortedKeys(current.SigningKeys) {
 		sc, _ := current.SigningKeys.GetScope(k)
 		us, ok := sc.(*jwt.UserScope)
-		if !ok || us == nil || !isFileZone[us.Role] || k == localPub[us.Role] {
+		if !ok || us == nil {
+			continue // a plain signing key is not a zone
+		}
+		if !isFileZone[us.Role] {
+			// A zone the file lacks (or a scoped signer mash did not create): its key and old permissions would stay
+			// active outside the policy, so the operator must say what to do with it.
+			onServer[us.Role] = true
+			switch {
+			case remove[us.Role]:
+				b.removed = append(b.removed, outside{us.Role, k})
+			case keep[us.Role]:
+				if len(b.kept) == 0 || b.kept[len(b.kept)-1] != us.Role {
+					b.kept = append(b.kept, us.Role)
+				}
+			default:
+				b.unacked = append(b.unacked, outside{us.Role, k})
+			}
+			continue
+		}
+		if k == localPub[us.Role] {
 			continue
 		}
 		if replace[us.Role] {
 			oldKeys[us.Role] = append(oldKeys[us.Role], k)
-			removed[k] = true
 			continue
 		}
 		b.conflicts = append(b.conflicts, conflict{zone: us.Role, serverKey: k, localKey: localPub[us.Role]})
 	}
-	if len(b.conflicts) > 0 {
+	for _, flag := range []struct {
+		name  string
+		zones []string
+	}{{"--remove-zone", p.RemoveZones}, {"--keep-zone", p.KeepZones}} {
+		for _, z := range flag.zones {
+			switch {
+			case isFileZone[z]:
+				return nil, fmt.Errorf("%s %s: zone %s is in the policy file, so it is not outside the policy (nothing was changed)", flag.name, z, z)
+			case !onServer[z]:
+				return nil, fmt.Errorf("%s %s: no scoped signing key with that role is on the server (nothing was changed)", flag.name, z)
+			}
+		}
+	}
+	if b.refused() {
 		return b, nil
 	}
 
 	// Zone keys: apply creates the missing ones, a dry run reports them and uses a throwaway public key for sizing.
-	filePubs := map[string]string{} // zone public key -> zone name
 	for _, z := range c.Zones {
 		zp := &zonePlan{name: z.Name}
 		kp, kerr := p.Keys.ZoneKey(z.Name, false)
@@ -414,7 +487,6 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		if err != nil {
 			return nil, err
 		}
-		filePubs[zp.pub] = z.Name
 		scope := jwt.NewUserScope()
 		scope.Key = zp.pub
 		scope.Role = z.Name
@@ -447,19 +519,10 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		b.plans = append(b.plans, zp)
 	}
 
-	// Scoped signers on the server that no zone of the file owns are left alone and reported.
-	for _, k := range sortedKeys(current.SigningKeys) {
-		sc, _ := current.SigningKeys.GetScope(k)
-		us, ok := sc.(*jwt.UserScope)
-		if !ok || us == nil {
-			continue // a plain signing key is not a zone
-		}
-		if _, ours := filePubs[k]; ours || removed[k] {
-			continue
-		}
-		b.extras = append(b.extras, us.Role)
+	for _, o := range b.removed {
+		delete(desired.SigningKeys, o.key)
 	}
-
+	b.changed = len(b.removed) > 0
 	for _, zp := range b.plans {
 		b.changed = b.changed || zp.state != zoneUnchanged
 	}
@@ -476,18 +539,34 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	return b, nil
 }
 
-// refuse prints the zone key conflicts (public keys only) and the two ways out.
-func refuse(out io.Writer, p Params, cs []conflict) {
-	fmt.Fprintf(out, "%s: REFUSED: the server has a signing key for a zone that is not the zone key in the key store (nothing was changed, no key was created)\n", p.Mode)
-	for _, c := range cs {
-		local := c.localKey
-		if local == "" {
-			local = "none (the zone key file is missing: apply would create a new key)"
+// refuse prints the refusals (public keys only) and the ways out: zone key conflicts, and zones on the server that the
+// policy file lacks.
+func refuse(out io.Writer, p Params, cs []conflict, outs []outside) {
+	if len(cs) > 0 {
+		fmt.Fprintf(out, "%s: REFUSED: the server has a signing key for a zone that is not the zone key in the key store (nothing was changed, no key was created)\n", p.Mode)
+		for _, c := range cs {
+			local := c.localKey
+			if local == "" {
+				local = "none (the zone key file is missing: apply would create a new key)"
+			}
+			fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", c.zone, c.serverKey, local)
 		}
-		fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", c.zone, c.serverKey, local)
+		fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
+		fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
 	}
-	fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
-	fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
+	if len(outs) > 0 {
+		fmt.Fprintf(out, "%s: REFUSED unless each zone below is named by --remove-zone or --keep-zone: the server has a signing key for a zone that is not in the policy file (nothing was changed, no key was created)\n", p.Mode)
+		seen := map[string]bool{}
+		for _, o := range outs {
+			fmt.Fprintf(out, "  zone %s: signing key %s stays active with its old permissions, outside the policy\n", o.zone, o.key)
+			if !seen[o.zone] {
+				seen[o.zone] = true
+				fmt.Fprintf(out, "      REFUSED unless --remove-zone %s or --keep-zone %s\n", o.zone, o.zone)
+			}
+		}
+		fmt.Fprintln(out, "--remove-zone ZONE removes that signing key from the account JWT in this apply: users signed by that key stop working (the local zone key file is not deleted).")
+		fmt.Fprintln(out, "--keep-zone ZONE says the key is deliberately kept active outside the policy: apply proceeds and warns.")
+	}
 }
 
 // unconfirmed prints that the update was acknowledged by the servers that were heard from but that the full server set
@@ -691,7 +770,7 @@ func sortedSet(m map[string]bool) []string {
 }
 
 // report prints the diff shared by apply, --dry-run and diff.
-func report(out io.Writer, p Params, plans []*zonePlan, extras []string, before, after int, changed bool) {
+func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after int, changed bool) {
 	fmt.Fprintf(out, "%s: %d zone(s) in the file\n", p.Mode, len(plans))
 	for _, zp := range plans {
 		switch zp.state {
@@ -720,8 +799,11 @@ func report(out io.Writer, p Params, plans []*zonePlan, extras []string, before,
 			fmt.Fprintln(out, "      the permission lines are the same; the role or limits of the key differ")
 		}
 	}
-	for _, z := range extras {
-		fmt.Fprintf(out, "  zone %s has a key on the server but is not in the file: apply never removes a zone key, that would lock out its users\n", z)
+	for _, o := range b.removed {
+		fmt.Fprintf(out, "  zone %s is not in the file: removes its signing key %s (--remove-zone): users signed by it stop working (the local zone key file is not deleted)\n", o.zone, o.key)
+	}
+	for _, z := range b.kept {
+		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", z)
 	}
 	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, policy.AccountJWTLimit)
 	tagged := 0

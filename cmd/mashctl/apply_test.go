@@ -314,7 +314,9 @@ func TestDryRunAndDiffChangeNothing(t *testing.T) {
 	}
 }
 
-func TestZoneAbsentFromFileIsReportedAndKept(t *testing.T) {
+// dropZoneC applies threeZones, then rewrites the file as twoZones; it returns zone c's public key.
+func dropZoneC(t *testing.T) (*applyEnv, string) {
+	t.Helper()
 	e := newApplyEnv(t, threeZones)
 	if _, errb, code := e.run("policy", "apply"); code != 0 {
 		t.Fatal(errb)
@@ -326,18 +328,78 @@ func TestZoneAbsentFromFileIsReportedAndKept(t *testing.T) {
 	if err := os.WriteFile(e.policy, []byte(twoZones), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code := e.run("policy", "apply")
-	if code != 0 || errb != "" {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	if !strings.Contains(out, "zone c has a key on the server but is not in the file: apply never removes a zone key") {
-		t.Fatalf("zone c not reported:\n%s", out)
-	}
-	if !strings.Contains(out, "already up to date") {
-		t.Fatalf("expected no push:\n%s", out)
+	return e, cpub
+}
+
+func TestZoneAbsentFromFileIsRefusedUnlessRemovedOrKept(t *testing.T) {
+	e, cpub := dropZoneC(t)
+	before := e.accountJWT()
+	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "diff"}} {
+		out, errb, code := e.run(args...)
+		want := 1
+		if args[1] == "diff" {
+			want = 0
+		}
+		if code != want || errb != "" || !strings.Contains(out, "REFUSED unless --remove-zone c or --keep-zone c") || strings.Contains(out, "already up to date") {
+			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
+		}
+		if e.accountJWT() != before {
+			t.Fatalf("%v changed the server", args)
+		}
 	}
 	if _, ok := scopedSigners(e.claims())[cpub]; !ok {
 		t.Fatal("zone c's key was removed")
+	}
+}
+
+func TestKeepZoneProceedsWithTheWarning(t *testing.T) {
+	e, cpub := dropZoneC(t)
+	out, errb, code := e.run("policy", "apply", "--keep-zone", "c")
+	if code != 0 || errb != "" || !strings.Contains(out, "zone c is outside the policy and its key stays active") || !strings.Contains(out, "already up to date") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	if _, ok := scopedSigners(e.claims())[cpub]; !ok {
+		t.Fatal("zone c's key was removed")
+	}
+	// an unknown zone name is an error
+	if out, _, code := e.run("policy", "apply", "--keep-zone", "nope"); code != 1 || strings.Contains(out, "already up to date") {
+		t.Fatalf("%d\n%s", code, out)
+	}
+}
+
+func TestRemoveZoneRemovesTheSignerAndKeepsTheKeyFile(t *testing.T) {
+	e, cpub := dropZoneC(t)
+	out, errb, code := e.run("policy", "apply", "--remove-zone", "c")
+	if code != 0 || errb != "" || !strings.Contains(out, "users signed by it stop working") || !strings.Contains(out, "pushed") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	if _, ok := scopedSigners(e.claims())[cpub]; ok {
+		t.Fatal("zone c's signer is still in the account JWT")
+	}
+	if got, err := e.ks.ZonePublic("c"); err != nil || got != cpub {
+		t.Fatalf("the local zone key file is gone: %v", err)
+	}
+	// nothing is outside the policy any more
+	if out, _, code := e.run("policy", "apply"); code != 0 || !strings.Contains(out, "already up to date") || strings.Contains(out, "outside the policy") {
+		t.Fatalf("%d\n%s", code, out)
+	}
+}
+
+func TestServersFlagAndEnvAreValidated(t *testing.T) {
+	for _, args := range [][]string{{"--servers", "0"}, {"--servers=-1"}, {"--servers", "abc"}, {"--servers"}} {
+		e := newApplyEnv(t, twoZones)
+		if _, _, code := e.run(append([]string{"policy", "diff"}, args...)...); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+	e := newApplyEnv(t, twoZones)
+	e.env["MASH_SERVERS"] = "junk"
+	if _, errb, code := e.run("policy", "diff"); code != 2 || !strings.Contains(errb, "MASH_SERVERS") {
+		t.Fatalf("%d %s", code, errb)
+	}
+	e.env["MASH_SERVERS"] = "1"
+	if out, errb, code := e.run("policy", "apply"); code != 0 || !strings.Contains(out, "pushed: 1 server(s)") {
+		t.Fatalf("%d %s %s", code, out, errb)
 	}
 }
 
@@ -426,6 +488,10 @@ func TestApplyConfirmsTheServerSetAndParsesReplaceFlag(t *testing.T) {
 	}
 	o, err := parseApplyArgs("apply", []string{"--replace-zone-key", "a", "--replace-zone-key=b"})
 	if err != nil || len(o.replaceZones) != 2 || o.replaceZones[1] != "b" {
+		t.Fatalf("%v %v", o, err)
+	}
+	o, err = parseApplyArgs("apply", []string{"--remove-zone", "a", "--keep-zone=b", "--servers", "3"})
+	if err != nil || len(o.removeZones) != 1 || len(o.keepZones) != 1 || o.servers != "3" {
 		t.Fatalf("%v %v", o, err)
 	}
 	if _, err := parseApplyArgs("apply", []string{"--replace-zone-key"}); err == nil {

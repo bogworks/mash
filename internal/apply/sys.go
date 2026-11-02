@@ -32,7 +32,11 @@ const (
 )
 
 // NATS is a Resolver over a connection authenticated as a system account user.
-type NATS struct{ Conn *nats.Conn }
+type NATS struct {
+	Conn *nats.Conn
+	// Inventory is the operator's server count (--servers; 0 none): the ping stops waiting once that many replied.
+	Inventory int
+}
 
 // Lookup asks the resolver for the account's JWT; an empty answer is "none".
 func (n NATS) Lookup(ctx context.Context, account string) (string, error) {
@@ -70,7 +74,7 @@ func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
 		if err != nil {
 			// quiet for the settle window: done when complete, or when the total wait is used up.
 			left := pingTotal - time.Since(start)
-			if set.Complete() || set.Gateways || left <= 0 || len(set.Names) == 0 {
+			if set.Complete(n.Inventory) || set.Gateways || left <= 0 || len(set.Names) == 0 {
 				break
 			}
 			wait = min(pingSettle, left)

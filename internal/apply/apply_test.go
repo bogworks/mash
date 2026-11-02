@@ -208,11 +208,15 @@ func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
 	fk.token = tok
 	_ = apub
 	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
+	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 1 || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") {
+		t.Fatal(out.String())
+	}
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk, KeepZones: []string{"legacy"}}, &out); code != 0 {
 		t.Fatal(out.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "zone legacy has a key on the server but is not in the file") || !strings.Contains(s, "would create its signing key") {
+	if !strings.Contains(s, "zone legacy is outside the policy and its key stays active") || !strings.Contains(s, "would create its signing key") {
 		t.Fatalf("%s", s)
 	}
 	if z, _ := ks.Zones(); len(z) != 0 || fk.pushes != 0 {
@@ -375,7 +379,7 @@ func TestConcurrentAppliesNeverLoseAZone(t *testing.T) {
 			mu.Lock()
 			codes[code]++
 			mu.Unlock()
-			if code != 0 && !strings.Contains(out.String(), "lock") && !strings.Contains(out.String(), "changed twice") {
+			if code != 0 && !strings.Contains(out.String(), "lock") && !strings.Contains(out.String(), "changed twice") && !strings.Contains(out.String(), "REFUSED unless") {
 				t.Errorf("unclean error: %s", out.String())
 			}
 		}()
@@ -412,4 +416,104 @@ func TestLockExcludesAndWaitsOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	un2()
+}
+
+func TestOutsidePolicyZones(t *testing.T) {
+	ks, fk, c := setup(t)
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	var out bytes.Buffer
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	// an unrelated scoped signer (not created by mash) appears on the server
+	op, _, _ := ks.Operator()
+	cl, _ := jwt.DecodeAccountClaims(fk.token)
+	other, _ := nkeys.CreateAccount()
+	opub, _ := other.PublicKey()
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = opub, "legacy"
+	cl.SigningKeys.AddScopedSigner(sc)
+	tok, err := cl.Encode(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fk.token = tok
+	pushes := fk.pushes
+	for _, mode := range []Mode{Apply, DryRun, Diff} {
+		out.Reset()
+		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
+		want := 1
+		if mode == Diff {
+			want = 0
+		}
+		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "already up to date") || fk.pushes != pushes || fk.token != tok {
+			t.Fatalf("%s: %d\n%s", mode, code, out.String())
+		}
+	}
+	// bad flag names
+	for _, p := range []Params{{RemoveZones: []string{"nope"}}, {KeepZones: []string{"a"}}, {KeepZones: []string{"legacy"}, RemoveZones: []string{"legacy"}}} {
+		p.Mode, p.Compiled, p.Keys, p.Resolver = Apply, c, ks, fk
+		out.Reset()
+		if code := Run(context.Background(), p, &out); code != 1 || fk.pushes != pushes {
+			t.Fatalf("%+v: %d\n%s", p, code, out.String())
+		}
+	}
+	// keep: proceeds with the warning, nothing pushed to the account but the unchanged JWT
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, KeepZones: []string{"legacy"}}, &out); code != 0 ||
+		!strings.Contains(out.String(), "zone legacy is outside the policy and its key stays active") || !strings.Contains(out.String(), "already up to date") {
+		t.Fatalf("%d\n%s", code, out.String())
+	}
+	// remove: the signer is gone from the JWT, the other zones stay
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, RemoveZones: []string{"legacy"}}, &out); code != 0 || !strings.Contains(out.String(), "stop working") {
+		t.Fatalf("%d\n%s", code, out.String())
+	}
+	after, _ := jwt.DecodeAccountClaims(fk.token)
+	if _, ok := after.SigningKeys.GetScope(opub); ok || len(after.SigningKeys) != 2 {
+		t.Fatalf("signers after remove: %v", after.SigningKeys.Keys())
+	}
+}
+
+// A clustered server that sees no peers is not proof of a complete set: it needs the operator's --servers or it is
+// UNCONFIRMED; a server naming no cluster is standalone.
+func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
+	ok := func(names ...string) []ServerAck {
+		var a []ServerAck
+		for _, n := range names {
+			a = append(a, ServerAck{Server: n, Code: 200})
+		}
+		return a
+	}
+	cases := []struct {
+		name      string
+		servers   ServerSet
+		inventory int
+		acks      []ServerAck
+		code      int
+		want      string
+	}{
+		{"standalone", ServerSet{Names: []string{"s1"}, Expected: 1}, 0, ok("s1"), 0, "pushed: 1 server(s)"},
+		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, ok("s1"), 1, "UNCONFIRMED: the server set could not be verified (this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N)"},
+		{"three of three", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3, Cluster: "C"}, 3, ok("s1", "s2", "s3"), 0, "pushed: 3 server(s)"},
+		{"two of three", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, ok("s1", "s2"), 1, "UNCONFIRMED: the server set could not be verified (2 server(s) replied but --servers says 3)"},
+		{"one with a cluster name", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 1, ok("s1"), 0, "pushed: 1 server(s)"},
+		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, ok("s1"), 1, "the cluster reports 3"},
+		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, ok("s1"), 1, "--servers says 2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ks, fk, c := setup(t)
+			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
+			var out bytes.Buffer
+			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: tc.inventory, VerifyTries: 1, VerifyWait: 1}, &out)
+			if code != tc.code || !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("%d\n%s", code, out.String())
+			}
+		})
+	}
+	ks, fk, c := setup(t)
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: -1}, &bytes.Buffer{}); code != 1 || fk.pushes != 0 {
+		t.Fatalf("negative servers: %d", code)
+	}
 }
