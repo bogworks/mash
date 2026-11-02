@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/admin"
 )
 
 func TestLabelUnlabelRoundTripKeepsComments(t *testing.T) {
@@ -116,9 +119,112 @@ func TestLabelConsequences(t *testing.T) {
 	}
 	// a label no rule reads changes nothing to do
 	out, _, code = h.run("label", "b", "note=hello")
-	if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "moves") {
+	if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "moves") ||
+		!strings.Contains(out, "directory labels not updated: run mashctl set-meta b --label note=hello (or re-run with --sync) to refresh who --long\n") {
 		t.Fatalf("%d %q", code, out)
 	}
+	out, _, code = h.run("unlabel", "b", "note")
+	if code != 0 || !strings.Contains(out, "directory labels not updated: run mashctl set-meta b --label note=- (or re-run with --sync) to refresh who --long\n") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// recordLabels reads a directory record's labels from the server.
+func (h *addEnv) recordLabels(name string) (map[string]string, bool) {
+	h.t.Helper()
+	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	recs, err := adm.List(context.Background())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	for _, r := range recs {
+		if r.Name == name {
+			return r.Labels, true
+		}
+	}
+	return nil, false
+}
+
+func TestLabelSyncUpdatesAndClearsRecord(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("b")
+	out, errb, code := h.run("label", "b", "note=hello", "--sync")
+	if code != 0 || !strings.Contains(out, "labeled b: note=hello\n") || !strings.Contains(out, "directory labels updated for b\n") ||
+		strings.Contains(out, "directory labels not updated") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if l, _ := h.recordLabels("b"); l["note"] != "hello" {
+		t.Errorf("record labels %v", l)
+	}
+	out, errb, code = h.run("unlabel", "b", "note", "--sync")
+	if code != 0 || !strings.Contains(out, "unlabeled b: -note\n") || !strings.Contains(out, "directory labels updated for b\n") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if l, _ := h.recordLabels("b"); len(l) != 0 {
+		t.Errorf("record labels %v", l)
+	}
+	// the re-run the follow-up names: the file already says it, --sync still reconciles the record
+	h.run("label", "b", "note=hello")
+	out, _, code = h.run("label", "b", "note=hello", "--sync")
+	if code != 0 || !strings.Contains(out, "nothing to change") || !strings.Contains(out, "directory labels updated for b\n") {
+		t.Fatalf("%d %q", code, out)
+	}
+	if l, _ := h.recordLabels("b"); l["note"] != "hello" {
+		t.Errorf("record labels %v", l)
+	}
+	noSecrets(t, out, errb)
+}
+
+func TestLabelSyncWithNoRecord(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	out, errb, code := h.run("label", "b", "note=hello", "--sync")
+	if code != 0 || !strings.Contains(out, "b has no directory record yet; labels will be set when it is added\n") || errb != "" {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if !strings.Contains(h.policyText(), "note: hello") {
+		t.Error("policy not saved")
+	}
+}
+
+func TestLabelSyncServerFailureAfterSave(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
+	out, errb, code := h.run("label", "b", "note=hello", "--sync")
+	if code != 1 || !strings.Contains(errb, "policy file is saved") || !strings.Contains(errb, "Retry: mashctl set-meta b --label note=hello\n") ||
+		strings.Contains(out, "directory labels updated") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if !strings.Contains(h.policyText(), "note: hello") {
+		t.Error("policy was not saved before the directory")
+	}
+	_, errb2, code := h.run("unlabel", "b", "note", "--sync")
+	if code != 1 || !strings.Contains(errb2, "Retry: mashctl set-meta b --label note=-\n") {
+		t.Fatalf("%d %q", code, errb2)
+	}
+	noSecrets(t, out, errb, errb2)
+}
+
+func TestLabelSyncDryRunTouchesNothing(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("b")
+	orig := h.policyText()
+	h.env["MASH_URL"] = "nats://127.0.0.1:1" // a connection would fail
+	out, errb, code := h.run("label", "b", "note=hello", "--dry-run", "--sync")
+	if code != 0 || !strings.Contains(out, "dry run: would have labeled b") ||
+		!strings.Contains(out, "dry run: would then update the directory labels for b (connected to nothing)") || errb != "" {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if h.policyText() != orig {
+		t.Error("dry run wrote the policy")
+	}
+	h.env["MASH_URL"] = h.e.URL
+	if l, _ := h.recordLabels("b"); l["note"] != "" {
+		t.Errorf("dry run changed the record: %v", l)
+	}
+	noSecrets(t, out, errb)
 }
 
 func TestLabelSurfacesConcurrentEdit(t *testing.T) {

@@ -34,7 +34,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		return runPolicy(args[1:], env, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, stdout, stderr)
-	case "label", "unlabel": // offline: the policy file only
+	case "label", "unlabel": // the policy file; the server only with --sync
 		return runLabel(args[0] == "unlabel", args[1:], env, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, stdout, stderr)

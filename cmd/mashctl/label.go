@@ -4,21 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/policyfile"
 	"github.com/bogworks/mash/internal/store"
 )
 
-const labelUsage = `usage: mashctl label NAME k=v [k=v]... [--policy FILE] [--dry-run]
-       mashctl unlabel NAME k [k]... [--policy FILE] [--dry-run]
+const labelUsage = `usage: mashctl label NAME k=v [k=v]... [--policy FILE] [--dry-run] [--sync]
+       mashctl unlabel NAME k [k]... [--policy FILE] [--dry-run] [--sync]
 `
 
 type labelOpts struct {
 	name, file string
-	dry        bool
+	dry, sync  bool
 	set        map[string]string // label: k=v
 	unset      []string          // unlabel: keys
 }
@@ -31,6 +34,8 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 		switch {
 		case a == "--dry-run":
 			o.dry = true
+		case a == "--sync":
+			o.sync = true
 		case a == "--policy" || strings.HasPrefix(a, "--policy="):
 			if v, has := strings.CutPrefix(a, "--policy="); has {
 				o.file = v
@@ -80,8 +85,9 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 // afterLabelLoad is a test seam called after the edit is compiled and before the save.
 var afterLabelLoad func()
 
-// runLabel is `mashctl label` and `mashctl unlabel`. It edits the policy file only: nothing touches the server or
-// any creds, so nothing changes until `mashctl apply`, and what the edit leaves to do is printed.
+// runLabel is `mashctl label` and `mashctl unlabel`. It edits the policy file, the source of truth; nothing touches
+// the server or any creds unless --sync is given, and then only the directory record's labels, after the save. What
+// the edit leaves to do is printed, always including the directory labels, which `mashctl apply` does not reconcile.
 func runLabel(unlabel bool, args []string, env func(string) string, stdout, stderr io.Writer) int {
 	verb, usage := "label", labelUsage
 	if unlabel {
@@ -147,8 +153,22 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		return fail("%v", err)
 	}
 	afterBytes, _ := doc.Bytes()
+	// The directory record's change, as a set-meta command (set: k=v; unset: k=-).
+	var kv []string
+	for k, v := range o.set {
+		kv = append(kv, k+"="+v)
+	}
+	for _, k := range o.unset {
+		kv = append(kv, k+"=-")
+	}
+	sort.Strings(kv)
+	setMeta := "mashctl set-meta " + o.name + " --label " + strings.Join(kv, " --label ")
 	if string(afterBytes) == string(beforeBytes) {
 		fmt.Fprintf(stdout, "%s: nothing to change\n", o.name)
+		if o.sync && !o.dry {
+			// The policy already says it; --sync still reconciles the record (this is the re-run the follow-up names).
+			return syncLabels(o, verb, setMeta, cfg, stdout, stderr)
+		}
 		return 0
 	}
 	_, after, err := compileBytes(afterBytes, cfg.Owner)
@@ -161,6 +181,9 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 	done := map[bool]string{false: "labeled", true: "unlabeled"}[unlabel]
 	if o.dry {
 		fmt.Fprintf(stdout, "dry run: would have %s %s (nothing written)\n", done, o.name)
+		if o.sync {
+			fmt.Fprintf(stdout, "dry run: would then update the directory labels for %s (connected to nothing)\n", o.name)
+		}
 	} else {
 		if err := doc.Save(); err != nil {
 			if errors.Is(err, policyfile.ErrChanged) {
@@ -170,9 +193,50 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		}
 		fmt.Fprintf(stdout, "%s %s: %s\n", done, o.name, labelSummary(o.set, unset))
 	}
+	if !o.sync {
+		fmt.Fprintf(stdout, "directory labels not updated: run %s (or re-run with --sync) to refresh who --long\n", setMeta)
+	}
 	for _, l := range consequences(before, after) {
 		fmt.Fprintln(stdout, l)
 	}
+	if o.sync && !o.dry {
+		return syncLabels(o, verb, setMeta, cfg, stdout, stderr)
+	}
+	return 0
+}
+
+// syncLabels applies the label change to the endpoint's directory record, after the policy file is saved. The file
+// is the source of truth and the record a compiled output, so a failure here leaves the file saved and says how to
+// retry.
+func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, stdout, stderr io.Writer) int {
+	retry := func(err error) int {
+		fmt.Fprintf(stderr, "mashctl: %s %s: the policy file is saved but the directory labels were not updated: %v. Retry: %s\n", verb, o.name, err, setMeta)
+		return 1
+	}
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return retry(err)
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return retry(err)
+	}
+	if !slices.ContainsFunc(recs, func(r store.Record) bool { return r.Name == o.name }) {
+		fmt.Fprintf(stdout, "%s has no directory record yet; labels will be set when it is added\n", o.name)
+		return 0
+	}
+	labels := map[string]string{}
+	for k, v := range o.set {
+		labels[k] = v
+	}
+	for _, k := range o.unset {
+		labels[k] = ""
+	}
+	if _, err := adm.SetMeta(ctx, o.name, admin.MetaUpdate{Labels: labels}); err != nil {
+		return retry(err)
+	}
+	fmt.Fprintf(stdout, "directory labels updated for %s\n", o.name)
 	return 0
 }
 

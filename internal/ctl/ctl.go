@@ -73,8 +73,8 @@ func mintLines(line func(left, right string)) {
 
 func retireLines(line func(left, right string)) {
 	line("retire NAME [--policy FILE] [--delete-creds] [--force]", "remove NAME's record and inbox, then its policy entry; its user is not revoked")
-	line("label NAME k=v... [--policy FILE] [--dry-run]", "set labels in the policy file (offline; nothing changes until apply)")
-	line("unlabel NAME k... [--policy FILE] [--dry-run]", "remove labels from the policy file (offline)")
+	line("label NAME k=v... [--policy FILE] [--dry-run] [--sync]", "set labels in the policy file (offline unless --sync updates the directory record)")
+	line("unlabel NAME k... [--policy FILE] [--dry-run] [--sync]", "remove labels from the policy file (offline unless --sync)")
 }
 
 func policyLines(line func(left, right string)) {

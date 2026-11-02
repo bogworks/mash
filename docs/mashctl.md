@@ -45,11 +45,13 @@ Mints the endpoint's user JWT again from the current policy and replaces its cre
 ## Labels
 
 ```sh
-mashctl label NAME k=v [k=v]... [--policy FILE] [--dry-run]
-mashctl unlabel NAME k [k]... [--policy FILE] [--dry-run]
+mashctl label NAME k=v [k=v]... [--policy FILE] [--dry-run] [--sync]
+mashctl unlabel NAME k [k]... [--policy FILE] [--dry-run] [--sync]
 ```
 
-These edit the policy file and nothing else (comments are kept). They are offline: nothing touches the server or any creds, so nothing changes for the running fleet until you act on what they print. The endpoint must be declared; keys and values are checked as the directory checks labels. `unlabel` of a label that is not set warns and exits 0. `--dry-run` prints what would be left to do and writes nothing. If the file changed since it was loaded, nothing is written and the command says to re-run it.
+These edit the policy file (comments are kept). By default they are offline: nothing touches the server or any creds, so nothing changes for the running fleet until you act on what they print. The endpoint must be declared; keys and values are checked as the directory checks labels. `unlabel` of a label that is not set warns and exits 0. `--dry-run` prints what would be left to do and writes nothing. If the file changed since it was loaded, nothing is written and the command says to re-run it.
+
+The directory record's labels (what `who --long` shows) are not changed by the policy edit, and `mashctl apply` pushes zone keys into the account JWT but does not reconcile directory labels. So every edit that changes the file ends with `directory labels not updated: run mashctl set-meta NAME --label k=v ... (or re-run with --sync) to refresh who --long` (`unlabel` prints `--label k=-`). `--sync` does it for you: after the policy file is saved it connects, sets (or, for `unlabel`, clears) the same labels on the record and prints `directory labels updated for NAME`; an endpoint with no record yet prints `NAME has no directory record yet; labels will be set when it is added`. The policy file is the source of truth and the record a compiled output, so if the server step fails the file stays saved, the command exits 1 and prints the exact `mashctl set-meta` to retry. `--sync` with `--dry-run` connects to nothing and writes nothing. A re-run of an edit the file already holds prints `nothing to change`, but with `--sync` still reconciles the record.
 
 After the save the policy is compiled before and after, and each consequence is one line (none when nothing needs doing):
 
