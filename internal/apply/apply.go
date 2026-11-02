@@ -141,6 +141,10 @@ type Params struct {
 	Servers int
 	// LockWait is how long an apply waits for the key directory lock (default 5s).
 	LockWait time.Duration
+
+	// collectAll (drift only, with Mode Diff) makes build go on past a refusal and describe every zone, so a drift
+	// report lists everything at once; the zones with a conflict are skipped, the conflict being their finding.
+	collectAll bool
 }
 
 const (
@@ -467,12 +471,19 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 			}
 		}
 	}
-	if b.refused() {
+	if b.refused() && !p.collectAll {
 		return b, nil
+	}
+	conflictZone := map[string]bool{}
+	for _, cf := range b.conflicts {
+		conflictZone[cf.zone] = true
 	}
 
 	// Zone keys: apply creates the missing ones, a dry run reports them and uses a throwaway public key for sizing.
 	for _, z := range c.Zones {
+		if conflictZone[z.Name] {
+			continue
+		}
 		zp := &zonePlan{name: z.Name}
 		kp, kerr := p.Keys.ZoneKey(z.Name, false)
 		switch {
@@ -869,5 +880,5 @@ func notCovered(out io.Writer, p Params) {
 	fmt.Fprintln(out, "Not covered by apply:")
 	fmt.Fprintln(out, "  - "+a)
 	fmt.Fprintln(out, "  - credentials minted by other tools (for example nsc) under the account key keep their own permissions until revoked: no rule is enforced on them")
-	fmt.Fprintln(out, "  - a drift check of the issued state (mashctl policy drift) is planned")
+	fmt.Fprintln(out, "  - the directory records, the key store and the creds files are compared with the file by mashctl policy drift (it cannot see credentials minted by other tools either)")
 }
