@@ -21,7 +21,7 @@ import (
 func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]string {
 	t.Helper()
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
 	for _, n := range names {

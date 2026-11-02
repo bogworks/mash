@@ -40,7 +40,7 @@ func newAdopter(t *testing.T, src *applyEnv) *adopter {
 	t.Helper()
 	root := t.TempDir()
 	a := &adopter{t: t, src: src, root: root, env: map[string]string{
-		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_KEYS_DIR": filepath.Join(root, "keys"),
+		"HOME": root, "MASH_INSECURE_LOOPBACK": "1", "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_KEYS_DIR": filepath.Join(root, "keys"),
 	}}
 	in := filepath.Join(root, "in")
 	if err := os.Mkdir(in, 0o700); err != nil {

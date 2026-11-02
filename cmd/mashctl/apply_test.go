@@ -85,7 +85,7 @@ func newApplyEnv(t *testing.T, policyYAML string) *applyEnv {
 		t.Fatal(err)
 	}
 	e.env = map[string]string{
-		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_OWNER": "alice",
+		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_INSECURE_LOOPBACK": "1", "MASH_OWNER": "alice",
 		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds), "MASH_POLICY": e.policy,
 	}
 	return e
@@ -527,6 +527,7 @@ func TestSysCredsDefaultsFromTheInitServerDir(t *testing.T) {
 	// admin_creds in the environment points into the server directory: sys.creds is found next to it.
 	e.env["MASH_SYS_CREDS"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
+	e.env["MASH_INSECURE_LOOPBACK"] = "1"
 	out, errb, code := e.run("policy", "diff")
 	if code != 0 {
 		t.Fatalf("%d %s %s", code, out, errb)

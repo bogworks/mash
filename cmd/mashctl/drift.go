@@ -433,9 +433,13 @@ func keysState(ctx context.Context, l *loaded, res apply.Resolver) stateReport {
 	if err != nil {
 		return unknownState(fmt.Errorf("look up the account JWT: %w", err))
 	}
-	ac, err := jwt.DecodeAccountClaims(tok)
+	trust, err := apply.LoadTrust(l.keys)
 	if err != nil {
-		return unknownState(fmt.Errorf("the account JWT does not decode: %w", err))
+		return unknownState(err)
+	}
+	ac, err := apply.VerifyAccountJWT(tok, acctPub, trust)
+	if err != nil {
+		return unknownState(fmt.Errorf("refusing the account JWT: %w", err))
 	}
 	zones, err := l.keys.Zones()
 	if err != nil {

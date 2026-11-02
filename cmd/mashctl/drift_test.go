@@ -33,6 +33,7 @@ func newDriftEnv(t *testing.T) *applyEnv {
 	t.Helper()
 	e := newApplyEnv(t, driftBase)
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
+	e.env["MASH_INSECURE_LOOPBACK"] = "1"
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)
 	}
@@ -186,7 +187,10 @@ func TestDriftAccountSignerRemovedServerSide(t *testing.T) {
 	// a changed template, and a zone the file lacks, are findings too
 	e = newDriftEnv(t)
 	apub, _ := e.ks.ZonePublic("a")
-	extra, _ := nkeys.CreateAccount()
+	extra, err := e.ks.ZoneKey("stray", true) // a zone key of the key store whose zone the file lacks
+	if err != nil {
+		t.Fatal(err)
+	}
 	epub, _ := extra.PublicKey()
 	e.pushClaims(func(ac *jwt.AccountClaims) {
 		sc, _ := ac.SigningKeys.GetScope(apub)
@@ -731,5 +735,20 @@ func TestRepairDryRunWritesNothingAndMatchesRealRun(t *testing.T) {
 	}
 	if recs2["x"] == recs0["x"] || recs2["y"] == recs0["y"] {
 		t.Fatal("the real run did not change x and y")
+	}
+}
+
+func TestDriftReportsUnknownSigningKeys(t *testing.T) {
+	e := newDriftEnv(t)
+	other, _ := nkeys.CreateAccount()
+	opub, _ := other.PublicKey()
+	e.pushClaims(func(ac *jwt.AccountClaims) { ac.SigningKeys.Add(opub) })
+	r, code := e.drift()
+	if code != 1 || !r.Drift {
+		t.Fatalf("exit %d", code)
+	}
+	wantState(t, "account", r.Account, statusDrift, "signing-key-unknown "+opub)
+	if d := r.Account.Findings[0].Detail; !strings.Contains(d, "will not carry signing keys it did not create") {
+		t.Errorf("finding: %s", d)
 	}
 }

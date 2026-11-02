@@ -778,3 +778,30 @@ func TestMashConfigDirHasNoFallback(t *testing.T) {
 		t.Fatalf("url %q creds %q err %v", c.URL, c.Creds, err)
 	}
 }
+
+func TestLoadInsecureLoopback(t *testing.T) {
+	load := func(file string, env map[string]string) (Config, error) {
+		home := t.TempDir()
+		writeFile(t, home, file)
+		env["MASH_NAME"] = "a"
+		return Load(envOf(env), home)
+	}
+	base := `"url":"nats://127.0.0.1:4222","owner":"o"`
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       bool
+	}{
+		{"default off", `{` + base + `}`, map[string]string{}, false},
+		{"file key", `{` + base + `,"insecure_loopback":true}`, map[string]string{}, true},
+		{"env 1", `{` + base + `}`, map[string]string{"MASH_INSECURE_LOOPBACK": "1"}, true},
+		{"env 0 beats the file", `{` + base + `,"insecure_loopback":true}`, map[string]string{"MASH_INSECURE_LOOPBACK": "0"}, false},
+	} {
+		if c, err := load(tc.file, tc.env); err != nil || c.InsecureLoopback != tc.want {
+			t.Fatalf("%s: %v, %v; want %v", tc.name, c.InsecureLoopback, err, tc.want)
+		}
+	}
+	if _, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_LOOPBACK": "yes"}); err == nil || !strings.Contains(err.Error(), "MASH_INSECURE_LOOPBACK") {
+		t.Fatalf("a bad value: %v", err)
+	}
+}

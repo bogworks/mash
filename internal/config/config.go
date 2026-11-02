@@ -54,12 +54,16 @@ type Config struct {
 	TLSCA           string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
-	LaunchToken     string        // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host            string        // MASH_HOST / "host": the agent host adapter ("" = claude)
-	SpoolFromStart  bool          // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	Dir             string        // the config directory (ConfigDir); "" when none can be found
-	Legacy          string        // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
-	Limits          store.Limits  // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	// InsecureLoopback is the one minimal escape from the TLS requirement of admin and system connections: it allows
+	// plain text, and only to a loopback URL. It is a setting, not a command-line flag, and may be renamed when the
+	// command-line settings are redesigned (its name now: "insecure_loopback").
+	InsecureLoopback bool         // MASH_INSECURE_LOOPBACK / "insecure_loopback": allow plain nats:// for admin and system connections to a loopback server (a local server `init --local` made); refused for any other host
+	LaunchToken      string       // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Host             string       // MASH_HOST / "host": the agent host adapter ("" = claude)
+	SpoolFromStart   bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	Dir              string       // the config directory (ConfigDir); "" when none can be found
+	Legacy           string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
+	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 }
 
 type file struct {
@@ -88,6 +92,8 @@ type file struct {
 	TLSKey  string `json:"tls_key"`
 
 	SpoolFromStart *bool `json:"spool_from_start"`
+
+	InsecureLoopback *bool `json:"insecure_loopback"`
 
 	Limits json.RawMessage `json:"limits"`
 }
@@ -280,6 +286,9 @@ func Load(env func(string) string, home string) (Config, error) {
 	if f.SpoolFromStart != nil {
 		c.SpoolFromStart = *f.SpoolFromStart
 	}
+	if f.InsecureLoopback != nil {
+		c.InsecureLoopback = *f.InsecureLoopback
+	}
 	for _, p := range []struct {
 		dst *int
 		src *int
@@ -339,6 +348,16 @@ func Load(env func(string) string, home string) (Config, error) {
 		c.SpoolFromStart = false
 	default:
 		return c, fmt.Errorf("mash: MASH_SPOOL_FROM_START=%q is not 1, true, 0 or false", v)
+	}
+
+	switch v := env("MASH_INSECURE_LOOPBACK"); v {
+	case "":
+	case "1", "true":
+		c.InsecureLoopback = true
+	case "0", "false":
+		c.InsecureLoopback = false
+	default:
+		return c, fmt.Errorf("mash: MASH_INSECURE_LOOPBACK=%q is not 1, true, 0 or false", v)
 	}
 
 	if v := env("MASH_IDLE_WAKE"); v != "" {
