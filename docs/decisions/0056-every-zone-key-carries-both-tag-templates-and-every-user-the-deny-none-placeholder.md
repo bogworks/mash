@@ -42,8 +42,11 @@ ADR 0053's first implementation.
   change.
 * Good: scoped users still carry an empty permission block of their own; `mint` asserts it.
 * Bad: every user JWT is one tag (about 30 bytes) larger, and every zone key one deny line larger.
-* Bad: a deployment minted under the earlier compile has stale zone keys and users: apply the new account claims and
-  run `mashctl reissue --changed` once.
+* Bad: a deployment minted under the earlier compile has stale zone keys and users, and the ORDER matters: first run
+  `mashctl reissue --changed` (every user gains `deny:_none`; under the old zone key, which has no deny template, the
+  extra tag is harmless), and only then `mashctl policy apply` (the new key carries the deny template, and a user
+  without a deny tag fails to authenticate once it does). Applying first would lock out every not-yet-reissued user
+  when it next reconnects.
 
 ### Confirmation
 

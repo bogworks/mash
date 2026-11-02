@@ -60,6 +60,10 @@ Limits of the encoding, each measured against nats-server 2.15:
 
 `Compiled.Effective(name)` expands a zone key for one endpoint exactly as nats-server does, and a property test checks over random files that the subjects it lets an endpoint publish to are its recipients, no more and no fewer. A live test starts nats-server in operator mode with the compiled keys and publishes every sender and recipient of the enterprise example and two further files, checking each against the compile: mail on its six-token subject is allowed exactly as compiled, while a five-token prompt and status probe to any peer is always allowed.
 
+## Migrating a deployment minted before the deny placeholder
+
+Zone keys now carry the deny template from their first compile and every user carries `deny:_none` (ADR 0056). A deployment minted earlier must move in this order: `mashctl reissue --changed` first (each user gains `deny:_none`, which is harmless under the old key), then `mashctl policy apply`. Applying first makes nats-server refuse every user that has no deny tag, so each not-yet-reissued endpoint loses its connection at its next reconnect.
+
 ## Sizes
 
 `Budget` measures two things by building the real JWTs with throwaway keys: the account JWT with one scoped signing key per zone, against the 1 MiB the server accepts for an account (the jwt library's decoder cap; no server setting lifts it), and the largest user JWT (its name, its tags, signed by its zone's key), against 4,000 bytes.
