@@ -331,6 +331,7 @@ func (e *applyEnv) rewriteCreds(name string, signer nkeys.KeyPair, tags ...strin
 }
 
 func TestDriftIssuedCredsStale(t *testing.T) {
+	fakeRevoke(t, nil) // a reissue of narrowed creds rotates the user key
 	e := newDriftEnv(t)
 	zkb, _ := e.ks.ZoneKey("b", false)
 	e.rewriteCreds("y", zkb, "allow:a.x") // right signer, a tag the file no longer gives
@@ -388,6 +389,7 @@ func TestDriftUnreadableStateIsUnknownAndNotOK(t *testing.T) {
 }
 
 func TestRepairFixesAccountKeysAndDirectoryAndListsIssued(t *testing.T) {
+	fakeRevoke(t, nil)
 	e := newDriftEnv(t)
 	adm, ctx, done := e.admin()
 	defer done()

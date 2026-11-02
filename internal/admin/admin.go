@@ -23,6 +23,7 @@ import (
 
 // Admin provisions endpoints with the account's admin credentials.
 type Admin struct {
+	nc     *nats.Conn
 	js     jetstream.JetStream
 	owner  string
 	limits store.Limits
@@ -102,8 +103,11 @@ func New(nc *nats.Conn, owner string) (*Admin, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Admin{js: js, owner: owner, limits: store.DefaultLimits()}, nil
+	return &Admin{nc: nc, js: js, owner: owner, limits: store.DefaultLimits()}, nil
 }
+
+// Conn is the connection the Admin was made with. The caller owns it.
+func (a *Admin) Conn() *nats.Conn { return a.nc }
 
 // Init creates the directory and lease buckets. It is idempotent. A bucket from before buckets had a size cap (no
 // MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
@@ -734,6 +738,96 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 		return store.ParseRecord(name, val)
 	}
 	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-meta; try again", name)
+}
+
+// UserOf reads name's directory record and returns its user key and account. It returns ErrNoRecord when there is none.
+func (a *Admin) UserOf(ctx context.Context, name string) (user, account string, err error) {
+	if !config.ValidName(name) {
+		return "", "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	e, err := kv.Get(ctx, name)
+	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+		return "", "", ErrNoRecord
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("mash: directory %s: %w", name, err)
+	}
+	rec, err := store.ParseRecord(name, e.Value())
+	if err != nil {
+		return "", "", err
+	}
+	return rec.User, rec.Account, nil
+}
+
+// SetUser is a compare-and-set of name's directory record's user key from oldUser to newUser (public user keys), for a
+// key rotation. It takes the name's lock like SetMeta, reads the record and writes it back against the revision it
+// read, re-reading and retrying if another write got in between, and keeps every other field. It refuses a name with
+// no record, a record whose account is not account, and a record whose user is neither oldUser nor newUser. It is
+// idempotent: a record that already carries newUser is returned as it is.
+func (a *Admin) SetUser(ctx context.Context, name, account, oldUser, newUser string) (store.Record, error) {
+	user := newUser
+	if !nkeys.IsValidPublicUserKey(oldUser) {
+		return store.Record{}, fmt.Errorf("mash: %q is not a user public key (U...)", oldUser)
+	}
+	if !config.ValidName(name) {
+		return store.Record{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	if !nkeys.IsValidPublicUserKey(user) {
+		return store.Record{}, fmt.Errorf("mash: %q is not a user public key (U...)", user)
+	}
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return store.Record{}, err
+	}
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return store.Record{}, err
+	}
+	defer lk.release(ctx)
+	for try := 0; try < setMetaTries; try++ {
+		e, err := kv.Get(ctx, name)
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			return store.Record{}, fmt.Errorf("mash: endpoint %s is not provisioned", name)
+		}
+		if err != nil {
+			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+		rec, err := store.ParseRecord(name, e.Value())
+		if err != nil {
+			return store.Record{}, err
+		}
+		if rec.Account != account {
+			return store.Record{}, fmt.Errorf("mash: the record of %s belongs to account %s, not %s; left in place", name, rec.Account, account)
+		}
+		if rec.User == user {
+			return rec, nil
+		}
+		if rec.User != oldUser {
+			return store.Record{}, fmt.Errorf("mash: the record of %s names user key %s..., not %s...; left in place", name, shortKey(rec.User), shortKey(oldUser))
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(e.Value(), &obj); err != nil {
+			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+		ub, _ := json.Marshal(user)
+		obj["user"] = ub
+		val, err := json.Marshal(obj)
+		if err != nil {
+			return store.Record{}, err
+		}
+		if _, err := kv.Update(ctx, name, val, e.Revision()); err != nil {
+			if isRevisionConflict(err) {
+				continue
+			}
+			return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
+		}
+		return store.ParseRecord(name, val)
+	}
+	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under reissue; try again", name)
 }
 
 func errBadZone(_ string) error {

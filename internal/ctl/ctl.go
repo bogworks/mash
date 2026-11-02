@@ -123,7 +123,7 @@ func adoptLines(line func(left, right string)) {
 
 func mintLines(line func(left, right string)) {
 	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (same user key, offline)")
+	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
 }
 
 func retireLines(line func(left, right string)) {

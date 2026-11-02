@@ -12,7 +12,9 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/policy"
@@ -23,8 +25,12 @@ const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
        mashctl reissue --changed [--policy FILE]
 `
 
-// runReissue is `mashctl reissue`. It is offline: the directory record is unchanged (the user key is kept), so it
-// needs the policy file, the key directory and the creds files, and no server.
+// runReissue is `mashctl reissue`. Every reissue signs with the creds file's stored user seed, so it first connects
+// with the admin credentials and reads the endpoint's directory record: a seed whose name has no record (retired) or
+// whose record names another user key is never reissued. A reissue that only adds tags then keeps the user key. A
+// reissue that narrows what the creds file's JWT carries (a tag removed, another signer, account or name) rotates the
+// user key instead, because a user JWT never expires and the old, wider one would stay valid: it revokes the old key
+// (system account credentials, as retire), then points the record at the new key, then replaces the file.
 func runReissue(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	var names []string
 	var file string
@@ -120,7 +126,7 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 				warned = true
 			}
 		}
-		tags, err := reissueOne(keys, cfg, c, name)
+		tags, rotated, err := reissueOne(keys, cfg, env, c, name, stdout)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 			code = 1
@@ -129,7 +135,11 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		if len(tags) == 0 {
 			tags = []string{"none"}
 		}
-		fmt.Fprintf(stdout, "reissued %s (tags: %s)\n", name, strings.Join(tags, ", "))
+		if rotated {
+			fmt.Fprintf(stdout, "reissued %s (tags: %s; new user key, old key revoked)\n", name, strings.Join(tags, ", "))
+		} else {
+			fmt.Fprintf(stdout, "reissued %s (tags: %s)\n", name, strings.Join(tags, ", "))
+		}
 	}
 	return code
 }
@@ -238,43 +248,125 @@ func compareCreds(keys mint.Keys, p string, e policy.CompiledEndpoint) (credsDif
 	return d, nil
 }
 
-// reissueOne mints name's user again from the creds file's user key and replaces the file atomically.
-func reissueOne(keys mint.Keys, cfg config.Config, c *policy.Compiled, name string) ([]string, error) {
-	if _, ok := findEndpoint(c, name); !ok {
-		return nil, fmt.Errorf("endpoint %q is not declared in the policy file", name)
+// rotates reports whether the difference narrows what the old JWT grants (anything but only added tags), so that the
+// old JWT must stop working and the user key must change.
+func (d credsDiff) rotates() bool {
+	return len(d.TagsRemove) > 0 || d.WrongSigner || d.WrongAccount || d.WrongName
+}
+
+// reissueOne mints name's user again and replaces the creds file atomically. Before anything is minted it checks that
+// the creds file's seed is the one the directory record names (see runReissue). It keeps the creds file's user key
+// when the policy only adds tags. Otherwise (rotated) it mints a fresh user key in memory, has the old key revoked
+// (confirmed), points the directory record at the new key and only then replaces the file.
+func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout io.Writer) (tags []string, rotated bool, err error) {
+	ep, ok := findEndpoint(c, name)
+	if !ok {
+		return nil, false, fmt.Errorf("endpoint %q is not declared in the policy file", name)
 	}
 	p, err := credsFileFor(cfg, name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	raw, err := readCreds(p)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no creds file for %s: retire and add it again", name)
+		return nil, false, fmt.Errorf("no creds file for %s: retire and add it again", name)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	kp, err := jwt.ParseDecoratedNKey(raw)
-	clear(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s holds no user seed: retire and add it again", p)
+		clear(raw)
+		return nil, false, fmt.Errorf("%s holds no user seed: retire and add it again", p)
 	}
 	defer kp.Wipe()
 	seed, err := kp.Seed()
 	if err != nil {
-		return nil, fmt.Errorf("%s holds no user seed: retire and add it again", p)
+		clear(raw)
+		return nil, false, fmt.Errorf("%s holds no user seed: retire and add it again", p)
 	}
 	seed = append([]byte(nil), seed...)
 	defer clear(seed)
-	m, err := mint.Mint(keys, c, name, seed, false)
+	seedPub, err := kp.PublicKey()
 	if err != nil {
-		return nil, err
+		clear(raw)
+		return nil, false, fmt.Errorf("%s holds no user seed: retire and add it again", p)
+	}
+	token, terr := jwt.ParseDecoratedJWT(raw)
+	clear(raw)
+	var oldClaims *jwt.UserClaims
+	if terr == nil {
+		oldClaims, terr = jwt.DecodeUserClaims(token)
+	}
+	if terr != nil {
+		return nil, false, fmt.Errorf("%s: %w", p, terr)
+	}
+	oldPub := oldClaims.Subject
+	if oldPub != seedPub {
+		return nil, false, fmt.Errorf("%s: its seed (user key %s...) is not the key its JWT names (%s...); not reissued", p, ctl.ShortKey(seedPub), ctl.ShortKey(oldPub))
+	}
+	d, err := compareCreds(keys, p, ep)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// The record check: the seed signs the new JWT, so it must be the key the directory names for this name.
+	akp, accountPub, err := keys.Account()
+	if err != nil {
+		return nil, false, err
+	}
+	akp.Wipe()
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return nil, false, fmt.Errorf("a reissue first checks %s's directory record, which needs the server and the admin credentials: %v; nothing was changed", name, err)
+	}
+	defer closeAdmin()
+	recUser, recAccount, err := adm.UserOf(ctx, name)
+	if errors.Is(err, admin.ErrNoRecord) {
+		return nil, false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was changed", err)
+	}
+	if recAccount != accountPub {
+		return nil, false, fmt.Errorf("the directory record of %s belongs to account %s..., not this account's key %s...; not reissued", name, ctl.ShortKey(recAccount), ctl.ShortKey(accountPub))
+	}
+	if recUser != seedPub {
+		return nil, false, fmt.Errorf("the directory record of %s names user key %s..., not the creds file's %s...; the file is not the endpoint's current creds, so it is not reissued (retire and add it again)", name, ctl.ShortKey(recUser), ctl.ShortKey(seedPub))
+	}
+
+	if !d.rotates() {
+		m, err := mint.Mint(keys, c, name, seed, false)
+		if err != nil {
+			return nil, false, err
+		}
+		defer clear(m.Creds)
+		if err := replaceCreds(p, m.Creds); err != nil {
+			return nil, false, err
+		}
+		return m.Tags, false, nil
+	}
+
+	// Rotating: (a) a fresh key in memory, (b) the revocation of the old key, (c) the record, (d) the file.
+	servers, err := parseServers(env)
+	if err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was changed", err)
+	}
+	m, err := mint.Mint(keys, c, name, nil, false)
+	if err != nil {
+		return nil, false, err
 	}
 	defer clear(m.Creds)
-	if err := replaceCreds(p, m.Creds); err != nil {
-		return nil, err
+	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout); err != nil {
+		return nil, false, fmt.Errorf("the creds file's JWT is wider than the policy now allows (%s), so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); nothing was changed (the old creds still work); run the reissue again", d.text(), err)
 	}
-	return m.Tags, nil
+	if _, err := adm.SetUser(ctx, name, m.AccountPub, oldPub, m.UserPub); err != nil {
+		return nil, false, fmt.Errorf("the old key %s... is revoked, so the endpoint is cut off, but its directory record was not updated (%v); the creds file and the record still agree, so run the reissue again to finish; if that keeps failing, run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+	}
+	if err := replaceCreds(p, m.Creds); err != nil {
+		return nil, false, fmt.Errorf("the old key %s... is revoked and the record names the new key, but the new creds file could not be written (%v), so the endpoint is cut off; a plain reissue is now refused because the file and the record disagree: run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+	}
+	return m.Tags, true, nil
 }
 
 // replaceCreds writes creds to a 0600 temp file beside path and renames it over path.
