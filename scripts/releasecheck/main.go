@@ -150,6 +150,9 @@ func withArgs(o Options, x, version string) Options {
 }
 
 func mainRun(args []string, out io.Writer) int {
+	if len(args) > 0 && args[0] == "provenance-signer" {
+		return provenanceSignerCommand(args[1:], out)
+	}
 	o, assets, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

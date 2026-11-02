@@ -4,6 +4,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- The release gate and the dry run now prove which `slsa-github-generator` commit signed `mash.intoto.jsonl`: every line's Fulcio certificate must carry the commit recorded in `SLSA_GENERATOR_SHA` (`release.yml`, read at the release commit) as its Build Signer Digest and the generic generator at `SLSA_GENERATOR_TAG` as its Build Signer URI, so a tag moved and restored around the run is caught (issue #108). See [docs/release.md](docs/release.md#sbom-and-slsa-provenance).
+
 ### Added
 
 - `mashctl policy drift [--policy F] [--sys-creds F] [--creds-dir D] [--json]` compares the policy file with the account JWT's zone keys and templates, the key store's zone key files, the directory records (zone, labels, mail subject) and the user creds files on disk (the compare `reissue --changed` uses), reports each state as `ok` or a list of findings, changes nothing, and exits 0 only when all four match. `mashctl policy repair` makes the additive repairs: missing zone key files and the account push (the same code path and refusals as `apply`, which stops the repair), a record's zone and labels, and it lists stale creds with the `mashctl reissue` command without running it. It never revokes a credential or deletes a key file, record or creds file, and it is not a transaction. Credentials minted by other tools are not seen. See [docs/operations.md](docs/operations.md#checking-and-repairing-drift).

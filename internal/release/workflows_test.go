@@ -1498,6 +1498,23 @@ func TestRelease_provenanceJobCallsTheSLSAGeneratorByTag(t *testing.T) {
 	}
 }
 
+// The dry run proves the generator commit that signed the provenance from its certificate, with the same program as the
+// gate and against the pin in this checkout's release.yml (the checkout and Go setup precede it).
+func TestRelease_dryRunVerifiesTheProvenanceSignerCommit(t *testing.T) {
+	w := load(t, "release.yml")
+	j := w.Jobs["dry-run-verify"]
+	var run string
+	for _, st := range j.Steps {
+		run += st.Run + "\n"
+	}
+	if !strings.Contains(run, "scripts/releasecheck provenance-signer") || !strings.Contains(run, "mash.intoto.jsonl") || !strings.Contains(run, ".github/workflows/release.yml") {
+		t.Errorf("dry-run-verify does not run the provenance-signer check:\n%s", run)
+	}
+	if i, k := strings.Index(run, "provenance-signer"), strings.Index(run, "slsa-verifier verify-artifact"); i < 0 || k < 0 || i > k {
+		t.Error("the signer check must run before slsa-verifier")
+	}
+}
+
 // generator-pin resolves the generator's tag through the GitHub API and fails unless it is the recorded commit; the
 // recorded commit sits next to the tag in the workflow env, and the tag there is the one the provenance job's `uses:` names.
 func TestRelease_generatorPinJobHoldsTheTagToTheRecordedCommit(t *testing.T) {

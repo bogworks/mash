@@ -49,6 +49,9 @@ const slsaVerifierInstall = "go install github.com/" + "slsa-framework/slsa-veri
 //     attested for some other file, or a different SBOM file, is refused);
 //   - `slsa-verifier verify-artifact <binary> --provenance-path mash.intoto.jsonl --source-uri github.com/<repo>
 //     --source-tag v<version> --builder-id <the generic generator at its pinned tag>` passes;
+//   - every line of the provenance carries the Fulcio certificate whose Build Signer Digest is SLSA_GENERATOR_SHA and whose
+//     Build Signer URI names the generic generator at SLSA_GENERATOR_TAG, both read from release.yml at X
+//     (checkProvenanceSignerDigest), which proves which generator commit signed it;
 //   - the provenance's workflow entry point is .github/workflows/release.yml (checkProvenanceEntryPoint).
 //
 // slsa-verifier must be installed: without it the gate refuses and says how to install it. It runs only for a release
@@ -79,6 +82,11 @@ func verifySupplyChain(o Options, tag string) error {
 		return err
 	}
 	var bad []string
+	// Which generator commit signed the provenance: the pin is release.yml at the release commit, so changing it there
+	// changes the gate. A pin that cannot be read is a refusal.
+	if err := checkSignerAtRelease(o, prov); err != nil {
+		bad = append(bad, fmt.Sprintf("%s: %v", release.ProvenanceName, err))
+	}
 	for _, t := range release.Targets {
 		name := t.AssetName()
 		bin, binBytes, err := fetch(name)
@@ -315,4 +323,29 @@ func checkSBOM(b []byte) error {
 		return errors.New("metadata names neither a main component nor a tool")
 	}
 	return nil
+}
+
+// checkSignerAtRelease reads the generator pin from release.yml as the release commit carries it (never the working
+// tree) and holds the provenance file to it. It also refuses when slsaBuilderID, the --builder-id given to
+// slsa-verifier, names another tag than the pin.
+func checkSignerAtRelease(o Options, provPath string) error {
+	x, err := git(o.Repo, "rev-parse", "--verify", o.X+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolving %s to read the generator pin: %w", o.X, err)
+	}
+	wf, ok, err := fileAt(o.Repo, x, releaseWorkflowPath)
+	if err != nil {
+		return fmt.Errorf("reading the generator pin: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("%s is not at %s, so the generator pin cannot be read", releaseWorkflowPath, x)
+	}
+	tag, _, err := generatorPin([]byte(wf))
+	if err != nil {
+		return fmt.Errorf("at %s: %w", x, err)
+	}
+	if slsaBuilderID != generatorWorkflowURI+tag {
+		return fmt.Errorf("the gate's --builder-id %q does not name SLSA_GENERATOR_TAG %s of %s at %s", slsaBuilderID, tag, releaseWorkflowPath, x)
+	}
+	return checkProvenanceSignerWorkflow(provPath, []byte(wf))
 }
