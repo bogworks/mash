@@ -76,7 +76,7 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 			t.Fatalf("#%s is not %s:\n%s", seq, want, out)
 		}
 	}
-	if out, _ := w.cli(t, "a", "inbox"); strings.Contains(out, "hi") {
+	if out, _ := w.cli(t, "a", "inbox"); strings.Contains(out, "B\thi\t") { // the text column; a bare "hi" matches inside a random instance id
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }
