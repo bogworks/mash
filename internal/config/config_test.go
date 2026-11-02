@@ -180,6 +180,39 @@ func TestIdleWakeSettings(t *testing.T) {
 	}
 }
 
+func TestRelayWindowSettings(t *testing.T) {
+	load := func(file string, env map[string]string) (Config, error) {
+		home := t.TempDir()
+		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
+		env["MASH_NAME"] = "a"
+		return Load(envOf(env), home)
+	}
+	if c, err := load("", map[string]string{}); err != nil || c.RelayWindow != 60*time.Second {
+		t.Fatalf("default: %v %v", c.RelayWindow, err)
+	}
+	if c, err := load(`,"relay_window":"5m"`, map[string]string{}); err != nil || c.RelayWindow != 5*time.Minute {
+		t.Fatalf("file: %v %v", c.RelayWindow, err)
+	}
+	if c, err := load(`,"relay_window":"5m"`, map[string]string{"MASH_RELAY_WINDOW": "1h"}); err != nil || c.RelayWindow != time.Hour {
+		t.Fatalf("env beats file: %v %v", c.RelayWindow, err)
+	}
+	if c, err := load(`,"relay_window":"1s"`, map[string]string{}); err != nil || c.RelayWindow != time.Second {
+		t.Fatalf("lower bound: %v %v", c.RelayWindow, err)
+	}
+	for _, bad := range []string{"soon", "999ms", "61m", "0s", "-1m", "60"} {
+		if _, err := load("", map[string]string{"MASH_RELAY_WINDOW": bad}); err == nil || !strings.Contains(err.Error(), "MASH_RELAY_WINDOW") {
+			t.Errorf("env %q: err %v", bad, err)
+		}
+		_, err := load(`,"relay_window":"`+bad+`"`, map[string]string{})
+		if err == nil || !strings.Contains(err.Error(), "relay_window") {
+			t.Errorf("file %q: err %v", bad, err)
+		}
+		if err := ValidateFile([]byte(`{"relay_window":"` + bad + `"}`)); err == nil || !strings.Contains(err.Error(), "relay_window") {
+			t.Errorf("validate %q: err %v", bad, err)
+		}
+	}
+}
+
 func TestTimeoutSettings(t *testing.T) {
 	load := func(file string, env map[string]string) (Config, error) {
 		home := t.TempDir()

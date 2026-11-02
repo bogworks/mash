@@ -42,6 +42,9 @@ type Endpoint struct {
 	skew    atomic.Int64
 	skewSet atomic.Bool
 
+	// relay traces relay-by-asking from signed headers and timing only (relay.go).
+	relay *relayTracker
+
 	// waking is the unread waking-mail count written into the lease (waking.go).
 	waking *wakingTracker
 
@@ -284,7 +287,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	}
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, nc: nc, id: id, subj: sap.For(cfg.Owner, cfg.Name),
-		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), refusals: refs,
+		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
 		dir:           map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
 	if opts.Presence {
@@ -537,6 +540,9 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 // Run consumes mail and keeps the directory, presence and lease current
 // until ctx ends or the lease is lost.
 func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
+	// This serve's relay counters go to the state directory for `mash status` (another process).
+	e.relay.persistTo(relayCountersPath(e.cfg.StateDir, e.cfg.Owner, e.cfg.Name), e.Instance, e.log.Printf)
+	defer e.relay.stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// The poller is joined before Run returns, and its interval read here: a poller outliving Run raced a test that

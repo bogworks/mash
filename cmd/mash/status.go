@@ -116,6 +116,7 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
 		lines = append(lines, clientStatusLine(src.clientInfo()))
@@ -409,6 +410,34 @@ func deliveryLines(src *statusSource) []string {
 		line += fmt.Sprintf(", last at %s", last.Format(time.RFC3339))
 	}
 	return append(out, line)
+}
+
+// relayLine shows the relay-trace counters (ADR 0064). Inside serve they are the running endpoint's; from the shell
+// (another process) they are what the serve of this endpoint wrote to its state directory, with the start time of that
+// run, since the shell cannot tell whether it is still running. Missing or unreadable: "none recorded".
+func relayLine(src *statusSource) string {
+	const none = "relay trace: none recorded"
+	cfg := src.cfg
+	var c endpoint.RelayCounters
+	since := ""
+	if src.cli {
+		var ok bool
+		if c, ok = endpoint.ReadRelayCounters(cfg.StateDir, cfg.Owner, cfg.Name); !ok {
+			return none
+		}
+		since = fmt.Sprintf(" (since %s)", c.Started.UTC().Format(time.RFC3339))
+	} else {
+		if src.state == nil {
+			return none
+		}
+		st := src.state.Load()
+		if st == nil || st.ep == nil {
+			return none
+		}
+		c = st.ep.RelayCounters()
+	}
+	return fmt.Sprintf("relay trace: inbound with via %d, sends within %ds of another sender's mail %d, declared relays %d%s",
+		c.InboundVia, c.WindowS, c.RelayCandidates, c.RelayedDeclared, since)
 }
 
 // hooklessOf is serve's verdict on whether no mash hook runs in this session: none when there is no endpoint yet.
