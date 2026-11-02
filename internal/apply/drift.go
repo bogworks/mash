@@ -174,6 +174,9 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 		return nil, fmt.Errorf("look up the account JWT: %w", err)
 	}
 	set, serr := p.Resolver.Servers(ctx)
+	if errors.Is(serr, ErrServerSetRefused) {
+		return nil, fmt.Errorf("refusing: %w", serr)
+	}
 	need := max(set.need(p.Servers), len(set.Names), 1)
 	ag, aerr := collectAgreement(ctx, p.Resolver, acctPub, need)
 	switch {

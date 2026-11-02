@@ -230,7 +230,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	res := apply.NATS{Conn: nc}
 	set, err := res.Servers(ctx)
 	if err != nil {
-		return fail("ping the servers: %v (nothing was changed)", err)
+		return fail("ping the servers: %v (nothing was changed)", config.Clean(err.Error()))
 	}
 	if len(set.Names) == 0 {
 		return fail("the system account ping (%s) was answered by no server: this does not look like an operator-mode server with a full resolver, or --sys-creds are not system account user creds (nothing was changed)", "$SYS.REQ.SERVER.PING")

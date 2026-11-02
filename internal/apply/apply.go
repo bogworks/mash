@@ -304,6 +304,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	// The servers asked for the base, the push and the read-back: the ping and the inventory say how many there are.
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
+	if p.Mode == Apply && errors.Is(kerr, ErrServerSetRefused) {
+		return fail(fmt.Errorf("refusing: %w (nothing was pushed)", kerr))
+	}
 	if p.Mode == Apply && !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {

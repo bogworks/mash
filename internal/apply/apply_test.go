@@ -20,17 +20,18 @@ import (
 
 // fake is an in-memory resolver.
 type fake struct {
-	mu        sync.Mutex
-	noServers bool      // the ping finds nobody
-	servers   ServerSet // the system account ping's answer
-	token     string
-	acks      []ServerAck
-	pushErr   error
-	applyPush bool // a push replaces token
-	pushes    int
-	lastPush  string // the token of the latest push
-	lookups   int
-	all       []string // LookupAll's answer; nil: every expected server holds token
+	mu         sync.Mutex
+	noServers  bool      // the ping finds nobody
+	servers    ServerSet // the system account ping's answer
+	token      string
+	acks       []ServerAck
+	pushErr    error
+	applyPush  bool // a push replaces token
+	pushes     int
+	lastPush   string // the token of the latest push
+	lookups    int
+	serversErr error    // Servers returns it with servers
+	all        []string // LookupAll's answer; nil: every expected server holds token
 }
 
 func (f *fake) Lookup(context.Context, string) (string, error) {
@@ -51,6 +52,9 @@ func (f *fake) LookupAll(_ context.Context, _ string, expect int) ([]string, err
 	return out, nil
 }
 func (f *fake) Servers(context.Context) (ServerSet, error) {
+	if f.serversErr != nil {
+		return f.servers, f.serversErr
+	}
 	if f.servers.Names == nil && !f.servers.Gateways && f.servers.Expected == 0 && !f.noServers {
 		return ServerSet{Names: []string{"s1"}, Expected: 1}, nil // the default: one healthy server
 	}

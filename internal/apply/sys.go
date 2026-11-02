@@ -14,6 +14,10 @@ import (
 	"github.com/bogworks/mash/internal/policy"
 )
 
+// ErrServerSetRefused is wrapped by Servers when more than maxServers distinct servers answered or a server or
+// cluster name is over maxNameBytes. The set it returns is partial; a caller must refuse and not act on it.
+var ErrServerSetRefused = errors.New("server set refused")
+
 // Caps on what a system-account peer can make mashctl hold or wait for. A server is not trusted to be small.
 const (
 	// maxServers is the most distinct server names Servers records.
@@ -159,7 +163,7 @@ func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
 		wait = pingSettle
 		if addPingReply(&set, seen, msg.Data) {
 			sort.Strings(set.Names)
-			return set, fmt.Errorf("more than %d servers answered, or a server or cluster name is over %d bytes: refusing", maxServers, maxNameBytes)
+			return set, fmt.Errorf("%w: more than %d servers answered, or a server or cluster name is over %d bytes", ErrServerSetRefused, maxServers, maxNameBytes)
 		}
 	}
 	sort.Strings(set.Names)
