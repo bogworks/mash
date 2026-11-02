@@ -76,3 +76,50 @@ func TestTLSHintClosedAfterHandshake(t *testing.T) {
 		t.Fatalf("hint = %q", got)
 	}
 }
+
+func TestRequireTLS(t *testing.T) {
+	for _, tc := range []struct {
+		url      string
+		insecure bool
+		wantErr  string // "" = accepted
+		secure   bool   // the options force TLS
+	}{
+		{"tls://example.com:4222", false, "", true},
+		{"nats://127.0.0.1:4222", false, "", true}, // loopback plain URL: TLS is still required of the server
+		{"nats://localhost:4222", false, "", true},
+		{"nats://[::1]:4222", false, "", true},
+		{"nats://10.0.0.5:4222", false, "refusing a plain nats://", false},
+		{"nats://example.com:4222", false, "refusing a plain nats://", false},
+		{"example.com:4222", false, "refusing a plain nats://", false},
+		{"ws://example.com:80", false, "refusing a plain ws://", false},
+		{"nats://127.0.0.1:4222", true, "", false},
+		{"nats://127.1.2.3:4222", true, "", false},
+		{"nats://localhost:4222", true, "", false},
+		{"nats://[::1]:4222", true, "", false},
+		{"nats://10.0.0.5:4222", true, "allows a plain connection only to localhost", false},
+		{"tls://example.com:4222", true, "allows a plain connection only to localhost", false},
+		{"nats://127.0.0.1:4222,nats://10.0.0.5:4222", true, "allows a plain connection only to localhost", false},
+		{"nats://127.0.0.1.example.com:4222", true, "allows a plain connection only to localhost", false},
+	} {
+		opts, err := natsauth.RequireTLS(tc.url, tc.insecure)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%s insecure=%v: err %v, want %q", tc.url, tc.insecure, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s insecure=%v: %v", tc.url, tc.insecure, err)
+			continue
+		}
+		var o nats.Options
+		for _, f := range opts {
+			if err := f(&o); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if o.Secure != tc.secure {
+			t.Errorf("%s insecure=%v: Secure = %v, want %v", tc.url, tc.insecure, o.Secure, tc.secure)
+		}
+	}
+}

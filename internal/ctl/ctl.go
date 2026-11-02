@@ -121,7 +121,11 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return nil, nil, nil, err
 	}
-	nc, err := nats.Connect(cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
+	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%s: %w", pfx, err)
+	}
+	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", cfg.URL, natsauth.TLSHint(err))
 	}

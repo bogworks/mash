@@ -487,3 +487,52 @@ func InstallFile(path string, data []byte) (created bool, err error) {
 	}
 	return true, nil
 }
+
+// OperatorJWTFile is the name, in the key directory, of the copy of the operator JWT that tells mashctl which keys
+// the operator accepts as issuers of an account JWT.
+const OperatorJWTFile = "operator.jwt"
+
+// ErrDifferentOperatorJWT is wrapped by InstallOperatorJWT when the key directory already holds another operator JWT.
+var ErrDifferentOperatorJWT = errors.New("mashctl: the key directory already holds a different operator.jwt")
+
+// InstallOperatorJWT stores token as <keydir>/operator.jwt (0600, never replacing a file). With a file already in
+// place, created is false and the error says so when its content differs. The token is not validated here.
+func (a *Authority) InstallOperatorJWT(token string) (created bool, err error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, errors.New("mashctl: empty operator JWT")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.checkDirs(true); err != nil {
+		return false, err
+	}
+	path := filepath.Join(a.dir, OperatorJWTFile)
+	created, err = InstallFile(path, []byte(token+"\n"))
+	if err != nil || created {
+		return created, err
+	}
+	have, rerr := os.ReadFile(path)
+	if rerr != nil {
+		return false, rerr
+	}
+	if strings.TrimSpace(string(have)) != token {
+		return false, fmt.Errorf("%w (%s): refusing to replace it", ErrDifferentOperatorJWT, path)
+	}
+	return false, nil
+}
+
+// OperatorJWT returns the operator JWT stored in the key directory, or "" when there is none.
+func (a *Authority) OperatorJWT() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	path := filepath.Join(a.dir, OperatorJWTFile)
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("mashctl: read %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}

@@ -87,6 +87,7 @@ type adoptState struct {
 	opKP, acctKP     nkeys.KeyPair
 	opPub, acctPub   string
 	sysCredsRaw      []byte
+	trust            apply.Trust
 	adminCredsAbs    string
 	adminRaw         []byte
 	serverDir        string
@@ -188,6 +189,10 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 			return fail("--admin-creds: %v", err)
 		}
 	}
+	// adopt installs no operator.jwt: the accepted issuer is the operator key given
+	if st.trust, err = apply.NewTrust(st.opPub, ""); err != nil {
+		return fail("%v (nothing was changed)", err)
+	}
 	fmt.Fprintf(stdout, "  1. files          ok: operator key %s, account key %s, system creds (modes 0600, seeds not printed)\n", st.opPub, st.acctPub)
 
 	// The key store and the destination files must not conflict: checked now so nothing is written on a refusal.
@@ -198,12 +203,17 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		return fail("%v", err)
 	}
 
-	// (2) the server: operator mode, system creds, the resolver.
+	// (2) the server: operator mode, system creds, the resolver. Admin and system connections require TLS, so a URL
+	// that is refused for that is refused before any connection is made.
+	tlsReq, err := natsauth.RequireTLS(o.server, cfg.InsecureLoopback)
+	if err != nil {
+		return fail("%v (nothing was changed)", err)
+	}
 	if c, aerr := nats.Connect(o.server, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), nats.Name("mashctl-adopt-probe"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...); aerr == nil {
 		c.Close()
 		return fail("%s accepts a connection without credentials: it does not look like an operator-mode server with a full resolver, so adopt has nothing to take over (nothing was changed)", o.server)
 	}
-	nc, err := nats.Connect(o.server, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+	nc, err := nats.Connect(o.server, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(st.sysCredsRaw), nats.Name("mashctl-adopt"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
 		return fail("connect %s with the system creds: %v (a refused connection can mean the server is unreachable or a TLS problem: check the URL, the port and the tls_ca, tls_cert and tls_key settings; nothing was changed)", o.server, natsauth.TLSHint(err))
@@ -231,9 +241,9 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		}
 		return fail("account %s is not on the resolver (%s): adopt needs an account that already exists; it cannot create one. The server answers pings, so it is the account that is missing (or the resolver is not a full resolver). Check --account-key (nothing was changed)", st.acctPub, detail)
 	}
-	claims, err := jwt.DecodeAccountClaims(tok)
+	claims, err := apply.VerifyAccountJWT(tok, st.acctPub, st.trust)
 	if err != nil {
-		return fail("the resolver's JWT for %s does not decode: %v (nothing was changed)", st.acctPub, err)
+		return fail("refusing the resolver's JWT for %s: %v (nothing was changed)", st.acctPub, err)
 	}
 	warns, err := verifyAccount(claims, st.acctPub, account, time.Now().Unix())
 	if err != nil {
@@ -268,12 +278,10 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	}
 
 	// (5) can the operator key sign for this account?
-	switch {
-	case claims.Issuer == st.opPub:
-		fmt.Fprintf(stdout, "  5. operator key   ok: it issued the account JWT (issuer %s)\n", claims.Issuer)
-	default:
-		warns = append(warns, fmt.Sprintf("the account JWT was issued by %s, not by the operator key you gave (%s). If yours is one of the operator's signing keys, apply will work; that list is in the operator JWT, which the server does not publish, so it cannot be verified from here (`nsc describe operator` shows it)", claims.Issuer, st.opPub))
-		fmt.Fprintf(stdout, "  5. operator key   unverified: see the warning below\n")
+	if claims.Issuer == st.opPub {
+		fmt.Fprintf(stdout, "  5. operator key   ok: it issued the account JWT (issuer %s), whose signature is valid\n", claims.Issuer)
+	} else {
+		fmt.Fprintf(stdout, "  5. operator key   ok: the account JWT's valid signature is by %s, a signing key the operator JWT declares (the operator key %s is declared too)\n", claims.Issuer, st.opPub)
 	}
 
 	if st.adminRaw != nil {
@@ -355,6 +363,9 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	if adminPath != "" {
 		settings["admin_creds"] = adminPath
 	}
+	if cfg.InsecureLoopback {
+		settings["insecure_loopback"] = "true"
+	}
 	if cfg.TLSCA != "" {
 		settings["tls_ca"] = cfg.TLSCA
 	}
@@ -426,9 +437,9 @@ func already(have bool) string {
 
 func settingsText(m map[string]string) string {
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
-			parts = append(parts, fmt.Sprintf("%q: %s", k, strconv.Quote(v)))
+			parts = append(parts, fmt.Sprintf("%q: %s", k, jsonValue(k, v)))
 		}
 	}
 	return strings.Join(parts, ", ")
@@ -438,9 +449,9 @@ func configJSON(m map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
-			parts = append(parts, fmt.Sprintf("  %q: %s", k, strconv.Quote(v)))
+			parts = append(parts, fmt.Sprintf("  %q: %s", k, jsonValue(k, v)))
 		}
 	}
 	b.WriteString(strings.Join(parts, ",\n"))
@@ -545,7 +556,11 @@ func checkAdminCreds(cfg config.Config, url string, st *adoptState) (string, err
 	if uc.IssuerAccount == "" && uc.Issuer != st.acctPub {
 		warn = fmt.Sprintf("the admin creds were signed by %s, not the account identity key; adopt could not tell they belong to this account, only that they connect", uc.Issuer)
 	}
-	c, err := nats.Connect(url, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+	tlsReq, err := natsauth.RequireTLS(url, cfg.InsecureLoopback)
+	if err != nil {
+		return "", err
+	}
+	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(st.adminRaw), nats.Name("mashctl-adopt-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
 		return "", fmt.Errorf("the creds cannot connect to %s: %v", url, natsauth.TLSHint(err))
@@ -594,4 +609,12 @@ func ensureDir(d string) error {
 		return fmt.Errorf("create %s: %w", d, err)
 	}
 	return nil
+}
+
+// jsonValue is v as a config.json value: insecure_loopback is a boolean, everything else a string.
+func jsonValue(key, v string) string {
+	if key == "insecure_loopback" {
+		return v
+	}
+	return strconv.Quote(v)
 }

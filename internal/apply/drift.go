@@ -26,6 +26,7 @@ const (
 	KindZoneTemplate  = "zone-template-differs"
 	KindKeyConflict   = "zone-key-differs"
 	KindZoneNotInFile = "zone-not-in-file"
+	KindUnknownKey    = "signing-key-unknown"
 )
 
 // AccountFindings compares the policy file's compiled zones with the scoped signing keys of the account JWT the
@@ -56,6 +57,9 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 		return nil, err
 	}
 	acctKP.Wipe()
+	if p.trust, err = LoadTrust(p.Keys); err != nil {
+		return nil, err
+	}
 	cur, err := p.Resolver.Lookup(ctx, acctPub)
 	if err != nil {
 		return nil, fmt.Errorf("look up the account JWT: %w", err)
@@ -75,6 +79,10 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	for _, o := range b.unacked {
 		out = append(out, Finding{Kind: KindZoneNotInFile, Subject: o.zone,
 			Detail: fmt.Sprintf("signing key %s is on the server with its old permissions and the policy file has no such zone", o.key)})
+	}
+	for _, u := range b.unknown {
+		out = append(out, Finding{Kind: KindUnknownKey, Subject: u.key,
+			Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create. %s", u.describe(), unknownKeyNote)})
 	}
 	for _, zp := range b.plans {
 		switch zp.state {

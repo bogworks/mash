@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
@@ -193,10 +192,11 @@ func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
 	op, _, _ := ks.Operator()
 	_, apub, _ := ks.Account()
 	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	plain, _ := nkeys.CreateAccount()
-	pp, _ := plain.PublicKey()
-	cl.SigningKeys.Add(pp)
-	other, _ := nkeys.CreateAccount()
+	cl.SigningKeys.Add(apub)                 // a plain signing key that is mashctl's own (the account identity key)
+	other, err := ks.ZoneKey("legacy", true) // a zone key of the key store whose zone the file lacks
+	if err != nil {
+		t.Fatal(err)
+	}
 	op2, _ := other.PublicKey()
 	sc := jwt.NewUserScope()
 	sc.Key, sc.Role = op2, "legacy"
@@ -206,7 +206,6 @@ func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
 		t.Fatal(err)
 	}
 	fk.token = tok
-	_ = apub
 	var out bytes.Buffer
 	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 1 || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") {
 		t.Fatal(out.String())
@@ -219,7 +218,7 @@ func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
 	if !strings.Contains(s, "zone legacy is outside the policy and its key stays active") || !strings.Contains(s, "would create its signing key") {
 		t.Fatalf("%s", s)
 	}
-	if z, _ := ks.Zones(); len(z) != 0 || fk.pushes != 0 {
+	if z, _ := ks.Zones(); len(z) != 1 || fk.pushes != 0 { // only the legacy key the test made
 		t.Fatal("dry run changed something")
 	}
 }
@@ -428,7 +427,10 @@ func TestOutsidePolicyZones(t *testing.T) {
 	// an unrelated scoped signer (not created by mash) appears on the server
 	op, _, _ := ks.Operator()
 	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	other, _ := nkeys.CreateAccount()
+	other, err := ks.ZoneKey("legacy", true) // a zone key of the key store whose zone the file lacks
+	if err != nil {
+		t.Fatal(err)
+	}
 	opub, _ := other.PublicKey()
 	sc := jwt.NewUserScope()
 	sc.Key, sc.Role = opub, "legacy"

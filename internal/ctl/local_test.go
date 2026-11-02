@@ -190,7 +190,7 @@ func stubStart(t *testing.T) {
 	t.Helper()
 	s, i := startLocalServer, initLocalBuckets
 	t.Cleanup(func() { startLocalServer, initLocalBuckets = s, i })
-	startLocalServer = func(bootstrap.Params) (int, error) { return 4242, nil }
+	startLocalServer = func(bootstrap.Params, string, bool) (int, error) { return 4242, nil }
 	initLocalBuckets = func(string, config.Config, io.Writer, io.Writer) int { return 0 }
 }
 
@@ -242,5 +242,50 @@ func TestInitLocalStartNoConfigIsReady(t *testing.T) {
 	code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
 	if code != 0 || !strings.Contains(out, "Ready") || strings.Contains(out, "points elsewhere") {
 		t.Fatalf("exit %d: %s\n%s", code, out, errs)
+	}
+}
+
+func TestInitLocalStartTakesNoInsecureFlagAndStartsOnlyTheLoopbackServerItGenerated(t *testing.T) {
+	e := newLocalEnv(t)
+	var gotURL string
+	var gotGenerated bool
+	s, i := startLocalServer, initLocalBuckets
+	t.Cleanup(func() { startLocalServer, initLocalBuckets = s, i })
+	startLocalServer = func(_ bootstrap.Params, url string, generated bool) (int, error) {
+		gotURL, gotGenerated = url, generated
+		return 4242, nil
+	}
+	var bucketCfg config.Config
+	initLocalBuckets = func(_ string, c config.Config, _, _ io.Writer) int { bucketCfg = c; return 0 }
+	code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
+	if code != 0 || !strings.Contains(out, "Ready") {
+		t.Fatalf("exit %d: %s\n%s", code, out, errs)
+	}
+	if !strings.HasPrefix(gotURL, "nats://127.0.0.1:") || !gotGenerated || !bucketCfg.InsecureLoopback {
+		t.Fatalf("Start got %q generated %v, buckets insecure_loopback %v", gotURL, gotGenerated, bucketCfg.InsecureLoopback)
+	}
+	if code, _, _ := e.run("init", "--local", "--owner", "alice", "--start", "--insecure"); code != 2 {
+		t.Fatalf("--insecure is not a flag any more: exit %d", code)
+	}
+}
+
+func TestInitLocalRecordsOperatorJWTAndTheLoopbackOptIn(t *testing.T) {
+	e := newLocalEnv(t)
+	code, out, errs := e.run("init", "--local", "--owner", "alice")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	st, err := os.Stat(filepath.Join(e.root, "keys", "operator.jwt"))
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("operator.jwt in the key directory: %v %v", st, err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
+	if err != nil || !strings.Contains(string(cfg), `"insecure_loopback": true`) {
+		t.Fatalf("config.json: %s %v", cfg, err)
+	}
+	// a second init on another directory keeps the first operator JWT
+	code, _, errs = e.run("init", "--local", "--owner", "alice", "--dir", filepath.Join(e.root, "second"))
+	if code != 0 {
+		t.Fatalf("second init: %d %s", code, errs)
 	}
 }

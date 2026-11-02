@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -138,4 +139,56 @@ func TLSHint(err error) error {
 		return fmt.Errorf("%w (the server refused the client certificate or requires one: set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed)", err)
 	}
 	return err
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP literal (127.0.0.0/8, ::1).
+func isLoopbackHost(host string) bool {
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// serverParts splits one server URL (a scheme is optional; a port is optional) into its lower-case scheme ("nats" when
+// there is none) and its host.
+func serverParts(entry string) (scheme, host string) {
+	e := strings.TrimSpace(entry)
+	scheme = "nats"
+	if sch, rest, ok := strings.Cut(e, "://"); ok {
+		scheme, e = strings.ToLower(sch), rest
+	}
+	e, _, _ = strings.Cut(e, "/")
+	if i := strings.LastIndex(e, "@"); i >= 0 {
+		e = e[i+1:]
+	}
+	if h, _, err := net.SplitHostPort(e); err == nil {
+		return scheme, h
+	}
+	return scheme, strings.Trim(e, "[]")
+}
+
+// RequireTLS is the option set for a connection that carries admin or system credentials. The connection must use TLS:
+// nats.Secure() makes it fail when the server does not offer TLS, and a plain nats:// or ws:// URL to a host that is
+// not localhost or a loopback IP literal is refused before any connection is made (use tls://).
+//
+// insecureLoopback (the insecure_loopback setting) is the one explicit opt-in for plain text: it returns no option, so a
+// plain server is accepted, but only when every host of url is localhost or a loopback IP literal; any other host is
+// refused.
+func RequireTLS(url string, insecureLoopback bool) ([]nats.Option, error) {
+	for _, e := range strings.Split(url, ",") {
+		scheme, host := serverParts(e)
+		loop := isLoopbackHost(host)
+		switch {
+		case insecureLoopback && !loop:
+			return nil, fmt.Errorf("mash: insecure_loopback (MASH_INSECURE_LOOPBACK) allows a plain connection only to localhost or a loopback address, and %q is not one: use tls:// with the server's certificate (tls_ca for a private CA)", host)
+		case !insecureLoopback && !loop && (scheme == "nats" || scheme == "ws"):
+			return nil, fmt.Errorf("mash: refusing a plain %s:// connection to %q with admin or system credentials: use tls:// with the server's certificate (tls_ca for a private CA). Only a loopback server may be used without TLS, and only with insecure_loopback set", scheme, host)
+		}
+	}
+	if insecureLoopback {
+		return nil, nil
+	}
+	return []nats.Option{nats.Secure()}, nil
 }

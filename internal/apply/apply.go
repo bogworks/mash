@@ -145,6 +145,8 @@ type Params struct {
 	// collectAll (drift only, with Mode Diff) makes build go on past a refusal and describe every zone, so a drift
 	// report lists everything at once; the zones with a conflict are skipped, the conflict being their finding.
 	collectAll bool
+	// trust is the set of accepted issuers of the account JWT, loaded from the key store by Run and AccountFindings.
+	trust Trust
 }
 
 const (
@@ -180,7 +182,8 @@ type built struct {
 	plans     []*zonePlan
 	kept      []string // outside-policy zones acknowledged with --keep-zone
 	removed   []outside
-	unacked   []outside // outside-policy zones nobody said what to do with
+	unacked   []outside    // outside-policy zones nobody said what to do with
+	unknown   []unknownKey // signing keys of the account JWT that mashctl did not create and that nobody pinned
 	changed   bool
 	token     string
 	conflicts []conflict
@@ -189,7 +192,23 @@ type built struct {
 // outside is a scoped signer on the server whose role is not a zone of the policy file.
 type outside struct{ zone, key string }
 
-func (b *built) refused() bool { return len(b.conflicts) > 0 || len(b.unacked) > 0 }
+// unknownKey is a signing key of the fetched account JWT that is not one of mashctl's own keys. role is the scoped
+// signer's role, "" for a plain signing key.
+type unknownKey struct{ key, role string }
+
+func (u unknownKey) describe() string {
+	if u.role == "" {
+		return "plain signing key " + u.key
+	}
+	return fmt.Sprintf("scoped signing key %s (role %s)", u.key, u.role)
+}
+
+// unknownKeyNote is the one explanation printed with every unknown signing key.
+const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry signing keys it did not create. Remove it with the tool that added it before apply can run."
+
+func (b *built) refused() bool {
+	return len(b.conflicts) > 0 || len(b.unacked) > 0 || len(b.unknown) > 0
+}
 
 // conflict is a scoped signer on the server under a file zone's role whose key is not the zone key apply holds.
 type conflict struct {
@@ -239,6 +258,12 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	}
 	acctKP.Wipe()
 
+	trust, err := LoadTrust(p.Keys)
+	if err != nil {
+		return fail(fmt.Errorf("refusing: %w (nothing was changed)", err))
+	}
+	p.trust = trust
+
 	// Applies that share this key directory are serialized, from before the first read until after the read-back.
 	if p.Mode == Apply {
 		wait := p.LockWait
@@ -287,7 +312,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	plans, desired, changed, token, cur := b.plans, b.desired, b.changed, b.token, b.cur
 
 	if b.refused() {
-		refuse(out, p, b.conflicts, b.unacked)
+		refuse(out, p, b)
 		if p.Mode == Diff {
 			return 0
 		}
@@ -380,12 +405,9 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	if cur == "" {
 		return nil, fmt.Errorf("the resolver has no JWT for the MASH account %s: is the account key in the key store the account of this server? (nothing was changed)", acctPub)
 	}
-	current, err := jwt.DecodeAccountClaims(cur)
+	current, err := VerifyAccountJWT(cur, acctPub, p.trust)
 	if err != nil {
-		return nil, fmt.Errorf("the resolver's account JWT does not decode: %w (nothing was changed)", err)
-	}
-	if current.Subject != acctPub {
-		return nil, fmt.Errorf("the resolver answered with the JWT of account %s, not %s (nothing was changed)", current.Subject, acctPub)
+		return nil, fmt.Errorf("refusing the resolver's account JWT: %w (nothing was changed)", err)
 	}
 	desired, err := jwt.DecodeAccountClaims(cur)
 	if err != nil {
@@ -415,6 +437,20 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 			return nil, kerr
 		}
 	}
+	// Known keys: the account identity key and every zone key in the key store (the zone keys apply creates are not
+	// on the server yet). Any other signing key of the JWT is unknown and refused.
+	known := map[string]bool{acctPub: true}
+	storeZones, zerr := p.Keys.Zones()
+	if zerr != nil {
+		return nil, zerr
+	}
+	for _, z := range storeZones {
+		pub, perr := p.Keys.ZonePublic(z)
+		if perr != nil {
+			return nil, perr
+		}
+		known[pub] = true
+	}
 	oldKeys := map[string][]string{}
 	remove, keep := map[string]bool{}, map[string]bool{}
 	for _, z := range p.RemoveZones {
@@ -429,9 +465,20 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	onServer := map[string]bool{}
 	for _, k := range sortedKeys(current.SigningKeys) {
 		sc, _ := current.SigningKeys.GetScope(k)
-		us, ok := sc.(*jwt.UserScope)
-		if !ok || us == nil {
-			continue // a plain signing key is not a zone
+		us, _ := sc.(*jwt.UserScope)
+		switch {
+		case us != nil && isFileZone[us.Role]:
+			// a zone of the file: handled below (the zone key, a replacement, or a conflict)
+		case !known[k]:
+			u := unknownKey{key: k}
+			if us != nil {
+				u.role = us.Role
+				onServer[us.Role] = true
+			}
+			b.unknown = append(b.unknown, u)
+			continue
+		case us == nil:
+			continue // a plain signing key that is one of mashctl's own
 		}
 		if !isFileZone[us.Role] {
 			// A zone the file lacks (or a scoped signer mash did not create): its key and old permissions would stay
@@ -561,7 +608,15 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 
 // refuse prints the refusals (public keys only) and the ways out: zone key conflicts, and zones on the server that the
 // policy file lacks.
-func refuse(out io.Writer, p Params, cs []conflict, outs []outside) {
+func refuse(out io.Writer, p Params, b *built) {
+	cs, outs := b.conflicts, b.unacked
+	if len(b.unknown) > 0 {
+		fmt.Fprintf(out, "%s: REFUSED: the account JWT holds signing keys that mashctl did not create (nothing was changed, no key was created, nothing was pushed)\n", p.Mode)
+		for _, u := range b.unknown {
+			fmt.Fprintf(out, "  %s\n", u.describe())
+		}
+		fmt.Fprintln(out, unknownKeyNote)
+	}
 	if len(cs) > 0 {
 		fmt.Fprintf(out, "%s: REFUSED: the server has a signing key for a zone that is not the zone key in the key store (nothing was changed, no key was created)\n", p.Mode)
 		for _, c := range cs {
@@ -655,9 +710,9 @@ func verifyState(ctx context.Context, p Params, acctPub string, desired *jwt.Acc
 			last = "could not be read back: " + err.Error()
 			continue
 		}
-		got, err := jwt.DecodeAccountClaims(tok)
+		got, err := VerifyAccountJWT(tok, acctPub, p.trust)
 		if err != nil {
-			last = "does not decode: " + err.Error()
+			last = "is not acceptable: " + err.Error()
 			continue
 		}
 		if d := signersDiff(desired, got); d != "" {

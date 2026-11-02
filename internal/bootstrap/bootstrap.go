@@ -83,6 +83,8 @@ type Plan struct {
 	Account  string // public keys, safe to print
 	Operator string
 	System   string
+	// OperatorJWT is the operator JWT written to the server directory; init --local also stores a copy in the key directory.
+	OperatorJWT string
 }
 
 func (p Params) path(n string) string { return filepath.Join(p.Dir, n) }
@@ -199,7 +201,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		return nil, err
 	}
 
-	pl := &Plan{Params: p, URL: "nats://127.0.0.1:" + strconv.Itoa(p.Port), Creds: p.AdminCredsPath(), Account: acctPub, Operator: opPub, System: sysPub}
+	pl := &Plan{Params: p, URL: "nats://127.0.0.1:" + strconv.Itoa(p.Port), Creds: p.AdminCredsPath(), Account: acctPub, Operator: opPub, System: sysPub, OperatorJWT: opJWT}
 	pl.Dirs = []string{p.Dir, p.path(resolverDir), p.path(jetstreamDir)}
 	pl.Files = []File{
 		{p.path(OperatorJWT), []byte(opJWT + "\n")},
@@ -218,7 +220,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		pl.Policy = &File{p.PolicyPath, []byte(OpenPolicy)}
 	}
 	if p.ConfigPath != "" && config.Absent(p.ConfigPath) {
-		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s\n}\n",
+		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"insecure_loopback\": true\n}\n",
 			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds)))}
 	}
 	return pl, nil

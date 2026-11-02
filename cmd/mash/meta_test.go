@@ -13,7 +13,7 @@ import (
 func (w *world) admin(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, args, &out, &errb)
+	code := adminCmd(config.Config{InsecureLoopback: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, args, &out, &errb)
 	return out.String() + strings.TrimPrefix(errb.String(), adminDeprecation+"\n"), code // the notice has its own test
 }
 
@@ -124,7 +124,7 @@ func TestAdminLimitsCLI(t *testing.T) {
 	w := newWorld(t, "a")
 	run := func(l store.Limits, args ...string) (string, int) {
 		var out, errb bytes.Buffer
-		code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, Limits: l}, args, &out, &errb)
+		code := adminCmd(config.Config{InsecureLoopback: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, Limits: l}, args, &out, &errb)
 		return out.String() + strings.TrimPrefix(errb.String(), adminDeprecation+"\n"), code
 	}
 	// --show needs no server and prints the defaults for a Config with no limits.
@@ -158,7 +158,7 @@ func TestAdminLimitsCLI(t *testing.T) {
 func TestAdminDeprecatedAlias(t *testing.T) {
 	w := newWorld(t, "a")
 	var out, errb bytes.Buffer
-	code := adminCmd(config.Config{URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, []string{"list"}, &out, &errb)
+	code := adminCmd(config.Config{InsecureLoopback: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, []string{"list"}, &out, &errb)
 	if code != 0 || !strings.HasPrefix(out.String(), "a\t") {
 		t.Fatalf("list: %d %q %q", code, out.String(), errb.String())
 	}

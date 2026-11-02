@@ -4,6 +4,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+### Security
+
+- `mashctl policy apply`, `diff`, `repair`, `drift` and `adopt` verify the account JWT's issuer: its signature must be valid, its subject the account key, and its issuer the operator key or a key declared by the operator JWT (`<key dir>/operator.jwt`, which `init --local` records). `adopt` now refuses where it warned. Apply only adds or removes mash's own zone keys: any other signing key in the account JWT is refused (named by public key and role; `diff` and `drift` report it): mashctl will not carry signing keys it did not create, so they must be removed with the tool that added them. Admin and system connections require TLS: a plain `nats://` URL to a non-loopback host is refused, and a local server made by `init --local` opts in with `insecure_loopback` in `config.json` (or `MASH_INSECURE_LOOPBACK=1`); `init --local --start` connects only to the loopback server it just started and needs no opt-in. See [ADR 0059](docs/decisions/0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md).
+
 ### Changed
 
 - The policy parser refuses a map key that is not a plain string (for example an unquoted null, ~, number or boolean), with the line number; quote such names.

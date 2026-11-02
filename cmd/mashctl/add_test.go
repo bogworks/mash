@@ -52,7 +52,7 @@ func newAddEnv(t *testing.T, src string) *addEnv {
 	e := testenv.Start(t)
 	dir := t.TempDir()
 	h := &addEnv{t: t, e: e, dir: dir, policy: filepath.Join(dir, "policy.yaml"), env: map[string]string{
-		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds,
+		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1",
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),
 	}}
 	if err := os.WriteFile(h.policy, []byte(src), 0o600); err != nil {

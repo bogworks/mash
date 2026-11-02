@@ -6,6 +6,10 @@
 
 `add` needs the account signing key, which `mashctl init` creates (the bootstrap verb is PR #137; until it merges the key can be created with the `ctlkeys` package), and an account that lists the zone keys: the account push is `mashctl apply` (also a separate change). Until `apply` has pushed a new zone's key, creds minted for that zone cannot authenticate. `add` tells you when an account update is needed.
 
+## Connections and trust
+
+Plain `nats://` to a non-loopback host is refused for admin and system connections: every verb that connects with the admin or system creds (and `adopt`) requires TLS, and fails when the server does not offer it. Local servers made by `init --local` are loopback-only and opt in explicitly: `init --local` writes `"insecure_loopback": true` into the `config.json` it creates (the one minimal escape, a setting and not a flag, which may be renamed when the command-line settings are redesigned; the same setting is `MASH_INSECURE_LOOPBACK=1`, honoured only for loopback URLs), and `init --local --start` connects only to the loopback server it just started, which needs no opt-in. `policy apply`, `diff`, `repair`, `drift` and `adopt` verify the account JWT's signature, subject and issuer (the operator key, or a key declared by `<key dir>/operator.jwt`), and `apply` carries only its own zone keys: another signing key is refused until the tool that added it removes it. See [operations](operations.md#applying-the-policy).
+
 ## Adopting an existing server
 
 ```sh
