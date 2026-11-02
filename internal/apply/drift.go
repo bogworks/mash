@@ -12,6 +12,7 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/policy"
 )
 
@@ -173,6 +174,9 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 		return nil, fmt.Errorf("look up the account JWT: %w", err)
 	}
 	set, serr := p.Resolver.Servers(ctx)
+	if errors.Is(serr, ErrServerSetRefused) {
+		return nil, fmt.Errorf("refusing: %w", serr)
+	}
 	need := max(set.need(p.Servers), len(set.Names), 1)
 	ag, aerr := collectAgreement(ctx, p.Resolver, acctPub, need)
 	switch {
@@ -206,15 +210,15 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 		if local == "" {
 			local = "none (the zone key file is missing)"
 		}
-		out = append(out, Finding{Kind: KindKeyConflict, Subject: cf.zone,
-			Detail: fmt.Sprintf("the server's signing key is %s, the key store's is %s", cf.serverKey, local)})
+		out = append(out, Finding{Kind: KindKeyConflict, Subject: config.Clean(cf.zone),
+			Detail: fmt.Sprintf("the server's signing key is %s, the key store's is %s", config.Clean(cf.serverKey), local)})
 	}
 	for _, o := range b.unacked {
-		out = append(out, Finding{Kind: KindZoneNotInFile, Subject: o.zone,
-			Detail: fmt.Sprintf("signing key %s is on the server with its old permissions and the policy file has no such zone", o.key)})
+		out = append(out, Finding{Kind: KindZoneNotInFile, Subject: config.Clean(o.zone),
+			Detail: fmt.Sprintf("signing key %s is on the server with its old permissions and the policy file has no such zone", config.Clean(o.key))})
 	}
 	for _, u := range b.unknown {
-		out = append(out, Finding{Kind: KindUnknownKey, Subject: u.key,
+		out = append(out, Finding{Kind: KindUnknownKey, Subject: config.Clean(u.key),
 			Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create. %s", u.describe(), unknownKeyNote)})
 	}
 	for _, zp := range b.plans {

@@ -2,10 +2,12 @@ package ctl
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/store"
 )
 
 func TestAdminDeadline(t *testing.T) {
@@ -47,6 +49,17 @@ func TestShortKey(t *testing.T) {
 	for in, want := range map[string]string{"": "", "abc": "abc", "12345678": "12345678", "UABCDEFGHIJK": "UABCDEFG"} {
 		if got := ShortKey(in); got != want {
 			t.Errorf("ShortKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestListFieldsAreEscaped(t *testing.T) {
+	hostile := "x\x1b[2K\r\nREFUSED"
+	want := `x\x1b[2K\x0d\x0aREFUSED`
+	r := store.Record{Name: "a", Zone: hostile, Description: hostile, Caps: []string{hostile}}
+	for _, got := range []string{zoneSuffix(r), metaSuffix(r), labelList(map[string]string{hostile: hostile}), NoRevokeWarning("a", hostile)} {
+		if strings.ContainsAny(got, "\x1b\r") || !strings.Contains(got, want) {
+			t.Errorf("not escaped: %q", got)
 		}
 	}
 }

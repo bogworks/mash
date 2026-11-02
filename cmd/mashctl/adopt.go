@@ -121,6 +121,10 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stderr, "%smissing: %s\nadopt takes over a server you already run in operator mode; it cannot stand one up or reconfigure one from a URL (use `mashctl init --local` for a new local server)\n%s", pfx, strings.Join(missing, "; "), adoptUsage())
 		return 2
 	}
+	if config.HasUserinfo(o.server) {
+		fmt.Fprintf(stderr, "%scredentials in the URL are not supported (the URL would be printed and written to config.json): pass a URL without user:password@ and give the credentials as files with --sys-creds and --admin-creds\n%s", pfx, adoptUsage())
+		return 2
+	}
 	if o.mintAdmin && o.adminCreds != "" {
 		fmt.Fprintf(stderr, "%s--admin-creds and --mint-admin are alternatives: pass one\n%s", pfx, adoptUsage())
 		return 2
@@ -226,7 +230,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	res := apply.NATS{Conn: nc}
 	set, err := res.Servers(ctx)
 	if err != nil {
-		return fail("ping the servers: %v (nothing was changed)", err)
+		return fail("ping the servers: %v (nothing was changed)", config.Clean(err.Error()))
 	}
 	if len(set.Names) == 0 {
 		return fail("the system account ping (%s) was answered by no server: this does not look like an operator-mode server with a full resolver, or --sys-creds are not system account user creds (nothing was changed)", "$SYS.REQ.SERVER.PING")
@@ -239,7 +243,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	if err != nil || tok == "" {
 		detail := "the resolver has no answer for it"
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, nats.ErrTimeout) {
-			detail = err.Error()
+			detail = config.Clean(err.Error())
 		}
 		return fail("account %s is not on the resolver (%s): adopt needs an account that already exists; it cannot create one. The server answers pings, so it is the account that is missing (or the resolver is not a full resolver). Check --account-key (nothing was changed)", st.acctPub, detail)
 	}
@@ -251,7 +255,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	if err != nil {
 		return fail("%v (nothing was changed)", err)
 	}
-	fmt.Fprintf(stdout, "  2. account        ok: %q found on the resolver, subject = the account key, not expired. Not visible from here: whether the operator has revoked it\n", claims.Name)
+	fmt.Fprintf(stdout, "  2. account        ok: %q found on the resolver, subject = the account key, not expired. Not visible from here: whether the operator has revoked it\n", config.Clean(claims.Name))
 
 	// (3) JetStream.
 	lim, tier, err := jsLimits(claims)

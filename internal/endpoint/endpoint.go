@@ -280,7 +280,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		}),
 	)...)
 	if err != nil {
-		return nil, fmt.Errorf("mash: connect %s: %w", cfg.URL, natsauth.TLSHint(err))
+		return nil, fmt.Errorf("mash: connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
 	}
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, nc: nc, id: id, subj: sap.For(cfg.Owner, cfg.Name),

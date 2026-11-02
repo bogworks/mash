@@ -98,6 +98,9 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
+	if errors.Is(kerr, ErrServerSetRefused) {
+		return res, fmt.Errorf("revoke: refusing: %w (nothing was changed)", kerr)
+	}
 	if !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {
