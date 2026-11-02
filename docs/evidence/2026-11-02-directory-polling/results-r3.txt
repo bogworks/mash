@@ -1,0 +1,11 @@
+# nproc=16 kernel=6.1.0-54-cloud-arm64 nats-server: v2.15.1 2026-11-02T21:01:57Z
+## case n=500 -replicas 3
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=false replicas=3 window_s=60.0
+loads_per_s=33.333 streaminfo_per_s=33.333 directget_per_s=16666.584 requests_per_s=16699.917
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=8.6 p99=14.0 max=22.6 samples=2000
+hb_published_per_s=16.667 hb_delivered_per_s=8333.292
+server_in_msgs_per_s=39051.0 out_msgs_per_s=47367.6 in_bytes_per_s=5023537 out_bytes_per_s=15003341
+server_cpu_cores_sum=1.224 server_cpu_cores_max=0.423 server_rss_mb=83/83/83
+bench_cpu_cores=0.650
