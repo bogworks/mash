@@ -4,6 +4,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [0.3.2] - Unreleased
 
+### Added
+
+- `internal/policy`: the policy file (labels, allow and deny rules, tests) parsed strictly, checked, explained and compiled to each endpoint's full per-recipient permission set, with a JWT size budget; `admin.PermissionsTo` narrows the peer lines to a recipient list. Not wired to any command yet; see [docs/policy-file.md](docs/policy-file.md).
+
 ### Fixed
 
 - Two admins changing the limits of one inbox at the same time can no longer leave the lower cap (and evict mail). `mash admin limits` and `mash admin provision` take a per-stream lock (`limits-lock.<name>` in the lease bucket, 30 s expiry) before reading the stream and hold it through the update; a second admin waits up to 20 s, then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`. Admins' clocks should agree to within a few seconds (see "Changing limits later" in [docs/operations.md](docs/operations.md), [ADR-0048](docs/decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), #27).

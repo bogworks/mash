@@ -1,0 +1,6 @@
+from \ to   coder  deploy-bot  reviewer
+coder       +      -           +
+deploy-bot  +      +           +
+reviewer    +      -           +
+
++ may mail, prompt and probe; - may not
