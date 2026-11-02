@@ -573,3 +573,158 @@ func TestDeprovisionDrainedRefusesMissingStream(t *testing.T) {
 		t.Fatalf("record gone: %v", err)
 	}
 }
+
+// putUser rewrites name's directory record with another user key, as a hand edit of the bucket would.
+func putUser(t *testing.T, js jetstream.JetStream, name, user string) {
+	t.Helper()
+	ctx := context.Background()
+	kv, err := js.KeyValue(ctx, store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.GetRecord(ctx, kv, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.User = user
+	b, _ := json.Marshal(rec)
+	if _, err := kv.Put(ctx, name, b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func parked(t *testing.T, a *admin.Admin, name, id string) {
+	t.Helper()
+	if got, err := a.Suspended(context.Background(), name); err != nil || !got.Suspended || got.ID != id {
+		t.Fatalf("not left parked: %+v %v", got, err)
+	}
+}
+
+func TestDeprovisionDrainedRefusesReplacedRecord(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "p", "")
+	st, err := a.Suspend(ctx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, other := e.Mint(t, "other")
+	putUser(t, js, "p", other)
+	if err := a.DeprovisionDrained(ctx, "p", st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "different user key") {
+		t.Fatalf("replaced record: %v", err)
+	}
+	intact(t, a, js, "p")
+	parked(t, a, "p", st.ID)
+}
+
+func TestDeprovisionDrainedRefusesNoRecord(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "n", "")
+	st, err := a.Suspend(ctx, "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if err := kv.Purge(ctx, "n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionDrained(ctx, "n", st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "has no directory record") {
+		t.Fatalf("no record: %v", err)
+	}
+	if _, err := js.Stream(ctx, "inbox-n"); err != nil {
+		t.Fatalf("stream gone: %v", err)
+	}
+	parked(t, a, "n", st.ID)
+}
+
+func TestDeprovisionDrainedRefusesSuspendedWithoutRecord(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "w", "")
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if err := kv.Purge(ctx, "w"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := a.Suspend(ctx, "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record appears afterwards; the suspension saved no user, so it proves nothing.
+	provisionFor(t, e, a, "w2", "")
+	_ = st
+	rec, err := store.GetRecord(ctx, kv, "w2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Name, rec.MailSubject = "w", store.MailSubjectFor(rec.Owner, rec.Zone, "w")
+	b, _ := json.Marshal(rec)
+	if _, err := kv.Put(ctx, "w", b); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionDrained(ctx, "w", st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "suspended without a record") {
+		t.Fatalf("suspended without record: %v", err)
+	}
+	if _, err := js.Stream(ctx, "inbox-w"); err != nil {
+		t.Fatalf("stream gone: %v", err)
+	}
+	if _, err := kv.Get(ctx, "w"); err != nil {
+		t.Fatalf("record gone: %v", err)
+	}
+	parked(t, a, "w", st.ID)
+}
+
+func TestDeprovisionDrainedRefusesRecordChangedBeforePurge(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "c", "")
+	st, err := a.Suspend(ctx, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := admin.SetAfterDeprovisionGet(func() {
+		role := "changed"
+		if _, err := a.SetMeta(ctx, "c", admin.MetaUpdate{Role: &role}); err != nil {
+			t.Error(err)
+		}
+	})
+	defer admin.SetAfterDeprovisionGet(prev)
+	if err := a.DeprovisionDrained(ctx, "c", st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "the record changed; left in place") {
+		t.Fatalf("changed record: %v", err)
+	}
+	intact(t, a, js, "c")
+	parked(t, a, "c", st.ID)
+}
+
+func TestSuspendSavesUserAndResumeClearsIt(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	_, user := e.Mint(t, "u")
+	if _, err := a.Provision(ctx, "u", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Suspend(ctx, "u"); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := js.Stream(ctx, "inbox-u")
+	info, _ := s.Info(ctx)
+	if got := info.Config.Metadata[store.MetaSuspendedUser]; got != user {
+		t.Fatalf("saved user %q, want %q", got, user)
+	}
+	// Idempotent suspend keeps what is saved.
+	putUser(t, js, "u", "UOTHER")
+	if _, err := a.Suspend(ctx, "u"); err != nil {
+		t.Fatal(err)
+	}
+	info, _ = s.Info(ctx)
+	if got := info.Config.Metadata[store.MetaSuspendedUser]; got != user {
+		t.Fatalf("idempotent suspend changed user to %q", got)
+	}
+	if err := a.Resume(ctx, "u"); err != nil {
+		t.Fatal(err)
+	}
+	info, _ = s.Info(ctx)
+	if _, ok := info.Config.Metadata[store.MetaSuspendedUser]; ok {
+		t.Fatalf("resume left the user: %v", info.Config.Metadata)
+	}
+}

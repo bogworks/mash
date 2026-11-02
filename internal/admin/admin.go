@@ -814,6 +814,15 @@ func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 	return a.deleteInbox(ctx, name)
 }
 
+// fenceAndDeleteInbox is the part of a deprovision that follows a guarded record delete (DeprovisionIfUser,
+// DeprovisionDrained; Deprovision fences before it purges): the lease tombstone, then the inbox stream.
+func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lease jetstream.KeyValue, name string) error {
+	if err := fence(ctx, lease, name); err != nil {
+		return err
+	}
+	return a.deleteInbox(ctx, name)
+}
+
 // DeprovisionDrained is Deprovision for an inbox that was suspended and read through sequence seq (the last_seq that
 // Suspend reported); id is the suspension id Suspend reported. Under the name's lock it reads the stream fresh and
 // refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
@@ -848,7 +857,41 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if info.State.LastSeq != seq {
 		return fmt.Errorf("mash: inbox of %s is at last_seq %d, not the drained %d; drain the rest and try again", name, info.State.LastSeq, seq)
 	}
-	return a.deprovisionLocked(ctx, name)
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return err
+	}
+	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		return fmt.Errorf("mash: lease bucket: %w", err)
+	}
+	e, err := kv.Get(ctx, name)
+	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+		return fmt.Errorf("mash: endpoint %s has no directory record, so nothing proves it is the endpoint that was drained; run plain `deprovision` if it is a leftover", name)
+	} else if err != nil {
+		return fmt.Errorf("mash: directory %s: %w", name, err)
+	}
+	rec, err := store.ParseRecord(name, e.Value())
+	if err != nil {
+		return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves it is the endpoint that was drained (left in place): %w", name, err)
+	}
+	savedUser := info.Config.Metadata[store.MetaSuspendedUser]
+	switch {
+	case savedUser == "":
+		return fmt.Errorf("mash: endpoint %s was suspended without a record; use plain `deprovision`", name)
+	case rec.User != savedUser:
+		return fmt.Errorf("mash: endpoint %s: its record belongs to a different user key than when it was suspended (left in place)", name)
+	}
+	if afterDeprovisionGet != nil {
+		afterDeprovisionGet()
+	}
+	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
+		if isRevisionConflict(err) {
+			return fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name)
+		}
+		return fmt.Errorf("mash: directory record: %w", err)
+	}
+	return a.fenceAndDeleteInbox(ctx, lease, name)
 }
 
 // The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.
@@ -944,10 +987,7 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()
 	}
-	if err := fence(ctx, lease, name); err != nil {
-		return err
-	}
-	return a.deleteInbox(ctx, name)
+	return a.fenceAndDeleteInbox(ctx, lease, name)
 }
 
 // IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it

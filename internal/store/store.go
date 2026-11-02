@@ -45,6 +45,9 @@ const (
 	MetaSuspendedSubjects = "mash_suspended_subjects"
 	MetaSuspendedAt       = "mash_suspended_at"
 	MetaSuspendedID       = "mash_suspended_id" // random 128-bit hex token naming one suspension
+	// MetaSuspendedUser is the user public key of the directory record at suspend time; empty or absent when there was
+	// no record. The drained deprovision requires the record to still carry it.
+	MetaSuspendedUser = "mash_suspended_user"
 )
 
 // InboxDuplicateWindow is how long the inbox stream remembers a Nats-Msg-Id: a publish with the same id inside it is

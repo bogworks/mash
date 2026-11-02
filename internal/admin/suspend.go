@@ -95,6 +95,15 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 	if slices.Equal(cfg.Subjects, []string{store.SuspendedSubject(name)}) {
 		return SuspendState{}, fmt.Errorf("mash: inbox of %s is parked but its saved subjects are missing, so suspend cannot tell what to restore; restore them by hand or deprovision", name)
 	}
+	// The record is read only to remember whose it was; a missing directory or record leaves the user empty.
+	savedUser := ""
+	if kv, err := a.dir(ctx); err == nil {
+		if e, err := kv.Get(ctx, name); err == nil {
+			if rec, err := store.ParseRecord(name, e.Value()); err == nil {
+				savedUser = rec.User
+			}
+		}
+	}
 	saved, _ := json.Marshal(cfg.Subjects)
 	meta := maps.Clone(cfg.Metadata)
 	if meta == nil {
@@ -107,6 +116,7 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 		return SuspendState{}, fmt.Errorf("mash: suspend %s: suspension id: %w", name, err)
 	}
 	meta[store.MetaSuspendedID] = hex.EncodeToString(idb[:])
+	meta[store.MetaSuspendedUser] = savedUser
 	cfg.Subjects, cfg.Metadata = []string{store.SuspendedSubject(name)}, meta
 	if s, err = a.js.UpdateStream(ctx, cfg); err != nil {
 		return SuspendState{}, fmt.Errorf("mash: suspend %s: %w", name, err)
@@ -153,6 +163,7 @@ func (a *Admin) Resume(ctx context.Context, name string) error {
 	delete(meta, store.MetaSuspendedSubjects)
 	delete(meta, store.MetaSuspendedAt)
 	delete(meta, store.MetaSuspendedID)
+	delete(meta, store.MetaSuspendedUser)
 	if len(meta) == 0 {
 		meta = nil
 	}
