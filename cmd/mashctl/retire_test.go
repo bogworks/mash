@@ -26,7 +26,7 @@ func (h *addEnv) policyText() string {
 }
 
 func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -50,7 +50,7 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 }
 
 func TestRetireDeleteCredsAndSymlink(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -97,7 +97,7 @@ tests:
 `
 
 func TestRetireRefusesWhileTestsNameItForceOverrides(t *testing.T) {
-	h := newAddEnv(t, retirePolicyTests)
+	h := newFleetEnv(t, retirePolicyTests)
 	h.provisionDeclared("b")
 	before := h.policyText()
 	out, errb, code := h.run("retire", "b")
@@ -120,7 +120,7 @@ func TestRetireRefusesWhileTestsNameItForceOverrides(t *testing.T) {
 }
 
 func TestRetireUndeclaredNeedsForce(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("a")
 	h.provisionDeclared("zz") // provisioned, never declared
 	before := h.policyText()
@@ -152,7 +152,7 @@ func TestRetireUndeclaredNeedsForce(t *testing.T) {
 }
 
 func TestRetireLeavesAReplacedRecord(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	before := h.policyText()
 	other := ""
@@ -181,7 +181,7 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 }
 
 func TestRetireServerFailureChangesNothing(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	before := h.policyText()
 	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
@@ -195,7 +195,7 @@ func TestRetireServerFailureChangesNothing(t *testing.T) {
 }
 
 func TestRetireSavesNothingWhenPolicyChanged(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	afterRetireRead = func() {
 		f, _ := os.OpenFile(h.policy, os.O_APPEND|os.O_WRONLY, 0)
@@ -214,7 +214,7 @@ func TestRetireSavesNothingWhenPolicyChanged(t *testing.T) {
 }
 
 func TestRetireConsequencesAndUsage(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	// b is the last member of zone blue: the account JWT loses a key
 	out, errb, code := h.run("retire", "b")
@@ -232,4 +232,17 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 			t.Errorf("usage lacks %q", v)
 		}
 	}
+}
+
+// newFleetEnv is newAddEnv with the signing keys of the zones the policy already declares (an add into an existing
+// zone needs its key to exist: only a new zone gets one made).
+func newFleetEnv(t *testing.T, src string) *addEnv {
+	t.Helper()
+	h := newAddEnv(t, src)
+	for _, z := range []string{"red", "blue"} {
+		if _, err := h.keys().ZoneKey(z, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return h
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func TestLabelUnlabelRoundTripKeepsComments(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
 	out, errb, code := h.run("label", "a2", "team=x", "kind=tool", "--policy", h.policy)
 	if code != 0 || !strings.HasPrefix(out, "labeled a2: kind=tool team=x\n") {
@@ -35,7 +35,7 @@ func TestLabelUnlabelRoundTripKeepsComments(t *testing.T) {
 }
 
 func TestLabelDryRunWritesNothing(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
 	out, errb, code := h.run("label", "b", "zone=green", "--dry-run")
 	if code != 0 || !strings.Contains(out, "dry run:") || !strings.Contains(out, "b moves from zone blue to zone green") ||
@@ -48,7 +48,7 @@ func TestLabelDryRunWritesNothing(t *testing.T) {
 }
 
 func TestUnlabelUnsetWarns(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
 	out, errb, code := h.run("unlabel", "b", "team")
 	if code != 0 || !strings.Contains(errb, "label team is not set") || strings.Contains(out, "needed") {
@@ -60,7 +60,7 @@ func TestUnlabelUnsetWarns(t *testing.T) {
 }
 
 func TestLabelRefusals(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
 	for _, c := range []struct {
 		args []string
@@ -88,7 +88,7 @@ func TestLabelRefusals(t *testing.T) {
 }
 
 func TestLabelConsequences(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	// b becomes a tool: team x (a) now needs a tag for it
 	out, errb, code := h.run("label", "b", "kind=tool")
 	if code != 0 || !strings.Contains(out, "reissue needed: a (run: mashctl reissue a)") {
@@ -122,7 +122,7 @@ func TestLabelConsequences(t *testing.T) {
 }
 
 func TestLabelSurfacesConcurrentEdit(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newFleetEnv(t, addPolicy)
 	afterLabelLoad = func() {
 		f, _ := os.OpenFile(h.policy, os.O_APPEND|os.O_WRONLY, 0)
 		f.WriteString("# edited by hand\n")
