@@ -1,0 +1,6 @@
+default: allow
+endpoints:
+    a:
+      labels:
+        zone: x
+rules: []

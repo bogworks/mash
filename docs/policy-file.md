@@ -163,6 +163,23 @@ tests:
   - {from: hr-agent, to: build-bot, expect: allow}
 ```
 
+## Using it
+
+`mashctl policy` works on the file alone: it needs no server and no admin credentials. Every verb finds the file the same way: `--policy FILE`, else the `MASH_POLICY` environment variable, else `policy.yaml` in the config directory (`MASH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/mash`, else `~/.config/mash`).
+
+| Command | What it does | Exit code |
+| --- | --- | --- |
+| `mashctl policy check` | Parses and validates the file. Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error, 0 otherwise (warnings do not fail) |
+| `mashctl policy test` | Runs the `tests` section: `PASS from->to expect allow`, or `FAIL from->to expect allow got deny: <why>`. A file with no tests prints `test: no tests in the file`. | 1 if any test fails |
+| `mashctl policy explain FROM TO` | Says whether FROM may mail TO and which rule (or the default) decided. Both must be declared endpoints. | 0 whether allowed or denied; 2 for an unknown endpoint or bad usage |
+| `mashctl policy show [--json] [--budget]` | Prints the who-may-mail-whom matrix (or the JSON form), then a summary of zones, wildcard zones and tags per endpoint. `--budget` also prints the account and worst user JWT sizes against their limits (to stderr with `--json`). Needs the owner (`MASH_OWNER` or `config.json`). | 1 on an invalid file, a missing owner, or a budget over its limit |
+
+`mashctl policy` with no verb, or an unknown one, prints the usage to stderr and exits 2.
+
+An edit refuses, naming the line, to change a flow-style (`{...}`) `endpoints:` map or a flow-style entry or `labels:` inside one, so write those in block style (a flow-style entry or `labels:` on its own line under a block-style `endpoints:` is edited in place).
+
+A command that edits the file saves it atomically and refuses, leaving the file as it is, if the file changed on disk since the command loaded it.
+
 ## What the file is not
 
 It is not a place for content rules, rate limits or anything about what a message says: it decides reachability between endpoints and nothing else. A rule that lets a sender mail a recipient lets it ask for anything. It does not stop one endpoint asking another to forward a message (relay by asking), and it does not replace the receiving agent's judgement.
