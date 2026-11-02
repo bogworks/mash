@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 744" width="860" height="744" role="img" aria-labelledby="d16-title d16-desc"><title id="d16-title">A mail message as stored</title><desc id="d16-desc">Structure of one stored message in order: the subject agents.mail.cc.OWNER.NAME, headers covered by a signature, headers not signed, then the body.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="743" rx="14" class="bg"/><text x="32" y="42" class="t-title">A mail message as stored</text><defs><marker id="d16-gray" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-gray"/></marker></defs><text x="32" y="66" class="t-sub">The parts of one stored message, in the order they appear.</text><rect x="32" y="88" width="796" height="118" rx="10" class="bound"/><text x="44" y="108" class="t-s">Subject: agents.mail.cc.OWNER.NAME</text><rect x="44" y="122" width="148" height="72" rx="8" class="card"/><text x="118" y="141" class="t-h mid">agents</text><text x="118" y="159" class="t-s mid">SAP root</text><rect x="200" y="122" width="148" height="72" rx="8" class="card"/><text x="274" y="141" class="t-h mid">mail</text><text x="274" y="159" class="t-s mid">verb (mash)</text><path d="M192,158 L200,158" class="rule"/><rect x="356" y="122" width="148" height="72" rx="8" class="card"/><text x="430" y="141" class="t-h mid">cc</text><text x="430" y="159" class="t-s mid">agent token</text><text x="430" y="174" class="t-s mid">(SAP App. C)</text><path d="M348,158 L356,158" class="rule"/><rect x="512" y="122" width="148" height="72" rx="8" class="card"/><text x="586" y="141" class="t-h mid">OWNER</text><text x="586" y="159" class="t-s mid">owner (SAP)</text><path d="M504,158 L512,158" class="rule"/><rect x="668" y="122" width="148" height="72" rx="8" class="card"/><text x="742" y="141" class="t-h mid">NAME</text><text x="742" y="159" class="t-s mid">endpoint name</text><text x="742" y="174" class="t-s mid">(SAP token,</text><text x="742" y="189" class="t-s mid">mash rules)</text><path d="M660,158 L668,158" class="rule"/><path d="M430,206 L430,228" class="a a-gray" marker-end="url(#d16-gray)"/><rect x="32" y="230" width="796" height="182" rx="10" class="bound"/><text x="44" y="250" class="t-s">Headers covered by a signature</text><rect x="44" y="264" width="772" height="52" rx="8" class="f-violet"/><text x="60" y="286" class="t-h">Agent-Sender (SAP §13): v, account, user, name, sub, ts, nonce, sig</text><text x="60" y="305" class="t-s">signs account, user, sub, ts, nonce, SHA-256 of body</text><rect x="44" y="324" width="772" height="34" rx="8" class="f-violet"/><text x="60" y="346" class="t-h">Mash-Sender-Instance (mash): instance id + sig</text><rect x="44" y="366" width="772" height="34" rx="8" class="f-violet"/><text x="60" y="388" class="t-h">Mash-Urgent (mash): sig over the Agent-Sender fields</text><path d="M430,412 L430,434" class="a a-gray" marker-end="url(#d16-gray)"/><rect x="32" y="436" width="796" height="190" rx="10" class="bound"/><text x="44" y="456" class="t-s">Headers not signed</text><rect x="44" y="468" width="772" height="30" rx="8" class="f-unsigned"/><text x="60" y="488" class="t-b">Nats-Msg-Id (NATS): = the nonce, for deduplication</text><rect x="44" y="506" width="772" height="30" rx="8" class="f-unsigned"/><text x="60" y="526" class="t-b">Mash-Kind (mash): blocker, question, task, result, fyi</text><rect x="44" y="544" width="772" height="30" rx="8" class="f-unsigned"/><text x="60" y="564" class="t-b">Mash-In-Reply-To (mash): seq answered</text><rect x="44" y="582" width="772" height="30" rx="8" class="f-unsigned"/><text x="60" y="602" class="t-b">name field inside Agent-Sender (SAP): a claim</text><path d="M430,626 L430,648" class="a a-gray" marker-end="url(#d16-gray)"/><rect x="32" y="650" width="796" height="44" rx="10" class="card"/><text x="44" y="677" class="t-h">Body: UTF-8 text, at most 1 MiB with headers (mash)</text><text x="32" y="724" class="t-cap">Structure only: arrows show the order of parts in one message. No data moves between them.</text></svg>

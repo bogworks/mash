@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 640" width="860" height="640" role="img" aria-labelledby="d11-title d11-desc"><title id="d11-title">Send (data flow)</title><desc id="d11-desc">A sender looks up bob in the KV directory, signs the message, publishes it to the inbox stream and gets a storage acknowledgement with a sequence number or a duplicate notice.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="639" rx="14" class="bg"/><text x="32" y="42" class="t-title">Send (data flow)</text><defs><marker id="d11-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d11-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-violet"/></marker></defs><text x="32" y="66" class="t-sub">Arrows point in the direction the data moves.</text><rect x="40" y="92" width="220" height="40" rx="8" class="card"/><text x="150" y="117" class="t-h mid">Sender (mash serve or CLI)</text><path d="M150,132 L150,580" class="rule"/><rect x="320" y="92" width="220" height="40" rx="8" class="f-teal"/><text x="430" y="117" class="t-h mid">KV mash-directory</text><path d="M430,132 L430,580" class="rule"/><rect x="600" y="92" width="220" height="40" rx="8" class="f-teal"/><text x="710" y="117" class="t-h mid">Inbox stream inbox-bob</text><path d="M710,132 L710,580" class="rule"/><rect x="32" y="150" width="300" height="44" rx="8" class="f-amber"/><text x="44" y="170" class="t-i">identity loaded at start from the creds file</text><text x="44" y="186" class="t-i">in ~/.config/mash</text><text x="290" y="224" class="t-i mid">look up "bob"</text><text x="290" y="238" class="t-i mid">(cached by serve, polled every 15 s)</text><path d="M150,252 L428,252" class="a a-teal" marker-end="url(#d11-teal)"/><circle cx="174" cy="252" r="9" class="f-violet"/><text x="174" y="256" class="t-i mid w6">1</text><text x="290" y="284" class="t-i mid">record: user key, mail subject</text><path d="M430,292 L152,292" class="a a-teal dash" marker-end="url(#d11-teal)"/><circle cx="406" cy="292" r="9" class="f-violet"/><text x="406" y="296" class="t-i mid w6">2</text><rect x="32" y="312" width="340" height="76" rx="8" class="f-amber"/><text x="44" y="332" class="t-i">sign body, subject, time and nonce with own</text><text x="44" y="348" class="t-i">user seed (SAP §13)</text><text x="44" y="364" class="t-i">nonce = hash of sender, recipient and</text><text x="44" y="380" class="t-i">idempotency key</text><rect x="268" y="411" width="323" height="30" class="bg"/><text x="430" y="424" class="t-i mid">publish to agents.mail.cc.OWNER.bob</text><text x="430" y="438" class="t-i mid">headers Agent-Sender, Nats-Msg-Id, Mash-Kind, ...</text><path d="M150,452 L708,452" class="a a-violet" marker-end="url(#d11-violet)"/><circle cx="174" cy="452" r="9" class="f-violet"/><text x="174" y="456" class="t-i mid w6">3</text><rect x="281" y="471" width="298" height="16" class="bg"/><text x="430" y="484" class="t-i mid">storage acknowledgement: seq 42, or duplicate</text><path d="M710,492 L152,492" class="a a-teal dash" marker-end="url(#d11-teal)"/><circle cx="686" cy="492" r="9" class="f-violet"/><text x="686" y="496" class="t-i mid w6">4</text><rect x="32" y="516" width="300" height="44" rx="8" class="f-amber"/><text x="44" y="536" class="t-i">reports "sent #42".</text><text x="44" y="552" class="t-i">On timeout, reports the key to retry with</text><text x="32" y="618" class="t-cap">Numbers give the order of messages. Dashed arrows are replies.</text></svg>

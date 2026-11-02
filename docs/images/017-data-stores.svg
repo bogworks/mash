@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 614" width="860" height="614" role="img" aria-labelledby="d17-title d17-desc"><title id="d17-title">Data stores and their writers</title><desc id="d17-desc">A mash admin creates inboxes and writes the directory and lease tombstones. Endpoints mail inboxes and read the directory. Serve writes its own lease. Heartbeats are not stored.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="613" rx="14" class="bg"/><text x="32" y="42" class="t-title">Data stores and their writers</text><defs><marker id="d17-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d17-gray" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-gray"/></marker></defs><text x="32" y="66" class="t-sub">Who writes to and reads from each store.</text><rect x="270" y="92" width="228" height="296" rx="10" class="bound"/><text x="282" y="112" class="t-s">NATS JetStream, one account</text><rect x="294" y="128" width="180" height="64" rx="8" class="f-teal"/><text x="384" y="153" class="t-h mid">inbox-NAME stream</text><text x="384" y="173" class="t-s mid">+ consumer 'deliver'</text><rect x="294" y="232" width="180" height="48" rx="8" class="f-teal"/><text x="384" y="261" class="t-h mid">KV mash-directory</text><rect x="294" y="320" width="180" height="48" rx="8" class="f-teal"/><text x="384" y="349" class="t-h mid">KV mash-leases</text><rect x="32" y="232" width="104" height="48" rx="8" class="card"/><text x="84" y="261" class="t-h mid">mash admin</text><path d="M136,256 L146,256 L146,160 L294,160" class="a a-teal" marker-end="url(#d17-teal)"/><path d="M136,256 L294,256" class="a a-teal" marker-end="url(#d17-teal)"/><path d="M136,256 L146,256 L146,350 L294,350" class="a a-teal" marker-end="url(#d17-teal)"/><text x="152" y="152" class="t-i">creates, deletes</text><text x="152" y="248" class="t-i">writes records</text><text x="152" y="327" class="t-i">writes tombstone,</text><text x="152" y="340" class="t-i">clears</text><rect x="640" y="124" width="188" height="148" rx="8" class="card"/><text x="734" y="194" class="t-h mid">Endpoint</text><text x="734" y="214" class="t-s mid">(serve or CLI)</text><path d="M640,140 L474,140" class="a a-teal" marker-end="url(#d17-teal)"/><path d="M474,180 L640,180" class="a a-teal" marker-end="url(#d17-teal)"/><path d="M474,256 L640,256" class="a a-teal" marker-end="url(#d17-teal)"/><text x="569" y="114" class="t-i mid">publishes mail to</text><text x="569" y="127" class="t-i mid">any inbox of its owner</text><text x="569" y="196" class="t-i mid">own inbox only</text><text x="569" y="248" class="t-i mid">read only</text><rect x="640" y="316" width="188" height="56" rx="8" class="card"/><text x="734" y="349" class="t-h mid">mash serve</text><path d="M640,350 L474,350" class="a a-teal" marker-end="url(#d17-teal)"/><text x="569" y="342" class="t-i mid">own key only</text><rect x="640" y="416" width="188" height="68" rx="8" class="f-gray"/><text x="734" y="438" class="t-h mid">agents.hb,</text><text x="734" y="455" class="t-h mid">$SRV subjects</text><text x="734" y="473" class="t-s mid">(not stored)</text><rect x="640" y="516" width="188" height="44" rx="8" class="card"/><text x="734" y="543" class="t-h mid">Any SAP agent</text><path d="M734,372 L734,416" class="a a-gray" marker-end="url(#d17-gray)"/><path d="M734,516 L734,484" class="a a-gray" marker-end="url(#d17-gray)"/><text x="726" y="398" class="t-i end">heartbeat, registration</text><text x="726" y="504" class="t-i end">heartbeat, registration</text><text x="32" y="594" class="t-cap">Data flow: arrows point where data is written or read to.</text></svg>

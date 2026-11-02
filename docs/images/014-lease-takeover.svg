@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 663" width="860" height="663" role="img" aria-labelledby="d14-title d14-desc"><title id="d14-title">Lease takeover after a crash (data flow)</title><desc id="d14-desc">A new mash serve finds the dead holder&#x27;s lease in KV mash-leases, confirms the holder is gone on the same machine, takes the lease by compare-and-set, then receives redelivery of unacknowledged #42.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="662" rx="14" class="bg"/><text x="32" y="42" class="t-title">Lease takeover after a crash (data flow)</text><defs><marker id="d14-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker></defs><text x="32" y="66" class="t-sub">The new serve takes the lease from a killed one, and the stream redelivers what was left unacknowledged.</text><path d="M117,140 L117,607" class="rule dash"/><path d="M307,140 L307,607" class="rule dash"/><path d="M567,140 L567,607" class="rule dash"/><path d="M748,140 L748,607" class="rule dash"/><rect x="37" y="92" width="160" height="48" rx="8" class="card"/><text x="117" y="113" class="t-h mid">old mash serve</text><text x="117" y="130" class="t-s mid">(killed)</text><rect x="227" y="92" width="160" height="48" rx="8" class="card"/><text x="307" y="121" class="t-h mid">new mash serve</text><rect x="487" y="92" width="160" height="48" rx="8" class="f-teal"/><text x="567" y="113" class="t-h mid">KV</text><text x="567" y="130" class="t-s mid">mash-leases</text><rect x="668" y="92" width="160" height="48" rx="8" class="f-teal"/><text x="748" y="121" class="t-h mid">Inbox stream</text><rect x="37" y="180" width="160" height="56" rx="8" class="f-red"/><text x="51" y="202" class="t-b">kill -9: lease left,</text><text x="51" y="220" class="t-b">#42 unacknowledged</text><text x="319" y="267" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">create key &quot;bob&quot;</text><path d="M307,275 L567,275" class="a a-teal" marker-end="url(#d14-teal)"/><text x="32" y="279" class="t-s w6">1</text><text x="319" y="312" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">exists: holder machine id, pid, start time</text><path d="M567,320 L307,320" class="a a-teal dash" marker-end="url(#d14-teal)"/><text x="32" y="324" class="t-s w6">2</text><rect x="174" y="346" width="266" height="56" rx="8" class="f-amber"/><text x="188" y="368" class="t-b">same machine id, and the pid is gone</text><text x="188" y="386" class="t-b">or has another start time</text><text x="319" y="433" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">compare-and-set update (fails if the holder wrote since)</text><path d="M307,441 L567,441" class="a a-teal" marker-end="url(#d14-teal)"/><text x="32" y="445" class="t-s w6">3</text><text x="319" y="478" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">new revision: lease held</text><path d="M567,486 L307,486" class="a a-teal dash" marker-end="url(#d14-teal)"/><text x="32" y="490" class="t-s w6">4</text><text x="319" y="523" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">redelivery of #42 after the ack wait</text><path d="M748,531 L307,531" class="a a-teal" marker-end="url(#d14-teal)"/><text x="32" y="535" class="t-s w6">5</text><rect x="204" y="557" width="206" height="38" rx="8" class="f-amber"/><text x="218" y="579" class="t-b">spooled and shown as in 6.2</text><text x="32" y="639" class="t-cap">Solid arrows are requests, dashed arrows are replies and status. Time runs top to bottom.</text></svg>
