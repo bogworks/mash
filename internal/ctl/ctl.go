@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"slices"
 	"sort"
 	"strconv"
@@ -155,10 +155,11 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	if cfg.URL == "" || cfg.AdminCreds == "" {
 		return nil, nil, nil, errors.New(pfx + ": admin commands need MASH_URL and MASH_ADMIN_CREDS")
 	}
-	if err := config.CheckCredsMode(cfg.AdminCreds); err != nil {
-		return nil, nil, nil, err
-	}
-	if raw, err := os.ReadFile(cfg.AdminCreds); err != nil {
+	if raw, err := config.ReadCredsFile(cfg.AdminCreds); err != nil {
+		var pe *fs.PathError
+		if !errors.As(err, &pe) {
+			return nil, nil, nil, err // a refusal of the file's type, mode or owner, in its own words
+		}
 		return nil, nil, nil, fmt.Errorf(pfx+": admin credentials: %w", err)
 	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return nil, nil, nil, err

@@ -6,7 +6,6 @@ package mint
 import (
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -29,6 +28,35 @@ type Minted struct {
 	JWT        string
 	Creds      []byte // the creds file contents (JWT and seed): a secret
 	Tags       []string
+}
+
+// ScopeVerifier is implemented by a Keys that can see the account JWT the zone keys are published in. Mint calls it
+// with the zone key's public key and the zone, and it returns an error unless that key is a jwt.UserScope signing
+// key of the account. The key store alone (ctlkeys.Authority) holds seeds, not the account JWT, so it does not
+// implement it; Mint then relies on the checks in checkZoneKey, and `policy apply` is what publishes and verifies
+// the scope in the account JWT.
+type ScopeVerifier interface {
+	VerifyZoneScope(zone, zonePub string) error
+}
+
+// checkZoneKey refuses to mint with a key that would give users no restrictions. Users minted under a scoped
+// signing key carry empty permission limits and take the key's template; signed by a plain account key, they would
+// carry empty limits and so be unrestricted. The key must be an account-type key, must not be the account identity
+// key itself (which is not scoped), and, where the Keys can see the account JWT, must be a UserScope key in it.
+func checkZoneKey(keys Keys, zone string, zoneKP nkeys.KeyPair, acctPub string) error {
+	zonePub, err := zoneKP.PublicKey()
+	if err != nil || !nkeys.IsValidPublicAccountKey(zonePub) {
+		return fmt.Errorf("mint: the signing key of zone %q is not an account signing key", zone)
+	}
+	if zonePub == acctPub {
+		return fmt.Errorf("mint: the signing key of zone %q is the account identity key, not a scoped signing key: users it signs would have no restrictions", zone)
+	}
+	if v, ok := keys.(ScopeVerifier); ok {
+		if err := v.VerifyZoneScope(zone, zonePub); err != nil {
+			return fmt.Errorf("mint: zone %q: %w", zone, err)
+		}
+	}
+	return nil
 }
 
 // Mint issues the user JWT of endpoint name of c. With userSeed nil it makes a fresh user key; with a user seed (a
@@ -60,6 +88,9 @@ func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte, createZon
 		return nil, err
 	}
 	defer zoneKP.Wipe()
+	if err := checkZoneKey(keys, ep.Zone, zoneKP, acctPub); err != nil {
+		return nil, err
+	}
 
 	var userKP nkeys.KeyPair
 	if reissue {
@@ -90,12 +121,10 @@ func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte, createZon
 	uc.Name = name
 	uc.IssuerAccount = acctPub
 	// A scoped signing key's users carry no permissions or limits of their own: the key's template applies only to
-	// such users, and a populated set makes it not apply or the user fail to connect.
+	// such users, and a populated set makes it not apply or the user fail to connect. That makes the key the only
+	// thing restricting the user, so the key is checked above (checkZoneKey), not the empty limits set here.
 	uc.UserPermissionLimits = jwt.UserPermissionLimits{}
 	uc.Tags.Add(ep.Tags...)
-	if !reflect.DeepEqual(uc.UserPermissionLimits, jwt.UserPermissionLimits{}) {
-		return nil, errors.New("mint: a scoped user must carry no permission limits")
-	}
 	token, err := uc.Encode(zoneKP)
 	if err != nil {
 		return nil, fmt.Errorf("mint: sign: %w", err)

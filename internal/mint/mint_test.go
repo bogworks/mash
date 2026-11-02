@@ -345,3 +345,59 @@ rules:
 		}
 	}
 }
+
+// scopedKeys is a fakeKeys that also sees the account JWT's scopes.
+type scopedKeys struct {
+	*fakeKeys
+	scopes jwt.SigningKeys
+}
+
+func (s scopedKeys) VerifyZoneScope(zone, zonePub string) error {
+	sc, ok := s.scopes.GetScope(zonePub)
+	if !ok {
+		return errors.New("the signing key is not in the account JWT")
+	}
+	if _, isUser := sc.(*jwt.UserScope); !isUser {
+		return errors.New("the signing key is not a user scope")
+	}
+	return nil
+}
+
+// TestMintRefusesAZoneKeyThatDoesNotRestrict: a key that is not a scoped signing key would give the minted users no
+// restrictions at all, so Mint refuses it. These fail if the guard is removed.
+func TestMintRefusesAZoneKeyThatDoesNotRestrict(t *testing.T) {
+	c := compile(t, "default: deny\nendpoints:\n  a: {labels: {zone: red}}\n")
+
+	// The account identity key as the zone key.
+	k := newFakeKeys(t)
+	k.zones["red"] = k.acct
+	if m, err := Mint(k, c, "a", nil, false); err == nil || m != nil || !strings.Contains(err.Error(), "identity key") {
+		t.Errorf("identity key as zone key: got %v, %v", m, err)
+	}
+
+	// A key of another type.
+	k = newFakeKeys(t)
+	uk, _ := nkeys.CreateUser()
+	k.zones["red"] = uk
+	if m, err := Mint(k, c, "a", nil, false); err == nil || m != nil || !strings.Contains(err.Error(), "not an account signing key") {
+		t.Errorf("user key as zone key: got %v, %v", m, err)
+	}
+
+	// A Keys that sees the account JWT: absent from it, or present as something other than a UserScope.
+	k = newFakeKeys(t)
+	zk, _ := nkeys.CreateAccount()
+	k.zones["red"] = zk
+	zpub, _ := zk.PublicKey()
+	sk := scopedKeys{k, jwt.SigningKeys{}}
+	if m, err := Mint(sk, c, "a", nil, false); err == nil || m != nil || !strings.Contains(err.Error(), "not in the account JWT") {
+		t.Errorf("zone key missing from the account JWT: got %v, %v", m, err)
+	}
+	sk.scopes.Add(zpub) // a plain signing key: no scope
+	if m, err := Mint(sk, c, "a", nil, false); err == nil || m != nil || !strings.Contains(err.Error(), "not a user scope") {
+		t.Errorf("plain signing key: got %v, %v", m, err)
+	}
+	sk.scopes[zpub] = jwt.NewUserScope()
+	if _, err := Mint(sk, c, "a", nil, false); err != nil {
+		t.Errorf("a UserScope key must mint: %v", err)
+	}
+}
