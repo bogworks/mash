@@ -47,6 +47,8 @@ type ServerSet struct {
 	Gateways bool
 	// Cluster is the cluster name any reply gave ("" when no reply names a cluster: a standalone server).
 	Cluster string
+	// ClusterConflict is set when replies name different clusters: the set spans clusters and is not authoritative.
+	ClusterConflict bool
 }
 
 // need is how many distinct replies make the set complete: what the routes say, or the operator's inventory
@@ -58,7 +60,7 @@ func (s ServerSet) need(inventory int) int { return max(s.Expected, inventory) }
 // that names a cluster is not enough, even with zero routes: an isolated cluster member sees no peers, so the
 // number of servers cannot be verified from here. A reply naming no cluster is a standalone server.
 func (s ServerSet) Complete(inventory int) bool {
-	if s.Gateways || len(s.Names) == 0 {
+	if s.Gateways || s.ClusterConflict || len(s.Names) == 0 {
 		return false
 	}
 	if inventory <= 0 && s.Cluster != "" {
@@ -72,6 +74,8 @@ func (s ServerSet) Why(inventory int) string {
 	switch {
 	case len(s.Names) == 0:
 		return "the system account ping was answered by no server"
+	case s.ClusterConflict:
+		return fmt.Sprintf("%d server(s) replied and they name different clusters (first seen: %s): membership cannot be verified from here", len(s.Names), s.Cluster)
 	case s.Gateways:
 		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
 	case inventory <= 0 && s.Cluster != "" && len(s.Names) >= s.Expected:

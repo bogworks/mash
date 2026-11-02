@@ -74,52 +74,14 @@ func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
 		if err != nil {
 			// quiet for the settle window: done when complete, or when the total wait is used up.
 			left := pingTotal - time.Since(start)
-			if set.Complete(n.Inventory) || set.Gateways || left <= 0 || len(set.Names) == 0 {
+			if set.Complete(n.Inventory) || set.Gateways || set.ClusterConflict || left <= 0 || len(set.Names) == 0 {
 				break
 			}
 			wait = min(pingSettle, left)
 			continue
 		}
 		wait = pingSettle
-		var r struct {
-			Server struct {
-				Name string `json:"name"`
-				ID   string `json:"id"`
-			} `json:"server"`
-			Stats struct {
-				Routes []struct {
-					Name string `json:"name"`
-				} `json:"routes"`
-				Gateways []json.RawMessage `json:"gateways"`
-			} `json:"statsz"`
-		}
-		if json.Unmarshal(msg.Data, &r) != nil {
-			continue
-		}
-		name := r.Server.Name
-		if name == "" {
-			name = r.Server.ID
-		}
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		set.Names = append(set.Names, name)
-		// One route connection per peer, but a pool holds several: count distinct peer names when they are
-		// reported (an unnamed route counts for itself, which can only over-count and so can only say UNCONFIRMED).
-		peers := map[string]bool{}
-		unnamed := 0
-		for _, rt := range r.Stats.Routes {
-			if rt.Name == "" {
-				unnamed++
-			} else {
-				peers[rt.Name] = true
-			}
-		}
-		set.Expected = max(set.Expected, 1+len(peers)+unnamed)
-		if len(r.Stats.Gateways) > 0 {
-			set.Gateways = true
-		}
+		addPingReply(&set, seen, msg.Data)
 	}
 	sort.Strings(set.Names)
 	return set, nil
@@ -219,4 +181,57 @@ func hintNoAnswer(err error) error {
 		return fmt.Errorf("%w: the system account answered nothing; are these the system account's credentials, and does the server run an operator-mode full resolver?", err)
 	}
 	return err
+}
+
+// addPingReply folds one $SYS.REQ.SERVER.PING reply into the set. seen holds the server names already counted;
+// an unparsable reply, one naming no server, or a repeat is ignored. The cluster name is the first non-empty one
+// seen; a reply naming a different cluster marks the set ClusterConflict, which keeps it from being complete.
+func addPingReply(set *ServerSet, seen map[string]bool, data []byte) {
+	var r struct {
+		Server struct {
+			Name    string `json:"name"`
+			ID      string `json:"id"`
+			Cluster string `json:"cluster"`
+		} `json:"server"`
+		Stats struct {
+			Routes []struct {
+				Name string `json:"name"`
+			} `json:"routes"`
+			Gateways []json.RawMessage `json:"gateways"`
+		} `json:"statsz"`
+	}
+	if json.Unmarshal(data, &r) != nil {
+		return
+	}
+	name := r.Server.Name
+	if name == "" {
+		name = r.Server.ID
+	}
+	if name == "" || seen[name] {
+		return
+	}
+	seen[name] = true
+	set.Names = append(set.Names, name)
+	switch {
+	case r.Server.Cluster == "":
+	case set.Cluster == "":
+		set.Cluster = r.Server.Cluster
+	case set.Cluster != r.Server.Cluster:
+		set.ClusterConflict = true
+	}
+	// One route connection per peer, but a pool holds several: count distinct peer names when they are
+	// reported (an unnamed route counts for itself, which can only over-count and so can only say UNCONFIRMED).
+	peers := map[string]bool{}
+	unnamed := 0
+	for _, rt := range r.Stats.Routes {
+		if rt.Name == "" {
+			unnamed++
+		} else {
+			peers[rt.Name] = true
+		}
+	}
+	set.Expected = max(set.Expected, 1+len(peers)+unnamed)
+	if len(r.Stats.Gateways) > 0 {
+		set.Gateways = true
+	}
 }
