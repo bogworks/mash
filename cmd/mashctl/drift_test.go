@@ -750,6 +750,9 @@ func TestDriftReportsUnknownSigningKeys(t *testing.T) {
 	wantState(t, "account", r.Account, statusDrift, "signing-key-unknown "+opub)
 	if d := r.Account.Findings[0].Detail; !strings.Contains(d, "will not carry signing keys it did not create") {
 		t.Errorf("finding: %s", d)
+	}
+}
+
 func TestDriftRecordExtraNamesTheFix(t *testing.T) {
 	e := newDriftEnv(t)
 	adm, ctx, done := e.admin()
