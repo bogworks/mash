@@ -16,11 +16,13 @@ mashctl add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]
 
 `add` refuses a policy that would exceed the JWT budgets (the 1 MiB account JWT, the per-user connect limit) before changing anything.
 
+A zone that already has endpoints must already have its signing key: if the key file is missing, `add` refuses before changing anything, since a new key would sign creds the account JWT does not trust; restore the key file from backup. The key is created only for a new zone (a leftover key from an earlier failed add is reused).
+
 Order of operations; a failure at any step undoes the earlier ones, so no half-made endpoint is left:
 
 1. Lock and load the policy file; the name must be valid and not declared.
 2. Declare the endpoint in memory and compile the result.
-3. Mint the user (the zone's signing key is created if the zone is new; an unused key stays, it is in no account JWT).
+3. Mint the user (the zone's signing key is created only if the zone is new; an unused key stays, it is in no account JWT).
 4. Provision the directory record and inbox. A server failure here writes nothing.
 5. Write `NAME.creds` (mode 0600, never over an existing file; the directory is made 0700 if missing). On failure the provision is rolled back.
 6. Save the policy file, comments kept. If the file changed since it was loaded, the creds file and the provision are rolled back and the command says to re-run it.

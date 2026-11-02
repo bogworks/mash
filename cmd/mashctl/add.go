@@ -297,10 +297,16 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	}
 	defer closeAdmin()
 
-	// (3) mint: the zone key is created if the zone is new. It is left in place by a later failure: an unused key
-	// is not in any account JWT.
-	m, err := mint.Mint(keys, after, o.name, nil)
+	// (3) mint: the zone key is created only if the zone is new (no declared endpoint is in it); a zone that already
+	// has endpoints must already have its key, or the new creds would not authenticate. A key made here is left in
+	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
+	zoneExists := slices.ContainsFunc(before.Endpoints, func(e policy.CompiledEndpoint) bool { return e.Zone == ep.Zone })
+	m, err := mint.Mint(keys, after, o.name, nil, !zoneExists)
 	if err != nil {
+		if zoneExists && errors.Is(err, ctlkeys.ErrNoZoneKey) {
+			dir, _ := ctlkeys.DirFor(cfg, env)
+			return fail("the signing key for zone %s is missing (existing endpoints are in this zone), so a new endpoint's creds would not authenticate: restore the key file from backup (key directory %s), or move the endpoints to another zone; nothing was changed", ep.Zone, dir)
+		}
 		return fail("%v", err)
 	}
 	defer clear(m.Creds)

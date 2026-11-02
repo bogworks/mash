@@ -31,10 +31,11 @@ type Minted struct {
 	Tags       []string
 }
 
-// Mint issues the user JWT of endpoint name of c. With userSeed nil it makes a fresh user key and creates the zone's
-// signing key if the zone is new; with a user seed (a re-issue) it keeps that user key, and a missing zone key is an
-// error, since apply never made it.
-func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte) (*Minted, error) {
+// Mint issues the user JWT of endpoint name of c. With userSeed nil it makes a fresh user key; with a user seed (a
+// re-issue) it keeps that user key. The caller decides whether the zone's signing key may be created: with
+// createZoneKey false a missing key is an error wrapping ctlkeys.ErrNoZoneKey, since a key made now would not be in
+// the account JWT the zone's existing users were issued under.
+func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte, createZoneKey bool) (*Minted, error) {
 	var ep *policy.CompiledEndpoint
 	for i := range c.Endpoints {
 		if c.Endpoints[i].Name == name {
@@ -51,10 +52,10 @@ func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte) (*Minted,
 		return nil, err
 	}
 	acctKP.Wipe() // only the public key is needed: users are signed by the zone key
-	zoneKP, err := keys.ZoneKey(ep.Zone, !reissue)
+	zoneKP, err := keys.ZoneKey(ep.Zone, createZoneKey)
 	if err != nil {
-		if reissue {
-			return nil, fmt.Errorf("mint: zone %q has no signing key (run mashctl apply first): %w", ep.Zone, err)
+		if !createZoneKey {
+			return nil, fmt.Errorf("mint: zone %q has no signing key: %w", ep.Zone, err)
 		}
 		return nil, err
 	}

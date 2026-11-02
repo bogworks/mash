@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
 )
 
@@ -42,7 +43,7 @@ func (f *fakeKeys) Account() (nkeys.KeyPair, string, error) {
 	return kp, pub, nil
 }
 
-var errNoZone = errors.New("no zone key")
+var errNoZone = ctlkeys.ErrNoZoneKey
 
 func (f *fakeKeys) ZoneKey(zone string, create bool) (nkeys.KeyPair, error) {
 	kp, ok := f.zones[zone]
@@ -80,7 +81,7 @@ rules:
   - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}
 `)
 	keys := newFakeKeys(t)
-	m, err := Mint(keys, c, "a", nil)
+	m, err := Mint(keys, c, "a", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,13 +122,13 @@ rules:
 func TestMintReissue(t *testing.T) {
 	c := compile(t, "endpoints:\n  a: {labels: {zone: red}}\n")
 	keys := newFakeKeys(t)
-	m1, err := Mint(keys, c, "a", nil)
+	m1, err := Mint(keys, c, "a", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	kp, _ := jwt.ParseDecoratedNKey(m1.Creds)
 	seed, _ := kp.Seed()
-	m2, err := Mint(keys, c, "a", seed)
+	m2, err := Mint(keys, c, "a", seed, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,28 +137,28 @@ func TestMintReissue(t *testing.T) {
 	}
 	// not a user seed, not a seed
 	acctSeed, _ := keys.acct.Seed()
-	if _, err := Mint(keys, c, "a", acctSeed); err == nil || !strings.Contains(err.Error(), "not a user seed") {
+	if _, err := Mint(keys, c, "a", acctSeed, false); err == nil || !strings.Contains(err.Error(), "not a user seed") {
 		t.Errorf("account seed: %v", err)
 	}
-	if _, err := Mint(keys, c, "a", []byte("junk")); err == nil {
+	if _, err := Mint(keys, c, "a", []byte("junk"), false); err == nil {
 		t.Error("junk seed accepted")
 	}
 	// a zone with no key: error on re-issue, nothing created
 	delete(keys.zones, "red")
-	if _, err := Mint(keys, c, "a", seed); err == nil || !errors.Is(err, errNoZone) {
+	if _, err := Mint(keys, c, "a", seed, false); err == nil || !errors.Is(err, errNoZone) {
 		t.Errorf("re-issue with no zone key: %v", err)
 	}
 	if _, ok := keys.zones["red"]; ok {
 		t.Error("re-issue created the zone key")
 	}
-	if _, err := Mint(keys, c, "nope", nil); err == nil {
+	if _, err := Mint(keys, c, "nope", nil, true); err == nil {
 		t.Error("undeclared endpoint minted")
 	}
 }
 
 func TestMintErrorsHideSeeds(t *testing.T) {
 	c := compile(t, "endpoints:\n  a: {}\n")
-	_, err := Mint(newFakeKeys(t), c, "a", []byte("SUAJUNKJUNKJUNK"))
+	_, err := Mint(newFakeKeys(t), c, "a", []byte("SUAJUNKJUNKJUNK"), false)
 	if err == nil || strings.Contains(err.Error(), "SUAJ") {
 		t.Fatalf("%v", err)
 	}
@@ -178,11 +179,11 @@ rules:
   - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}
 `)
 	keys := newFakeKeys(t)
-	ma, err := Mint(keys, c, "a", nil)
+	ma, err := Mint(keys, c, "a", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Mint(keys, c, "b", nil); err != nil {
+	if _, err := Mint(keys, c, "b", nil, true); err != nil {
 		t.Fatal(err)
 	}
 	url := startServer(t, c, keys)
@@ -220,7 +221,7 @@ rules:
 	// A re-issue keeps the user key and still connects.
 	kp, _ := jwt.ParseDecoratedNKey(ma.Creds)
 	seed, _ := kp.Seed()
-	re, err := Mint(keys, c, "a", seed)
+	re, err := Mint(keys, c, "a", seed, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,4 +282,24 @@ func startServer(t *testing.T, c *policy.Compiled, keys *fakeKeys) string {
 	}
 	t.Cleanup(func() { s.Shutdown(); s.WaitForShutdown() })
 	return s.ClientURL()
+}
+
+func TestMintZoneKeyCreationIsTheCallers(t *testing.T) {
+	c := compile(t, "endpoints:\n  a: {labels: {zone: red}}\n")
+	keys := newFakeKeys(t)
+	if _, err := Mint(keys, c, "a", nil, false); !errors.Is(err, ctlkeys.ErrNoZoneKey) {
+		t.Fatalf("missing key, create false: %v", err)
+	}
+	if _, ok := keys.zones["red"]; ok {
+		t.Fatal("the zone key was created although createZoneKey was false")
+	}
+	if _, err := Mint(keys, c, "a", nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keys.zones["red"]; !ok {
+		t.Fatal("the zone key was not created")
+	}
+	if _, err := Mint(keys, c, "a", nil, false); err != nil {
+		t.Fatalf("an existing key with create false: %v", err)
+	}
 }

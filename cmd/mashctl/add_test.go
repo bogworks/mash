@@ -99,7 +99,7 @@ func (h *addEnv) seed(name string) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	m, err := mint.Mint(h.keys(), c, name, nil)
+	m, err := mint.Mint(h.keys(), c, name, nil, true)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -269,6 +269,54 @@ func TestReissueNeedsZoneKeyAndNewIssuer(t *testing.T) {
 	}
 	if out, _, code := h.run("reissue", "--changed"); code != 0 || !strings.HasPrefix(out, "reissued a ") {
 		t.Fatalf("--changed after a new zone key: %d %q", code, out)
+	}
+}
+
+func TestAddRefusesExistingZoneWithLostKey(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seed("a")
+	keyFile := filepath.Join(h.env["MASH_KEYS_DIR"], "zones", "red.nk")
+	if err := os.Remove(keyFile); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(h.policy)
+	recs := h.records()
+	out, errb, code := h.run("add", "n", "--zone", "red")
+	if code != 1 || out != "" || !strings.Contains(errb, "the signing key for zone red is missing") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
+		t.Error("policy changed")
+	}
+	if _, err := os.Stat(h.creds("n")); !os.IsNotExist(err) {
+		t.Error("creds written")
+	}
+	if !slices.Equal(recs, h.records()) {
+		t.Errorf("directory changed: %v -> %v", recs, h.records())
+	}
+	if _, err := os.Stat(keyFile); !os.IsNotExist(err) {
+		t.Error("a new zone key was created")
+	}
+}
+
+func TestAddNewZoneReusesLeftoverKey(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	kp, err := h.keys().ZoneKey("green", true) // left by an earlier failed add
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := kp.PublicKey()
+	out, errb, code := h.run("add", "g", "--zone", "green")
+	if code != 0 || !strings.Contains(out, "account update needed: run mashctl apply") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	got, err := h.keys().ZonePublic("green")
+	if err != nil || got != want {
+		t.Fatalf("zone key changed: %q vs %q (%v)", got, want, err)
+	}
+	if uc, _ := h.credsClaims("g"); uc.Issuer != want {
+		t.Errorf("creds not signed by the leftover key: %s", uc.Issuer)
 	}
 }
 

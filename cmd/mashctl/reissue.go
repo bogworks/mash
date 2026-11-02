@@ -202,7 +202,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, c *policy.Compiled, name stri
 	}
 	seed = append([]byte(nil), seed...)
 	defer clear(seed)
-	m, err := mint.Mint(keys, c, name, seed)
+	m, err := mint.Mint(keys, c, name, seed, false)
 	if err != nil {
 		return nil, err
 	}
