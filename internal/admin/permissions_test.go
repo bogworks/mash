@@ -25,6 +25,7 @@ func TestPermissionsExact(t *testing.T) {
 		"_INBOX.>",
 		"agents.hb.cc.o.a",
 		"agents.mail.*.o.*",
+		"agents.mail.*.o.*.*",
 		"agents.prompt.*.o.*",
 		"agents.status.*.o.*",
 	}
@@ -77,10 +78,34 @@ func TestNSCFlags(t *testing.T) {
 	f := strings.Join(NSCFlags("o", "a"), " ")
 	for _, want := range []string{
 		"--allow-pub agents.mail.*.o.*",
+		"--allow-pub agents.mail.*.o.*.*",
 		"--allow-sub agents.prompt.cc.o.a",
 	} {
 		if !strings.Contains(f, want) {
 			t.Errorf("flags missing %q:\n%s", want, f)
+		}
+	}
+}
+
+// The zoned mail subject has 6 tokens; the legacy wildcard does not match it, so the wildcard set carries both forms.
+func TestPermissionsMailZoneLine(t *testing.T) {
+	p := Permissions("o", "a")
+	for _, w := range []string{"agents.mail.*.o.*", "agents.mail.*.o.*.*"} {
+		if !slices.Contains(p.Pub.Allow, w) {
+			t.Errorf("missing %s", w)
+		}
+	}
+	for _, s := range p.Pub.Allow {
+		if strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
+			if strings.Count(s, ".") != 4 {
+				t.Errorf("prompt/status line %s changed shape", s)
+			}
+		}
+	}
+	// A recipient form keeps the single legacy line per recipient.
+	for _, s := range PermissionsTo("o", "a", []string{"b"}).Pub.Allow {
+		if strings.HasPrefix(s, "agents.mail") && s != "agents.mail.*.o.b" {
+			t.Errorf("recipient form grants %s", s)
 		}
 	}
 }
@@ -104,12 +129,12 @@ func TestPermissionsToRecipients(t *testing.T) {
 			t.Errorf("wildcard line %s", s)
 		}
 	}
-	// Same size apart from the peer lines: 18 fixed lines minus 3 wildcards, plus 6.
-	if len(p.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3+6 {
+	// Same size apart from the peer lines: 18 fixed lines minus 4 wildcards (mail twice, prompt, status), plus 6.
+	if len(p.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-4+6 {
 		t.Errorf("%d lines", len(p.Pub.Allow))
 	}
 	none := PermissionsTo("o", "a", []string{})
-	if len(none.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3 {
+	if len(none.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-4 {
 		t.Errorf("empty recipients: %d lines", len(none.Pub.Allow))
 	}
 	for _, s := range none.Pub.Allow {

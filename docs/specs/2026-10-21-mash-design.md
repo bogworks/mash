@@ -52,7 +52,7 @@ For endpoint `<name>` under owner `<owner>`:
 | prompt (live request/reply) | `agents.prompt.cc.<owner>.<name>` | Required by SAP. Queue group `agents`. |
 | status | `agents.status.cc.<owner>.<name>` | Required by SAP. Queue group `agents`. |
 | heartbeat | `agents.hb.cc.<owner>.<name>` | Every 30 s, signed (§13.11). |
-| **mail** | `agents.mail.cc.<owner>.<name>` | The mash verb. Captured by the endpoint's inbox stream. |
+| **mail** | `agents.mail.cc.<owner>.<name>`, or `agents.mail.cc.<owner>.<zone>.<name>` for an endpoint in a zone | The mash verb. Captured by the endpoint's inbox stream. An endpoint with no zone on record has the 5-token form (ADR 0054). |
 
 `mail` is not one of SAP's four reserved verbs, so using it is allowed (§2). SAP's official SDKs support custom endpoints the same way, e.g. `agents.spawn.…`.
 
@@ -90,7 +90,7 @@ mail is **declared, not registered** as a micro-service endpoint:
 | Setting | Value |
 |---|---|
 | name | `inbox-<name>` |
-| subjects | `agents.mail.*.<owner>.<name>` |
+| subjects | `agents.mail.*.<owner>.<name>`; for a zoned endpoint also the exact-zone `agents.mail.*.<owner>.<zone>.<name>` (ADR 0054) |
 | storage | file |
 | retention | limits |
 | max age | 30 days |
@@ -196,7 +196,7 @@ Then the contents of `~/.config/mash/policy.md`, if that file exists.
 These permissions, applied to a user named `<name>`, are the whole security model. `mash admin permissions <name>` prints them as JSON and as `nsc` flags.
 
 **Publish allow:**
-- `agents.mail.*.<owner>.*`: send mail to any endpoint. The signature, not the subject, proves the sender.
+- `agents.mail.*.<owner>.*` and `agents.mail.*.<owner>.*.*`: send mail to any endpoint, with the legacy 5-token subject or the zoned 6-token subject (ADR 0054). The signature, not the subject, proves the sender.
 - `agents.prompt.*.<owner>.*` and `agents.status.*.<owner>.*`: live SAP prompts and status probes to peers (`mash prompt`).
 - `agents.hb.cc.<owner>.<name>`.
 - `_INBOX.>`: replies to callers (prompt chunks, `$SRV` answers).

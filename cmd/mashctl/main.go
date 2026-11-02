@@ -30,7 +30,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
-	case "init", "limits", "permissions", "provision", "set-meta", "deprovision", "list":
+	case "init", "limits", "permissions", "provision", "set-meta", "set-zone", "deprovision", "list":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2

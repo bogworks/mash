@@ -33,6 +33,75 @@ func MailFilter(owner, name string) string {
 	return "agents.mail.*." + owner + "." + name
 }
 
+// DefaultZone is the conventional name of a zone for operators who want one;
+// an endpoint with no zone in its record has the legacy 5-token mail subject,
+// it is not in this zone.
+const DefaultZone = "default"
+
+// MaxZoneLen is the longest zone token.
+const MaxZoneLen = 32
+
+// ValidZone reports whether z is a zone token: 1-32 lower-case letters, digits
+// and hyphens. That excludes '.', '*', '>' and whitespace, so a zone is always
+// exactly one subject token.
+func ValidZone(z string) bool {
+	if z == "" || len(z) > MaxZoneLen {
+		return false
+	}
+	for i := 0; i < len(z); i++ {
+		c := z[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// ForZone returns the subjects of endpoint name under owner in zone: the same
+// as For, except that mail carries the zone token,
+// agents.mail.cc.<owner>.<zone>.<name>.
+func ForZone(owner, zone, name string) Subjects {
+	s := For(owner, name)
+	s.Mail = "agents.mail." + AgentToken + "." + owner + "." + zone + "." + name
+	return s
+}
+
+// MailFilterZone is the subject filter that matches mail to name under owner
+// in exactly zone (the 6-token form), from any agent token. A zoned endpoint's
+// inbox takes this filter and never a wildcard zone: a sender gated into one
+// zone must not reach an endpoint in another.
+func MailFilterZone(owner, zone, name string) string {
+	return "agents.mail.*." + owner + "." + zone + "." + name
+}
+
+// ZoneOfMailFilter returns the zone of s if s is an exact-zone mail filter of
+// name under owner (6 tokens: agents, mail, *, owner, a valid zone, name).
+func ZoneOfMailFilter(s, owner, name string) (zone string, ok bool) {
+	t := strings.Split(s, ".")
+	if len(t) != 6 || t[0] != "agents" || t[1] != "mail" || t[2] != "*" || t[3] != owner || t[5] != name || !ValidZone(t[4]) {
+		return "", false
+	}
+	return t[4], true
+}
+
+// SplitMail splits a mail subject into owner, zone and name. It accepts the
+// legacy 5-token form (zone is "") and the 6-token zoned form.
+func SplitMail(subj string) (owner, zone, name string, ok bool) {
+	t := strings.Split(subj, ".")
+	if len(t) < 5 || len(t) > 6 || t[0] != "agents" || t[1] != "mail" {
+		return "", "", "", false
+	}
+	for _, x := range t {
+		if x == "" {
+			return "", "", "", false
+		}
+	}
+	if len(t) == 5 {
+		return t[3], "", t[4], true
+	}
+	return t[3], t[4], t[5], true
+}
+
 // InboxPrefix is the reply-subject prefix of endpoint name's connections:
 // _INBOX.<name>. Each endpoint may subscribe only under its own prefix, so
 // replies meant for one endpoint (JetStream deliveries, KV reads, prompt

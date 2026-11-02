@@ -81,10 +81,21 @@ func (l Limits) Validate() error {
 
 // InboxConfigFor is InboxConfig under limits l.
 func InboxConfigFor(owner, name string, l Limits) jetstream.StreamConfig {
+	return InboxConfigZoned(owner, "", name, l)
+}
+
+// InboxConfigZoned is InboxConfigFor for an endpoint in zone. A non-empty zone adds the exact filter of that zone next
+// to the legacy one, so mail from a sender that still publishes to the legacy subject lands too, and mail addressed
+// to any other zone does not (ADR 0054).
+func InboxConfigZoned(owner, zone, name string, l Limits) jetstream.StreamConfig {
+	subjects := []string{sap.MailFilter(owner, name)}
+	if zone != "" {
+		subjects = append(subjects, sap.MailFilterZone(owner, zone, name))
+	}
 	return jetstream.StreamConfig{
 		Name:              sap.InboxStream(name),
 		Description:       "mash inbox for " + name,
-		Subjects:          []string{sap.MailFilter(owner, name)},
+		Subjects:          subjects,
 		Storage:           jetstream.FileStorage,
 		Retention:         jetstream.LimitsPolicy,
 		MaxAge:            l.InboxMaxAge,
@@ -153,6 +164,18 @@ type Record struct {
 	// set by the admin. Readers from before these fields ignore them, and set-meta keeps fields it does not know.
 	Description string   `json:"description,omitempty"`
 	Caps        []string `json:"caps,omitempty"`
+	// Zone is the zone token in the endpoint's mail subject (ADR 0054). Empty means the legacy 5-token mail subject,
+	// not the default zone. Readers from before this field ignore it and, for a zoned endpoint, still reach it
+	// because its inbox stream keeps the legacy subject too.
+	Zone string `json:"zone,omitempty"`
+}
+
+// MailSubjectFor is the mail subject an endpoint with this owner, zone and name has: the legacy one when zone is empty.
+func MailSubjectFor(owner, zone, name string) string {
+	if zone == "" {
+		return sap.For(owner, name).Mail
+	}
+	return sap.ForZone(owner, zone, name).Mail
 }
 
 // MaxMetaLen is the longest Role, Host or label value.
@@ -238,6 +261,12 @@ func ParseRecord(key string, value []byte) (Record, error) {
 	}
 	if r.Name != key || r.User == "" || r.MailSubject == "" {
 		return Record{}, fmt.Errorf("directory %s: incomplete record", key)
+	}
+	if r.Zone != "" && !sap.ValidZone(r.Zone) {
+		return Record{}, fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+	}
+	if want := MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
+		return Record{}, fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
 	}
 	return r, nil
 }
