@@ -19,6 +19,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -44,7 +45,8 @@ type Resolver interface {
 
 // ServerSet is the answer to the system-account ping.
 type ServerSet struct {
-	// Names are the distinct servers that replied.
+	// Names are the distinct servers that replied, as the servers sent them (raw: they are the identity acknowledgements
+	// match on; print one through config.Clean).
 	Names []string
 	// Expected is the largest 1 + route peers any reply reported: how many servers the cluster has.
 	Expected int
@@ -80,11 +82,11 @@ func (s ServerSet) Why(inventory int) string {
 	case len(s.Names) == 0:
 		return "the system account ping was answered by no server"
 	case s.ClusterConflict:
-		return fmt.Sprintf("%d server(s) replied and they name different clusters (first seen: %s): membership cannot be verified from here", len(s.Names), s.Cluster)
+		return fmt.Sprintf("%d server(s) replied and they name different clusters (first seen: %s): membership cannot be verified from here", len(s.Names), config.Clean(s.Cluster))
 	case s.Gateways:
 		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
 	case inventory <= 0 && s.Cluster != "" && len(s.Names) >= s.Expected:
-		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", s.Cluster)
+		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", config.Clean(s.Cluster))
 	case s.Expected >= inventory:
 		return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
 	}
@@ -202,9 +204,9 @@ type unknownKey struct{ key, role string }
 
 func (u unknownKey) describe() string {
 	if u.role == "" {
-		return "plain signing key " + u.key
+		return "plain signing key " + config.Clean(u.key)
 	}
-	return fmt.Sprintf("scoped signing key %s (role %s)", u.key, u.role)
+	return fmt.Sprintf("scoped signing key %s (role %s)", config.Clean(u.key), config.Clean(u.role))
 }
 
 // knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
@@ -302,6 +304,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	// The servers asked for the base, the push and the read-back: the ping and the inventory say how many there are.
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
+	if p.Mode == Apply && errors.Is(kerr, ErrServerSetRefused) {
+		return fail(fmt.Errorf("refusing: %w (nothing was pushed)", kerr))
+	}
 	if p.Mode == Apply && !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {
@@ -430,13 +435,13 @@ func pushAndCheck(ctx context.Context, r Resolver, token string, known []string)
 	for _, a := range acks {
 		acked[a.Server] = true
 		if !a.OK() {
-			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, a.Message))
+			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, config.Clean(a.Message)))
 		}
 	}
 	var silent []string
 	for _, k := range known {
 		if !acked[k] {
-			silent = append(silent, k)
+			silent = append(silent, config.Clean(k))
 		}
 	}
 	if perr == nil && len(bad) == 0 && len(acks) > 0 && len(silent) == 0 {
@@ -676,7 +681,7 @@ func refuse(out io.Writer, p Params, b *built) {
 			if local == "" {
 				local = "none (the zone key file is missing: apply would create a new key)"
 			}
-			fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", c.zone, c.serverKey, local)
+			fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", config.Clean(c.zone), config.Clean(c.serverKey), local)
 		}
 		fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
 		fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
@@ -685,10 +690,10 @@ func refuse(out io.Writer, p Params, b *built) {
 		fmt.Fprintf(out, "%s: REFUSED unless each zone below is named by --remove-zone or --keep-zone: the server has a signing key for a zone that is not in the policy file (nothing was changed, no key was created)\n", p.Mode)
 		seen := map[string]bool{}
 		for _, o := range outs {
-			fmt.Fprintf(out, "  zone %s: signing key %s stays active with its old permissions, outside the policy\n", o.zone, o.key)
+			fmt.Fprintf(out, "  zone %s: signing key %s stays active with its old permissions, outside the policy\n", config.Clean(o.zone), config.Clean(o.key))
 			if !seen[o.zone] {
 				seen[o.zone] = true
-				fmt.Fprintf(out, "      REFUSED unless --remove-zone %s or --keep-zone %s\n", o.zone, o.zone)
+				fmt.Fprintf(out, "      REFUSED unless --remove-zone %s or --keep-zone %s\n", config.Clean(o.zone), config.Clean(o.zone))
 			}
 		}
 		fmt.Fprintln(out, "--remove-zone ZONE removes that signing key from the account JWT in this apply: users signed by that key stop working (the local zone key file is not deleted).")
@@ -783,16 +788,16 @@ func signersDiff(want, got *jwt.AccountClaims) string {
 
 func label(key string, s jwt.Scope) string {
 	if us, ok := s.(*jwt.UserScope); ok && us != nil {
-		return "zone " + us.Role
+		return "zone " + config.Clean(us.Role)
 	}
-	return key
+	return config.Clean(key)
 }
 
 func serverName(a ServerAck) string {
 	if a.Server == "" {
 		return "a server"
 	}
-	return a.Server
+	return config.Clean(a.Server) // a.Server is raw, the identity; clean it only to print
 }
 
 func sortedKeys(sk jwt.SigningKeys) []string {
@@ -887,7 +892,7 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 			fmt.Fprintf(out, "  zone %s: changed\n", zp.name)
 		}
 		for _, o := range zp.replaced {
-			fmt.Fprintf(out, "      replaces the signing key %s (role %s) on the explicit --replace-zone-key %s: it is dropped from the account JWT, and credentials signed by it, by mashctl or by any other tool, stop working\n", o, zp.name, zp.name)
+			fmt.Fprintf(out, "      replaces the signing key %s (role %s) on the explicit --replace-zone-key %s: it is dropped from the account JWT, and credentials signed by it, by mashctl or by any other tool, stop working\n", config.Clean(o), zp.name, zp.name)
 		}
 		for _, l := range zp.changes {
 			fmt.Fprintf(out, "      %s\n", l)
@@ -897,10 +902,10 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 		}
 	}
 	for _, o := range b.removed {
-		fmt.Fprintf(out, "  zone %s is not in the file: removes its signing key %s (--remove-zone): users signed by it stop working (the local zone key file is not deleted)\n", o.zone, o.key)
+		fmt.Fprintf(out, "  zone %s is not in the file: removes its signing key %s (--remove-zone): users signed by it stop working (the local zone key file is not deleted)\n", config.Clean(o.zone), config.Clean(o.key))
 	}
 	for _, z := range b.kept {
-		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", z)
+		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", config.Clean(z))
 	}
 	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, policy.AccountJWTLimit)
 	tagged := 0

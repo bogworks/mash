@@ -240,6 +240,14 @@ func (c Config) Find(name string) string {
 	return filepath.Join(c.Dir, name)
 }
 
+// inDir resolves a relative path against dir; an empty or absolute path, or an empty dir, is returned as is.
+func inDir(dir, p string) string {
+	if p == "" || dir == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "~") {
+		return p
+	}
+	return filepath.Join(dir, p)
+}
+
 // ExpandHome expands a leading "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
 func ExpandHome(p, home string) string {
 	if home == "" {
@@ -287,6 +295,9 @@ func Load(env func(string) string, home string) (Config, error) {
 	}
 	switch {
 	case err == nil:
+		if err := checkConfigMode(filepath.Join(dir, "config.json")); err != nil {
+			return c, err
+		}
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return c, fmt.Errorf("mash: %s: %w", filepath.Join(dir, "config.json"), err)
 		}
@@ -294,6 +305,9 @@ func Load(env func(string) string, home string) (Config, error) {
 	case !errors.Is(err, os.ErrNotExist):
 		return c, fmt.Errorf("mash: reading config: %w", err)
 	}
+	// Relative paths in the file are relative to the config directory, not to wherever mash was started.
+	f.AdminCreds = inDir(dir, ExpandHome(f.AdminCreds, home))
+	f.TLSCA, f.TLSCert, f.TLSKey = inDir(dir, f.TLSCA), inDir(dir, f.TLSCert), inDir(dir, f.TLSKey)
 	c.URL, c.Owner, c.Creds, c.AdminCreds, c.Host = f.URL, f.Owner, f.Creds, f.AdminCreds, f.Host
 	c.TLSCA, c.TLSCert, c.TLSKey = f.TLSCA, f.TLSCert, f.TLSKey
 	if f.SpoolFromStart != nil {
