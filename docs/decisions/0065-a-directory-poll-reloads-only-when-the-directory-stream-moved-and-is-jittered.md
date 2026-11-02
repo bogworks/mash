@@ -118,4 +118,3 @@ Heartbeat fan-out (each endpoint receives every heartbeat: N squared over 30 sec
 * Directory poll: `internal/endpoint/directory.go`; the key list and record reads: `internal/endpoint/client.go`.
 * Heartbeat fan-out options for a later record: a presence summary written by one aggregator, heartbeats to a subject
   subset, or presence read from the lease bucket on demand.
-* Implemented in `internal/endpoint/dirpoll.go` (`DirPoller`, `DirectoryFullReload`) and `pollDirectory`; `scripts/dirbench -mode new` runs the same `DirPoller`.
