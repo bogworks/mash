@@ -24,15 +24,37 @@ import (
 // bucket's own 90 s TTL removes a lock nobody released, behind the lock's 30 s expiry.
 //
 // Expiry is judged by each admin's own clock, so admins' clocks must agree to within a few seconds; lockTTL is
-// generous for that. A critical section that outlasts lockTTL (a stream update that hangs) can overlap with another
-// admin's, which is the old behaviour for that one change.
+// generous for that. A critical section must never outlast its lock, because another admin could then take the name
+// (a resume, say) while this one carries on (a guarded deprovision deleting the stream after mail resumed). So the
+// holder records a deadline, the local time before it acquired plus lockTTL, and every operation under the lock:
+//   - runs on a context that ends lockSafety before that deadline (bound), so a stalled call fails instead of
+//     running on;
+//   - re-reads the lock key just before each write the lock protects (check), and refuses unless the key is still
+//     its own revision and the deadline minus lockSafety is still ahead.
+//
+// A refused or stopped operation reports that nothing after that point was changed, and the caller may try again.
+// Admin_timeout may therefore be longer than the lock, but an operation that needs longer than the lock fails.
 
 // Lock timing. Variables so tests can shorten them.
 var (
 	lockTTL  = 30 * time.Second       // how long an acquired lock is valid
 	lockWait = 20 * time.Second       // how long acquire waits for a held lock before giving up
 	lockPoll = 200 * time.Millisecond // base wait between attempts; up to the same again is added as jitter
+
+	// lockSafety is how long before its deadline a held lock stops being used: bound ends the operation's context
+	// then, and check refuses from then on.
+	lockSafety = 5 * time.Second
 )
+
+// ErrLockExpiring is the cause of a bound context that ended because its lock was about to expire.
+var ErrLockExpiring = errors.New("the name lock is about to expire")
+
+// lockCheckTimeout bounds the re-read check makes of the lock key.
+const lockCheckTimeout = 3 * time.Second
+
+// afterLockAcquired is a test seam that runs once the operation holds the lock and its context is bounded; nil in
+// production.
+var afterLockAcquired func()
 
 // lockReleaseTimeout bounds the release call, which runs even when the caller's context is done.
 const lockReleaseTimeout = 5 * time.Second
@@ -50,9 +72,11 @@ type lockValue struct {
 
 // streamLock is a held lock. Release it exactly once.
 type streamLock struct {
-	kv  jetstream.KeyValue
-	key string
-	rev uint64
+	kv       jetstream.KeyValue
+	name     string
+	key      string
+	rev      uint64
+	deadline time.Time // local time before the acquiring call plus lockTTL: when this lock may be taken from us
 }
 
 // leaseKV returns the lease bucket, creating it with the configured limits if a deployment from before the lock has
@@ -73,8 +97,9 @@ func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 	return kv, nil
 }
 
-func newLockValue(owner string) []byte {
-	b, _ := json.Marshal(lockValue{Owner: owner, Until: time.Now().Add(lockTTL).UTC().Format(time.RFC3339)})
+// newLockValue is the value of a lock acquired at start; it expires at start plus lockTTL.
+func newLockValue(owner string, start time.Time) []byte {
+	b, _ := json.Marshal(lockValue{Owner: owner, Until: start.Add(lockTTL).UTC().Format(time.RFC3339)})
 	return b
 }
 
@@ -102,9 +127,10 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 	key := lockKey(name)
 	giveUp := time.Now().Add(lockWait)
 	for {
-		rev, err := kv.Create(ctx, key, newLockValue(owner))
+		start := time.Now() // before the call, so the deadline is never later than the key's expiry
+		rev, err := kv.Create(ctx, key, newLockValue(owner, start))
 		if err == nil {
-			return &streamLock{kv: kv, key: key, rev: rev}, nil
+			return &streamLock{kv: kv, name: name, key: key, rev: rev, deadline: start.Add(lockTTL)}, nil
 		}
 		if !errors.Is(err, jetstream.ErrKeyExists) {
 			return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
@@ -124,9 +150,10 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 		}
 		if perr != nil || !time.Now().Before(until) {
 			// Expired, or unreadable and so no one's: take it over only if it is still the revision we read.
-			rev, err := kv.Update(ctx, key, newLockValue(owner), e.Revision())
+			start := time.Now()
+			rev, err := kv.Update(ctx, key, newLockValue(owner, start), e.Revision())
 			if err == nil {
-				return &streamLock{kv: kv, key: key, rev: rev}, nil
+				return &streamLock{kv: kv, name: name, key: key, rev: rev, deadline: start.Add(lockTTL)}, nil
 			}
 			if !isRevisionConflict(err) {
 				return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
@@ -151,4 +178,57 @@ func (l *streamLock) release(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
 	defer cancel()
 	_ = l.kv.Purge(ctx, l.key, jetstream.LastRevision(l.rev))
+}
+
+// bound returns ctx cut off lockSafety before the lock's deadline, with cause ErrLockExpiring. A caller's context
+// that ends earlier keeps its own end.
+func (l *streamLock) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithDeadlineCause(ctx, l.deadline.Add(-lockSafety), ErrLockExpiring)
+}
+
+// check refuses unless the lock is still this admin's (the stored revision is the one it wrote) and not within
+// lockSafety of its deadline. Call it immediately before a write that cannot be undone or that another admin could
+// invalidate.
+func (l *streamLock) check(ctx context.Context) error {
+	lost := fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again", l.name)
+	if !time.Now().Before(l.deadline.Add(-lockSafety)) {
+		return lost
+	}
+	if err := ctx.Err(); err != nil {
+		return err // explain words a bound context's end
+	}
+	cctx, cancel := context.WithTimeout(ctx, lockCheckTimeout)
+	defer cancel()
+	e, err := l.kv.Get(cctx, l.key)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: %v", lost, err)
+	}
+	if e.Revision() != l.rev || !time.Now().Before(l.deadline.Add(-lockSafety)) {
+		return lost
+	}
+	return nil
+}
+
+// explain words err for an operation op whose context (from bound) ended because the lock was about to expire.
+func (l *streamLock) explain(ctx context.Context, op string, err error) error {
+	if err != nil && errors.Is(context.Cause(ctx), ErrLockExpiring) {
+		return fmt.Errorf("mash: %s ran past the lock of %s; nothing after the point it stopped was changed; try again: %w", op, l.name, err)
+	}
+	return err
+}
+
+// guard bounds ctx by the lock and returns the bounded context and a func to defer that words *errp (the caller's
+// named error result) with explain and then ends the bound.
+func (l *streamLock) guard(ctx context.Context, op string, errp *error) (context.Context, func()) {
+	bctx, cancel := l.bound(ctx)
+	if afterLockAcquired != nil {
+		afterLockAcquired()
+	}
+	return bctx, func() {
+		*errp = l.explain(bctx, op, *errp)
+		cancel()
+	}
 }

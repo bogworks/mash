@@ -108,7 +108,7 @@ func (m Meta) validate() error {
 
 // Provision creates name's inbox stream, its consumer and, last, its
 // directory record, so a half-done provision can simply be re-run.
-func (a *Admin) Provision(ctx context.Context, name, user, account, note string, meta Meta) (store.Record, error) {
+func (a *Admin) Provision(ctx context.Context, name, user, account, note string, meta Meta) (rec store.Record, err error) {
 	if !config.ValidName(name) {
 		return store.Record{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -132,6 +132,8 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 		return store.Record{}, err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "provision", &err)
+	defer end()
 	if _, err := kv.Get(ctx, name); err == nil {
 		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
 	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
@@ -145,20 +147,23 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	}
 	// A retried provision finds its inbox stream already there: never let the update lower its caps. The read, the
 	// check and the write run under the stream's limits lock, so a concurrent limits change cannot slip between them.
-	s, err := a.createInboxLocked(ctx, name, meta.Zone)
+	s, err := a.createInboxLocked(ctx, lk, name, meta.Zone)
 	if err != nil {
 		return store.Record{}, err
 	}
 	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
 		return store.Record{}, fmt.Errorf("mash: inbox consumer: %w", err)
 	}
-	rec := store.Record{
+	rec = store.Record{
 		Name: name, Owner: a.owner, Agent: sap.AgentName, AgentToken: sap.AgentToken,
 		Account: account, User: user, MailSubject: store.MailSubjectFor(a.owner, meta.Zone, name), Zone: meta.Zone,
 		Created: time.Now().UTC().Format(time.RFC3339), Note: note,
 		Role: meta.Role, Host: meta.Host, Labels: meta.Labels, Description: meta.Description, Caps: sortedCaps(meta.Caps),
 	}
 	val, _ := json.Marshal(rec)
+	if err := lk.check(ctx); err != nil {
+		return store.Record{}, err
+	}
 	if _, err := kv.Create(ctx, name, val); err != nil {
 		if errors.Is(err, jetstream.ErrKeyExists) {
 			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
@@ -170,7 +175,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 
 // createInboxLocked creates name's inbox stream, or updates an existing one to the configured limits unless that
 // would lower a cap. The caller holds name's lock.
-func (a *Admin) createInboxLocked(ctx context.Context, name, zone string) (jetstream.Stream, error) {
+func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name, zone string) (jetstream.Stream, error) {
 	existing, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 		return nil, fmt.Errorf("mash: inbox stream: %w", err)
@@ -195,6 +200,9 @@ func (a *Admin) createInboxLocked(ctx context.Context, name, zone string) (jetst
 				break
 			}
 		}
+	}
+	if err := lk.check(ctx); err != nil {
+		return nil, err
 	}
 	s, err := a.js.CreateOrUpdateStream(ctx, cfg)
 	if err != nil {
@@ -249,20 +257,25 @@ func (a *Admin) ensureInboxStream(ctx context.Context, name string) (s jetstream
 		return nil, false, err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "ensure-inbox", &err)
+	defer end()
 	// The zone is read under the lock, and a failed read is an error, never an empty zone: that would repair a zoned
 	// endpoint's missing stream with the legacy subject only.
 	zone, err := a.recordZone(ctx, name)
 	if err != nil {
 		return nil, false, err
 	}
-	return a.ensureInboxStreamLocked(ctx, name, zone)
+	return a.ensureInboxStreamLocked(ctx, lk, name, zone)
 }
 
 // ensureInboxStreamLocked finds name's inbox stream, creating it if missing, or checks an existing one against the
 // configuration. The caller holds name's lock.
-func (a *Admin) ensureInboxStreamLocked(ctx context.Context, name, zone string) (s jetstream.Stream, created bool, err error) {
+func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, name, zone string) (s jetstream.Stream, created bool, err error) {
 	s, err = a.js.Stream(ctx, sap.InboxStream(name))
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		if err := lk.check(ctx); err != nil {
+			return nil, false, err
+		}
 		if s, err = a.js.CreateStream(ctx, store.InboxConfigZoned(a.owner, zone, name, a.limits)); err != nil {
 			return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 		}
@@ -447,7 +460,7 @@ func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) err
 	return nil
 }
 
-func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, error) {
+func (a *Admin) applyInboxLimits(ctx context.Context, name string) (msg string, err error) {
 	if !config.ValidName(name) {
 		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -457,11 +470,13 @@ func (a *Admin) applyInboxLimits(ctx context.Context, name string) (string, erro
 		return "", err
 	}
 	defer lk.release(ctx)
-	return a.applyInboxLimitsLocked(ctx, name)
+	ctx, end := lk.guard(ctx, "limits change", &err)
+	defer end()
+	return a.applyInboxLimitsLocked(ctx, lk, name)
 }
 
 // applyInboxLimitsLocked is applyInboxLimits for a caller that holds name's lock.
-func (a *Admin) applyInboxLimitsLocked(ctx context.Context, name string) (string, error) {
+func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name string) (string, error) {
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
 		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
@@ -489,6 +504,9 @@ func (a *Admin) applyInboxLimitsLocked(ctx context.Context, name string) (string
 	}
 	if afterStreamRead != nil {
 		afterStreamRead(a.limits.InboxMaxBytes)
+	}
+	if err := lk.check(ctx); err != nil {
+		return "", err
 	}
 	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
 		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
@@ -691,7 +709,7 @@ func (a *Admin) recordZone(ctx context.Context, name string) (string, error) {
 // mail subject against the revision it read, keeping every other field. It is idempotent: an endpoint already in zone
 // is returned as it is. An endpoint in another zone is refused, as no endpoint returns to legacy or changes zone in
 // this version.
-func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, error) {
+func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record, err error) {
 	if !config.ValidName(name) {
 		return store.Record{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -707,6 +725,8 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 		return store.Record{}, err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "set-zone", &err)
+	defer end()
 	for try := 0; try < setMetaTries; try++ {
 		e, err := kv.Get(ctx, name)
 		if errors.Is(err, jetstream.ErrKeyNotFound) {
@@ -722,7 +742,7 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 		if rec.Zone != "" && rec.Zone != zone {
 			return store.Record{}, fmt.Errorf("mash: endpoint %s is in zone %q; moving it to another zone, or back to legacy, is not supported", name, rec.Zone)
 		}
-		if err := a.addZoneFilterLocked(ctx, name, zone); err != nil {
+		if err := a.addZoneFilterLocked(ctx, lk, name, zone); err != nil {
 			return store.Record{}, err
 		}
 		if rec.Zone == zone {
@@ -739,6 +759,9 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 		if err != nil {
 			return store.Record{}, err
 		}
+		if err := lk.check(ctx); err != nil {
+			return store.Record{}, err
+		}
 		if _, err := kv.Update(ctx, name, val, e.Revision()); err != nil {
 			if isRevisionConflict(err) {
 				continue
@@ -753,7 +776,7 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 // addZoneFilterLocked appends the exact mail filter of zone to name's inbox stream subjects, changing nothing else.
 // The stream must have exactly the legacy filter, or the legacy filter and the exact filter of zone (a resumed
 // set-zone); anything else, another zone's filter or a wildcard included, is refused. The caller holds name's lock.
-func (a *Admin) addZoneFilterLocked(ctx context.Context, name, zone string) error {
+func (a *Admin) addZoneFilterLocked(ctx context.Context, lk *streamLock, name, zone string) error {
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
@@ -771,6 +794,9 @@ func (a *Admin) addZoneFilterLocked(ctx context.Context, name, zone string) erro
 		return firstInboxDiff("stream", name, []inboxField{{"subjects", got, sortedCopy([]string{legacy})}})
 	}
 	cfg.Subjects = append(slices.Clone(cfg.Subjects), zoned)
+	if err := lk.check(ctx); err != nil {
+		return err
+	}
 	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}
@@ -786,17 +812,19 @@ func isRevisionConflict(err error) bool {
 
 // Deprovision fences name's lease with a tombstone, then removes its directory record and inbox stream. The fence
 // comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10).
-func (a *Admin) Deprovision(ctx context.Context, name string) error {
+func (a *Admin) Deprovision(ctx context.Context, name string) (err error) {
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
 		return err
 	}
 	defer lk.release(ctx)
-	return a.deprovisionLocked(ctx, name)
+	ctx, end := lk.guard(ctx, "deprovision", &err)
+	defer end()
+	return a.deprovisionLocked(ctx, lk, name)
 }
 
 // deprovisionLocked is Deprovision's body; the caller holds name's lock.
-func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
+func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name string) error {
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
@@ -805,19 +833,34 @@ func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
+	if err := lk.check(ctx); err != nil {
+		return err
+	}
 	if err := fence(ctx, lease, name); err != nil {
+		return err
+	}
+	if err := lk.check(ctx); err != nil {
 		return err
 	}
 	if err := kv.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
 		return fmt.Errorf("mash: directory record: %w", err)
+	}
+	if err := lk.check(ctx); err != nil {
+		return err
 	}
 	return a.deleteInbox(ctx, name)
 }
 
 // fenceAndDeleteInbox is the part of a deprovision that follows a guarded record delete (DeprovisionIfUser,
 // DeprovisionDrained; Deprovision fences before it purges): the lease tombstone, then the inbox stream.
-func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lease jetstream.KeyValue, name string) error {
+func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string) error {
+	if err := lk.check(ctx); err != nil {
+		return err
+	}
 	if err := fence(ctx, lease, name); err != nil {
+		return err
+	}
+	if err := lk.check(ctx); err != nil {
 		return err
 	}
 	return a.deleteInbox(ctx, name)
@@ -828,7 +871,7 @@ func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lease jetstream.KeyValu
 // refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
 // matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
 // check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
-func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) error {
+func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) (err error) {
 	if !config.ValidName(name) {
 		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -837,6 +880,8 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 		return err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "deprovision", &err)
+	defer end()
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	switch {
 	case errors.Is(err, jetstream.ErrStreamNotFound):
@@ -885,13 +930,16 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if afterDeprovisionGet != nil {
 		afterDeprovisionGet()
 	}
+	if err := lk.check(ctx); err != nil {
+		return err
+	}
 	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
 			return fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name)
 		}
 		return fmt.Errorf("mash: directory record: %w", err)
 	}
-	return a.fenceAndDeleteInbox(ctx, lease, name)
+	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
 }
 
 // The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.
@@ -928,7 +976,7 @@ var afterDeprovisionPurge func()
 //
 // With no record nothing proves ownership, so it refuses even when the inbox stream exists (a provision that failed
 // before writing its record): remove that stream with a plain deprovision.
-func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error {
+func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err error) {
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
@@ -944,6 +992,8 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 		return err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "deprovision", &err)
+	defer end()
 	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
 	purged := false
 	for try := 0; try < setMetaTries && !purged; try++ {
@@ -970,6 +1020,9 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 		if afterDeprovisionGet != nil {
 			afterDeprovisionGet()
 		}
+		if err := lk.check(ctx); err != nil {
+			return err
+		}
 		err = kv.Purge(ctx, name, jetstream.LastRevision(e.Revision()))
 		switch {
 		case err == nil:
@@ -987,7 +1040,7 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()
 	}
-	return a.fenceAndDeleteInbox(ctx, lease, name)
+	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
 }
 
 // IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it
