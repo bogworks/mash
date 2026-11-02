@@ -132,10 +132,14 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 			return 2
 		}
 		fmt.Fprintln(stdout, x.Text)
+		fmt.Fprintln(stdout, coverageNote)
 		return 0
 	}
 	return policyShow(f, cfg.Owner, o, stdout, stderr)
 }
+
+// coverageNote says what rules police today (ADR 0054, ADR 0055).
+const coverageNote = "note: rules cover mail only; prompt and status probes are not covered by rules yet (open)"
 
 func policyCheck(path string, data []byte, stdout, stderr io.Writer) int {
 	f, err := policy.Parse(data)
@@ -193,6 +197,7 @@ func policyShow(f *policy.File, owner string, o policyOpts, stdout, stderr io.Wr
 	} else {
 		fmt.Fprint(stdout, c.Matrix())
 		fmt.Fprint(stdout, zonesSummary(c))
+		fmt.Fprintln(stdout, coverageNote)
 	}
 	if !o.budget {
 		return 0

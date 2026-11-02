@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,7 +140,7 @@ func TestPolicyExplain(t *testing.T) {
 	for _, c := range [][2]string{{"coder", "reviewer"}, {"coder", "deploy-bot"}} {
 		x, _ := policy.Explain(f, c[0], c[1])
 		out, _, code := policyRun(t, nil, "policy", "explain", c[0], c[1], "--policy", solo)
-		if code != 0 || out != x.Text+"\n" {
+		if code != 0 || out != x.Text+"\n"+coverageNote+"\n" {
 			t.Fatalf("%v: %d %q", c, code, out)
 		}
 	}
@@ -167,13 +168,19 @@ func TestPolicyShow(t *testing.T) {
 		env := map[string]string{"MASH_OWNER": "acme"}
 		out, errb, code := policyRun(t, env, "policy", "show", "--policy", p)
 		if code != 0 || errb != "" || !strings.HasPrefix(out, c.Matrix()) || !strings.Contains(out, "\nzones:\n") ||
-			!strings.Contains(out, "wildcard zones") || !strings.Contains(out, "tags per endpoint") {
+			!strings.Contains(out, "wildcard zones") || !strings.Contains(out, "tags per endpoint") ||
+			!strings.HasSuffix(out, "\n"+coverageNote+"\n") {
 			t.Fatalf("%s text: %d %q %q", n, code, out, errb)
 		}
 		js, _ := c.JSON()
 		out, errb, code = policyRun(t, env, "policy", "show", "--json", "--policy", p)
 		if code != 0 || out != string(js) || errb != "" {
 			t.Fatalf("%s json: %d %q %q", n, code, out, errb)
+		}
+		var doc struct{ Covers, Open []string }
+		if err := json.Unmarshal([]byte(out), &doc); err != nil || strings.Join(doc.Covers, ",") != "mail" ||
+			strings.Join(doc.Open, ",") != "prompt,status" || strings.Contains(out, "note:") {
+			t.Fatalf("%s json fields: %v %+v", n, err, doc)
 		}
 	}
 }

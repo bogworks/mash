@@ -23,15 +23,15 @@
           "_INBOX.\u003e",
           "agents.hb.cc.acme.{{name()}}",
           "agents.mail.*.acme.{{tag(allow)}}",
-          "agents.prompt.*.acme.{{tag(allow)}}",
-          "agents.status.*.acme.{{tag(allow)}}"
+          "agents.prompt.*.acme.*",
+          "agents.status.*.acme.*"
         ],
         "sub": [
           "$SRV.\u003e",
           "_INBOX.{{name()}}.\u003e",
           "agents.hb.*.acme.*",
-          "agents.prompt.cc.acme.dmz.{{name()}}",
-          "agents.status.cc.acme.dmz.{{name()}}"
+          "agents.prompt.cc.acme.{{name()}}",
+          "agents.status.cc.acme.{{name()}}"
         ]
       }
     },
@@ -66,22 +66,18 @@
           "agents.hb.cc.acme.{{name()}}",
           "agents.mail.*.acme.internal.*",
           "agents.mail.*.acme.{{tag(allow)}}",
-          "agents.prompt.*.acme.internal.*",
-          "agents.prompt.*.acme.{{tag(allow)}}",
-          "agents.status.*.acme.internal.*",
-          "agents.status.*.acme.{{tag(allow)}}"
+          "agents.prompt.*.acme.*",
+          "agents.status.*.acme.*"
         ],
         "pub_deny": [
-          "agents.mail.*.acme.{{tag(deny)}}",
-          "agents.prompt.*.acme.{{tag(deny)}}",
-          "agents.status.*.acme.{{tag(deny)}}"
+          "agents.mail.*.acme.{{tag(deny)}}"
         ],
         "sub": [
           "$SRV.\u003e",
           "_INBOX.{{name()}}.\u003e",
           "agents.hb.*.acme.*",
-          "agents.prompt.cc.acme.internal.{{name()}}",
-          "agents.status.cc.acme.internal.{{name()}}"
+          "agents.prompt.cc.acme.{{name()}}",
+          "agents.status.cc.acme.{{name()}}"
         ]
       }
     }
