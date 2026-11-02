@@ -53,6 +53,8 @@ type jsonDoc struct {
 	Owner        string         `json:"owner"`
 	Default      string         `json:"default"`
 	SubjectLabel string         `json:"subject_label"`
+	Covers       []string       `json:"covers"`
+	Open         []string       `json:"open"`
 	Zones        []jsonZone     `json:"zones"`
 	Endpoints    []jsonEndpoint `json:"endpoints"`
 }
@@ -72,12 +74,14 @@ type jsonEndpoint struct {
 	Tags          []string          `json:"tags"`
 }
 
-// JSON is the machine-readable form for `show --json`: owner, default, subject_label, the zones (name, the zones
+// JSON is the machine-readable form for `show --json`: owner, default, subject_label, covers (what rules police: mail) and
+// open (what they do not yet: prompt, status), the zones (name, the zones
 // its key grants whole, endpoints) and, per endpoint, name, zone, labels, recipients, may_mail_nobody and the tags
 // of its user. Keys are in a fixed order, maps are sorted, the output is indented and ends in a newline.
 // It carries nothing of the JWT.
 func (c *Compiled) JSON() ([]byte, error) {
 	d := jsonDoc{Owner: c.Owner, Default: c.Default, SubjectLabel: c.SubjectLabel,
+		Covers: []string{"mail"}, Open: []string{"prompt", "status"},
 		Zones: make([]jsonZone, len(c.Zones)), Endpoints: make([]jsonEndpoint, len(c.Endpoints))}
 	for i, z := range c.Zones {
 		d.Zones[i] = jsonZone{Name: z.Name, Wildcards: nonNil(z.Wildcards), Endpoints: nonNil(z.Endpoints)}

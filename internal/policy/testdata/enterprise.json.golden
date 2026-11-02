@@ -2,6 +2,13 @@
   "owner": "acme",
   "default": "deny",
   "subject_label": "zone",
+  "covers": [
+    "mail"
+  ],
+  "open": [
+    "prompt",
+    "status"
+  ],
   "zones": [
     {
       "name": "dmz",

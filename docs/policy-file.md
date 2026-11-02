@@ -171,8 +171,8 @@ tests:
 | --- | --- | --- |
 | `mashctl policy check` | Parses and validates the file. Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error, 0 otherwise (warnings do not fail) |
 | `mashctl policy test` | Runs the `tests` section: `PASS from->to expect allow`, or `FAIL from->to expect allow got deny: <why>`. A file with no tests prints `test: no tests in the file`. | 1 if any test fails |
-| `mashctl policy explain FROM TO` | Says whether FROM may mail TO and which rule (or the default) decided. Both must be declared endpoints. | 0 whether allowed or denied; 2 for an unknown endpoint or bad usage |
-| `mashctl policy show [--json] [--budget]` | Prints the who-may-mail-whom matrix (or the JSON form), then a summary of zones, wildcard zones and tags per endpoint. `--budget` also prints the account and worst user JWT sizes against their limits (to stderr with `--json`). Needs the owner (`MASH_OWNER` or `config.json`). | 1 on an invalid file, a missing owner, or a budget over its limit |
+| `mashctl policy explain FROM TO` | Says whether FROM may mail TO and which rule (or the default) decided, then the line `note: rules cover mail only; prompt and status probes are not covered by rules yet (open)`. Both must be declared endpoints. | 0 whether allowed or denied; 2 for an unknown endpoint or bad usage |
+| `mashctl policy show [--json] [--budget]` | Prints the who-may-mail-whom matrix (or the JSON form), then a summary of zones, wildcard zones and tags per endpoint, then the same `note:` line (rules cover mail only; prompt and status probes are open). With `--json` there is no note; the document carries top-level `"covers": ["mail"]` and `"open": ["prompt", "status"]` instead. `--budget` also prints the account and worst user JWT sizes against their limits (to stderr with `--json`). Needs the owner (`MASH_OWNER` or `config.json`). | 1 on an invalid file, a missing owner, or a budget over its limit |
 
 `mashctl policy` with no verb, or an unknown one, prints the usage to stderr and exits 2.
 
