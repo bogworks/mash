@@ -16,6 +16,8 @@ const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy test [--policy FILE]
        mashctl policy explain FROM TO [--policy FILE]
        mashctl policy show [--json] [--budget] [--policy FILE]
+       mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
+       mashctl policy diff [--policy FILE] [--sys-creds FILE]
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.
@@ -88,6 +90,8 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 	case "check", "test", "explain":
 	case "show":
 		allowed = []string{"--json", "--budget"}
+	case "apply", "diff":
+		return runPolicyApply(verb, rest, env, stdout, stderr)
 	default:
 		return usage()
 	}

@@ -124,6 +124,26 @@ A zoned endpoint's inbox stream takes the legacy subject (`agents.mail.*.<owner>
 
 Roll it out in this order. First upgrade the mash binaries: they read both subjects. Then re-issue each user's permissions (`mash admin permissions <name>`) so they include the zoned publish line; a user minted before this change can only publish the 5-token mail subject, so it cannot mail a zoned endpoint. Then run `set-zone` or `provision --zone` per endpoint, in any order: senders resolve the recipient's subject from the directory, so they follow the record. A user minted with per-recipient lines (the policy compiler's form) keeps its legacy line per recipient and cannot mail a zoned endpoint until its lines are reissued.
 
+### Applying the policy
+
+`mashctl policy apply` compiles the policy file ([the policy file](policy-file.md)) into one scoped signing key per zone and pushes it to the MASH account. It runs `check` first and refuses a file that does not check or that does not fit the account JWT (1 MiB) or a user JWT (4000 bytes); a refusal changes nothing.
+
+```sh
+mashctl policy diff  [--policy FILE] [--sys-creds FILE]   # what apply would change; changes nothing
+mashctl policy apply --dry-run [--policy FILE] [--sys-creds FILE]   # the same report, under apply's name
+mashctl policy apply [--policy FILE] [--sys-creds FILE]
+```
+
+The server URL and owner come from the configuration, the signing keys from the `mashctl` key store, and the push goes through the system account: `--sys-creds FILE`, else `$MASH_SYS_CREDS`, else the `sys.creds` that `mashctl init --local` wrote next to `admin_creds` (or in `<config dir>/server`). The operator key (`operator.nk`) signs the account JWT, so apply works where `mashctl init --local` stood the server up; with an operator you manage elsewhere it stops and says the key is missing.
+
+`diff` and `--dry-run` print, per zone, whether it is new, changed or unchanged and, for a changed or new zone, the permission lines added (`+`) and removed (`-`) under `pub allow`, `pub deny`, `sub allow` and `sub deny`; the account JWT's size now and after against the limit; the zones the server has that the file lacks; and how many endpoints carry exception tags. A dry run creates no key and pushes nothing.
+
+`apply` creates the signing key of each new zone in the key store, looks up the account JWT that is on the resolver now, replaces or adds only the scoped signing keys of the file's zones (limits, JetStream, exports, tags, name and every other signing key stay as they are), signs it and pushes it. Every server that answers must acknowledge, and apply then reads the JWT back and compares the signing keys and templates with what it sent. Run twice, the second apply pushes nothing and says `already up to date`. Servers disconnect and reconnect the users of a changed zone with the same credentials; a new zone key changes no user. When a zone key is new or a template changes and endpoints carry exception tags, apply says that user JWTs carrying changed exception tags must be re-issued with `mashctl add`.
+
+Zone keys are never removed. A zone that has a key on the server but is not in the file is reported and left, because removing its key would lock out every user signed by it. Retire a zone's users first; removing a key is not something apply does.
+
+Apply is not a transaction across NATS claims, JetStream resources and local files. If the push is not acknowledged by every server, or the read-back does not match, it prints `PARTIAL` with what was done (for example, zone keys created locally), what was not confirmed, and the command to retry, and exits 1. `mashctl policy apply` is idempotent: running it again pushes what still differs.
+
 ### Finding endpoints: `who` filters and `--json`
 
 ```
