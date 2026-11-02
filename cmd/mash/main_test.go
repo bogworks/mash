@@ -326,7 +326,7 @@ func TestAdminCLI(t *testing.T) {
 		{"deprovision", "z", "--who", u},
 		{"deprovision", "z", u},
 	} {
-		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <name> [--user <public-key>]") {
+		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <name> [--user <public-key> | --drained-to SEQ]") {
 			t.Fatalf("%v: %d %s", bad, code, out)
 		}
 	}

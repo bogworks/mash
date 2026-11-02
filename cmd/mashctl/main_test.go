@@ -42,7 +42,7 @@ func TestMashctlVerbs(t *testing.T) {
 	if out, _, code := ctlRun(t, e, "permissions", "c", "--nsc"); code != 0 || out == "" {
 		t.Fatalf("permissions: %d %q", code, out)
 	}
-	if _, errb, code := ctlRun(t, e, "deprovision"); code == 0 || !strings.Contains(errb, "usage: mashctl deprovision <name> [--user <public-key>]") {
+	if _, errb, code := ctlRun(t, e, "deprovision"); code == 0 || !strings.Contains(errb, "usage: mashctl deprovision <name> [--user <public-key> | --drained-to SEQ]") {
 		t.Fatalf("deprovision usage: %d %q", code, errb)
 	}
 	if _, errb, code := ctlRun(t, e, "provision"); code == 0 || !strings.Contains(errb, "usage: mashctl provision") {
@@ -66,7 +66,7 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 		t.Fatalf("no args: %d %q %q", code, out, errb)
 	}
 	for _, h := range []string{"help", "-h", "--help"} {
-		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl deprovision <name> [--user U]") {
+		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl deprovision <name> [--user U | --drained-to SEQ]") {
 			t.Fatalf("%s: %d %q %q", h, code, out, errb)
 		}
 	}
@@ -146,5 +146,30 @@ func TestMashctlSuspendVerbs(t *testing.T) {
 	}
 	if _, errb, code := ctlRun(t, e, "suspend"); code == 0 || !strings.Contains(errb, "usage: mashctl suspend <name>") {
 		t.Fatalf("usage: %d %q", code, errb)
+	}
+}
+
+func TestMashctlDeprovisionDrainedTo(t *testing.T) {
+	e := testenv.Start(t)
+	ctlRun(t, e, "init")
+	_, u := e.Mint(t, "c")
+	if _, errb, code := ctlRun(t, e, "provision", "c", "--user", u, "--account", e.Account); code != 0 {
+		t.Fatalf("provision: %d %q", code, errb)
+	}
+	if _, errb, code := ctlRun(t, e, "deprovision", "c", "--drained-to", "0"); code != 1 || !strings.Contains(errb, "not suspended") {
+		t.Fatalf("not suspended: %d %q", code, errb)
+	}
+	ctlRun(t, e, "suspend", "c")
+	if _, errb, code := ctlRun(t, e, "deprovision", "c", "--drained-to", "5"); code != 1 || !strings.Contains(errb, "last_seq 0, not the drained 5") {
+		t.Fatalf("mismatch: %d %q", code, errb)
+	}
+	if _, errb, code := ctlRun(t, e, "deprovision", "c", "--drained-to", "-1"); code == 0 || !strings.Contains(errb, "non-negative integer") {
+		t.Fatalf("bad seq: %d %q", code, errb)
+	}
+	if _, errb, code := ctlRun(t, e, "deprovision", "c", "--user", u, "--drained-to", "0"); code == 0 || !strings.Contains(errb, "cannot be combined") {
+		t.Fatalf("combined: %d %q", code, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "deprovision", "c", "--drained-to", "0"); code != 0 || !strings.Contains(out, "deprovisioned c") {
+		t.Fatalf("drained: %d %q %q", code, out, errb)
 	}
 }

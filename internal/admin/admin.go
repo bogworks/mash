@@ -787,6 +787,16 @@ func isRevisionConflict(err error) bool {
 // Deprovision fences name's lease with a tombstone, then removes its directory record and inbox stream. The fence
 // comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10).
 func (a *Admin) Deprovision(ctx context.Context, name string) error {
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer lk.release(ctx)
+	return a.deprovisionLocked(ctx, name)
+}
+
+// deprovisionLocked is Deprovision's body; the caller holds name's lock.
+func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
@@ -795,11 +805,6 @@ func (a *Admin) Deprovision(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
-	lk, err := a.lockStream(ctx, name)
-	if err != nil {
-		return err
-	}
-	defer lk.release(ctx)
 	if err := fence(ctx, lease, name); err != nil {
 		return err
 	}
@@ -807,6 +812,39 @@ func (a *Admin) Deprovision(ctx context.Context, name string) error {
 		return fmt.Errorf("mash: directory record: %w", err)
 	}
 	return a.deleteInbox(ctx, name)
+}
+
+// DeprovisionDrained is Deprovision for an inbox that was suspended and read through sequence seq (the last_seq that
+// Suspend reported). Under the name's lock it reads the stream fresh and refuses, touching nothing, unless the inbox is
+// still suspended and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
+// check fail instead of losing mail. A name with no inbox stream is removed as Deprovision does.
+func (a *Admin) DeprovisionDrained(ctx context.Context, name string, seq uint64) error {
+	if !config.ValidName(name) {
+		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer lk.release(ctx)
+	s, err := a.js.Stream(ctx, sap.InboxStream(name))
+	switch {
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+		return a.deprovisionLocked(ctx, name)
+	case err != nil:
+		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	if _, ok := suspendedSubjects(name, info.Config); !ok {
+		return fmt.Errorf("mash: inbox of %s is not suspended; run suspend first", name)
+	}
+	if info.State.LastSeq != seq {
+		return fmt.Errorf("mash: inbox of %s is at last_seq %d, not the drained %d; drain the rest and try again", name, info.State.LastSeq, seq)
+	}
+	return a.deprovisionLocked(ctx, name)
 }
 
 // The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.

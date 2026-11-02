@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,7 +64,7 @@ func Usage(prog string) string {
 	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence")
 	line("resume <name>", "undo suspend")
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
-	line("deprovision <name> [--user U]", "remove the record and inbox; with --user, only if the record's user is still U")
+	line("deprovision <name> [--user U | --drained-to SEQ]", "remove the record and inbox; with --user, only if the record's user is still U; with --drained-to, only if suspended and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		mintLines(line)
@@ -268,7 +269,21 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			fmt.Fprintf(stdout, "suspended %s since %s: last_seq %d, msgs %d\n", args[1], st.Since, st.LastSeq, st.Msgs)
 		}
 	case "deprovision":
-		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key>]"
+		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ]"
+		if len(args) >= 4 && slices.Contains(args[2:], "--drained-to") && slices.Contains(args[2:], "--user") {
+			return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --user and --drained-to cannot be combined"))
+		}
+		if len(args) == 4 && args[2] == "--drained-to" {
+			seq, err := strconv.ParseUint(args[3], 10, 64)
+			if err != nil {
+				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to wants a non-negative integer (the last_seq that suspend printed)"))
+			}
+			if err := a.DeprovisionDrained(ctx, args[1], seq); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(stdout, "deprovisioned %s (suspended and drained to %d; revoke its NATS user with your operator tooling)\n", args[1], seq)
+			return 0
+		}
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
 			return fail(errors.New(deprovisionUsage))
 		}

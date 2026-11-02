@@ -439,3 +439,61 @@ func TestSuspendRefusesParkedWithoutSavedSubjects(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func intact(t *testing.T, a *admin.Admin, js jetstream.JetStream, name string) {
+	t.Helper()
+	if _, err := js.Stream(context.Background(), "inbox-"+name); err != nil {
+		t.Fatalf("%s: stream gone: %v", name, err)
+	}
+	recs, err := a.List(context.Background())
+	if err != nil || len(recs) != 1 || recs[0].Name != name {
+		t.Fatalf("%s: records %v %v", name, recs, err)
+	}
+}
+
+func TestDeprovisionDrained(t *testing.T) {
+	ctx := context.Background()
+	e, a, js := setup(t)
+	provisionFor(t, e, a, "d", "")
+	if _, err := js.Publish(ctx, "agents.mail.cc.o.d", []byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	// Not suspended.
+	if err := a.DeprovisionDrained(ctx, "d", 1); err == nil || !strings.Contains(err.Error(), "not suspended; run suspend first") {
+		t.Fatalf("not suspended: %v", err)
+	}
+	intact(t, a, js, "d")
+	st, err := a.Suspend(ctx, "d")
+	if err != nil || st.LastSeq != 1 {
+		t.Fatalf("%+v %v", st, err)
+	}
+	// Wrong sequence.
+	if err := a.DeprovisionDrained(ctx, "d", 0); err == nil || !strings.Contains(err.Error(), "last_seq 1, not the drained 0") {
+		t.Fatalf("seq differs: %v", err)
+	}
+	intact(t, a, js, "d")
+	// Another admin resumes in between.
+	if err := a.Resume(ctx, "d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionDrained(ctx, "d", st.LastSeq); err == nil || !strings.Contains(err.Error(), "not suspended") {
+		t.Fatalf("after resume: %v", err)
+	}
+	intact(t, a, js, "d")
+	// Suspended and matching.
+	if _, err := a.Suspend(ctx, "d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionDrained(ctx, "d", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := js.Stream(ctx, "inbox-d"); err == nil {
+		t.Fatal("stream still there")
+	}
+	if recs, err := a.List(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("records %v %v", recs, err)
+	}
+	if err := a.DeprovisionDrained(ctx, "Bad Name", 0); err == nil {
+		t.Fatal("bad name accepted")
+	}
+}
