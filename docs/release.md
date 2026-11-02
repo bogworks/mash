@@ -236,7 +236,7 @@ information embedded in the binary, so it lists what is inside the artifact. It 
 does not rebuild them. mash meets SLSA v1.0 Build L2, not L3: the generator adds a signer identity mash's steps cannot use
 and a fixed provenance format, but the digests it attests come from mash's own workflow. A tag can move, so a
 `generator-pin` job (which `provenance` needs) fails the run unless the generator's tag still resolves to the commit recorded
-in `SLSA_GENERATOR_SHA` in `release.yml`. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
+in `SLSA_GENERATOR_SHA` in `release.yml`. The generator job holds `contents: write` in the release workflow's run; it is isolated and its upload job is disabled by `upload-assets: false`. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
 `quickstart-synadia.sh`, `SHA256SUMS` and `SHA256SUMS.sig`. The reasoning, and what is not yet true, is in
 [decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md).
 

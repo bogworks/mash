@@ -82,6 +82,8 @@ bytes to the reproducible recipe. mash meets SLSA v1.0 **Build L2**; it does not
   API and fails unless it equals the commit recorded in the workflow (`SLSA_GENERATOR_SHA`), and `slsa-verifier
   --builder-id` refuses another generator version. This detects a moved tag; it does not stop the generator's own
   maintainers from shipping bad code at the recorded commit.
+- The generator job holds `contents: write` in the release workflow's run (Actions requires the caller to grant what the
+  generator's `upload-assets` job declares); it is isolated, and its upload job is disabled by `upload-assets: false`.
 - Build L3 is not met (see point 5): the subjects the generator attests are produced by mash's workflow.
 - The SBOM is generated in a job of mash's own workflow and attested by mash's workflow, so it is Build L2-grade, not
   generator-isolated.

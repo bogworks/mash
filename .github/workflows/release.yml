@@ -309,7 +309,9 @@ jobs:
     permissions:
       actions: read
       id-token: write
-      contents: read
+      # The generator's upload-assets job declares contents: write, and Actions requires the caller to grant it even
+      # though upload-assets is false and nothing is uploaded; we attach the provenance ourselves (the draft job).
+      contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.hashes.outputs.base64-subjects }}

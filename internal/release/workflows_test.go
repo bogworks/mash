@@ -1131,7 +1131,7 @@ func TestRelease_runsOnRunnerLinuxDefaultHosted(t *testing.T) {
 }
 
 // A draft left behind stops the next draft before anything is built: the guard job runs scripts/draft-guard, and it is
-// the only job that gets contents: write beyond the draft job; attest holds the signing permissions and no contents (workflow default stays read).
+// the only jobs that get contents: write beyond the draft job are guard and provenance (the generator's upload-assets job declares it); attest holds the signing permissions and no contents (workflow default stays read).
 func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 	w := load(t, "release.yml")
 	var run string
@@ -1155,8 +1155,8 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 				t.Errorf("job %s permissions = %v, want id-token: write and attestations: write only", id, j.Permissions)
 			}
 		case "provenance":
-			if j.Permissions["id-token"] != "write" || j.Permissions["actions"] != "read" || j.Permissions["contents"] != "read" || len(j.Permissions) != 3 {
-				t.Errorf("job provenance permissions = %v, want actions: read, id-token: write, contents: read only", j.Permissions)
+			if j.Permissions["id-token"] != "write" || j.Permissions["actions"] != "read" || j.Permissions["contents"] != "write" || len(j.Permissions) != 3 {
+				t.Errorf("job provenance permissions = %v, want exactly actions: read, id-token: write, contents: write", j.Permissions)
 			}
 		case "sbom", "hashes", "generator-pin", "dry-run-verify":
 			if j.Permissions["contents"] != "read" || len(j.Permissions) != 1 {
