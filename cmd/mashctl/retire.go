@@ -264,10 +264,15 @@ func archiveNoReplace(src, dest string) (string, error) {
 		}
 		err := os.Link(src, d)
 		if err == nil {
+			// The new name must be durable before the old one goes: a crash or a failed sync here leaves both
+			// names, never neither. On a sync failure the original stays and the link is reported.
+			if err := syncDir(filepath.Dir(d)); err != nil {
+				return "", fmt.Errorf("archived to %s but could not make it durable (%w); %s was left in place", d, err, src)
+			}
 			if err := os.Remove(src); err != nil {
 				return "", fmt.Errorf("archived to %s but could not remove %s: %w", d, src, err)
 			}
-			_ = syncDir(filepath.Dir(d)) // best effort
+			_ = syncDir(filepath.Dir(d)) // best effort: the removal
 			return d, nil
 		}
 		if errors.Is(err, os.ErrExist) {
