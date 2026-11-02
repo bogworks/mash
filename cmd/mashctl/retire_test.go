@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 )
@@ -35,7 +36,7 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "retired c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "c's user is not revoked at the server: revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off") {
+	if !strings.Contains(out, "c's user is not revoked at the server: revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off") {
 		t.Errorf("revocation note: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -45,8 +46,61 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if p := h.policyText(); strings.Contains(p, "  c:") || !strings.Contains(p, "# a keeps its comment") || !strings.Contains(p, "# team x may mail any tool") {
 		t.Errorf("policy:\n%s", p)
 	}
-	if _, err := os.Stat(h.creds("c")); err != nil {
-		t.Errorf("creds were removed without --delete-creds: %v", err)
+	if _, err := os.Lstat(h.creds("c")); !os.IsNotExist(err) {
+		t.Errorf("creds still at the old name: %v", err)
+	}
+}
+
+func TestRetireRenamesCredsByDefault(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	if _, errb, code := h.run("add", "c"); code != 0 {
+		t.Fatal(errb)
+	}
+	want, _ := os.ReadFile(h.creds("c"))
+	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
+	t.Cleanup(func() { retireNow = time.Now })
+	out, errb, code := h.run("retire", "c")
+	if code != 0 {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	moved := h.creds("c") + ".retired-20261102T030405Z"
+	if !strings.Contains(out, "creds file renamed to "+moved) {
+		t.Errorf("report: %q", out)
+	}
+	got, err := os.ReadFile(moved)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("renamed content: %v", err)
+	}
+	if fi, _ := os.Stat(moved); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", fi.Mode())
+	}
+	if _, err := os.Lstat(h.creds("c")); !os.IsNotExist(err) {
+		t.Error("old name remains")
+	}
+	if _, errb, code := h.run("add", "c"); code != 0 {
+		t.Fatalf("re-add: %q", errb)
+	}
+}
+
+func TestRetireNoCredsFileIsFine(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("a")
+	out, errb, code := h.run("retire", "a")
+	if code != 0 || strings.Contains(out, "renamed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+}
+
+func TestRetireUndeclaredOrphanSaysFix(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("zz")
+	_, errb, code := h.run("retire", "zz")
+	if code != 1 || !strings.Contains(errb, "zz looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint zz): run mashctl retire zz --force --delete-creds, then mashctl add zz again") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	_, errb, code = h.run("retire", "nothing-here")
+	if code != 1 || strings.Contains(errb, "interrupted") || !strings.Contains(errb, "not declared") {
+		t.Fatalf("%d %q", code, errb)
 	}
 }
 

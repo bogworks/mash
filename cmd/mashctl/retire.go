@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
@@ -23,8 +24,36 @@ var afterRetireRead func()
 // deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
 var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
+// retireNow is the clock for the renamed creds file's suffix; a test replaces it.
+var retireNow = time.Now
+
+// looksInterrupted reports whether a creds file or a directory record exists for a name the policy file lacks. A
+// server that cannot be reached counts as no record.
+func looksInterrupted(cfg config.Config, credsPath, name string) bool {
+	if credsPath != "" {
+		if _, err := os.Lstat(credsPath); err == nil {
+			return true
+		}
+	}
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return false
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, r := range recs {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // revocationNote is printed after every retire: mashctl does not revoke users.
-const revocationNote = "revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off"
+const revocationNote = "revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off"
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
@@ -79,11 +108,9 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
 	}
-	credsPath := ""
-	if deleteCreds {
-		if credsPath, err = credsFileFor(cfg, name); err != nil {
-			return fail("%v", err)
-		}
+	credsPath, credsErr := credsFileFor(cfg, name)
+	if credsErr != nil && deleteCreds {
+		return fail("%v", credsErr)
 	}
 
 	// (1) the policy file, locked for the whole command.
@@ -99,6 +126,9 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	_, declared := beforeFile.Endpoints[name]
 	if !declared && !force {
+		if looksInterrupted(cfg, credsPath, name) {
+			return fail("endpoint %q is not declared in %s (--force removes it from the server only); %s", name, path, orphanText(name))
+		}
 		return fail("endpoint %q is not declared in %s (--force removes it from the server only)", name, path)
 	}
 
@@ -173,9 +203,11 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		}
 	}
 
-	// (5) the creds file, last; a symlink or anything but a regular file is left alone.
+	// (5) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
+	// aside so the name can be added again at once; --delete-creds removes it.
 	code := 0
-	if deleteCreds {
+	renamed := ""
+	if credsErr == nil {
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -185,9 +217,16 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		case !fi.Mode().IsRegular():
 			fmt.Fprintf(stderr, "mashctl: retire %s: %s is not a regular file: left in place\n", name, credsPath)
 			code = 1
-		default:
+		case deleteCreds:
 			if err := os.Remove(credsPath); err != nil {
 				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
+				code = 1
+			}
+		default:
+			renamed = credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
+			if err := os.Rename(credsPath, renamed); err != nil {
+				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
+				renamed = ""
 				code = 1
 			}
 		}
@@ -195,6 +234,9 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 
 	// (6) report.
 	fmt.Fprintf(stdout, "retired %s\n", name)
+	if renamed != "" {
+		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
+	}
 	if after != nil {
 		for _, l := range consequences(before, after) {
 			fmt.Fprintln(stdout, l)

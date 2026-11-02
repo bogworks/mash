@@ -329,7 +329,7 @@ func TestLockContention(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Load(p)
-	if !errors.Is(err, ErrLocked) || err.Error() != "policy file is being edited by another mashctl" {
+	if !errors.Is(err, ErrLocked) || !strings.HasPrefix(err.Error(), "policy file is being edited by another mashctl") || !strings.Contains(err.Error(), "leftover") {
 		t.Fatalf("second Load: %v", err)
 	}
 	d1.Close()
@@ -429,4 +429,101 @@ func TestCreateDoesNotReplaceRacingFile(t *testing.T) {
 		t.Fatalf("competing file changed: %q", b)
 	}
 	noTemps(t, filepath.Dir(p))
+}
+
+func TestLockFileRemovedOnClose(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	d, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p + ".lock"); err != nil {
+		t.Fatalf("lock file while held: %v", err)
+	}
+	d.Close()
+	if _, err := os.Stat(p + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock file after Close: %v", err)
+	}
+}
+
+func TestLeftoverLockFileIsReused(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	// a file left by a holder that died: no flock on it
+	if err := os.WriteFile(p+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with leftover lock file: %v", err)
+	}
+	d.Close()
+	if _, err := os.Stat(p + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("leftover not removed on Close: %v", err)
+	}
+}
+
+func TestSecondLoadWaitsForClose(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	d1, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); !errors.Is(err, ErrLocked) {
+		t.Fatalf("second Load: %v", err)
+	}
+	// the refused Load must not have removed the first holder's file
+	if _, err := os.Stat(p + ".lock"); err != nil {
+		t.Fatalf("holder's lock file gone: %v", err)
+	}
+	d1.Close()
+	d2, err := Load(p)
+	if err != nil {
+		t.Fatalf("after Close: %v", err)
+	}
+	d2.Close()
+}
+
+func TestAcquireRetriesWhenLockFileUnlinkedBeforeFlock(t *testing.T) {
+	p := copyTo(t, "commented.yaml")
+	n := 0
+	afterLockOpen = func() {
+		if n++; n == 1 {
+			os.Remove(p + ".lock") // another process closed and removed it between our open and flock
+		}
+	}
+	t.Cleanup(func() { afterLockOpen = nil })
+	d, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("opens %d, want 2", n)
+	}
+	if !sameLockFile(d.lock, p+".lock") {
+		t.Error("held descriptor is not the file at the path")
+	}
+	d.Close()
+	// every attempt unlinked: bounded, then ErrLocked
+	afterLockOpen = func() { os.Remove(p + ".lock") }
+	if _, err := Load(p); !errors.Is(err, ErrLocked) {
+		t.Fatalf("endless unlink: %v", err)
+	}
+}
+
+func TestSameLockFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.lock")
+	f, _ := os.Create(path)
+	defer f.Close()
+	if !sameLockFile(f, path) {
+		t.Error("same file reported different")
+	}
+	os.Remove(path)
+	if sameLockFile(f, path) {
+		t.Error("removed path reported same")
+	}
+	os.WriteFile(path, nil, 0o600)
+	if sameLockFile(f, path) {
+		t.Error("replaced path reported same")
+	}
 }

@@ -750,5 +750,18 @@ func TestDriftReportsUnknownSigningKeys(t *testing.T) {
 	wantState(t, "account", r.Account, statusDrift, "signing-key-unknown "+opub)
 	if d := r.Account.Findings[0].Detail; !strings.Contains(d, "will not carry signing keys it did not create") {
 		t.Errorf("finding: %s", d)
+func TestDriftRecordExtraNamesTheFix(t *testing.T) {
+	e := newDriftEnv(t)
+	adm, ctx, done := e.admin()
+	defer done()
+	ghost, _ := nkeys.CreateUser()
+	gpub, _ := ghost.PublicKey()
+	if _, err := adm.Provision(ctx, "ghost", gpub, e.acctPub, "", admin.Meta{Zone: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code := e.run("policy", "drift")
+	if code != 1 || !strings.Contains(out, "record-extra ghost") ||
+		!strings.Contains(out, "ghost looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint ghost): run mashctl retire ghost --force --delete-creds, then mashctl add ghost again") {
+		t.Fatalf("%d\n%s", code, out)
 	}
 }
