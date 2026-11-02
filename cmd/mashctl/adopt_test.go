@@ -144,7 +144,7 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 	if code != 0 || errb != "" {
 		t.Fatalf("dry run: %d\n%s\n%s", code, out, errb)
 	}
-	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would mint a mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "`mashctl policy apply` is the first to use it"} {
+	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl policy apply` is the first to use it"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run output lacks %q:\n%s", want, out)
 		}
@@ -200,7 +200,7 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 	if code != 0 || errb != "" {
 		t.Fatalf("second adopt: %d\n%s\n%s", code, out, errb)
 	}
-	if !strings.Contains(out, "already stored") || !strings.Contains(out, "not minted again") {
+	if !strings.Contains(out, "already stored") || !strings.Contains(out, "not minted again") || !strings.Contains(out, "connected (kept)") {
 		t.Errorf("second run output:\n%s", out)
 	}
 	sameTree(t, snap, tree(t, a.root))
@@ -229,7 +229,7 @@ func TestAdoptAdminCredsFileIsRecordedNotCopied(t *testing.T) {
 	if err := os.WriteFile(ac, mustRead(t, e.pl.AdminCredsPath()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := a.adopt("--admin-creds", ac); code != 0 {
+	if out, errb, code := a.adopt("--admin-creds", ac); code != 0 || !strings.Contains(out, "connected (given)") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
 	cj := mustRead(t, filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"))
@@ -436,5 +436,155 @@ func TestJSLimits(t *testing.T) {
 	c.Limits.JetStreamTieredLimits = map[string]jwt.JetStreamLimits{"R3": {DiskStorage: 1 << 30}}
 	if _, _, err := jsLimits(c); err == nil || !strings.Contains(err.Error(), "R1") {
 		t.Errorf("tiers without R1: %v", err)
+	}
+}
+
+// strictEnv is a server whose operator has strict signing key usage and whose account has one signing key. In strict
+// mode the operator identity key may not sign accounts, so the operator JWT also declares an operator signing key,
+// and the system and MASH account JWTs are re-signed by it (the MASH one also gains the account signing key). The
+// operator.jwt and the preloaded JWTs in server.conf are rewritten on disk (the server config is bootstrap's own)
+// before the server starts. The system user in sys.creds is re-minted under a system account signing key. It returns the env, the account signing key, and the operator signing key, whose seed
+// is what adopt must be given as --operator-key.
+func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
+	t.Helper()
+	sk, err := nkeys.CreateAccount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skPub, _ := sk.PublicKey()
+	osk, err := nkeys.CreateOperator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oskPub, _ := osk.PublicKey()
+	ssk, err := nkeys.CreateAccount() // a signing key of the system account: its identity key cannot sign users either
+	if err != nil {
+		t.Fatal(err)
+	}
+	sskPub, _ := ssk.PublicKey()
+	e := newApplyEnvTweak(t, twoZones, func(e *applyEnv) {
+		opKP, _, err := e.ks.Operator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		oc, err := jwt.DecodeOperatorClaims(strings.TrimSpace(string(mustRead(t, filepath.Join(e.pl.Dir, bootstrap.OperatorJWT)))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		oc.StrictSigningKeyUsage = true
+		oc.SigningKeys.Add(oskPub)
+		otok, err := oc.Encode(opKP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(e.pl.Dir, bootstrap.OperatorJWT), []byte(otok+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		conf := e.pl.ConfPath()
+		cb := string(mustRead(t, conf))
+		resign := func(pub, addKey string) {
+			m := regexp.MustCompile(`(?m)^  ` + pub + `: "([^"]+)"$`).FindStringSubmatch(cb)
+			if m == nil {
+				t.Fatalf("JWT of %s not found in server.conf", pub)
+			}
+			ac, err := jwt.DecodeAccountClaims(m[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if addKey != "" {
+				ac.SigningKeys.Add(addKey)
+			}
+			tok, err := ac.Encode(osk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cb = strings.Replace(cb, m[1], tok, 1)
+		}
+		resign(e.pl.System, sskPub)
+		resign(e.acctPub, skPub)
+		signingKeyCreds(t, e.pl.System, ssk, filepath.Join(e.pl.Dir, bootstrap.SysCreds))
+		if err := os.WriteFile(conf, []byte(cb), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	return e, sk, osk
+}
+
+// signingKeyCreds is a user of the account signed by its signing key sk.
+func signingKeyCreds(t *testing.T, acctPub string, sk nkeys.KeyPair, path string) {
+	t.Helper()
+	ukp, _ := nkeys.CreateUser()
+	pub, _ := ukp.PublicKey()
+	seed, _ := ukp.Seed()
+	uc := jwt.NewUserClaims(pub)
+	uc.Name = "viasigner"
+	uc.IssuerAccount = acctPub
+	tok, err := uc.Encode(sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := jwt.FormatUserConfig(tok, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdoptStrictSigningKeyUsage(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	a := newAdopter(t, e)
+	seed, _ := osk.Seed()
+	if err := os.WriteFile(a.opSeed, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	msg := []string{"the server rejected the minted mashadmin user", "strict signing key usage", "account signing key", "--admin-creds FILE", "Authorization Violation", "Nothing was changed"}
+
+	// --mint-admin is refused, dry run included, and writes nothing.
+	a.refuses(1, msg, "--mint-admin")
+	a.refuses(1, msg, "--mint-admin", "--dry-run")
+	if out, _, _ := a.adopt("--mint-admin"); strings.Contains(out, "All checks passed") {
+		t.Errorf("a refused adopt printed success:\n%s", out)
+	}
+
+	// A user signed by the account signing key is accepted, and the summary says it connected.
+	sc := filepath.Join(a.root, "in", "signer.creds")
+	signingKeyCreds(t, e.acctPub, sk, sc)
+	out, errb, code := a.adopt("--admin-creds", sc)
+	if code != 0 || !strings.Contains(out, "admin creds    ok: connected (given)") || strings.Index(out, "connected (given)") > strings.Index(out, "All checks passed") {
+		t.Fatalf("adopt --admin-creds: %d\n%s\n%s", code, out, errb)
+	}
+
+	// A mashadmin.creds minted by the identity key (a dead file left by an earlier adopt) is refused.
+	b := newAdopter(t, e)
+	b.opSeed = a.opSeed
+	dead := filepath.Join(b.root, "cfg", "server", "mashadmin.creds")
+	if err := os.MkdirAll(filepath.Dir(dead), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	acctKP, _, err := e.ks.Account()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := bootstrap.MintAdminCreds(acctKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dead, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b.refuses(1, []string{"cannot connect", "probably rejected by the server", "Move the file aside", "nothing was changed"}, "--mint-admin")
+}
+
+func TestAdoptMintAdminConnectsOnNonStrictServer(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	a := newAdopter(t, e)
+	out, errb, code := a.adopt("--mint-admin")
+	if code != 0 || !strings.Contains(out, "admin creds    ok: connected (minted)") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	if strings.Index(out, "connected (minted)") > strings.Index(out, "All checks passed") {
+		t.Errorf("success came before the connect test:\n%s", out)
 	}
 }

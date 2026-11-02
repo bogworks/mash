@@ -93,9 +93,10 @@ type adoptState struct {
 	serverDir        string
 	sysDst, adminDst string
 	cfgPath, polPath string
-	haveOp, haveAcct bool // the key store already holds this very key
-	haveSys          bool // sys.creds already in place with the same content
-	haveAdmin        bool // mashadmin.creds already in place (kept)
+	haveOp, haveAcct bool   // the key store already holds this very key
+	haveSys          bool   // sys.creds already in place with the same content
+	haveAdmin        bool   // mashadmin.creds already in place (kept)
+	adminKind        string // which admin creds were connect-tested: given, kept or minted ("" when none)
 }
 
 // runAdopt is `mashctl adopt`: the counterpart of `init --local` for a server you already run.
@@ -167,6 +168,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		if st.acctKP != nil {
 			st.acctKP.Wipe()
 		}
+		clear(st.adminRaw)
 	}()
 
 	fmt.Fprintf(stdout, "mashctl adopt: checking %s as owner %q, account %q (read-only: nothing is written until every check passes)\n", o.server, owner, account)
@@ -284,12 +286,34 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stdout, "  5. operator key   ok: the account JWT's valid signature is by %s, a signing key the operator JWT declares (the operator key %s is declared too)\n", claims.Issuer, st.opPub)
 	}
 
-	if st.adminRaw != nil {
+	// (6) the admin creds, whichever way adopt ends up with them, must connect before anything is written. A minted
+	// user is made in memory here and written only in the write phase.
+	switch {
+	case o.adminCreds != "":
 		if w, err := checkAdminCreds(cfg, o.server, st); err != nil {
 			return fail("--admin-creds: %v (nothing was changed)", err)
 		} else if w != "" {
 			warns = append(warns, w)
 		}
+		st.adminKind = "given"
+	case o.mintAdmin && st.haveAdmin:
+		if err := connectAdmin(cfg, o.server, st.adminRaw); err != nil {
+			return fail("%s parses as creds for this account but cannot connect to %s: probably rejected by the server (%v). Move the file aside to mint a new one; nothing was changed", st.adminDst, o.server, err)
+		}
+		st.adminKind = "kept"
+	case o.mintAdmin:
+		raw, err := bootstrap.MintAdminCreds(st.acctKP)
+		if err != nil {
+			return fail("%v (nothing was changed)", err)
+		}
+		st.adminRaw = raw
+		if err := connectAdmin(cfg, o.server, raw); err != nil {
+			return fail("the server rejected the minted mashadmin user: %v\n  On an operator with strict signing key usage (strict_signing_key_usage) users must be signed by an account signing key, and the account identity key cannot sign users, which is all --mint-admin has. Instead pass --admin-creds FILE: a user signed by one of the account's signing keys. Nothing was changed", err)
+		}
+		st.adminKind = "minted"
+	}
+	if st.adminKind != "" {
+		fmt.Fprintf(stdout, "  6. admin creds    ok: connected (%s)\n", st.adminKind)
 	}
 	for _, w := range warns {
 		fmt.Fprintf(stdout, "  warning: %s\n", w)
@@ -337,19 +361,14 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 		step("%srecord the admin creds path %s (the file is not copied)", verb, adminPath)
 	case o.mintAdmin && st.haveAdmin:
 		adminPath = st.adminDst
-		step("%skeep the existing %s (it is valid creds for this account; not minted again)", verb, st.adminDst)
+		step("%skeep the existing %s (it connected; not minted again)", verb, st.adminDst)
 	case o.mintAdmin:
 		adminPath = st.adminDst
 		if o.dryRun {
-			step("would mint a mashadmin user in the account, signed by the account key, and write %s (0600)", st.adminDst)
+			step("would write the minted mashadmin user (it connected) to %s (0600)", st.adminDst)
 			break
 		}
-		raw, err := bootstrap.MintAdminCreds(st.acctKP)
-		if err != nil {
-			return fail("%v", err)
-		}
-		created, err := ctlkeys.InstallFile(st.adminDst, raw)
-		clear(raw)
+		created, err := ctlkeys.InstallFile(st.adminDst, st.adminRaw)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -521,7 +540,7 @@ func checkDestinations(o adoptOpts, st *adoptState) error {
 			if err != nil || !(uc.IssuerAccount == st.acctPub || uc.Issuer == st.acctPub) {
 				return fmt.Errorf("%s exists but is not valid creds for this account: refusing to replace it. Move it aside to mint a new one (nothing was changed)", st.adminDst)
 			}
-			st.haveAdmin = true
+			st.haveAdmin, st.adminRaw = true, b
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -556,17 +575,26 @@ func checkAdminCreds(cfg config.Config, url string, st *adoptState) (string, err
 	if uc.IssuerAccount == "" && uc.Issuer != st.acctPub {
 		warn = fmt.Sprintf("the admin creds were signed by %s, not the account identity key; adopt could not tell they belong to this account, only that they connect", uc.Issuer)
 	}
+	if err := connectAdmin(cfg, url, st.adminRaw); err != nil {
+		return "", fmt.Errorf("the creds cannot connect to %s: %v", url, err)
+	}
+	return warn, nil
+}
+
+// connectAdmin connects with admin creds (bytes; never printed) under the rules of every admin connection: TLS
+// required unless the loopback opt-in applies. The error carries the server's text.
+func connectAdmin(cfg config.Config, url string, raw []byte) error {
 	tlsReq, err := natsauth.RequireTLS(url, cfg.InsecureLoopback)
 	if err != nil {
-		return "", err
+		return err
 	}
 	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
-		natsauth.UserCredentialBytes(st.adminRaw), nats.Name("mashctl-adopt-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
+		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-adopt-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
-		return "", fmt.Errorf("the creds cannot connect to %s: %v", url, natsauth.TLSHint(err))
+		return natsauth.TLSHint(err)
 	}
 	c.Close()
-	return warn, nil
+	return nil
 }
 
 // jsLimits is the JetStream limits of the account (the R1 tier when the account uses tiered limits). It errors when
