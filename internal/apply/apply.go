@@ -19,6 +19,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -202,9 +203,9 @@ type unknownKey struct{ key, role string }
 
 func (u unknownKey) describe() string {
 	if u.role == "" {
-		return "plain signing key " + u.key
+		return "plain signing key " + config.Clean(u.key)
 	}
-	return fmt.Sprintf("scoped signing key %s (role %s)", u.key, u.role)
+	return fmt.Sprintf("scoped signing key %s (role %s)", config.Clean(u.key), config.Clean(u.role))
 }
 
 // knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
@@ -430,7 +431,7 @@ func pushAndCheck(ctx context.Context, r Resolver, token string, known []string)
 	for _, a := range acks {
 		acked[a.Server] = true
 		if !a.OK() {
-			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, a.Message))
+			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, config.Clean(a.Message)))
 		}
 	}
 	var silent []string
@@ -676,7 +677,7 @@ func refuse(out io.Writer, p Params, b *built) {
 			if local == "" {
 				local = "none (the zone key file is missing: apply would create a new key)"
 			}
-			fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", c.zone, c.serverKey, local)
+			fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", config.Clean(c.zone), config.Clean(c.serverKey), local)
 		}
 		fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
 		fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
@@ -685,10 +686,10 @@ func refuse(out io.Writer, p Params, b *built) {
 		fmt.Fprintf(out, "%s: REFUSED unless each zone below is named by --remove-zone or --keep-zone: the server has a signing key for a zone that is not in the policy file (nothing was changed, no key was created)\n", p.Mode)
 		seen := map[string]bool{}
 		for _, o := range outs {
-			fmt.Fprintf(out, "  zone %s: signing key %s stays active with its old permissions, outside the policy\n", o.zone, o.key)
+			fmt.Fprintf(out, "  zone %s: signing key %s stays active with its old permissions, outside the policy\n", config.Clean(o.zone), config.Clean(o.key))
 			if !seen[o.zone] {
 				seen[o.zone] = true
-				fmt.Fprintf(out, "      REFUSED unless --remove-zone %s or --keep-zone %s\n", o.zone, o.zone)
+				fmt.Fprintf(out, "      REFUSED unless --remove-zone %s or --keep-zone %s\n", config.Clean(o.zone), config.Clean(o.zone))
 			}
 		}
 		fmt.Fprintln(out, "--remove-zone ZONE removes that signing key from the account JWT in this apply: users signed by that key stop working (the local zone key file is not deleted).")
@@ -783,16 +784,16 @@ func signersDiff(want, got *jwt.AccountClaims) string {
 
 func label(key string, s jwt.Scope) string {
 	if us, ok := s.(*jwt.UserScope); ok && us != nil {
-		return "zone " + us.Role
+		return "zone " + config.Clean(us.Role)
 	}
-	return key
+	return config.Clean(key)
 }
 
 func serverName(a ServerAck) string {
 	if a.Server == "" {
 		return "a server"
 	}
-	return a.Server
+	return config.Clean(a.Server)
 }
 
 func sortedKeys(sk jwt.SigningKeys) []string {
@@ -887,7 +888,7 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 			fmt.Fprintf(out, "  zone %s: changed\n", zp.name)
 		}
 		for _, o := range zp.replaced {
-			fmt.Fprintf(out, "      replaces the signing key %s (role %s) on the explicit --replace-zone-key %s: it is dropped from the account JWT, and credentials signed by it, by mashctl or by any other tool, stop working\n", o, zp.name, zp.name)
+			fmt.Fprintf(out, "      replaces the signing key %s (role %s) on the explicit --replace-zone-key %s: it is dropped from the account JWT, and credentials signed by it, by mashctl or by any other tool, stop working\n", config.Clean(o), zp.name, zp.name)
 		}
 		for _, l := range zp.changes {
 			fmt.Fprintf(out, "      %s\n", l)
@@ -897,10 +898,10 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 		}
 	}
 	for _, o := range b.removed {
-		fmt.Fprintf(out, "  zone %s is not in the file: removes its signing key %s (--remove-zone): users signed by it stop working (the local zone key file is not deleted)\n", o.zone, o.key)
+		fmt.Fprintf(out, "  zone %s is not in the file: removes its signing key %s (--remove-zone): users signed by it stop working (the local zone key file is not deleted)\n", config.Clean(o.zone), config.Clean(o.key))
 	}
 	for _, z := range b.kept {
-		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", z)
+		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", config.Clean(z))
 	}
 	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, policy.AccountJWTLimit)
 	tagged := 0

@@ -9,7 +9,28 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/policy"
 )
+
+// Caps on what a system-account peer can make mashctl hold or wait for. A server is not trusted to be small.
+const (
+	// maxServers is the most distinct server names Servers records.
+	maxServers = 1024
+	// maxReplies is the most replies LookupAll or Push collects.
+	maxReplies = 4096
+)
+
+var errTooManyReplies = fmt.Errorf("more than %d replies: refusing", maxReplies)
+
+// checkClaimsReply refuses a claims reply larger than the account JWT limit; it is never truncated.
+func checkClaimsReply(b []byte) error {
+	if len(b) > policy.AccountJWTLimit {
+		return fmt.Errorf("reply of %d bytes over the limit of %d bytes", len(b), policy.AccountJWTLimit)
+	}
+	return nil
+}
 
 // The subjects of a full resolver's system-account API, and the waits of the transport.
 const (
@@ -46,6 +67,9 @@ func (n NATS) Lookup(ctx context.Context, account string) (string, error) {
 	if err != nil {
 		return "", hintNoAnswer(err)
 	}
+	if err := checkClaimsReply(msg.Data); err != nil {
+		return "", err
+	}
 	return string(msg.Data), nil
 }
 
@@ -79,7 +103,13 @@ func (n NATS) LookupAll(ctx context.Context, account string, expect int) ([]stri
 			}
 			return out, err
 		}
+		if err := checkClaimsReply(msg.Data); err != nil {
+			return out, err
+		}
 		out = append(out, string(msg.Data))
+		if len(out) >= maxReplies {
+			return out, errTooManyReplies
+		}
 		if expect > 0 {
 			if deadline.IsZero() {
 				deadline = time.Now().Add(ackWait)
@@ -124,7 +154,10 @@ func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
 			continue
 		}
 		wait = pingSettle
-		addPingReply(&set, seen, msg.Data)
+		if addPingReply(&set, seen, msg.Data) {
+			sort.Strings(set.Names)
+			return set, fmt.Errorf("more than %d servers answered: refusing", maxServers)
+		}
 	}
 	sort.Strings(set.Names)
 	return set, nil
@@ -165,6 +198,9 @@ func (n NATS) Push(ctx context.Context, token string, expect []string) ([]Server
 			a := parseAck(msg.Data)
 			acks = append(acks, a)
 			delete(pending, a.Server)
+			if len(acks) >= maxReplies {
+				return acks, errTooManyReplies
+			}
 		}
 		return acks, ctx.Err()
 	}
@@ -181,6 +217,9 @@ func (n NATS) Push(ctx context.Context, token string, expect []string) ([]Server
 			return acks, err
 		}
 		acks = append(acks, parseAck(msg.Data))
+		if len(acks) >= maxReplies {
+			return acks, errTooManyReplies
+		}
 		wait = settleTimeout
 		if ctx.Err() != nil {
 			return acks, ctx.Err()
@@ -210,11 +249,12 @@ func parseAck(b []byte) ServerAck {
 	if name == "" {
 		name = r.Server.ID
 	}
+	name = config.Clean(name)
 	switch {
 	case r.Error != nil:
-		return ServerAck{Server: name, Code: r.Error.Code, Message: r.Error.Description}
+		return ServerAck{Server: name, Code: r.Error.Code, Message: config.Clean(r.Error.Description)}
 	case r.Data != nil:
-		return ServerAck{Server: name, Code: r.Data.Code, Message: r.Data.Message}
+		return ServerAck{Server: name, Code: r.Data.Code, Message: config.Clean(r.Data.Message)}
 	}
 	return ServerAck{Server: name, Message: "empty answer"}
 }
@@ -229,7 +269,10 @@ func hintNoAnswer(err error) error {
 // addPingReply folds one $SYS.REQ.SERVER.PING reply into the set. seen holds the server names already counted;
 // an unparsable reply, one naming no server, or a repeat is ignored. The cluster name is the first non-empty one
 // seen; a reply naming a different cluster marks the set ClusterConflict, which keeps it from being complete.
-func addPingReply(set *ServerSet, seen map[string]bool, data []byte) {
+//
+// Names are cleaned (control characters escaped, capped in length). A name beyond maxServers distinct ones is not
+// recorded and the result is true: the caller must stop and refuse.
+func addPingReply(set *ServerSet, seen map[string]bool, data []byte) (overflow bool) {
 	var r struct {
 		Server struct {
 			Name    string `json:"name"`
@@ -244,14 +287,19 @@ func addPingReply(set *ServerSet, seen map[string]bool, data []byte) {
 		} `json:"statsz"`
 	}
 	if json.Unmarshal(data, &r) != nil {
-		return
+		return false
 	}
 	name := r.Server.Name
 	if name == "" {
 		name = r.Server.ID
 	}
+	name = config.Clean(name)
+	r.Server.Cluster = config.Clean(r.Server.Cluster)
 	if name == "" || seen[name] {
-		return
+		return false
+	}
+	if len(seen) >= maxServers {
+		return true
 	}
 	seen[name] = true
 	set.Names = append(set.Names, name)
@@ -277,4 +325,5 @@ func addPingReply(set *ServerSet, seen map[string]bool, data []byte) {
 	if len(r.Stats.Gateways) > 0 {
 		set.Gateways = true
 	}
+	return false
 }

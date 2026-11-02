@@ -297,6 +297,10 @@ func TestAdoptRefusals(t *testing.T) {
 		a.refuses(2, []string{"--server"}, "adopt", "--operator-key", a.opSeed)
 		a.refuses(2, []string{"alternatives"}, "--admin-creds", a.sys, "--mint-admin")
 	})
+	t.Run("credentials in the URL", func(t *testing.T) {
+		a.t = t
+		a.refuses(2, []string{"credentials in the URL are not supported", "--sys-creds"}, "--server", "tls://bob:hunter2@127.0.0.1:4222")
+	})
 	t.Run("wrong seed prefix", func(t *testing.T) {
 		a.t = t
 		a.refuses(1, []string{"--operator-key", "operator seed"}, "--operator-key", a.acSeed)

@@ -31,12 +31,12 @@ var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, std
 
 // NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
 func NoRevokeWarning(name, user string) string {
-	return "WARNING: --no-revoke: " + name + "'s NATS user key " + user + " is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid. (--no-revoke is a temporary flag name: it will be renamed with the CLI redesign.)\n"
+	return "WARNING: --no-revoke: " + name + "'s NATS user key " + config.Clean(user) + " is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid. (--no-revoke is a temporary flag name: it will be renamed with the CLI redesign.)\n"
 }
 
 // ShortKey is the first 8 characters of a key for messages, or all of it when it is shorter: a user key read from a
 // directory record may be short or malformed, and slicing it must never panic.
-func ShortKey(k string) string { return fmt.Sprintf("%.8s", k) }
+func ShortKey(k string) string { return config.Clean(fmt.Sprintf("%.8s", k)) }
 
 // splitRevokeFlags takes --no-revoke out of args (name and the rest keep their order).
 func splitRevokeFlags(args []string) ([]string, bool, error) {
@@ -169,7 +169,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	}
 	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", cfg.URL, natsauth.TLSHint(err))
+		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
 	}
 	a, err := madmin.New(nc, cfg.Owner)
 	if err != nil {
@@ -265,7 +265,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", rec.Name, rec.Name, rec.MailSubject, metaSuffix(rec))
+		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(rec.Name), config.Clean(rec.Name), config.Clean(rec.MailSubject), metaSuffix(rec))
 	case "limits":
 		for _, n := range args[1:] {
 			if !config.ValidName(n) {
@@ -291,7 +291,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels), metaSuffix(rec))
+		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(rec.Name), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
 	case "set-zone":
 		if len(args) != 3 || !config.ValidName(args[1]) {
 			return usage(errors.New(setZoneUsage(prog)))
@@ -306,7 +306,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", rec.Name, rec.Zone, rec.MailSubject)
+		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(rec.Name), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !config.ValidName(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))
@@ -317,7 +317,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", args[1], st.ID, st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", args[1], config.Clean(st.ID), st.LastSeq, st.Msgs)
 		case "resume":
 			if err := a.Resume(ctx, args[1]); err != nil {
 				return fail(err)
@@ -332,7 +332,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				fmt.Fprintf(stdout, "%s is not suspended\n", args[1])
 				return 3
 			}
-			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", args[1], st.Since, st.ID, st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", args[1], config.Clean(st.Since), config.Clean(st.ID), st.LastSeq, st.Msgs)
 		}
 	case "deprovision":
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
@@ -478,7 +478,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", r.Name, r.User, r.Created, r.Note, zoneSuffix(r))
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", config.Clean(r.Name), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note), zoneSuffix(r))
 		}
 	default:
 		if prog == "mash admin" {
@@ -496,20 +496,20 @@ func zoneSuffix(r store.Record) string {
 	if r.Zone == "" {
 		return ""
 	}
-	return "\tzone=" + r.Zone
+	return "\tzone=" + config.Clean(r.Zone)
 }
 
 // metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
 func metaSuffix(r store.Record) string {
 	var b strings.Builder
 	if r.Description != "" {
-		fmt.Fprintf(&b, ", description %q", r.Description)
+		fmt.Fprintf(&b, ", description %q", config.Clean(r.Description))
 	}
 	if len(r.Caps) > 0 {
-		fmt.Fprintf(&b, ", caps %s", strings.Join(r.Caps, ","))
+		fmt.Fprintf(&b, ", caps %s", config.Clean(strings.Join(r.Caps, ",")))
 	}
 	if r.Zone != "" {
-		fmt.Fprintf(&b, ", zone %s", r.Zone)
+		fmt.Fprintf(&b, ", zone %s", config.Clean(r.Zone))
 	}
 	return b.String()
 }
@@ -637,7 +637,7 @@ func labelList(l map[string]string) string {
 	}
 	sort.Strings(keys)
 	for i, k := range keys {
-		keys[i] = k + "=" + l[k]
+		keys[i] = config.Clean(k) + "=" + config.Clean(l[k])
 	}
 	return strings.Join(keys, " ")
 }
