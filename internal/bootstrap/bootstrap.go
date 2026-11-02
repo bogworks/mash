@@ -224,6 +224,12 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 	return pl, nil
 }
 
+// MintAdminCreds mints the mashadmin user (full access within the account) signed by the account identity key and
+// returns its .creds bytes, which hold the user seed: never log or print them. `mashctl adopt --mint-admin` uses it.
+func MintAdminCreds(accountKey nkeys.KeyPair) ([]byte, error) {
+	return userCreds(adminUserName, accountKey)
+}
+
 // userCreds mints a user signed by signer (an account identity key) and returns its .creds bytes.
 func userCreds(name string, signer nkeys.KeyPair) ([]byte, error) {
 	ukp, err := nkeys.CreateUser()

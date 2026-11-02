@@ -32,6 +32,8 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		return 0
 	case "policy": // offline: no server, no admin credentials
 		return runPolicy(args[1:], env, stdout, stderr)
+	case "adopt": // takes over a server you already run: the config and the key store, not a server
+		return runAdopt(args[1:], env, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, stdout, stderr)
 	case "label", "unlabel": // the policy file; the server only with --sync

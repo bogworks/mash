@@ -67,11 +67,16 @@ func Usage(prog string) string {
 	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", "remove the record and inbox; with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
+		adoptLines(line)
 		mintLines(line)
 		retireLines(line)
 		policyLines(line)
 	}
 	return b.String()
+}
+
+func adoptLines(line func(left, right string)) {
+	line("adopt --server URL --operator-key F --account-key F --sys-creds F [--account N] [--admin-creds F | --mint-admin] [--owner O] [--dry-run]", "take over an operator-mode server you already run: check your authority over it, then keep the keys and write the config; changes nothing on the server")
 }
 
 func mintLines(line func(left, right string)) {
