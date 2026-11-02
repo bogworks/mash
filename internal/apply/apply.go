@@ -1,7 +1,7 @@
 // Package apply pushes a compiled policy to the MASH account (ADR 0052, 0053): one scoped signing key per zone in
 // the account JWT. It looks the current account JWT up on the resolver through the system account, replaces or adds
 // only the scoped signing keys of the policy's zones, signs the result with the operator key, pushes it, and reads it
-// back to verify. It never removes a zone key and it is not a transaction across NATS claims, JetStream resources and
+// back to verify. It removes a zone key only when asked (--replace-zone-key) and it is not a transaction across NATS claims, JetStream resources and
 // local files; a partial result says what was and was not done. Seed text is never put in output or errors.
 package apply
 
@@ -29,8 +29,12 @@ const NotATransaction = "apply is not a transaction across NATS claims, JetStrea
 type Resolver interface {
 	// Lookup returns the account's current JWT, or "" when the resolver has none.
 	Lookup(ctx context.Context, account string) (string, error)
-	// Push sends the account JWT as a claims update and returns the answer of every server that replied.
-	Push(ctx context.Context, token string) ([]ServerAck, error)
+	// Servers returns the names of the servers that answer a system-account ping: the set that must acknowledge a
+	// push. An empty set means it could not be confirmed.
+	Servers(ctx context.Context) ([]string, error)
+	// Push sends the account JWT as a claims update and returns the answer of every server that replied; expect is
+	// the known server set (nil when unknown), which a transport may wait for.
+	Push(ctx context.Context, token string, expect []string) ([]ServerAck, error)
 }
 
 // ServerAck is one server's answer to a claims update.
@@ -77,11 +81,17 @@ type Params struct {
 	// may take a moment to answer with the new claims everywhere.
 	VerifyTries int
 	VerifyWait  time.Duration
+	// ReplaceZoneKeys names zones whose scoped signer on the server may be replaced by the key apply holds
+	// (--replace-zone-key): credentials signed by the old key stop working.
+	ReplaceZoneKeys []string
+	// LockWait is how long an apply waits for the key directory lock (default 5s).
+	LockWait time.Duration
 }
 
 const (
 	defaultVerifyTries = 5
 	defaultVerifyWait  = 200 * time.Millisecond
+	defaultLockWait    = 5 * time.Second
 )
 
 // zoneState is how one file zone compares with the server.
@@ -101,6 +111,23 @@ type zonePlan struct {
 	scope     *jwt.UserScope
 	changes   []string // "pub allow  + line" for a changed or new zone
 	otherDiff bool     // changed in the role or limits only
+	replaced  []string // old scoped signers under this role that this run removes (--replace-zone-key)
+}
+
+// built is one computation of the desired account JWT from the JWT the resolver had.
+type built struct {
+	cur       string
+	desired   *jwt.AccountClaims
+	plans     []*zonePlan
+	extras    []string
+	changed   bool
+	token     string
+	conflicts []conflict
+}
+
+// conflict is a scoped signer on the server under a file zone's role whose key is not the zone key apply holds.
+type conflict struct {
+	zone, serverKey, localKey string // localKey "" means the zone key file is missing
 }
 
 // Run executes p and writes its report to out; the result is the process exit code (0 ok, 1 refused or partial).
@@ -120,6 +147,18 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		return fail(fmt.Errorf("refusing: the policy does not fit: %w (nothing was changed)", err))
 	}
 
+	replace := map[string]bool{}
+	for _, r := range p.ReplaceZoneKeys {
+		found := false
+		for _, z := range c.Zones {
+			found = found || z.Name == r
+		}
+		if !found {
+			return fail(fmt.Errorf("--replace-zone-key %s: no zone of that name in the policy file (nothing was changed)", r))
+		}
+		replace[r] = true
+	}
+
 	opKP, _, err := p.Keys.Operator()
 	if err != nil {
 		return fail(err)
@@ -131,107 +170,59 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	}
 	acctKP.Wipe()
 
-	cur, err := p.Resolver.Lookup(ctx, acctPub)
-	if err != nil {
-		return fail(fmt.Errorf("look up the account JWT: %w (nothing was changed)", err))
-	}
-	if cur == "" {
-		return fail(fmt.Errorf("the resolver has no JWT for the MASH account %s: is the account key in the key store the account of this server? (nothing was changed)", acctPub))
-	}
-	current, err := jwt.DecodeAccountClaims(cur)
-	if err != nil {
-		return fail(fmt.Errorf("the resolver's account JWT does not decode: %w (nothing was changed)", err))
-	}
-	if current.Subject != acctPub {
-		return fail(fmt.Errorf("the resolver answered with the JWT of account %s, not %s (nothing was changed)", current.Subject, acctPub))
-	}
-	desired, err := jwt.DecodeAccountClaims(cur)
-	if err != nil {
-		return fail(err)
-	}
-	if desired.SigningKeys == nil {
-		desired.SigningKeys = jwt.SigningKeys{}
+	// Applies that share this key directory are serialized, from before the first read until after the read-back.
+	if p.Mode == Apply {
+		wait := p.LockWait
+		if wait <= 0 {
+			wait = defaultLockWait
+		}
+		unlock, lerr := p.Keys.Lock(wait)
+		if lerr != nil {
+			return fail(fmt.Errorf("%w (nothing was changed)", lerr))
+		}
+		defer unlock()
 	}
 
-	// Zone keys: apply creates the missing ones, a dry run reports them and uses a throwaway public key for sizing.
-	var plans []*zonePlan
-	var created []string
-	filePubs := map[string]string{} // zone public key -> zone name
-	for _, z := range c.Zones {
-		zp := &zonePlan{name: z.Name}
-		kp, kerr := p.Keys.ZoneKey(z.Name, false)
-		switch {
-		case kerr == nil:
-		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
-			zp.keyIsNew = true
-			if p.Mode == Apply {
-				kp, kerr = p.Keys.ZoneKey(z.Name, true)
-				if kerr != nil {
-					return fail(kerr)
-				}
-				created = append(created, z.Name)
-			} else if kp, kerr = nkeys.CreateAccount(); kerr != nil {
-				return fail(kerr)
-			}
-		default:
-			return fail(kerr)
+	created := map[string]bool{}
+	var b *built
+	for attempt := 0; ; attempt++ {
+		cur, err := p.Resolver.Lookup(ctx, acctPub)
+		if err != nil {
+			return fail(fmt.Errorf("look up the account JWT: %w (nothing was changed)", err))
 		}
-		zp.pub, err = kp.PublicKey()
-		kp.Wipe()
+		b, err = build(p, opKP, acctPub, cur, replace, created)
 		if err != nil {
 			return fail(err)
 		}
-		filePubs[zp.pub] = z.Name
-		scope := jwt.NewUserScope()
-		scope.Key = zp.pub
-		scope.Role = z.Name
-		scope.Template.Permissions = z.Perms
-		zp.scope = scope
-
-		have, _ := current.SigningKeys.GetScope(zp.pub)
-		old, _ := have.(*jwt.UserScope)
-		switch {
-		case old == nil:
-			zp.state = zoneNew
-			zp.changes = permDiff(nil, scope)
-		case scopeJSON(old) == scopeJSON(scope):
-			zp.state = zoneUnchanged
-		default:
-			zp.state = zoneChanged
-			zp.changes = permDiff(old, scope)
-			zp.otherDiff = len(zp.changes) == 0
+		if len(b.conflicts) > 0 || p.Mode != Apply || !b.changed {
+			break
 		}
-		desired.SigningKeys[zp.pub] = scope
-		plans = append(plans, zp)
-	}
-
-	// Scoped signers on the server that no zone of the file owns are left alone and reported.
-	var extras []string
-	for _, k := range sortedKeys(current.SigningKeys) {
-		sc, _ := current.SigningKeys.GetScope(k)
-		us, ok := sc.(*jwt.UserScope)
-		if !ok || us == nil {
-			continue // a plain signing key is not a zone
-		}
-		if _, ours := filePubs[k]; ours {
-			continue
-		}
-		extras = append(extras, us.Role)
-	}
-
-	changed := false
-	for _, zp := range plans {
-		changed = changed || zp.state != zoneUnchanged
-	}
-	token := cur
-	if changed {
-		token, err = desired.Encode(opKP)
+		// Someone else may have pushed since the read: compute again from what is there now, once.
+		again, err := p.Resolver.Lookup(ctx, acctPub)
 		if err != nil {
-			return fail(fmt.Errorf("encode the account JWT: %w (nothing was changed)", err))
+			return fail(fmt.Errorf("look up the account JWT before the push: %w (nothing was pushed)", err))
 		}
-		if len(token) > policy.AccountJWTLimit {
-			return fail(fmt.Errorf("the account JWT would be %d bytes, over the %d byte limit: fewer zones, or fewer zone pairs granted (nothing was changed)", len(token), policy.AccountJWTLimit))
+		if again == b.cur {
+			break
 		}
+		if attempt == 1 {
+			return fail(errors.New("the account JWT changed twice while apply was computing its update: something else is changing it; run the command again (nothing was pushed)"))
+		}
+	}
+	var createdList []string
+	for _, z := range c.Zones {
+		if created[z.Name] {
+			createdList = append(createdList, z.Name)
+		}
+	}
+	plans, desired, extras, changed, token, cur := b.plans, b.desired, b.extras, b.changed, b.token, b.cur
+
+	if len(b.conflicts) > 0 {
+		refuse(out, p, b.conflicts)
+		if p.Mode == Diff {
+			return 0
+		}
+		return 1
 	}
 
 	report(out, p, plans, extras, len(cur), len(token), changed)
@@ -245,7 +236,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		pf("%s\n", NotATransaction)
 		return 0
 	}
-	for _, z := range created {
+	for _, z := range createdList {
 		pf("created the signing key of zone %s (a local file in the key store)\n", z)
 	}
 	if !changed {
@@ -253,32 +244,216 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		return 0
 	}
 
-	// Push, then read back.
-	acks, perr := p.Resolver.Push(ctx, token)
+	// The set of servers that must acknowledge, then push, then read back.
+	known, kerr := p.Resolver.Servers(ctx)
+	acks, perr := p.Resolver.Push(ctx, token, known)
+	acked := map[string]bool{}
 	var bad []string
 	for _, a := range acks {
+		acked[a.Server] = true
 		if !a.OK() {
 			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, a.Message))
 		}
 	}
-	if perr != nil || len(bad) > 0 || len(acks) == 0 {
-		var why string
+	var silent []string
+	for _, k := range known {
+		if !acked[k] {
+			silent = append(silent, k)
+		}
+	}
+	if perr != nil || len(bad) > 0 || len(acks) == 0 || len(silent) > 0 {
+		var why []string
 		switch {
 		case perr != nil:
-			why = perr.Error()
+			why = append(why, perr.Error())
 		case len(acks) == 0:
-			why = "no server answered"
-		default:
-			why = "refused by " + strings.Join(bad, "; ")
+			why = append(why, "no server answered")
 		}
-		return partial(out, p, created, fmt.Sprintf("the claims update was not acknowledged: %s", why), verifyState(ctx, p, acctPub, desired))
+		if len(bad) > 0 {
+			why = append(why, "refused by "+strings.Join(bad, "; "))
+		}
+		if len(silent) > 0 {
+			why = append(why, "no acknowledgement from "+strings.Join(silent, ", ")+" (known from the system account ping)")
+		}
+		return partial(out, p, createdList, fmt.Sprintf("the claims update was not acknowledged: %s", strings.Join(why, "; ")), verifyState(ctx, p, acctPub, desired))
+	}
+	unconfirmed := ""
+	if len(known) == 0 {
+		why := "the ping answered no server"
+		if kerr != nil {
+			why = kerr.Error()
+		}
+		unconfirmed = fmt.Sprintf("\nnote: the set of servers could not be confirmed (%s), so only the %d answer(s) received are known; check the other servers if there are any.", why, len(acks))
 	}
 	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
-		return partial(out, p, created, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
+		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
 	}
-	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).\n", len(acks), len(plans))
+	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).%s\n", len(acks), len(plans), unconfirmed)
 	pf("%s\n", NotATransaction)
 	return 0
+}
+
+// build computes the desired account JWT from cur. It creates missing zone keys only when nothing conflicts and the
+// mode is Apply; created collects their zone names.
+func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created map[string]bool) (*built, error) {
+	c := p.Compiled
+	if cur == "" {
+		return nil, fmt.Errorf("the resolver has no JWT for the MASH account %s: is the account key in the key store the account of this server? (nothing was changed)", acctPub)
+	}
+	current, err := jwt.DecodeAccountClaims(cur)
+	if err != nil {
+		return nil, fmt.Errorf("the resolver's account JWT does not decode: %w (nothing was changed)", err)
+	}
+	if current.Subject != acctPub {
+		return nil, fmt.Errorf("the resolver answered with the JWT of account %s, not %s (nothing was changed)", current.Subject, acctPub)
+	}
+	desired, err := jwt.DecodeAccountClaims(cur)
+	if err != nil {
+		return nil, err
+	}
+	if desired.SigningKeys == nil {
+		desired.SigningKeys = jwt.SigningKeys{}
+	}
+	b := &built{cur: cur, desired: desired}
+
+	// A scoped signer on the server under a file zone's role but with another key than the zone key apply holds
+	// would keep its old permissions beside the new policy: refuse, or replace it when asked. Nothing is created yet.
+	localPub := map[string]string{}
+	isFileZone := map[string]bool{}
+	for _, z := range c.Zones {
+		isFileZone[z.Name] = true
+		kp, kerr := p.Keys.ZoneKey(z.Name, false)
+		switch {
+		case kerr == nil:
+			localPub[z.Name], kerr = kp.PublicKey()
+			kp.Wipe()
+			if kerr != nil {
+				return nil, kerr
+			}
+		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
+		default:
+			return nil, kerr
+		}
+	}
+	oldKeys := map[string][]string{}
+	removed := map[string]bool{}
+	for _, k := range sortedKeys(current.SigningKeys) {
+		sc, _ := current.SigningKeys.GetScope(k)
+		us, ok := sc.(*jwt.UserScope)
+		if !ok || us == nil || !isFileZone[us.Role] || k == localPub[us.Role] {
+			continue
+		}
+		if replace[us.Role] {
+			oldKeys[us.Role] = append(oldKeys[us.Role], k)
+			removed[k] = true
+			continue
+		}
+		b.conflicts = append(b.conflicts, conflict{zone: us.Role, serverKey: k, localKey: localPub[us.Role]})
+	}
+	if len(b.conflicts) > 0 {
+		return b, nil
+	}
+
+	// Zone keys: apply creates the missing ones, a dry run reports them and uses a throwaway public key for sizing.
+	filePubs := map[string]string{} // zone public key -> zone name
+	for _, z := range c.Zones {
+		zp := &zonePlan{name: z.Name}
+		kp, kerr := p.Keys.ZoneKey(z.Name, false)
+		switch {
+		case kerr == nil:
+		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
+			zp.keyIsNew = true
+			if p.Mode == Apply {
+				kp, kerr = p.Keys.ZoneKey(z.Name, true)
+				if kerr != nil {
+					return nil, kerr
+				}
+				created[z.Name] = true
+			} else if kp, kerr = nkeys.CreateAccount(); kerr != nil {
+				return nil, kerr
+			}
+		default:
+			return nil, kerr
+		}
+		zp.pub, err = kp.PublicKey()
+		kp.Wipe()
+		if err != nil {
+			return nil, err
+		}
+		filePubs[zp.pub] = z.Name
+		scope := jwt.NewUserScope()
+		scope.Key = zp.pub
+		scope.Role = z.Name
+		scope.Template.Permissions = z.Perms
+		zp.scope = scope
+
+		have, _ := current.SigningKeys.GetScope(zp.pub)
+		old, _ := have.(*jwt.UserScope)
+		switch {
+		case len(oldKeys[z.Name]) > 0:
+			zp.replaced = oldKeys[z.Name]
+			zp.state = zoneChanged
+			hv, _ := current.SigningKeys.GetScope(zp.replaced[0])
+			ov, _ := hv.(*jwt.UserScope)
+			zp.changes = permDiff(ov, scope)
+		case old == nil:
+			zp.state = zoneNew
+			zp.changes = permDiff(nil, scope)
+		case scopeJSON(old) == scopeJSON(scope):
+			zp.state = zoneUnchanged
+		default:
+			zp.state = zoneChanged
+			zp.changes = permDiff(old, scope)
+			zp.otherDiff = len(zp.changes) == 0
+		}
+		for _, o := range zp.replaced {
+			delete(desired.SigningKeys, o)
+		}
+		desired.SigningKeys[zp.pub] = scope
+		b.plans = append(b.plans, zp)
+	}
+
+	// Scoped signers on the server that no zone of the file owns are left alone and reported.
+	for _, k := range sortedKeys(current.SigningKeys) {
+		sc, _ := current.SigningKeys.GetScope(k)
+		us, ok := sc.(*jwt.UserScope)
+		if !ok || us == nil {
+			continue // a plain signing key is not a zone
+		}
+		if _, ours := filePubs[k]; ours || removed[k] {
+			continue
+		}
+		b.extras = append(b.extras, us.Role)
+	}
+
+	for _, zp := range b.plans {
+		b.changed = b.changed || zp.state != zoneUnchanged
+	}
+	b.token = cur
+	if b.changed {
+		b.token, err = desired.Encode(opKP)
+		if err != nil {
+			return nil, fmt.Errorf("encode the account JWT: %w (nothing was changed)", err)
+		}
+		if len(b.token) > policy.AccountJWTLimit {
+			return nil, fmt.Errorf("the account JWT would be %d bytes, over the %d byte limit: fewer zones, or fewer zone pairs granted (nothing was changed)", len(b.token), policy.AccountJWTLimit)
+		}
+	}
+	return b, nil
+}
+
+// refuse prints the zone key conflicts (public keys only) and the two ways out.
+func refuse(out io.Writer, p Params, cs []conflict) {
+	fmt.Fprintf(out, "%s: REFUSED: the server has a signing key for a zone that is not the zone key in the key store (nothing was changed, no key was created)\n", p.Mode)
+	for _, c := range cs {
+		local := c.localKey
+		if local == "" {
+			local = "none (the zone key file is missing: apply would create a new key)"
+		}
+		fmt.Fprintf(out, "  zone %s: the server's signing key is %s, the key store's is %s\n", c.zone, c.serverKey, local)
+	}
+	fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
+	fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
 }
 
 // partial prints what was and was not done and returns exit code 1. observed is what the read-back found ("" is a
@@ -480,6 +655,9 @@ func report(out io.Writer, p Params, plans []*zonePlan, extras []string, before,
 			fmt.Fprintf(out, "  zone %s: new%s\n", zp.name, note)
 		case zoneChanged:
 			fmt.Fprintf(out, "  zone %s: changed\n", zp.name)
+		}
+		for _, o := range zp.replaced {
+			fmt.Fprintf(out, "      replaces the signing key %s (--replace-zone-key): credentials signed by it stop working\n", o)
 		}
 		for _, l := range zp.changes {
 			fmt.Fprintf(out, "      %s\n", l)

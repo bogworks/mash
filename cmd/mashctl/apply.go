@@ -29,13 +29,14 @@ const (
 type applyOpts struct {
 	file, sysCreds string
 	dryRun         bool
+	replaceZones   []string
 }
 
 func applyUsage(verb string) string {
 	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE]\n"
+		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]...\n"
 	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]...\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {
@@ -48,7 +49,7 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			*i++
 			return args[*i], nil
 		}
-		return "", fmt.Errorf("%s needs a file", name)
+		return "", fmt.Errorf("%s needs a value", name)
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -58,6 +59,11 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			o.file, err = val(&i, a, "--policy")
 		case a == "--sys-creds" || strings.HasPrefix(a, "--sys-creds="):
 			o.sysCreds, err = val(&i, a, "--sys-creds")
+		case a == "--replace-zone-key" || strings.HasPrefix(a, "--replace-zone-key="):
+			var z string
+			if z, err = val(&i, a, "--replace-zone-key"); err == nil {
+				o.replaceZones = append(o.replaceZones, z)
+			}
 		case a == "--dry-run" && verb == "apply":
 			o.dryRun = true
 		default:
@@ -169,5 +175,5 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
-	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc}}, stdout)
+	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc}, ReplaceZoneKeys: o.replaceZones}, stdout)
 }

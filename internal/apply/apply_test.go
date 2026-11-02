@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -17,6 +20,8 @@ import (
 
 // fake is an in-memory resolver.
 type fake struct {
+	mu        sync.Mutex
+	servers   []string // the system account ping's answer
 	token     string
 	acks      []ServerAck
 	pushErr   error
@@ -24,8 +29,15 @@ type fake struct {
 	pushes    int
 }
 
-func (f *fake) Lookup(context.Context, string) (string, error) { return f.token, nil }
-func (f *fake) Push(_ context.Context, tok string) ([]ServerAck, error) {
+func (f *fake) Lookup(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.token, nil
+}
+func (f *fake) Servers(context.Context) ([]string, error) { return f.servers, nil }
+func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pushes++
 	if f.applyPush {
 		f.token = tok
@@ -149,4 +161,188 @@ func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
 	if z, _ := ks.Zones(); len(z) != 0 || fk.pushes != 0 {
 		t.Fatal("dry run changed something")
 	}
+}
+
+func compile(t *testing.T, y string) *policy.Compiled {
+	t.Helper()
+	f, err := policy.Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := policy.Compile(f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestServerAcknowledgements(t *testing.T) {
+	cases := []struct {
+		name    string
+		servers []string
+		acks    []ServerAck
+		code    int
+		want    []string
+	}{
+		{"both ack", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}}, 0, []string{"pushed: 2 server(s)"}},
+		{"one silent", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}}, 1, []string{"PARTIAL", "no acknowledgement from s2"}},
+		{"non-200", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, 1, []string{"PARTIAL", "refused by s2: code 503 busy"}},
+		{"single server", []string{"s1"}, []ServerAck{{Server: "s1", Code: 200}}, 0, []string{"pushed: 1 server(s)"}},
+		{"ping found nobody", nil, []ServerAck{{Server: "s1", Code: 200}}, 0, []string{"pushed: 1 server(s)", "could not be confirmed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ks, fk, c := setup(t)
+			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
+			var out bytes.Buffer
+			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
+			if code != tc.code {
+				t.Fatalf("%d\n%s", code, out.String())
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(out.String(), w) {
+					t.Fatalf("missing %q:\n%s", w, out.String())
+				}
+			}
+		})
+	}
+}
+
+// lostKey applies once, then replaces the zone key file of zone a, as if the file were lost and apply ran again.
+func lostKey(t *testing.T) (*ctlkeys.Authority, *fake, *policy.Compiled, string, string) {
+	t.Helper()
+	ks, fk, c := setup(t)
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	var out bytes.Buffer
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	oldPub, err := ks.ZonePublic("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zdir := filepath.Join(ks.Dir(), "zones")
+	entries, _ := os.ReadDir(zdir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "a.") {
+			if err := os.Remove(filepath.Join(zdir, e.Name())); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := ks.ZonePublic("a"); err == nil {
+		t.Fatal("zone key a still present")
+	}
+	return ks, fk, c, oldPub, fk.token
+}
+
+func TestLostZoneKeyIsRefusedUnlessReplaced(t *testing.T) {
+	for _, mode := range []Mode{Apply, DryRun, Diff} {
+		ks, fk, c, oldPub, before := lostKey(t)
+		pushes := fk.pushes
+		var out bytes.Buffer
+		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
+		want := 1
+		if mode == Diff {
+			want = 0
+		}
+		s := out.String()
+		if code != want || !strings.Contains(s, "REFUSED") || !strings.Contains(s, "zone a") || !strings.Contains(s, oldPub) ||
+			!strings.Contains(s, "--replace-zone-key") || !strings.Contains(s, "restore the original zone key file") || !strings.Contains(s, "stop working") {
+			t.Fatalf("%s: %d\n%s", mode, code, s)
+		}
+		if fk.pushes != pushes || fk.token != before {
+			t.Fatalf("%s pushed", mode)
+		}
+		if _, err := ks.ZonePublic("a"); err == nil {
+			t.Fatalf("%s created a zone key before refusing", mode)
+		}
+	}
+}
+
+func TestReplaceZoneKeyReplacesTheOldSigner(t *testing.T) {
+	ks, fk, c, oldPub, _ := lostKey(t)
+	var out bytes.Buffer
+	// a dry run with the flag reports the replacement and changes nothing
+	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"a"}}, &out); code != 0 ||
+		!strings.Contains(out.String(), "replaces the signing key "+oldPub) {
+		t.Fatalf("%d\n%s", code, out.String())
+	}
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"a"}}, &out); code != 0 {
+		t.Fatalf("%d\n%s", code, out.String())
+	}
+	newPub, err := ks.ZonePublic("a")
+	if err != nil || newPub == oldPub {
+		t.Fatalf("%v %s", err, newPub)
+	}
+	cl, _ := jwt.DecodeAccountClaims(fk.token)
+	if _, ok := cl.SigningKeys.GetScope(oldPub); ok {
+		t.Fatal("the old signer is still in the account JWT")
+	}
+	if _, ok := cl.SigningKeys.GetScope(newPub); !ok || len(cl.SigningKeys) != 2 {
+		t.Fatalf("signers: %v", cl.SigningKeys.Keys())
+	}
+	// a flag for a zone the file lacks is an error
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"nope"}}, &out); code != 1 || !strings.Contains(out.String(), "no zone of that name") {
+		t.Fatalf("%d %s", code, out.String())
+	}
+}
+
+func TestConcurrentAppliesNeverLoseAZone(t *testing.T) {
+	ks, fk, _ := setup(t)
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	y1 := "default: deny\nendpoints:\n  x: {labels: {zone: a}}\n  y: {labels: {zone: b}}\nrules:\n  - {name: r, action: allow, from: {zone: a}, to: {zone: b}}\n"
+	y2 := "default: deny\nendpoints:\n  x: {labels: {zone: c}}\n  y: {labels: {zone: d}}\nrules:\n  - {name: r, action: allow, from: {zone: c}, to: {zone: d}}\n"
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	codes := map[int]int{}
+	for _, y := range []string{y1, y2} {
+		c := compile(t, y)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var out bytes.Buffer
+			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, LockWait: 10 * time.Second}, &out)
+			mu.Lock()
+			codes[code]++
+			mu.Unlock()
+			if code != 0 && !strings.Contains(out.String(), "lock") && !strings.Contains(out.String(), "changed twice") {
+				t.Errorf("unclean error: %s", out.String())
+			}
+		}()
+	}
+	wg.Wait()
+	cl, _ := jwt.DecodeAccountClaims(fk.token)
+	have := map[string]bool{}
+	for _, k := range cl.SigningKeys.Keys() {
+		sc, _ := cl.SigningKeys.GetScope(k)
+		if us, ok := sc.(*jwt.UserScope); ok {
+			have[us.Role] = true
+		}
+	}
+	if codes[0] == 2 && (!have["a"] || !have["b"] || !have["c"] || !have["d"]) {
+		t.Fatalf("a zone was lost: %v", have)
+	}
+	if codes[0] == 0 {
+		t.Fatalf("neither apply succeeded: %v", codes)
+	}
+}
+
+func TestLockExcludesAndWaitsOut(t *testing.T) {
+	ks, _, _ := setup(t)
+	un, err := ks.Lock(time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ks.Lock(50 * time.Millisecond); !errors.Is(err, ctlkeys.ErrLocked) {
+		t.Fatalf("second lock: %v", err)
+	}
+	un()
+	un2, err := ks.Lock(time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	un2()
 }

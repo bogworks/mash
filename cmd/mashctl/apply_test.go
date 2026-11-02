@@ -398,3 +398,18 @@ func TestSysCredsDefaultsFromTheInitServerDir(t *testing.T) {
 		t.Fatalf("%d %s %s", code, out, errb)
 	}
 }
+
+func TestApplyConfirmsTheServerSetAndParsesReplaceFlag(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	out, errb, code := e.run("policy", "apply")
+	if code != 0 || !strings.Contains(out, "pushed: 1 server(s)") || strings.Contains(out, "could not be confirmed") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	o, err := parseApplyArgs("apply", []string{"--replace-zone-key", "a", "--replace-zone-key=b"})
+	if err != nil || len(o.replaceZones) != 2 || o.replaceZones[1] != "b" {
+		t.Fatalf("%v %v", o, err)
+	}
+	if _, err := parseApplyArgs("apply", []string{"--replace-zone-key"}); err == nil {
+		t.Fatal("a flag without a value parsed")
+	}
+}
