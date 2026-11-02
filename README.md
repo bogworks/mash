@@ -77,17 +77,7 @@ The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 en
 
 ## How it works
 
-```
- Claude Code session                       NATS server (operator mode, JetStream)
- ┌──────────────────────┐                 ┌──────────────────────────────────────┐
- │ claude --channels     │  stdio (MCP)    │ account MASH                          │
- │   plugin:mash@mash    │◀──────────────▶ │  inbox-<name>   per-endpoint stream   │
- │                       │  mash serve ────┼──▶ agents.mail.cc.<owner>.<name>      │
- │  tools: send, read,   │   one TLS conn  │  mash-directory KV  name → identity   │
- │  inbox, who, reply    │                 │  mash-leases KV     one live session  │
- └──────────────────────┘                 │  $SRV.* / agents.hb.*  SAP presence   │
-                                           └──────────────────────────────────────┘
-```
+![A Claude Code session talks stdio (MCP) to mash serve, which holds one TLS connection to the NATS server (account MASH: inbox stream, mail subject, directory and lease KVs, SAP presence).](docs/images/007-session-and-server.svg)
 
 The design, with every subject, permission and limit, is in [docs/specs/2026-10-21-mash-design.md](docs/specs/2026-10-21-mash-design.md).
 

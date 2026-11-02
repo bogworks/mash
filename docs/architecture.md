@@ -114,29 +114,7 @@ measure each one.
 
 ## 3. Context and scope
 
-```mermaid
----
-title: System context (topology)
----
-flowchart LR
-  op(["Operator / admin"])
-  subgraph hostA["Machine A"]
-    ahA["Agent host session<br/>(Claude Code)"] -->|"starts, stdio"| mashA["mash<br/>(serve, hook, CLI)"]
-  end
-  subgraph hostB["Machine B"]
-    ahB["Agent host session"] -->|"starts, stdio"| mashB["mash"]
-  end
-  sap["Other SAP tools"]
-  nats[("NATS server with JetStream<br/>self-hosted or Synadia Cloud")]
-  idt["Operator's identity tooling<br/>(nsc or another JWT issuer)"]
-  api["Synadia Cloud control-plane API"]
-  mashA -->|"NATS, TLS"| nats
-  mashB -->|"NATS, TLS"| nats
-  sap -->|"NATS"| nats
-  op -->|"mash admin, via NATS"| nats
-  op -->|"issues users"| idt
-  op -->|"scripts/quickstart-synadia.sh, HTTPS"| api
-```
+![Two machines each run an agent host session that starts mash; mash, other SAP tools and the operator reach one NATS server, and the operator also uses identity tooling and the Synadia Cloud API.](images/009-system-context.svg)
 
 *Topology: each arrow points from the side that opens the connection or starts the process. The two machines are peers:
 they never connect to each other, and all mail and presence pass through the NATS server.*
@@ -186,34 +164,7 @@ issues NATS users ([ADR-0008][0008]), the agent host, and any file store that ma
 
 ### 5.1 Containers
 
-```mermaid
----
-title: Containers (topology)
----
-flowchart TB
-  subgraph host["One machine, one user account"]
-    cc["Agent host session<br/>(Claude Code)"]
-    serve["mash serve<br/>endpoint manager, MCP server"]
-    hook["mash hook<br/>short-lived, per hook event"]
-    cli["mash CLI<br/>send, read, inbox, who, prompt, status, admin"]
-    spool[("Spool directory<br/>~/.local/state/mash/spool/owner/name")]
-    cfg[("~/.config/mash<br/>config.json, creds, policy.md")]
-  end
-  subgraph nats["NATS server"]
-    inbox[("Inbox streams<br/>inbox-NAME, one per endpoint")]
-    dir[("KV mash-directory")]
-    lease[("KV mash-leases")]
-    sapsubj["SAP subjects<br/>prompt, status, hb, $SRV"]
-  end
-  cc -->|"starts, MCP over stdio"| serve
-  cc -->|"runs after each tool call and prompt"| hook
-  serve -->|"writes files"| spool
-  hook -->|"reads, marks shown, then drained (listed, for a digest)"| spool
-  serve -->|"reads"| cfg
-  cli -->|"reads"| cfg
-  serve -->|"one NATS connection"| nats
-  cli -->|"NATS connection per command"| nats
-```
+![Containers: the agent host session, mash serve, mash hook, mash CLI, spool and config on one machine; serve and the CLI connect to the NATS server's streams, KV buckets and SAP subjects. The hook never connects to NATS.](images/010-containers.svg)
 
 *Topology: arrows point from the process that starts another process, opens a connection or opens a file. `mash hook`
 never connects to NATS.*
@@ -254,52 +205,14 @@ carry the hand-off to the hook, `mcp` carries tool calls and channel events, and
 
 ### 6.1 Send
 
-```mermaid
-sequenceDiagram
-  title Send (data flow)
-  participant S as Sender (mash serve or CLI)
-  participant D as KV mash-directory
-  participant I as Inbox stream inbox-bob
-  Note over S: identity loaded at start from the creds file in ~/.config/mash
-  S->>D: look up "bob" (cached by serve, polled every 15 s)
-  D-->>S: record: user key, mail subject
-  Note over S: sign body, subject, time and nonce with own user seed (SAP §13)<br/>nonce = hash of sender, recipient and idempotency key
-  S->>I: publish to agents.mail.cc.OWNER.bob<br/>headers Agent-Sender, Nats-Msg-Id, Mash-Kind, ...
-  I-->>S: storage acknowledgement: seq 42, or duplicate
-  Note over S: reports "sent #42". On timeout, reports the key to retry with
-```
+![Send data flow: the sender looks up bob in the KV directory, signs the message, publishes to the inbox stream and receives a storage acknowledgement (seq 42 or duplicate).](images/011-send.svg)
 
 A publish has exactly one responder, JetStream, so `sent` means stored ([ADR-0004][0004]). A retry with the same key
 inside the 2-minute duplicate window stores nothing new ([ADR-0031][0031]).
 
 ### 6.2 Receive and wake
 
-```mermaid
-sequenceDiagram
-  title Receive and wake (data flow)
-  participant I as Inbox stream
-  participant V as mash serve
-  participant P as Spool
-  participant C as Claude Code
-  participant H as mash hook
-  I->>V: pull delivery of #42 (durable consumer)
-  Note over V: verify signature, look up directory, assign trust label and kind
-  V->>P: write 42.json (message unacknowledged, ack deadline renewed)
-  alt busy session (running tool calls)
-    C->>H: PostToolUse hook input
-    P->>H: waiting entries
-    H->>C: hook context: framed batch, quoted bodies
-  else idle session, waking kind, 45 s with no hook run
-    V->>C: channel event: one summary line ("1 message from alice (task)")
-    Note over C: a new turn starts
-    C->>H: UserPromptSubmit hook input
-    P->>H: waiting entries
-    H->>C: hook context: framed batch
-  end
-  H->>P: mark drained/42
-  P->>V: drained mark seen (checked every 250 ms)
-  V->>I: acknowledge #42
-```
+![Receive and wake data flow: serve pulls and spools mail; a busy session gets it via the hook, an idle one via a channel event and a new turn; the hook marks it drained and serve acknowledges.](images/012-receive-and-wake.svg)
 
 Mail of kind `result` or `fyi` takes only the busy path. It never triggers the idle wake unless the backlog nears the
 inbox limits ([ADR-0027][0027], [ADR-0028][0028]). Urgent mail from a verified sender wakes at once
@@ -307,71 +220,21 @@ inbox limits ([ADR-0027][0027], [ADR-0028][0028]). Urgent mail from a verified s
 
 ### 6.3 Live prompt
 
-```mermaid
-sequenceDiagram
-  title Live SAP prompt (data flow)
-  participant Q as Caller (mash prompt CLI)
-  participant N as NATS ($SRV and agents.prompt)
-  participant V as mash serve (callee)
-  participant C as Claude Code (callee)
-  Q->>N: $SRV.INFO.agents request
-  N-->>Q: registrations, incl. callee's prompt subject
-  Q->>V: signed prompt on agents.prompt.cc.OWNER.bob
-  Note over V: SAP §13 live check: signature, 30 s clock window, nonce.<br/>unsigned 401, malformed 400, not in directory 403
-  V-->>Q: status chunk "ack"
-  V->>C: channel event with request_id and text
-  loop every 30 s until answered
-    V-->>Q: status chunk "working"
-  end
-  C->>V: reply tool call (request_id, text)
-  V-->>Q: response chunk, then terminator
-```
+![Live SAP prompt: the caller discovers the callee via NATS, sends a signed prompt, gets ack and working chunks, then the reply tool's response.](images/013-live-prompt.svg)
 
 A prompt is not durable. If the channel event is lost, the caller gets error `500` after 10 minutes
 ([ADR-0030][0030]).
 
 ### 6.4 Lease takeover after a crash
 
-```mermaid
-sequenceDiagram
-  title Lease takeover after a crash (data flow)
-  participant V1 as old mash serve (killed)
-  participant V2 as new mash serve
-  participant L as KV mash-leases
-  participant I as Inbox stream
-  Note over V1: kill -9: lease left, #42 unacknowledged
-  V2->>L: create key "bob"
-  L-->>V2: exists: holder machine id, pid, start time
-  Note over V2: same machine id, and the pid is gone or has another start time
-  V2->>L: compare-and-set update (fails if the holder wrote since)
-  L-->>V2: new revision: lease held
-  I->>V2: redelivery of #42 after the ack wait
-  Note over V2: spooled and shown as in 6.2
-```
+![Lease takeover after a crash: the new serve finds the dead holder's lease in KV, takes it by compare-and-set, and #42 is redelivered.](images/014-lease-takeover.svg)
 
 A holder on another machine, or one with no machine identity, is never judged dead. The new session waits and
 retries every 10 s until the 90 s lease runs out ([ADR-0014][0014]).
 
 ### 6.5 Error and recovery: a hook killed mid-delivery
 
-```mermaid
-sequenceDiagram
-  title Hook killed between showing and marking (data flow)
-  participant P as Spool
-  participant H1 as mash hook (run 1)
-  participant C as Claude Code
-  participant H2 as mash hook (run 2)
-  participant V as mash serve
-  P->>H1: entries 42, 43
-  H1->>P: mark shown/42, shown/43
-  H1->>C: prints batch
-  Note over H1: killed (timeout or crash) before drained marks
-  P->>H2: entries 42, 43, still marked shown
-  H2->>C: batch again, each flagged "re-delivered after an interrupted hook"
-  H2->>P: drained/42, drained/43
-  P->>V: drained marks
-  Note over V: acknowledges both. A later redelivery of a drained seq is acknowledged, never shown
-```
+![A hook killed after marking shown but before drained marks: run 2 re-delivers the batch flagged, marks drained, and serve acknowledges.](images/015-hook-killed-mid-delivery.svg)
 
 Delivery is at-least-once by design: showing a message twice is the lesser harm, and the model is told when it may
 have happened ([ADR-0025][0025]).
@@ -430,28 +293,7 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 
 ### 8.1 The message envelope
 
-```mermaid
----
-title: A mail message as stored (structure)
----
-flowchart TB
-  subgraph subj["Subject: agents.mail.cc.OWNER.NAME"]
-    s1["agents: SAP root"] --- s2["mail: verb (mash)"] --- s3["cc: agent token (SAP App. C)"] --- s4["OWNER: owner (SAP)"] --- s5["NAME: endpoint name (SAP token, mash rules)"]
-  end
-  subgraph signed["Headers covered by a signature"]
-    h1["Agent-Sender (SAP §13): v, account, user, name, sub, ts, nonce, sig<br/>signs account, user, sub, ts, nonce, SHA-256 of body"]
-    h2["Mash-Sender-Instance (mash): instance id + sig"]
-    h3["Mash-Urgent (mash): sig over the Agent-Sender fields"]
-  end
-  subgraph unsigned["Headers not signed"]
-    u1["Nats-Msg-Id (NATS): = the nonce, for deduplication"]
-    u2["Mash-Kind (mash): blocker, question, task, result, fyi"]
-    u3["Mash-In-Reply-To (mash): seq answered"]
-    u4["name field inside Agent-Sender (SAP): a claim"]
-  end
-  body["Body: UTF-8 text, at most 1 MiB with headers (mash)"]
-  subj --> signed --> unsigned --> body
-```
+![A stored mail message in order: subject agents.mail.cc.OWNER.NAME, headers covered by a signature, headers not signed, then the UTF-8 body of at most 1 MiB.](images/016-message-envelope.svg)
 
 *Structure only: arrows show the order of parts in one message. No data moves between them.*
 
@@ -464,31 +306,7 @@ the signed one.
 
 ### 8.2 Data stores
 
-```mermaid
----
-title: Data stores and their writers (data flow)
----
-flowchart LR
-  adm["mash admin"]
-  ep["Endpoint (serve or CLI)"]
-  srv["mash serve"]
-  sap["Any SAP agent"]
-  subgraph js["NATS JetStream, one account"]
-    ib[("inbox-NAME stream<br/>+ consumer 'deliver'")]
-    d[("KV mash-directory")]
-    l[("KV mash-leases")]
-  end
-  hb["agents.hb, $SRV subjects<br/>(not stored)"]
-  adm -->|"creates, deletes"| ib
-  adm -->|"writes records"| d
-  adm -->|"writes tombstone, clears"| l
-  ep -->|"publishes mail to any inbox of its owner"| ib
-  ib -->|"own inbox only"| ep
-  d -->|"read only"| ep
-  srv -->|"own key only"| l
-  srv -->|"heartbeat, registration"| hb
-  sap -->|"heartbeat, registration"| hb
-```
+![The admin creates inboxes and writes the directory and lease tombstones; endpoints mail inboxes and read the directory; serve writes its own lease; heartbeats are not stored.](images/017-data-stores.svg)
 
 *Data flow: arrows point where data is written or read to.*
 
@@ -539,23 +357,7 @@ service's API token, which only the quickstart script ever sees.
 
 **Trust boundaries.**
 
-```mermaid
----
-title: Trust boundaries (topology)
----
-flowchart LR
-  subgraph m["Boundary 1: one OS user account on one machine"]
-    model["Model session"] --- agh["Agent host"]
-    agh --- sv["mash serve / hook / CLI"]
-    sv --- files[("creds, spool, policy.md")]
-  end
-  subgraph acct["Boundary 2: the shared NATS account"]
-    perms["Per-user subject permissions"]
-  end
-  sv -->|"Boundary 3: TLS, user JWT auth"| perms
-  ctl["Synadia control-plane API"]
-  qs["scripts/quickstart-synadia.sh<br/>(outside the binary)"] -.->|"setup only, HTTPS, token"| ctl
-```
+![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account; a setup script reaches the Synadia API separately.](images/018-trust-labels.svg)
 
 *Topology: arrows point from the client to the server it connects to. Plain lines join parts inside one boundary.*
 
