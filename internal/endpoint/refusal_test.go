@@ -22,6 +22,11 @@ const refusedText = "refused by policy: you may not mail "
 const refusedSuffix = ". If the policy file allows this pair, or lists the recipient at all (mashctl policy explain), " +
 	"your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
 
+// retrySuffix is the last sentence of a refusal that carries the send's key.
+func retrySuffix(key string) string {
+	return " If you retry, use --id " + key + " (the send tool's id): it sends at most once within " + DuplicateWindowText() + "."
+}
+
 // restrictedSender provisions sender "s" whose permissions are admin.Permissions with the owner-wide mail line
 // replaced by the mail subjects of the allowed recipients only, and returns its client. (admin.PermissionsTo will do
 // this once it lands.)
@@ -57,7 +62,7 @@ func wantRefused(t *testing.T, err error, to string, took time.Duration) {
 	if !errors.As(err, &re) {
 		t.Fatalf("send to %s: %v (after %v), want *RefusedError", to, err, took)
 	}
-	if re.To != to || err.Error() != refusedText+to+refusedSuffix {
+	if re.To != to || re.Key == "" || err.Error() != refusedText+to+refusedSuffix+retrySuffix(re.Key) {
 		t.Fatalf("refusal %+v text %q", re, err.Error())
 	}
 	if !errors.Is(err, &RefusedError{}) || !errors.Is(err, &RefusedError{To: to}) || errors.Is(err, &RefusedError{To: "zz"}) {
@@ -125,7 +130,7 @@ func signalled(ch <-chan struct{}) bool {
 func TestSoleWaiterViolationRefuses(t *testing.T) {
 	r := newRefusals()
 	ch, release := r.register("a.b", false)
-	defer release()
+	defer release(true)
 	r.note(violation("a.b"))
 	if !signalled(ch) {
 		t.Fatal("sole waiter not signalled")
@@ -152,11 +157,11 @@ func TestSeveralWaitersViolationSignalsNone(t *testing.T) {
 	if !r.sawAmbiguous("a.b") {
 		t.Fatal("ambiguity not recorded")
 	}
-	rel1()
+	rel1(true)
 	if !r.sawAmbiguous("a.b") || r.pending() != 1 {
 		t.Fatal("flag must survive until the set empties")
 	}
-	rel2()
+	rel2(true)
 	if r.pending() != 0 || r.sawAmbiguous("a.b") {
 		t.Fatal("flag leaked past the empty set")
 	}
@@ -168,10 +173,10 @@ func TestAmbiguityDoesNotLeakToALaterSend(t *testing.T) {
 	_, rel1 := r.register("a.b", false)
 	_, rel2 := r.register("a.b", false)
 	r.note(violation("a.b"))
-	rel1()
-	rel2()
+	rel1(true)
+	rel2(true)
 	ch, rel := r.register("a.b", false)
-	defer rel()
+	defer rel(true)
 	if r.sawAmbiguous("a.b") {
 		t.Fatal("flag leaked")
 	}
@@ -199,9 +204,9 @@ func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
 	}
 	// Two other sends are in flight on the subject when a violation arrives.
 	_, rel1 := s.refusals.register(subj, false)
-	defer rel1()
+	defer rel1(true)
 	_, rel2 := s.refusals.register(subj, false)
-	defer rel2()
+	defer rel2(true)
 	s.refusals.note(violation(subj))
 	err := expired()
 	if !errors.As(err, &te) || !te.Ambiguous || !strings.HasSuffix(err.Error(), clause) || !errors.Is(err, context.Canceled) {
@@ -291,7 +296,7 @@ func TestViolationForAnotherSubjectDoesNotRefuse(t *testing.T) {
 	f := newFixture(t, "ok", "denied")
 	s := f.restrictedSender(t, "ok")
 	ch, release := s.refusals.register(sap.For(f.e.Owner, "ok").Mail, false)
-	defer release()
+	defer release(true)
 	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, "agents.mail.cc.o.other"))
 	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Subscription to %q", nats.ErrPermissionViolation, sap.For(f.e.Owner, "ok").Mail))
 	select {
@@ -327,7 +332,7 @@ func TestUnparseableViolationFallsBackToTimeout(t *testing.T) {
 	}
 	// A synthetic error that is not a permission violation never signals.
 	ch, release := s.refusals.register("x.y", false)
-	defer release()
+	defer release(true)
 	s.refusals.note(errors.New(`Permissions Violation for Publish to "x.y"`))
 	select {
 	case <-ch:
@@ -422,5 +427,161 @@ func TestSettledSendsDoNotMarkDirty(t *testing.T) {
 	wantRefused(t, err, "denied", took)
 	if *n != 0 {
 		t.Fatalf("flush called %d times after settled sends", *n)
+	}
+}
+
+// A barrier running on a subject holds the next send back until the flush returns, and the dirty mark stays set for
+// the whole flush, so a third send waits too instead of skipping the barrier.
+func TestBarrierSerialisesSendsOnTheSubject(t *testing.T) {
+	r := newRefusals()
+	const subj = "a.b"
+	started, release := make(chan struct{}), make(chan struct{})
+	r.flush = func(context.Context) error { close(started); <-release; return nil }
+	r.markDirty(subj)
+	type reg struct {
+		ch  <-chan struct{}
+		rel func(bool)
+		err error
+	}
+	begin := func() chan reg {
+		c := make(chan reg, 1)
+		go func() {
+			ch, rel, err := r.begin(context.Background(), subj)
+			c <- reg{ch, rel, err}
+		}()
+		return c
+	}
+	first := begin()
+	<-started
+	second, third := begin(), begin()
+	time.Sleep(30 * time.Millisecond)
+	r.mu.Lock()
+	dirty := r.dirty[subj]
+	r.mu.Unlock()
+	if dirty == 0 {
+		t.Fatal("dirty cleared before the flush returned")
+	}
+	if n := r.pending(); n != 0 {
+		t.Fatalf("%d sends registered during the barrier", n)
+	}
+	close(release)
+	for i, c := range []chan reg{first, second, third} {
+		select {
+		case g := <-c:
+			if g.err != nil {
+				t.Fatalf("send %d: %v", i, g.err)
+			}
+			defer g.rel(true)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("send %d never registered", i)
+		}
+	}
+	if n := r.pending(); n != 3 {
+		t.Fatalf("pending %d, want 3", n)
+	}
+}
+
+// A send waiting for a barrier gives up with its context and registers nothing.
+func TestBarrierWaitIsBoundedByContext(t *testing.T) {
+	r := newRefusals()
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	r.flush = func(context.Context) error { close(started); <-release; return nil }
+	r.markDirty("a.b")
+	go r.begin(context.Background(), "a.b")
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, _, err := r.begin(ctx, "a.b"); err == nil {
+		t.Fatal("begin did not fail with its context")
+	}
+}
+
+// nats.go runs the error handler on its own goroutine: a violation can reach note a few ms after the flush returned.
+// The settle catches it before the next send registers, so that send is not refused.
+func TestSettleCatchesAViolationDeliveredAfterTheFlush(t *testing.T) {
+	r := newRefusals()
+	const subj = "a.b"
+	r.flush = func(context.Context) error {
+		go func() { time.Sleep(5 * time.Millisecond); r.note(violation(subj)) }()
+		return nil
+	}
+	r.markDirty(subj)
+	ch, rel, err := r.begin(context.Background(), subj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel(true)
+	time.Sleep(50 * time.Millisecond)
+	if signalled(ch) {
+		t.Fatal("a violation from before the barrier refused the next send")
+	}
+	r.note(violation(subj))
+	if !signalled(ch) {
+		t.Fatal("a later violation no longer refuses the sole send")
+	}
+}
+
+// When one of two waiters ends unsettled, a violation hitting the remaining one is not a definite refusal; it ends as
+// an ambiguous timeout. The flag clears when the set empties.
+func TestUnsettledEndTaintsTheRemainingWaiter(t *testing.T) {
+	r := newRefusals()
+	c1, rel1 := r.register("a.b", false)
+	c2, rel2 := r.register("a.b", false)
+	rel1(false)
+	_ = c1
+	if !r.sawAmbiguous("a.b") {
+		t.Fatal("set not tainted")
+	}
+	r.note(violation("a.b"))
+	if signalled(c2) {
+		t.Fatal("tainted sole waiter was signalled")
+	}
+	rel2(true)
+	if r.sawAmbiguous("a.b") {
+		t.Fatal("taint leaked past the empty set")
+	}
+	c3, rel3 := r.register("a.b", false)
+	defer rel3(true)
+	r.note(violation("a.b"))
+	if !signalled(c3) {
+		t.Fatal("later sole send not a definite refusal")
+	}
+}
+
+// End to end: the remaining send times out carrying the ambiguity clause.
+func TestTaintedSoleSendEndsAsAmbiguousTimeout(t *testing.T) {
+	f := newFixture(t, "ok", "denied")
+	s := f.restrictedSender(t, "ok")
+	subj := sap.For(f.e.Owner, "denied").Mail
+	_, rel1 := s.refusals.register(subj, false) // another send on the subject, still in flight
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		rel1(false) // it times out; our send is the sole remaining waiter
+		time.Sleep(50 * time.Millisecond)
+		s.refusals.note(violation(subj))
+	}()
+	_, err := s.Send(ctx, "denied", "x", 0)
+	var te *SendTimeoutError
+	var re *RefusedError
+	if errors.As(err, &re) || !errors.As(err, &te) || !te.Ambiguous {
+		t.Fatalf("got %v, want an ambiguous *SendTimeoutError", err)
+	}
+	if n := s.refusals.pending(); n != 0 {
+		t.Fatalf("pending %d", n)
+	}
+}
+
+func TestRefusedErrorCarriesKeyAndRetryText(t *testing.T) {
+	err := error(&RefusedError{To: "x", Subject: "a.b", Key: "k9"})
+	want := refusedText + "x" + refusedSuffix + " If you retry, use --id k9 (the send tool's id): it sends at most once within " +
+		DuplicateWindowText() + "."
+	if err.Error() != want {
+		t.Fatalf("text %q, want %q", err.Error(), want)
+	}
+	if !errors.Is(err, &RefusedError{To: "x"}) {
+		t.Fatal("errors.Is")
 	}
 }

@@ -585,9 +585,13 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	// a refusal, or the caller's deadline (which PublishMsg itself honours through pctx).
 	// After a send on this subject ended unsettled, first order any violation it left in flight ahead of this send;
 	// when that cannot be done this send cannot be attributed a definite refusal.
-	attributable := e.refusals.barrier(ctx, msg.Subject)
-	refused, release := e.refusals.register(msg.Subject, !attributable)
-	defer release()
+	refused, release, err := e.refusals.begin(ctx, msg.Subject)
+	if err != nil {
+		// Nothing was published: the caller's deadline ended while another send's barrier ran.
+		return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err}
+	}
+	settled := true
+	defer func() { release(settled) }()
 	pctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type published struct {
@@ -610,14 +614,15 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 		case p := <-done:
 			ack, err = p.ack, p.err
 			if err != nil {
-				return SendResult{}, &RefusedError{To: to, Subject: msg.Subject}
+				return SendResult{}, &RefusedError{To: to, Subject: msg.Subject, Key: key}
 			}
 		default:
-			return SendResult{}, &RefusedError{To: to, Subject: msg.Subject}
+			return SendResult{}, &RefusedError{To: to, Subject: msg.Subject, Key: key}
 		}
 	}
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
+			settled = false
 			e.refusals.markDirty(msg.Subject)
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
