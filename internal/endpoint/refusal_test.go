@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,11 @@ import (
 )
 
 const refusedText = "refused by policy: you may not mail "
+
+// refusedSuffix is the second sentence of every refusal: the pair may be allowed by the policy file while the
+// credentials predate the rule, or the recipient may not be listed at all.
+const refusedSuffix = ". If the policy file allows this pair, or lists the recipient at all (mashctl policy explain), " +
+	"your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
 
 // restrictedSender provisions sender "s" whose permissions are admin.Permissions with the owner-wide mail line
 // replaced by the mail subjects of the allowed recipients only, and returns its client. (admin.PermissionsTo will do
@@ -51,7 +57,7 @@ func wantRefused(t *testing.T, err error, to string, took time.Duration) {
 	if !errors.As(err, &re) {
 		t.Fatalf("send to %s: %v (after %v), want *RefusedError", to, err, took)
 	}
-	if re.To != to || err.Error() != refusedText+to {
+	if re.To != to || err.Error() != refusedText+to+refusedSuffix {
 		t.Fatalf("refusal %+v text %q", re, err.Error())
 	}
 	if !errors.Is(err, &RefusedError{}) || !errors.Is(err, &RefusedError{To: to}) || errors.Is(err, &RefusedError{To: "zz"}) {
@@ -102,24 +108,118 @@ func TestSendToADeniedRecipientFailsFast(t *testing.T) {
 	}
 }
 
-func TestConcurrentSendsToADeniedRecipientBothFailFast(t *testing.T) {
-	f := newFixture(t, "ok", "denied")
+func violation(subject string) error {
+	return fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, subject)
+}
+
+func signalled(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// One waiter and a violation is a definite refusal, with the new text.
+func TestSoleWaiterViolationRefuses(t *testing.T) {
+	r := newRefusals()
+	ch, release := r.register("a.b")
+	defer release()
+	r.note(violation("a.b"))
+	if !signalled(ch) {
+		t.Fatal("sole waiter not signalled")
+	}
+	err := error(&RefusedError{To: "x", Subject: "a.b"})
+	if err.Error() != refusedText+"x"+refusedSuffix {
+		t.Fatalf("text %q", err.Error())
+	}
+}
+
+// Changed from "concurrent sends are both signalled and fail fast": a violation cannot be attributed to one of
+// several sends, so none is signalled and each stays pending until it is acked, times out or is released.
+func TestSeveralWaitersViolationSignalsNone(t *testing.T) {
+	r := newRefusals()
+	c1, rel1 := r.register("a.b")
+	c2, rel2 := r.register("a.b")
+	r.note(violation("a.b"))
+	if signalled(c1) || signalled(c2) {
+		t.Fatal("an unattributable violation signalled a waiter")
+	}
+	if n := r.pending(); n != 2 {
+		t.Fatalf("pending %d, want 2", n)
+	}
+	if !r.sawAmbiguous("a.b") {
+		t.Fatal("ambiguity not recorded")
+	}
+	rel1()
+	if !r.sawAmbiguous("a.b") || r.pending() != 1 {
+		t.Fatal("flag must survive until the set empties")
+	}
+	rel2()
+	if r.pending() != 0 || r.sawAmbiguous("a.b") {
+		t.Fatal("flag leaked past the empty set")
+	}
+}
+
+// A send after an overlap is a definite refusal again: the flag does not leak across sends.
+func TestAmbiguityDoesNotLeakToALaterSend(t *testing.T) {
+	r := newRefusals()
+	_, rel1 := r.register("a.b")
+	_, rel2 := r.register("a.b")
+	r.note(violation("a.b"))
+	rel1()
+	rel2()
+	ch, rel := r.register("a.b")
+	defer rel()
+	if r.sawAmbiguous("a.b") {
+		t.Fatal("flag leaked")
+	}
+	r.note(violation("a.b"))
+	if !signalled(ch) {
+		t.Fatal("later sole send not refused")
+	}
+}
+
+// A flagged send that times out says the violation could not be attributed; an unflagged one does not.
+func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
+	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl policy explain shows whether the pair is allowed)"
+	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
-	for round := 0; round < 3; round++ {
-		var wg sync.WaitGroup
-		took := make([]time.Duration, 2)
-		errs := make([]error, 2)
-		for i := range errs {
-			wg.Add(1)
-			go func() { defer wg.Done(); took[i], errs[i] = timedSend(s, "denied") }()
-		}
-		wg.Wait()
-		for i := range errs {
-			wantRefused(t, errs[i], "denied", took[i])
-		}
+	subj := sap.For(f.e.Owner, "ok").Mail
+	expired := func() error {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // the send ends at its deadline, whatever the server would have said
+		_, err := s.Send(ctx, "ok", "x", 0)
+		return err
+	}
+	var te *SendTimeoutError
+	if err := expired(); !errors.As(err, &te) || te.Ambiguous || strings.Contains(err.Error(), clause) {
+		t.Fatalf("unflagged send: %v", err)
+	}
+	// Two other sends are in flight on the subject when a violation arrives.
+	_, rel1 := s.refusals.register(subj)
+	defer rel1()
+	_, rel2 := s.refusals.register(subj)
+	defer rel2()
+	s.refusals.note(violation(subj))
+	err := expired()
+	if !errors.As(err, &te) || !te.Ambiguous || !strings.HasSuffix(err.Error(), clause) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("flagged send: %v", err)
+	}
+}
+
+// An allowed send acked after a stray violation on its subject still succeeds.
+func TestAllowedSendAckedAfterStrayViolationSucceeds(t *testing.T) {
+	f := newFixture(t, "ok")
+	s := f.restrictedSender(t, "ok")
+	subj := sap.For(f.e.Owner, "ok").Mail
+	s.refusals.note(violation(subj)) // no waiter: dropped
+	if _, err := timedSend(s, "ok"); err != nil {
+		t.Fatalf("allowed send: %v", err)
 	}
 	if n := s.refusals.pending(); n != 0 {
-		t.Fatalf("%d waiters left registered", n)
+		t.Fatalf("%d waiters left", n)
 	}
 }
 
@@ -127,18 +227,26 @@ func TestDeniedAndAllowedConcurrentSendsDoNotInterfere(t *testing.T) {
 	f := newFixture(t, "ok", "ok2", "denied", "denied2")
 	s := f.restrictedSender(t, "ok", "ok2")
 	var wg sync.WaitGroup
+	// Denied recipients get one send each: several concurrent sends to one denied subject are not attributable and
+	// would time out (see TestSeveralWaitersViolationSignalsNone).
+	copies := func(n string) int {
+		if n == "denied" || n == "denied2" {
+			return 1
+		}
+		return 3
+	}
 	type out struct {
 		took time.Duration
 		err  error
 	}
 	res := map[string]*out{}
 	for _, n := range []string{"ok", "ok2", "denied", "denied2"} {
-		for i := 0; i < 3; i++ {
+		for i := 0; i < copies(n); i++ {
 			res[fmt.Sprintf("%s/%d", n, i)] = &out{}
 		}
 	}
 	for _, n := range []string{"ok", "ok2", "denied", "denied2"} {
-		for i := 0; i < 3; i++ {
+		for i := 0; i < copies(n); i++ {
 			key := fmt.Sprintf("%s/%d", n, i)
 			o := res[key]
 			wg.Add(1)

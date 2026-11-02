@@ -39,7 +39,9 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 }
 
-const refusal = "refused by policy: you may not mail denied"
+const refusal = "refused by policy: you may not mail denied." +
+	" If the policy file allows this pair, or lists the recipient at all (mashctl policy explain)," +
+	" your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
 
 // The CLI prints a refusal verbatim, fast, exits 1, and says nothing about a message that may have been delivered.
 func TestCLISendRefusedByPolicy(t *testing.T) {

@@ -11,6 +11,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 ### Changed
 
 - The policy parser refuses a map key that is not a plain string (for example an unquoted null, ~, number or boolean), with the line number; quote such names.
+- `refused by policy: you may not mail <name>` now adds a second sentence: if `mashctl policy explain` allows the pair (or the recipient is not in the policy file), the sender's credentials may be older than the rule, so ask the admin to run `mashctl policy drift`, then `mashctl reissue`. A permission violation is a definite refusal only when exactly one send is waiting on that subject; with several in flight none is refused (delivery stays unknown), each ends as the usual timeout, and that timeout says an unattributed violation was seen (#182).
 - The release gate and the dry run now prove which `slsa-github-generator` commit signed `mash.intoto.jsonl`: every line's Fulcio certificate must carry the commit recorded in `SLSA_GENERATOR_SHA` (`release.yml`, read at the release commit) as its Build Signer Digest and the generic generator at `SLSA_GENERATOR_TAG` as its Build Signer URI, so a tag moved and restored around the run is caught (issue #108). See [docs/release.md](docs/release.md#sbom-and-slsa-provenance).
 
 ### Added

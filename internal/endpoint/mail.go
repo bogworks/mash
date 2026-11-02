@@ -476,12 +476,22 @@ type SendTimeoutError struct {
 	To  string
 	Key string
 	Err error
+	// Ambiguous is set when a permission violation on the subject was seen while several sends were in flight, so
+	// it could not be attributed to this one.
+	Ambiguous bool
 }
 
 func (e *SendTimeoutError) Error() string {
 	return fmt.Sprintf("mash: send to %s timed out; the message may or may not have been delivered. "+
 		"Retry with --id %s (the send tool's id) within %s to send it at most once; after that a retry may store a second copy. (%v)",
-		e.To, e.Key, DuplicateWindowText(), e.Err)
+		e.To, e.Key, DuplicateWindowText(), e.Err) + e.ambiguousClause()
+}
+
+func (e *SendTimeoutError) ambiguousClause() string {
+	if !e.Ambiguous {
+		return ""
+	}
+	return "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl policy explain shows whether the pair is allowed)"
 }
 
 // DuplicateWindowText is the inbox stream's duplicate window in words ("2 minutes"), for messages and docs.
@@ -605,7 +615,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	}
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
-			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err}
+			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
 		return SendResult{}, fmt.Errorf("mash: send to %s: %w", to, err)
 	}

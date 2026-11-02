@@ -86,7 +86,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## `send` refused by policy
 
-`refused by policy: you may not mail X`. The server refused the publish because the sender's NATS permissions do not include X's mail subject. It fails at once (not after a timeout), nothing was stored, and retrying with the same credentials will not help; `--id` is irrelevant. The default permission set lets an endpoint mail every endpoint of its owner, so this means the sender was issued a narrower set (from a policy file or a hand-edited allow list). Ask the admin to issue one that includes X, or mail a recipient you are allowed to. See "Refused sends" in [operations.md](operations.md).
+`refused by policy: you may not mail X`. The server refused the publish because the sender's NATS permissions do not include X's mail subject. It fails at once (not after a timeout) when only one send to X is in flight; with several overlapping sends to X a violation cannot be attributed, so they time out instead and the timeout says so, nothing was stored, and retrying with the same credentials will not help; `--id` is irrelevant. The default permission set lets an endpoint mail every endpoint of its owner, so this means the sender was issued a narrower set (from a policy file or a hand-edited allow list). If `mashctl policy explain` says the policy file allows the pair, or X is not listed in it at all, the credentials may be older than the rule: ask the admin to run `mashctl policy drift`, then `mashctl reissue`. Otherwise ask the admin to issue a set that includes X, or mail a recipient you are allowed to. See "Refused sends" in [operations.md](operations.md).
 
 ## `send` timed out
 
