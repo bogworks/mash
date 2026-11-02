@@ -439,9 +439,19 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	}
 	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	_ = kv.Purge(context.Background(), "a")
-	if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
-		t.Fatal(err)
+	// Take the lease from under the live session. Its own refresh writes the same key, so a create can meet a revision
+	// it did not expect ("wrong last sequence"): purge and create again until this one wins (flake seen on macOS CI).
+	stolen := false
+	for try := 0; try < 20 && !stolen; try++ {
+		_ = kv.Purge(context.Background(), "a")
+		if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err == nil {
+			stolen = true
+		} else {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !stolen {
+		t.Fatal("could not take the lease from the live session")
 	}
 	select {
 	case code := <-done:
