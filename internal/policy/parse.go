@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,7 +36,7 @@ func Parse(data []byte) (*File, error) {
 	if top.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("policy: line %d: the file must be a mapping with default, endpoints, rules and tests", top.Line)
 	}
-	if err := dupKeys(top); err != nil {
+	if err := checkKeys(top); err != nil {
 		return nil, fmt.Errorf("policy: %w", err)
 	}
 
@@ -58,26 +59,59 @@ func Parse(data []byte) (*File, error) {
 	return &f, nil
 }
 
-// dupKeys walks the node tree and rejects a mapping that repeats a key.
-func dupKeys(n *yaml.Node) error {
+// keyKinds names what a non-string scalar key reads as, by its resolved YAML tag.
+var keyKinds = map[string]string{
+	"!!null": "null", "!!int": "int", "!!float": "float", "!!bool": "bool",
+	"!!timestamp": "timestamp", "!!merge": "merge",
+}
+
+// plainStringKey reports an error unless the key node is a scalar that reads as a string. A quoted scalar always
+// does, so a name such as "null" stays available.
+func plainStringKey(k *yaml.Node) error {
+	var text, kind string
+	switch k.Kind {
+	case yaml.ScalarNode:
+		tag := k.ShortTag()
+		if tag == "!!str" {
+			return nil
+		}
+		text, kind = k.Value, keyKinds[tag]
+		if kind == "" {
+			kind = strings.TrimPrefix(tag, "!!")
+		}
+	case yaml.MappingNode:
+		text, kind = "a mapping", "mapping"
+	case yaml.SequenceNode:
+		text, kind = "a sequence", "sequence"
+	default:
+		text, kind = "an alias", "alias"
+	}
+	return fmt.Errorf("line %d: map key %s is not a plain string (it reads as %s); quote it, for example \"null\"", k.Line, text, kind)
+}
+
+// checkKeys walks the node tree and rejects a mapping key that is not a plain string and a mapping that repeats a key.
+func checkKeys(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		seen := map[string]int{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
+			if err := plainStringKey(k); err != nil {
+				return err
+			}
 			if k.Kind == yaml.ScalarNode {
 				if first, dup := seen[k.Value]; dup {
 					return fmt.Errorf("line %d: duplicate key %q (first at line %d)", k.Line, k.Value, first)
 				}
 				seen[k.Value] = k.Line
 			}
-			if err := dupKeys(n.Content[i+1]); err != nil {
+			if err := checkKeys(n.Content[i+1]); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	for _, c := range n.Content {
-		if err := dupKeys(c); err != nil {
+		if err := checkKeys(c); err != nil {
 			return err
 		}
 	}
