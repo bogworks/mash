@@ -1,0 +1,10 @@
+from \ to      billing-agent  build-bot  deploy-tool  hr-agent  ledger-agent  support-bot  web-intake
+billing-agent  +              +          +            -         +             +            -
+build-bot      +              +          +            -         +             +            -
+deploy-tool    +              +          +            -         +             +            -
+hr-agent       +              +          +            -         +             +            -
+ledger-agent   +              +          +            -         +             +            -
+support-bot    +              +          +            -         +             +            +
+web-intake     -              -          -            -         -             +            -
+
++ may mail, prompt and probe; - may not

@@ -1,0 +1,23 @@
+# A solo developer's policy: three endpoints, everything open, one restriction.
+default: allow
+
+endpoints:
+  coder:
+    labels: {role: agent}
+  reviewer:
+    labels: {role: agent}
+  deploy-bot:
+    labels: {risk: high, kind: tool}
+
+rules:
+  # Agents may not reach the tools that can ship to production.
+  - name: agents-do-not-reach-high-risk-tools
+    action: deny
+    from: {role: agent}
+    to: {risk: high}
+    log: true
+
+tests:
+  - {from: coder, to: reviewer, expect: allow}
+  - {from: coder, to: deploy-bot, expect: deny}
+  - {from: deploy-bot, to: coder, expect: allow}

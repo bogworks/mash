@@ -84,3 +84,40 @@ func TestNSCFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestPermissionsToNilIsPermissions(t *testing.T) {
+	a, b := Permissions("o", "a"), PermissionsTo("o", "a", nil)
+	if !slices.Equal(a.Pub.Allow, b.Pub.Allow) || !slices.Equal(a.Sub.Allow, b.Sub.Allow) {
+		t.Fatalf("nil recipients differ from Permissions:\n%v\n%v", a, b)
+	}
+}
+
+func TestPermissionsToRecipients(t *testing.T) {
+	p := PermissionsTo("o", "a", []string{"c", "b"})
+	for _, w := range []string{"agents.mail.*.o.b", "agents.prompt.*.o.b", "agents.status.*.o.b", "agents.mail.*.o.c", "agents.prompt.*.o.c", "agents.status.*.o.c"} {
+		if !slices.Contains(p.Pub.Allow, w) {
+			t.Errorf("missing %s", w)
+		}
+	}
+	for _, s := range p.Pub.Allow {
+		if strings.HasSuffix(s, ".o.*") {
+			t.Errorf("wildcard line %s", s)
+		}
+	}
+	// Same size apart from the peer lines: 18 fixed lines minus 3 wildcards, plus 6.
+	if len(p.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3+6 {
+		t.Errorf("%d lines", len(p.Pub.Allow))
+	}
+	none := PermissionsTo("o", "a", []string{})
+	if len(none.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3 {
+		t.Errorf("empty recipients: %d lines", len(none.Pub.Allow))
+	}
+	for _, s := range none.Pub.Allow {
+		if strings.HasPrefix(s, "agents.mail") || strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
+			t.Errorf("empty recipients still grants %s", s)
+		}
+	}
+	if len(none.Pub.Allow) == 0 {
+		t.Error("empty block")
+	}
+}
