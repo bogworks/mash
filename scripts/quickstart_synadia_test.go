@@ -221,7 +221,8 @@ func runScript(t *testing.T, f *fakeSynadia, home string, extraEnv []string, arg
 		}
 	}
 	cmd.Env = append(env, "HOME="+home, "SYNADIA_API_URL="+f.srv.URL, "SYNADIA_API_TOKEN="+fakeToken,
-		"MASH_SETTLE_MS=20", "USER=alice")
+		"MASH_SETTLE_MS=20", "USER=alice",
+		"MASH_INSECURE_LOOPBACK=1") // the in-process test server is plain loopback; Synadia hands out tls:// URLs (ADR 0059)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Env = append(cmd.Env, pathEnv...)
 	var buf bytes.Buffer
