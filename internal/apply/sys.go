@@ -49,6 +49,49 @@ func (n NATS) Lookup(ctx context.Context, account string) (string, error) {
 	return string(msg.Data), nil
 }
 
+// LookupAll asks every server's resolver for the account's JWT and collects the replies on a fresh inbox. It waits up
+// to lookupTimeout for the first; then, with expect > 0, until expect replies arrived or ackWait has passed since the
+// first; with expect <= 0 until settleTimeout passes without a new reply.
+func (n NATS) LookupAll(ctx context.Context, account string, expect int) ([]string, error) {
+	inbox := n.Conn.NewRespInbox()
+	sub, err := n.Conn.SubscribeSync(inbox)
+	if err != nil {
+		return nil, err
+	}
+	defer sub.Unsubscribe()
+	if err := n.Conn.PublishMsg(&nats.Msg{Subject: fmt.Sprintf(lookupSubject, account), Reply: inbox}); err != nil {
+		return nil, err
+	}
+	if err := n.Conn.Flush(); err != nil {
+		return nil, err
+	}
+	var out []string
+	wait := lookupTimeout
+	var deadline time.Time
+	for ctx.Err() == nil && (expect <= 0 || len(out) < expect) {
+		msg, err := sub.NextMsg(wait)
+		if err != nil {
+			if errors.Is(err, nats.ErrTimeout) && len(out) > 0 {
+				break
+			}
+			if errors.Is(err, nats.ErrTimeout) {
+				return nil, hintNoAnswer(err)
+			}
+			return out, err
+		}
+		out = append(out, string(msg.Data))
+		if expect > 0 {
+			if deadline.IsZero() {
+				deadline = time.Now().Add(ackWait)
+			}
+			wait = max(time.Until(deadline), time.Millisecond)
+		} else {
+			wait = settleTimeout
+		}
+	}
+	return out, ctx.Err()
+}
+
 // Servers pings the system account and collects the replies: it waits up to pingFirst for the first one and then
 // until pingSettle passes without a new one. If the set is still not complete (see ServerSet.Complete) it keeps
 // listening until pingTotal has passed since the ping, so a slow server is not left out of the expected set.

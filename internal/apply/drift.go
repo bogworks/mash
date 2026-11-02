@@ -2,9 +2,15 @@ package apply
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
+
+	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -27,13 +33,115 @@ const (
 	KindKeyConflict   = "zone-key-differs"
 	KindZoneNotInFile = "zone-not-in-file"
 	KindUnknownKey    = "signing-key-unknown"
+	// Findings of the servers' agreement on the account JWT.
+	KindServersDiffer     = "servers-differ"
+	KindServersSilent     = "servers-silent"
+	KindServersUnverified = "servers-unverified"
 )
+
+// jwtGroup is one distinct account JWT the servers answered with, and how many servers hold it.
+type jwtGroup struct {
+	token string
+	n     int
+}
+
+// agreement is what every server answered to the claims lookup.
+type agreement struct {
+	answered, need int
+	groups         []jwtGroup // distinct answers, most common first
+}
+
+// collectAgreement asks every server (LookupAll) for the account JWT and groups the answers; need is the known
+// server count.
+func collectAgreement(ctx context.Context, r Resolver, acct string, need int) (agreement, error) {
+	need = max(need, 1)
+	toks, err := r.LookupAll(ctx, acct, need)
+	a := agreement{answered: len(toks), need: need}
+	if err != nil && len(toks) == 0 {
+		return a, err
+	}
+	count := map[string]int{}
+	for _, t := range toks {
+		count[t]++
+	}
+	for t, n := range count {
+		a.groups = append(a.groups, jwtGroup{t, n})
+	}
+	sort.Slice(a.groups, func(i, j int) bool {
+		if a.groups[i].n != a.groups[j].n {
+			return a.groups[i].n > a.groups[j].n
+		}
+		return a.groups[i].token < a.groups[j].token
+	})
+	return a, nil
+}
+
+// describe names each distinct JWT by its issued-at and a short hash of the token (no secret is shown).
+func (a agreement) describe() string {
+	var parts []string
+	for _, g := range a.groups {
+		if g.token == "" {
+			parts = append(parts, fmt.Sprintf("no JWT on %d server(s)", g.n))
+			continue
+		}
+		iat := "unreadable"
+		if c, err := jwt.DecodeAccountClaims(g.token); err == nil {
+			iat = time.Unix(c.IssuedAt, 0).UTC().Format("2006-01-02T15:04:05Z")
+		}
+		sum := sha256.Sum256([]byte(g.token))
+		parts = append(parts, fmt.Sprintf("iat %s sha %s on %d server(s)", iat, hex.EncodeToString(sum[:4]), g.n))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// differs says the answers are not one and the same non-empty JWT.
+func (a agreement) differs() bool {
+	return len(a.groups) != 1 || a.groups[0].token == ""
+}
+
+func (a agreement) differText() string {
+	return fmt.Sprintf("servers differ: %d of %d servers answered; %d distinct account JWTs (%s)", a.answered, a.need, len(a.groups), a.describe())
+}
+
+// verifyAll reads the account JWT from every server until all need of them answer with want; "" is that, else what was
+// found. It retries like verifyState, since a server may still be applying the update.
+func verifyAll(ctx context.Context, p Params, acct string, need int, want string) string {
+	tries, wait := p.VerifyTries, p.VerifyWait
+	if tries <= 0 {
+		tries = defaultVerifyTries
+	}
+	if wait <= 0 {
+		wait = defaultVerifyWait
+	}
+	last := ""
+	for i := 0; i < tries; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return "the check was interrupted: " + ctx.Err().Error()
+			case <-time.After(wait):
+			}
+		}
+		a, err := collectAgreement(ctx, p.Resolver, acct, need)
+		switch {
+		case err != nil:
+			last = "could not ask every server for the account JWT: " + err.Error()
+		case a.answered < a.need:
+			last = fmt.Sprintf("only %d of %d servers answered the account JWT lookup (a server may be down or partitioned; %s)", a.answered, a.need, a.describe())
+		case len(a.groups) != 1 || a.groups[0].token != want:
+			last = a.differText()
+		default:
+			return ""
+		}
+	}
+	return last
+}
 
 // AccountFindings compares the policy file's compiled zones with the scoped signing keys of the account JWT the
 // resolver holds, with the same code `policy diff` uses, and reports every difference and every refusal condition apply
 // would report (a server key that is not the key store's, a zone the file lacks) as a finding. It changes nothing: no
 // key is created and nothing is pushed. p.Compiled, p.Keys and p.Resolver are used; the result is empty when the
-// resolver's copy matches. It reads one resolver's copy: it does not show that every server holds it (apply does).
+// resolver's copy matches. It builds the comparison from one resolver's copy and also asks every server (Resolver.LookupAll): servers that answer with different JWTs, fewer answers than the known server count, or an unverifiable server set are findings too. Params.Servers is the operator's server count.
 func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	p.Mode, p.collectAll = Diff, true
 	var out []Finding
@@ -63,6 +171,24 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	cur, err := p.Resolver.Lookup(ctx, acctPub)
 	if err != nil {
 		return nil, fmt.Errorf("look up the account JWT: %w", err)
+	}
+	set, serr := p.Resolver.Servers(ctx)
+	need := max(set.need(p.Servers), len(set.Names), 1)
+	ag, aerr := collectAgreement(ctx, p.Resolver, acctPub, need)
+	switch {
+	case aerr != nil:
+		return nil, fmt.Errorf("look up the account JWT on every server: %w", aerr)
+	case ag.answered < ag.need:
+		out = append(out, Finding{Kind: KindServersSilent, Detail: fmt.Sprintf("only %d of %d servers answered the account JWT lookup (cannot say which: a server may be down or partitioned)", ag.answered, ag.need)})
+	case !set.Complete(p.Servers):
+		why := set.Why(p.Servers)
+		if serr != nil {
+			why = serr.Error()
+		}
+		out = append(out, Finding{Kind: KindServersUnverified, Detail: "the server set could not be verified, so a server may hold another account JWT: " + why})
+	}
+	if ag.answered > 0 && len(ag.groups) > 1 {
+		out = append(out, Finding{Kind: KindServersDiffer, Detail: ag.differText()})
 	}
 	b, err := build(p, opKP, acctPub, cur, map[string]bool{}, map[string]bool{})
 	if err != nil {

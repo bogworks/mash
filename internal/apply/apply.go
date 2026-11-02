@@ -30,6 +30,10 @@ const NotATransaction = "apply is not a transaction across NATS claims, JetStrea
 type Resolver interface {
 	// Lookup returns the account's current JWT, or "" when the resolver has none.
 	Lookup(ctx context.Context, account string) (string, error)
+	// LookupAll returns the account JWT of every server that answered the claims lookup, one entry per reply ("" is a
+	// server that has none). expect is how many servers are known (0: unknown, so only a quiet period ends the wait);
+	// a transport stops early once that many answered. Fewer entries than expect means a server did not answer.
+	LookupAll(ctx context.Context, account string, expect int) ([]string, error)
 	// Servers returns what a system-account ping learned: the servers that answered and how many the cluster says
 	// it has. The set that must acknowledge a push is ServerSet.Names; only a Complete set is authoritative.
 	Servers(ctx context.Context) (ServerSet, error)
@@ -377,6 +381,11 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		return unconfirmed(out, p, createdList, len(acks), why, changed)
 	}
 	if !changed {
+		// "already up to date" is a claim about every server: each acknowledged the re-send (above), and each now
+		// answers the lookup with this very JWT.
+		if msg := verifyAll(ctx, p, acctPub, set.need(p.Servers), token); msg != "" {
+			return partial(out, p, createdList, "every server acknowledged the re-send of the unchanged claims, but they do not all hold it", msg)
+		}
 		pf("\n%s: account claims already up to date: the claims are unchanged, and all %d server(s) acknowledged the unchanged JWT sent again and the resolver answers with it. This covers the account claims only, not user credentials already issued.\n", p.Mode, len(acks))
 		notCovered(out, p)
 		pf("%s\n", NotATransaction)

@@ -398,7 +398,7 @@ type states struct {
 	stale                            []string
 }
 
-func gather(ctx context.Context, l *loaded, env func(string) string, sysCreds, credsDir string) states {
+func gather(ctx context.Context, l *loaded, env func(string) string, sysCreds, credsDir string, servers int) states {
 	var st states
 	// account and keys need the system account connection.
 	nc, err := connectSys(l.cfg, sysCreds, env)
@@ -406,8 +406,8 @@ func gather(ctx context.Context, l *loaded, env func(string) string, sysCreds, c
 		st.account, st.keys = unknownState(err), unknownState(err)
 	} else {
 		defer nc.Close()
-		res := apply.NATS{Conn: nc}
-		f, err := apply.AccountFindings(ctx, apply.Params{Compiled: l.c, Keys: l.keys, Resolver: res})
+		res := apply.NATS{Conn: nc, Inventory: servers}
+		f, err := apply.AccountFindings(ctx, apply.Params{Compiled: l.c, Keys: l.keys, Resolver: res, Servers: servers})
 		if err != nil {
 			st.account = unknownState(err)
 		} else {
@@ -514,7 +514,12 @@ func runPolicyDrift(args []string, env func(string) string, stdout, stderr io.Wr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
-	st := gather(ctx, l, env, o.sysCreds, o.credsDir)
+	servers, err := parseServers(env)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, driftUsage())
+		return 2
+	}
+	st := gather(ctx, l, env, o.sysCreds, o.credsDir, servers)
 	rep := driftReport{Policy: l.path, Account: st.account, Keys: st.keys, Directory: st.directory, Issued: st.issued, NotCovered: driftNotCovered}
 	for _, s := range []stateReport{st.account, st.keys, st.directory, st.issued} {
 		rep.Drift = rep.Drift || s.Status != statusOK
