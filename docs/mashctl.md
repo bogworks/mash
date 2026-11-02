@@ -2,6 +2,10 @@
 
 `mashctl add` and `mashctl reissue` mint NATS users from the compiled [policy file](policy-file.md). Each zone has one scoped signing key (kept in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`, made by `mashctl init`); a user is signed by its zone's key and carries only its tags, so the permissions come from the key. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md) and [ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md).
 
+## Prerequisites
+
+`add` needs the account signing key, which `mashctl init` creates (the bootstrap verb is a separate change; until it is released the key can be created with the `ctlkeys` package), and an account that lists the zone keys: the account push is `mashctl apply` (also a separate change). Until `apply` has pushed a new zone's key, creds minted for that zone cannot authenticate. `add` tells you when an account update is needed.
+
 ## Adding an endpoint
 
 ```sh
