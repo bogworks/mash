@@ -98,20 +98,36 @@ func hashes() map[Target]string {
 
 var scriptHash = strings.Repeat("9", 64)
 
+// ciHashes are the hex digests of the SBOMs and the provenance, which the gate cannot rebuild.
+func ciHashes() map[string]string {
+	m := map[string]string{}
+	for i, n := range CIAssetNames() {
+		m[n] = strings.Repeat(string(rune('0'+i)), 64)
+	}
+	return m
+}
+
+// goodSums is the SHA256SUMS the draft job makes for goodAssets.
+func goodSums() string { return ExpectedSums(hashes(), scriptHash, ciHashes()) }
+
 func goodAssets() map[string]string {
 	h := hashes()
-	have := map[string]string{SumsName: "sha256:" + sha([]byte(ExpectedSums(h, scriptHash))), ScriptName: "sha256:" + scriptHash}
+	have := map[string]string{SumsName: "sha256:" + sha([]byte(goodSums())), ScriptName: "sha256:" + scriptHash}
 	for _, t := range Targets {
 		have[t.AssetName()] = "sha256:" + h[t]
+	}
+	for n, d := range ciHashes() {
+		have[n] = "sha256:" + d
 	}
 	return have
 }
 
 func TestExpectedSums_isSha256sumOutput(t *testing.T) {
-	got := ExpectedSums(hashes(), scriptHash)
+	got := goodSums()
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", ScriptName}
-	if len(lines) != 5 {
+	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", ScriptName,
+		"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json", ProvenanceName}
+	if len(lines) != 10 {
 		t.Fatalf("%q", got)
 	}
 	for i, ln := range lines {
@@ -149,7 +165,13 @@ func TestCheckAssets(t *testing.T) {
 			delete(m, "mash-linux-amd64")
 		}), "mash-linux-amd64 is missing"},
 		"sums without script": {mutate(func(m map[string]string) {
-			m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes(), scriptHash)[:4*(64+2)+4*len("mash-linux-amd64")]))
+			m[SumsName] = "sha256:" + sha([]byte(goodSums()[:4*(64+2)+4*len("mash-linux-amd64")]))
+		}), "SHA256SUMS has digest"},
+		"missing sbom":        {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64.cdx.json") }), "mash-linux-arm64.cdx.json is missing"},
+		"missing provenance":  {mutate(func(m map[string]string) { delete(m, ProvenanceName) }), "mash.intoto.jsonl is missing"},
+		"sbom with no digest": {mutate(func(m map[string]string) { m["mash-linux-arm64.cdx.json"] = "x" }), "not a sha256"},
+		"sums not covering the attached sbom": {mutate(func(m map[string]string) {
+			m["mash-linux-arm64.cdx.json"] = "sha256:" + strings.Repeat("e", 64)
 		}), "SHA256SUMS has digest"},
 		"bad sums":            {mutate(func(m map[string]string) { m[SumsName] = "sha256:" + strings.Repeat("1", 64) }), "SHA256SUMS has digest"},
 		"digest without algo": {mutate(func(m map[string]string) { m["mash-linux-amd64"] = hashes()[Target{"linux", "amd64"}] }), "mash-linux-amd64 has digest"},
