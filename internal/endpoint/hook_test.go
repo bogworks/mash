@@ -183,9 +183,9 @@ func TestHookRedeliveryOfADrainedMessageIsAcked(t *testing.T) {
 		t.Fatal(err)
 	}
 	until(t, "the redelivered, already shown message is acked", func() bool { return unread(t, a) == 0 })
-	if w := waiting(t, sp); len(w) != 0 {
-		t.Fatalf("spooled again: %+v", w)
-	}
+	// The server's ack is visible before serve has forgotten the message in the spool (ack, then spool.Acked), so
+	// "nothing waiting" is polled, not read once: a message spooled again would stay, a forgotten one goes (#153).
+	until(t, "the acked message is forgotten by the spool", func() bool { return len(waiting(t, sp)) == 0 })
 }
 
 // A full spool takes no more: the mail stays in NATS, unread (condition 4). Never dropped.
