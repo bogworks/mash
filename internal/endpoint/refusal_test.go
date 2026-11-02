@@ -124,7 +124,7 @@ func signalled(ch <-chan struct{}) bool {
 // One waiter and a violation is a definite refusal, with the new text.
 func TestSoleWaiterViolationRefuses(t *testing.T) {
 	r := newRefusals()
-	ch, release := r.register("a.b")
+	ch, release := r.register("a.b", false)
 	defer release()
 	r.note(violation("a.b"))
 	if !signalled(ch) {
@@ -140,8 +140,8 @@ func TestSoleWaiterViolationRefuses(t *testing.T) {
 // several sends, so none is signalled and each stays pending until it is acked, times out or is released.
 func TestSeveralWaitersViolationSignalsNone(t *testing.T) {
 	r := newRefusals()
-	c1, rel1 := r.register("a.b")
-	c2, rel2 := r.register("a.b")
+	c1, rel1 := r.register("a.b", false)
+	c2, rel2 := r.register("a.b", false)
 	r.note(violation("a.b"))
 	if signalled(c1) || signalled(c2) {
 		t.Fatal("an unattributable violation signalled a waiter")
@@ -165,12 +165,12 @@ func TestSeveralWaitersViolationSignalsNone(t *testing.T) {
 // A send after an overlap is a definite refusal again: the flag does not leak across sends.
 func TestAmbiguityDoesNotLeakToALaterSend(t *testing.T) {
 	r := newRefusals()
-	_, rel1 := r.register("a.b")
-	_, rel2 := r.register("a.b")
+	_, rel1 := r.register("a.b", false)
+	_, rel2 := r.register("a.b", false)
 	r.note(violation("a.b"))
 	rel1()
 	rel2()
-	ch, rel := r.register("a.b")
+	ch, rel := r.register("a.b", false)
 	defer rel()
 	if r.sawAmbiguous("a.b") {
 		t.Fatal("flag leaked")
@@ -198,9 +198,9 @@ func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
 		t.Fatalf("unflagged send: %v", err)
 	}
 	// Two other sends are in flight on the subject when a violation arrives.
-	_, rel1 := s.refusals.register(subj)
+	_, rel1 := s.refusals.register(subj, false)
 	defer rel1()
-	_, rel2 := s.refusals.register(subj)
+	_, rel2 := s.refusals.register(subj, false)
 	defer rel2()
 	s.refusals.note(violation(subj))
 	err := expired()
@@ -290,7 +290,7 @@ func TestViolationWithNoWaiterIsDropped(t *testing.T) {
 func TestViolationForAnotherSubjectDoesNotRefuse(t *testing.T) {
 	f := newFixture(t, "ok", "denied")
 	s := f.restrictedSender(t, "ok")
-	ch, release := s.refusals.register(sap.For(f.e.Owner, "ok").Mail)
+	ch, release := s.refusals.register(sap.For(f.e.Owner, "ok").Mail, false)
 	defer release()
 	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, "agents.mail.cc.o.other"))
 	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Subscription to %q", nats.ErrPermissionViolation, sap.For(f.e.Owner, "ok").Mail))
@@ -326,7 +326,7 @@ func TestUnparseableViolationFallsBackToTimeout(t *testing.T) {
 		}
 	}
 	// A synthetic error that is not a permission violation never signals.
-	ch, release := s.refusals.register("x.y")
+	ch, release := s.refusals.register("x.y", false)
 	defer release()
 	s.refusals.note(errors.New(`Permissions Violation for Publish to "x.y"`))
 	select {
@@ -336,5 +336,91 @@ func TestUnparseableViolationFallsBackToTimeout(t *testing.T) {
 	}
 	if n := s.refusals.pending(); n != 1 {
 		t.Fatalf("pending %d", n)
+	}
+}
+
+// countingFlush replaces the barrier's flush with one that counts calls, runs during (if non-nil) and returns err.
+func countingFlush(s *Endpoint, during func(), err error) *int {
+	n := new(int)
+	s.refusals.flush = func(context.Context) error {
+		*n++
+		if during != nil {
+			during()
+		}
+		return err
+	}
+	return n
+}
+
+func cancelledSend(s *Endpoint, to string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.Send(ctx, to, "x", 0)
+	return err
+}
+
+// A violation delayed from a send that timed out arrives after the next send starts: the barrier delivers it before
+// that send registers, so it is dropped and the next send is not refused.
+func TestDelayedViolationFromTimedOutSendDoesNotRefuseNext(t *testing.T) {
+	f := newFixture(t, "ok")
+	s := f.restrictedSender(t, "ok")
+	subj := sap.For(f.e.Owner, "ok").Mail
+	var te *SendTimeoutError
+	if err := cancelledSend(s, "ok"); !errors.As(err, &te) {
+		t.Fatalf("send 1: %v", err)
+	}
+	n := countingFlush(s, func() { s.refusals.note(violation(subj)) }, nil)
+	if _, err := timedSend(s, "ok"); err != nil {
+		t.Fatalf("send 2 was refused or failed: %v", err)
+	}
+	if *n != 1 {
+		t.Fatalf("flush called %d times, want 1", *n)
+	}
+	if _, err := timedSend(s, "ok"); err != nil || *n != 1 {
+		t.Fatalf("send 3: %v, flush calls %d (barrier must run once per dirty mark)", err, *n)
+	}
+	if s.refusals.pending() != 0 {
+		t.Fatal("waiters left")
+	}
+}
+
+// When the barrier fails, the next send is unattributable: a real violation during it is not a definite refusal.
+func TestFailedBarrierNeverReportsDefiniteRefusal(t *testing.T) {
+	f := newFixture(t, "ok", "denied")
+	s := f.restrictedSender(t, "ok")
+	var te *SendTimeoutError
+	if err := cancelledSend(s, "denied"); !errors.As(err, &te) {
+		t.Fatalf("send 1: %v", err)
+	}
+	n := countingFlush(s, nil, errors.New("flush failed"))
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	_, err := s.Send(ctx, "denied", "x", 0)
+	var re *RefusedError
+	if errors.As(err, &re) || !errors.As(err, &te) || !te.Ambiguous {
+		t.Fatalf("got %v, want an ambiguous *SendTimeoutError", err)
+	}
+	if *n != 1 || s.refusals.pending() != 0 {
+		t.Fatalf("flush calls %d, pending %d", *n, s.refusals.pending())
+	}
+}
+
+// A send that ended by ack, or by a definite refusal, leaves nothing in flight: no barrier follows.
+func TestSettledSendsDoNotMarkDirty(t *testing.T) {
+	f := newFixture(t, "ok", "denied")
+	s := f.restrictedSender(t, "ok")
+	n := countingFlush(s, nil, nil)
+	if _, err := timedSend(s, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := timedSend(s, "ok"); err != nil || *n != 0 {
+		t.Fatalf("after an ack: %v, flush calls %d", err, *n)
+	}
+	took, err := timedSend(s, "denied")
+	wantRefused(t, err, "denied", took)
+	took, err = timedSend(s, "denied")
+	wantRefused(t, err, "denied", took)
+	if *n != 0 {
+		t.Fatalf("flush called %d times after settled sends", *n)
 	}
 }

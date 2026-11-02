@@ -583,7 +583,10 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	// A publish the server refuses by permissions gets no reply, only a violation on the connection's error handler
 	// (refusal.go). Register for the subject first, publish in a goroutine, and take whichever comes first: the ack,
 	// a refusal, or the caller's deadline (which PublishMsg itself honours through pctx).
-	refused, release := e.refusals.register(msg.Subject)
+	// After a send on this subject ended unsettled, first order any violation it left in flight ahead of this send;
+	// when that cannot be done this send cannot be attributed a definite refusal.
+	attributable := e.refusals.barrier(ctx, msg.Subject)
+	refused, release := e.refusals.register(msg.Subject, !attributable)
 	defer release()
 	pctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -615,6 +618,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	}
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
+			e.refusals.markDirty(msg.Subject)
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
 		return SendResult{}, fmt.Errorf("mash: send to %s: %w", to, err)

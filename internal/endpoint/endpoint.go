@@ -282,6 +282,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if err != nil {
 		return nil, fmt.Errorf("mash: connect %s: %w", cfg.URL, natsauth.TLSHint(err))
 	}
+	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, nc: nc, id: id, subj: sap.For(cfg.Owner, cfg.Name),
 		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), refusals: refs,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
