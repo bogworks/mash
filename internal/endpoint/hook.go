@@ -416,13 +416,13 @@ func (e *Endpoint) healHeld(h *held) {
 // EntryOf is a message as the spool keeps it.
 func EntryOf(m render.Mail) spool.Entry {
 	return spool.Entry{Seq: m.Seq, From: m.From, Trust: string(m.Trust), Instance: m.Instance, Owner: m.Owner, At: m.At, Body: m.Body,
-		Urgent: m.Urgent, Kind: string(m.Kind.Norm())}
+		Urgent: m.Urgent, Kind: string(m.Kind.Norm()), ReplyTo: m.ReplyTo, Via: m.Via}
 }
 
 // MailOf is a spooled message as render shows it.
 func MailOf(e spool.Entry) render.Mail {
 	return render.Mail{Seq: e.Seq, From: e.From, Trust: sap.Trust(e.Trust), Instance: e.Instance, Owner: e.Owner, At: e.At, Body: e.Body,
-		Urgent: e.Urgent, Kind: kind.Of(e.Kind), Redelivered: e.Redelivered}
+		Urgent: e.Urgent, Kind: kind.Of(e.Kind), ReplyTo: e.ReplyTo, Via: e.Via, Redelivered: e.Redelivered}
 }
 
 // wakeMax caps the re-wake backoff.

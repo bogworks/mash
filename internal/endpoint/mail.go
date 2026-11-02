@@ -33,8 +33,13 @@ const UrgentHeader = "Mash-Urgent"
 // KindHeader carries the sender's kind (kind.Kind). Missing or unknown reads as task on receipt (kind.Of): an old sender's mail wakes.
 const KindHeader = "Mash-Kind"
 
-// InReplyToHeader carries the seq a message answers (optional).
+// InReplyToHeader carries the seq a message answers and the sender's signature over it, "<seq>.<sig>"
+// (sap.SignInReplyTo, ADR 0063). Only a value that verifies is ever shown; an older sender's bare decimal is ignored.
 const InReplyToHeader = "Mash-In-Reply-To"
+
+// ViaHeader is the sender's signed declaration that the message relays or quotes message #seq of its own inbox, whose
+// sender was origin: "<origin>#<seq>.<sig>" (sap.SignVia, ADR 0063). Only a value that verifies is ever shown.
+const ViaHeader = "Mash-Via"
 
 // InstanceHeader carries the sender's instance id and its signature over it
 // (sap.Identity.SignInstance). Only a value that verifies is ever shown.
@@ -67,6 +72,21 @@ func senderInstance(hdr nats.Header, trust sap.Trust, h sap.SenderHeader) string
 	}
 	inst, _ := sap.VerifyInstance(hdr.Get(InstanceHeader), h)
 	return inst
+}
+
+// senderMarks are the sender's signed in-reply-to and via declarations, only when they verify for this very message and
+// the message itself verified (or is stale, like the instance). ReplyTo is 0 and via empty otherwise: the old bare
+// decimal, a forged or moved signature and a malformed value are ignored, never shown and never an error. via reads
+// "<origin> #<seq>".
+func senderMarks(hdr nats.Header, trust sap.Trust, h sap.SenderHeader) (replyTo uint64, via string) {
+	if trust != sap.TrustVerified && trust != sap.TrustStale {
+		return 0, ""
+	}
+	replyTo, _ = sap.VerifyInReplyTo(h, hdr.Get(InReplyToHeader))
+	if origin, seq, ok := sap.VerifyVia(h, hdr.Get(ViaHeader)); ok {
+		via = origin + " #" + strconv.FormatUint(seq, 10)
+	}
+	return replyTo, via
 }
 
 // classify verifies a stored message and names its sender (spec section 4).
@@ -309,7 +329,8 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
 		}
-		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{Seq: meta.Sequence.Stream, From: from, Trust: trust,
+		replyTo, via := senderMarks(m.Headers(), trust, h)
+		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: meta.Sequence.Stream, From: from, Trust: trust,
 			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
 			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
 			Kind:   kind.Of(m.Headers().Get(KindHeader))}}
@@ -427,9 +448,13 @@ func (e *Endpoint) Send(ctx context.Context, to, text string, inReplyTo uint64) 
 
 // SendOptions are a send's optional parts.
 type SendOptions struct {
-	InReplyTo uint64    // the #seq this answers
-	Urgent    bool      // wake the recipient's session at once, not after its idle wait
-	Kind      kind.Kind // what the sender wants of the recipient; the zero value is task
+	InReplyTo uint64 // the #seq this answers; sent signed, so a recipient can show it
+	// Via is a message of the sender's own inbox (a stream sequence) this one relays or quotes. SendDetailed reads it,
+	// names its sender as the origin and sends the declaration signed (Mash-Via); the send fails when there is no such
+	// message. Zero is none.
+	Via    uint64
+	Urgent bool      // wake the recipient's session at once, not after its idle wait
+	Kind   kind.Kind // what the sender wants of the recipient; the zero value is task
 	// ID is an idempotency key: sends from one endpoint to one recipient with the same ID are one message within the
 	// stream's duplicate window. Empty means a fresh random key, which a timed-out send reports so it can be retried.
 	ID string
@@ -528,6 +553,13 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
 	inReplyTo := o.InReplyTo
+	var viaOrigin string
+	if o.Via > 0 {
+		var err error
+		if viaOrigin, err = e.viaOrigin(ctx, o.Via); err != nil {
+			return SendResult{}, err
+		}
+	}
 	key := o.ID
 	if key != "" {
 		if err := ValidateSendID(key); err != nil {
@@ -563,7 +595,18 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 		msg.Header.Set(InstanceHeader, iv)
 	}
 	if inReplyTo > 0 {
-		msg.Header.Set(InReplyToHeader, strconv.FormatUint(inReplyTo, 10))
+		v, err := e.id.SignInReplyTo(h, inReplyTo)
+		if err != nil {
+			return SendResult{}, err
+		}
+		msg.Header.Set(InReplyToHeader, v)
+	}
+	if o.Via > 0 {
+		v, err := e.id.SignVia(h, viaOrigin, o.Via)
+		if err != nil {
+			return SendResult{}, err
+		}
+		msg.Header.Set(ViaHeader, v)
 	}
 	msg.Header.Set(KindHeader, string(k))
 	if o.Urgent {
@@ -631,6 +674,25 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	return SendResult{Seq: ack.Sequence, Duplicate: ack.Duplicate}, nil
 }
 
+// viaOrigin names the sender of message seq of this endpoint's own inbox, for a Mash-Via declaration. The original need
+// not be verified (relaying unverified mail is still worth declaring), but it must exist and its sender name must be a
+// valid endpoint name: a claimed name that is not one is never put into a signed declaration.
+func (e *Endpoint) viaOrigin(ctx context.Context, seq uint64) (string, error) {
+	s, err := e.inbox(ctx)
+	if err != nil {
+		return "", err
+	}
+	raw, err := s.GetMsg(ctx, seq)
+	if err != nil {
+		return "", fmt.Errorf("mash: no message #%d in your inbox to relay", seq)
+	}
+	h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
+	if trust == sap.TrustForged || trust == sap.TrustMalformed || trust == sap.TrustAbsent || !config.ValidName(h.Name) {
+		return "", fmt.Errorf("mash: message #%d names no sender that can be declared as the origin of a relay", seq)
+	}
+	return h.Name, nil
+}
+
 // sendLimit is the largest message, headers included, a send may be: mash's own cap, or the connected server's
 // max_payload (from its INFO) when that is smaller. Hosted servers cap it below 1 MiB (Synadia's free tier: 512 KiB),
 // and the client would otherwise fail a send between the two with a bare "maximum payload exceeded".
@@ -692,7 +754,8 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
-	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data,
+	replyTo, via := senderMarks(raw.Header, trust, h)
+	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data, ReplyTo: replyTo, Via: via,
 		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
 }
 

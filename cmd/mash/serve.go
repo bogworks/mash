@@ -43,7 +43,7 @@ func sendArgsError(raw json.RawMessage) error {
 	var unknown []string
 	for k := range args {
 		switch k {
-		case "to", "text", "in_reply_to", "urgent", "kind", "id":
+		case "to", "text", "in_reply_to", "via", "urgent", "kind", "id":
 		default:
 			unknown = append(unknown, k)
 		}
@@ -485,11 +485,13 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 		}
 	}
 	return append([]mcp.Tool{
-		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox).",
+		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
 			Schema: schema(map[string]any{"to": str("endpoint name"), "text": str("message body (markdown)"),
-				"in_reply_to": num("optional #seq of the message this answers"),
-				"urgent":      flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
-				"kind":        kindProp(),
+				"in_reply_to": num("optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
+				"via": num("optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; " +
+					"recipients see 'relayed from <sender> #N' when the declaration verifies; omit it for ordinary mail"),
+				"urgent": flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
+				"kind":   kindProp(),
 				"id": str("optional idempotency key (1-128 printable ASCII characters, no spaces). A send repeated with the same id to the same " +
 					"recipient within the stream's duplicate window (2 minutes) is stored once and reports a duplicate, so a retry after a timeout cannot deliver twice; " +
 					"after the window a repeated id is a new message")}, "to", "text"),
@@ -498,6 +500,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					To        string `json:"to"`
 					Text      string `json:"text"`
 					InReplyTo uint64 `json:"in_reply_to"`
+					Via       uint64 `json:"via"`
 					Urgent    bool   `json:"urgent"`
 					Kind      string `json:"kind"`
 					ID        string `json:"id"`
@@ -513,7 +516,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					return "", err
 				}
 				k, tagged := kind.Tag(k, a.InReplyTo, a.Text)
-				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: a.InReplyTo, Urgent: a.Urgent, Kind: k, ID: a.ID})
+				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: a.InReplyTo, Via: a.Via, Urgent: a.Urgent, Kind: k, ID: a.ID})
 				if err != nil {
 					return "", err
 				}

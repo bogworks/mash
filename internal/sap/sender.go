@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -393,4 +394,98 @@ func VerifyInstance(value string, h SenderHeader) (string, bool) {
 		return "", false
 	}
 	return instance, true
+}
+
+// markSeq is a stream sequence in its one wire form: plain decimal, no sign, no leading zero, at least 1.
+func markSeq(s string) (uint64, bool) {
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || n == 0 || strconv.FormatUint(n, 10) != s {
+		return 0, false
+	}
+	return n, true
+}
+
+func inReplyToInput(h SenderHeader, seq uint64) []byte {
+	return []byte("MASH-IN-REPLY-TO-V1\n" + h.Account + "\n" + h.User + "\n" + h.Sub + "\n" +
+		h.TS + "\n" + h.Nonce + "\n" + strconv.FormatUint(seq, 10) + "\n")
+}
+
+// SignInReplyTo binds the sequence seq (the message of the sender's own inbox this one answers) to the message h
+// signs. The value is "<seq>.<sig>", for the Mash-In-Reply-To header.
+func (id Identity) SignInReplyTo(h SenderHeader, seq uint64) (string, error) {
+	if id.kp == nil {
+		return "", errors.New("sap: identity has no seed")
+	}
+	if seq == 0 {
+		return "", errors.New("sap: in-reply-to sequence is 0")
+	}
+	sig, err := id.kp.Sign(inReplyToInput(h, seq))
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatUint(seq, 10) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// VerifyInReplyTo checks an in-reply-to value against the (already verified) sender header of the same message. It
+// returns the sequence only when the header's own key signed it for this message.
+func VerifyInReplyTo(h SenderHeader, value string) (uint64, bool) {
+	i := strings.IndexByte(value, '.')
+	if i <= 0 || i == len(value)-1 {
+		return 0, false
+	}
+	seq, ok := markSeq(value[:i])
+	if !ok || !verifySig(h.User, inReplyToInput(h, seq), value[i+1:]) {
+		return 0, false
+	}
+	return seq, true
+}
+
+// validOrigin is the endpoint-name syntax (config.ValidName; sap cannot import config).
+var validOrigin = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+func validOriginName(s string) bool { return len(s) >= 1 && len(s) <= 48 && validOrigin.MatchString(s) }
+
+func viaInput(h SenderHeader, origin string, seq uint64) []byte {
+	return []byte("MASH-VIA-V1\n" + h.Account + "\n" + h.User + "\n" + h.Sub + "\n" +
+		h.TS + "\n" + h.Nonce + "\n" + origin + "\n" + strconv.FormatUint(seq, 10) + "\n")
+}
+
+// SignVia declares, under the key of the message h signs, that this message relays or quotes message seq of the
+// signer's own inbox, whose sender was origin (an endpoint name). The value is "<origin>#<seq>.<sig>", for the
+// Mash-Via header.
+func (id Identity) SignVia(h SenderHeader, origin string, seq uint64) (string, error) {
+	if id.kp == nil {
+		return "", errors.New("sap: identity has no seed")
+	}
+	if !validOriginName(origin) {
+		return "", errors.New("sap: via origin is not an endpoint name")
+	}
+	if seq == 0 {
+		return "", errors.New("sap: via sequence is 0")
+	}
+	sig, err := id.kp.Sign(viaInput(h, origin, seq))
+	if err != nil {
+		return "", err
+	}
+	return origin + "#" + strconv.FormatUint(seq, 10) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// VerifyVia checks a via value against the (already verified) sender header of the same message. It returns the
+// origin and sequence only when the header's own key signed exactly them for this message.
+func VerifyVia(h SenderHeader, value string) (string, uint64, bool) {
+	hash := strings.IndexByte(value, '#')
+	if hash <= 0 {
+		return "", 0, false
+	}
+	rest := value[hash+1:]
+	dot := strings.IndexByte(rest, '.')
+	if dot <= 0 || dot == len(rest)-1 {
+		return "", 0, false
+	}
+	origin := value[:hash]
+	seq, ok := markSeq(rest[:dot])
+	if !ok || !validOriginName(origin) || !verifySig(h.User, viaInput(h, origin, seq), rest[dot+1:]) {
+		return "", 0, false
+	}
+	return origin, seq, true
 }
