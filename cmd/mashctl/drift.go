@@ -512,6 +512,7 @@ func runPolicyDrift(args []string, env func(string) string, stdout, stderr io.Wr
 	if !ok {
 		return 1
 	}
+	announceTarget(l.cfg, env, stderr, &sysTarget{o.sysCreds})
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
 	st := gather(ctx, l, env, o.sysCreds, o.credsDir)

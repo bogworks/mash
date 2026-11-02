@@ -64,6 +64,18 @@ type Config struct {
 	Dir              string       // the config directory (ConfigDir); "" when none can be found
 	Legacy           string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+
+	// Provenance of the settings that decide which server a command acts on, for a command to say what it is about to
+	// act on (it informs; it changes no precedence). Keys: SourceKeys.
+	File       string            // the config.json that was read ("" when there is none)
+	Source     map[string]string // key -> where its value came from: an environment variable name (MASH_URL), "config.json", "default" or "unset"
+	FileValues map[string]string // key -> what config.json itself said (only keys it set), to compare with the effective value
+}
+
+// SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
+var SourceKeys = map[string]string{
+	"url": "MASH_URL", "owner": "MASH_OWNER", "admin_creds": "MASH_ADMIN_CREDS",
+	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "MASH_INSECURE_LOOPBACK",
 }
 
 type file struct {
@@ -278,6 +290,7 @@ func Load(env func(string) string, home string) (Config, error) {
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return c, fmt.Errorf("mash: %s: %w", filepath.Join(dir, "config.json"), err)
 		}
+		c.File = filepath.Join(dir, "config.json")
 	case !errors.Is(err, os.ErrNotExist):
 		return c, fmt.Errorf("mash: reading config: %w", err)
 	}
@@ -321,6 +334,7 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
 	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
+	c.recordSources(f, env, home)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	str(&c.Host, "MASH_HOST")
 	str(&c.TLSCA, "MASH_TLS_CA")
@@ -426,6 +440,33 @@ func Load(env func(string) string, home string) (Config, error) {
 		c.Creds = c.Find(c.Name + ".creds")
 	}
 	return c, nil
+}
+
+// recordSources fills Source and FileValues from the file f and the environment, as Load applied them: an environment
+// variable that is set and not empty wins, else a value the file set, else the default.
+func (c *Config) recordSources(f file, env func(string) string, home string) {
+	c.Source, c.FileValues = map[string]string{}, map[string]string{}
+	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "admin_creds": ExpandHome(f.AdminCreds, home),
+		"tls_ca": f.TLSCA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
+	if f.InsecureLoopback != nil {
+		fileVals["insecure_loopback"] = strconv.FormatBool(*f.InsecureLoopback)
+	}
+	for key, ev := range SourceKeys {
+		fv := fileVals[key]
+		if fv != "" {
+			c.FileValues[key] = fv
+		}
+		switch {
+		case env(ev) != "":
+			c.Source[key] = ev
+		case fv != "":
+			c.Source[key] = "config.json"
+		case key == "insecure_loopback":
+			c.Source[key] = "default"
+		default:
+			c.Source[key] = "unset"
+		}
+	}
 }
 
 // validLaunchToken: empty, or up to 128 of [A-Za-z0-9._-] (it goes into a JSON lease value and a process environment).

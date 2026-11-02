@@ -805,3 +805,63 @@ func TestLoadInsecureLoopback(t *testing.T) {
 		t.Fatalf("a bad value: %v", err)
 	}
 }
+
+func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://file:4222","owner":"fileowner","admin_creds":"~/a.creds","tls_ca":"/file/ca.pem"}`)
+	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://env:4222", "MASH_TLS_CERT": "/c.pem", "MASH_TLS_KEY": "/k.pem"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"url": "MASH_URL", "owner": "config.json", "admin_creds": "config.json", "tls_ca": "config.json",
+		"tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "default"}
+	for k, v := range want {
+		if c.Source[k] != v {
+			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
+		}
+	}
+	if c.File != filepath.Join(home, ".config", "mash", "config.json") {
+		t.Errorf("File %q", c.File)
+	}
+	// The file's own values, to compare with the effective ones: the env overrode url, so they differ.
+	if c.URL != "tls://env:4222" || c.FileValues["url"] != "tls://file:4222" {
+		t.Errorf("url %q, file said %q", c.URL, c.FileValues["url"])
+	}
+	if c.FileValues["admin_creds"] != filepath.Join(home, "a.creds") || c.AdminCreds != c.FileValues["admin_creds"] {
+		t.Errorf("admin creds %q, file said %q", c.AdminCreds, c.FileValues["admin_creds"])
+	}
+	if _, ok := c.FileValues["tls_cert"]; ok {
+		t.Errorf("FileValues has a key the file did not set: %v", c.FileValues)
+	}
+}
+
+func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
+	home := t.TempDir()
+	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://e:1", "MASH_OWNER": "o", "MASH_INSECURE_LOOPBACK": "1"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.File != "" || len(c.FileValues) != 0 {
+		t.Errorf("File %q FileValues %v", c.File, c.FileValues)
+	}
+	for k, v := range map[string]string{"url": "MASH_URL", "owner": "MASH_OWNER", "admin_creds": "unset", "insecure_loopback": "MASH_INSECURE_LOOPBACK"} {
+		if c.Source[k] != v {
+			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
+		}
+	}
+}
+
+func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://same:4222","insecure_loopback":false}`)
+	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://same:4222"}), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Source["url"] != "MASH_URL" || c.FileValues["url"] != c.URL {
+		t.Errorf("%v %v", c.Source, c.FileValues)
+	}
+	if c.FileValues["insecure_loopback"] != "false" || c.Source["insecure_loopback"] != "config.json" {
+		t.Errorf("%v %v", c.Source, c.FileValues)
+	}
+}

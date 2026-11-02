@@ -60,5 +60,8 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		}
 		return revokeUsers(ctx, cfg, env, n, users, stdout)
 	}
+	if announcesVerb(args) {
+		announceTarget(cfg, env, stderr, nil)
+	}
 	return ctl.Run("mashctl", cfg, args, stdout, stderr)
 }

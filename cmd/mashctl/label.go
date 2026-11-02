@@ -168,7 +168,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		fmt.Fprintf(stdout, "%s: nothing to change\n", o.name)
 		if o.sync && !o.dry {
 			// The policy already says it; --sync still reconciles the record (this is the re-run the follow-up names).
-			return syncLabels(o, verb, setMeta, cfg, stdout, stderr)
+			return syncLabels(o, verb, setMeta, cfg, env, stdout, stderr)
 		}
 		return 0
 	}
@@ -201,7 +201,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		fmt.Fprintln(stdout, l)
 	}
 	if o.sync && !o.dry {
-		return syncLabels(o, verb, setMeta, cfg, stdout, stderr)
+		return syncLabels(o, verb, setMeta, cfg, env, stdout, stderr)
 	}
 	return 0
 }
@@ -209,11 +209,12 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 // syncLabels applies the label change to the endpoint's directory record, after the policy file is saved. The file
 // is the source of truth and the record a compiled output, so a failure here leaves the file saved and says how to
 // retry.
-func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, stdout, stderr io.Writer) int {
+func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, env func(string) string, stdout, stderr io.Writer) int {
 	retry := func(err error) int {
 		fmt.Fprintf(stderr, "mashctl: %s %s: the policy file is saved but the directory labels were not updated: %v. Retry: %s\n", verb, o.name, err, setMeta)
 		return 1
 	}
+	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return retry(err)

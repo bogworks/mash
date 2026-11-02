@@ -237,6 +237,9 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	} else if c, err = policy.Compile(f, cfg.Owner); err != nil {
 		return fail("%v", err)
 	}
+	if snap == nil { // repair (which passes a snapshot) has announced already
+		announceTarget(cfg, env, stderr, &sysTarget{o.sysCreds})
+	}
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
 		return fail("%v", err)
