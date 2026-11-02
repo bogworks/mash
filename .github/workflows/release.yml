@@ -31,7 +31,8 @@ env:
   # The SLSA generator is referenced by TAG (it refuses a SHA ref), and a tag can move. The generator-pin job fails unless
   # the tag still resolves to this commit, and the publish gate and the dry-run-verify job require the certificate that
   # signed mash.intoto.jsonl to carry this commit as its Build Signer Digest (scripts/releasecheck provenance-signer; the
-  # gate reads this env at the release commit), which proves which commit signed even if the tag moved and came back. To update: pick the new release tag, read its commit with
+  # gate reads this env at the release commit), which proves which commit signed even if the tag moved and came back.
+  # To update: pick the new release tag, read its commit with
   # `gh api repos/slsa-framework/slsa-github-generator/git/ref/tags/<tag>` (dereference a `tag` object through git/tags/<sha>),
   # review that release, then change this SHA, SLSA_GENERATOR_TAG, the `uses:` tag of the provenance job, and the --builder-id
   # in scripts/releasecheck/supply.go, docs/release.md and the dry-run-verify job together.
