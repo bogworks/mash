@@ -818,7 +818,7 @@ func (a *Admin) deprovisionLocked(ctx context.Context, name string) error {
 // Suspend reported); id is the suspension id Suspend reported. Under the name's lock it reads the stream fresh and
 // refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
 // matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
-// check fail instead of losing mail. A name with no inbox stream is removed as Deprovision does.
+// check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
 func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) error {
 	if !config.ValidName(name) {
 		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
@@ -831,7 +831,7 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	switch {
 	case errors.Is(err, jetstream.ErrStreamNotFound):
-		return a.deprovisionLocked(ctx, name)
+		return fmt.Errorf("mash: endpoint %s has no inbox stream, so nothing proves it is the suspension you drained; run plain `deprovision` if it is a leftover", name)
 	case err != nil:
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}

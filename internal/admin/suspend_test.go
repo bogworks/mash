@@ -554,3 +554,22 @@ func TestDeprovisionDrainedEmptyIDNeverMatches(t *testing.T) {
 	}
 	intact(t, a, js, "h")
 }
+
+func TestDeprovisionDrainedRefusesMissingStream(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := js.DeleteStream(ctx, "inbox-alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionDrained(ctx, "alpha", "x", 0); err == nil || !strings.Contains(err.Error(), "no inbox stream") {
+		t.Fatalf("got %v", err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if _, err := kv.Get(ctx, "alpha"); err != nil {
+		t.Fatalf("record gone: %v", err)
+	}
+}
