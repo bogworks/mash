@@ -305,17 +305,17 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 			fix.Lines = append(fix.Lines, fmt.Sprintf("set zone %s %s", e.Name, e.Zone))
 		case r.Zone != e.Zone:
 			out = append(out, apply.Finding{Kind: kindZoneDiffers, Subject: e.Name,
-				Detail: fmt.Sprintf("the record is in zone %s, the file says zone %s (repair never moves an endpoint between zones)", r.Zone, e.Zone)})
+				Detail: fmt.Sprintf("the record is in zone %s, the file says zone %s (repair never moves an endpoint between zones)", config.Clean(r.Zone), e.Zone)})
 		}
 		if want := store.MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
 			out = append(out, apply.Finding{Kind: kindMailSubject, Subject: e.Name,
-				Detail: fmt.Sprintf("the record's mail subject is %q, a record in zone %q has %q", r.MailSubject, r.Zone, want)})
+				Detail: fmt.Sprintf("the record's mail subject is %q, a record in zone %q has %q", config.Clean(r.MailSubject), config.Clean(r.Zone), want)})
 		}
 		labels := map[string]string{}
 		for _, k := range slices.Sorted(mapKeys(e.Labels)) {
 			if r.Labels[k] != e.Labels[k] {
 				if v, has := r.Labels[k]; has {
-					out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s is %q on the record, %q in the file", k, v, e.Labels[k])})
+					out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s is %q on the record, %q in the file", k, config.Clean(v), e.Labels[k])})
 				} else {
 					out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s=%s is in the file and not on the record", k, e.Labels[k])})
 				}
@@ -329,7 +329,7 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 		}
 		for _, k := range slices.Sorted(mapKeys(r.Labels)) {
 			if _, has := e.Labels[k]; !has {
-				out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s=%s is on the record and not in the file", k, r.Labels[k])})
+				out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s=%s is on the record and not in the file", k, config.Clean(r.Labels[k]))})
 				labels[k] = ""
 				fix.Lines = append(fix.Lines, fmt.Sprintf("clear label %s %s=%s", e.Name, k, r.Labels[k]))
 			}
@@ -481,22 +481,22 @@ func printState(out io.Writer, name string, s stateReport) {
 	case statusOK:
 		fmt.Fprintf(out, "%s: ok\n", name)
 	case statusUnknown:
-		fmt.Fprintf(out, "%s: UNKNOWN: %s\n", name, s.Error)
+		fmt.Fprintf(out, "%s: UNKNOWN: %s\n", name, config.Escape(s.Error))
 	default:
 		fmt.Fprintf(out, "%s: DRIFT (%d)\n", name, len(s.Findings))
 		for _, f := range s.Findings {
 			if f.Subject != "" {
-				fmt.Fprintf(out, "  %s %s: %s\n", f.Kind, f.Subject, f.Detail)
+				fmt.Fprintf(out, "  %s %s: %s\n", f.Kind, config.Escape(f.Subject), config.Escape(f.Detail))
 			} else {
-				fmt.Fprintf(out, "  %s: %s\n", f.Kind, f.Detail)
+				fmt.Fprintf(out, "  %s: %s\n", f.Kind, config.Escape(f.Detail))
 			}
 			for _, l := range f.Lines {
-				fmt.Fprintf(out, "      %s\n", l)
+				fmt.Fprintf(out, "      %s\n", config.Escape(l))
 			}
 		}
 	}
 	for _, n := range s.Notes {
-		fmt.Fprintf(out, "  note: %s\n", n)
+		fmt.Fprintf(out, "  note: %s\n", config.Escape(n))
 	}
 }
 

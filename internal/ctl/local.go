@@ -143,7 +143,7 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	}
 	if elsewhere {
 		fmt.Fprintf(stdout, "\nthe local server is running, but your configuration points elsewhere\n")
-		fmt.Fprintf(stdout, "  %s commands use url %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these three:\n", prog, cfg.URL, cfg.AdminCreds, cfg.Owner)
+		fmt.Fprintf(stdout, "  %s commands use url %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these three:\n", prog, config.RedactURL(cfg.URL), cfg.AdminCreds, cfg.Owner)
 		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q, \"insecure_loopback\": true\n", pl.URL, owner, pl.Creds)
 		fmt.Fprintf(stdout, "  (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS)\n")
 		return 0

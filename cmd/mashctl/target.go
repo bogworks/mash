@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"regexp"
 
 	"github.com/bogworks/mash/internal/config"
 )
@@ -15,10 +14,8 @@ var announceSink io.Writer
 // sysTarget asks announceTarget to name the system account credentials too: the --sys-creds value, if any.
 type sysTarget struct{ flagVal string }
 
-// userinfoPassword matches the password of a URL's userinfo, so it is never printed.
-var userinfoPassword = regexp.MustCompile(`(://[^/@:,\s]*):[^@/,\s]*@`)
-
-func maskURL(u string) string { return userinfoPassword.ReplaceAllString(u, "$1:***@") }
+// maskURL hides the userinfo of a server URL, so it is never printed.
+func maskURL(u string) string { return config.RedactURL(u) }
 
 // sourceText is where the setting key came from, as a person reads it: the environment variable, the path of
 // config.json, or "default"/"unset".

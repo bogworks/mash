@@ -64,9 +64,20 @@ Every verb that connects to a server or changes one (`init`, `limits`, `provisio
 mashctl: target server tls://host:4222 (from MASH_URL), owner acme (from /home/me/.config/mash/config.json), admin creds /home/me/.config/mash/admin.creds (from MASH_ADMIN_CREDS)
 ```
 
-The policy verbs add the system credentials' path when it is known. Credentials files are named, never printed; a password in a URL is shown as `***`. When an environment variable overrides a different value in `config.json` (the url, owner, admin creds or `tls_ca`), a warning names both values, and when `MASH_NAME` or `MASH_LAUNCH_TOKEN` is set and the url came from `MASH_URL`, a second warning says the shell looks like it is inside a mash session. These lines inform; they never refuse, and the TLS and issuer rules are unchanged. The offline verbs (`permissions`, `limits --show`, `policy check`, `test`, `explain`, `show`, `init --local`, `reissue`, `label` without `--sync`) print nothing of this.
+The policy verbs add the system credentials' path when it is known. Credentials files are named, never printed; the user information of a URL is shown as `***@`. When an environment variable overrides a different value in `config.json` (the url, owner, admin creds or `tls_ca`), a warning names both values, and when `MASH_NAME` or `MASH_LAUNCH_TOKEN` is set and the url came from `MASH_URL`, a second warning says the shell looks like it is inside a mash session. These lines inform; they never refuse, and the TLS and issuer rules are unchanged. The offline verbs (`permissions`, `limits --show`, `policy check`, `test`, `explain`, `show`, `init --local`, `reissue`, `label` without `--sync`) print nothing of this.
 
 A flag or context to choose the target explicitly (`--server`, `--config-dir`) is deferred to the CLI redesign; the CLI is frozen until then. Until then, to use `config.json` instead of the session's variables run `env -u MASH_URL -u MASH_OWNER -u MASH_ADMIN_CREDS -u MASH_TLS_CA mashctl ...`, or run mashctl outside the session.
+
+## Where the key store lives
+
+The account seed in the key store (`account.nk`, with `operator.nk` and the zone keys) and `mashadmin.creds` are account-wide, unrestricted authority: whoever holds them can mint any user, change any permission and revoke any key. Their modes (0600 files in a 0700 directory) stop other users, but not other processes of the same UID, and agent sessions on the operator's host run as that UID. So run `mashctl` and keep its key store (`<config dir>/keys` or `$MASH_KEYS_DIR`) under a separate UID, or on a mount, that agent sessions cannot read, and give each host's agents only their own creds file. Never hand an agent `mashadmin.creds`, `sys.creds` or the key store.
+
+What `mashctl` prints and reads follows from not trusting the server:
+
+- Strings that came from a server or a directory record (server names, ack messages, scoped signing key roles, record fields in `list`, `suspended` and `policy drift`) are printed escaped: every control character (ESC, CR, newline, and the C1 range) and invalid UTF-8 shows as `\xNN` or `\uNNNN`, and a value is cut at 256 characters with `...`. Ordinary text, accented letters included, is unchanged.
+- A reply from the system account is bounded: a claims reply over the account JWT limit (1 MiB) is refused with `reply of N bytes over the limit`, more than 1024 distinct server names ends the ping with `more than 1024 servers answered: refusing`, and a collection stops after 4096 replies.
+- A server URL with credentials in it (`nats://user:pass@host`) is not supported. `adopt` refuses it, so it is never written to `config.json`; give the credentials as files (`--sys-creds`, `--admin-creds`). A URL that reaches `mashctl` through `config.json` or `MASH_URL` is printed with the user information replaced by `***@`.
+- `config.json` is refused when it is writable by every user (`chmod go-w` it); its owner is not checked, since a config map is often a symlink owned by another user. A relative `admin_creds`, `tls_ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory.
 
 ## The account
 

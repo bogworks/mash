@@ -768,3 +768,11 @@ func TestDriftRecordExtraNamesTheFix(t *testing.T) {
 		t.Fatalf("%d\n%s", code, out)
 	}
 }
+
+func TestPrintStateEscapesServerText(t *testing.T) {
+	var b strings.Builder
+	printState(&b, "account", stateReport{Status: statusDrift, Findings: []apply.Finding{{Kind: "k", Subject: "z\x1b[2K", Detail: "d\r\n", Lines: []string{"+ \x1b[31m"}}}, Notes: []string{"n\x1b"}})
+	if strings.ContainsAny(b.String(), "\x1b\r") || !strings.Contains(b.String(), `z\x1b[2K`) {
+		t.Fatalf("%q", b.String())
+	}
+}

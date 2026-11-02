@@ -129,7 +129,7 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 			t.Errorf("printed %q:\n%s", bad, got)
 		}
 	}
-	if !strings.Contains(got, "tls://bob:***@h:4222,tls://h2:4222") || !strings.Contains(got, "(tls://u:***@file:4222)") {
+	if !strings.Contains(got, "tls://***@h:4222,tls://h2:4222") || !strings.Contains(got, "(tls://***@file:4222)") {
 		t.Errorf("url not masked as expected:\n%s", got)
 	}
 }
@@ -213,11 +213,11 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 // exclude whitespace, not the letter s (codex on #208).
 func TestMaskURLHidesPasswordsWithTheLetterS(t *testing.T) {
 	for in, want := range map[string]string{
-		"tls://sam:secret@host":                "tls://sam:***@host",
-		"tls://sam:secret@host:4222":           "tls://sam:***@host:4222",
-		"nats://a:b@h1:4222,tls://sam:ssss@h2": "nats://a:***@h1:4222,tls://sam:***@h2",
+		"tls://sam:secret@host":                "tls://***@host",
+		"tls://sam:secret@host:4222":           "tls://***@host:4222",
+		"nats://a:b@h1:4222,tls://sam:ssss@h2": "nats://***@h1:4222,tls://***@h2",
 		"tls://h:4222":                         "tls://h:4222",
-		"tls://user@h:4222":                    "tls://user@h:4222",
+		"tls://user@h:4222":                    "tls://***@h:4222",
 	} {
 		if got := maskURL(in); got != want {
 			t.Errorf("maskURL(%q) = %q, want %q", in, got, want)
