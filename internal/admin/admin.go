@@ -179,6 +179,9 @@ func (a *Admin) createInboxLocked(ctx context.Context, name, zone string) (jetst
 		afterStreamRead(a.limits.InboxMaxBytes)
 	}
 	if err == nil {
+		if _, ok := suspendedSubjects(name, existing.CachedInfo().Config); ok {
+			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", name, name)
+		}
 		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
 			return nil, err
 		}
@@ -271,16 +274,21 @@ func (a *Admin) ensureInboxStreamLocked(ctx context.Context, name, zone string) 
 	// subject must enter, and mail addressed to another zone must not. A legacy record accepts [legacy] or the legacy
 	// filter plus one exact zone filter, as set-zone adds that filter before it rewrites the record.
 	want := store.InboxConfigZoned(a.owner, zone, name, a.limits)
+	got := s.CachedInfo().Config
+	// A suspended stream is the endpoint's own: its saved subjects stand in for the parked one (ADR 0057).
+	if saved, ok := suspendedSubjects(name, got); ok {
+		got.Subjects = saved
+	}
 	var alt []string
 	if zone == "" {
-		for _, sub := range s.CachedInfo().Config.Subjects {
+		for _, sub := range got.Subjects {
 			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
 				alt = []string{sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, z, name)}
 				break
 			}
 		}
 	}
-	if err := checkInboxStream(name, s.CachedInfo().Config, want, alt); err != nil {
+	if err := checkInboxStream(name, got, want, alt); err != nil {
 		return nil, false, err
 	}
 	return s, false, nil
@@ -751,6 +759,9 @@ func (a *Admin) addZoneFilterLocked(ctx context.Context, name, zone string) erro
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}
 	cfg := s.CachedInfo().Config
+	if _, ok := suspendedSubjects(name, cfg); ok {
+		return fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` before set-zone", name, name)
+	}
 	legacy, zoned := sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, zone, name)
 	switch got := sortedCopy(cfg.Subjects); {
 	case slices.Equal(got, sortedCopy([]string{legacy, zoned})):

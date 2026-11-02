@@ -59,6 +59,14 @@ After the save the policy is compiled before and after, and each consequence is 
 - `account update needed: run mashctl apply`: a zone appeared or went away, or a zone's permissions changed.
 - `NAME moves from zone A to zone B: ...`: the subject label (default `zone`) was set or unset, so the endpoint's zone and mail address change. The directory record keeps zone A: `mashctl set-zone NAME B` takes a record that has no zone, but refuses one already in a zone (no endpoint changes zone in this version, ADR 0054), so for a zoned endpoint `mashctl retire NAME` and `mashctl add NAME --zone B` is the way. Until it is reissued its creds are signed by zone A's key and keep zone A's permissions.
 
+## Suspending an endpoint's inbound mail
+
+- `mashctl suspend NAME` refuses all inbound mail to NAME's inbox and prints `suspended NAME: last_seq N, msgs M`. Stored mail stays readable; the sequence is final while the suspension holds.
+- `mashctl resume NAME` restores delivery and prints `resumed NAME`.
+- `mashctl suspended NAME` prints `suspended NAME since T: last_seq N, msgs M` and exits 0, or `NAME is not suspended` and exits 3. Any error exits 1, so `mashctl suspended NAME && drain && mashctl deprovision NAME` stops on a failed read.
+
+See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
+
 ## Retiring an endpoint
 
 ```sh

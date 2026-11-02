@@ -226,6 +226,19 @@ nsc push --account "$ACCOUNT"
 
 Deprovisioning fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and provisioning the name again clears it at once. `mash admin deprovision <name> --user <public-key>` is the guarded form, for scripts that must not remove an endpoint someone else has since provisioned under the same name: it reads the directory record, refuses (touching nothing) unless the record's user equals the key, and deletes the record only if its revision is still the one it read, so a record replaced in between is never removed. If another admin changes only the record's metadata in between, it re-reads the record and retries on the new revision (up to 5 tries), so that change does not refuse; a changed user, a vanished record or exhausted tries refuse; it then fences the lease and deletes the inbox. Provision and both forms of deprovision hold the name's lock ([ADR-0048](decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), see [Limits](#limits)) for their whole run, so a second admin working on the same name waits for the first to finish (up to 20 s, then "try again") and cannot have its new endpoint fenced or its inbox deleted by it. With no record it refuses even if the inbox stream exists, because nothing proves who owns it; run it without `--user` to remove such a leftover. Revoking the user stops its credentials from connecting at all. Until you revoke, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
 
+### Suspend an endpoint's inbound mail
+
+To read the last of an endpoint's mail before removing it, stop new mail first, then drain, then deprovision ([ADR 0057](decisions/0057-an-admin-can-suspend-an-endpoints-inbound-mail-by-parking-its-inbox-stream-subjects.md)):
+
+```sh
+mashctl suspend design      # suspended design: last_seq 41, msgs 38
+mashctl suspended design    # exit 0 if suspended, 3 if not, 1 on any error
+# read the inbox through sequence 41 (the last_seq above); it is final while the endpoint stays suspended
+mashctl deprovision design
+```
+
+`suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl resume design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; `set-zone` refuses on a suspended endpoint, and so does provisioning over its stream. Both `suspend` and `resume` can be repeated safely. `mash admin` carries the same three verbs. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
+
 ## Topologies
 
 mash supports one NATS server, or a cluster, in the default JetStream domain, with the default API prefix. Inboxes are single-replica ([Durability](#durability-and-sync_interval)), so on a cluster an inbox is unavailable while its node is down.

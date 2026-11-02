@@ -33,6 +33,10 @@ func setZoneUsage(prog string) string {
 	return "usage: " + prog + " set-zone <name> <zone>   (moves an existing endpoint into the zone: its inbox also takes the zone mail subject, mail to the old subject still arrives; a zone is 1-32 lower-case letters, digits and hyphens)"
 }
 
+func suspendUsage(prog, verb string) string {
+	return "usage: " + prog + " " + verb + " <name>"
+}
+
 func setMetaUsage(prog string) string {
 	return "usage: " + prog + " set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...   (at least one; a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)"
 }
@@ -56,6 +60,9 @@ func Usage(prog string) string {
 	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]", "")
 	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
 	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
+	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence")
+	line("resume <name>", "undo suspend")
+	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
 	line("deprovision <name> [--user U]", "remove the record and inbox; with --user, only if the record's user is still U")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
@@ -233,6 +240,33 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", rec.Name, rec.Zone, rec.MailSubject)
+	case "suspend", "resume", "suspended":
+		if len(args) != 2 || !config.ValidName(args[1]) {
+			return fail(errors.New(suspendUsage(prog, args[0])))
+		}
+		switch args[0] {
+		case "suspend":
+			st, err := a.Suspend(ctx, args[1])
+			if err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(stdout, "suspended %s: last_seq %d, msgs %d\n", args[1], st.LastSeq, st.Msgs)
+		case "resume":
+			if err := a.Resume(ctx, args[1]); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(stdout, "resumed %s\n", args[1])
+		default:
+			st, err := a.Suspended(ctx, args[1])
+			if err != nil {
+				return fail(err)
+			}
+			if !st.Suspended {
+				fmt.Fprintf(stdout, "%s is not suspended\n", args[1])
+				return 3
+			}
+			fmt.Fprintf(stdout, "suspended %s since %s: last_seq %d, msgs %d\n", args[1], st.Since, st.LastSeq, st.Msgs)
+		}
 	case "deprovision":
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key>]"
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {

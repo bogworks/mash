@@ -117,3 +117,34 @@ func TestMashctlZone(t *testing.T) {
 		t.Fatalf("help lacks zone:\n%s", h.String())
 	}
 }
+
+func TestMashctlSuspendVerbs(t *testing.T) {
+	e := testenv.Start(t)
+	ctlRun(t, e, "init")
+	_, u := e.Mint(t, "c")
+	if _, errb, code := ctlRun(t, e, "provision", "c", "--user", u, "--account", e.Account); code != 0 {
+		t.Fatalf("provision: %d %q", code, errb)
+	}
+	if out, _, code := ctlRun(t, e, "suspended", "c"); code != 3 || !strings.Contains(out, "c is not suspended") {
+		t.Fatalf("suspended before: %d %q", code, out)
+	}
+	if out, errb, code := ctlRun(t, e, "suspend", "c"); code != 0 || out != "suspended c: last_seq 0, msgs 0\n" {
+		t.Fatalf("suspend: %d %q %q", code, out, errb)
+	}
+	if out, _, code := ctlRun(t, e, "suspended", "c"); code != 0 || !strings.HasPrefix(out, "suspended c since ") || !strings.HasSuffix(out, ": last_seq 0, msgs 0\n") {
+		t.Fatalf("suspended: %d %q", code, out)
+	}
+	if out, errb, code := ctlRun(t, e, "resume", "c"); code != 0 || out != "resumed c\n" {
+		t.Fatalf("resume: %d %q %q", code, out, errb)
+	}
+	if _, _, code := ctlRun(t, e, "suspended", "c"); code != 3 {
+		t.Fatalf("suspended after resume: %d", code)
+	}
+	// Any error is 1, never 3.
+	if _, errb, code := ctlRun(t, e, "suspended", "ghost"); code != 1 || !strings.Contains(errb, "no inbox stream") {
+		t.Fatalf("suspended ghost: %d %q", code, errb)
+	}
+	if _, errb, code := ctlRun(t, e, "suspend"); code == 0 || !strings.Contains(errb, "usage: mashctl suspend <name>") {
+		t.Fatalf("usage: %d %q", code, errb)
+	}
+}

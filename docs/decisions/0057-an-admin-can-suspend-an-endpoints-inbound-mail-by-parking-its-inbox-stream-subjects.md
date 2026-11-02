@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-02
 decision-makers: Randy Bias (mash maintainer)
 ---
@@ -102,4 +102,4 @@ not arrivals.
 ## More Information
 
 * Issue 130, whose author's retirement design depends on it.
-* Not yet true in code: all of it. It lands in the change that follows this record.
+* Accepted by the maintainer 2026-11-02.
