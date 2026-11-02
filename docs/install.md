@@ -104,7 +104,7 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 
 The environment wins over the file. Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`).
 
-Optional: `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use the policy file to carve out what still needs a human, for example "Ask me before spending money or touching production."
+Optional: the session instruction file `~/.config/mash/policy.md` (not the enforced `policy.yaml`, which `mashctl` compiles into NATS permissions) is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
 
 ## 5. Launch a session
 

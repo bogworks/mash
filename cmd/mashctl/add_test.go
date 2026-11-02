@@ -163,7 +163,7 @@ func TestAddAndReissue(t *testing.T) {
 		t.Fatalf("add: %d %q %q", code, out, errb)
 	}
 	// a green zone is new: the account JWT needs the new key; team x (a) gets a tag for the new tool
-	if !strings.Contains(out, "account update needed: run mashctl apply") || !strings.Contains(out, "reissue needed: a (run: mashctl reissue a)") {
+	if !strings.Contains(out, "account update needed: run mashctl policy apply") || !strings.Contains(out, "reissue needed: a (run: mashctl reissue a)") {
 		t.Errorf("follow-up lines: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -308,7 +308,7 @@ func TestAddNewZoneReusesLeftoverKey(t *testing.T) {
 	}
 	want, _ := kp.PublicKey()
 	out, errb, code := h.run("add", "g", "--zone", "green")
-	if code != 0 || !strings.Contains(out, "account update needed: run mashctl apply") {
+	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	got, err := h.keys().ZonePublic("green")

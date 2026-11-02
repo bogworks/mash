@@ -57,7 +57,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
-	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl provision", "no TLS", "127.0.0.1:4333"} {
+	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl add NAME", "no TLS", "127.0.0.1:4333"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

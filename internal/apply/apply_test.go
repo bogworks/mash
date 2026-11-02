@@ -533,7 +533,7 @@ func TestNotCoveredBlockOnSuccess(t *testing.T) {
 			t.Fatalf("%d: %d\n%s", i, code, out.String())
 		}
 		s := out.String()
-		for _, w := range []string{"Not covered by apply:", "1 endpoint(s) carry exception tags: x", "mashctl add", "nsc", "mashctl policy drift"} {
+		for _, w := range []string{"Not covered by apply:", "1 endpoint(s) carry exception tags: x", "mashctl reissue", "nsc", "mashctl policy drift"} {
 			if !strings.Contains(s, w) {
 				t.Fatalf("%d: missing %q\n%s", i, w, s)
 			}
