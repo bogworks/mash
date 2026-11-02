@@ -329,7 +329,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if err != nil {
 			return fail(err)
 		}
-		if b.refused() || p.Mode != Apply || !b.changed {
+		if b.refused() || p.Mode != Apply {
 			break
 		}
 		// Someone else may have pushed since the read: compute again from the newest copy now, once.

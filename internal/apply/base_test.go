@@ -285,3 +285,75 @@ func TestRevokeDoesNotResurrectFromAStaleServer(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// The policy already matches (nothing to change): the unchanged JWT is still checked against the newest copy before it
+// is sent again, so a revocation or another update made after the first lookup is never overwritten by the old token.
+func TestApplyUnchangedPathRechecksTheBaseBeforePushing(t *testing.T) {
+	for _, mode := range []string{"same", "revoked", "twice"} {
+		ks, fk, c := setup(t)
+		op, _, _ := ks.Operator()
+		_, acct, _ := ks.Account()
+		fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+		// first apply: brings the account to the policy; the token it leaves is the unchanged base
+		if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup apply: %d", code)
+		}
+		base := fk.token
+		baseClaims, err := jwt.DecodeAccountClaims(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		newer := func(iat int64, user string) string {
+			cl, _ := jwt.DecodeAccountClaims(base)
+			cl.Revocations = jwt.RevocationList{}
+			cl.Revocations.Revoke(user, time.Unix(iat, 0))
+			return tokenAt(t, op, cl, baseClaims.IssuedAt+iat)
+		}
+		fk.pushes, fk.lastPush = 0, "" // multi heals from the first push on: count afresh
+		pre := 0
+		m := &multi{fake: fk, copies: []string{base}, healed: map[int]bool{0: true}}
+		var second string
+		switch mode {
+		case "revoked":
+			second = newer(10, userKey(t))
+			m.onCall = func(n int, m *multi) {
+				if n == 2 {
+					m.copies = []string{second}
+				}
+			}
+		case "twice":
+			second = newer(10, userKey(t))
+			third := newer(20, userKey(t))
+			m.onCall = func(n int, m *multi) {
+				switch n {
+				case 2:
+					m.copies = []string{second}
+				case 4:
+					m.copies = []string{third}
+				}
+			}
+		}
+		var out bytes.Buffer
+		code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: m, VerifyTries: 1, VerifyWait: 1}, &out)
+		pushes := fk.pushes - pre
+		switch mode {
+		case "same":
+			if code != 0 || pushes != 1 || fk.lastPush != base || !strings.Contains(out.String(), "account claims already up to date") {
+				t.Fatalf("same: %d pushes %d\n%s", code, pushes, out.String())
+			}
+		case "revoked":
+			if code != 0 || pushes != 1 || fk.lastPush == base {
+				t.Fatalf("revoked: %d pushes %d stale=%v\n%s", code, pushes, fk.lastPush == base, out.String())
+			}
+			got, _ := jwt.DecodeAccountClaims(fk.lastPush)
+			if len(got.Revocations) != 1 {
+				t.Fatalf("the newer revocation was dropped: %v", got.Revocations)
+			}
+		case "twice":
+			if code != 1 || pushes != 0 || !strings.Contains(out.String(), "changed twice") {
+				t.Fatalf("twice: %d pushes %d\n%s", code, pushes, out.String())
+			}
+		}
+		_ = acct
+	}
+}
