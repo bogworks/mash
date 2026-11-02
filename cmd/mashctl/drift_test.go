@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // driftBase declares no endpoint: `mashctl add` makes x and y, so their records, creds and zone keys are real.
@@ -419,8 +421,10 @@ func TestRepairFixesAccountKeysAndDirectoryAndListsIssued(t *testing.T) {
 	for _, w := range []string{
 		"step 1, zone key files: created b",
 		"pushed:",
-		"y: set zone b",
-		"x: labels per the file: cleared stray, set team=red",
+		"set zone y b",
+		"clear label x stray=yes",
+		"set label x team=red (was blue)",
+		"repair is additive EXCEPT that it clears every label the file does not name",
 		"y is stale: signed by",
 		"not executed; to reissue them run: mashctl reissue y",
 		"not a transaction",
@@ -455,7 +459,7 @@ func TestRepairFixesAccountKeysAndDirectoryAndListsIssued(t *testing.T) {
 			t.Errorf("second repair lacks %q:\n%s", w, out)
 		}
 	}
-	if strings.Contains(out, "set zone") || strings.Contains(out, "labels per the file") {
+	if strings.Contains(out, "set zone") || strings.Contains(out, "set label") || strings.Contains(out, "clear label") {
 		t.Errorf("second repair changed a record:\n%s", out)
 	}
 	if e.accountJWT() != jwtNow {
@@ -524,9 +528,208 @@ func TestRepairStopsWhenApplyRefusesAndDoesNothingDestructive(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "step 3") {
 		t.Fatalf("%d\n%s", code, out)
 	}
-	for _, args := range [][]string{{"--dry-run"}, {"--servers", "0"}, {"--bogus"}} {
+	for _, args := range [][]string{{"--servers", "0"}, {"--bogus"}} {
 		if _, _, code := e.run(append([]string{"policy", "repair"}, args...)...); code != 2 {
 			t.Fatalf("repair %v: exit %d, want 2", args, code)
 		}
+	}
+}
+
+func TestRepairRejectsRemoveZoneAndReplaceZoneKey(t *testing.T) {
+	e := newDriftEnv(t)
+	before := e.accountJWT()
+	for _, args := range [][]string{{"--remove-zone", "b"}, {"--replace-zone-key=b"}, {"--keep-zone", "b", "--remove-zone", "c"}} {
+		out, errb, code := e.run(append([]string{"policy", "repair"}, args...)...)
+		if code != 2 || out != "" || !strings.Contains(errb, "mashctl policy apply") || !strings.Contains(errb, "stop working") {
+			t.Fatalf("repair %v: exit %d\n%s\n%s", args, code, out, errb)
+		}
+		if strings.Contains(errb, "usage: mashctl policy repair") && (strings.Contains(strings.SplitN(errb, "usage:", 2)[1], "--remove-zone") || strings.Contains(strings.SplitN(errb, "usage:", 2)[1], "--replace-zone-key")) {
+			t.Fatalf("repair usage still lists the flags:\n%s", errb)
+		}
+	}
+	if e.accountJWT() != before {
+		t.Fatal("a rejected repair changed the account")
+	}
+	// --keep-zone and --servers stay allowed
+	if out, errb, code := e.run("policy", "repair", "--keep-zone", "zzz-not-on-server", "--servers", "1"); code == 2 {
+		t.Fatalf("--keep-zone/--servers rejected as usage: %s %s", out, errb)
+	}
+}
+
+func TestRepairUsesOnePolicySnapshotForEveryStep(t *testing.T) {
+	e := newDriftEnv(t)
+	adm, ctx, done := e.admin()
+	defer done()
+	// x's label drifted and y lost its zone in the directory: repair has records to fix from the file.
+	if _, err := adm.SetMeta(ctx, "x", admin.MetaUpdate{Labels: map[string]string{"team": "blue"}}); err != nil {
+		t.Fatal(err)
+	}
+	recs, _ := adm.List(ctx)
+	for _, rec := range recs {
+		if rec.Name == "y" {
+			if err := adm.Deprovision(ctx, "y"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adm.Provision(ctx, "y", rec.User, rec.Account, "", admin.Meta{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	jwtBefore := e.accountJWT()
+	orig, _ := os.ReadFile(e.policy)
+	changed := strings.NewReplacer("team: red, zone: a", "team: green, zone: a", "y:\n    labels: {zone: b}", "y:\n    labels: {zone: a}").Replace(string(orig))
+	if changed == string(orig) {
+		t.Fatal("test setup: the rewrite changed nothing")
+	}
+	var stages []string
+	repairHook = func(stage string) {
+		stages = append(stages, stage)
+		if stage == "snapshot" {
+			if err := os.WriteFile(e.policy, []byte(changed), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	defer func() { repairHook = func(string) {} }()
+
+	out, errb, code := e.run("policy", "repair")
+	if code != 0 || errb != "" {
+		t.Fatalf("repair: %d\n%s\n%s", code, out, errb)
+	}
+	if strings.Join(stages, ",") != "snapshot,applied" {
+		t.Fatalf("hook stages %v", stages)
+	}
+	if !strings.Contains(out, "set zone y b") || !strings.Contains(out, "team=red") || strings.Contains(out, "green") {
+		t.Fatalf("repair did not act on the original snapshot:\n%s", out)
+	}
+	if e.accountJWT() != jwtBefore {
+		t.Fatal("the account was pushed from a different policy than the snapshot")
+	}
+	recs, _ = adm.List(ctx)
+	for _, rec := range recs {
+		switch rec.Name {
+		case "y":
+			if rec.Zone != "b" {
+				t.Fatalf("y zone %q, want b (snapshot)", rec.Zone)
+			}
+		case "x":
+			if rec.Labels["team"] != "red" {
+				t.Fatalf("x labels %v, want team=red (snapshot)", rec.Labels)
+			}
+		}
+	}
+}
+
+// changeLines are the per-record change lines of a repair run, in the order printed.
+func changeLines(out string) []string {
+	var l []string
+	for _, ln := range strings.Split(out, "\n") {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "set zone ") || strings.HasPrefix(t, "set label ") || strings.HasPrefix(t, "clear label ") {
+			l = append(l, t)
+		}
+	}
+	return l
+}
+
+// storeState is everything repair could write: the account JWT, every key file and every directory record.
+func (e *applyEnv) storeState(adm interface {
+	List(context.Context) ([]store.Record, error)
+}, ctx context.Context) (jwtTok string, keys map[string]string, recs map[string]string) {
+	e.t.Helper()
+	keys, recs = map[string]string{}, map[string]string{}
+	files, _ := filepath.Glob(filepath.Join(e.keyDir, "*"))
+	zs, _ := filepath.Glob(filepath.Join(e.keyDir, "zones", "*"))
+	for _, f := range append(files, zs...) {
+		if b, err := os.ReadFile(f); err == nil {
+			keys[f] = string(b)
+		}
+	}
+	rs, err := adm.List(ctx)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, r := range rs {
+		b, _ := json.Marshal(r)
+		recs[r.Name] = string(b)
+	}
+	return e.accountJWT(), keys, recs
+}
+
+func TestRepairDryRunWritesNothingAndMatchesRealRun(t *testing.T) {
+	e := newDriftEnv(t)
+	adm, ctx, done := e.admin()
+	defer done()
+
+	// drift of every kind repair can fix: the account lost b's signer, b's key file is gone, x has a changed and a stray
+	// label, y has no zone; ghost is a record the file does not declare, with labels and a zone.
+	bpub, _ := e.ks.ZonePublic("b")
+	e.pushClaims(func(ac *jwt.AccountClaims) { delete(ac.SigningKeys, bpub) })
+	if err := os.Remove(filepath.Join(e.keyDir, "zones", "b.nk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adm.SetMeta(ctx, "x", admin.MetaUpdate{Labels: map[string]string{"team": "blue", "stray": "yes"}}); err != nil {
+		t.Fatal(err)
+	}
+	recs, _ := adm.List(ctx)
+	for _, rec := range recs {
+		if rec.Name == "y" {
+			if err := adm.Deprovision(ctx, "y"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adm.Provision(ctx, "y", rec.User, rec.Account, "", admin.Meta{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ghost, _ := nkeys.CreateUser()
+	gpub, _ := ghost.PublicKey()
+	if _, err := adm.Provision(ctx, "ghost", gpub, e.acctPub, "", admin.Meta{Zone: "a", Labels: map[string]string{"team": "green", "keep": "me"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	jwt0, keys0, recs0 := e.storeState(adm, ctx)
+	for _, args := range [][]string{{"policy", "repair", "--dry-run"}, {"policy", "repair", "--dry-run"}} {
+		out, errb, code := e.run(args...)
+		if code != 0 || errb != "" {
+			t.Fatalf("dry run: %d\n%s\n%s", code, out, errb)
+		}
+		e.noSeeds(out + errb)
+		jwt1, keys1, recs1 := e.storeState(adm, ctx)
+		if jwt1 != jwt0 || !maps.Equal(keys1, keys0) || !maps.Equal(recs1, recs0) {
+			t.Fatalf("--dry-run changed the server, the key store or the directory:\n%s", out)
+		}
+		for _, w := range []string{"dry run: nothing is written", "repair is additive EXCEPT", "would create b", "dry run, nothing was changed on the server",
+			"clear label x stray=yes", "set label x team=red (was blue)", "set zone y b", "reported, not repaired", "record-extra ghost"} {
+			if !strings.Contains(out, w) {
+				t.Errorf("dry-run output lacks %q:\n%s", w, out)
+			}
+		}
+	}
+	dry, _, _ := e.run("policy", "repair", "--dry-run")
+	if strings.Contains(dry, "ghost:") && strings.Contains(strings.Join(changeLines(dry), "\n"), "ghost") {
+		t.Errorf("a dry run lists a change for an undeclared endpoint:\n%s", dry)
+	}
+
+	out, errb, code := e.run("policy", "repair")
+	if code != 0 || errb != "" {
+		t.Fatalf("repair: %d\n%s\n%s", code, out, errb)
+	}
+	if got, want := changeLines(out), changeLines(dry); !slices.Equal(got, want) || len(want) != 4 {
+		t.Fatalf("real run change lines %q, dry run %q", got, want)
+	}
+	if !slices.Contains(changeLines(out), "clear label x stray=yes") {
+		t.Fatalf("no clear-label line:\n%s", out)
+	}
+	// the undeclared endpoint's record is byte-identical after the real run, and only reported
+	_, _, recs2 := e.storeState(adm, ctx)
+	if recs2["ghost"] != recs0["ghost"] || recs2["ghost"] == "" {
+		t.Fatalf("repair changed the record of an undeclared endpoint:\nbefore %s\nafter  %s", recs0["ghost"], recs2["ghost"])
+	}
+	if !strings.Contains(out, "record-extra ghost") || strings.Contains(strings.Join(changeLines(out), "\n"), "ghost") {
+		t.Fatalf("ghost was not only reported:\n%s", out)
+	}
+	if recs2["x"] == recs0["x"] || recs2["y"] == recs0["y"] {
+		t.Fatal("the real run did not change x and y")
 	}
 }

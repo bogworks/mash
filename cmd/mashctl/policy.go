@@ -19,7 +19,8 @@ const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
        mashctl policy diff [--policy FILE] [--sys-creds FILE]
        mashctl policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
-       mashctl policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]... [--remove-zone ZONE]... [--replace-zone-key ZONE]...
+       mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]...
+       (repair is additive EXCEPT that it clears labels the file does not name on endpoints the file declares)
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.

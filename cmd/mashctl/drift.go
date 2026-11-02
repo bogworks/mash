@@ -31,7 +31,7 @@ func driftUsage() string {
 }
 
 func repairUsage() string {
-	return "usage: mashctl policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]... [--remove-zone ZONE]... [--replace-zone-key ZONE]...\n"
+	return "usage: mashctl policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]... [--dry-run]\n"
 }
 
 // The states a drift report compares with the policy file, in the order they are printed.
@@ -149,6 +149,7 @@ func parseDriftArgs(args []string) (driftOpts, error) {
 type loaded struct {
 	cfg  config.Config
 	path string
+	f    *policy.File
 	c    *policy.Compiled
 	keys *ctlkeys.Authority
 }
@@ -193,7 +194,7 @@ func loadPolicy(pfx, file string, env func(string) string, stderr io.Writer) (*l
 	if err != nil {
 		return fail("%v", err)
 	}
-	return &loaded{cfg: cfg, path: path, c: c, keys: ks}, true
+	return &loaded{cfg: cfg, path: path, f: f, c: c, keys: ks}, true
 }
 
 // credsPathFunc is where an endpoint's creds file is looked for: dir/NAME.creds, else where `mashctl add` writes it.
@@ -275,11 +276,12 @@ type dirFix struct {
 	Name   string
 	Zone   string            // set the record's zone (it has none)
 	Labels map[string]string // for admin.SetMeta: a value sets the label, "" clears it
+	Lines  []string          // one line per change, the same text for a real run and --dry-run
 }
 
 // directoryFindings compares the endpoint records with the file's endpoints, and says what repair would change.
 // The file is the source of truth for the labels of an endpoint it declares: a label the record has and the file lacks
-// is a difference (repair clears it). A record the file does not declare is only reported.
+// is a difference (repair clears it, so repair is not additive only). A record the file does not declare is only reported.
 func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding, []dirFix) {
 	var out []apply.Finding
 	var fixes []dirFix
@@ -300,6 +302,7 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 			out = append(out, apply.Finding{Kind: kindZoneUnset, Subject: e.Name,
 				Detail: fmt.Sprintf("the record has no zone (the legacy mail subject); the file says zone %s", e.Zone)})
 			fix.Zone = e.Zone
+			fix.Lines = append(fix.Lines, fmt.Sprintf("set zone %s %s", e.Name, e.Zone))
 		case r.Zone != e.Zone:
 			out = append(out, apply.Finding{Kind: kindZoneDiffers, Subject: e.Name,
 				Detail: fmt.Sprintf("the record is in zone %s, the file says zone %s (repair never moves an endpoint between zones)", r.Zone, e.Zone)})
@@ -317,12 +320,18 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 					out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s=%s is in the file and not on the record", k, e.Labels[k])})
 				}
 				labels[k] = e.Labels[k]
+				if v, has := r.Labels[k]; has {
+					fix.Lines = append(fix.Lines, fmt.Sprintf("set label %s %s=%s (was %s)", e.Name, k, e.Labels[k], v))
+				} else {
+					fix.Lines = append(fix.Lines, fmt.Sprintf("set label %s %s=%s (was unset)", e.Name, k, e.Labels[k]))
+				}
 			}
 		}
 		for _, k := range slices.Sorted(mapKeys(r.Labels)) {
 			if _, has := e.Labels[k]; !has {
 				out = append(out, apply.Finding{Kind: kindLabelDiffers, Subject: e.Name, Detail: fmt.Sprintf("label %s=%s is on the record and not in the file", k, r.Labels[k])})
 				labels[k] = ""
+				fix.Lines = append(fix.Lines, fmt.Sprintf("clear label %s %s=%s", e.Name, k, r.Labels[k]))
 			}
 		}
 		if len(labels) > 0 {
@@ -524,7 +533,7 @@ func runPolicyDrift(args []string, env func(string) string, stdout, stderr io.Wr
 			fmt.Fprintln(stdout, "  - "+n)
 		}
 		if rep.Drift {
-			fmt.Fprintln(stdout, "drift found: `mashctl policy repair` makes the additive repairs and lists the rest; drift itself fixes nothing.")
+			fmt.Fprintln(stdout, "drift found: `mashctl policy repair` makes the repairs (additive, except that it clears labels the file does not name on declared endpoints) and lists the rest; drift itself fixes nothing.")
 		} else {
 			fmt.Fprintln(stdout, "no drift: the four states match the policy file.")
 		}
@@ -535,13 +544,26 @@ func runPolicyDrift(args []string, env func(string) string, stdout, stderr io.Wr
 	return 0
 }
 
-// runPolicyRepair is `mashctl policy repair`: additive repairs only, in four steps, never a revoke or a delete. It is not
-// a transaction: each step is safe to repeat and a failed one leaves the earlier ones done.
+// repairHook is a test seam: called after the policy snapshot is taken and again after apply, so a test can change the
+// policy file between the steps. It does nothing in production.
+var repairHook = func(stage string) {}
+
+// runPolicyRepair is `mashctl policy repair`: in four steps, additive except that it clears the labels the file does not
+// name on an endpoint the file declares; never a revoke or a delete of a credential, key file or record. With --dry-run it
+// writes nothing and prints what a real run would do. It is not a transaction: each step is safe to repeat and a failed one leaves the earlier ones done.
 func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy repair: "
 	o, err := parseApplyArgs("repair", args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, repairUsage())
+		return 2
+	}
+	if len(o.removeZones) > 0 || len(o.replaceZones) > 0 {
+		flag, why := "--remove-zone", "removes a zone's signing key from the account"
+		if len(o.removeZones) == 0 {
+			flag, why = "--replace-zone-key", "replaces a zone's signing key in the account"
+		}
+		fmt.Fprintf(stderr, "%srepair does not take %s: it %s, so users signed by the old key stop working, and repair never revokes. Run `mashctl policy apply` with that flag explicitly if you mean it.\n%s", pfx, flag, why, repairUsage())
 		return 2
 	}
 	if sv := o.servers; sv != "" {
@@ -556,6 +578,12 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 	}
 	pf := func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }
 	pf("policy repair: %s\n", l.path)
+	if o.dryRun {
+		pf("%s\n", repairHeader)
+		pf("dry run: nothing is written (no key file, no account push, no directory change); these are the changes a real run would make.\n")
+	} else {
+		pf("%s\n", repairHeader)
+	}
 
 	// Steps 1 and 2 are one code path: apply, with the same flags, so every refusal, lock and acknowledgement rule
 	// holds. Apply creates a missing zone key file only after its refusals have passed (a key made before them would
@@ -566,7 +594,9 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 		return 1
 	}
 	var applyOut bytes.Buffer
-	code := runPolicyApply("apply", args, env, &applyOut, stderr)
+	repairHook("snapshot")
+	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c}, env, &applyOut, stderr)
+	repairHook("applied")
 	after, _ := l.keys.Zones()
 	var created []string
 	for _, z := range after {
@@ -574,9 +604,18 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 			created = append(created, z)
 		}
 	}
+	if o.dryRun {
+		for _, z := range l.c.Zones {
+			if !slices.Contains(before, z.Name) {
+				created = append(created, z.Name)
+			}
+		}
+	}
 	pf("step 1, zone key files: ")
 	if len(created) == 0 {
 		pf("nothing to do\n")
+	} else if o.dryRun {
+		pf("would create %s (a local file in the key store each; nothing is created in a dry run)\n", strings.Join(created, ", "))
 	} else {
 		pf("created %s (a local file in the key store each; nothing was overwritten)\n", strings.Join(created, ", "))
 	}
@@ -585,7 +624,7 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 		pf("  %s\n", line)
 	}
 	if code != 0 {
-		pf("repair stopped at step 2: apply did not complete (exit %d). Nothing destructive was done; steps 3 and 4 were not run. Fix what apply says and run repair again.\n", code)
+		pf("repair stopped at step 2: apply did not complete (exit %d). Nothing was revoked or deleted; steps 3 and 4 were not run. Fix what apply says and run repair again.\n", code)
 		pf("%s\n", repairNotATransaction)
 		return 1
 	}
@@ -604,7 +643,7 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 			exit = 1
 		} else {
 			findings, fixes := directoryFindings(l.c, recs)
-			if rc := repairDirectory(actx, adm, fixes, pf); rc != 0 {
+			if rc := repairDirectory(actx, adm, fixes, o.dryRun, pf); rc != 0 {
 				exit = 1
 			}
 			fixed := map[string]bool{}
@@ -652,7 +691,10 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 	return exit
 }
 
-const repairNotATransaction = "repair is not a transaction across NATS claims, JetStream resources and local files: each step is idempotent, a step that fails leaves the earlier ones done, and running repair again is safe. It never revokes a credential, deletes a key file, a record or a creds file, or moves an endpoint between zones."
+// repairHeader is printed at the start of every run, so the one removal repair makes is never a surprise.
+const repairHeader = "repair is additive EXCEPT that it clears every label the file does not name on an endpoint the file declares (the file is the source of truth for a declared endpoint); every change is listed below. It never touches an endpoint the file does not declare."
+
+const repairNotATransaction = "repair is not a transaction across NATS claims, JetStream resources and local files: each step is idempotent, a step that fails leaves the earlier ones done, and running repair again is safe. It never revokes a credential, deletes a key file, a record or a creds file, or moves an endpoint between zones; the only thing it removes is a directory label the file does not name on a declared endpoint."
 
 func shellQuote(s string) string {
 	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+=:,@") == "" {
@@ -661,37 +703,41 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// repairDirectory applies fixes: SetZone for a record with no zone, SetMeta for labels. It returns 1 when one failed.
-func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, pf func(string, ...any)) int {
+// repairDirectory applies fixes, or with dryRun only prints them: SetZone for a record with no zone, SetMeta for labels.
+// Each change is one line, the same text either way, and a line is printed when the write succeeded (a real run) or would
+// be made (a dry run). It returns 1 when a write failed. A dry run makes no call that writes.
+func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryRun bool, pf func(string, ...any)) int {
 	if len(fixes) == 0 {
 		pf("  nothing to do\n")
 		return 0
 	}
 	rc := 0
 	for _, f := range fixes {
+		n := 0 // the lines of f: the zone line first, then the labels
 		if f.Zone != "" {
-			if _, err := adm.SetZone(ctx, f.Name, f.Zone); err != nil {
-				pf("  %s: set zone %s failed: %v\n", f.Name, f.Zone, err)
-				rc = 1
-			} else {
-				pf("  %s: set zone %s (its inbox also takes the zone mail subject; the legacy subject still arrives)\n", f.Name, f.Zone)
-			}
-		}
-		if len(f.Labels) > 0 {
-			if _, err := adm.SetMeta(ctx, f.Name, admin.MetaUpdate{Labels: f.Labels}); err != nil {
-				pf("  %s: set labels failed: %v\n", f.Name, err)
-				rc = 1
-				continue
-			}
-			var parts []string
-			for _, k := range slices.Sorted(mapKeys(f.Labels)) {
-				if f.Labels[k] == "" {
-					parts = append(parts, "cleared "+k)
-				} else {
-					parts = append(parts, "set "+k+"="+f.Labels[k])
+			if !dryRun {
+				if _, err := adm.SetZone(ctx, f.Name, f.Zone); err != nil {
+					pf("  %s: set zone %s failed: %v\n", f.Name, f.Zone, err)
+					rc = 1
+					n = 1
+					goto labels
 				}
 			}
-			pf("  %s: labels per the file: %s\n", f.Name, strings.Join(parts, ", "))
+			pf("  %s\n", f.Lines[0])
+			n = 1
+		}
+	labels:
+		if len(f.Labels) > 0 {
+			if !dryRun {
+				if _, err := adm.SetMeta(ctx, f.Name, admin.MetaUpdate{Labels: f.Labels}); err != nil {
+					pf("  %s: set labels failed: %v\n", f.Name, err)
+					rc = 1
+					continue
+				}
+			}
+			for _, l := range f.Lines[n:] {
+				pf("  %s\n", l)
+			}
 		}
 	}
 	return rc
