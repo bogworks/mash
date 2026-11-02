@@ -219,7 +219,7 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 	h.provisionDeclared("b")
 	// b is the last member of zone blue: the account JWT loses a key
 	out, errb, code := h.run("retire", "b")
-	if code != 0 || !strings.Contains(out, "account update needed: run mashctl apply") {
+	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	for _, args := range [][]string{{"retire"}, {"retire", "a", "b"}, {"retire", "a", "--bogus"}} {

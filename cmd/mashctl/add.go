@@ -231,7 +231,7 @@ func consequences(before, after *policy.Compiled) []string {
 		out = append(out, fmt.Sprintf("reissue needed: %s (run: mashctl reissue %s)", strings.Join(stale, ", "), strings.Join(stale, " ")))
 	}
 	if zoneSetChanged(before, after) {
-		out = append(out, "account update needed: run mashctl apply")
+		out = append(out, "account update needed: run mashctl policy apply")
 	}
 	return out
 }

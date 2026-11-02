@@ -891,7 +891,7 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 	if changed && tagged > 0 {
 		for _, zp := range plans {
 			if zp.state != zoneUnchanged {
-				fmt.Fprintln(out, "user JWTs carrying changed exception tags must be re-issued with mashctl add")
+				fmt.Fprintln(out, "user JWTs carrying changed exception tags must be re-issued with mashctl reissue")
 				break
 			}
 		}
@@ -923,7 +923,7 @@ func notCovered(out io.Writer, p Params) {
 		}
 	}
 	sort.Strings(tagged)
-	a := "user credentials issued before this apply keep the permissions of the key they were signed with and the exception tags they carry: an allow/deny tag change takes effect only when that endpoint's user JWT is re-issued (mashctl add), and apply cannot see issued tags"
+	a := "user credentials issued before this apply keep the permissions of the key they were signed with and the exception tags they carry: an allow/deny tag change takes effect only when that endpoint's user JWT is re-issued (mashctl reissue), and apply cannot see issued tags"
 	if len(tagged) > 0 {
 		names := tagged
 		more := ""

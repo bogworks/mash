@@ -42,7 +42,7 @@ func TestLabelDryRunWritesNothing(t *testing.T) {
 	orig, _ := os.ReadFile(h.policy)
 	out, errb, code := h.run("label", "b", "zone=green", "--dry-run")
 	if code != 0 || !strings.Contains(out, "dry run:") || !strings.Contains(out, "b moves from zone blue to zone green") ||
-		!strings.Contains(out, "account update needed: run mashctl apply") {
+		!strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if got, _ := os.ReadFile(h.policy); !bytes.Equal(got, orig) {
@@ -109,7 +109,7 @@ func TestLabelConsequences(t *testing.T) {
 	}
 	// a new zone changes the account JWT
 	out, _, code = h.run("label", "a2", "zone=green")
-	if code != 0 || !strings.Contains(out, "account update needed: run mashctl apply") {
+	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q", code, out)
 	}
 	// unsetting the subject label moves the endpoint to the default zone
