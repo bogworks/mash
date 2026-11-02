@@ -897,6 +897,13 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) error 
 	return a.deleteInbox(ctx, name)
 }
 
+// IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it
+// may come after the record was deleted (the lease fence or the inbox delete failed, or the connection broke).
+func IsRefusal(err error) bool {
+	var r *refusedError
+	return errors.As(err, &r)
+}
+
 func refusal(name string, why error) error {
 	return &refusedError{name: name, why: why}
 }

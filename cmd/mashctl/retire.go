@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/policy"
@@ -18,6 +19,9 @@ const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds]
 
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
 var afterRetireRead func()
+
+// deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
+var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
 // revocationNote is printed after every retire: mashctl does not revoke users.
 const revocationNote = "revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off"
@@ -143,13 +147,16 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
-		if err := adm.DeprovisionIfUser(ctx, name, user); err != nil {
-			return fail("%v: nothing was changed", err)
+		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
+			if admin.IsRefusal(err) {
+				return fail("%v: nothing was changed", err)
+			}
+			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left); the policy file was not changed. Then run: mashctl retire %s --force (it removes the policy entry)", err, name, name)
 		}
 	case force:
 		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server; only the policy file and creds are handled\n", name)
 	default:
-		return fail("no directory record on the server (--force edits the policy file anyway)")
+		return fail("no directory record on the server (--force edits the policy file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", name)
 	}
 
 	// (4) the policy file.

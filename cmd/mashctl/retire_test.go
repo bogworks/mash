@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,4 +246,73 @@ func newFleetEnv(t *testing.T, src string) *addEnv {
 		}
 	}
 	return h
+}
+
+// failAfterPurge makes the guarded removal fail the way a broken lease fence does: the record and inbox are gone.
+func failAfterPurge(t *testing.T) {
+	deprovisionIfUser = func(a *admin.Admin, ctx context.Context, name, user string) error {
+		if err := a.DeprovisionIfUser(ctx, name, user); err != nil {
+			return err
+		}
+		return errors.New("lease fence: connection lost")
+	}
+	t.Cleanup(func() { deprovisionIfUser = (*admin.Admin).DeprovisionIfUser })
+}
+
+func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("b")
+	before := h.policyText()
+	failAfterPurge(t)
+	out, errb, code := h.run("retire", "b")
+	if code != 1 || strings.Contains(out, "retired") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	for _, w := range []string{"PARTIAL", "mashctl deprovision b", "retire b --force", "lease fence: connection lost"} {
+		if !strings.Contains(errb, w) {
+			t.Errorf("stderr lacks %q: %q", w, errb)
+		}
+	}
+	if strings.Contains(errb, "nothing was changed") {
+		t.Errorf("a partial failure said nothing was changed: %q", errb)
+	}
+	if h.policyText() != before {
+		t.Error("policy changed")
+	}
+
+	// the record is gone: a retry refuses and points at deprovision and --force
+	deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
+	_, errb, code = h.run("retire", "b")
+	if code != 1 || !strings.Contains(errb, "no directory record") || !strings.Contains(errb, "mashctl deprovision b") || !strings.Contains(errb, "--force") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	if h.policyText() != before {
+		t.Error("policy changed by the retry")
+	}
+
+	// after the operator's deprovision, --force removes the policy entry
+	if _, errb, code := h.run("deprovision", "b"); code != 0 {
+		t.Fatal(errb)
+	}
+	out, errb, code = h.run("retire", "b", "--force")
+	if code != 0 || !strings.HasPrefix(out, "retired b\n") || strings.Contains(h.policyText(), "  b:") {
+		t.Fatalf("%d %q %q\n%s", code, out, errb, h.policyText())
+	}
+}
+
+func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.provisionDeclared("b")
+	afterRetireRead = func() {
+		adm, _ := admin.New(h.e.Conn(t, h.e.AdminCreds), h.e.Owner)
+		ctx := context.Background()
+		adm.Deprovision(ctx, "b")
+		_, other := h.e.Mint(t, "b2")
+		adm.Provision(ctx, "b", other, h.e.Account, "", admin.Meta{})
+	}
+	t.Cleanup(func() { afterRetireRead = nil })
+	_, errb, code := h.run("retire", "b")
+	if code != 1 || !strings.Contains(errb, "nothing was changed") || strings.Contains(errb, "PARTIAL") {
+		t.Fatalf("%d %q", code, errb)
+	}
 }
