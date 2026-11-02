@@ -21,7 +21,9 @@ const (
 	// answered for that long. ackWait bounds how long a known server has to acknowledge the push.
 	pingFirst  = time.Second
 	pingSettle = 300 * time.Millisecond
-	ackWait    = 2 * time.Second
+	// pingTotal is the longest the ping waits for the rest of a cluster that has not all replied yet.
+	pingTotal = 3 * time.Second
+	ackWait   = 2 * time.Second
 
 	lookupTimeout = 5 * time.Second
 	// pushTimeout bounds the first answer; after it, further servers have settleTimeout each to add theirs.
@@ -43,38 +45,80 @@ func (n NATS) Lookup(ctx context.Context, account string) (string, error) {
 	return string(msg.Data), nil
 }
 
-// Servers pings the system account and returns the names (or IDs) of the servers that answered: it waits up to
-// pingFirst for the first reply and then until pingSettle passes without a new one. An empty set is not an error: it
-// means the set could not be confirmed.
-func (n NATS) Servers(ctx context.Context) ([]string, error) {
+// Servers pings the system account and collects the replies: it waits up to pingFirst for the first one and then
+// until pingSettle passes without a new one. If the set is still not complete (see ServerSet.Complete) it keeps
+// listening until pingTotal has passed since the ping, so a slow server is not left out of the expected set.
+func (n NATS) Servers(ctx context.Context) (ServerSet, error) {
+	var set ServerSet
 	inbox := n.Conn.NewRespInbox()
 	sub, err := n.Conn.SubscribeSync(inbox)
 	if err != nil {
-		return nil, err
+		return set, err
 	}
 	defer sub.Unsubscribe()
 	if err := n.Conn.PublishMsg(&nats.Msg{Subject: pingSubject, Reply: inbox}); err != nil {
-		return nil, err
+		return set, err
 	}
 	if err := n.Conn.Flush(); err != nil {
-		return nil, err
+		return set, err
 	}
+	start := time.Now()
 	seen := map[string]bool{}
-	var names []string
 	wait := pingFirst
 	for ctx.Err() == nil {
 		msg, err := sub.NextMsg(wait)
 		if err != nil {
-			break
+			// quiet for the settle window: done when complete, or when the total wait is used up.
+			left := pingTotal - time.Since(start)
+			if set.Complete() || set.Gateways || left <= 0 || len(set.Names) == 0 {
+				break
+			}
+			wait = min(pingSettle, left)
+			continue
 		}
 		wait = pingSettle
-		if name := parseAck(msg.Data).Server; name != "" && !seen[name] {
-			seen[name] = true
-			names = append(names, name)
+		var r struct {
+			Server struct {
+				Name string `json:"name"`
+				ID   string `json:"id"`
+			} `json:"server"`
+			Stats struct {
+				Routes []struct {
+					Name string `json:"name"`
+				} `json:"routes"`
+				Gateways []json.RawMessage `json:"gateways"`
+			} `json:"statsz"`
+		}
+		if json.Unmarshal(msg.Data, &r) != nil {
+			continue
+		}
+		name := r.Server.Name
+		if name == "" {
+			name = r.Server.ID
+		}
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		set.Names = append(set.Names, name)
+		// One route connection per peer, but a pool holds several: count distinct peer names when they are
+		// reported (an unnamed route counts for itself, which can only over-count and so can only say UNCONFIRMED).
+		peers := map[string]bool{}
+		unnamed := 0
+		for _, rt := range r.Stats.Routes {
+			if rt.Name == "" {
+				unnamed++
+			} else {
+				peers[rt.Name] = true
+			}
+		}
+		set.Expected = max(set.Expected, 1+len(peers)+unnamed)
+		if len(r.Stats.Gateways) > 0 {
+			set.Gateways = true
 		}
 	}
-	sort.Strings(names)
-	return names, nil
+	sort.Strings(set.Names)
+	return set, nil
 }
 
 // Push sends the claims update and collects the answers. With a known server set it waits until every one of them

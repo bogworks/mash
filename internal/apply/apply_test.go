@@ -21,7 +21,8 @@ import (
 // fake is an in-memory resolver.
 type fake struct {
 	mu        sync.Mutex
-	servers   []string // the system account ping's answer
+	noServers bool      // the ping finds nobody
+	servers   ServerSet // the system account ping's answer
 	token     string
 	acks      []ServerAck
 	pushErr   error
@@ -34,7 +35,12 @@ func (f *fake) Lookup(context.Context, string) (string, error) {
 	defer f.mu.Unlock()
 	return f.token, nil
 }
-func (f *fake) Servers(context.Context) ([]string, error) { return f.servers, nil }
+func (f *fake) Servers(context.Context) (ServerSet, error) {
+	if f.servers.Names == nil && !f.servers.Gateways && f.servers.Expected == 0 && !f.noServers {
+		return ServerSet{Names: []string{"s1"}, Expected: 1}, nil // the default: one healthy server
+	}
+	return f.servers, nil
+}
 func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -177,23 +183,33 @@ func compile(t *testing.T, y string) *policy.Compiled {
 }
 
 func TestServerAcknowledgements(t *testing.T) {
+	ok := func(names ...string) []ServerAck {
+		var a []ServerAck
+		for _, n := range names {
+			a = append(a, ServerAck{Server: n, Code: 200})
+		}
+		return a
+	}
 	cases := []struct {
 		name    string
-		servers []string
+		servers ServerSet
 		acks    []ServerAck
 		code    int
 		want    []string
 	}{
-		{"both ack", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}}, 0, []string{"pushed: 2 server(s)"}},
-		{"one silent", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}}, 1, []string{"PARTIAL", "no acknowledgement from s2"}},
-		{"non-200", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, 1, []string{"PARTIAL", "refused by s2: code 503 busy"}},
-		{"single server", []string{"s1"}, []ServerAck{{Server: "s1", Code: 200}}, 0, []string{"pushed: 1 server(s)"}},
-		{"ping found nobody", nil, []ServerAck{{Server: "s1", Code: 200}}, 0, []string{"pushed: 1 server(s)", "could not be confirmed"}},
+		{"complete three all ack", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}, ok("s1", "s2", "s3"), 0, []string{"pushed: 3 server(s)"}},
+		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, ok("s1", "s2"), 1, []string{"UNCONFIRMED", "2 server(s) replied but the cluster reports 3", "may still hold the old claims", "2 server(s) that replied acknowledged"}},
+		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, ok("s1"), 1, []string{"UNCONFIRMED", "gateways"}},
+		{"single server", ServerSet{Names: []string{"s1"}, Expected: 1}, ok("s1"), 0, []string{"pushed: 1 server(s)"}},
+		{"one silent", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, []string{"PARTIAL", "no acknowledgement from s2"}},
+		{"non-200", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, 1, []string{"PARTIAL", "refused by s2: code 503 busy"}},
+		{"ping found nobody", ServerSet{}, ok("s1"), 1, []string{"UNCONFIRMED", "answered by no server"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ks, fk, c := setup(t)
 			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
+			fk.noServers = len(tc.servers.Names) == 0 && tc.servers.Expected == 0 && !tc.servers.Gateways
 			var out bytes.Buffer
 			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
 			if code != tc.code {

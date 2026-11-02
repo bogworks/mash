@@ -29,12 +29,39 @@ const NotATransaction = "apply is not a transaction across NATS claims, JetStrea
 type Resolver interface {
 	// Lookup returns the account's current JWT, or "" when the resolver has none.
 	Lookup(ctx context.Context, account string) (string, error)
-	// Servers returns the names of the servers that answer a system-account ping: the set that must acknowledge a
-	// push. An empty set means it could not be confirmed.
-	Servers(ctx context.Context) ([]string, error)
+	// Servers returns what a system-account ping learned: the servers that answered and how many the cluster says
+	// it has. The set that must acknowledge a push is ServerSet.Names; only a Complete set is authoritative.
+	Servers(ctx context.Context) (ServerSet, error)
 	// Push sends the account JWT as a claims update and returns the answer of every server that replied; expect is
 	// the known server set (nil when unknown), which a transport may wait for.
 	Push(ctx context.Context, token string, expect []string) ([]ServerAck, error)
+}
+
+// ServerSet is the answer to the system-account ping.
+type ServerSet struct {
+	// Names are the distinct servers that replied.
+	Names []string
+	// Expected is the largest 1 + route peers any reply reported: how many servers the cluster has.
+	Expected int
+	// Gateways is set when any reply reports gateways: super-cluster membership cannot be verified from here.
+	Gateways bool
+}
+
+// Complete says the set is authoritative: no gateways, at least one reply, and as many replies as the cluster
+// reports servers.
+func (s ServerSet) Complete() bool {
+	return !s.Gateways && len(s.Names) > 0 && len(s.Names) >= s.Expected
+}
+
+// Why says, for an incomplete set, why it cannot be trusted.
+func (s ServerSet) Why() string {
+	switch {
+	case len(s.Names) == 0:
+		return "the system account ping was answered by no server"
+	case s.Gateways:
+		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
+	}
+	return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
 }
 
 // ServerAck is one server's answer to a claims update.
@@ -245,7 +272,8 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	}
 
 	// The set of servers that must acknowledge, then push, then read back.
-	known, kerr := p.Resolver.Servers(ctx)
+	set, kerr := p.Resolver.Servers(ctx)
+	known := set.Names
 	acks, perr := p.Resolver.Push(ctx, token, known)
 	acked := map[string]bool{}
 	var bad []string
@@ -277,18 +305,17 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		}
 		return partial(out, p, createdList, fmt.Sprintf("the claims update was not acknowledged: %s", strings.Join(why, "; ")), verifyState(ctx, p, acctPub, desired))
 	}
-	unconfirmed := ""
-	if len(known) == 0 {
-		why := "the ping answered no server"
-		if kerr != nil {
-			why = kerr.Error()
-		}
-		unconfirmed = fmt.Sprintf("\nnote: the set of servers could not be confirmed (%s), so only the %d answer(s) received are known; check the other servers if there are any.", why, len(acks))
-	}
 	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
 		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
 	}
-	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).%s\n", len(acks), len(plans), unconfirmed)
+	if !set.Complete() {
+		why := set.Why()
+		if kerr != nil {
+			why = kerr.Error()
+		}
+		return unconfirmed(out, p, createdList, len(acks), why)
+	}
+	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).\n", len(acks), len(plans))
 	pf("%s\n", NotATransaction)
 	return 0
 }
@@ -454,6 +481,22 @@ func refuse(out io.Writer, p Params, cs []conflict) {
 	}
 	fmt.Fprintln(out, "applying anyway would leave the server's old key in place: credentials signed by it keep their old permissions and bypass the policy.")
 	fmt.Fprintln(out, "either restore the original zone key file, or run apply with --replace-zone-key ZONE: it removes the old key and installs the new one in the same account JWT, and credentials signed by the old key stop working.")
+}
+
+// unconfirmed prints that the update was acknowledged by the servers that were heard from but that the full server set
+// could not be established, and returns exit code 1.
+func unconfirmed(out io.Writer, p Params, created []string, acked int, why string) int {
+	fmt.Fprintf(out, "\nUNCONFIRMED: the server set could not be verified (%s)\n", why)
+	fmt.Fprintln(out, "done:")
+	fmt.Fprintf(out, "  the claims update was pushed; %d server(s) that replied acknowledged it and the resolver answers with the new signing keys\n", acked)
+	if len(created) > 0 {
+		fmt.Fprintf(out, "  zone keys created locally: %s\n", strings.Join(created, ", "))
+	}
+	fmt.Fprintln(out, "not confirmed:")
+	fmt.Fprintln(out, "  servers that did not reply may still hold the old claims")
+	fmt.Fprintln(out, "retry: mashctl policy apply   (idempotent: running it again is safe; check the other servers if there are any)")
+	fmt.Fprintf(out, "%s\n", NotATransaction)
+	return 1
 }
 
 // partial prints what was and was not done and returns exit code 1. observed is what the read-back found ("" is a

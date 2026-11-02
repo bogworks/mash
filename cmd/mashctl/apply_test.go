@@ -413,3 +413,36 @@ func TestApplyConfirmsTheServerSetAndParsesReplaceFlag(t *testing.T) {
 		t.Fatal("a flag without a value parsed")
 	}
 }
+
+func TestFailingPolicyTestsRefuseApplyAndWarnInDiff(t *testing.T) {
+	bad := twoZones + "tests:\n  - {from: x, to: y, expect: deny}\n"
+	e := newApplyEnv(t, bad)
+	before := e.accountJWT()
+
+	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}} {
+		out, errb, code := e.run(args...)
+		if code != 1 || !strings.Contains(out, "FAIL x->y expect deny got allow") || !strings.Contains(errb, "policy tests") {
+			t.Fatalf("%v: %d %q %q", args, code, out, errb)
+		}
+	}
+	if z, _ := e.ks.Zones(); len(z) != 0 {
+		t.Fatalf("zone keys created despite failing tests: %v", z)
+	}
+	if e.accountJWT() != before {
+		t.Fatal("a refused apply changed the server")
+	}
+
+	out, errb, code := e.run("policy", "diff")
+	if code != 0 || !strings.HasPrefix(out, "policy tests FAIL:") || !strings.Contains(out, "FAIL x->y expect deny got allow") || !strings.Contains(out, "zone") {
+		t.Fatalf("diff: %d %q %q", code, out, errb)
+	}
+
+	// the same file with a test that holds applies
+	good := twoZones + "tests:\n  - {from: x, to: y, expect: allow}\n"
+	if err := os.WriteFile(e.policy, []byte(good), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, errb, code := e.run("policy", "apply"); code != 0 {
+		t.Fatalf("passing tests: %d %q %q", code, out, errb)
+	}
+}

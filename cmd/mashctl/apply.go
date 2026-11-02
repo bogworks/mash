@@ -129,6 +129,29 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 		}
 		return fail("refusing: the policy file does not check (nothing was changed)")
 	}
+	// The file's own tests run before anything is read or created: a file whose tests contradict its rules is not pushed.
+	var failed []string
+	res := policy.RunTests(f)
+	for _, r := range res {
+		if !r.Pass {
+			failed = append(failed, fmt.Sprintf("FAIL %s->%s expect %s got %s: %s", r.From, r.To, r.Expect, r.Got, r.Text))
+		}
+	}
+	switch {
+	case len(failed) > 0 && verb == "diff":
+		fmt.Fprintf(stdout, "policy tests FAIL: %d of %d tests in %s do not hold; apply would refuse this file\n", len(failed), len(res), path)
+		for _, l := range failed {
+			fmt.Fprintf(stdout, "  %s\n", l)
+		}
+		fmt.Fprintln(stdout)
+	case len(failed) > 0:
+		for _, l := range failed {
+			fmt.Fprintln(stdout, l)
+		}
+		return fail("refusing: %d of %d policy tests in %s fail (nothing was changed, no key was created, nothing was pushed)", len(failed), len(res), path)
+	case len(res) == 0:
+		fmt.Fprintf(stdout, "note: %s has no tests section, so the rules were not checked against any expectation\n", path)
+	}
 	if cfg.Owner == "" {
 		return fail(`no owner (config.json "owner" or MASH_OWNER)`)
 	}
