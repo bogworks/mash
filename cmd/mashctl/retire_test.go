@@ -444,3 +444,46 @@ func TestArchiveNoReplaceExhaustedLeavesSource(t *testing.T) {
 		t.Error("source lost")
 	}
 }
+
+func TestCopyAndRemoveKeepsContent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	os.WriteFile(src, []byte("seed"), 0o640)
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyAndRemove(src, out, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "seed" {
+		t.Errorf("archive %q", b)
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Error("source remains")
+	}
+}
+
+func TestCopyAndRemoveSyncFailureKeepsSource(t *testing.T) {
+	old := syncFile
+	syncFile = func(*os.File) error { return errors.New("disk on fire") }
+	defer func() { syncFile = old }()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".retired-x"
+	os.WriteFile(src, []byte("seed"), 0o600)
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyAndRemove(src, out, 0o600); err == nil {
+		t.Fatal("expected error")
+	}
+	if b, _ := os.ReadFile(src); string(b) != "seed" {
+		t.Error("source lost")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Error("half archive remains")
+	}
+}

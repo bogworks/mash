@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
@@ -265,6 +267,7 @@ func archiveNoReplace(src, dest string) (string, error) {
 			if err := os.Remove(src); err != nil {
 				return "", fmt.Errorf("archived to %s but could not remove %s: %w", d, src, err)
 			}
+			_ = syncDir(filepath.Dir(d)) // best effort
 			return d, nil
 		}
 		if errors.Is(err, os.ErrExist) {
@@ -287,23 +290,61 @@ func archiveNoReplace(src, dest string) (string, error) {
 	return "", fmt.Errorf("could not archive %s: %s and %s.1 to %s.100 all exist; nothing was moved", src, dest, dest, dest)
 }
 
+// syncFile flushes a file to stable storage; a variable so tests can make it fail.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
+// syncDir fsyncs a directory so a created or removed entry is durable. Filesystems that cannot fsync a
+// directory (EINVAL, ENOTSUP, ENOSYS) are not an error.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS) {
+		return nil
+	}
+	return err
+}
+
+// copyAndRemove copies src into out, makes the archive durable (file, then its directory), and only then
+// removes src. On any failure before removal the half-written archive is deleted and src is left in place.
 func copyAndRemove(src string, out *os.File, mode os.FileMode) error {
+	fail := func(err error) error {
+		out.Close()
+		os.Remove(out.Name())
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
-		out.Close()
-		return err
+		return fail(err)
 	}
 	defer in.Close()
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
+		return fail(err)
 	}
 	if err := out.Chmod(mode); err != nil {
-		out.Close()
-		return err
+		return fail(err)
+	}
+	if err := syncFile(out); err != nil {
+		return fail(err)
 	}
 	if err := out.Close(); err != nil {
+		os.Remove(out.Name())
 		return err
 	}
-	return os.Remove(src)
+	dir := filepath.Dir(out.Name())
+	if err := syncDir(dir); err != nil {
+		os.Remove(out.Name())
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return err
+	}
+	// Best effort: the archive is already durable, and failing here must not make the caller delete it.
+	_ = syncDir(dir)
+	return nil
 }
