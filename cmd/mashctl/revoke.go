@@ -42,6 +42,9 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	if err != nil {
 		return err
 	}
+	if res.Warning != "" {
+		fmt.Fprintf(stdout, "warning: %s\n", res.Warning)
+	}
 	for _, u := range res.Revoked {
 		fmt.Fprintf(stdout, "revoked user key %s...: %d server(s) acknowledged\n", ctl.ShortKey(u), res.Acked)
 	}

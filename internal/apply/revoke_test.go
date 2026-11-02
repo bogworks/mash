@@ -93,7 +93,8 @@ func TestRevokeUsersAlreadyRevokedNeedsAcks(t *testing.T) {
 	}
 	fk.pushErr = nil
 	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 2}
-	if _, err := RevokeUsers(context.Background(), p, []string{u}); !errors.Is(err, ErrNotConfirmed) {
+	pushes := fk.pushes
+	if _, err := RevokeUsers(context.Background(), p, []string{u}); err == nil || !strings.Contains(err.Error(), "refusing") || fk.pushes != pushes {
 		t.Fatalf("incomplete set: %v", err)
 	}
 	if fk.token != before {
@@ -123,11 +124,11 @@ func TestRevokeUsersInvalidKeyBeforeAnyIO(t *testing.T) {
 // countFake counts lookups on the shared fake.
 type countFake struct{ *fake }
 
-func (c *countFake) Lookup(ctx context.Context, a string) (string, error) {
+func (c *countFake) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
 	c.fake.mu.Lock()
 	c.fake.lookups++
 	c.fake.mu.Unlock()
-	return c.fake.Lookup(ctx, a)
+	return c.fake.LookupAll(ctx, a, n)
 }
 
 func TestRevokeUsersRefusesSubjectMismatch(t *testing.T) {
@@ -155,11 +156,6 @@ func TestRevokeUsersNotAckedIsNotConfirmed(t *testing.T) {
 		{"no ack", func(f *fake) { f.pushErr = errors.New("no server answered the claims update in time") }, "not acknowledged"},
 		{"refused", func(f *fake) { f.acks = []ServerAck{{Server: "s1", Code: 500, Message: "boom"}} }, "refused by s1: code 500 boom"},
 		{"acked but the resolver shows the old claims", func(f *fake) { f.acks = []ServerAck{{Server: "s1", Code: 200}} }, "does not show the revocation"},
-		{"incomplete set", func(f *fake) {
-			f.applyPush = true
-			f.servers = ServerSet{Names: []string{"s1"}, Expected: 2}
-			f.acks = []ServerAck{{Server: "s1", Code: 200}}
-		}, "server set could not be verified"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,14 +166,14 @@ func TestRevokeUsersNotAckedIsNotConfirmed(t *testing.T) {
 			if !errors.Is(err, ErrNotConfirmed) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "safe") {
 				t.Fatalf("%v", err)
 			}
-			if tc.name != "incomplete set" && revokedIn(t, fk.token, u) {
+			if revokedIn(t, fk.token, u) {
 				t.Fatal("the revocation is assumed on the resolver")
 			}
 		})
 	}
 }
 
-// changing swaps the stored token once, on the second Lookup, to model another writer.
+// changing swaps the stored token once, on the second LookupAll, to model another writer.
 type changing struct {
 	*fake
 	swap  string
@@ -185,7 +181,7 @@ type changing struct {
 	calls int
 }
 
-func (c *changing) Lookup(ctx context.Context, a string) (string, error) {
+func (c *changing) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
 	c.fake.mu.Lock()
 	c.calls++
 	if c.calls == 2 || (c.swap2 != "" && c.calls == 4) {
@@ -196,7 +192,7 @@ func (c *changing) Lookup(ctx context.Context, a string) (string, error) {
 		}
 	}
 	c.fake.mu.Unlock()
-	return c.fake.Lookup(ctx, a)
+	return c.fake.LookupAll(ctx, a, n)
 }
 
 func TestRevokeUsersRetriesOnceWhenJWTChanges(t *testing.T) {
@@ -369,15 +365,15 @@ type launder struct {
 	foreign string
 }
 
-func (l *launder) Lookup(ctx context.Context, a string) (string, error) {
-	tok, err := l.fake.Lookup(ctx, a)
+func (l *launder) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
+	toks, err := l.fake.LookupAll(ctx, a, n)
 	l.fake.mu.Lock()
 	pushed := l.fake.pushes > 0
 	l.fake.mu.Unlock()
 	if pushed {
-		return l.foreign, err
+		return []string{l.foreign}, err
 	}
-	return tok, err
+	return toks, err
 }
 
 func TestRevokeUsersReadBackVerifiesTheIssuer(t *testing.T) {
@@ -397,5 +393,29 @@ func TestRevokeUsersReadBackVerifiesTheIssuer(t *testing.T) {
 	_, err = RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: r, VerifyTries: 1, Now: func() time.Time { return revokeAt }}, []string{u})
 	if !errors.Is(err, ErrNotConfirmed) || !strings.Contains(err.Error(), "not an accepted issuer") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// Fewer lookup replies than known servers refuse the revoke before anything is pushed: the silent server may hold a
+// newer copy (with an earlier revocation) than the one the revoke would build from.
+func TestRevokeRefusesShortLookupAndIncompleteSet(t *testing.T) {
+	ks, fk, _ := setup(t)
+	fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
+	fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
+	fk.applyPush = true
+	fk.all = []string{fk.token, fk.token}
+	u := userKey(t)
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, []string{u})
+	if err == nil || !strings.Contains(err.Error(), "only 2 of 3 servers answered the account lookup; mashctl will not write") || fk.pushes != 0 {
+		t.Fatalf("%v pushes %d", err, fk.pushes)
+	}
+	fk.all = nil
+	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 2}
+	if _, err = RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, []string{u}); err == nil || !strings.Contains(err.Error(), "server set could not be verified") || fk.pushes != 0 {
+		t.Fatalf("incomplete: %v pushes %d", err, fk.pushes)
+	}
+	fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
+	if _, err = RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, []string{u}); err != nil || fk.pushes != 1 {
+		t.Fatalf("complete: %v pushes %d", err, fk.pushes)
 	}
 }

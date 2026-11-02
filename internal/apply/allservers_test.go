@@ -85,8 +85,8 @@ func TestUnchangedNeverSaysAlreadyWhenServersDiffer(t *testing.T) {
 	op, _, _ := ks.Operator()
 	cl, _ := jwt.DecodeAccountClaims(tok)
 	cl.Name = "older"
-	old, _ := cl.Encode(op)
-	for name, all := range map[string][]string{"differs": {tok, tok, old}, "silent": {tok, tok}, "none": {tok, tok, ""}} {
+	old := tokenAt(t, op, cl, 1000) // an older copy: the newest is the base, then the read-back finds this server behind
+	for name, all := range map[string][]string{"differs": {tok, tok, old}, "none": {tok, tok, ""}} {
 		fk.all = all
 		out.Reset()
 		code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)

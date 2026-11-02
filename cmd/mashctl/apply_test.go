@@ -399,10 +399,7 @@ func TestZoneAbsentFromFileIsRefusedUnlessRemovedOrKept(t *testing.T) {
 	before := e.accountJWT()
 	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "diff"}} {
 		out, errb, code := e.run(args...)
-		want := 1
-		if args[1] == "diff" {
-			want = 0
-		}
+		want := 1 // a refusal exits 1 in every mode, `diff` included
 		if code != want || errb != "" || !strings.Contains(out, "REFUSED unless --remove-zone c or --keep-zone c") || strings.Contains(out, "account claims already up to date") {
 			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
 		}

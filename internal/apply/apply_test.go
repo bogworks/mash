@@ -176,7 +176,6 @@ func TestNoChangeStillConfirmsEveryServer(t *testing.T) {
 		{"all match", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1", "s2"), 0, "already up to date", "PARTIAL"},
 		{"one silent (stale)", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, "PARTIAL: the re-send of the unchanged claims was not acknowledged: no acknowledgement from s2", "already up to date"},
 		{"one refuses", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 500, Message: "boom"}}, 1, "refused by s2: code 500 boom", "already up to date"},
-		{"incomplete set", ServerSet{Names: []string{"s1"}, Expected: 2}, ok("s1"), 1, "UNCONFIRMED", "already up to date"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -267,12 +266,12 @@ func TestServerAcknowledgements(t *testing.T) {
 		want    []string
 	}{
 		{"complete three all ack", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}, ok("s1", "s2", "s3"), 0, []string{"pushed: 3 server(s)"}},
-		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, ok("s1", "s2"), 1, []string{"UNCONFIRMED", "2 server(s) replied but the cluster reports 3", "may still hold the old claims", "2 server(s) that replied acknowledged"}},
-		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, ok("s1"), 1, []string{"UNCONFIRMED", "gateways"}},
+		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, ok("s1", "s2"), 1, []string{"refusing", "2 server(s) replied but the cluster reports 3", "nothing was changed"}},
+		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, ok("s1"), 1, []string{"refusing", "gateways"}},
 		{"single server", ServerSet{Names: []string{"s1"}, Expected: 1}, ok("s1"), 0, []string{"pushed: 1 server(s)"}},
 		{"one silent", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, []string{"PARTIAL", "no acknowledgement from s2"}},
 		{"non-200", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, 1, []string{"PARTIAL", "refused by s2: code 503 busy"}},
-		{"ping found nobody", ServerSet{}, ok("s1"), 1, []string{"UNCONFIRMED", "answered by no server"}},
+		{"ping found nobody", ServerSet{}, ok("s1"), 1, []string{"refusing", "answered by no server"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -288,6 +287,9 @@ func TestServerAcknowledgements(t *testing.T) {
 				if !strings.Contains(out.String(), w) {
 					t.Fatalf("missing %q:\n%s", w, out.String())
 				}
+			}
+			if strings.Contains(out.String(), "refusing") && fk.pushes != 0 {
+				t.Fatalf("pushed %d time(s) before refusing", fk.pushes)
 			}
 		})
 	}
@@ -327,10 +329,7 @@ func TestLostZoneKeyIsRefusedUnlessReplaced(t *testing.T) {
 		pushes := fk.pushes
 		var out bytes.Buffer
 		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1
-		if mode == Diff {
-			want = 0
-		}
+		want := 1 // a refusal exits 1 in every mode, `diff` included
 		s := out.String()
 		if code != want || !strings.Contains(s, "REFUSED") || !strings.Contains(s, "zone a") || !strings.Contains(s, oldPub) ||
 			!strings.Contains(s, "--replace-zone-key") || !strings.Contains(s, "restore the original zone key file") || !strings.Contains(s, "stop working") {
@@ -459,10 +458,7 @@ func TestOutsidePolicyZones(t *testing.T) {
 	for _, mode := range []Mode{Apply, DryRun, Diff} {
 		out.Reset()
 		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1
-		if mode == Diff {
-			want = 0
-		}
+		want := 1 // a refusal exits 1 in every mode, `diff` included
 		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "account claims already up to date") || fk.pushes != pushes || fk.token != tok {
 			t.Fatalf("%s: %d\n%s", mode, code, out.String())
 		}
@@ -511,9 +507,9 @@ func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
 		want      string
 	}{
 		{"standalone", ServerSet{Names: []string{"s1"}, Expected: 1}, 0, ok("s1"), 0, "pushed: 1 server(s)"},
-		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, ok("s1"), 1, "UNCONFIRMED: the server set could not be verified (this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N)"},
+		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, ok("s1"), 1, "refusing: the server set could not be verified (this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N)"},
 		{"three of three", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3, Cluster: "C"}, 3, ok("s1", "s2", "s3"), 0, "pushed: 3 server(s)"},
-		{"two of three", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, ok("s1", "s2"), 1, "UNCONFIRMED: the server set could not be verified (2 server(s) replied but --servers says 3)"},
+		{"two of three", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, ok("s1", "s2"), 1, "refusing: the server set could not be verified (2 server(s) replied but --servers says 3)"},
 		{"one with a cluster name", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 1, ok("s1"), 0, "pushed: 1 server(s)"},
 		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, ok("s1"), 1, "the cluster reports 3"},
 		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, ok("s1"), 1, "--servers says 2"},
@@ -524,8 +520,8 @@ func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
 			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
 			var out bytes.Buffer
 			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: tc.inventory, VerifyTries: 1, VerifyWait: 1}, &out)
-			if code != tc.code || !strings.Contains(out.String(), tc.want) {
-				t.Fatalf("%d\n%s", code, out.String())
+			if code != tc.code || !strings.Contains(out.String(), tc.want) || (tc.code == 1 && fk.pushes != 0) {
+				t.Fatalf("%d pushes %d\n%s", code, fk.pushes, out.String())
 			}
 		})
 	}
@@ -592,5 +588,41 @@ func TestReplaceZoneKeyDoesNotCoverForeignKeys(t *testing.T) {
 	}
 	if z, _ := ks.Zones(); len(z) != 0 {
 		t.Fatalf("created zone keys %v", z)
+	}
+}
+
+// A write needs an answer to the account lookup from every known server: fewer replies than servers refuses apply
+// before a key is created or anything is pushed; the read-only modes warn and go on.
+func TestShortLookupRefusesWritesAndWarnsReadOnly(t *testing.T) {
+	for _, mode := range []Mode{Apply, DryRun, Diff} {
+		ks, fk, c := setup(t)
+		fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
+		fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
+		fk.all = []string{fk.token, fk.token}
+		var out bytes.Buffer
+		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
+		if fk.pushes != 0 {
+			t.Fatalf("%s: pushed", mode)
+		}
+		if mode == Apply {
+			if code != 1 || !strings.Contains(out.String(), "only 2 of 3 servers answered the account lookup; mashctl will not write") || !strings.Contains(out.String(), "nothing was changed") {
+				t.Fatalf("apply: %d\n%s", code, out.String())
+			}
+			if zs, _ := ks.ZoneKey("a", false); zs != nil {
+				t.Fatal("a zone key was created")
+			}
+			continue
+		}
+		if code != 0 || !strings.Contains(out.String(), "warning: only 2 of 3 servers answered the account lookup; this comparison may be stale") {
+			t.Fatalf("%s: %d\n%s", mode, code, out.String())
+		}
+	}
+	// every server answers: the write goes through
+	ks, fk, c := setup(t)
+	fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
+	fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
+	fk.applyPush = true
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &bytes.Buffer{}); code != 0 || fk.pushes != 1 {
+		t.Fatalf("complete: %d pushes %d", code, fk.pushes)
 	}
 }
