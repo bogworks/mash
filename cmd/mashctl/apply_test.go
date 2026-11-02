@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	madmin "github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctlkeys"
@@ -158,6 +159,7 @@ func (e *applyEnv) mint(zone, name string) nats.Option {
 	upub, _ := ukp.PublicKey()
 	uc := jwt.NewUserClaims(upub)
 	uc.Name = name
+	uc.Tags.Add(madmin.NoDenyTag) // every zone key carries a deny template, so every user carries a deny tag (ADR 0056)
 	uc.IssuerAccount = e.acctPub
 	uc.UserPermissionLimits = jwt.UserPermissionLimits{} // a scoped key's users carry none of their own
 	tok, err := uc.Encode(zk)
