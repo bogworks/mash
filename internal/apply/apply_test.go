@@ -28,6 +28,7 @@ type fake struct {
 	pushErr   error
 	applyPush bool // a push replaces token
 	pushes    int
+	lastPush  string // the token of the latest push
 }
 
 func (f *fake) Lookup(context.Context, string) (string, error) {
@@ -45,6 +46,7 @@ func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pushes++
+	f.lastPush = tok
 	if f.applyPush {
 		f.token = tok
 	}
@@ -131,8 +133,57 @@ func TestAckedAndVerifiedThenNoOp(t *testing.T) {
 		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
 	}
 	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 1 || !strings.Contains(out.String(), "already up to date") {
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 2 || !strings.Contains(out.String(), "already up to date") {
 		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
+	}
+	if fk.lastPush != fk.token {
+		t.Fatal("the no-change run re-signed instead of sending the JWT the resolver has")
+	}
+}
+
+// With no change the unchanged JWT is still sent to every server; "already up to date" needs a complete set and an
+// acknowledgement from each, and anything else is PARTIAL or UNCONFIRMED.
+func TestNoChangeStillConfirmsEveryServer(t *testing.T) {
+	ok := func(names ...string) []ServerAck {
+		var a []ServerAck
+		for _, n := range names {
+			a = append(a, ServerAck{Server: n, Code: 200})
+		}
+		return a
+	}
+	cases := []struct {
+		name    string
+		servers ServerSet
+		acks    []ServerAck
+		code    int
+		want    string
+		not     string
+	}{
+		{"all match", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1", "s2"), 0, "already up to date", "PARTIAL"},
+		{"one silent (stale)", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, "PARTIAL: the re-send of the unchanged claims was not acknowledged: no acknowledgement from s2", "already up to date"},
+		{"one refuses", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 500, Message: "boom"}}, 1, "refused by s2: code 500 boom", "already up to date"},
+		{"incomplete set", ServerSet{Names: []string{"s1"}, Expected: 2}, ok("s1"), 1, "UNCONFIRMED", "already up to date"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ks, fk, c := setup(t)
+			// First apply brings every server up to date; then the case's servers answer the second.
+			fk.servers, fk.acks, fk.applyPush = ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1", "s2"), true
+			var out bytes.Buffer
+			if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
+				t.Fatalf("setup apply: %d\n%s", code, out.String())
+			}
+			fk.pushes = 0
+			fk.servers, fk.acks = tc.servers, tc.acks
+			out.Reset()
+			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
+			if code != tc.code || !strings.Contains(out.String(), tc.want) || strings.Contains(out.String(), tc.not) {
+				t.Fatalf("%d\n%s", code, out.String())
+			}
+			if fk.pushes != 1 || fk.lastPush != fk.token {
+				t.Fatalf("pushes %d, re-signed %v", fk.pushes, fk.lastPush != fk.token)
+			}
+		})
 	}
 }
 

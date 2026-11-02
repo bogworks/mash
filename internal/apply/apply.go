@@ -258,7 +258,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if changed {
 			pf("\n%s: dry run, nothing was changed on the server and no key was created.\n", p.Mode)
 		} else {
-			pf("\n%s: already up to date.\n", p.Mode)
+			pf("\n%s: the resolver's copy already matches the file; no server was asked (apply confirms every server).\n", p.Mode)
 		}
 		pf("%s\n", NotATransaction)
 		return 0
@@ -266,12 +266,15 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	for _, z := range createdList {
 		pf("created the signing key of zone %s (a local file in the key store)\n", z)
 	}
-	if !changed {
-		pf("\n%s: already up to date, nothing pushed.\n%s\n", p.Mode, NotATransaction)
-		return 0
-	}
 
-	// The set of servers that must acknowledge, then push, then read back.
+	// The set of servers that must acknowledge, then push, then read back. With no change the claims are not
+	// re-signed: the JWT the resolver already has (same token, same iat) is sent again, so that every server
+	// acknowledges it or is named. One resolver answering with the new claims does not show that the others hold
+	// them, and a retry after a partial push is how a lagging server is repaired.
+	what := "the claims update"
+	if !changed {
+		what = "the re-send of the unchanged claims"
+	}
 	set, kerr := p.Resolver.Servers(ctx)
 	known := set.Names
 	acks, perr := p.Resolver.Push(ctx, token, known)
@@ -303,7 +306,7 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if len(silent) > 0 {
 			why = append(why, "no acknowledgement from "+strings.Join(silent, ", ")+" (known from the system account ping)")
 		}
-		return partial(out, p, createdList, fmt.Sprintf("the claims update was not acknowledged: %s", strings.Join(why, "; ")), verifyState(ctx, p, acctPub, desired))
+		return partial(out, p, createdList, fmt.Sprintf("%s was not acknowledged: %s", what, strings.Join(why, "; ")), verifyState(ctx, p, acctPub, desired))
 	}
 	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
 		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
@@ -313,7 +316,11 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if kerr != nil {
 			why = kerr.Error()
 		}
-		return unconfirmed(out, p, createdList, len(acks), why)
+		return unconfirmed(out, p, createdList, len(acks), why, changed)
+	}
+	if !changed {
+		pf("\n%s: already up to date: the claims are unchanged, and all %d server(s) acknowledged the unchanged JWT sent again and the resolver answers with it.\n%s\n", p.Mode, len(acks), NotATransaction)
+		return 0
 	}
 	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).\n", len(acks), len(plans))
 	pf("%s\n", NotATransaction)
@@ -485,10 +492,14 @@ func refuse(out io.Writer, p Params, cs []conflict) {
 
 // unconfirmed prints that the update was acknowledged by the servers that were heard from but that the full server set
 // could not be established, and returns exit code 1.
-func unconfirmed(out io.Writer, p Params, created []string, acked int, why string) int {
+func unconfirmed(out io.Writer, p Params, created []string, acked int, why string, changed bool) int {
 	fmt.Fprintf(out, "\nUNCONFIRMED: the server set could not be verified (%s)\n", why)
 	fmt.Fprintln(out, "done:")
-	fmt.Fprintf(out, "  the claims update was pushed; %d server(s) that replied acknowledged it and the resolver answers with the new signing keys\n", acked)
+	if changed {
+		fmt.Fprintf(out, "  the claims update was pushed; %d server(s) that replied acknowledged it and the resolver answers with the new signing keys\n", acked)
+	} else {
+		fmt.Fprintf(out, "  the claims were already current on the resolver; the unchanged JWT was sent again and %d server(s) that replied acknowledged it\n", acked)
+	}
 	if len(created) > 0 {
 		fmt.Fprintf(out, "  zone keys created locally: %s\n", strings.Join(created, ", "))
 	}
@@ -516,7 +527,7 @@ func partial(out io.Writer, p Params, created []string, step, observed string) i
 		fmt.Fprintf(out, "  the account JWT on the resolver: %s\n", observed)
 	}
 	fmt.Fprintln(out, "  user JWTs were not touched")
-	fmt.Fprintln(out, "retry: mashctl policy apply   (idempotent: it pushes only what differs; mashctl policy diff shows what that is)")
+	fmt.Fprintln(out, "retry: mashctl policy apply   (idempotent: it sends the claims again to every server, so a server that missed the update is repaired; mashctl policy diff shows what differs)")
 	fmt.Fprintf(out, "%s\n", NotATransaction)
 	return 1
 }

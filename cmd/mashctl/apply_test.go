@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
@@ -269,8 +271,25 @@ func TestApplyPushesZonesAndUsersGetExactlyTheirPermissions(t *testing.T) {
 	if code != 0 || errb != "" || !strings.Contains(out, "already up to date") {
 		t.Fatalf("second apply: %d\n%s\n%s", code, out, errb)
 	}
+	if !strings.Contains(out, "acknowledged the unchanged JWT") {
+		t.Fatalf("the no-change apply did not confirm the server:\n%s", out)
+	}
 	if e.accountJWT() != jwtNow {
 		t.Fatal("the second apply changed the account JWT")
+	}
+
+	// The resolver acknowledges the identical JWT again with code 200 (the basis of the no-change confirmation).
+	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	acks, err := apply.NATS{Conn: nc}.Push(context.Background(), jwtNow, nil)
+	if err != nil || len(acks) == 0 || !acks[0].OK() {
+		t.Fatalf("re-pushing the identical JWT: %v %+v", err, acks)
+	}
+	if e.accountJWT() != jwtNow {
+		t.Fatal("the identical re-push changed the account JWT")
 	}
 }
 
