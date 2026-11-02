@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 632" width="860" height="632" role="img" aria-labelledby="d9-title d9-desc"><title id="d9-title">System context (topology)</title><desc id="d9-desc">Two machines each run an agent host session that starts mash over stdio. Each mash, the other SAP tools and the operator connect to one NATS server with JetStream. The operator also issues users through identity tooling and calls the Synadia Cloud control-plane API.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="631" rx="14" class="bg"/><text x="32" y="42" class="t-title">System context (topology)</text><defs><marker id="d9-gray" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-gray"/></marker><marker id="d9-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d9-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-violet"/></marker></defs><text x="32" y="66" class="t-sub">Each arrow points from the side that opens the connection or starts the process.</text><rect x="32" y="92" width="420" height="96" rx="10" class="bound"/><text x="44" y="112" class="t-s">Machine A</text><rect x="46" y="124" width="150" height="54" rx="8" class="card"/><text x="121" y="147" class="t-h mid">Agent host session</text><text x="121" y="165" class="t-s mid">(Claude Code)</text><rect x="300" y="124" width="140" height="54" rx="8" class="card"/><text x="370" y="147" class="t-h mid">mash</text><text x="370" y="165" class="t-s mid">(serve, hook, CLI)</text><path d="M196,151 L298,151" class="a a-gray " marker-end="url(#d9-gray)"/><text x="247" y="143" class="t-s mid">starts, stdio</text><rect x="32" y="208" width="420" height="84" rx="10" class="bound"/><text x="44" y="226" class="t-s">Machine B</text><rect x="46" y="240" width="150" height="40" rx="8" class="card"/><text x="121" y="265" class="t-h mid">Agent host session</text><rect x="300" y="240" width="140" height="40" rx="8" class="card"/><text x="370" y="265" class="t-h mid">mash</text><path d="M196,260 L298,260" class="a a-gray " marker-end="url(#d9-gray)"/><text x="247" y="252" class="t-s mid">starts, stdio</text><rect x="300" y="316" width="140" height="40" rx="8" class="card"/><text x="370" y="341" class="t-h mid">Other SAP tools</text><rect x="600" y="124" width="228" height="290" rx="12" class="f-teal"/><text x="714" y="252" class="t-h mid">NATS server with JetStream</text><text x="714" y="272" class="t-s mid">self-hosted or Synadia Cloud</text><path d="M440,151 L598,151" class="a a-teal " marker-end="url(#d9-teal)"/><text x="519" y="143" class="t-i x-teal w6 mid">NATS, TLS</text><path d="M440,260 L598,260" class="a a-teal " marker-end="url(#d9-teal)"/><text x="519" y="252" class="t-i x-teal w6 mid">NATS, TLS</text><path d="M440,336 L598,336" class="a a-teal " marker-end="url(#d9-teal)"/><text x="519" y="328" class="t-i x-teal w6 mid">NATS</text><rect x="32" y="420" width="150" height="60" rx="30" class="plain"/><text x="107" y="455" class="t-h mid">Operator / admin</text><rect x="290" y="404" width="210" height="54" rx="8" class="card"/><text x="395" y="428" class="t-h mid">Operator's identity tooling</text><text x="395" y="446" class="t-s mid">(nsc or another JWT issuer)</text><path d="M182,431 L288,431" class="a a-violet " marker-end="url(#d9-violet)"/><text x="235" y="423" class="t-i x-violet w6 mid">issues users</text><path d="M182,470 L560,470 L560,392 L598,392" class="a a-teal " marker-end="url(#d9-teal)"/><text x="194" y="488" class="t-i x-teal w6">mash admin, via NATS</text><rect x="598" y="514" width="230" height="56" rx="8" class="card"/><text x="713" y="538" class="t-h mid">Synadia Cloud</text><text x="713" y="556" class="t-h mid">control-plane API</text><path d="M107,480 L107,542 L596,542" class="a a-gray " marker-end="url(#d9-gray)"/><text x="120" y="534" class="mono x-gray">scripts/quickstart-synadia.sh, HTTPS</text><text x="32" y="610" class="t-cap">The two machines are peers: they never connect to each other, and all mail and presence pass through the NATS server.</text></svg>

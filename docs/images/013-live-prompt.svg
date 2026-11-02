@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 698" width="860" height="698" role="img" aria-labelledby="d13-title d13-desc"><title id="d13-title">Live SAP prompt (data flow)</title><desc id="d13-desc">A caller finds the callee through NATS service discovery, sends a signed prompt, gets an ack and working status chunks every 30 s, and receives the response when Claude Code replies via the reply tool.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="697" rx="14" class="bg"/><text x="32" y="42" class="t-title">Live SAP prompt (data flow)</text><defs><marker id="d13-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-ink"/></marker><marker id="d13-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d13-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-violet"/></marker></defs><text x="32" y="66" class="t-sub">One live prompt from discovery to response. The prompt is not durable.</text><path d="M112,140 L112,642" class="rule dash"/><path d="M342,140 L342,642" class="rule dash"/><path d="M562,140 L562,642" class="rule dash"/><path d="M752,140 L752,642" class="rule dash"/><rect x="32" y="92" width="160" height="48" rx="8" class="card"/><text x="112" y="113" class="t-h mid">Caller</text><text x="112" y="130" class="t-s mid">mash prompt CLI</text><rect x="262" y="92" width="160" height="48" rx="8" class="f-teal"/><text x="342" y="113" class="t-h mid">NATS</text><text x="342" y="130" class="t-s mid">$SRV and agents.prompt</text><rect x="482" y="92" width="160" height="48" rx="8" class="card"/><text x="562" y="113" class="t-h mid">mash serve</text><text x="562" y="130" class="t-s mid">callee</text><rect x="672" y="92" width="160" height="48" rx="8" class="card"/><text x="752" y="113" class="t-h mid">Claude Code</text><text x="752" y="130" class="t-s mid">callee</text><text x="124" y="191" class="t-i mono" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">$SRV.INFO.agents request</text><path d="M112,199 L342,199" class="a a-teal" marker-end="url(#d13-teal)"/><text x="32" y="203" class="t-s w6">1</text><text x="124" y="236" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">registrations, incl. callee&#x27;s prompt subject</text><path d="M342,244 L112,244" class="a a-teal dash" marker-end="url(#d13-teal)"/><text x="32" y="248" class="t-s w6">2</text><text x="124" y="281" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">signed prompt on agents.prompt.cc.OWNER.bob</text><path d="M112,289 L562,289" class="a a-violet" marker-end="url(#d13-violet)"/><text x="32" y="293" class="t-s w6">3</text><rect x="363" y="315" width="398" height="56" rx="8" class="f-amber"/><text x="377" y="337" class="t-b">SAP §13 live check: signature, 30 s clock window, nonce.</text><text x="377" y="355" class="t-b">unsigned 401, malformed 400, not in directory 403</text><text x="124" y="402" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">status chunk &quot;ack&quot;</text><path d="M562,410 L112,410" class="a a-violet dash" marker-end="url(#d13-violet)"/><text x="32" y="414" class="t-s w6">4</text><text x="574" y="447" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">channel event with request_id and text</text><path d="M562,455 L752,455" class="a a-ink" marker-end="url(#d13-ink)"/><text x="32" y="459" class="t-s w6">5</text><text x="124" y="518" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">status chunk &quot;working&quot;</text><path d="M562,526 L112,526" class="a a-violet dash" marker-end="url(#d13-violet)"/><text x="32" y="530" class="t-s w6">6</text><rect x="48" y="481" width="784" height="65" rx="10" class="bound"/><text x="60" y="499" class="t-s">loop every 30 s until answered</text><text x="574" y="571" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">reply tool call (request_id, text)</text><path d="M752,579 L562,579" class="a a-ink" marker-end="url(#d13-ink)"/><text x="32" y="583" class="t-s w6">7</text><text x="124" y="616" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">response chunk, then terminator</text><path d="M562,624 L112,624" class="a a-violet dash" marker-end="url(#d13-violet)"/><text x="32" y="628" class="t-s w6">8</text><text x="32" y="674" class="t-cap">Solid arrows are requests, dashed arrows are replies and status. Time runs top to bottom.</text></svg>

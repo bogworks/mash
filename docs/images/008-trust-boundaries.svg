@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 590" width="860" height="590" role="img" aria-labelledby="d8-title d8-desc"><title id="d8-title">Trust boundaries and data flows</title><desc id="d8-desc">Six trust boundaries B1 to B6. B1: hook context into the model. B2: the spool directory between mash serve and mash hook. B3: the TLS connection from the consumer host to the NATS server. B4: the server to the key holders. B5: admin provisioning. B6: install and upgrade from the supply chain.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="589" rx="14" class="bg"/><text x="32" y="42" class="t-title">Trust boundaries and data flows</text><defs><marker id="d8-gray" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-gray"/></marker><marker id="d8-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-teal"/></marker><marker id="d8-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-amber"/></marker></defs><text x="32" y="66" class="t-sub">Where mail, keys and code cross between the host, the server, the key holders and the supply chain.</text><rect x="32" y="92" width="380" height="324" rx="10" class="bound"/><text x="44" y="112" class="t-s">Consumer host (one OS user)</text><rect x="44" y="124" width="356" height="280" rx="8" class="card"/><text x="60" y="146" class="t-h">Agent host (Claude Code ...)</text><rect x="60" y="160" width="80" height="32" rx="8" class="plain"/><text x="100" y="181" class="t-b mid">model</text><rect x="250" y="160" width="130" height="32" rx="8" class="plain"/><text x="315" y="181" class="t-b mid">hook context</text><path d="M250,176 L142,176" class="a a-amber " marker-end="url(#d8-amber)"/><text x="196" y="168" class="t-i x-amber w6 mid">B1</text><rect x="250" y="224" width="130" height="32" rx="8" class="plain"/><text x="315" y="245" class="t-b mid">mash serve (MCP)</text><path d="M120,192 L120,232 L248,232" class="a a-gray " marker-end="url(#d8-gray)"/><text x="128" y="226" class="t-s">tools</text><path d="M248,248 L80,248 L80,194" class="a a-gray " marker-end="url(#d8-gray)"/><text x="150" y="264" class="t-s">channel event</text><rect x="60" y="296" width="90" height="32" rx="8" class="plain"/><text x="105" y="317" class="t-b mid">mash hook</text><rect x="250" y="296" width="130" height="32" rx="8" class="plain"/><text x="315" y="317" class="t-b mid">spool dir (0700)</text><path d="M248,312 L152,312" class="a a-amber " marker-end="url(#d8-amber)"/><text x="200" y="304" class="t-i x-amber w6 mid">B2</text><rect x="60" y="344" width="320" height="48" rx="8" class="plain"/><text x="72" y="364" class="mono">~/.config/mash:</text><text x="72" y="382" class="mono">config.json, *.creds, policy.md</text><rect x="500" y="92" width="328" height="244" rx="10" class="bound"/><text x="512" y="112" class="t-s">NATS server (operator mode, JetStream)</text><rect x="512" y="124" width="304" height="210" rx="12" class="f-teal"/><text x="528" y="146" class="t-h">Account (one or more owners)</text><text x="528" y="170" class="mono">inbox-&lt;name&gt; streams</text><text x="528" y="186" class="t-s">(30 d, 16 MiB)</text><text x="528" y="208" class="mono">agents.mail.*.&lt;owner&gt;.&lt;name&gt;</text><text x="528" y="230" class="mono">mash-directory KV</text><text x="528" y="246" class="t-s">(admin writes)</text><text x="528" y="268" class="mono">mash-leases KV</text><text x="528" y="284" class="t-s">(own key only)</text><text x="528" y="306" class="mono">$SRV.*, agents.prompt/status/hb.*</text><path d="M414,150 L498,150" class="a a-teal " marker-end="url(#d8-teal)" marker-start="url(#d8-teal)"/><text x="456" y="142" class="t-i x-amber w6 mid">B3</text><text x="456" y="170" class="t-s mid">TLS?</text><path d="M380,240 L456,240 L456,208 L510,208" class="a a-teal " marker-end="url(#d8-teal)"/><path d="M664,372 L664,338" class="a a-teal " marker-end="url(#d8-teal)"/><text x="676" y="360" class="t-i x-amber w6">B4</text><rect x="500" y="372" width="328" height="68" rx="8" class="f-violet"/><text x="512" y="394" class="t-h">Account signing keys</text><text x="512" y="412" class="t-b">(nsc store or Synadia Cloud),</text><text x="512" y="430" class="t-b">admin creds, API token</text><path d="M664,440 L664,490" class="a a-muted"/><rect x="500" y="490" width="328" height="48" rx="8" class="plain"/><text x="512" y="510" class="t-b">Admin host: mash admin,</text><text x="512" y="528" class="t-b">quickstart script (B5)</text><rect x="32" y="506" width="380" height="32" rx="8" class="f-gray"/><text x="44" y="527" class="t-b">GitHub repo, CI runners, release key</text><path d="M222,506 L222,418" class="a a-gray " marker-end="url(#d8-gray)"/><text x="234" y="440" class="t-i x-amber w6">B6 install/upgrade</text><text x="234" y="458" class="t-s">(go install, plugin marketplace,</text><text x="234" y="474" class="t-s">GitHub release binaries)</text><text x="32" y="568" class="t-cap">Labels B1 to B6 are the trust boundaries listed below. Dashed boxes are hosts and servers.</text></svg>

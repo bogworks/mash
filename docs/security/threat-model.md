@@ -71,25 +71,7 @@ interface mash uses, and the internals of the NATS server.
 
 ## 4. Trust boundaries and data flows
 
-```
-  Consumer host (one OS user)                         NATS server (operator mode, JetStream)
- +----------------------------------------+   B3   +----------------------------------------+
- | Agent host (Claude Code ...)           |  TLS?  | Account (one or more owners)           |
- |  model <--B1-- hook context            |<======>|  inbox-<name> streams (30 d, 16 MiB)   |
- |  model --tools--> mash serve (MCP) ----+--------+->agents.mail.*.<owner>.<name>        |
- |         <-channel event--              |        |  mash-directory KV (admin writes)      |
- |  mash hook <--B2-- spool dir (0700)    |        |  mash-leases KV (own key only)         |
- |  ~/.config/mash: config.json, *.creds, |        |  $SRV.*, agents.prompt/status/hb.*     |
- |  policy.md                             |        +-------------------^--------------------+
- +----------------------------------------+                            | B4
-        ^ B6 install/upgrade                                Account signing keys (nsc store or
-        | (go install, plugin marketplace,                  Synadia Cloud), admin creds, API token
-        |  GitHub release binaries)                                     |
- +------+--------------------------------+                  +-----------+-------------+
- | GitHub repo, CI runners, release key   |                  | Admin host: mash admin, |
- +----------------------------------------+                  | quickstart script (B5)  |
-                                                             +-------------------------+
-```
+![Trust boundaries B1 to B6: hook context into the model, the spool, the TLS link to the NATS server, key holders, admin host, and the supply chain that installs mash on the consumer host.](../images/008-trust-boundaries.svg)
 
 - **B1 Mail to model.** Untrusted text crosses into the model's context: hook `additionalContext`
   (`internal/host/claude.go:88-136`), channel events (`cmd/mash/serve.go:246-248`) and tool results.

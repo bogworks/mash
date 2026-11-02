@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 710" width="860" height="710" role="img" aria-labelledby="d15-title d15-desc"><title id="d15-title">Hook killed between showing and marking (data flow)</title><desc id="d15-desc">A mash hook is killed after marking entries 42 and 43 shown but before drained marks. A second hook run re-delivers the batch flagged as re-delivered, marks drained, and mash serve acknowledges both.</desc><style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+</style><rect x="0.5" y="0.5" width="859" height="709" rx="14" class="bg"/><text x="32" y="42" class="t-title">Hook killed between showing and marking (data flow)</text><defs><marker id="d15-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-ink"/></marker><marker id="d15-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 L2.6,5 z" class="solid-violet"/></marker></defs><text x="32" y="66" class="t-sub">A hook killed mid-delivery shows the batch twice at worst, and the model is told.</text><path d="M100,140 L100,654" class="rule dash"/><path d="M260,140 L260,654" class="rule dash"/><path d="M420,140 L420,654" class="rule dash"/><path d="M580,140 L580,654" class="rule dash"/><path d="M740,140 L740,654" class="rule dash"/><rect x="30" y="92" width="140" height="48" rx="8" class="f-violet"/><text x="100" y="121" class="t-h mid">Spool</text><rect x="190" y="92" width="140" height="48" rx="8" class="card"/><text x="260" y="113" class="t-h mid">mash hook</text><text x="260" y="130" class="t-s mid">run 1</text><rect x="350" y="92" width="140" height="48" rx="8" class="card"/><text x="420" y="121" class="t-h mid">Claude Code</text><rect x="510" y="92" width="140" height="48" rx="8" class="card"/><text x="580" y="113" class="t-h mid">mash hook</text><text x="580" y="130" class="t-s mid">run 2</text><rect x="670" y="92" width="140" height="48" rx="8" class="card"/><text x="740" y="121" class="t-h mid">mash serve</text><text x="112" y="191" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">entries 42, 43</text><path d="M100,199 L260,199" class="a a-violet" marker-end="url(#d15-violet)"/><text x="32" y="203" class="t-s w6">1</text><text x="112" y="236" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">mark shown/42, shown/43</text><path d="M260,244 L100,244" class="a a-violet" marker-end="url(#d15-violet)"/><text x="32" y="248" class="t-s w6">2</text><text x="272" y="281" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">prints batch</text><path d="M260,289 L420,289" class="a a-ink" marker-end="url(#d15-ink)"/><text x="32" y="293" class="t-s w6">3</text><rect x="164" y="315" width="193" height="56" rx="8" class="f-red"/><text x="178" y="337" class="t-b">killed (timeout or crash)</text><text x="178" y="355" class="t-b">before drained marks</text><text x="112" y="402" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">entries 42, 43, still marked shown</text><path d="M100,410 L580,410" class="a a-violet" marker-end="url(#d15-violet)"/><text x="32" y="414" class="t-s w6">4</text><text x="432" y="447" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">batch again, each flagged</text><text x="432" y="462" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">&quot;re-delivered after an interrupted hook&quot;</text><path d="M580,470 L420,470" class="a a-ink" marker-end="url(#d15-ink)"/><text x="32" y="474" class="t-s w6">5</text><text x="112" y="507" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">drained/42, drained/43</text><path d="M580,515 L100,515" class="a a-violet" marker-end="url(#d15-violet)"/><text x="32" y="519" class="t-s w6">6</text><text x="112" y="552" class="t-i" style="paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round">drained marks</text><path d="M100,560 L740,560" class="a a-violet" marker-end="url(#d15-violet)"/><text x="32" y="564" class="t-s w6">7</text><rect x="523" y="586" width="305" height="56" rx="8" class="f-amber"/><text x="537" y="608" class="t-b">acknowledges both. A later redelivery of a</text><text x="537" y="626" class="t-b">drained seq is acknowledged, never shown</text><text x="32" y="686" class="t-cap">Solid arrows are messages. Time runs top to bottom.</text></svg>
