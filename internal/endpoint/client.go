@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -164,7 +165,16 @@ type recordResult struct {
 	gone bool
 }
 
+// fetchRecordHook, set only by tests, fails the read of a key before it is made.
+var fetchRecordHook atomic.Pointer[func(key string) error]
+
 func (e *Endpoint) fetchRecord(ctx context.Context, key string) recordResult {
+	if hp := fetchRecordHook.Load(); hp != nil {
+		if err := (*hp)(key); err != nil {
+			return recordResult{err: fmt.Errorf("directory %s: %w", key, err),
+				gone: errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted)}
+		}
+	}
 	v, err := e.directGetKV(ctx, store.DirectoryBucket, key)
 	if err != nil {
 		return recordResult{err: fmt.Errorf("directory %s: %w", key, err),
@@ -388,7 +398,7 @@ func (e *Endpoint) loadSenders(ctx context.Context, raws []*jetstream.RawStreamM
 		}
 		switch {
 		case h.Name == "":
-			return e.loadDirectory(ctx)
+			return e.loadSenderDirectory(ctx)
 		case config.ValidName(h.Name):
 			need[h.Name] = true
 		}
@@ -409,6 +419,18 @@ func (e *Endpoint) loadSenders(ctx context.Context, raws []*jetstream.RawStreamM
 	}
 	e.learn(got)
 	return nil
+}
+
+// loadSenderDirectory loads the whole directory for a classify that needs it. Records that could not be read were
+// never an error here: the load's partial result is used, as the poll loop retries the rest.
+func (e *Endpoint) loadSenderDirectory(ctx context.Context) error {
+	err := e.loadDirectory(ctx)
+	var pe *partialLoadError
+	if errors.As(err, &pe) {
+		e.log.Print(err)
+		return nil
+	}
+	return err
 }
 
 // presenceProbe is one $SRV.INFO request and the answers to it so far.
