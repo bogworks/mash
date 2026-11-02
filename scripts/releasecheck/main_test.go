@@ -72,6 +72,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
 	write(t, repo, "scripts/"+release.ScriptName, "#!/bin/sh\necho quickstart\n")
+	write(t, repo, releaseWorkflowPath, testReleaseYML)
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
 	gitT(t, repo, "add", "-A")
 	gitT(t, repo, "commit", "-q", "-m", "candidate")
@@ -237,7 +238,7 @@ func bareDSSELine(statement string) string {
 // line naming release.yml).
 func goodCIAsset(name string) string {
 	if name == release.ProvenanceName {
-		return dsseLine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`)
+		return bundleLineWithCert(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert())
 	}
 	return `{"bomFormat":"CycloneDX","specVersion":"1.5","metadata":{"component":{"name":"` + name + `"}},"components":[{"type":"library","name":"x"}]}` + "\n"
 }
@@ -1581,4 +1582,9 @@ func TestAssets_aScriptMissingAtXIsAClearError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "script is missing at") {
 		t.Fatalf("%v", err)
 	}
+}
+
+// goodSignerCert is a certificate made by the recorded generator commit at the recorded tag, as Fulcio would record it.
+func goodSignerCert() []byte {
+	return goodCertDER(nil)
 }

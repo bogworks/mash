@@ -29,7 +29,9 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || 'v0.0.0-dryrun' }}
   RELEASE_REF: ${{ github.event_name == 'push' && github.ref_name || 'HEAD' }}
   # The SLSA generator is referenced by TAG (it refuses a SHA ref), and a tag can move. The generator-pin job fails unless
-  # the tag still resolves to this commit. To update: pick the new release tag, read its commit with
+  # the tag still resolves to this commit, and the publish gate and the dry-run-verify job require the certificate that
+  # signed mash.intoto.jsonl to carry this commit as its Build Signer Digest (scripts/releasecheck provenance-signer; the
+  # gate reads this env at the release commit), which proves which commit signed even if the tag moved and came back. To update: pick the new release tag, read its commit with
   # `gh api repos/slsa-framework/slsa-github-generator/git/ref/tags/<tag>` (dereference a `tag` object through git/tags/<sha>),
   # review that release, then change this SHA, SLSA_GENERATOR_TAG, the `uses:` tag of the provenance job, and the --builder-id
   # in scripts/releasecheck/supply.go, docs/release.md and the dry-run-verify job together.
@@ -356,6 +358,9 @@ jobs:
           [ -f mash.intoto.jsonl ] || { echo "no mash.intoto.jsonl was downloaded" >&2; ls >&2; exit 1; }
           # The workflow that ran the generator must be release.yml: every line (a Sigstore bundle, or a bare DSSE envelope) of the provenance names it as
           # its entry point (SLSA v0.2 configSource.entryPoint, or v1 externalParameters.workflow.path).
+          # The generator commit that signed it must be the recorded SLSA_GENERATOR_SHA, read from the signing certificate (the
+          # same check as the publish gate; a tag moved and restored around the run cannot sign a different commit undetected).
+          go -C "$GITHUB_WORKSPACE" run ./scripts/releasecheck provenance-signer "$PWD/mash.intoto.jsonl" .github/workflows/release.yml
           jq -r '(.dsseEnvelope.payload // .payload)' mash.intoto.jsonl | while read -r p; do
             echo "$p" | base64 -d | jq -e '(.predicate.invocation.configSource.entryPoint // .predicate.buildDefinition.externalParameters.workflow.path) == ".github/workflows/release.yml"' > /dev/null \
               || { echo "mash.intoto.jsonl was not made by .github/workflows/release.yml" >&2; exit 1; }

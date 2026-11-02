@@ -861,9 +861,9 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 			})
 		}
 		for name, body := range map[string]string{
-			"v1":        dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`),
-			"bare":      bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
-			"mixed":     goodCIAsset(release.ProvenanceName) + bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
+			"v1":        bundleLineWithCert(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`, goodSignerCert()),
+			"bare":      bareLineWithCertStatement(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert()),
+			"mixed":     goodCIAsset(release.ProvenanceName) + bareLineWithCertStatement(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert()),
 			"two lines": goodCIAsset(release.ProvenanceName) + goodCIAsset(release.ProvenanceName),
 		} {
 			f := signedFixture(t, nil)

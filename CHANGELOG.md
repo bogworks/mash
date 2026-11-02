@@ -4,6 +4,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- The release gate and the dry run now prove which `slsa-github-generator` commit signed `mash.intoto.jsonl`: every line's Fulcio certificate must carry the commit recorded in `SLSA_GENERATOR_SHA` (`release.yml`, read at the release commit) as its Build Signer Digest and the generic generator at `SLSA_GENERATOR_TAG` as its Build Signer URI, so a tag moved and restored around the run is caught (issue #108). See [docs/release.md](docs/release.md#sbom-and-slsa-provenance).
+
 ### Added
 
 - `mashctl adopt --server URL [--account NAME] --operator-key F --account-key F --sys-creds F [--admin-creds F | --mint-admin] [--owner O] [--dry-run]` takes over a NATS server you already run in operator mode with a full resolver and JetStream. It requires the authority to exist (the operator signing seed, the mash account's identity seed, system account creds, all 0600 files, never printed) and refuses without it. Read-only checks come first and nothing is written until they pass: the seed files, a server that refuses anonymous connections and answers the system account, the account JWT on the resolver (subject, name, expiry), JetStream file storage and its limits, the server set, and whether the operator key issued the account. It then imports the keys into the key store (without replacing a different key), copies the system creds, records or mints admin creds, and writes `config.json` and an open `policy.yaml` only if absent; `--dry-run` prints what it would do and a second run changes nothing. It changes nothing on the server. See [docs/operations.md](docs/operations.md#adopting-an-existing-server).

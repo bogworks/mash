@@ -238,7 +238,14 @@ information embedded in the binary, so it lists what is inside the artifact. It 
 does not rebuild them. mash meets SLSA v1.0 Build L2, not L3: the generator adds a signer identity mash's steps cannot use
 and a fixed provenance format, but the digests it attests come from mash's own workflow. A tag can move, so a
 `generator-pin` job (which `provenance` needs) fails the run unless the generator's tag still resolves to the commit recorded
-in `SLSA_GENERATOR_SHA` in `release.yml`. The generator job holds `contents: write` in the release workflow's run; it is isolated and its upload job is disabled by `upload-assets: false`. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
+in `SLSA_GENERATOR_SHA` in `release.yml`. That job reads the mutable tag in a different job from the one that runs the generator, so a tag
+moved away and restored around the run would pass it. The publish gate and the dry run therefore also read the Fulcio
+certificate that signed each line of `mash.intoto.jsonl` and require its Build Signer Digest extension
+(`1.3.6.1.4.1.57264.1.10` in the Sigstore OID registry) to equal `SLSA_GENERATOR_SHA` and its Build Signer URI (`.1.9`) to name
+the generic generator at `SLSA_GENERATOR_TAG`. This proves which generator commit actually signed this provenance: a tag moved and restored
+cannot sign a different commit's provenance undetected. The pin is read from `release.yml` (at the release commit, by the
+gate), so changing it there changes the check; `go run ./scripts/releasecheck provenance-signer <file> .github/workflows/release.yml`
+runs the same check by hand. It reads what the certificate says; slsa-verifier still verifies the signature. The generator job holds `contents: write` in the release workflow's run; it is isolated and its upload job is disabled by `upload-assets: false`. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
 `quickstart-synadia.sh`, `SHA256SUMS` and `SHA256SUMS.sig`. The reasoning, and what is not yet true, is in
 [decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md).
 
@@ -315,11 +322,16 @@ check that the provenance names `release.yml` as its workflow entry point; for a
 
     jq -r .payload mash.intoto.jsonl | base64 -d | jq '.predicate.invocation.configSource.entryPoint // .predicate.buildDefinition.externalParameters.workflow.path'
 
+The generator is referenced by a tag, which can move, so also prove which commit signed. The signing certificate in each
+line carries the generator's commit as the Build Signer Digest; from a checkout of the release tag run
+`go run ./scripts/releasecheck provenance-signer mash.intoto.jsonl .github/workflows/release.yml`, which requires every
+line's certificate to name the commit `release.yml` records as `SLSA_GENERATOR_SHA` and the generic generator at `SLSA_GENERATOR_TAG`.
+
 The level met is SLSA v1.0 **Build L2**, not L3. The generator's signature is one mash's steps cannot forge, but the
 digests it attests are supplied by mash's own workflow, so a compromised build step would still get a genuine signature. The
 control beyond L2 is the two-clone reproducibility check in CI plus the maintainer's independent rebuild before signing
 `SHA256SUMS`. The generator is pinned by tag, not commit; the `generator-pin` job checks the tag against the recorded commit
-on every run. The trust roots are GitHub's OIDC and Sigstore and the maintainer's key.
+on every run, and the gate proves from the signing certificate which commit signed. The trust roots are GitHub's OIDC and Sigstore and the maintainer's key.
 
 ## Versions
 
