@@ -84,6 +84,10 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 `mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller (512 KiB on Synadia's free tier). Send a file path instead of the content.
 
+## `send` refused by policy
+
+`refused by policy: you may not mail X`. The server refused the publish because the sender's NATS permissions do not include X's mail subject. It fails at once (not after a timeout), nothing was stored, and retrying with the same credentials will not help; `--id` is irrelevant. The default permission set lets an endpoint mail every endpoint of its owner, so this means the sender was issued a narrower set (from a policy file or a hand-edited allow list). Ask the admin to issue one that includes X, or mail a recipient you are allowed to. See "Refused sends" in [operations.md](operations.md).
+
 ## `send` timed out
 
 `mash: send to X timed out; the message may or may not have been delivered. Retry with --id KEY ... within 2 minutes to send it at most once; after that a retry may store a second copy.` Re-run the same send with the key it printed: `mash send <to> --id <key> ...` (the `send` tool takes `id`). Within the window a duplicate reports `sent #N ... (duplicate of --id KEY: already delivered, nothing new stored)`. Past 2 minutes, check the recipient's inbox before retrying.

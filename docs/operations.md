@@ -262,6 +262,12 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 
 `host.MinClaudeCode` (`internal/host/claude.go`) is the oldest Claude Code a live receipt passed on. Each live receipt in `docs/evidence/` names the Claude Code version it ran on and whether it passed. The constant is the oldest version that has a passing receipt for the current delivery design (hooks plus the channel wake). It is raised when a design change retires the receipts on the oldest version, so that every version at or above it still has a passing receipt behind it, and it is never lowered: lowering it would claim a receipt that does not exist. Update it, the README and install.md Requirements line together, in the pull request that adds the receipt. `status` compares the version the client sent in `initialize` (`clientInfo`) with it and warns below it; mash does not refuse older versions, and it does not guess other clients' version schemes.
 
+## Refused sends
+
+`mash send` (and the `send` tool) fails at once with `refused by policy: you may not mail <name>` when the server refuses the publish because the sender's NATS user has no permission to publish to that recipient's mail subject. Nothing was stored, and retrying cannot help. Mash's default permission set lets an endpoint mail every endpoint of its owner, so this only happens to a sender issued a set that omits the recipient, for example one generated from a policy file or a hand-edited allow list of mail subjects. The fix is on the server side: issue the sender a permission set that includes the recipient's mail subject (`agents.mail.*.<owner>.<recipient>`).
+
+Mash learns of the refusal from the server's asynchronous permission-violation error, which names the subject, and matches it to the send in flight by subject. Without it a denied publish gets no reply and would only report a timeout after the full call timeout. If a server version words that error differently, mash cannot match it and the send fails as a timeout, as before.
+
 ## Fixed protocol constants
 
 These timings are not configurable: peers and the server must agree on them, so one operator's value would break another's session or weaken a check.
@@ -290,6 +296,7 @@ These timings are not configurable: peers and the server must agree on them, so 
 | `x509: certificate signed by unknown authority` (or another `x509:` error) on connect | The server's certificate is not trusted. Set `tls_ca` (`MASH_TLS_CA`) to the PEM file of the CA that signed it. The files are read at connect time. |
 | `remote error: tls: bad certificate` (or `certificate required`) on connect | The server requires a client certificate, or refused the one given. Set both `tls_cert` and `tls_key` (`MASH_TLS_CERT`, `MASH_TLS_KEY`) to a certificate the server's CA signed. |
 | `status` says `tls: WARN` | The url is plain `nats://` to a non-loopback host. Use `tls://` with the server's certificate. |
+| `refused by policy: you may not mail X` on send | The sender's NATS permissions do not include X's mail subject (a policy-file or hand-edited permission set). See "Refused sends". |
 | `do not match endpoint` | The credentials file belongs to a different endpoint than `MASH_NAME`. |
 | Peers look offline, or mail arrives labelled `[stale]` | Clock skew. Keep every machine's clock in sync (NTP, including laptops, containers and VMs after suspend): more than 30 s of skew (`sap.LiveSkew`) makes live requests and heartbeats fail and stored mail `[stale]`. `status` prints a `clock:` line and warns past 10 s. |
 | Clients take 30-60 s to reconnect after a network blip | The server rate-limits new connections per source address. Clients retry with jitter; raise the limit for trusted sources if this matters. |
