@@ -12,8 +12,8 @@ An operator who retires an endpoint wants its mail before `deprovision` deletes 
 ([ADR 0015](0015-deprovision-fences-the-name-with-a-lease-tombstone.md)). The tombstone fences the name, not inbound
 mail; revoking the endpoint's credentials stops what it sends, not what others send to it; and deletion is denied on the
 stream ([ADR 0010](0010-inbox-limits-and-append-only-history.md)), so a stream cannot be drained to a known end. Mail
-that lands between an archiver's last read and the deprovision is deleted unarchived (issue 130, from Rangehand's agent
-retirement). Two things are needed without a gap: stop inbound delivery to one endpoint from every sender, and read whether
+that lands between an archiver's last read and the deprovision is deleted unarchived (issue 130, from an agent-management tool's
+retirement step). Two things are needed without a gap: stop inbound delivery to one endpoint from every sender, and read whether
 it has stopped, with the sequence number it stopped at.
 
 ## Decision Drivers
@@ -101,5 +101,5 @@ not arrivals.
 
 ## More Information
 
-* Issue 130; Rangehand's retirement design record names it as its dependency.
+* Issue 130, whose author's retirement design depends on it.
 * Not yet true in code: all of it. It lands in the change that follows this record.
