@@ -157,6 +157,8 @@ The `who` tool takes the same filters as optional parameters: `match`, `name`, `
 
 The policy file that will restrict who may mail whom (compiled by `mashctl`, not shipped yet) is described in [policy-file.md](policy-file.md). Its `mashctl policy check|test|explain|show` verbs are listed under "Using it" there.
 
+Adding an endpoint to the policy and minting its user (`mashctl add`, `mashctl reissue`) is described in [mashctl.md](mashctl.md).
+
 ## Removing an endpoint
 
 ```sh

@@ -58,10 +58,16 @@ func Usage(prog string) string {
 	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
 	line("deprovision <name> [--user U]", "remove the record and inbox; with --user, only if the record's user is still U")
 	line("list", "")
-	if prog == "mashctl" { // offline verbs: `mash admin` does not carry them
+	if prog == "mashctl" { // verbs `mash admin` does not carry
+		mintLines(line)
 		policyLines(line)
 	}
 	return b.String()
+}
+
+func mintLines(line func(left, right string)) {
+	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
+	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (same user key, offline)")
 }
 
 func policyLines(line func(left, right string)) {
@@ -69,6 +75,45 @@ func policyLines(line func(left, right string)) {
 	line("policy test [--policy FILE]", "run the file's tests")
 	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
 	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
+}
+
+// OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
+// command's deadline (admin_timeout, else 30 seconds) and a func that releases both. prog is the command prefix of
+// error text. The caller must call the func when done.
+func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, func(), error) {
+	pfx, _, _ := strings.Cut(prog, " ")
+	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
+		cfg.Limits = store.DefaultLimits()
+	}
+	if cfg.Owner == "" {
+		return nil, nil, nil, errors.New(pfx + ": no owner (config.json \"owner\" or MASH_OWNER)")
+	}
+	if cfg.URL == "" || cfg.AdminCreds == "" {
+		return nil, nil, nil, errors.New(pfx + ": admin commands need MASH_URL and MASH_ADMIN_CREDS")
+	}
+	if err := config.CheckCredsMode(cfg.AdminCreds); err != nil {
+		return nil, nil, nil, err
+	}
+	if raw, err := os.ReadFile(cfg.AdminCreds); err != nil {
+		return nil, nil, nil, fmt.Errorf(pfx+": admin credentials: %w", err)
+	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
+		return nil, nil, nil, err
+	}
+	nc, err := nats.Connect(cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", cfg.URL, natsauth.TLSHint(err))
+	}
+	a, err := madmin.New(nc, cfg.Owner)
+	if err != nil {
+		nc.Close()
+		return nil, nil, nil, err
+	}
+	if err := a.SetLimits(cfg.Limits); err != nil {
+		nc.Close()
+		return nil, nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), adminDeadline(cfg))
+	return a, ctx, func() { cancel(); nc.Close() }, nil
 }
 
 // Run executes one admin verb. prog is the command prefix used in usage and error text: "mashctl" or "mash admin".
@@ -108,31 +153,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			config.FormatSize(l.LeaseMaxBytes), l.InboxMaxConsumers)
 		return 0
 	}
-	if cfg.URL == "" || cfg.AdminCreds == "" {
-		return fail(errors.New(pfx + ": admin commands need MASH_URL and MASH_ADMIN_CREDS"))
-	}
-	if err := config.CheckCredsMode(cfg.AdminCreds); err != nil {
-		return fail(err)
-	}
-	if raw, err := os.ReadFile(cfg.AdminCreds); err != nil {
-		return fail(fmt.Errorf(pfx+": admin credentials: %w", err))
-	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
-		return fail(err)
-	}
-	nc, err := nats.Connect(cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
-	if err != nil {
-		return fail(fmt.Errorf(pfx+": connect %s: %w", cfg.URL, natsauth.TLSHint(err)))
-	}
-	defer nc.Close()
-	a, err := madmin.New(nc, cfg.Owner)
+	a, ctx, closeAdmin, err := OpenAdmin(prog, cfg)
 	if err != nil {
 		return fail(err)
 	}
-	if err := a.SetLimits(cfg.Limits); err != nil {
-		return fail(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), adminDeadline(cfg))
-	defer cancel()
+	defer closeAdmin()
 
 	opt := func(name string) string {
 		for i := 2; i+1 < len(args); i++ {
