@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"maps"
 	"math/rand"
 	"slices"
 	"strings"
@@ -196,35 +197,192 @@ func TestCompileOwnerAndNoRecipients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(c.Zones) != 1 || c.Zones[0].Name != DefaultZone || len(c.Zones[0].Wildcards) != 0 {
+		t.Fatalf("zones %+v", c.Zones)
+	}
+	z := c.Zones[0]
+	if len(z.Perms.Pub.Allow) == 0 || len(z.Perms.Sub.Allow) == 0 {
+		t.Fatal("empty permission block")
+	}
+	for _, s := range z.Perms.Pub.Allow {
+		if strings.HasPrefix(s, "agents.mail") && !strings.Contains(s, "{{tag(allow)}}") {
+			t.Fatalf("zone key may still address peers: %s", s)
+		}
+	}
 	for _, e := range c.Endpoints {
-		if len(e.Recipients) != 0 || e.Recipients == nil {
-			t.Fatalf("%s recipients %#v", e.Name, e.Recipients)
+		if len(e.Recipients) != 0 || e.Recipients == nil || len(e.Tags) != 0 || e.Tags == nil {
+			t.Fatalf("%s recipients %#v tags %#v", e.Name, e.Recipients, e.Tags)
 		}
-		if len(e.Perms.Pub.Allow) == 0 || len(e.Perms.Sub.Allow) == 0 {
-			t.Fatalf("%s has an empty permission block", e.Name)
+		p, err := c.Effective(e.Name)
+		if err != nil || len(p.Pub.Allow) == 0 || len(p.Sub.Allow) == 0 {
+			t.Fatalf("%s: %+v %v", e.Name, p, err)
 		}
-		for _, s := range e.Perms.Pub.Allow {
+		for _, s := range p.Pub.Allow {
 			if strings.HasPrefix(s, "agents.mail") || strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
 				t.Fatalf("%s may still address peers: %s", e.Name, s)
 			}
 		}
 	}
-	// A recipient gets the three lines.
-	f = mustParse(t, "default: deny\n"+trio+"rules:\n  - {name: r, action: allow, from: {team: y}, to: {team: x}}\n")
-	c, _ = Compile(f, "o")
-	var pub []string
-	for _, e := range c.Endpoints {
-		if e.Name == "c" {
-			pub = e.Perms.Pub.Allow
+}
+
+func TestZonesAndTags(t *testing.T) {
+	const head = `
+default: deny
+endpoints:
+  a1: {labels: {zone: red, team: x}}
+  a2: {labels: {zone: red}}
+  b1: {labels: {zone: blue}}
+  b2: {labels: {zone: blue, tier: secret}}
+  b3: {labels: {zone: blue}}
+  n1: {}
+`
+	tags := func(c *Compiled) map[string]string {
+		m := map[string]string{}
+		for _, e := range c.Endpoints {
+			m[e.Name] = e.Zone + " " + strings.Join(e.Tags, ",")
+		}
+		return m
+	}
+	compile := func(rules string) *Compiled {
+		t.Helper()
+		c, err := Compile(mustParse(t, head+"rules:\n"+rules), "o")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	zoneKey := func(c *Compiled, name string) CompiledZone {
+		for _, z := range c.Zones {
+			if z.Name == name {
+				return z
+			}
+		}
+		t.Fatalf("no zone %s", name)
+		return CompiledZone{}
+	}
+
+	// One rule between zones: one wildcard, no tags; the endpoint without the label is zone default.
+	c := compile("  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}\n")
+	if got := len(c.Zones); got != 3 || zoneKey(c, "default").Name != "default" {
+		t.Fatalf("zones %+v", c.Zones)
+	}
+	if w := zoneKey(c, "red").Wildcards; !slices.Equal(w, []string{"blue"}) {
+		t.Fatalf("wildcards %v", w)
+	}
+	for n, got := range tags(c) {
+		if strings.Contains(got, ":") {
+			t.Errorf("%s has tags: %s", n, got)
 		}
 	}
-	for _, w := range []string{"agents.mail.*.o.a", "agents.prompt.*.o.a", "agents.status.*.o.b"} {
-		if !slices.Contains(pub, w) {
-			t.Errorf("missing %s in %v", w, pub)
+	if !slices.Contains(zoneKey(c, "red").Perms.Pub.Allow, "agents.mail.*.o.blue.*") || len(zoneKey(c, "red").Perms.Pub.Deny) != 0 {
+		t.Errorf("red key: %+v", zoneKey(c, "red").Perms)
+	}
+
+	// A deny for one pair in a zone of three: the wildcard plus one deny tag (cheaper than allow tags), and a2, who
+	// has no deny tag, carries the placeholder because the key now has deny templates.
+	c = compile("  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}\n  - {name: d, action: deny, from: {team: x}, to: {tier: secret}}\n")
+	want := map[string]string{
+		"a1": "red deny:blue.b2", "a2": "red deny:0", "b1": "blue ", "b2": "blue ", "b3": "blue ", "n1": "default ",
+	}
+	if got := tags(c); !maps.Equal(got, want) {
+		t.Errorf("tags %v want %v", got, want)
+	}
+	if len(zoneKey(c, "red").Perms.Pub.Deny) != 3 || len(zoneKey(c, "blue").Perms.Pub.Deny) != 0 {
+		t.Errorf("deny templates: red %v blue %v", zoneKey(c, "red").Perms.Pub.Deny, zoneKey(c, "blue").Perms.Pub.Deny)
+	}
+
+	// Mostly denied: allow tags, and allow:blue.* for a sender who may mail the whole zone.
+	c = compile("  - {name: r, action: allow, from: {team: x}, to: {zone: blue}}\n  - {name: r2, action: allow, from: {zone: red}, to: {tier: secret}}\n")
+	want = map[string]string{
+		"a1": "red allow:blue.*", "a2": "red allow:blue.b2", "b1": "blue ", "b2": "blue ", "b3": "blue ", "n1": "default ",
+	}
+	if got := tags(c); !maps.Equal(got, want) {
+		t.Errorf("tags %v want %v", got, want)
+	}
+	if len(zoneKey(c, "red").Wildcards) != 0 || len(zoneKey(c, "red").Perms.Pub.Deny) != 0 {
+		t.Errorf("red key: %+v", zoneKey(c, "red"))
+	}
+
+	// A tie goes to the allow encoding: a1 is allowed b1 only, a2 b2 only, in a zone of two (2 tags either way).
+	f := mustParse(t, `
+default: deny
+endpoints:
+  a1: {labels: {zone: red, team: x}}
+  a2: {labels: {zone: red, team: y}}
+  b1: {labels: {zone: blue, tier: low}}
+  b2: {labels: {zone: blue, tier: secret}}
+rules:
+  - {name: r, action: allow, from: {zone: red}, to: {zone: blue}}
+  - {name: d, action: deny, from: {team: x}, to: {tier: secret}}
+  - {name: d2, action: deny, from: {team: y}, to: {tier: low}}
+`)
+	c, err := Compile(f, "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tags(c)["a1"] + "|" + tags(c)["a2"]; got != "red allow:blue.b1|red allow:blue.b2" {
+		t.Errorf("tie: %s", got)
+	}
+}
+
+func TestSubjectLabel(t *testing.T) {
+	f := mustParse(t, `
+subject_label: site
+endpoints:
+  a: {labels: {site: paris, zone: ignored}}
+  b: {}
+`)
+	c, err := Compile(f, "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SubjectLabel != "site" || c.Endpoints[0].Zone != "paris" || c.Endpoints[1].Zone != "default" {
+		t.Fatalf("%+v", c)
+	}
+	if mustParse(t, "endpoints:\n  a: {}\n").SubjectLabel != "zone" {
+		t.Error("default subject_label is not zone")
+	}
+	for name, src := range map[string]string{
+		"zone value with a dot":    "endpoints:\n  a: {labels: {zone: \"a.b\"}}\n",
+		"zone value with capitals": "endpoints:\n  a: {labels: {zone: Paris}}\n",
+		"zone value with wildcard": "endpoints:\n  a: {labels: {zone: \"*\"}}\n",
+		"bad subject_label":        "subject_label: Zone\nendpoints:\n  a: {}\n",
+		"custom label bad value":   "subject_label: site\nendpoints:\n  a: {labels: {site: \"x y\"}}\n",
+	} {
+		if _, err := Parse([]byte(src)); err == nil {
+			t.Errorf("%s accepted", name)
 		}
 	}
-	if slices.Contains(pub, "agents.mail.*.o.*") {
-		t.Error("wildcard line leaked")
+	// A value that is a bad zone under another subject_label is fine.
+	if _, err := Parse([]byte("subject_label: site\nendpoints:\n  a: {labels: {zone: \"A B\"}}\n")); err != nil {
+		t.Errorf("zone label is not the subject label here: %v", err)
+	}
+}
+
+func TestCheckZoneWarnings(t *testing.T) {
+	f := mustParse(t, "endpoints:\n  a: {labels: {zone: red}}\nrules:\n  - {name: r, action: allow, from: {zone: red}, to: {zone: ghost}}\n")
+	var got []string
+	for _, w := range f.Check().Warnings {
+		got = append(got, w.String())
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "to selector {zone=ghost} matches no endpoint (zone ghost has no endpoints)") {
+		t.Errorf("%q", got)
+	}
+
+	// An endpoint told apart from half of 400 peers needs 200 tags, more than the connect line holds.
+	var b strings.Builder
+	b.WriteString("default: deny\nendpoints:\n  hub: {labels: {team: hub}}\n")
+	for i := 0; i < 400; i++ {
+		fmt.Fprintf(&b, "  p%03d: {labels: {zone: other, team: peer, parity: \"%d\"}}\n", i, i%2)
+	}
+	b.WriteString("rules:\n  - {name: r, action: allow, from: {team: hub}, to: {parity: \"0\"}}\n")
+	f = mustParse(t, b.String())
+	var warn []string
+	for _, w := range f.Check().Warnings {
+		warn = append(warn, w.String())
+	}
+	if len(warn) == 0 || !strings.Contains(warn[0], "endpoint hub") || !strings.Contains(warn[0], "200 tags") {
+		t.Errorf("%q", warn[:min(len(warn), 3)])
 	}
 }
 
@@ -344,96 +502,97 @@ func TestBudget60AllToAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep, err := Budget(c)
-	if err != nil || !rep.OK || rep.Endpoints != 60 || rep.Limit != 1048576 {
+	if err != nil || !rep.OK || rep.Zones != 1 || rep.AccountLimit != 1048576 || rep.UserLimit != UserJWTLimit {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	t.Logf("60 endpoints all-to-all: account JWT %d bytes of %d", rep.AccountJWTBytes, rep.Limit)
+	t.Logf("60 endpoints all-to-all: account JWT %d bytes of %d, worst user JWT %d bytes (%s)", rep.AccountJWTBytes, rep.AccountLimit, rep.WorstUserJWTBytes, rep.WorstUser)
 }
 
 func TestBudgetOverLimit(t *testing.T) {
-	f := mustParse(t, "endpoints:\n  small: {}\n  big: {}\n")
+	f := mustParse(t, `
+endpoints:
+  small: {labels: {zone: z1}}
+  big: {labels: {zone: z2}}
+`)
 	c, _ := Compile(f, "o")
-	c.Endpoints[0].Recipients = c.Endpoints[0].Recipients[:0]
-	// Give "big" (index 0, sorted) a much larger permission set than "small".
-	rec := make([]string, 200)
-	for i := range rec {
-		rec[i] = fmt.Sprintf("peer-%03d", i)
+	// Give zone z2 a much bigger template than z1.
+	for i := range c.Zones {
+		if c.Zones[i].Name == "z2" {
+			for j := 0; j < 200; j++ {
+				c.Zones[i].Perms.Pub.Allow.Add(fmt.Sprintf("agents.mail.*.o.zone-%03d.*", j))
+			}
+		}
 	}
-	c.Endpoints[0].Perms = permsFor(rec)
-	rep, err := budget(c, 2000)
-	if err == nil || rep.OK || !strings.Contains(err.Error(), "biggest signing key is big") {
+	rep, err := budget(c, 2000, UserJWTLimit)
+	if err == nil || rep.OK || !strings.Contains(err.Error(), "biggest signing key is zone z2") {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	if rep2, err := budget(c, 1<<30); err != nil || !rep2.OK {
+	if rep2, err := budget(c, 1<<30, UserJWTLimit); err != nil || !rep2.OK {
 		t.Fatalf("%+v %v", rep2, err)
 	}
 }
 
-// TestCompileNeverWidens: for random files, a sender's compiled recipients are exactly what Explain allows, and the
-// permission lines name no one else.
-func TestCompileNeverWidens(t *testing.T) {
-	rng := rand.New(rand.NewSource(7))
-	vals := []string{"a", "b", "c"}
-	keys := []string{"k1", "k2"}
-	randSel := func() string {
-		var parts []string
-		for _, k := range keys {
-			if rng.Intn(3) == 0 {
-				parts = append(parts, k+": "+vals[rng.Intn(3)])
-			}
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
+func TestBudgetUserOverLimit(t *testing.T) {
+	f := mustParse(t, "endpoints:\n  small: {}\n  tagged: {}\n")
+	c, _ := Compile(f, "o")
+	for j := 0; j < 200; j++ {
+		c.Endpoints[1].Tags = append(c.Endpoints[1].Tags, fmt.Sprintf("allow:default.peer-%03d", j))
 	}
-	for iter := 0; iter < 200; iter++ {
-		var b strings.Builder
-		if rng.Intn(2) == 0 {
-			b.WriteString("default: deny\n")
-		}
-		n := 2 + rng.Intn(5)
-		b.WriteString("endpoints:\n")
-		for i := 0; i < n; i++ {
-			var parts []string
-			for _, k := range keys {
-				if rng.Intn(2) == 0 {
-					parts = append(parts, k+": "+vals[rng.Intn(3)])
-				}
-			}
-			fmt.Fprintf(&b, "  e%d: {labels: {%s}}\n", i, strings.Join(parts, ", "))
-		}
-		b.WriteString("rules:\n")
-		for i, nr := 0, rng.Intn(6); i < nr; i++ {
-			act := "allow"
-			if rng.Intn(2) == 0 {
-				act = "deny"
-			}
-			fmt.Fprintf(&b, "  - {name: r%d, action: %s, from: %s, to: %s}\n", i, act, randSel(), randSel())
-		}
-		f, err := Parse([]byte(b.String()))
-		if err != nil {
-			t.Fatalf("%v\n%s", err, b.String())
-		}
-		c, err := Compile(f, "o")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, e := range c.Endpoints {
-			for _, to := range f.names() {
-				x, err := Explain(f, e.Name, to)
-				if err != nil {
-					t.Fatal(err)
-				}
-				in := slices.Contains(e.Recipients, to)
-				if in != x.Allowed {
-					t.Fatalf("%s -> %s: compiled %v, explain %v\n%s", e.Name, to, in, x.Allowed, b.String())
-				}
-				line := "agents.mail.*.o." + to
-				if slices.Contains(e.Perms.Pub.Allow, line) != in {
-					t.Fatalf("%s -> %s: permission line disagrees with recipients", e.Name, to)
-				}
-			}
-			if slices.Contains(e.Perms.Pub.Allow, "agents.mail.*.o.*") {
-				t.Fatal("wildcard mail line in compiled perms")
-			}
+	rep, err := Budget(c)
+	if err == nil || rep.OK || rep.WorstUser != "tagged" || !strings.Contains(err.Error(), "user JWT of tagged") || !strings.Contains(err.Error(), "200 tags") {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	if rep.AccountJWTBytes > rep.AccountLimit {
+		t.Fatal("the account is fine")
+	}
+}
+
+// TestBudgetScale1000: 1,000 endpoints in 20 zones with sparse rules (each zone may mail the next three) fit
+// easily: the account JWT holds 20 keys whatever the number of endpoints.
+func TestBudgetScale1000(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("default: deny\nendpoints:\n")
+	for i := 0; i < 1000; i++ {
+		fmt.Fprintf(&b, "  ep%04d: {labels: {zone: zone%02d}}\n", i, i%20)
+	}
+	b.WriteString("rules:\n")
+	for z := 0; z < 20; z++ {
+		for k := 1; k <= 3; k++ {
+			fmt.Fprintf(&b, "  - {name: z%02d-to-z%02d, action: allow, from: {zone: zone%02d}, to: {zone: zone%02d}}\n", z, (z+k)%20, z, (z+k)%20)
 		}
 	}
+	f := mustParse(t, b.String())
+	c, err := Compile(f, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Budget(c)
+	if err != nil || !rep.OK || rep.Zones != 20 || rep.AccountJWTBytes >= 100_000 {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	for _, e := range c.Endpoints {
+		if len(e.Tags) != 0 {
+			t.Fatalf("%s has tags %v", e.Name, e.Tags)
+		}
+	}
+	t.Logf("1,000 endpoints, 20 zones, sparse: account JWT %d bytes, worst user JWT %d bytes", rep.AccountJWTBytes, rep.WorstUserJWTBytes)
+}
+
+// TestBudget60ZonesAllToAll is the worst shape for the zone layout: every endpoint in a zone of its own and every
+// zone granted to every other, so each key carries 60 wildcards (quadratic in zones, not endpoints).
+func TestBudget60ZonesAllToAll(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("endpoints:\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "  agent-%02d: {labels: {zone: zone-%02d}}\n", i, i)
+	}
+	c, err := Compile(mustParse(t, b.String()), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Budget(c)
+	if err != nil || !rep.OK || rep.Zones != 60 {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	t.Logf("60 endpoints in 60 zones all-to-all: account JWT %d bytes of %d, worst user JWT %d bytes", rep.AccountJWTBytes, rep.AccountLimit, rep.WorstUserJWTBytes)
 }

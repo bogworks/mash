@@ -1,101 +1,62 @@
 {
-  "coder": {
-    "pub": [
-      "$JS.ACK.inbox-coder.deliver.\u003e",
-      "$JS.API.CONSUMER.INFO.inbox-coder.deliver",
-      "$JS.API.CONSUMER.MSG.NEXT.inbox-coder.deliver",
-      "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
-      "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.coder",
-      "$JS.API.DIRECT.GET.inbox-coder",
-      "$JS.API.DIRECT.GET.inbox-coder.\u003e",
-      "$JS.API.INFO",
-      "$JS.API.STREAM.INFO.KV_mash-directory",
-      "$JS.API.STREAM.INFO.KV_mash-leases",
-      "$JS.API.STREAM.INFO.inbox-coder",
-      "$KV.mash-leases.coder",
-      "$SRV.\u003e",
-      "_INBOX.\u003e",
-      "agents.hb.cc.acme.coder",
-      "agents.mail.*.acme.coder",
-      "agents.mail.*.acme.reviewer",
-      "agents.prompt.*.acme.coder",
-      "agents.prompt.*.acme.reviewer",
-      "agents.status.*.acme.coder",
-      "agents.status.*.acme.reviewer"
-    ],
-    "sub": [
-      "$SRV.\u003e",
-      "_INBOX.coder.\u003e",
-      "agents.hb.*.acme.*",
-      "agents.prompt.cc.acme.coder",
-      "agents.status.cc.acme.coder"
-    ]
+  "zones": {
+    "default": {
+      "wildcards": [
+        "default"
+      ],
+      "endpoints": [
+        "coder",
+        "deploy-bot",
+        "reviewer"
+      ],
+      "template": {
+        "pub": [
+          "$JS.ACK.inbox-{{name()}}.deliver.\u003e",
+          "$JS.API.CONSUMER.INFO.inbox-{{name()}}.deliver",
+          "$JS.API.CONSUMER.MSG.NEXT.inbox-{{name()}}.deliver",
+          "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+          "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.{{name()}}",
+          "$JS.API.DIRECT.GET.inbox-{{name()}}",
+          "$JS.API.DIRECT.GET.inbox-{{name()}}.\u003e",
+          "$JS.API.INFO",
+          "$JS.API.STREAM.INFO.KV_mash-directory",
+          "$JS.API.STREAM.INFO.KV_mash-leases",
+          "$JS.API.STREAM.INFO.inbox-{{name()}}",
+          "$KV.mash-leases.{{name()}}",
+          "$SRV.\u003e",
+          "_INBOX.\u003e",
+          "agents.hb.cc.acme.{{name()}}",
+          "agents.mail.*.acme.default.*",
+          "agents.mail.*.acme.{{tag(allow)}}",
+          "agents.prompt.*.acme.default.*",
+          "agents.prompt.*.acme.{{tag(allow)}}",
+          "agents.status.*.acme.default.*",
+          "agents.status.*.acme.{{tag(allow)}}"
+        ],
+        "pub_deny": [
+          "agents.mail.*.acme.{{tag(deny)}}",
+          "agents.prompt.*.acme.{{tag(deny)}}",
+          "agents.status.*.acme.{{tag(deny)}}"
+        ],
+        "sub": [
+          "$SRV.\u003e",
+          "_INBOX.{{name()}}.\u003e",
+          "agents.hb.*.acme.*",
+          "agents.prompt.cc.acme.default.{{name()}}",
+          "agents.status.cc.acme.default.{{name()}}"
+        ]
+      }
+    }
   },
-  "deploy-bot": {
-    "pub": [
-      "$JS.ACK.inbox-deploy-bot.deliver.\u003e",
-      "$JS.API.CONSUMER.INFO.inbox-deploy-bot.deliver",
-      "$JS.API.CONSUMER.MSG.NEXT.inbox-deploy-bot.deliver",
-      "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
-      "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.deploy-bot",
-      "$JS.API.DIRECT.GET.inbox-deploy-bot",
-      "$JS.API.DIRECT.GET.inbox-deploy-bot.\u003e",
-      "$JS.API.INFO",
-      "$JS.API.STREAM.INFO.KV_mash-directory",
-      "$JS.API.STREAM.INFO.KV_mash-leases",
-      "$JS.API.STREAM.INFO.inbox-deploy-bot",
-      "$KV.mash-leases.deploy-bot",
-      "$SRV.\u003e",
-      "_INBOX.\u003e",
-      "agents.hb.cc.acme.deploy-bot",
-      "agents.mail.*.acme.coder",
-      "agents.mail.*.acme.deploy-bot",
-      "agents.mail.*.acme.reviewer",
-      "agents.prompt.*.acme.coder",
-      "agents.prompt.*.acme.deploy-bot",
-      "agents.prompt.*.acme.reviewer",
-      "agents.status.*.acme.coder",
-      "agents.status.*.acme.deploy-bot",
-      "agents.status.*.acme.reviewer"
+  "tags": {
+    "coder": [
+      "deny:default.deploy-bot"
     ],
-    "sub": [
-      "$SRV.\u003e",
-      "_INBOX.deploy-bot.\u003e",
-      "agents.hb.*.acme.*",
-      "agents.prompt.cc.acme.deploy-bot",
-      "agents.status.cc.acme.deploy-bot"
-    ]
-  },
-  "reviewer": {
-    "pub": [
-      "$JS.ACK.inbox-reviewer.deliver.\u003e",
-      "$JS.API.CONSUMER.INFO.inbox-reviewer.deliver",
-      "$JS.API.CONSUMER.MSG.NEXT.inbox-reviewer.deliver",
-      "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
-      "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.reviewer",
-      "$JS.API.DIRECT.GET.inbox-reviewer",
-      "$JS.API.DIRECT.GET.inbox-reviewer.\u003e",
-      "$JS.API.INFO",
-      "$JS.API.STREAM.INFO.KV_mash-directory",
-      "$JS.API.STREAM.INFO.KV_mash-leases",
-      "$JS.API.STREAM.INFO.inbox-reviewer",
-      "$KV.mash-leases.reviewer",
-      "$SRV.\u003e",
-      "_INBOX.\u003e",
-      "agents.hb.cc.acme.reviewer",
-      "agents.mail.*.acme.coder",
-      "agents.mail.*.acme.reviewer",
-      "agents.prompt.*.acme.coder",
-      "agents.prompt.*.acme.reviewer",
-      "agents.status.*.acme.coder",
-      "agents.status.*.acme.reviewer"
+    "deploy-bot": [
+      "deny:0"
     ],
-    "sub": [
-      "$SRV.\u003e",
-      "_INBOX.reviewer.\u003e",
-      "agents.hb.*.acme.*",
-      "agents.prompt.cc.acme.reviewer",
-      "agents.status.cc.acme.reviewer"
+    "reviewer": [
+      "deny:default.deploy-bot"
     ]
   }
 }

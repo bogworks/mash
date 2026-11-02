@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,8 +35,13 @@ type Report struct {
 // other than allow or deny, a missing from or to (write {} for everyone), or a selector with an invalid key or
 // value; a test naming an endpoint the file does not declare or expecting something other than allow or deny.
 //
+// Further errors for the zone: subject_label that is not a label key, and an endpoint whose subject label value is not
+// one subject token (config.ValidName).
+//
 // Warnings: a rule whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
-// the pair silently falls to the default); under default deny, an endpoint that can neither send nor receive.
+// the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); an endpoint whose user JWT
+// would need more than MaxTagsWarn tags (the connect line); under default deny, an endpoint that can neither send
+// nor receive.
 // Labels no rule uses are not reported. Warnings are only computed for a file without errors.
 func (f *File) Check() Report {
 	var r Report
@@ -45,6 +51,10 @@ func (f *File) Check() Report {
 
 	if f.Default != "" && f.Default != Allow && f.Default != Deny {
 		errf("default", "%q is not allow or deny", f.Default)
+	}
+
+	if sl := f.subjectLabel(); !store.ValidLabelKey(sl) {
+		errf("subject_label", "%q is not a label key: a letter, then up to 31 of a-z 0-9 _ . -", sl)
 	}
 
 	names := f.names()
@@ -61,6 +71,9 @@ func (f *File) Check() Report {
 			if labels[k] == "" {
 				errf(where, "label %s has an empty value", k)
 			}
+		}
+		if z, ok := labels[f.subjectLabel()]; ok && z != "" && !config.ValidName(z) {
+			errf(where, "%s=%q is the zone, which is one subject token: lower-case letters, digits and single hyphens, starting with a letter, 1-48 characters", f.subjectLabel(), z)
 		}
 	}
 
@@ -137,19 +150,31 @@ func (f *File) Check() Report {
 		}{{"from", rule.From}, {"to", rule.To}} {
 			matched := false
 			for _, n := range names {
-				if sel.s.matches(f.Endpoints[n].Labels) {
+				if sel.s.matches(f.effectiveLabels(n)) {
 					matched = true
 					break
 				}
 			}
 			if !matched {
-				r.Warnings = append(r.Warnings, Diagnostic{where, fmt.Sprintf("%s selector %s matches no endpoint", sel.name, sel.s)})
+				msg := fmt.Sprintf("%s selector %s matches no endpoint", sel.name, sel.s)
+				if z, ok := sel.s[f.subjectLabel()]; ok && !slices.ContainsFunc(names, func(n string) bool { return f.zoneOf(n) == z }) {
+					msg += fmt.Sprintf(" (zone %s has no endpoints)", z)
+				}
+				r.Warnings = append(r.Warnings, Diagnostic{where, msg})
 			}
 		}
 	}
+	p := f.plan()
+	for _, n := range names {
+		if len(p.tags[n]) > MaxTagsWarn {
+			r.Warnings = append(r.Warnings, Diagnostic{"endpoint " + n + lineSuffix(f.lines.endpoints[n]),
+				fmt.Sprintf("its user JWT needs %d tags; about %d fit the default connect line (see UserJWTLimit)", len(p.tags[n]), MaxTagsWarn)})
+		}
+	}
 	if !f.defaultAllow() {
-		for _, n := range names {
-			if f.touches(n, names) {
+		m := f.matrix(names)
+		for i, n := range names {
+			if m.touches(i, len(names)) {
 				continue
 			}
 			r.Warnings = append(r.Warnings, Diagnostic{"endpoint " + n + lineSuffix(f.lines.endpoints[n]),
@@ -160,10 +185,10 @@ func (f *File) Check() Report {
 	return r
 }
 
-// touches reports whether n sends to or receives from anyone (itself included) under the rules.
-func (f *File) touches(n string, names []string) bool {
-	for _, o := range names {
-		if f.decide(n, o).allowed || f.decide(o, n).allowed {
+// touches reports whether endpoint i of n sends to or receives from anyone (itself included) under the rules.
+func (m matrix) touches(i, n int) bool {
+	for j := 0; j < n; j++ {
+		if m.allowed(i, j) || m.allowed(j, i) {
 			return true
 		}
 	}

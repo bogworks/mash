@@ -16,6 +16,12 @@ import (
 	"strings"
 )
 
+// DefaultSubjectLabel is the label whose value is the zone; DefaultZone is the zone of an endpoint without it.
+const (
+	DefaultSubjectLabel = "zone"
+	DefaultZone         = "default"
+)
+
 // Actions and defaults.
 const (
 	Allow = "allow"
@@ -26,10 +32,13 @@ const (
 type File struct {
 	// Default is "allow" or "deny": what applies to a sender-recipient pair no rule matches. Parse sets "allow" when
 	// the file does not say.
-	Default   string              `yaml:"default"`
-	Endpoints map[string]Endpoint `yaml:"endpoints"`
-	Rules     []Rule              `yaml:"rules"`
-	Tests     []Test              `yaml:"tests"`
+	Default string `yaml:"default"`
+	// SubjectLabel is the label whose value is carried in the mail subject: an endpoint's zone is its label of this
+	// name, or DefaultZone when it has none. Parse sets "zone" when the file does not say.
+	SubjectLabel string              `yaml:"subject_label"`
+	Endpoints    map[string]Endpoint `yaml:"endpoints"`
+	Rules        []Rule              `yaml:"rules"`
+	Tests        []Test              `yaml:"tests"`
 
 	lines fileLines
 }
@@ -94,6 +103,38 @@ func (s Selector) String() string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+// subjectLabel is the label that names an endpoint's zone.
+func (f *File) subjectLabel() string {
+	if f.SubjectLabel == "" {
+		return DefaultSubjectLabel
+	}
+	return f.SubjectLabel
+}
+
+// zoneOf is the zone of a declared endpoint: its subject label's value, or DefaultZone.
+func (f *File) zoneOf(name string) string {
+	if z, ok := f.Endpoints[name].Labels[f.subjectLabel()]; ok {
+		return z
+	}
+	return DefaultZone
+}
+
+// effectiveLabels is a copy of the endpoint's labels plus, when it lacks the subject label, that label set to
+// DefaultZone: the labels selectors are matched against. What the file stores is unchanged.
+func (f *File) effectiveLabels(name string) map[string]string {
+	src := f.Endpoints[name].Labels
+	out := make(map[string]string, len(src)+1)
+	for k, v := range src {
+		out[k] = v
+	}
+	if sl := f.subjectLabel(); !has(out, sl) {
+		out[sl] = DefaultZone
+	}
+	return out
+}
+
+func has(m map[string]string, k string) bool { _, ok := m[k]; return ok }
+
 func (f *File) defaultAllow() bool { return f.Default != Deny }
 
 func (f *File) defaultName() string {
@@ -122,7 +163,7 @@ type decision struct {
 // decide applies the rules to from -> to. Both must be declared. Any matching deny beats any matching allow; the
 // default applies only when no rule matched.
 func (f *File) decide(from, to string) decision {
-	fl, tl := f.Endpoints[from].Labels, f.Endpoints[to].Labels
+	fl, tl := f.effectiveLabels(from), f.effectiveLabels(to)
 	var d decision
 	for _, r := range f.Rules {
 		if !r.From.matches(fl) || !r.To.matches(tl) {
@@ -146,6 +187,72 @@ func (f *File) decide(from, to string) decision {
 	}
 	return d
 }
+
+// permits is decide(from, to).allowed, given both endpoints' effective labels, without building the explanation.
+func (f *File) permits(fl, tl map[string]string) bool {
+	allowed := false
+	for _, r := range f.Rules {
+		if !r.From.matches(fl) || !r.To.matches(tl) {
+			continue
+		}
+		if r.Action == Deny {
+			return false
+		}
+		allowed = true
+	}
+	if allowed {
+		return true
+	}
+	return f.defaultAllow()
+}
+
+// matrix is the decision for every ordered pair of the declared endpoints (in names order), computed once per class:
+// endpoints that every rule's from selector and every rule's to selector treat alike are one class, so a file of
+// thousands of endpoints and a handful of distinct label sets costs classes squared, not endpoints squared, calls
+// of permits.
+type matrix struct {
+	cls     []int
+	classOK [][]bool
+}
+
+func (f *File) matrix(names []string) matrix {
+	m := matrix{cls: make([]int, len(names))}
+	byKey := map[string]int{}
+	var reps []map[string]string
+	key := make([]byte, 0, 2*len(f.Rules))
+	for i, n := range names {
+		key = key[:0]
+		labels := f.effectiveLabels(n)
+		for _, r := range f.Rules {
+			key = append(key, b2c(r.From.matches(labels)), b2c(r.To.matches(labels)))
+		}
+		c, ok := byKey[string(key)]
+		if !ok {
+			c = len(reps)
+			byKey[string(key)] = c
+			reps = append(reps, labels)
+		}
+		m.cls[i] = c
+	}
+	m.classOK = make([][]bool, len(reps))
+	for i, from := range reps {
+		m.classOK[i] = make([]bool, len(reps))
+		for j, to := range reps {
+			m.classOK[i][j] = f.permits(from, to)
+		}
+	}
+	return m
+}
+
+func b2c(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// allowed reports whether names[i] may address names[j].
+func (m matrix) allowed(i, j int) bool { return m.classOK[m.cls[i]][m.cls[j]] }
 
 func verdict(allowed bool) string {
 	if allowed {
