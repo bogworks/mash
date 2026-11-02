@@ -310,3 +310,34 @@ func TestHookBatchDigestSaysListedMailStaysUnread(t *testing.T) {
 		t.Fatal("IsDigest disagrees with Batch")
 	}
 }
+
+// answers and relayed-from lines appear only when set, between the header line and the instance; nothing else changes.
+func TestAnswersAndRelayedFromLines(t *testing.T) {
+	base := Mail{Seq: 5, From: "b", Trust: sap.TrustVerified, At: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC), Body: []byte("hi"), Instance: "I1"}
+	plain := One(base)
+	if strings.Contains(plain, "answers") || strings.Contains(plain, "relayed") {
+		t.Fatalf("marks in %q", plain)
+	}
+	m := base
+	m.ReplyTo, m.Via = 3, "c #2"
+	got := One(m)
+	want := "--- #5 from b [verified] at 2026-11-02T12:00:00Z\nanswers #3\nrelayed from c #2\ninstance: I1\nkind: task\n> hi"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	only := base
+	only.Via = "c #2"
+	if g := One(only); !strings.Contains(g, "\nrelayed from c #2\ninstance: I1\n") || strings.Contains(g, "answers") {
+		t.Fatalf("via only: %q", g)
+	}
+	if l := Line(m); !strings.HasSuffix(l, "\tanswers #3\trelayed from c #2\tinstance I1") {
+		t.Fatalf("line %q", l)
+	}
+	if l := Line(base); strings.Contains(l, "answers") || strings.Contains(l, "relayed") {
+		t.Fatalf("line %q", l)
+	}
+	// a digest line carries them too; a body can never forge them (it is quoted)
+	if d := Batch("a", "o", []Mail{m, m}, 1, 1<<20); !strings.Contains(d, "\tanswers #3\trelayed from c #2\tinstance I1\n") {
+		t.Fatalf("digest %q", d)
+	}
+}

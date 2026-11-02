@@ -27,6 +27,11 @@ type Mail struct {
 	Urgent bool
 	// Kind is the sender's kind (blocker, question, task, result, fyi); the zero value reads as task.
 	Kind kind.Kind
+	// ReplyTo is the #seq the sender says this answers, only when its signature on it verified; 0 otherwise.
+	ReplyTo uint64
+	// Via is "<origin> #<seq>": the sender's signed declaration that this relays or quotes that message of its own
+	// inbox, only when it verified; empty otherwise. Neither mark changes the trust label.
+	Via string
 	// Redelivered: a hook began to show this message and was interrupted, so it may already have been seen.
 	Redelivered bool
 }
@@ -77,8 +82,14 @@ func quote(b []byte) string {
 // One renders a message in full; the body is quoted.
 func One(m Mail) string {
 	inst := ""
+	if m.ReplyTo != 0 {
+		inst += fmt.Sprintf("answers #%d\n", m.ReplyTo)
+	}
+	if m.Via != "" {
+		inst += "relayed from " + m.Via + "\n"
+	}
 	if m.Instance != "" {
-		inst = "instance: " + m.Instance + "\n" // never from the body: bodies are quoted
+		inst += "instance: " + m.Instance + "\n" // never from the body: bodies are quoted
 	}
 	if m.Urgent {
 		inst += "urgent: yes\n"
@@ -99,8 +110,14 @@ func redeliveredNote(seq uint64) string {
 // instField is the trailing tab field of the one-line forms.
 func instField(m Mail) string {
 	f := ""
+	if m.ReplyTo != 0 {
+		f += fmt.Sprintf("\tanswers #%d", m.ReplyTo)
+	}
+	if m.Via != "" {
+		f += "\trelayed from " + m.Via
+	}
 	if m.Instance != "" {
-		f = "\tinstance " + m.Instance
+		f += "\tinstance " + m.Instance
 	}
 	if m.Redelivered {
 		f += "\t" + redeliveredNote(m.Seq)

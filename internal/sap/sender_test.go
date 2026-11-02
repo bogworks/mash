@@ -220,3 +220,107 @@ func TestUrgentMarkRoundTrip(t *testing.T) {
 		t.Fatal("accepted an empty or junk mark")
 	}
 }
+
+func marksFixture(t *testing.T) (Identity, SenderHeader) {
+	t.Helper()
+	id := b13Identity(t)
+	h, err := id.Sign(b13Subject, []byte("x"), "n", time.Now(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id, h
+}
+
+func TestInReplyToRoundTripAndForgery(t *testing.T) {
+	id, h := marksFixture(t)
+	v, err := id.SignInReplyTo(h, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(v, "42.") {
+		t.Fatalf("value %q", v)
+	}
+	if seq, ok := VerifyInReplyTo(h, v); !ok || seq != 42 {
+		t.Fatalf("verify: %d %v", seq, ok)
+	}
+	sig := v[3:]
+	// moved to another message: another nonce, ts, subject
+	other, _ := id.Sign(b13Subject, []byte("x"), "n", time.Now(), "")
+	moved := []SenderHeader{other, func() SenderHeader { o := h; o.TS = "2020-01-01T00:00:00Z"; return o }(),
+		func() SenderHeader { o := h; o.Sub = "agents.mail.cc.x.y"; return o }()}
+	for i, m := range moved {
+		if _, ok := VerifyInReplyTo(m, v); ok {
+			t.Fatalf("mark moved to message %d accepted", i)
+		}
+	}
+	// signed by another key
+	ov, _ := freshIdentityForTest(t).SignInReplyTo(h, 42)
+	if _, ok := VerifyInReplyTo(h, ov); ok {
+		t.Fatal("another key's mark accepted")
+	}
+	// another seq under the same signature
+	for _, bad := range []string{"43." + sig, "", "nodot", ".sig", "42.", "x." + sig, "042." + sig, "+42." + sig, "0." + sig,
+		"-1." + sig, "42", "42." + sig[:len(sig)-2] + "AA", "42." + sig + "A", "99999999999999999999." + sig} {
+		if _, ok := VerifyInReplyTo(h, bad); ok {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	// the old bare decimal
+	if _, ok := VerifyInReplyTo(h, "42"); ok {
+		t.Fatal("bare decimal accepted")
+	}
+	if _, err := id.SignInReplyTo(h, 0); err == nil {
+		t.Fatal("signed seq 0")
+	}
+	// the mark is not an urgent or instance signature, nor the reverse
+	u, _ := id.SignUrgent(h)
+	if _, ok := VerifyInReplyTo(h, "42."+u); ok {
+		t.Fatal("urgent signature passed as in-reply-to")
+	}
+}
+
+func TestViaRoundTripAndForgery(t *testing.T) {
+	id, h := marksFixture(t)
+	v, err := id.SignVia(h, "origin-a", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(v, "origin-a#7.") {
+		t.Fatalf("value %q", v)
+	}
+	if o, seq, ok := VerifyVia(h, v); !ok || o != "origin-a" || seq != 7 {
+		t.Fatalf("verify: %q %d %v", o, seq, ok)
+	}
+	sig := v[len("origin-a#7."):]
+	other, _ := id.Sign(b13Subject, []byte("x"), "n", time.Now(), "")
+	for i, m := range []SenderHeader{other, func() SenderHeader { o := h; o.TS = "2020-01-01T00:00:00Z"; return o }(),
+		func() SenderHeader { o := h; o.Sub = "agents.mail.cc.x.y"; return o }()} {
+		if _, _, ok := VerifyVia(m, v); ok {
+			t.Fatalf("mark moved to message %d accepted", i)
+		}
+	}
+	ov, _ := freshIdentityForTest(t).SignVia(h, "origin-a", 7)
+	if _, _, ok := VerifyVia(h, ov); ok {
+		t.Fatal("another key's mark accepted")
+	}
+	for _, bad := range []string{"origin-a#8." + sig, "origin-b#7." + sig, "", "origin-a", "origin-a#7", "origin-a7." + sig,
+		"#7." + sig, "origin-a#." + sig, "origin-a#x." + sig, "origin-a#07." + sig, "origin-a#0." + sig, "Origin-A#7." + sig,
+		"origin a#7." + sig, "origin-a\n#7." + sig, "origin-a#7.", "origin-a#7." + sig[:len(sig)-2] + "AA", "a#b#7." + sig,
+		"origin_a#7." + sig} {
+		if _, _, ok := VerifyVia(h, bad); ok {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	// a via signature is not an in-reply-to signature over the same seq
+	if _, ok := VerifyInReplyTo(h, "7."+sig); ok {
+		t.Fatal("via signature passed as in-reply-to")
+	}
+	for _, o := range []string{"", "Bad", "a b", "a\nb", "-a", strings.Repeat("a", 49)} {
+		if _, err := id.SignVia(h, o, 7); err == nil {
+			t.Fatalf("signed origin %q", o)
+		}
+	}
+	if _, err := id.SignVia(h, "origin-a", 0); err == nil {
+		t.Fatal("signed seq 0")
+	}
+}

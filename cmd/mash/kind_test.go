@@ -119,3 +119,39 @@ func TestUnkindedMCPSendIsTask(t *testing.T) {
 		}
 	}
 }
+
+// The MCP send tool takes an optional integer `via` (documented in the schema), signs it with in_reply_to, and a
+// recipient sees "relayed from <origin> #N" and "answers #N" only because both verify. A via with no such message in the
+// sender's inbox, or a value that is not a positive integer, is a tool error and sends nothing.
+func TestSendViaFromTheMCPTool(t *testing.T) {
+	w := newWorld(t, "a", "b", "c")
+	if out, code := w.cli(t, "c", "send", "b", "the original"); code != 0 {
+		t.Fatalf("send: %d %s", code, out)
+	}
+	s := startServe(t, w.env["b"])
+	s.initialize(t)
+	var via map[string]any
+	for _, tl := range s.tools(t) {
+		if m := tl.(map[string]any); m["name"] == "send" {
+			via, _ = m["inputSchema"].(map[string]any)["properties"].(map[string]any)["via"].(map[string]any)
+		}
+	}
+	if via == nil || via["type"] != "integer" || !strings.Contains(via["description"].(string), "relayed from <sender> #N") {
+		t.Fatalf("send schema via: %v", via)
+	}
+	if r := s.call(t, 30, "send", `{"to":"a","text":"fwd","via":1,"in_reply_to":9}`); r["isError"] == true || resultText(r) != "sent #1 to a" {
+		t.Fatalf("send: %v", resultText(r))
+	}
+	out, _ := w.cli(t, "a", "read", "1")
+	if !strings.Contains(out, "[verified] at") || !strings.Contains(out, "\nanswers #9\nrelayed from c #1\n") || !strings.Contains(out, "> fwd") {
+		t.Fatalf("read #1:\n%s", out)
+	}
+	for i, args := range []string{`{"to":"a","text":"x","via":7}`, `{"to":"a","text":"x","via":-1}`, `{"to":"a","text":"x","via":"1"}`, `{"to":"a","text":"x","via":1.5}`} {
+		if r := s.call(t, 31+i, "send", args); r["isError"] != true {
+			t.Fatalf("%s: not an error: %v", args, resultText(r))
+		}
+	}
+	if out, _ := w.cli(t, "a", "read", "2"); strings.Contains(out, "> x") {
+		t.Fatalf("a refused send was delivered:\n%s", out)
+	}
+}

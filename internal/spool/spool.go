@@ -35,7 +35,9 @@ type Entry struct {
 	Instance string    `json:"instance,omitempty"`
 	Owner    string    `json:"owner,omitempty"` // the sender's owner
 	Urgent   bool      `json:"urgent,omitempty"`
-	Kind     string    `json:"kind,omitempty"` // blocker, question, task, result or fyi; empty (an older serve) reads as task
+	Kind     string    `json:"kind,omitempty"`     // blocker, question, task, result or fyi; empty (an older serve) reads as task
+	ReplyTo  uint64    `json:"reply_to,omitempty"` // the verified #seq the sender says this answers
+	Via      string    `json:"via,omitempty"`      // the verified relay declaration, "<origin> #<seq>"
 	At       time.Time `json:"at"`
 	Body     []byte    `json:"body"`
 	// Redelivered is set by Waiting, never persisted: a hook had begun to show this entry and did not finish
