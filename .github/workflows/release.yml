@@ -112,7 +112,9 @@ jobs:
     # failed attestation.
     # Attestation requires a public repository (or GitHub Enterprise Cloud); this repository is public.
     needs: [build, attest, sbom, attest-sbom, provenance]
-    if: ${{ github.event_name == 'push' }} # never on a dry run: it creates the release
+    # An explicit status function: a skipped guard (a dry run) would otherwise skip every job downstream of build. On a push
+    # the guard succeeds and every need must have succeeded.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' && needs.provenance.result == 'success' }} # never on a dry run: it creates the release
     timeout-minutes: 30
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -168,6 +170,7 @@ jobs:
           scripts/draft-guard --after-create "$GITHUB_REF_NAME"
   attest:
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -188,6 +191,7 @@ jobs:
     # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
     # exactly the bytes a consumer downloads. The tool version is pinned; the job reads and uploads, nothing else.
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -226,6 +230,7 @@ jobs:
           if-no-files-found: error
   attest-sbom:
     needs: sbom
+    if: ${{ !cancelled() && needs.sbom.result == 'success' }} # explicit: see build
     timeout-minutes: 15
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -280,6 +285,7 @@ jobs:
   hashes:
     # The subjects the SLSA generator attests: the four binaries only, as `sha256sum` prints them, base64 encoded.
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 10
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:
@@ -305,7 +311,7 @@ jobs:
     # the SHA pinning of every other `uses:` here, held in place by the generator-pin job, and the gate verifies the result
     # with slsa-verifier. A reusable-workflow caller job sets neither runs-on nor timeout-minutes.
     needs: [build, hashes, generator-pin]
-    if: ${{ github.event_name == 'push' || github.ref == 'refs/heads/main' }} # a dry run only on main
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.ref == 'refs/heads/main') && needs.build.result == 'success' && needs.hashes.result == 'success' && needs['generator-pin'].result == 'success' }} # a dry run only on main
     permissions:
       actions: read
       id-token: write
@@ -322,7 +328,7 @@ jobs:
     # published. Only a dispatch on main runs it; on a tag push the draft job takes its place. It reads and verifies, and
     # holds no id-token.
     needs: [build, attest, sbom, attest-sbom, provenance]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' && needs.provenance.result == 'success' }}
     timeout-minutes: 20
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
     permissions:

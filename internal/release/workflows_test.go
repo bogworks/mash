@@ -318,13 +318,21 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 
 // jobConditions are the only job-level conditions release.yml has: the event split between a tag push and the dry run
 // (workflow_dispatch). Every other job has none. None of them is a status function that could run a job after a failure,
-// except build's !cancelled(), which still demands the guard's success on a push.
+// except that every job downstream of build carries one that also demands its direct needs' success (see
+// TestRelease_everyJobBelowBuildHasAStatusFunction). On a push the guard succeeds, so these behave as the implicit success().
+// allFiveSucceeded is what draft and dry-run-verify demand of the five jobs they wait for.
+const allFiveSucceeded = "needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' && needs.provenance.result == 'success'"
+
 var jobConditions = map[string]string{
 	"guard":          "${{ github.event_name == 'push' }}",
-	"draft":          "${{ github.event_name == 'push' }}",
+	"draft":          "${{ !cancelled() && github.event_name == 'push' && " + allFiveSucceeded + " }}",
 	"build":          "${{ !cancelled() && (needs.guard.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.guard.result == 'skipped')) }}",
-	"provenance":     "${{ github.event_name == 'push' || github.ref == 'refs/heads/main' }}",
-	"dry-run-verify": "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
+	"attest":         "${{ !cancelled() && needs.build.result == 'success' }}",
+	"sbom":           "${{ !cancelled() && needs.build.result == 'success' }}",
+	"attest-sbom":    "${{ !cancelled() && needs.sbom.result == 'success' }}",
+	"hashes":         "${{ !cancelled() && needs.build.result == 'success' }}",
+	"provenance":     "${{ !cancelled() && (github.event_name == 'push' || github.ref == 'refs/heads/main') && needs.build.result == 'success' && needs.hashes.result == 'success' && needs['generator-pin'].result == 'success' }}",
+	"dry-run-verify": "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && " + allFiveSucceeded + " }}",
 }
 
 // ci.yml's check names are the job names (plus matrix values): a name that differs from the job id, a condition or a
@@ -1564,10 +1572,11 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 	w := load(t, "release.yml")
 	push := "${{ github.event_name == 'push' }}"
-	for _, id := range []string{"guard", "draft"} {
-		if w.Jobs[id].If != push {
-			t.Errorf("job %s if %q, want %q: it must never run on a dispatch", id, w.Jobs[id].If, push)
-		}
+	if w.Jobs["guard"].If != push {
+		t.Errorf("guard if %q, want %q: it must never run on a dispatch", w.Jobs["guard"].If, push)
+	}
+	if d := w.Jobs["draft"].If; !strings.Contains(d, "github.event_name == 'push'") || strings.Contains(d, "workflow_dispatch") || strings.Contains(d, "||") {
+		t.Errorf("draft if %q: it must require a push and never run on a dispatch", d)
 	}
 	// A tag push needs the guard's success; only a dispatch on main may build past a skipped guard.
 	b := w.Jobs["build"].If
@@ -1651,5 +1660,46 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 	}
 	if !strings.Contains(w.Jobs["provenance"].If, "github.ref == 'refs/heads/main'") {
 		t.Errorf("provenance may run from a branch only on main: %q", w.Jobs["provenance"].If)
+	}
+}
+
+// A skipped job anywhere in a job's needs chain fails its implicit success(), so a dry run (guard skipped) silently skipped
+// everything below build. Every job that needs build, directly or through any other job, must therefore carry an explicit
+// status function, and must check each direct need's result.
+func TestRelease_everyJobBelowBuildHasAStatusFunction(t *testing.T) {
+	w := load(t, "release.yml")
+	below := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for jn, j := range w.Jobs {
+			if below[jn] {
+				continue
+			}
+			for _, n := range jobNeeds(j.Needs) {
+				if n == "build" || below[n] {
+					below[jn], changed = true, true
+				}
+			}
+		}
+	}
+	for _, jn := range []string{"attest", "sbom", "attest-sbom", "hashes", "provenance", "dry-run-verify", "draft"} {
+		if !below[jn] {
+			t.Errorf("job %s is not below build: the chain walk is broken", jn)
+		}
+	}
+	for jn := range below {
+		j := w.Jobs[jn]
+		if !strings.Contains(j.If, "!cancelled()") && !strings.Contains(j.If, "always()") {
+			t.Errorf("job %s needs build (directly or through a chain) but its if %q has no !cancelled()/always(): a skipped guard would skip it", jn, j.If)
+		}
+		for _, n := range jobNeeds(j.Needs) {
+			ref := "needs." + n + ".result == 'success'"
+			if strings.Contains(n, "-") {
+				ref = "needs['" + n + "'].result == 'success'"
+			}
+			if !strings.Contains(j.If, ref) {
+				t.Errorf("job %s needs %s but its if does not require %s", jn, n, ref)
+			}
+		}
 	}
 }
