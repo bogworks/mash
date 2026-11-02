@@ -1,0 +1,444 @@
+// Command dirbench is a MEASUREMENT TOOL, not product code (bogworks/mash#43, "directory polling grows with the
+// square of the endpoint count"). It simulates N endpoints against a NATS cluster that is already running: each one
+// has its own connection, polls the directory the way internal/endpoint does (a filtered stream info for the keys,
+// then one direct get per key, 64 at a time, five second timeout), publishes a heartbeat on agents.hb.cc.<owner>.<name>
+// and counts what its agents.hb.*.<owner>.* subscription delivers. It does not sign or verify anything and does not
+// import the Endpoint. It creates a bucket of its OWN, named dirbench-<8 random hex>, with the product's directory
+// config (store.DirectoryConfig: history, storage; replicas settable by flag), writes N valid records, runs a warm-up
+// and then a measured window, and prints key=value lines: client counters, and server side numbers from /varz deltas
+// and /proc (CPU, RSS) of the server pids it is given.
+//
+// SCRATCH SERVERS ONLY. The tool refuses to start unless every -urls host is loopback (127.0.0.0/8, ::1, localhost),
+// or -i-know-this-is-a-scratch-server is passed. It only ever creates its own uniquely named bucket (after checking
+// that neither the bucket nor its stream exists), never touches any other bucket, stream or key, and deletes only that
+// bucket at the end, on error and on SIGINT/SIGTERM. It still loads the server with N connections and polls: do not
+// point it at a deployment.
+//
+// Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1]
+package main
+
+import (
+	"context"
+	crand "crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"math/rand/v2"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/bogworks/mash/internal/store"
+)
+
+const (
+	defPoll    = 15 * time.Second
+	defHB      = 30 * time.Second
+	defWarm    = 10 * time.Second
+	defMeasure = 60 * time.Second
+	fetchConc  = 64 // internal/endpoint fetchConcurrency
+	reqTimeout = 5 * time.Second
+	owner      = "o"
+	clkTck     = 100 // getconf CLK_TCK on Linux
+)
+
+type ep struct {
+	name string
+	nc   *nats.Conn
+}
+
+var (
+	cStream, cGet, cFail, cTimeout, cLoads, cLoadFail atomic.Int64
+	cHBPub, cHBDel                                    atomic.Int64
+	measuring                                         atomic.Bool
+	durMu                                             sync.Mutex
+	durs                                              []float64
+	bucket                                            string // the benchmark-owned bucket; set once in run before any endpoint starts
+)
+
+// newBucketName is dirbench-<8 random hex>: a name no deployment uses.
+func newBucketName() (string, error) {
+	var b [4]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "dirbench-" + hex.EncodeToString(b[:]), nil
+}
+
+// checkLoopback reports an error unless every URL's host is localhost or a loopback address.
+func checkLoopback(urls []string) error {
+	for _, raw := range urls {
+		r := strings.TrimSpace(raw)
+		if !strings.Contains(r, "://") {
+			r = "nats://" + r
+		}
+		u, err := url.Parse(r)
+		if err != nil || u.Hostname() == "" {
+			return fmt.Errorf("cannot parse server URL %q", raw)
+		}
+		h := u.Hostname()
+		if strings.EqualFold(h, "localhost") {
+			continue
+		}
+		if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+			continue
+		}
+		return fmt.Errorf("server %q is not a loopback host: dirbench is for scratch servers only; pass -i-know-this-is-a-scratch-server to override", raw)
+	}
+	return nil
+}
+
+func main() { os.Exit(run()) }
+
+func run() int {
+	urls := flag.String("urls", "", "comma separated client URLs of the cluster")
+	mons := flag.String("mon", "", "comma separated monitor base URLs (for /varz), same order as -pids")
+	pids := flag.String("pids", "", "comma separated nats-server pids")
+	n := flag.Int("n", 100, "simulated endpoints")
+	syncStart := flag.Bool("sync", false, "every endpoint starts its poll and heartbeat at the same instant")
+	replicas := flag.Int("replicas", 1, "replicas of the directory bucket (the product uses 1)")
+	poll := flag.Duration("poll", defPoll, "directory poll interval")
+	hb := flag.Duration("hb", defHB, "heartbeat interval")
+	warm := flag.Duration("warm", defWarm, "wait after ramp-up before measuring")
+	measure := flag.Duration("measure", defMeasure, "measured window")
+	scratch := flag.Bool("i-know-this-is-a-scratch-server", false, "allow non-loopback -urls (the tool creates and deletes its own dirbench-* bucket only)")
+	flag.Parse()
+	u := strings.Split(*urls, ",")
+	m := strings.Split(*mons, ",")
+	pl := strings.Split(*pids, ",")
+	if *urls == "" || len(m) != len(pl) {
+		fmt.Fprintln(os.Stderr, "need -urls, and -mon and -pids of equal length")
+		return 2
+	}
+	if !*scratch {
+		if err := checkLoopback(u); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	name, err := newBucketName()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bucket name:", err)
+		return 1
+	}
+	bucket = name
+	ctx := context.Background()
+	var created atomic.Bool
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			if created.Load() {
+				if err := dropBucket(ctx, u[0], bucket); err != nil {
+					fmt.Fprintln(os.Stderr, "cleanup: could not delete bucket", bucket+":", err)
+				}
+			}
+		})
+	}
+	defer cleanup()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() { <-sig; cleanup(); os.Exit(130) }()
+	if err := setup(ctx, u[0], bucket, *n, *replicas, &created); err != nil {
+		fmt.Fprintln(os.Stderr, "setup:", err)
+		return 1
+	}
+	fmt.Printf("bucket=%s\n", bucket)
+
+	eps := make([]*ep, *n)
+	ramp := time.Now()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 32)
+	var connFail atomic.Int64
+	for i := range *n {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			name := fmt.Sprintf("e%04d", i)
+			nc, err := nats.Connect(u[i%len(u)], nats.Name(name), nats.MaxReconnects(-1))
+			if err != nil {
+				connFail.Add(1)
+				return
+			}
+			_, _ = nc.Subscribe("agents.hb.*."+owner+".*", func(*nats.Msg) { cHBDel.Add(1) })
+			eps[i] = &ep{name, nc}
+		}()
+	}
+	wg.Wait()
+	fmt.Printf("ramp_seconds=%.1f connected=%d connect_failures=%d\n", time.Since(ramp).Seconds(), *n-int(connFail.Load()), connFail.Load())
+	stop := make(chan struct{})
+	for _, e := range eps {
+		if e == nil {
+			continue
+		}
+		var offP, offH time.Duration
+		if !*syncStart {
+			offP, offH = rand.N(*poll), rand.N(*hb)
+		}
+		go loop(stop, offP, *poll, func() { loadDirectory(e.nc) })
+		go loop(stop, offH, *hb, func() { _ = e.nc.Publish("agents.hb.cc."+owner+"."+e.name, make([]byte, 300)); cHBPub.Add(1) })
+	}
+	time.Sleep(*warm)
+
+	// measured window
+	measuring.Store(true)
+	var s0, g0, f0, t0, l0, lf0, hp0, hd0 = cStream.Load(), cGet.Load(), cFail.Load(), cTimeout.Load(), cLoads.Load(), cLoadFail.Load(), cHBPub.Load(), cHBDel.Load()
+	v0 := varz(m)
+	c0 := cpu(pl)
+	self0 := cpu([]string{"self"})
+	w0 := time.Now()
+	time.Sleep(*measure)
+	el := time.Since(w0).Seconds()
+	v1 := varz(m)
+	c1 := cpu(pl)
+	self1 := cpu([]string{"self"})
+	measuring.Store(false)
+	close(stop)
+
+	d := func(a, b int64) float64 { return float64(a-b) / el }
+	fmt.Printf("n=%d sync=%v replicas=%d window_s=%.1f\n", *n, *syncStart, *replicas, el)
+	fmt.Printf("loads_per_s=%.3f streaminfo_per_s=%.3f directget_per_s=%.3f requests_per_s=%.3f\n", d(cLoads.Load(), l0),
+		d(cStream.Load(), s0), d(cGet.Load(), g0), d(cStream.Load()+cGet.Load(), s0+g0))
+	fmt.Printf("request_failures=%d timeouts=%d load_failures=%d\n", cFail.Load()-f0, cTimeout.Load()-t0, cLoadFail.Load()-lf0)
+	durMu.Lock()
+	sort.Float64s(durs)
+	fmt.Printf("load_duration_ms p50=%.1f p99=%.1f max=%.1f samples=%d\n", pct(durs, .5), pct(durs, .99), pct(durs, 1), len(durs))
+	durMu.Unlock()
+	fmt.Printf("hb_published_per_s=%.3f hb_delivered_per_s=%.3f\n", d(cHBPub.Load(), hp0), d(cHBDel.Load(), hd0))
+	fmt.Printf("server_in_msgs_per_s=%.1f out_msgs_per_s=%.1f in_bytes_per_s=%.0f out_bytes_per_s=%.0f\n",
+		(v1[0]-v0[0])/el, (v1[1]-v0[1])/el, (v1[2]-v0[2])/el, (v1[3]-v0[3])/el)
+	var sum, mx float64
+	for i := range c1 {
+		c := (c1[i] - c0[i]) / clkTck / el
+		sum += c
+		mx = max(mx, c)
+	}
+	fmt.Printf("server_cpu_cores_sum=%.3f server_cpu_cores_max=%.3f server_rss_mb=%s\n", sum, mx, rss(pl))
+	fmt.Printf("bench_cpu_cores=%.3f\n", (self1[0]-self0[0])/clkTck/el)
+	for _, e := range eps {
+		if e != nil {
+			e.nc.Close()
+		}
+	}
+	return 0
+}
+
+func loop(stop chan struct{}, off, every time.Duration, f func()) {
+	select {
+	case <-stop:
+		return
+	case <-time.After(off):
+	}
+	f()
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			f()
+		}
+	}
+}
+
+// dropBucket deletes the named bucket; it is only ever called with the bucket this process created.
+func dropBucket(ctx context.Context, url, name string) error {
+	nc, err := nats.Connect(url)
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
+	return js.DeleteKeyValue(ctx, name)
+}
+
+// setup creates the benchmark's own bucket (refusing if the name already exists) and fills it with n records.
+// created is set as soon as CreateKeyValue succeeds, so the caller deletes exactly what was created.
+func setup(ctx context.Context, url, name string, n, replicas int, created *atomic.Bool) error {
+	nc, err := nats.Connect(url)
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
+	if _, err := js.KeyValue(ctx, name); err == nil {
+		return fmt.Errorf("bucket %q already exists on the server; refusing to touch it", name)
+	} else if !errors.Is(err, jetstream.ErrBucketNotFound) {
+		return fmt.Errorf("checking that bucket %q does not exist: %w", name, err)
+	}
+	if _, err := js.Stream(ctx, "KV_"+name); err == nil {
+		return fmt.Errorf("stream KV_%s already exists on the server; refusing to touch it", name)
+	} else if !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return fmt.Errorf("checking that stream KV_%s does not exist: %w", name, err)
+	}
+	cfg := store.DirectoryConfig()
+	cfg.Bucket = name
+	cfg.Description = "dirbench scratch bucket"
+	cfg.Replicas = replicas
+	kv, err := js.CreateKeyValue(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	created.Store(true)
+	for i := range n {
+		name := fmt.Sprintf("e%04d", i)
+		rec := store.Record{Name: name, Owner: owner, Agent: "A" + name, AgentToken: "tok-" + name + "-0123456789abcdef0123456789abcdef",
+			Account: "ACCT0123456789", User: "U" + name + "0123456789", MailSubject: store.MailSubjectFor(owner, "", name),
+			Created: "2026-11-02T00:00:00Z", Role: "bench", Host: "bench-host"}
+		b, _ := json.Marshal(rec)
+		if _, err := kv.Put(ctx, name, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadDirectory is internal/endpoint's loadDirectory: keys by filtered stream info, then one direct get per key.
+func loadDirectory(nc *nats.Conn) {
+	t0 := time.Now()
+	prefix := "$KV." + bucket + "."
+	var keys []string
+	for {
+		body, _ := json.Marshal(map[string]any{"offset": len(keys), "subjects_filter": prefix + ">"})
+		cStream.Add(1)
+		m, err := req(nc, "$JS.API.STREAM.INFO.KV_"+bucket, body)
+		if err != nil {
+			cLoadFail.Add(1)
+			return
+		}
+		var resp struct {
+			Total int `json:"total"`
+			State struct {
+				Subjects map[string]uint64 `json:"subjects"`
+			} `json:"state"`
+		}
+		if json.Unmarshal(m.Data, &resp) != nil {
+			cLoadFail.Add(1)
+			return
+		}
+		for s := range resp.State.Subjects {
+			keys = append(keys, strings.TrimPrefix(s, prefix))
+		}
+		if len(resp.State.Subjects) == 0 || len(keys) >= resp.Total {
+			break
+		}
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, fetchConc)
+	var bad atomic.Bool
+	for _, k := range keys {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			cGet.Add(1)
+			m, err := req(nc, "$JS.API.DIRECT.GET.KV_"+bucket+".$KV."+bucket+"."+k, nil)
+			if err != nil || m.Header.Get("Status") != "" {
+				bad.Store(true)
+			}
+		}()
+	}
+	wg.Wait()
+	if bad.Load() {
+		cLoadFail.Add(1)
+		return
+	}
+	cLoads.Add(1)
+	if measuring.Load() {
+		durMu.Lock()
+		durs = append(durs, float64(time.Since(t0).Microseconds())/1000)
+		durMu.Unlock()
+	}
+}
+
+func req(nc *nats.Conn, subj string, body []byte) (*nats.Msg, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeout)
+	defer cancel()
+	m, err := nc.RequestWithContext(ctx, subj, body)
+	if err != nil {
+		cFail.Add(1)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
+			cTimeout.Add(1)
+		}
+	}
+	return m, err
+}
+
+func pct(s []float64, p float64) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	return s[min(len(s)-1, int(p*float64(len(s)-1)+.5))]
+}
+
+// varz sums in_msgs, out_msgs, in_bytes, out_bytes over the servers.
+func varz(mons []string) [4]float64 {
+	var t [4]float64
+	for _, m := range mons {
+		r, err := http.Get(m + "/varz")
+		if err != nil {
+			continue
+		}
+		var v struct {
+			A float64 `json:"in_msgs"`
+			B float64 `json:"out_msgs"`
+			C float64 `json:"in_bytes"`
+			D float64 `json:"out_bytes"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&v)
+		r.Body.Close()
+		t[0], t[1], t[2], t[3] = t[0]+v.A, t[1]+v.B, t[2]+v.C, t[3]+v.D
+	}
+	return t
+}
+
+// cpu returns utime+stime clock ticks per pid ("self" is this process).
+func cpu(pids []string) []float64 {
+	out := make([]float64, len(pids))
+	for i, p := range pids {
+		b, err := os.ReadFile("/proc/" + p + "/stat")
+		if err != nil {
+			continue
+		}
+		f := strings.Fields(string(b[strings.LastIndexByte(string(b), ')')+2:]))
+		ut, _ := strconv.ParseFloat(f[11], 64)
+		st, _ := strconv.ParseFloat(f[12], 64)
+		out[i] = ut + st
+	}
+	return out
+}
+
+func rss(pids []string) string {
+	var out []string
+	for _, p := range pids {
+		b, _ := os.ReadFile("/proc/" + p + "/status")
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(l, "VmRSS:") {
+				kb, _ := strconv.Atoi(strings.Fields(l)[1])
+				out = append(out, strconv.Itoa(kb/1024))
+			}
+		}
+	}
+	return strings.Join(out, "/")
+}
