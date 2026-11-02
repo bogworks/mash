@@ -334,6 +334,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
 			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
 			Kind:   kind.Of(m.Headers().Get(KindHeader))}}
+		e.relayInbound(p.mail.Seq, from, trust, via)
 		e.waking.add(p.mail.Seq, p.mail.Urgent || p.mail.Kind.Wakes())
 		select {
 		case queue <- p:
@@ -670,6 +671,9 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
 		return SendResult{}, fmt.Errorf("mash: send to %s: %w", to, err)
+	}
+	if !ack.Duplicate {
+		e.relaySent(to, o.Via, viaOrigin)
 	}
 	return SendResult{Seq: ack.Sequence, Duplicate: ack.Duplicate}, nil
 }

@@ -43,6 +43,7 @@ type Config struct {
 	BatchMsgs       int           // a batch up to this many messages is shown in full
 	BatchBytes      int           // ... and up to this many body bytes
 	IdleWake        time.Duration // hook mode: spooled mail no hook shows within this wakes the idle session (5s-30m)
+	RelayWindow     time.Duration // serve: a send within this of another sender's mail is traced as a relay candidate (1s-1h, default 60s)
 	OpenTimeout     time.Duration // bound on opening a connection to the endpoint's data: the first requests (default 20s)
 	CallTimeout     time.Duration // bound on one command's or tool call's requests once open (default 15s)
 	LeaseRetry      time.Duration // serve: wait between attempts to take a held lease (zero = serve's default, 10s)
@@ -86,6 +87,8 @@ type file struct {
 	BatchMsgs  *int   `json:"batch_msgs"`
 	BatchBytes *int   `json:"batch_bytes"`
 	IdleWake   string `json:"idle_wake"`
+
+	RelayWindow string `json:"relay_window"`
 
 	OpenTimeout string `json:"open_timeout"`
 	CallTimeout string `json:"call_timeout"`
@@ -140,6 +143,11 @@ func ValidateFile(raw []byte) error {
 	if f.IdleWake != "" {
 		if _, err := idleWake(f.IdleWake); err != nil {
 			return fmt.Errorf("\"idle_wake\" %w", err)
+		}
+	}
+	if f.RelayWindow != "" {
+		if _, err := relayWindow(f.RelayWindow); err != nil {
+			return fmt.Errorf("\"relay_window\" %w", err)
 		}
 	}
 	if _, err := ParseLimits(f.Limits); err != nil {
@@ -284,7 +292,7 @@ func Load(env func(string) string, home string) (Config, error) {
 	if home != "" && env("MASH_CONFIG_DIR") == "" {
 		legacy = filepath.Join(home, ".config", "mash")
 	}
-	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
 
 	var f file
 	var raw []byte
@@ -331,6 +339,14 @@ func Load(env func(string) string, home string) (Config, error) {
 			return c, fmt.Errorf("mash: config.json \"idle_wake\" %w", err)
 		}
 		c.IdleWake = d
+	}
+
+	if f.RelayWindow != "" {
+		d, err := relayWindow(f.RelayWindow)
+		if err != nil {
+			return c, fmt.Errorf("mash: config.json \"relay_window\" %w", err)
+		}
+		c.RelayWindow = d
 	}
 
 	if c.Limits, err = ParseLimits(f.Limits); err != nil {
@@ -394,6 +410,14 @@ func Load(env func(string) string, home string) (Config, error) {
 			return c, fmt.Errorf("mash: MASH_IDLE_WAKE %w", err)
 		}
 		c.IdleWake = d
+	}
+
+	if v := env("MASH_RELAY_WINDOW"); v != "" {
+		d, err := relayWindow(v)
+		if err != nil {
+			return c, fmt.Errorf("mash: MASH_RELAY_WINDOW %w", err)
+		}
+		c.RelayWindow = d
 	}
 
 	// Each timeout's effective raw value is chosen first (env, else file, else the default) and validated once, so an
@@ -501,6 +525,18 @@ func idleWake(v string) (time.Duration, error) {
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 5*time.Second || d > 30*time.Minute {
 		return 0, fmt.Errorf("%q is not a duration from 5s to 30m (for example \"45s\" or \"2m\")", v)
+	}
+	return d, nil
+}
+
+// DefaultRelayWindow is Config.RelayWindow when nothing sets it.
+const DefaultRelayWindow = 60 * time.Second
+
+// relayWindow parses the relay trace window: a Go duration string from 1s to 1h.
+func relayWindow(v string) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	if err != nil || d < time.Second || d > time.Hour {
+		return 0, fmt.Errorf("%q is not a duration from 1s to 1h (for example \"60s\" or \"5m\")", v)
 	}
 	return d, nil
 }

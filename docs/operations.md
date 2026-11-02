@@ -431,6 +431,28 @@ What this means for operators:
 - **A hook without serve does nothing.** It never creates a spool, so it is silent until serve has made one.
 - **Test failpoints.** `MASH_HOOK_FAILPOINT` (`before-print`, `after-print`, `after-first-drained`) makes `mash hook` print `mash hook: failpoint <name>` on stderr and block, and `MASH_SERVE_FAILPOINT=before-ack` makes `mash serve` print `mash serve: failpoint before-ack #<seq>` and block just before it acks a message a hook has drained (it never acks it), so a test can SIGKILL the process there. Both are for the crash tests only; never set them outside those.
 
+## Relay tracing
+
+`mash serve` traces relay by asking: a session that receives a request from one endpoint and soon asks a third endpoint the same thing, passing a message along. It only traces ([ADR 0064](decisions/0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md)). It never blocks, delays or changes a message, and it never reads a message body: the trace comes from signed headers (the sender's name, the signed `Mash-Via` of [ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md)) and from the time each mail arrived and each send was made. There is no pattern matching and no operator-supplied rule. There is no flag; the lines go to serve's stderr.
+
+What is recorded, per `mash serve` run:
+
+- An inbound mail from a `verified` or `stale` sender is remembered by its sequence, the sender's name and the time it arrived (the last 256 within the window; never its text). If it carries a `Mash-Via` that verifies, serve logs `trace relay: mail #<seq> from <from> declares a relay of #<n> from <origin>` and counts it.
+- A send that was published with a `via` logs `trace relay: sent to <to> declaring a relay of #<via> from <origin>` and is counted as a declared relay.
+- A send to a third party within the window of another endpoint's mail logs `trace relay: sent to <to> <N> s after mail #<seq> from <from> (declared: yes|no)`, naming the most recent such mail, and is counted as a relay candidate (once per send). A third party is an endpoint other than the sender of that mail, other than this endpoint. A reply to the sender of the recent mail is not a candidate, and a send to oneself is ignored. `declared: yes` means the send carried a `via`.
+
+The window is `relay_window` in `config.json` (or `MASH_RELAY_WINDOW`): a Go duration from `1s` to `1h`, default `60s`. An invalid value fails with a message naming the key.
+
+`mash status` shows the counters:
+
+```
+relay trace: inbound with via 0, sends within 60s of another sender's mail 1, declared relays 1
+```
+
+Inside a session (the MCP `status` tool) the line is the running endpoint's. From a shell, `mash status` is another process and reads `relay-counters.json`, which serve writes (0600, atomically, at most once a second after a change, by a background worker that never holds up a receipt or a send; shutdown waits at most 2 s for the last write) in the endpoint's state directory next to its spool (`<state dir>/spool/<owner>/<name>/`). It then adds `(since <time>)`, the start of the run that wrote it: the counters are per `mash serve` run and restart at zero, and the shell cannot tell whether that run is still going, so a file from an earlier run reads as that run's. With no file, or an unreadable one, the line is `relay trace: none recorded`.
+
+The limits. A candidate is time adjacency: the endpoint sent to someone soon after someone else's mail arrived. It does not show that the text relates, and a busy endpoint is a candidate on most sends. A relay that waits longer than the window, is retyped or paraphrased, or is sent through another endpoint, is not seen. `Mash-Via` is an honesty mechanism: a sender that does not declare is not caught by it. Use the lines to see how often it happens, then decide with the data whether any rule is worth making; none is made here.
+
 ## Headless and SDK sessions
 
 mash's live receipts use persistent `claude -p` stream-json sessions. Other headless shapes behave differently.
