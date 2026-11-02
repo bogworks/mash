@@ -30,12 +30,25 @@ type fake struct {
 	pushes    int
 	lastPush  string // the token of the latest push
 	lookups   int
+	all       []string // LookupAll's answer; nil: every expected server holds token
 }
 
 func (f *fake) Lookup(context.Context, string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.token, nil
+}
+func (f *fake) LookupAll(_ context.Context, _ string, expect int) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.all != nil {
+		return f.all, nil
+	}
+	var out []string
+	for i := 0; i < max(expect, 1); i++ {
+		out = append(out, f.token)
+	}
+	return out, nil
 }
 func (f *fake) Servers(context.Context) (ServerSet, error) {
 	if f.servers.Names == nil && !f.servers.Gateways && f.servers.Expected == 0 && !f.noServers {

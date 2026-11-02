@@ -49,10 +49,19 @@ func credsFile(t *testing.T, b []byte) string {
 	return p
 }
 
-// TestRevokeUsersCutsOffAConnectedUser runs RevokeUsers against a real in-process operator-mode nats-server with a
-// full (directory) account resolver, and shows that the revoked user's live connection is closed by the server and
-// that the same creds are refused on a new connection.
-func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
+// liveEnv is a real in-process operator-mode nats-server with a full (directory) resolver, holding the key store's
+// account and a system account, and a system-account connection to it.
+type liveEnv struct {
+	ks      *ctlkeys.Authority
+	srv     *server.Server
+	sysNC   *nats.Conn
+	acctKP  nkeys.KeyPair
+	acctPub string
+}
+
+// startLive starts the server and connects the system user; both are closed when the test ends.
+func startLive(t *testing.T) *liveEnv {
+	t.Helper()
 	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +124,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	go srv.Start()
-	defer srv.Shutdown()
+	t.Cleanup(srv.Shutdown)
 	if !srv.ReadyForConnections(10 * time.Second) {
 		t.Fatal("nats-server did not start")
 	}
@@ -126,8 +135,18 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sysNC.Close()
+	t.Cleanup(sysNC.Close)
 
+	return &liveEnv{ks: ks, srv: srv, sysNC: sysNC, acctKP: acctKP, acctPub: acctPub}
+}
+
+// TestRevokeUsersCutsOffAConnectedUser runs RevokeUsers against a real in-process operator-mode nats-server with a
+// full (directory) account resolver, and shows that the revoked user's live connection is closed by the server and
+// that the same creds are refused on a new connection.
+func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
+	env := startLive(t)
+	ks, srv, sysNC, acctKP := env.ks, env.srv, env.sysNC, env.acctKP
+	var err error
 	// The user: connects, and works.
 	creds, userPub := liveCreds(t, acctKP)
 	credPath := credsFile(t, creds)
