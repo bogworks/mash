@@ -223,11 +223,13 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 				code = 1
 			}
 		default:
-			renamed = credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
-			if err := os.Rename(credsPath, renamed); err != nil {
+			dest := credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
+			final, err := archiveNoReplace(credsPath, dest)
+			if err != nil {
 				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
-				renamed = ""
 				code = 1
+			} else {
+				renamed = final
 			}
 		}
 	}
@@ -244,4 +246,64 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stdout, "%s's user is not revoked at the server: %s\n", name, revocationNote)
 	return code
+}
+
+// archiveNoReplace moves src to dest without ever replacing an existing file. If dest exists it tries dest.1,
+// dest.2, ... up to dest.100, then fails with src left in place. It returns the path the file ended up at.
+func archiveNoReplace(src, dest string) (string, error) {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return "", err
+	}
+	for i := 0; i <= 100; i++ {
+		d := dest
+		if i > 0 {
+			d = fmt.Sprintf("%s.%d", dest, i)
+		}
+		err := os.Link(src, d)
+		if err == nil {
+			if err := os.Remove(src); err != nil {
+				return "", fmt.Errorf("archived to %s but could not remove %s: %w", d, src, err)
+			}
+			return d, nil
+		}
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		// Link unsupported here (EPERM, EXDEV, ENOTSUP, ...): copy into a new file, never over an existing one.
+		out, cerr := os.OpenFile(d, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
+		if cerr != nil {
+			if errors.Is(cerr, os.ErrExist) {
+				continue
+			}
+			return "", cerr
+		}
+		if cerr := copyAndRemove(src, out, fi.Mode().Perm()); cerr != nil {
+			os.Remove(d)
+			return "", cerr
+		}
+		return d, nil
+	}
+	return "", fmt.Errorf("could not archive %s: %s and %s.1 to %s.100 all exist; nothing was moved", src, dest, dest, dest)
+}
+
+func copyAndRemove(src string, out *os.File, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		out.Close()
+		return err
+	}
+	defer in.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Chmod(mode); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
