@@ -8,6 +8,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 - `internal/policy`: the policy file (labels, allow and deny rules, tests) parsed strictly, checked, explained and compiled to each endpoint's full per-recipient permission set, with a JWT size budget; `admin.PermissionsTo` narrows the peer lines to a recipient list. Not wired to any command yet; see [docs/policy-file.md](docs/policy-file.md).
 - Releases carry a CycloneDX 1.5 SBOM per binary (`mash-<os>-<arch>.cdx.json`, attested and listed in the signed `SHA256SUMS`) and SLSA provenance (`mash.intoto.jsonl`) from the `slsa-github-generator` generic generator, and the publish gate verifies all of them before a release is published. How to verify a download is in [docs/release.md](docs/release.md#verify-a-release) ([ADR-0052](docs/decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md)).
+- Boundary tests for the limits that meet at the inbox and the hook (#48): a message at exactly 1 MiB is accepted and one byte over is refused; 15 messages of 1 MiB to an offline endpoint all survive and read back byte for byte, and past the 16 MiB cap the oldest are evicted and the newest kept; emoji, CJK and mixed batches at and past Claude Code's 10,000-unit hook cap are never cut mid-pair or truncated; a burst of 600 `fyi` past `SpoolWakeCount` wakes once, an urgent message behind it is shown first, and the byte backlog wake is exact at `SpoolWakeBytes`. Tests only.
 
 ### Fixed
 
