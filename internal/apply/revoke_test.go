@@ -123,11 +123,11 @@ func TestRevokeUsersInvalidKeyBeforeAnyIO(t *testing.T) {
 // countFake counts lookups on the shared fake.
 type countFake struct{ *fake }
 
-func (c *countFake) Lookup(ctx context.Context, a string) (string, error) {
+func (c *countFake) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
 	c.fake.mu.Lock()
 	c.fake.lookups++
 	c.fake.mu.Unlock()
-	return c.fake.Lookup(ctx, a)
+	return c.fake.LookupAll(ctx, a, n)
 }
 
 func TestRevokeUsersRefusesSubjectMismatch(t *testing.T) {
@@ -177,7 +177,7 @@ func TestRevokeUsersNotAckedIsNotConfirmed(t *testing.T) {
 	}
 }
 
-// changing swaps the stored token once, on the second Lookup, to model another writer.
+// changing swaps the stored token once, on the second LookupAll, to model another writer.
 type changing struct {
 	*fake
 	swap  string
@@ -185,7 +185,7 @@ type changing struct {
 	calls int
 }
 
-func (c *changing) Lookup(ctx context.Context, a string) (string, error) {
+func (c *changing) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
 	c.fake.mu.Lock()
 	c.calls++
 	if c.calls == 2 || (c.swap2 != "" && c.calls == 4) {
@@ -196,7 +196,7 @@ func (c *changing) Lookup(ctx context.Context, a string) (string, error) {
 		}
 	}
 	c.fake.mu.Unlock()
-	return c.fake.Lookup(ctx, a)
+	return c.fake.LookupAll(ctx, a, n)
 }
 
 func TestRevokeUsersRetriesOnceWhenJWTChanges(t *testing.T) {
@@ -369,15 +369,15 @@ type launder struct {
 	foreign string
 }
 
-func (l *launder) Lookup(ctx context.Context, a string) (string, error) {
-	tok, err := l.fake.Lookup(ctx, a)
+func (l *launder) LookupAll(ctx context.Context, a string, n int) ([]string, error) {
+	toks, err := l.fake.LookupAll(ctx, a, n)
 	l.fake.mu.Lock()
 	pushed := l.fake.pushes > 0
 	l.fake.mu.Unlock()
 	if pushed {
-		return l.foreign, err
+		return []string{l.foreign}, err
 	}
-	return tok, err
+	return toks, err
 }
 
 func TestRevokeUsersReadBackVerifiesTheIssuer(t *testing.T) {

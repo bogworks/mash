@@ -42,6 +42,9 @@ type RevokeResult struct {
 	Acked int
 	// Complete says the acknowledging servers are the whole server set (always true when nothing was pushed).
 	Complete bool
+	// Warning is a neutral line when some servers held an older copy of the account JWT than the one the revocation
+	// was built from ("" when all agreed).
+	Warning string
 }
 
 // RevokeUsers adds a revocation for each user public key to the account JWT, re-signs it with the operator key and
@@ -93,20 +96,22 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
 	}
 
+	set, kerr := p.Resolver.Servers(ctx)
+	expect := serverExpect(set, p.Servers)
+
 	var claims *jwt.AccountClaims
 	var token string
 	var want map[string]int64 // the least revocation time each key must show on read-back
 	for attempt := 0; ; attempt++ {
-		cur, err := p.Resolver.Lookup(ctx, acctPub)
+		base, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT")
 		if err != nil {
-			return res, fmt.Errorf("revoke: look up the account JWT: %w (nothing was changed)", err)
+			return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
 		}
+		cur := base.token
+		claims = base.claims
+		res.Warning = base.warn
 		if cur == "" {
 			return res, fmt.Errorf("revoke: the resolver has no JWT for the MASH account %s: is the account key in the key store the account of this server? (nothing was changed)", acctPub)
-		}
-		claims, err = VerifyAccountJWT(cur, acctPub, trust)
-		if err != nil {
-			return res, fmt.Errorf("revoke: refusing the resolver's account JWT: %w (nothing was changed)", err)
 		}
 		var unknown []string
 		for _, k := range sortedKeys(claims.SigningKeys) {
@@ -155,11 +160,11 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 			}
 		}
 		// Someone else may have pushed since the read: compute again from what is there now, once.
-		again, err := p.Resolver.Lookup(ctx, acctPub)
+		again, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT before the push")
 		if err != nil {
-			return res, fmt.Errorf("revoke: look up the account JWT before the push: %w (nothing was pushed)", err)
+			return res, fmt.Errorf("revoke: %w (nothing was pushed)", err)
 		}
-		if again == cur {
+		if again.token == cur {
 			break
 		}
 		if attempt == 1 {
@@ -167,7 +172,6 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		}
 	}
 
-	set, kerr := p.Resolver.Servers(ctx)
 	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
 	res.Acked = len(acks)
 	if why != "" {
@@ -180,7 +184,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 	if len(confirm) == 0 {
 		confirm = want
 	}
-	if msg := verifyRevoked(ctx, p, acctPub, trust, confirm); msg != "" {
+	if msg := verifyRevoked(ctx, p, acctPub, trust, token, expect, confirm); msg != "" {
 		return res, fmt.Errorf("revoke: %w: %d server(s) acknowledged the update but the read-back %s; running the revoke again is safe", ErrNotConfirmed, len(acks), msg)
 	}
 	res.Complete = set.Complete(p.Servers)
@@ -207,35 +211,10 @@ func dedupe(l []string) []string {
 	return out
 }
 
-// verifyRevoked reads the account JWT back until every key in want has a revocation at least as new as its time; ""
-// is a match.
-func verifyRevoked(ctx context.Context, p RevokeParams, acctPub string, trust Trust, want map[string]int64) string {
-	tries, wait := p.VerifyTries, p.VerifyWait
-	if tries <= 0 {
-		tries = defaultVerifyTries
-	}
-	if wait <= 0 {
-		wait = defaultVerifyWait
-	}
-	last := ""
-	for i := 0; i < tries; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return "was interrupted: " + ctx.Err().Error()
-			case <-time.After(wait):
-			}
-		}
-		tok, err := p.Resolver.Lookup(ctx, acctPub)
-		if err != nil {
-			last = "could not be read back: " + err.Error()
-			continue
-		}
-		got, err := VerifyAccountJWT(tok, acctPub, trust)
-		if err != nil {
-			last = "is not acceptable: " + err.Error()
-			continue
-		}
+// verifyRevoked reads the account JWT back from every server until each answering one holds token, the JWT that was
+// pushed, and shows every key in want with a revocation at least as new as its time; "" is a match.
+func verifyRevoked(ctx context.Context, p RevokeParams, acctPub string, trust Trust, token string, need int, want map[string]int64) string {
+	return readBack(ctx, p.Resolver, acctPub, trust, need, p.VerifyTries, p.VerifyWait, token, func(got *jwt.AccountClaims) string {
 		var miss []string
 		for u, ts := range want {
 			if cur, ok := got.Revocations[u]; !ok || cur < ts {
@@ -246,7 +225,6 @@ func verifyRevoked(ctx context.Context, p RevokeParams, acctPub string, trust Tr
 		if len(miss) == 0 {
 			return ""
 		}
-		last = "does not show the revocation of " + strings.Join(miss, ", ")
-	}
-	return last
+		return "does not show the revocation of " + strings.Join(miss, ", ")
+	})
 }

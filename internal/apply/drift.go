@@ -141,7 +141,7 @@ func verifyAll(ctx context.Context, p Params, acct string, need int, want string
 // resolver holds, with the same code `policy diff` uses, and reports every difference and every refusal condition apply
 // would report (a server key that is not the key store's, a zone the file lacks) as a finding. It changes nothing: no
 // key is created and nothing is pushed. p.Compiled, p.Keys and p.Resolver are used; the result is empty when the
-// resolver's copy matches. It builds the comparison from one resolver's copy and also asks every server (Resolver.LookupAll): servers that answer with different JWTs, fewer answers than the known server count, or an unverifiable server set are findings too. Params.Servers is the operator's server count.
+// resolver's copy matches. It builds the comparison from the newest copy any server holds (highest iat) and also asks every server (Resolver.LookupAll): servers that answer with different JWTs, fewer answers than the known server count, or an unverifiable server set are findings too. Params.Servers is the operator's server count.
 func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	p.Mode, p.collectAll = Diff, true
 	var out []Finding
@@ -186,6 +186,13 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 			why = serr.Error()
 		}
 		out = append(out, Finding{Kind: KindServersUnverified, Detail: "the server set could not be verified, so a server may hold another account JWT: " + why})
+	}
+	// Compare against the newest copy any server holds (highest iat), not whichever answered first; build verifies it.
+	var newest int64
+	for _, g := range ag.groups {
+		if c, derr := jwt.DecodeAccountClaims(g.token); derr == nil && c.IssuedAt > newest {
+			newest, cur = c.IssuedAt, g.token
+		}
 	}
 	if ag.answered > 0 && len(ag.groups) > 1 {
 		out = append(out, Finding{Kind: KindServersDiffer, Detail: ag.differText()})

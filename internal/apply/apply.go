@@ -237,7 +237,7 @@ type conflict struct {
 	zone, serverKey, localKey string // localKey "" means the zone key file is missing
 }
 
-// Run executes p and writes its report to out; the result is the process exit code (0 ok, 1 refused or partial).
+// Run executes p and writes its report to out; the result is the process exit code (0 ok, 1 refused or partial; `diff` included: a refusal is exit 1, a report of differences is 0).
 func Run(ctx context.Context, p Params, out io.Writer) int {
 	pf := func(format string, a ...any) { fmt.Fprintf(out, format, a...) }
 	fail := func(err error) int { fmt.Fprintf(out, "mashctl: %s: %v\n", p.Mode, err); return 1 }
@@ -299,31 +299,40 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		defer unlock()
 	}
 
+	// The servers asked for the base, the push and the read-back: the ping and the inventory say how many there are.
+	set, kerr := p.Resolver.Servers(ctx)
+	expect := serverExpect(set, p.Servers)
+
 	created := map[string]bool{}
 	var b *built
+	var warn string
 	for attempt := 0; ; attempt++ {
-		cur, err := p.Resolver.Lookup(ctx, acctPub)
+		base, err := lookupBase(ctx, p.Resolver, acctPub, p.trust, expect, "look up the account JWT")
 		if err != nil {
-			return fail(fmt.Errorf("look up the account JWT: %w (nothing was changed)", err))
+			return fail(fmt.Errorf("%w (nothing was changed)", err))
 		}
-		b, err = build(p, opKP, acctPub, cur, replace, created)
+		warn = base.warn
+		b, err = build(p, opKP, acctPub, base.token, replace, created)
 		if err != nil {
 			return fail(err)
 		}
 		if b.refused() || p.Mode != Apply || !b.changed {
 			break
 		}
-		// Someone else may have pushed since the read: compute again from what is there now, once.
-		again, err := p.Resolver.Lookup(ctx, acctPub)
+		// Someone else may have pushed since the read: compute again from the newest copy now, once.
+		again, err := lookupBase(ctx, p.Resolver, acctPub, p.trust, expect, "look up the account JWT before the push")
 		if err != nil {
-			return fail(fmt.Errorf("look up the account JWT before the push: %w (nothing was pushed)", err))
+			return fail(fmt.Errorf("%w (nothing was pushed)", err))
 		}
-		if again == b.cur {
+		if again.token == b.cur {
 			break
 		}
 		if attempt == 1 {
 			return fail(errors.New("the account JWT changed twice while apply was computing its update: something else is changing it; run the command again (nothing was pushed)"))
 		}
+	}
+	if warn != "" {
+		pf("warning: %s\n", warn)
 	}
 	var createdList []string
 	for _, z := range c.Zones {
@@ -335,9 +344,6 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 
 	if b.refused() {
 		refuse(out, p, b)
-		if p.Mode == Diff {
-			return 0
-		}
 		return 1
 	}
 
@@ -365,12 +371,11 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	if !changed {
 		what = "the re-send of the unchanged claims"
 	}
-	set, kerr := p.Resolver.Servers(ctx)
 	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
 	if why != "" {
-		return partial(out, p, createdList, fmt.Sprintf("%s was not acknowledged: %s", what, why), verifyState(ctx, p, acctPub, desired))
+		return partial(out, p, createdList, fmt.Sprintf("%s was not acknowledged: %s", what, why), verifyState(ctx, p, acctPub, token, desired, expect))
 	}
-	if msg := verifyState(ctx, p, acctPub, desired); msg != "" {
+	if msg := verifyState(ctx, p, acctPub, token, desired, expect); msg != "" {
 		return partial(out, p, createdList, fmt.Sprintf("%d server(s) acknowledged the claims update", len(acks)), msg)
 	}
 	if !set.Complete(p.Servers) {
@@ -714,42 +719,12 @@ func partial(out io.Writer, p Params, created []string, step, observed string) i
 	return 1
 }
 
-// verifyState reads the account JWT back until it matches desired's signing keys and templates; "" is a match, else
-// the description of what was found.
-func verifyState(ctx context.Context, p Params, acctPub string, desired *jwt.AccountClaims) string {
-	tries, wait := p.VerifyTries, p.VerifyWait
-	if tries <= 0 {
-		tries = defaultVerifyTries
-	}
-	if wait <= 0 {
-		wait = defaultVerifyWait
-	}
-	last := ""
-	for i := 0; i < tries; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return "the check was interrupted: " + ctx.Err().Error()
-			case <-time.After(wait):
-			}
-		}
-		tok, err := p.Resolver.Lookup(ctx, acctPub)
-		if err != nil {
-			last = "could not be read back: " + err.Error()
-			continue
-		}
-		got, err := VerifyAccountJWT(tok, acctPub, p.trust)
-		if err != nil {
-			last = "is not acceptable: " + err.Error()
-			continue
-		}
-		if d := signersDiff(desired, got); d != "" {
-			last = d
-			continue
-		}
-		return ""
-	}
-	return last
+// verifyState reads the account JWT back from every server until each answering one holds token (the pushed JWT); ""
+// is a match, else the description of what was found. A server that still holds another copy, or none, is not a match.
+func verifyState(ctx context.Context, p Params, acctPub, token string, desired *jwt.AccountClaims, need int) string {
+	return readBack(ctx, p.Resolver, acctPub, p.trust, need, p.VerifyTries, p.VerifyWait, token, func(got *jwt.AccountClaims) string {
+		return signersDiff(desired, got)
+	})
 }
 
 // signersDiff compares the signing keys (scoped ones with their role and template) of want and got.

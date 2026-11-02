@@ -220,11 +220,11 @@ func TestApplyRefusesUnknownSigningKeys(t *testing.T) {
 	if z, _ := ks.Zones(); len(z) != 0 {
 		t.Fatalf("created zone keys %v", z)
 	}
-	// diff reports and exits 0; drift's findings carry the same text
+	// diff refuses with exit 1; drift's findings carry the same text
 	var out bytes.Buffer
 	p := c
 	p.Mode, p.Keys, p.Resolver = Diff, ks, fk
-	if code := Run(context.Background(), p, &out); code != 0 || !strings.Contains(out.String(), scoped) || !strings.Contains(out.String(), plain) {
+	if code := Run(context.Background(), p, &out); code != 1 || !strings.Contains(out.String(), scoped) || !strings.Contains(out.String(), plain) {
 		t.Fatalf("diff: %d\n%s", code, out.String())
 	}
 	p.Mode = 0

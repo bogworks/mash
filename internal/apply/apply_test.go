@@ -327,10 +327,7 @@ func TestLostZoneKeyIsRefusedUnlessReplaced(t *testing.T) {
 		pushes := fk.pushes
 		var out bytes.Buffer
 		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1
-		if mode == Diff {
-			want = 0
-		}
+		want := 1 // a refusal exits 1 in every mode, `diff` included
 		s := out.String()
 		if code != want || !strings.Contains(s, "REFUSED") || !strings.Contains(s, "zone a") || !strings.Contains(s, oldPub) ||
 			!strings.Contains(s, "--replace-zone-key") || !strings.Contains(s, "restore the original zone key file") || !strings.Contains(s, "stop working") {
@@ -459,10 +456,7 @@ func TestOutsidePolicyZones(t *testing.T) {
 	for _, mode := range []Mode{Apply, DryRun, Diff} {
 		out.Reset()
 		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1
-		if mode == Diff {
-			want = 0
-		}
+		want := 1 // a refusal exits 1 in every mode, `diff` included
 		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "account claims already up to date") || fk.pushes != pushes || fk.token != tok {
 			t.Fatalf("%s: %d\n%s", mode, code, out.String())
 		}
