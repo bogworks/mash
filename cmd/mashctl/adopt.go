@@ -206,7 +206,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	nc, err := nats.Connect(o.server, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
 		natsauth.UserCredentialBytes(st.sysCredsRaw), nats.Name("mashctl-adopt"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
-		return fail("connect %s with the system creds: %v (nothing was changed)", o.server, natsauth.TLSHint(err))
+		return fail("connect %s with the system creds: %v (a refused connection can mean the server is unreachable or a TLS problem: check the URL, the port and the tls_ca, tls_cert and tls_key settings; nothing was changed)", o.server, natsauth.TLSHint(err))
 	}
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
