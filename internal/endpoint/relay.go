@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
@@ -23,6 +24,8 @@ const (
 	relayRing = 256
 	// relayFlushEvery is the shortest time between two writes of the counters file.
 	relayFlushEvery = time.Second
+	// relayStopWait bounds how long stop waits for the final write.
+	relayStopWait = 2 * time.Second
 	// RelayCountersFile is the counters file's name in the endpoint's state directory (spool.Dir).
 	RelayCountersFile = "relay-counters.json"
 )
@@ -56,15 +59,17 @@ type relayTracker struct {
 	c       RelayCounters
 	started time.Time
 
-	// Persistence (Run only): the counters file, written at most once per relayFlushEvery.
-	pmu       sync.Mutex
-	path      string
-	instance  func() string
-	logf      func(format string, args ...any)
-	lastWrite time.Time
-	timer     *time.Timer
-	stopped   bool
-	warned    bool
+	// Persistence (Run only): the counters file, written by one background worker at most once per relayFlushEvery.
+	pmu         sync.Mutex // guards the fields below; never held across I/O
+	path        string
+	instance    func() string
+	logf        func(format string, args ...any)
+	wake        chan struct{} // size 1: a non-blocking nudge to the worker
+	quit, done  chan struct{}
+	writeFn     func(path string, v any) error // writeJSONAtomic unless a test replaces it
+	stopTimeout time.Duration                  // relayStopWait unless a test replaces it
+	dirty       atomic.Bool
+	warned      bool // the worker only
 }
 
 func newRelayTracker(window time.Duration) *relayTracker {
@@ -156,70 +161,117 @@ func (t *relayTracker) counters() RelayCounters {
 	return c
 }
 
-// persistTo makes the tracker write its counters to path (see changed).
+// persistTo starts the one background worker that writes the counters to path (see changed). The receipt and send paths
+// never touch the file system: they only count in memory and wake the worker.
 func (t *relayTracker) persistTo(path string, instance func() string, logf func(string, ...any)) {
-	if t == nil {
+	if t == nil || path == "" {
 		return
 	}
-	t.pmu.Lock()
-	t.path, t.instance, t.logf, t.stopped = path, instance, logf, false
-	t.pmu.Unlock()
-}
-
-// changed writes the counters now, or, when the last write was under a second ago, once the second is up.
-func (t *relayTracker) changed() {
 	t.pmu.Lock()
 	defer t.pmu.Unlock()
-	if t.path == "" || t.stopped || t.timer != nil {
-		return
+	if t.quit != nil {
+		return // already running
 	}
-	if wait := relayFlushEvery - time.Since(t.lastWrite); wait > 0 {
-		t.timer = time.AfterFunc(wait, func() {
-			t.pmu.Lock()
-			defer t.pmu.Unlock()
-			t.timer = nil
-			if !t.stopped {
-				t.writeLocked()
-			}
-		})
-		return
-	}
-	t.writeLocked()
+	t.path, t.instance, t.logf = path, instance, logf
+	t.wake = make(chan struct{}, 1)
+	t.quit = make(chan struct{})
+	t.done = make(chan struct{})
+	go t.worker(t.wake, t.quit, t.done)
 }
 
-// stop ends persistence, writing a change that was waiting for its second.
+// changed marks the counters dirty and wakes the worker. It never blocks and never does I/O.
+func (t *relayTracker) changed() {
+	t.pmu.Lock()
+	wake := t.wake
+	t.pmu.Unlock()
+	if wake == nil {
+		return
+	}
+	t.dirty.Store(true)
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// worker writes the counters at most once per relayFlushEvery, and once more when told to quit.
+func (t *relayTracker) worker(wake, quit <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	defer func() { _ = recover() }()
+	var last time.Time
+	flush := func() {
+		if !t.dirty.Swap(false) {
+			return
+		}
+		last = time.Now()
+		t.write()
+	}
+	for {
+		select {
+		case <-quit:
+			flush()
+			return
+		case <-wake:
+		}
+		if wait := relayFlushEvery - time.Since(last); wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+			case <-quit:
+				timer.Stop()
+				flush()
+				return
+			}
+		}
+		flush()
+	}
+}
+
+// stop ends persistence: the worker writes a change still waiting, but stop waits for it no longer than
+// relayStopWait, so a stalled state file system cannot hang shutdown.
 func (t *relayTracker) stop() {
 	if t == nil {
 		return
 	}
 	t.pmu.Lock()
-	defer t.pmu.Unlock()
-	if t.path == "" || t.stopped {
+	quit, done, logf := t.quit, t.done, t.logf
+	t.wake, t.quit, t.done = nil, nil, nil
+	t.pmu.Unlock()
+	if quit == nil {
 		return
 	}
-	t.stopped = true
-	if t.timer != nil {
-		t.timer.Stop()
-		t.timer = nil
-		t.writeLocked()
+	close(quit)
+	timer := time.NewTimer(t.stopWait())
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		if logf != nil {
+			logf("relay counters: final write gave up after %s (state directory not answering)", t.stopWait())
+		}
 	}
 }
 
-// writeLocked writes the counters atomically (0600, temporary file and rename), with pmu held. A failure is logged
-// once and otherwise ignored.
-func (t *relayTracker) writeLocked() {
-	t.lastWrite = time.Now()
-	t.mu.Lock()
-	c := t.c
-	t.mu.Unlock()
-	c.Started, c.WindowS = t.started, int(t.window/time.Second)
-	if t.instance != nil {
-		c.Instance = t.instance()
+func (t *relayTracker) stopWait() time.Duration {
+	if t.stopTimeout > 0 {
+		return t.stopTimeout
 	}
-	err := writeJSONAtomic(t.path, c)
-	if err != nil && !t.warned && t.logf != nil {
+	return relayStopWait
+}
+
+// write snapshots the counters (no lock held during I/O) and writes them atomically (0600, temporary file and
+// rename). A failure is logged once and otherwise ignored. Only the worker calls it.
+func (t *relayTracker) write() {
+	t.pmu.Lock()
+	path, logf, wf := t.path, t.logf, t.writeFn
+	t.pmu.Unlock()
+	if wf == nil {
+		wf = writeJSONAtomic
+	}
+	err := wf(path, t.counters())
+	if err != nil && !t.warned && logf != nil {
 		t.warned = true
-		t.logf("relay counters not written: %v", err)
+		logf("relay counters not written: %v", err)
 	}
 }
 

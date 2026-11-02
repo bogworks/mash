@@ -135,8 +135,15 @@ func TestRelayCountersFileIsWrittenOncePerSecond(t *testing.T) {
 	dir := t.TempDir()
 	path := relayCountersPath(dir, "o", "me")
 	tr.persistTo(path, func() string { return "inst1" }, t.Logf)
-	tr.send("me", "c", true) // written at once
-	c, ok := readCountersAt(t, dir)
+	tr.send("me", "c", true) // written by the worker at once
+	var c RelayCounters
+	var ok bool
+	for i := 0; i < 200; i++ {
+		if c, ok = readCountersAt(t, dir); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !ok || c.RelayedDeclared != 1 || c.Instance != "inst1" || c.WindowS != 60 {
 		t.Fatalf("%+v %v", c, ok)
 	}
@@ -384,8 +391,14 @@ func TestRelayCountersFileFromRun(t *testing.T) {
 	if _, err := ep.Send(ctx, "c", "yo", 0); err != nil {
 		t.Fatal(err)
 	}
-	c, ok := ReadRelayCounters(state, f.e.Owner, "b")
-	if !ok || c.RelayCandidates != 1 || c.Instance != ep.Instance() || c.Started.IsZero() {
+	// A background worker writes the file (within about a second), so poll for it.
+	var c RelayCounters
+	var ok bool
+	until(t, "the counters file is written", func() bool {
+		c, ok = ReadRelayCounters(state, f.e.Owner, "b")
+		return ok && c.RelayCandidates == 1
+	})
+	if c.Instance != ep.Instance() || c.Started.IsZero() {
 		t.Fatalf("%+v %v", c, ok)
 	}
 	// A one-shot client (no Run) sends and counts but writes no file.
@@ -405,3 +418,42 @@ func TestRelayCountersFileFromRun(t *testing.T) {
 }
 
 func itoaU(n uint64) string { return strconv.FormatUint(n, 10) }
+
+// A stalled state file system must not hold up a receipt or a send, nor shutdown (ADR 0064: no delay).
+func TestRelayStuckWriterDoesNotBlockPathsOrStop(t *testing.T) {
+	tr, _ := testTracker(time.Minute)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	defer close(release)
+	tr.writeFn = func(string, any) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}
+	tr.stopTimeout = 200 * time.Millisecond
+	tr.persistTo(relayCountersPath(t.TempDir(), "o", "me"), func() string { return "i" }, t.Logf)
+	tr.send("me", "c", true) // wakes the worker, which sticks in the write
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer never called")
+	}
+	start := time.Now()
+	for i := 0; i < 50; i++ {
+		tr.inbound(uint64(i), "a", true)
+		tr.send("me", "c", true)
+		_ = tr.counters()
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("paths blocked behind a stuck writer: %s", d)
+	}
+	start = time.Now()
+	tr.stop()
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("stop hung: %s", d)
+	}
+	tr.stop() // idempotent
+}

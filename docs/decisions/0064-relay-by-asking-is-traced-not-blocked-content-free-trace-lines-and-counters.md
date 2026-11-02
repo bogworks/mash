@@ -48,7 +48,8 @@ without mash judging content or risking a refused legitimate send.
   ignored. The line names the most recent such mail.
 * `mash status` shows `relay trace: inbound with via N, sends within <window>s of another sender's mail N, declared relays
   N`. serve writes the counters, with its instance id and start time, to `relay-counters.json` (0600, atomic, at most once
-  a second after a change) in the endpoint's state directory; the status command, another process, reads it and adds
+  a second after a change, by a background worker, so a slow state directory never delays a receipt or a send; shutdown
+  waits for the last write for 2 s at most) in the endpoint's state directory; the status command, another process, reads it and adds
   `(since <time>)`. A missing or unreadable file shows `relay trace: none recorded`. Counters are per serve run.
 * No flag, no block, no delay, no pattern and no operator rule. A tracker failure is swallowed.
 
