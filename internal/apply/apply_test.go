@@ -29,6 +29,7 @@ type fake struct {
 	applyPush bool // a push replaces token
 	pushes    int
 	lastPush  string // the token of the latest push
+	lookups   int
 }
 
 func (f *fake) Lookup(context.Context, string) (string, error) {

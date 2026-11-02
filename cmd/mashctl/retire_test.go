@@ -37,7 +37,7 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "retired c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "c's user is not revoked at the server: revocation is not implemented yet: delete the retired creds file and rotate the zone key if the user must be cut off") {
+	if !strings.Contains(out, "revoked in the account JWT") {
 		t.Errorf("revocation note: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -211,6 +211,7 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	before := h.policyText()
+	rs := stubRevoke(t)
 	other := ""
 	afterRetireRead = func() {
 		adm, _ := admin.New(h.e.Conn(t, h.e.AdminCreds), h.e.Owner)
@@ -230,6 +231,9 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 	}
 	if h.policyText() != before {
 		t.Error("policy changed")
+	}
+	if len(rs.calls) != 0 {
+		t.Errorf("the replaced record's endpoint had a key revoked: %v", rs.calls)
 	}
 	if r := h.records(); len(r) != 1 || !strings.HasSuffix(r[0], "/"+other) {
 		t.Errorf("the replaced record was not left in place: %v", r)

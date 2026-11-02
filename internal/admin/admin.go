@@ -26,6 +26,62 @@ type Admin struct {
 	js     jetstream.JetStream
 	owner  string
 	limits store.Limits
+	revoke RevokeHook // nil: the removal methods revoke nothing (see WithRevoker)
+}
+
+// RevokeHook revokes the NATS user key user (a public key) of an endpoint that is about to be removed. It runs under the
+// endpoint's name lock, after every guard of the removal has passed and before anything is removed; an error aborts the
+// removal with nothing removed.
+type RevokeHook func(ctx context.Context, user string) error
+
+// WithRevoker returns a copy of a whose Deprovision, DeprovisionIfUser and DeprovisionDrained call h, when it is not
+// nil, with the user key of the directory record read under the lock (see RevokeHook). Plain Deprovision calls it only
+// when the name has a readable record. a itself is unchanged.
+func (a *Admin) WithRevoker(h RevokeHook) *Admin {
+	c := *a
+	c.revoke = h
+	return &c
+}
+
+// revokeLocked runs the revoke hook for user, if both are set, and re-checks the lock afterwards (the hook may take
+// seconds). A hook error is a refusal (nothing was removed), though the revocation may be in force on some servers
+// (apply.ErrNotConfirmed). done reports that the hook returned nil: from then on the user is revoked, and a failure of
+// the lock check, like every later failure of the call, is a partialError (see partialIf).
+func (a *Admin) revokeLocked(ctx context.Context, lk *streamLock, name, user string) (done bool, err error) {
+	if a.revoke == nil || user == "" {
+		return false, nil
+	}
+	if err := a.revoke(ctx, user); err != nil {
+		return false, &refusedError{name: name, why: err, text: "could not confirm the revocation of " + shortKey(user) + ": " + err.Error() + "; it may already be in force on some servers; nothing was removed; run the same command again (revoking again is safe)"}
+	}
+	return true, partialIf(true, name, user, lk.check(ctx))
+}
+
+// shortKey is the first 8 characters of a key for messages (ctl.ShortKey; admin cannot import ctl).
+func shortKey(k string) string { return fmt.Sprintf("%.8s", k) }
+
+// partialError: the endpoint's NATS user was revoked, so its credentials are dead, but the removal did not complete.
+// It is never a refusal, whatever it wraps.
+type partialError struct {
+	name, user string
+	err        error
+}
+
+func (p *partialError) Error() string {
+	return "mash: PARTIAL: " + p.name + "'s user key " + shortKey(p.user) + " was revoked in the account JWT, so its credentials no longer work, but the removal did not complete: " + p.err.Error() + "; run the same command again (revoking again is safe)"
+}
+func (p *partialError) Unwrap() error { return p.err }
+
+// partialIf words err as a partialError when the user was revoked (done) and err is not nil.
+func partialIf(done bool, name, user string, err error) error {
+	if !done || err == nil {
+		return err
+	}
+	var p *partialError
+	if errors.As(err, &p) {
+		return err
+	}
+	return &partialError{name: name, user: user, err: err}
 }
 
 // SetLimits sets the caps Init, Provision and EnsureInbox use (default: store.DefaultLimits). It validates them.
@@ -837,19 +893,40 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	if err := lk.check(ctx); err != nil {
 		return err
 	}
+	var revoked bool
+	var ruser string
+	if a.revoke != nil {
+		// The record's user key, read under the lock. No record leaves nothing to revoke; a record that cannot be
+		// parsed hides its user key, so the removal fails closed.
+		e, err := kv.Get(ctx, name)
+		switch {
+		case err == nil:
+			rec, perr := store.ParseRecord(name, e.Value())
+			if perr != nil {
+				return &refusedError{name: name, why: perr, text: "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking (nothing was removed): " + perr.Error()}
+			}
+			done, err := a.revokeLocked(ctx, lk, name, rec.User)
+			revoked, ruser = done, rec.User
+			if err != nil {
+				return err
+			}
+		case !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted):
+			return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)
+		}
+	}
 	if err := fence(ctx, lease, name); err != nil {
-		return err
+		return partialIf(revoked, name, ruser, err)
 	}
 	if err := lk.check(ctx); err != nil {
-		return err
+		return partialIf(revoked, name, ruser, err)
 	}
 	if err := kv.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
-		return fmt.Errorf("mash: directory record: %w", err)
+		return partialIf(revoked, name, ruser, fmt.Errorf("mash: directory record: %w", err))
 	}
 	if err := lk.check(ctx); err != nil {
-		return err
+		return partialIf(revoked, name, ruser, err)
 	}
-	return a.deleteInbox(ctx, name)
+	return partialIf(revoked, name, ruser, a.deleteInbox(ctx, name))
 }
 
 // fenceAndDeleteInbox is the part of a deprovision that follows a guarded record delete (DeprovisionIfUser,
@@ -934,13 +1011,17 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if err := lk.check(ctx); err != nil {
 		return err
 	}
+	revoked, err := a.revokeLocked(ctx, lk, name, rec.User)
+	if err != nil {
+		return err
+	}
 	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
-			return fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name)
+			return partialIf(revoked, name, rec.User, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name))
 		}
-		return fmt.Errorf("mash: directory record: %w", err)
+		return partialIf(revoked, name, rec.User, fmt.Errorf("mash: directory record: %w", err))
 	}
-	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
+	return partialIf(revoked, name, rec.User, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }
 
 // The refusals of DeprovisionIfUser: each leaves the record, the lease and the inbox as they were.
@@ -996,25 +1077,25 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	ctx, end := lk.guard(ctx, "deprovision", &err)
 	defer end()
 	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
-	purged := false
+	purged, revoked := false, false
 	for try := 0; try < setMetaTries && !purged; try++ {
 		e, err := kv.Get(ctx, name)
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
 			if try > 0 {
-				return changed // it vanished after we read it: nothing proves ownership now
+				return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
 			}
 			return refusal(name, ErrNoRecord)
 		}
 		if err != nil {
-			return fmt.Errorf("mash: directory %s: %w", name, err)
+			return partialIf(revoked, name, user, fmt.Errorf("mash: directory %s: %w", name, err))
 		}
 		rec, err := store.ParseRecord(name, e.Value())
 		if err != nil {
-			return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err)
+			return partialIf(revoked, name, user, fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err))
 		}
 		if rec.User != user {
 			if try > 0 {
-				return changed
+				return partialIf(revoked, name, user, changed)
 			}
 			return refusal(name, ErrRecordOtherUser)
 		}
@@ -1022,7 +1103,15 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 			afterDeprovisionGet()
 		}
 		if err := lk.check(ctx); err != nil {
-			return err
+			return partialIf(revoked, name, user, err)
+		}
+		if !revoked {
+			// rec.User == user here; once per call, since a retry only repeats for the same user.
+			done, err := a.revokeLocked(ctx, lk, name, rec.User)
+			revoked = done
+			if err != nil {
+				return err
+			}
 		}
 		err = kv.Purge(ctx, name, jetstream.LastRevision(e.Revision()))
 		switch {
@@ -1032,23 +1121,34 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 			// Another admin changed the record (SetMeta bumps the revision). Re-read: if it is still this user's,
 			// retry on the new revision; a different user or a vanished record refuses on the next pass.
 		default:
-			return fmt.Errorf("mash: directory record: %w", err)
+			return partialIf(revoked, name, user, fmt.Errorf("mash: directory record: %w", err))
 		}
 	}
 	if !purged {
-		return changed
+		return partialIf(revoked, name, user, changed)
 	}
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()
 	}
-	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
+	return partialIf(revoked, name, user, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }
 
 // IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it
 // may come after the record was deleted (the lease fence or the inbox delete failed, or the connection broke).
 func IsRefusal(err error) bool {
+	var p *partialError
+	if errors.As(err, &p) {
+		return false
+	}
 	var r *refusedError
 	return errors.As(err, &r)
+}
+
+// IsPartial reports whether err says the endpoint's NATS user was revoked but the removal did not complete: the
+// credentials are dead and the same command run again finishes the removal.
+func IsPartial(err error) bool {
+	var p *partialError
+	return errors.As(err, &p)
 }
 
 func refusal(name string, why error) error {
