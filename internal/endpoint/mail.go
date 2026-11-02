@@ -570,7 +570,39 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 		}
 		return SendResult{}, fmt.Errorf("mash: message is %d bytes with headers; the limit is %d", size, store.MaxMsgSize)
 	}
-	ack, err := e.js.PublishMsg(ctx, msg)
+	// A publish the server refuses by permissions gets no reply, only a violation on the connection's error handler
+	// (refusal.go). Register for the subject first, publish in a goroutine, and take whichever comes first: the ack,
+	// a refusal, or the caller's deadline (which PublishMsg itself honours through pctx).
+	refused, release := e.refusals.register(msg.Subject)
+	defer release()
+	pctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type published struct {
+		ack *jetstream.PubAck
+		err error
+	}
+	done := make(chan published, 1)
+	go func() {
+		a, err := e.js.PublishMsg(pctx, msg)
+		done <- published{a, err}
+	}()
+	var ack *jetstream.PubAck
+	select {
+	case p := <-done:
+		ack, err = p.ack, p.err
+	case <-refused:
+		// Matching is by subject only, so a violation raised for another send to this subject could land while
+		// ours was acked. Prefer an ack that is already here.
+		select {
+		case p := <-done:
+			ack, err = p.ack, p.err
+			if err != nil {
+				return SendResult{}, &RefusedError{To: to, Subject: msg.Subject}
+			}
+		default:
+			return SendResult{}, &RefusedError{To: to, Subject: msg.Subject}
+		}
+	}
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err}

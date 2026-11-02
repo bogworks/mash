@@ -7,6 +7,11 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 ### Fixed
 
 - Two admins changing the limits of one inbox at the same time can no longer leave the lower cap (and evict mail). `mash admin limits` and `mash admin provision` take a per-stream lock (`limits-lock.<name>` in the lease bucket, 30 s expiry) before reading the stream and hold it through the update; a second admin waits up to 20 s, then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`. Admins' clocks should agree to within a few seconds (see "Changing limits later" in [docs/operations.md](docs/operations.md), [ADR-0048](docs/decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), #27).
+
+### Changed
+
+- `mash send` and the `send` tool fail at once with `refused by policy: you may not mail <name>` when the server refuses the publish by permissions, instead of waiting out the timeout and reporting that the message "may or may not have been delivered". The refusal is not a timeout (exit code 1, nothing to retry). It needs a sender whose permissions omit the recipient's mail subject; see "Refused sends" in [docs/operations.md](docs/operations.md).
+
 ## [Unreleased]
 
 ### Added
