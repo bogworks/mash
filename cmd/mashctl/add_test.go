@@ -229,7 +229,7 @@ func TestAddAndReissue(t *testing.T) {
 		t.Fatalf("second --changed: %d %q", code, out)
 	}
 	// by name, even when nothing changed; the file is replaced and the key is still the same
-	if out, _, code := h.run("reissue", "b"); code != 0 || out != "reissued b (tags: none)\n" {
+	if out, _, code := h.run("reissue", "b"); code != 0 || out != "reissued b (tags: deny:_none)\n" {
 		t.Fatalf("reissue b: %d %q", code, out)
 	}
 	// errors name the endpoint
@@ -520,5 +520,43 @@ func TestReissueRefusedOverBudget(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(h.creds("big")); !bytes.Equal(before, after) {
 		t.Error("creds changed")
+	}
+}
+
+// TestReissueChangedFindsCredsWithoutDenyNone: a creds file minted before every user carried deny:_none (simulated by
+// minting with the compiled tags minus the placeholder) is stale, and --changed lists it and only it.
+func TestReissueChangedFindsCredsWithoutDenyNone(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seed("b")
+	data, err := os.ReadFile(h.policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, c, err := compileBytes(data, h.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range c.Endpoints {
+		c.Endpoints[i].Tags = slices.DeleteFunc(slices.Clone(c.Endpoints[i].Tags), func(s string) bool { return s == admin.NoDenyTag })
+	}
+	m, err := mint.Mint(h.keys(), c, "a2", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.creds("a2"), m.Creds, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := h.credsClaims("a2"); slices.Contains([]string(old.Tags), admin.NoDenyTag) {
+		t.Fatalf("the simulated old creds carry the placeholder: %v", old.Tags)
+	}
+	out, errb, code := h.run("reissue", "--changed")
+	if code != 0 || out != "reissued a2 (tags: deny:_none)\n" {
+		t.Fatalf("--changed: %d %q %q", code, out, errb)
+	}
+	if uc, _ := h.credsClaims("a2"); !slices.Contains([]string(uc.Tags), admin.NoDenyTag) {
+		t.Errorf("tags after reissue: %v", uc.Tags)
+	}
+	if out, _, code := h.run("reissue", "--changed"); code != 0 || out != "nothing to reissue\n" {
+		t.Fatalf("second --changed: %d %q", code, out)
 	}
 }

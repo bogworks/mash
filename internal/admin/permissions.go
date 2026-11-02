@@ -103,11 +103,14 @@ func NSCFlags(owner, name string) []string {
 const (
 	AllowTag = "allow"
 	DenyTag  = "deny"
-	// NoDenyTag is the harmless deny tag a user of a zone whose key has deny templates carries when it has no other.
+	// NoDenyTag is the placeholder deny tag EVERY user carries, whether or not its zone has a deny exception.
 	// nats-server refuses to authenticate a user whose scoped key has a {{tag(deny)}} template in a deny list and
-	// that has no deny tag ("generated invalid subject"; allow lists just drop the line). No zone or endpoint name
-	// starts with a digit, so agents.<verb>.*.<owner>.0 addresses nothing.
-	NoDenyTag = DenyTag + ":0"
+	// that has no deny tag ("generated invalid subject"; allow lists just drop the line), and every zone key carries
+	// that template from its first compile, so every user needs one deny tag: this one. Its value "_none" is a valid
+	// subject token, and no endpoint or zone name can be "_none" (names start with a letter), so
+	// agents.mail.*.<owner>._none addresses nothing. Because every user carries it from the start, the first real deny
+	// exception of a zone changes only the JWTs of the endpoints it names, never the zone key.
+	NoDenyTag = DenyTag + ":_none"
 )
 
 // ZonePermissions is the permission template of the scoped signing key of zone under owner. Only MAIL carries the zone
@@ -120,11 +123,15 @@ const (
 //     every endpoint of each wildcardZones entry;
 //   - the mail exception line agents.mail.*.<owner>.{{tag(allow)}}, one subject per "allow:" tag of the user; a user
 //     with no allow tag gets none;
+//   - the mail deny line agents.mail.*.<owner>.{{tag(deny)}}, one subject per "deny:" tag of the user: a deny beats
+//     any allow, so a user's deny tags remove peers from what the mail wildcards grant. The key carries it always,
+//     so adding a zone's first deny exception never changes the key. nats-server refuses a user with no deny tag
+//     under this template, so every user carries NoDenyTag at least;
 //   - two fixed, open lines, agents.prompt.*.<owner>.* and agents.status.*.<owner>.*: live prompts and status probes
 //     to any endpoint of the owner are not policed until a later decision (ADR 0054).
 //
 // The endpoint's own prompt and status subscriptions are the five-token sap.For subjects with {{name()}}. Nothing else
-// addresses a peer. The block is never empty. See ZonePermissionsWithDeny for deny exceptions. The templates need the
+// addresses a peer. The block is never empty. The templates need the
 // scoped-key user to carry empty permissions of its own. zone names the key; no line spells it out except through
 // the mail wildcards it is a recipient of.
 func ZonePermissions(owner, zone string, wildcardZones []string) jwt.Permissions {
@@ -146,16 +153,7 @@ func ZonePermissions(owner, zone string, wildcardZones []string) jwt.Permissions
 	}
 	var p jwt.Permissions
 	p.Pub.Allow.Add(pub...)
-	p.Sub.Allow.Add(sub...)
-	return p
-}
-
-// ZonePermissionsWithDeny is ZonePermissions plus the MAIL publish deny line agents.mail.*.<owner>.{{tag(deny)}}: a
-// user's "deny:" tags remove peers from what the zone's mail wildcards grant (a deny beats any allow). Prompt and
-// status are open and have no deny line. Every user of the zone must then carry at least one deny tag, NoDenyTag if
-// it has no real one.
-func ZonePermissionsWithDeny(owner, zone string, wildcardZones []string) jwt.Permissions {
-	p := ZonePermissions(owner, zone, wildcardZones)
 	p.Pub.Deny.Add("agents.mail.*." + owner + ".{{tag(" + DenyTag + ")}}")
+	p.Sub.Allow.Add(sub...)
 	return p
 }

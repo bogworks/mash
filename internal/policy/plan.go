@@ -3,7 +3,6 @@ package policy
 import (
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/bogworks/mash/internal/admin"
 )
@@ -20,7 +19,6 @@ type plan struct {
 	members    map[string][]string // zone -> endpoint names, sorted
 	zone       map[string]string   // endpoint -> zone
 	wildcards  map[string][]string // sending zone -> receiving zones its key grants whole, sorted
-	denyZone   map[string]bool     // sending zone -> its key carries {{tag(deny)}} templates
 	tags       map[string][]string // endpoint -> sorted tags (allow:, deny:)
 	recipients map[string][]string // endpoint -> decided recipients, sorted
 }
@@ -34,13 +32,14 @@ type plan struct {
 //     it may mail nobody in Zr). The wildcard belongs to the key and so to every sender of Zs: (b) is chosen when it
 //     needs fewer tags in total over all senders of Zs, (a) on a tie.
 //
-// A zone with any (b) pair needs deny templates on its key, and nats-server refuses a user without a deny tag then,
-// so every user of that zone carries at least admin.NoDenyTag.
+// Every zone key carries the deny template from its first compile and nats-server refuses a user without a deny tag
+// then, so EVERY user carries admin.NoDenyTag besides its real tags: a zone's first deny exception re-signs only the
+// endpoints it names.
 func (f *File) plan() plan {
 	names := f.names()
 	p := plan{
 		members: map[string][]string{}, zone: map[string]string{}, wildcards: map[string][]string{},
-		denyZone: map[string]bool{}, tags: map[string][]string{}, recipients: map[string][]string{},
+		tags: map[string][]string{}, recipients: map[string][]string{},
 	}
 	idx := make(map[string]int, len(names))
 	for i, n := range names {
@@ -96,7 +95,6 @@ func (f *File) plan() plan {
 			if useDeny {
 				kind = admin.DenyTag
 				p.wildcards[zs] = append(p.wildcards[zs], zr)
-				p.denyZone[zs] = true
 			}
 			for _, s := range S {
 				// The recipients the tags name: the allowed ones under (a), the denied ones under (b).
@@ -120,12 +118,7 @@ func (f *File) plan() plan {
 	}
 	for _, z := range p.zones {
 		for _, n := range p.members[z] {
-			if p.denyZone[z] && !slices.ContainsFunc(p.tags[n], func(t string) bool { return strings.HasPrefix(t, admin.DenyTag+":") }) {
-				p.tags[n] = append(p.tags[n], admin.NoDenyTag)
-			}
-			if p.tags[n] == nil {
-				p.tags[n] = []string{}
-			}
+			p.tags[n] = append(p.tags[n], admin.NoDenyTag)
 			slices.Sort(p.tags[n])
 		}
 	}

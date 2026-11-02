@@ -28,8 +28,8 @@ type Compiled struct {
 // CompiledZone is one zone's scoped signing key.
 type CompiledZone struct {
 	Name string
-	// Perms is the key's permission template for MAIL (admin.ZonePermissions, or ZonePermissionsWithDeny when some sender of
-	// the zone has deny exceptions). Its {{name()}} and {{tag()}} templates expand per user; see Effective.
+	// Perms is the key's permission template for MAIL (admin.ZonePermissions: the allow and the deny tag template always, so the
+	// key does not change when the zone gets its first deny exception). Its {{name()}} and {{tag()}} templates expand per user; see Effective.
 	Perms jwt.Permissions
 	// Wildcards are the recipient zones the key lets every endpoint of this zone address whole, sorted.
 	Wildcards []string
@@ -47,7 +47,7 @@ type CompiledEndpoint struct {
 	Recipients []string
 	// Tags are the tags the endpoint's user JWT carries, sorted: allow:<zone>.<name> or allow:<zone>.* for what the
 	// zone key does not grant it, deny:<zone>.<name> or deny:<zone>.* for what it grants but the file forbids, and
-	// admin.NoDenyTag where the key has deny templates and the user has no deny tag. Never nil.
+	// admin.NoDenyTag always (every zone key has the deny template and nats-server refuses a user with no deny tag). Never nil.
 	Tags []string
 }
 
@@ -78,9 +78,6 @@ func Compile(f *File, owner string) (*Compiled, error) {
 	c := &Compiled{Owner: owner, Default: f.defaultName(), SubjectLabel: f.subjectLabel()}
 	for _, z := range p.zones {
 		perms := admin.ZonePermissions(owner, z, p.wildcards[z])
-		if p.denyZone[z] {
-			perms = admin.ZonePermissionsWithDeny(owner, z, p.wildcards[z])
-		}
 		c.Zones = append(c.Zones, CompiledZone{Name: z, Perms: perms, Wildcards: append([]string{}, p.wildcards[z]...), Endpoints: append([]string{}, p.members[z]...)})
 	}
 	for _, name := range f.names() {
@@ -114,7 +111,8 @@ func (c *Compiled) endpoint(name string) (CompiledEndpoint, bool) {
 
 // Effective is the permission set nats-server gives the user of endpoint name: the zone key's template with {{name()}}
 // replaced by the name and {{tag(x)}} by one subject per "x:" tag of the user (a line whose tag template finds no tag
-// is dropped from an allow list; in a deny list nats-server refuses the user instead, and so does Effective). It
+// is dropped from an allow list; in a deny list nats-server refuses the user instead, and so does Effective). A tag
+// template yields one line per tag value, so the deny line comes out once for NoDenyTag and once per real deny tag. It
 // evaluates the same expansion nats-server does at connect time, so tests can compare the file's decisions with what
 // would be enforced. Only mail is policed: prompt and status publishes are open, five-token lines.
 func (c *Compiled) Effective(name string) (jwt.Permissions, error) {

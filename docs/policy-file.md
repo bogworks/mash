@@ -48,17 +48,21 @@ The compile is one scoped signing key per zone:
 
 - The key's permission template holds the fixed per-endpoint lines (own heartbeat, inbox, lease and so on) as `{{name()}}` templates, so each user gets its own, and one mail publish line for every recipient zone that every endpoint of the zone may address: `agents.mail.*.<owner>.<zone>.*`.
 - Anything finer than a zone pair is an exception carried as tags on the user's JWT: `allow:<zone>.<name>` (or `allow:<zone>.*`) and `deny:<zone>.<name>` (or `deny:<zone>.*`), expanded by `agents.mail.*.<owner>.{{tag(allow)}}` in the key's publish allow list and `agents.mail.*.<owner>.{{tag(deny)}}` in its publish deny list. NATS lets a deny beat an allow.
-- For each pair of zones (sender zone, recipient zone) the compile looks at every pair of endpoints: all allowed gives the wildcard and no tags; none allowed gives nothing; a mix gives the cheaper of two encodings, counted in tags over all senders of the sender zone: allow tags for the allowed pairs and no wildcard, or the wildcard and deny tags for the denied pairs. The wildcard belongs to the key, so it applies to every sender of the zone; a tie goes to the allow tags. A sender allowed nothing in the zone gets no tag (or one deny tag for the whole zone under the wildcard encoding).
+- For each pair of zones (sender zone, recipient zone) the compile looks at every pair of endpoints: all allowed gives the wildcard and no tags; none allowed gives nothing; a mix gives the cheaper of two encodings, counted in tags over all senders of the sender zone: allow tags for the allowed pairs and no wildcard, or the wildcard and deny tags for the denied pairs. The wildcard belongs to the key, so it applies to every sender of the zone; a tie goes to the allow tags. A sender allowed nothing in the zone gets no real tag (or one deny tag for the whole zone under the wildcard encoding).
 - A sender allowed nobody still has a non-empty permission block: the fixed lines stay.
 
 Limits of the encoding, each measured against nats-server 2.15:
 
-- `{{tag(deny)}}` expands in the publish deny list, but nats-server refuses to authenticate a user whose scoped key has such a template and who has no `deny:` tag at all (the allow template just drops its lines). So every user of a zone whose key has deny templates carries at least the placeholder tag `deny:0`, which addresses nothing (no name starts with a digit). Adding the first deny exception to a zone therefore changes the key and re-issues all of that zone's users.
+- `{{tag(deny)}}` expands in the publish deny list, but nats-server refuses to authenticate a user whose scoped key has such a template and who has no `deny:` tag at all (the allow template just drops its lines). So every zone key carries both templates from its first compile, and every user carries the placeholder tag `deny:_none`, which addresses nothing (no name or zone is `_none`, since names start with a letter). A tag template expands to one line per tag value, so a user with `deny:_none` and a real deny tag gets both deny lines. Adding the first deny exception to a zone therefore does not change the zone key: only the endpoints the exception names are re-signed (see [ADR 0056](decisions/0056-every-zone-key-carries-both-tag-templates-and-every-user-the-deny-none-placeholder.md))
 - Tags are lower-cased and their values become subjects as written: a tag is a permission. Whoever signs users with a zone's key is that zone's policy authority and can grant any exception.
 - **A zone wildcard covers every name in its zone, declared or not.** `agents.mail.*.<owner>.<zoneB>.*` lets a sender publish to an endpoint of zone B that the file does not list. The compile's recipient lists and tests cover declared endpoints only. The invariant that closes this is that the file is the inventory: every endpoint is minted through the file (one authority, whoever holds the account key, as above), so an endpoint of a zone that the file does not declare can exist only if someone with the key mints a user under that zone key by hand. `mashctl drift` must report directory records and users that the file does not declare.
 - A user's JWT travels in the CONNECT line, which the default server caps at 4096 bytes together with the signature and options. A 3,522-byte user JWT connects and a 4,056-byte one does not, so the budget limit is 4,000 bytes, about 150 tags. A rule on a label other than the zone, aimed at many endpoints, spends tags; keep such rules to a few endpoints or give the group its own zone.
 
 `Compiled.Effective(name)` expands a zone key for one endpoint exactly as nats-server does, and a property test checks over random files that the subjects it lets an endpoint publish to are its recipients, no more and no fewer. A live test starts nats-server in operator mode with the compiled keys and publishes every sender and recipient of the enterprise example and two further files, checking each against the compile: mail on its six-token subject is allowed exactly as compiled, while a five-token prompt and status probe to any peer is always allowed.
+
+## Migrating a deployment minted before the deny placeholder
+
+Zone keys now carry the deny template from their first compile and every user carries `deny:_none` (ADR 0056). A deployment minted earlier must move in this order: `mashctl reissue --changed` first (each user gains `deny:_none`, which is harmless under the old key), then `mashctl policy apply`. Applying first makes nats-server refuse every user that has no deny tag, so each not-yet-reissued endpoint loses its connection at its next reconnect.
 
 ## Sizes
 
@@ -68,9 +72,9 @@ The account JWT grows with zones and the zone pairs granted, not with endpoints.
 
 | File | Account JWT | Largest user JWT |
 | --- | --- | --- |
-| 1,000 endpoints in 20 zones, each zone may mail the next three | 29,185 bytes | 606 bytes |
-| 60 endpoints, one zone, everyone may mail everyone | 2,077 bytes | 609 bytes |
-| 60 endpoints in 60 zones of their own, everyone may mail everyone | 227,772 bytes | 609 bytes |
+| 1,000 endpoints in 20 zones, each zone may mail the next three | 30,358 bytes | 636 bytes |
+| 60 endpoints, one zone, everyone may mail everyone | 2,136 bytes | 638 bytes |
+| 60 endpoints in 60 zones of their own, everyone may mail everyone | 231,292 bytes | 638 bytes |
 
 The last row is the worst shape (the number of wildcards is quadratic in zones, so all-to-all passes 1 MiB at about 140 zones). A user's tags are the only thing that grows with a sparse set of exceptions, and adding an endpoint never touches the account JWT.
 

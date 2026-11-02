@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -816,7 +817,7 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, policy.AccountJWTLimit)
 	tagged := 0
 	for _, e := range p.Compiled.Endpoints {
-		if len(e.Tags) > 0 {
+		if hasExceptionTags(e) {
 			tagged++
 		}
 	}
@@ -831,6 +832,17 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 	}
 }
 
+// hasExceptionTags reports whether the endpoint carries a real exception tag: every user carries the placeholder
+// admin.NoDenyTag (ADR 0056), which is not an exception.
+func hasExceptionTags(e policy.CompiledEndpoint) bool {
+	for _, t := range e.Tags {
+		if t != admin.NoDenyTag {
+			return true
+		}
+	}
+	return false
+}
+
 // notCovered prints the fixed block of what apply does not do, when the policy has endpoints. It is printed only on
 // success, diff and dry-run, never on a refusal or an error.
 func notCovered(out io.Writer, p Params) {
@@ -840,7 +852,7 @@ func notCovered(out io.Writer, p Params) {
 	}
 	var tagged []string
 	for _, e := range eps {
-		if len(e.Tags) > 0 {
+		if hasExceptionTags(e) {
 			tagged = append(tagged, e.Name)
 		}
 	}
