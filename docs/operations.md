@@ -54,6 +54,20 @@ The `mashadmin` creds that `--mint-admin` writes carry no permission limits on t
 
 Adopt changes nothing on the server: it pushes no account update, creates no NATS user there (a minted `mashadmin` exists only as a local creds file, usable because the account key signed it) and no buckets. The cutover of a live account, meaning pushing zone keys and revoking the credentials issued before, is a separate step the operator runs: `mashctl init` creates the buckets, `mashctl add` mints endpoints, and `mashctl policy apply` pushes the policy. Until then, credentials minted by other tools keep working.
 
+## Which server does mashctl change?
+
+`mashctl` has no flag that names its server. It takes the server, the owner and the admin credentials from `config.json` in the config directory, and the endpoint's own `MASH_*` variables (`MASH_URL`, `MASH_OWNER`, `MASH_ADMIN_CREDS`, `MASH_TLS_CA`, ...) win over the file. Run from a shell inside a mash agent session, those variables are the session's, so `mashctl init`, `list` and the other verbs act on the session's own server, not the scratch one you may have meant.
+
+Every verb that connects to a server or changes one (`init`, `limits`, `provision`, `set-meta`, `set-zone`, `suspend`, `resume`, `suspended`, `deprovision`, `list`, `add`, `retire`, `label --sync`, `policy apply`, `diff`, `drift` and `repair`) first prints, to stderr, what it is about to act on and where each setting came from:
+
+```
+mashctl: target server tls://host:4222 (from MASH_URL), owner acme (from /home/me/.config/mash/config.json), admin creds /home/me/.config/mash/admin.creds (from MASH_ADMIN_CREDS)
+```
+
+The policy verbs add the system credentials' path when it is known. Credentials files are named, never printed; a password in a URL is shown as `***`. When an environment variable overrides a different value in `config.json` (the url, owner, admin creds or `tls_ca`), a warning names both values, and when `MASH_NAME` or `MASH_LAUNCH_TOKEN` is set and the url came from `MASH_URL`, a second warning says the shell looks like it is inside a mash session. These lines inform; they never refuse, and the TLS and issuer rules are unchanged. The offline verbs (`permissions`, `limits --show`, `policy check`, `test`, `explain`, `show`, `init --local`, `reissue`, `label` without `--sync`) print nothing of this.
+
+A flag or context to choose the target explicitly (`--server`, `--config-dir`) is deferred to the CLI redesign; the CLI is frozen until then. Until then, to use `config.json` instead of the session's variables run `env -u MASH_URL -u MASH_OWNER -u MASH_ADMIN_CREDS -u MASH_TLS_CA mashctl ...`, or run mashctl outside the session.
+
 ## The account
 
 Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.

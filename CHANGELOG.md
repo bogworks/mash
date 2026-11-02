@@ -13,6 +13,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Changed
 
+- `mashctl` says which server it is about to act on (#183): before every verb that connects to a server or changes one it prints `mashctl: target server <url> (from <source>), owner ... , admin creds ...` to stderr, warns when a `MASH_*` environment variable overrides a different value in `config.json`, and warns when `MASH_NAME` or `MASH_LAUNCH_TOKEN` shows the shell is inside a mash session whose own server the url is. Nothing is refused and the precedence is unchanged; offline verbs print nothing. The `--server` and `--config-dir` flags the issue also asks for are deferred to the CLI redesign (the CLI is frozen); until then use `env -u MASH_URL ...` or run outside the session. See "Which server does mashctl change?" in the operations guide.
 - A rule with `log: true` is now a `policy check` error (`rule NAME (line N): log is not implemented yet; remove it`): the field never did anything. `log: false` and a missing `log` are fine ([ADR 0062](docs/decisions/0062-log-is-rejected-until-implemented-check-runs-the-budget-case-variant-labels-warn-usage-errors-exit-2.md), issue 185).
 - `mashctl policy check` also runs the JWT size budget and fails (exit 1, the text `show --budget` prints) when the account JWT would exceed 1 MiB; it used to print OK for a file that `apply` refused.
 - `policy check` warns when label values for one key differ only in case across endpoints (`Finance`, `finance`), naming the key, both spellings and their lines.
