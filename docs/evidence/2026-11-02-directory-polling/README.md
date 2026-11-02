@@ -5,9 +5,9 @@ Measurement only; no product code changed. Harness: `scripts/dirbench/main.go`. 
 ## Method
 
 - 3-server NATS cluster (v2.15.1), JetStream with file storage in temp dirs, no auth, no TLS, loopback, a monitor port on each. Servers run under `nice -n 10`.
-- Directory bucket created with `store.DirectoryConfig()` (the product's config: history 1, file storage, **replicas 1**, i.e. R1; the product never sets replicas). N valid `store.Record` JSON records (~330 bytes each) put under the endpoint name with plain KV puts.
+- Directory bucket created with `store.DirectoryConfig()` (the product's config: history 1, file storage, **replicas 1**, i.e. R1; the product never sets replicas) under a benchmark-owned unique name `dirbench-<8 random hex>` (the name does not affect the numbers; the request subjects below use that name in place of `mash-directory`). The bench only creates and deletes that one bucket, and refuses non-loopback servers unless given `-i-know-this-is-a-scratch-server`: it is for scratch servers only, never a deployment. Runs recorded in `results*.txt` were made with an earlier revision of the harness that used the name `mash-directory` on the fresh scratch cluster; the request pattern is identical. N valid `store.Record` JSON records (~330 bytes each) put under the endpoint name with plain KV puts.
 - N simulated endpoints in one bench process, each with its own NATS connection spread round-robin over the 3 servers. Each runs:
-  - a directory poll every 15 s: filtered stream info on `KV_mash-directory` (`subjects_filter`, paged like `directoryKeys`), then one direct get (`$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.<key>`) per key, 64 in flight at a time, 5 s timeout, as in `internal/endpoint/client.go`;
+  - a directory poll every 15 s: filtered stream info on `KV_<bucket>` (`subjects_filter`, paged like `directoryKeys`), then one direct get (`$JS.API.DIRECT.GET.KV_<bucket>.$KV.<bucket>.<key>`) per key, 64 in flight at a time, 5 s timeout, as in `internal/endpoint/client.go`;
   - a heartbeat every 30 s, 300-byte payload, on `agents.hb.cc.o.<name>`;
   - a subscription on `agents.hb.*.o.*` that only counts deliveries (no signature verification).
 - Random start offset in [0,15 s) for polls and [0,30 s) for heartbeats; the `-sync` variant starts every endpoint's poll and heartbeat at the same instant.

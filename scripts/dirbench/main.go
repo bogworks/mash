@@ -3,27 +3,40 @@
 // has its own connection, polls the directory the way internal/endpoint does (a filtered stream info for the keys,
 // then one direct get per key, 64 at a time, five second timeout), publishes a heartbeat on agents.hb.cc.<owner>.<name>
 // and counts what its agents.hb.*.<owner>.* subscription delivers. It does not sign or verify anything and does not
-// import the Endpoint. It creates the directory bucket from store.DirectoryConfig (replicas settable by flag), writes
-// N valid records, runs a warm-up and then a measured window, and prints key=value lines: client counters, and server
-// side numbers from /varz deltas and /proc (CPU, RSS) of the server pids it is given.
+// import the Endpoint. It creates a bucket of its OWN, named dirbench-<8 random hex>, with the product's directory
+// config (store.DirectoryConfig: history, storage; replicas settable by flag), writes N valid records, runs a warm-up
+// and then a measured window, and prints key=value lines: client counters, and server side numbers from /varz deltas
+// and /proc (CPU, RSS) of the server pids it is given.
+//
+// SCRATCH SERVERS ONLY. The tool refuses to start unless every -urls host is loopback (127.0.0.0/8, ::1, localhost),
+// or -i-know-this-is-a-scratch-server is passed. It only ever creates its own uniquely named bucket (after checking
+// that neither the bucket nor its stream exists), never touches any other bucket, stream or key, and deletes only that
+// bucket at the end, on error and on SIGINT/SIGTERM. It still loads the server with N connections and polls: do not
+// point it at a deployment.
 //
 // Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1]
 package main
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -54,9 +67,44 @@ var (
 	measuring                                         atomic.Bool
 	durMu                                             sync.Mutex
 	durs                                              []float64
+	bucket                                            string // the benchmark-owned bucket; set once in run before any endpoint starts
 )
 
-func main() {
+// newBucketName is dirbench-<8 random hex>: a name no deployment uses.
+func newBucketName() (string, error) {
+	var b [4]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "dirbench-" + hex.EncodeToString(b[:]), nil
+}
+
+// checkLoopback reports an error unless every URL's host is localhost or a loopback address.
+func checkLoopback(urls []string) error {
+	for _, raw := range urls {
+		r := strings.TrimSpace(raw)
+		if !strings.Contains(r, "://") {
+			r = "nats://" + r
+		}
+		u, err := url.Parse(r)
+		if err != nil || u.Hostname() == "" {
+			return fmt.Errorf("cannot parse server URL %q", raw)
+		}
+		h := u.Hostname()
+		if strings.EqualFold(h, "localhost") {
+			continue
+		}
+		if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+			continue
+		}
+		return fmt.Errorf("server %q is not a loopback host: dirbench is for scratch servers only; pass -i-know-this-is-a-scratch-server to override", raw)
+	}
+	return nil
+}
+
+func main() { os.Exit(run()) }
+
+func run() int {
 	urls := flag.String("urls", "", "comma separated client URLs of the cluster")
 	mons := flag.String("mon", "", "comma separated monitor base URLs (for /varz), same order as -pids")
 	pids := flag.String("pids", "", "comma separated nats-server pids")
@@ -67,19 +115,48 @@ func main() {
 	hb := flag.Duration("hb", defHB, "heartbeat interval")
 	warm := flag.Duration("warm", defWarm, "wait after ramp-up before measuring")
 	measure := flag.Duration("measure", defMeasure, "measured window")
+	scratch := flag.Bool("i-know-this-is-a-scratch-server", false, "allow non-loopback -urls (the tool creates and deletes its own dirbench-* bucket only)")
 	flag.Parse()
 	u := strings.Split(*urls, ",")
 	m := strings.Split(*mons, ",")
 	pl := strings.Split(*pids, ",")
 	if *urls == "" || len(m) != len(pl) {
 		fmt.Fprintln(os.Stderr, "need -urls, and -mon and -pids of equal length")
-		os.Exit(2)
+		return 2
 	}
+	if !*scratch {
+		if err := checkLoopback(u); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	name, err := newBucketName()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bucket name:", err)
+		return 1
+	}
+	bucket = name
 	ctx := context.Background()
-	if err := setup(ctx, u[0], *n, *replicas); err != nil {
-		fmt.Fprintln(os.Stderr, "setup:", err)
-		os.Exit(1)
+	var created atomic.Bool
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			if created.Load() {
+				if err := dropBucket(ctx, u[0], bucket); err != nil {
+					fmt.Fprintln(os.Stderr, "cleanup: could not delete bucket", bucket+":", err)
+				}
+			}
+		})
 	}
+	defer cleanup()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() { <-sig; cleanup(); os.Exit(130) }()
+	if err := setup(ctx, u[0], bucket, *n, *replicas, &created); err != nil {
+		fmt.Fprintln(os.Stderr, "setup:", err)
+		return 1
+	}
+	fmt.Printf("bucket=%s\n", bucket)
 
 	eps := make([]*ep, *n)
 	ramp := time.Now()
@@ -157,6 +234,7 @@ func main() {
 			e.nc.Close()
 		}
 	}
+	return 0
 }
 
 func loop(stop chan struct{}, off, every time.Duration, f func()) {
@@ -178,7 +256,8 @@ func loop(stop chan struct{}, off, every time.Duration, f func()) {
 	}
 }
 
-func setup(ctx context.Context, url string, n, replicas int) error {
+// dropBucket deletes the named bucket; it is only ever called with the bucket this process created.
+func dropBucket(ctx context.Context, url, name string) error {
 	nc, err := nats.Connect(url)
 	if err != nil {
 		return err
@@ -188,13 +267,40 @@ func setup(ctx context.Context, url string, n, replicas int) error {
 	if err != nil {
 		return err
 	}
-	_ = js.DeleteKeyValue(ctx, store.DirectoryBucket)
+	return js.DeleteKeyValue(ctx, name)
+}
+
+// setup creates the benchmark's own bucket (refusing if the name already exists) and fills it with n records.
+// created is set as soon as CreateKeyValue succeeds, so the caller deletes exactly what was created.
+func setup(ctx context.Context, url, name string, n, replicas int, created *atomic.Bool) error {
+	nc, err := nats.Connect(url)
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
+	if _, err := js.KeyValue(ctx, name); err == nil {
+		return fmt.Errorf("bucket %q already exists on the server; refusing to touch it", name)
+	} else if !errors.Is(err, jetstream.ErrBucketNotFound) {
+		return fmt.Errorf("checking that bucket %q does not exist: %w", name, err)
+	}
+	if _, err := js.Stream(ctx, "KV_"+name); err == nil {
+		return fmt.Errorf("stream KV_%s already exists on the server; refusing to touch it", name)
+	} else if !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return fmt.Errorf("checking that stream KV_%s does not exist: %w", name, err)
+	}
 	cfg := store.DirectoryConfig()
+	cfg.Bucket = name
+	cfg.Description = "dirbench scratch bucket"
 	cfg.Replicas = replicas
 	kv, err := js.CreateKeyValue(ctx, cfg)
 	if err != nil {
 		return err
 	}
+	created.Store(true)
 	for i := range n {
 		name := fmt.Sprintf("e%04d", i)
 		rec := store.Record{Name: name, Owner: owner, Agent: "A" + name, AgentToken: "tok-" + name + "-0123456789abcdef0123456789abcdef",
@@ -211,12 +317,12 @@ func setup(ctx context.Context, url string, n, replicas int) error {
 // loadDirectory is internal/endpoint's loadDirectory: keys by filtered stream info, then one direct get per key.
 func loadDirectory(nc *nats.Conn) {
 	t0 := time.Now()
-	prefix := "$KV." + store.DirectoryBucket + "."
+	prefix := "$KV." + bucket + "."
 	var keys []string
 	for {
 		body, _ := json.Marshal(map[string]any{"offset": len(keys), "subjects_filter": prefix + ">"})
 		cStream.Add(1)
-		m, err := req(nc, "$JS.API.STREAM.INFO.KV_"+store.DirectoryBucket, body)
+		m, err := req(nc, "$JS.API.STREAM.INFO.KV_"+bucket, body)
 		if err != nil {
 			cLoadFail.Add(1)
 			return
@@ -247,7 +353,7 @@ func loadDirectory(nc *nats.Conn) {
 		go func() {
 			defer func() { <-sem; wg.Done() }()
 			cGet.Add(1)
-			m, err := req(nc, "$JS.API.DIRECT.GET.KV_"+store.DirectoryBucket+".$KV."+store.DirectoryBucket+"."+k, nil)
+			m, err := req(nc, "$JS.API.DIRECT.GET.KV_"+bucket+".$KV."+bucket+"."+k, nil)
 			if err != nil || m.Header.Get("Status") != "" {
 				bad.Store(true)
 			}
