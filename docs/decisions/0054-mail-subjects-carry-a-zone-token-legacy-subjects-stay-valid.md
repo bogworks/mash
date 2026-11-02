@@ -52,11 +52,17 @@ ADR 0005 for the mail verb only.
   a `mail_subject` equal to the zoned subject; a record without one must have the legacy subject. Records written by
   older mash have no zone and load unchanged.
 * **Dual stream subjects.** A legacy inbox stream has the subject `agents.mail.*.<owner>.<name>`. A zoned inbox has that
-  and `agents.mail.*.<owner>.*.<name>`. Mail that a sender not yet updated publishes to the old subject still lands in
-  a zoned endpoint's inbox. The strict check on an existing inbox accepts exactly those two subject sets and stays
-  strict for every other field.
-* **Moving an endpoint** is `mash admin set-zone <name> <zone>`. It appends the zone subject to the existing stream
-  with an update that changes nothing else and purges nothing, then rewrites the directory record's `zone` and
+  and the exact filter of its own zone, `agents.mail.*.<owner>.<zone>.<name>`, never a wildcard zone. The exact zone is
+  the point: with `agents.mail.*.<owner>.*.<name>` a sender whose permissions allow publishing only into zone A could
+  address `agents.mail.cc.<owner>.A.<name>` and reach an endpoint that is really in zone B, and the receiver, which
+  verifies the signature against the address it was sent to, would accept it, defeating zone-based publish gates. The
+  legacy filter stays during migration, so a sender that holds the legacy wildcard publish line can still reach the
+  endpoint on the legacy subject; users compiled from a policy, which lack that line, cannot. The strict check on an
+  existing inbox of a zoned record accepts exactly the legacy filter and its own zone's filter, and refuses the
+  any-zone wildcard or another zone's filter; a legacy record accepts the legacy filter alone or with one exact zone
+  filter (a `set-zone` in progress). It stays strict for every other field.
+* **Moving an endpoint** is `mash admin set-zone <name> <zone>`. It appends the exact filter of the target zone to the
+  existing stream (which must be the legacy filter alone, or already carry that filter) with an update that changes nothing else and purges nothing, then rewrites the directory record's `zone` and
   `mail_subject` against the revision it read, keeping every other field. It is idempotent and can resume after a
   stop between its two steps. A new endpoint is provisioned with `--zone Z` and gets both subjects from the start. A
   zoned endpoint does not return to legacy, and does not change zone, in this version.
@@ -95,11 +101,11 @@ emits per-recipient lines, which stay the legacy form until it is changed to emi
 
 ### Confirmation
 
-Tests assert each part. `internal/sap`: `ForZone`, `MailFilterZones`, `SplitMail` and a table for `ValidZone`.
+Tests assert each part. `internal/sap`: `ForZone`, `MailFilterZone`, `ZoneOfMailFilter`, `SplitMail` and a table for `ValidZone`.
 `internal/store`: a legacy record loads, a zoned record round trips, a zone and subject that disagree are refused, and a
 zoned stream config differs from a legacy one only in its subjects. `internal/admin`: a zoned provision creates both
 subjects, the inbox check accepts both shapes and still rejects other drift, `SetZone` appends the subject, keeps the
-stored mail and sequence and every other record field, is idempotent and refuses a bad zone. The permissions test lists
+stored mail and sequence and every other record field, is idempotent and refuses a bad zone and a stream carrying another zone's filter or the wildcard, and a message addressed to the wrong zone is not stored in a zoned endpoint's inbox while the right zone and the legacy subject are. The permissions test lists
 both mail lines. `internal/endpoint`: legacy and zoned endpoints mail each other, and mail published to the old subject
 of a moved endpoint arrives verified. `cmd/mash`: `provision --zone`, `set-zone`, `list` and `who` show the zone, and
 `who --json` has the key only when set.
@@ -132,7 +138,7 @@ of a moved endpoint arrives verified. `cmd/mash`: `provision --zone`, `set-zone`
 
 ## More Information
 
-* Code: `internal/sap/subjects.go` (`ForZone`, `ValidZone`, `MailFilterZones`, `SplitMail`), `internal/store/store.go`
+* Code: `internal/sap/subjects.go` (`ForZone`, `ValidZone`, `MailFilterZone`, `ZoneOfMailFilter`, `SplitMail`), `internal/store/store.go`
   (`Record.Zone`, `InboxConfigZoned`), `internal/admin/admin.go` (`Meta.Zone`, `SetZone`, `checkInboxStream`),
   `internal/admin/permissions.go`, `cmd/mash/admin.go`.
 * Guide: "Zones" in `docs/operations.md`.

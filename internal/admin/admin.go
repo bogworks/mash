@@ -184,9 +184,14 @@ func (a *Admin) createInboxLocked(ctx context.Context, name, zone string) (jetst
 		}
 	}
 	cfg := store.InboxConfigZoned(a.owner, zone, name, a.limits)
-	if err == nil && zone == "" && slices.Contains(existing.CachedInfo().Config.Subjects, sap.MailFilterZones(a.owner, name)) {
-		// A retried legacy provision must not drop the zone filter a stream already has.
-		cfg.Subjects = append(cfg.Subjects, sap.MailFilterZones(a.owner, name))
+	if err == nil && zone == "" {
+		// A retried legacy provision must not drop the exact zone filter a stream already has.
+		for _, sub := range existing.CachedInfo().Config.Subjects {
+			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
+				cfg.Subjects = append(cfg.Subjects, sap.MailFilterZone(a.owner, z, name))
+				break
+			}
+		}
 	}
 	s, err := a.js.CreateOrUpdateStream(ctx, cfg)
 	if err != nil {
@@ -262,11 +267,18 @@ func (a *Admin) ensureInboxStreamLocked(ctx context.Context, name, zone string) 
 	} else if err != nil {
 		return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 	}
-	// A zoned record needs the dual-subject stream: mail sent to its recorded subject must be able to enter. A legacy
-	// record accepts either shape, as set-zone adds the zone filter before it rewrites the record.
-	want, alt := store.InboxConfigFor(a.owner, name, a.limits), sap.MailFilterZones(a.owner, name)
-	if zone != "" {
-		want, alt = store.InboxConfigZoned(a.owner, zone, name, a.limits), ""
+	// A zoned record needs exactly the legacy filter and the exact filter of its own zone: mail sent to its recorded
+	// subject must enter, and mail addressed to another zone must not. A legacy record accepts [legacy] or the legacy
+	// filter plus one exact zone filter, as set-zone adds that filter before it rewrites the record.
+	want := store.InboxConfigZoned(a.owner, zone, name, a.limits)
+	var alt []string
+	if zone == "" {
+		for _, sub := range s.CachedInfo().Config.Subjects {
+			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
+				alt = []string{sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, z, name)}
+				break
+			}
+		}
 	}
 	if err := checkInboxStream(name, s.CachedInfo().Config, want, alt); err != nil {
 		return nil, false, err
@@ -300,9 +312,9 @@ func firstInboxDiff(what, name string, fields []inboxField) error {
 
 // checkInboxStream compares an existing inbox stream with want, field by field. want carries the legacy mail filter;
 // a stream with the legacy filter and zoneFilter together is a zoned endpoint's inbox and is accepted too (ADR 0054).
-func checkInboxStream(name string, got, want jetstream.StreamConfig, zoneFilter string) error {
+func checkInboxStream(name string, got, want jetstream.StreamConfig, alt []string) error {
 	wantSubjects := sortedCopy(want.Subjects)
-	if slices.Equal(sortedCopy(got.Subjects), sortedCopy(append(slices.Clone(want.Subjects), zoneFilter))) {
+	if alt != nil && slices.Equal(sortedCopy(got.Subjects), sortedCopy(alt)) {
 		wantSubjects = sortedCopy(got.Subjects)
 	}
 	return firstInboxDiff("stream", name, []inboxField{
@@ -702,7 +714,7 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 		if rec.Zone != "" && rec.Zone != zone {
 			return store.Record{}, fmt.Errorf("mash: endpoint %s is in zone %q; moving it to another zone, or back to legacy, is not supported", name, rec.Zone)
 		}
-		if err := a.addZoneFilterLocked(ctx, name); err != nil {
+		if err := a.addZoneFilterLocked(ctx, name, zone); err != nil {
 			return store.Record{}, err
 		}
 		if rec.Zone == zone {
@@ -730,16 +742,16 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (store.Record, e
 	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-zone; try again", name)
 }
 
-// addZoneFilterLocked appends the zone mail filter to name's inbox stream subjects, changing nothing else. The stream
-// must have exactly the legacy filter or the legacy and zone filters; anything else is refused. The caller holds
-// name's lock.
-func (a *Admin) addZoneFilterLocked(ctx context.Context, name string) error {
+// addZoneFilterLocked appends the exact mail filter of zone to name's inbox stream subjects, changing nothing else.
+// The stream must have exactly the legacy filter, or the legacy filter and the exact filter of zone (a resumed
+// set-zone); anything else, another zone's filter or a wildcard included, is refused. The caller holds name's lock.
+func (a *Admin) addZoneFilterLocked(ctx context.Context, name, zone string) error {
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
 		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}
 	cfg := s.CachedInfo().Config
-	legacy, zoned := sap.MailFilter(a.owner, name), sap.MailFilterZones(a.owner, name)
+	legacy, zoned := sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, zone, name)
 	switch got := sortedCopy(cfg.Subjects); {
 	case slices.Equal(got, sortedCopy([]string{legacy, zoned})):
 		return nil

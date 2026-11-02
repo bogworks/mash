@@ -84,12 +84,13 @@ func InboxConfigFor(owner, name string, l Limits) jetstream.StreamConfig {
 	return InboxConfigZoned(owner, "", name, l)
 }
 
-// InboxConfigZoned is InboxConfigFor for an endpoint in zone. A non-empty zone adds the zone filter next to the legacy
-// one, so mail from a sender that still publishes to the legacy subject lands too (ADR 0054).
+// InboxConfigZoned is InboxConfigFor for an endpoint in zone. A non-empty zone adds the exact filter of that zone next
+// to the legacy one, so mail from a sender that still publishes to the legacy subject lands too, and mail addressed
+// to any other zone does not (ADR 0054).
 func InboxConfigZoned(owner, zone, name string, l Limits) jetstream.StreamConfig {
 	subjects := []string{sap.MailFilter(owner, name)}
 	if zone != "" {
-		subjects = append(subjects, sap.MailFilterZones(owner, name))
+		subjects = append(subjects, sap.MailFilterZone(owner, zone, name))
 	}
 	return jetstream.StreamConfig{
 		Name:              sap.InboxStream(name),

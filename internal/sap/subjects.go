@@ -66,10 +66,22 @@ func ForZone(owner, zone, name string) Subjects {
 	return s
 }
 
-// MailFilterZones is the subject filter that matches mail to name under owner
-// in any zone (the 6-token form), from any agent token.
-func MailFilterZones(owner, name string) string {
-	return "agents.mail.*." + owner + ".*." + name
+// MailFilterZone is the subject filter that matches mail to name under owner
+// in exactly zone (the 6-token form), from any agent token. A zoned endpoint's
+// inbox takes this filter and never a wildcard zone: a sender gated into one
+// zone must not reach an endpoint in another.
+func MailFilterZone(owner, zone, name string) string {
+	return "agents.mail.*." + owner + "." + zone + "." + name
+}
+
+// ZoneOfMailFilter returns the zone of s if s is an exact-zone mail filter of
+// name under owner (6 tokens: agents, mail, *, owner, a valid zone, name).
+func ZoneOfMailFilter(s, owner, name string) (zone string, ok bool) {
+	t := strings.Split(s, ".")
+	if len(t) != 6 || t[0] != "agents" || t[1] != "mail" || t[2] != "*" || t[3] != owner || t[5] != name || !ValidZone(t[4]) {
+		return "", false
+	}
+	return t[4], true
 }
 
 // SplitMail splits a mail subject into owner, zone and name. It accepts the

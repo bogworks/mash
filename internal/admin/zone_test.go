@@ -33,7 +33,7 @@ func TestProvisionZoned(t *testing.T) {
 	if rec.Zone != "default" || rec.MailSubject != "agents.mail.cc.o.default.alpha" {
 		t.Fatalf("record %+v", rec)
 	}
-	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha"}) {
+	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.default.alpha"}) {
 		t.Fatalf("subjects %v", got)
 	}
 	// Both the zoned and the legacy subject land.
@@ -87,8 +87,11 @@ func TestEnsureInboxStillStrictOnOtherDrift(t *testing.T) {
 	// Another subject set is refused, naming the field.
 	for _, subjects := range [][]string{
 		{"agents.mail.*.o.*.alpha"},
-		{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha", "agents.mail.*.o.extra"},
-		{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha"},
+		{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha", "agents.mail.*.o.extra"},
+		{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha"},
+		{"agents.mail.*.o.alpha", "agents.mail.*.o.z2.alpha"},
+		{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha", "agents.mail.*.o.z2.alpha"},
+		{"agents.mail.*.o.alpha"},
 	} {
 		c := cfg
 		c.Subjects = subjects
@@ -152,7 +155,7 @@ func TestSetZone(t *testing.T) {
 	if after.State.Msgs != before.State.Msgs || after.State.FirstSeq != before.State.FirstSeq || after.State.LastSeq != before.State.LastSeq {
 		t.Fatalf("stored mail changed: %+v -> %+v", before.State, after.State)
 	}
-	if !reflect.DeepEqual(after.Config.Subjects, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha"}) {
+	if !reflect.DeepEqual(after.Config.Subjects, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha"}) {
 		t.Fatalf("subjects %v", after.Config.Subjects)
 	}
 	// Only the subjects changed.
@@ -206,7 +209,7 @@ func TestSetZoneResumesAfterStreamUpdate(t *testing.T) {
 	}
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	cfg := s.CachedInfo().Config
-	cfg.Subjects = append(cfg.Subjects, "agents.mail.*.o.*.alpha")
+	cfg.Subjects = append(cfg.Subjects, "agents.mail.*.o.z1.alpha")
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +249,7 @@ func TestEnsureInboxRequiresDualSubjectsForAZonedRecord(t *testing.T) {
 	// Adding the zone filter makes it pass.
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	cfg := s.CachedInfo().Config
-	cfg.Subjects = []string{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha"}
+	cfg.Subjects = []string{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha"}
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +263,7 @@ func TestEnsureInboxRequiresDualSubjectsForAZonedRecord(t *testing.T) {
 	}
 	s, _ = js.Stream(ctx, "inbox-beta")
 	cfg = s.CachedInfo().Config
-	cfg.Subjects = []string{"agents.mail.*.o.beta", "agents.mail.*.o.*.beta"}
+	cfg.Subjects = []string{"agents.mail.*.o.beta", "agents.mail.*.o.z9.beta"}
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +306,7 @@ func TestEnsureInboxReportsADirectoryErrorInsteadOfAssumingLegacy(t *testing.T) 
 	if _, err := a.EnsureInbox(ctx, "alpha"); err != nil {
 		t.Fatalf("EnsureInbox after restoring the record: %v", err)
 	}
-	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.*.alpha"}) {
+	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.z1.alpha"}) {
 		t.Fatalf("subjects %v", got)
 	}
 	// No record at all is not an error: the legacy stream is made.
@@ -312,5 +315,67 @@ func TestEnsureInboxReportsADirectoryErrorInsteadOfAssumingLegacy(t *testing.T) 
 	}
 	if got := inboxSubjects(t, js, "ghost"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.ghost"}) {
 		t.Fatalf("subjects %v", got)
+	}
+}
+
+// set-zone appends only the exact filter of its target zone, and refuses a stream that already has another zone's
+// filter or the any-zone wildcard.
+func TestSetZoneRefusesForeignZoneFilters(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	for i, extra := range []string{"agents.mail.*.o.z2.alpha", "agents.mail.*.o.*.alpha"} {
+		name := []string{"alpha", "beta"}[i]
+		_, user := e.Mint(t, name)
+		if _, err := a.Provision(ctx, name, user, e.Account, "", admin.Meta{}); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := js.Stream(ctx, "inbox-"+name)
+		cfg := s.CachedInfo().Config
+		cfg.Subjects = append(cfg.Subjects, strings.Replace(extra, "alpha", name, 1))
+		if _, err := js.UpdateStream(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.SetZone(ctx, name, "z1"); err == nil || !strings.Contains(err.Error(), "subjects") {
+			t.Fatalf("%s with %s: %v", name, extra, err)
+		}
+		// The record stays legacy.
+		kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+		ent, _ := kv.Get(ctx, name)
+		if strings.Contains(string(ent.Value()), `"zone"`) && strings.Contains(string(ent.Value()), `"zone":"z1"`) {
+			t.Fatalf("%s: record was moved: %s", name, ent.Value())
+		}
+	}
+}
+
+// A zoned endpoint's stream takes its own zone and the legacy subject, never another zone's: a sender gated into
+// zone za must not reach an endpoint in zone zb by addressing it as <za>.<name>.
+func TestZonedInboxRejectsMailAddressedToAnotherZone(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "b")
+	if _, err := a.Provision(ctx, "b", user, e.Account, "", admin.Meta{Zone: "zb"}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := js.Stream(ctx, "inbox-b")
+	msgs := func() uint64 {
+		info, err := s.Info(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.State.Msgs
+	}
+	if _, err := js.Publish(ctx, "agents.mail.cc.o.za.b", []byte("forged")); err == nil {
+		t.Fatal("mail addressed to the wrong zone was stored")
+	}
+	if n := msgs(); n != 0 {
+		t.Fatalf("%d messages after a wrong-zone publish", n)
+	}
+	for _, subj := range []string{"agents.mail.cc.o.zb.b", "agents.mail.cc.o.b"} {
+		if _, err := js.Publish(ctx, subj, []byte("ok")); err != nil {
+			t.Fatalf("publish %s: %v", subj, err)
+		}
+	}
+	if n := msgs(); n != 2 {
+		t.Fatalf("%d messages, want 2", n)
 	}
 }

@@ -187,7 +187,7 @@ func TestInboxConfigZoned(t *testing.T) {
 		t.Fatalf("%v", legacy.Subjects)
 	}
 	z := InboxConfigZoned("o", "z1", "a", DefaultLimits())
-	if !reflect.DeepEqual(z.Subjects, []string{"agents.mail.*.o.a", "agents.mail.*.o.*.a"}) {
+	if !reflect.DeepEqual(z.Subjects, []string{"agents.mail.*.o.a", "agents.mail.*.o.z1.a"}) {
 		t.Fatalf("%v", z.Subjects)
 	}
 	z.Subjects = legacy.Subjects

@@ -90,7 +90,7 @@ mail is **declared, not registered** as a micro-service endpoint:
 | Setting | Value |
 |---|---|
 | name | `inbox-<name>` |
-| subjects | `agents.mail.*.<owner>.<name>`; for a zoned endpoint also `agents.mail.*.<owner>.*.<name>` (ADR 0054) |
+| subjects | `agents.mail.*.<owner>.<name>`; for a zoned endpoint also the exact-zone `agents.mail.*.<owner>.<zone>.<name>` (ADR 0054) |
 | storage | file |
 | retention | limits |
 | max age | 30 days |

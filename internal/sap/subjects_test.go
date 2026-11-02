@@ -58,8 +58,16 @@ func TestForZone(t *testing.T) {
 	if got := For("acme", "p-ops2").Mail; got != "agents.mail.cc.acme.p-ops2" {
 		t.Fatalf("legacy mail subject changed: %s", got)
 	}
-	if MailFilterZones("acme", "p-ops2") != "agents.mail.*.acme.*.p-ops2" {
-		t.Fatal(MailFilterZones("acme", "p-ops2"))
+	if MailFilterZone("acme", "z1", "p-ops2") != "agents.mail.*.acme.z1.p-ops2" {
+		t.Fatal(MailFilterZone("acme", "z1", "p-ops2"))
+	}
+	if z, ok := ZoneOfMailFilter("agents.mail.*.acme.z1.p-ops2", "acme", "p-ops2"); !ok || z != "z1" {
+		t.Fatal(z, ok)
+	}
+	for _, bad := range []string{"agents.mail.*.acme.*.p-ops2", "agents.mail.*.acme.p-ops2", "agents.mail.cc.acme.z1.p-ops2", "agents.mail.*.other.z1.p-ops2", "agents.mail.*.acme.z1.x", "agents.mail.*.acme.Z1.p-ops2"} {
+		if _, ok := ZoneOfMailFilter(bad, "acme", "p-ops2"); ok {
+			t.Fatal(bad)
+		}
 	}
 	if MailFilter("acme", "p-ops2") != "agents.mail.*.acme.p-ops2" {
 		t.Fatal("legacy filter changed")

@@ -688,7 +688,7 @@ idle wake.
 |---|---|
 | Endpoint name, owner | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-48 characters: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
 | Subjects | `agents.mail.cc.<owner>.<name>`, `agents.prompt.cc.<owner>.<name>`, `agents.status.cc.<owner>.<name>`, `agents.hb.cc.<owner>.<name>` |
-| Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token; a zoned endpoint's mail subject is `agents.mail.cc.<owner>.<zone>.<name>` and its stream also takes `agents.mail.*.<owner>.*.<name>` (ADR 0054) |
+| Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token; a zoned endpoint's mail subject is `agents.mail.cc.<owner>.<zone>.<name>` and its stream also takes the exact-zone filter `agents.mail.*.<owner>.<zone>.<name>`, never a wildcard zone (ADR 0054) |
 | Inbox stream, consumer | `inbox-<name>`, `deliver` |
 | Buckets, keys | `mash-directory` and `mash-leases`, keyed by `<name>` |
 | Reply prefix | `_INBOX.<name>.` |
