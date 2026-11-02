@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -110,13 +111,13 @@ func (m Meta) validate() error {
 // directory record, so a half-done provision can simply be re-run.
 func (a *Admin) Provision(ctx context.Context, name, user, account, note string, meta Meta) (rec store.Record, err error) {
 	if !config.ValidName(name) {
-		return store.Record{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		return store.Record{}, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
 	if !nkeys.IsValidPublicUserKey(user) {
-		return store.Record{}, fmt.Errorf("mash: %q is not a user public key (U...)", user)
+		return store.Record{}, errors.New("mash: the user is not a user public key (U, then 55 base32 characters; the value is not shown)")
 	}
 	if !nkeys.IsValidPublicAccountKey(account) {
-		return store.Record{}, fmt.Errorf("mash: %q is not an account public key (A...)", account)
+		return store.Record{}, fmt.Errorf("mash: the account is not an account public key (A, then 55 base32 characters; the value is not shown)")
 	}
 	if err := meta.validate(); err != nil {
 		return store.Record{}, err
@@ -223,7 +224,7 @@ var afterStreamRead func(inboxMaxBytes int64)
 // user decides to deprovision it, which removes whatever the inbox holds, and provisions again.
 func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) {
 	if !config.ValidName(name) {
-		return nil, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		return nil, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
 	var made []string
 	s, created, err := a.ensureInboxStream(ctx, name)
@@ -462,7 +463,7 @@ func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) err
 
 func (a *Admin) applyInboxLimits(ctx context.Context, name string) (msg string, err error) {
 	if !config.ValidName(name) {
-		return "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		return "", fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
 	// The read, the check and the write run under the stream's limits lock.
 	lk, err := a.lockStream(ctx, name)
@@ -562,13 +563,13 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 	}
 	for _, c := range append(append([]string(nil), u.AddCaps...), u.DropCaps...) {
 		if !store.ValidCap(c) {
-			return store.Record{}, fmt.Errorf("mash: capability %q: a letter, then up to 31 of a-z 0-9 _ . -", c)
+			return store.Record{}, fmt.Errorf("mash: capability: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)")
 		}
 	}
 	changeCaps := u.ClearCaps || len(u.AddCaps) > 0 || len(u.DropCaps) > 0
 	for k, v := range u.Labels {
 		if !store.ValidLabelKey(k) {
-			return store.Record{}, fmt.Errorf("mash: label key %q: a letter, then up to 31 of a-z 0-9 _ . -", k)
+			return store.Record{}, fmt.Errorf("mash: label key: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)")
 		}
 		if err := store.ValidMeta("label "+k, v); err != nil {
 			return store.Record{}, err
@@ -679,8 +680,8 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-meta; try again", name)
 }
 
-func errBadZone(z string) error {
-	return fmt.Errorf("mash: zone %q: 1-%d lower-case letters, digits and hyphens", z, sap.MaxZoneLen)
+func errBadZone(_ string) error {
+	return fmt.Errorf("mash: zone: 1-%d lower-case letters, digits and hyphens (the value is not shown)", sap.MaxZoneLen)
 }
 
 // recordZone is name's zone on record: empty when it has none, or when there is no record (or no directory yet).
@@ -711,7 +712,7 @@ func (a *Admin) recordZone(ctx context.Context, name string) (string, error) {
 // this version.
 func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record, err error) {
 	if !config.ValidName(name) {
-		return store.Record{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		return store.Record{}, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
 	if !sap.ValidZone(zone) {
 		return store.Record{}, errBadZone(zone)
@@ -873,7 +874,7 @@ func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lk *streamLock, lease j
 // check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
 func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) (err error) {
 	if !config.ValidName(name) {
-		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+		return fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
@@ -1106,4 +1107,37 @@ func (a *Admin) List(ctx context.Context) ([]store.Record, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// Exists reports whether name has a directory record, an inbox stream or a live lease (not just the tombstone a
+// deprovision leaves): any of them is something a deprovision removes or fences.
+// Deprovision itself stays idempotent (rollbacks rely on it); a CLI verb asks this first to refuse a name that was
+// never there.
+func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
+	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
+	switch {
+	case errors.Is(err, jetstream.ErrBucketNotFound):
+	case err != nil:
+		return false, fmt.Errorf("mash: directory: %w", err)
+	default:
+		if _, err := kv.Get(ctx, name); err == nil {
+			return true, nil
+		} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
+			return false, fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+	}
+	if _, err := a.js.Stream(ctx, sap.InboxStream(name)); err == nil {
+		return true, nil
+	} else if !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return false, fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	if lease, err := a.js.KeyValue(ctx, store.LeaseBucket); err == nil {
+		switch e, err := lease.Get(ctx, name); {
+		case err == nil:
+			return !bytes.Contains(e.Value(), []byte(`"deprovisioned":true`)), nil
+		case !errors.Is(err, jetstream.ErrKeyNotFound):
+			return false, fmt.Errorf("mash: lease %s: %w", name, err)
+		}
+	}
+	return false, nil
 }

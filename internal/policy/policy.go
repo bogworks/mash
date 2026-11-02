@@ -66,8 +66,8 @@ type Rule struct {
 	Action string   `yaml:"action"`
 	From   Selector `yaml:"from"`
 	To     Selector `yaml:"to"`
-	// Log asks that what a deny rule refuses be recorded. It is carried through the file and has no effect on the
-	// compiled permissions.
+	// Log asks that what a deny rule refuses be recorded. Nothing records yet, so Check refuses a rule that sets it
+	// (ADR 0062); the field stays parsed so the refusal is a clear message, not an unknown-field error.
 	Log bool `yaml:"log"`
 }
 

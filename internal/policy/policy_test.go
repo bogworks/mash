@@ -599,3 +599,32 @@ func TestBudget60ZonesAllToAll(t *testing.T) {
 	}
 	t.Logf("60 endpoints in 60 zones all-to-all: account JWT %d bytes of %d, worst user JWT %d bytes", rep.AccountJWTBytes, rep.AccountLimit, rep.WorstUserJWTBytes)
 }
+
+func TestCheckRefusesLogTrue(t *testing.T) {
+	f, err := Parse([]byte("endpoints:\n  a: {}\nrules:\n  - name: noisy\n    action: deny\n    from: {}\n    to: {}\n    log: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "rule noisy (line 4): log is not implemented yet; remove it") {
+		t.Fatalf("%v %v", f, err)
+	}
+	// log: false is the same as leaving it out
+	mustParse(t, "endpoints:\n  a: {}\nrules:\n  - name: quiet\n    action: deny\n    from: {}\n    to: {}\n    log: false\n")
+}
+
+func TestCheckWarnsOnCaseVariantLabelValues(t *testing.T) {
+	f := mustParse(t, "default: allow\nendpoints:\n  a: {labels: {team: Finance}}\n  b: {labels: {team: finance}}\n  c: {labels: {team: finance, tier: Gold}}\n  d: {labels: {tier: gold}}\n  e: {labels: {tier: gold}}\n")
+	rep := f.Check()
+	if len(rep.Errors) != 0 {
+		t.Fatal(rep.Errors)
+	}
+	var got []string
+	for _, w := range rep.Warnings {
+		got = append(got, w.String())
+	}
+	if len(got) != 2 || !strings.HasPrefix(got[0], "label team: ") || !strings.Contains(got[0], `"Finance" on endpoint a (line 3)`) ||
+		!strings.Contains(got[0], `"finance" on endpoint b (line 4)`) || !strings.HasPrefix(got[1], "label tier: ") {
+		t.Fatalf("%q", got)
+	}
+	// the same spelling twice is not a variant
+	if w := mustParse(t, "endpoints:\n  a: {labels: {team: x}}\n  b: {labels: {team: x}}\n").Check().Warnings; len(w) != 0 {
+		t.Fatalf("%v", w)
+	}
+}

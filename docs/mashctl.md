@@ -99,6 +99,10 @@ Needs the server and admin credentials. Order of operations (a failure leaves th
 
 What it does not do: **revoke the user.** mashctl has no revocation yet (`nsc` has: see [Before you push with nsc](#before-you-push-with-nsc)), so NAME's old creds still authenticate; the note says `revocation is not implemented yet: delete the creds file and rotate the zone key if the user must be cut off`. It also does not push the account JWT: run `mashctl policy apply` when told to.
 
+## Exit codes and arguments
+
+Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended". An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get their permissions from the policy file's zone key (see `mashctl policy explain`).
+
 ## Checking and repairing drift
 
 ```sh

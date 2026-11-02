@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
 
 	madmin "github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
@@ -146,6 +148,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	pfx, _, _ := strings.Cut(prog, " ") // "mash" or "mashctl", the prefix of error lines
 	fail := func(err error) int { fmt.Fprintln(stderr, err); return 1 }
+	usage := func(err error) int { fmt.Fprintln(stderr, err); return 2 } // a misuse of the verb, not a failure of it
 	if len(args) == 0 {
 		fmt.Fprint(stderr, Usage(prog))
 		return 2
@@ -156,14 +159,22 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
 		cfg.Limits = store.DefaultLimits()
 	}
+	if args[0] == "init" && len(args) > 1 {
+		return usage(errors.New(initUsage(prog)))
+	}
+	if args[0] == "list" && len(args) > 1 {
+		return usage(errors.New("usage: " + prog + " list"))
+	}
 	if cfg.Owner == "" {
 		return fail(errors.New(pfx + ": no owner (config.json \"owner\" or MASH_OWNER)"))
 	}
 	if args[0] == "permissions" {
-		if len(args) < 2 || !config.ValidName(args[1]) {
-			return fail(errors.New("usage: " + prog + " permissions <name> [--nsc]"))
+		if len(args) < 2 || len(args) > 3 || !config.ValidName(args[1]) || (len(args) == 3 && args[2] != "--nsc") {
+			return usage(errors.New("usage: " + prog + " permissions <name> [--nsc]"))
 		}
-		if len(args) == 3 && args[2] == "--nsc" {
+		// On stderr: the output is consumed whole (jq, mapfile), so a note on stdout would break it.
+		fmt.Fprintln(stderr, permissionsNote(prog))
+		if len(args) == 3 {
 			// One argument per line: mapfile -t flags < <(mashctl permissions n --nsc)
 			fmt.Fprintln(stdout, strings.Join(madmin.NSCFlags(cfg.Owner, args[1]), "\n"))
 			return 0
@@ -201,11 +212,14 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		fmt.Fprintln(stdout, pfx+": directory and lease buckets ready")
 	case "provision":
 		if len(args) < 2 {
-			return fail(errors.New(provisionUsage(prog)))
+			return usage(errors.New(provisionUsage(prog)))
 		}
 		meta, err := provisionMeta(prog, args, opt)
 		if err != nil {
-			return fail(err)
+			return usage(err)
+		}
+		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account"), meta.Zone); err != nil {
+			return usage(err)
 		}
 		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"), meta)
 		if err != nil {
@@ -215,7 +229,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	case "limits":
 		for _, n := range args[1:] {
 			if !config.ValidName(n) {
-				return fail(errors.New(limitsUsage(prog)))
+				return usage(errors.New(limitsUsage(prog)))
 			}
 		}
 		lines, err := a.ApplyLimits(ctx, args[1:]...)
@@ -227,11 +241,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 	case "set-meta":
 		if len(args) < 3 || !config.ValidName(args[1]) {
-			return fail(errors.New(setMetaUsage(prog)))
+			return usage(errors.New(setMetaUsage(prog)))
 		}
 		u, err := setMetaUpdate(prog, args)
 		if err != nil {
-			return fail(err)
+			return usage(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {
@@ -240,10 +254,13 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", rec.Name, rec.Role, rec.Host, labelList(rec.Labels), metaSuffix(rec))
 	case "set-zone":
 		if len(args) != 3 || !config.ValidName(args[1]) {
-			return fail(errors.New(setZoneUsage(prog)))
+			return usage(errors.New(setZoneUsage(prog)))
 		}
 		if args[2] == "-" {
-			return fail(errors.New(pfx + ": set-zone: an endpoint in a zone cannot return to the legacy subject in this version (the zone - is refused)"))
+			return usage(errors.New(pfx + ": set-zone: an endpoint in a zone cannot return to the legacy subject in this version (the zone - is refused)"))
+		}
+		if !sap.ValidZone(args[2]) {
+			return usage(fmt.Errorf("%s: set-zone: the zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", pfx, sap.MaxZoneLen))
 		}
 		rec, err := a.SetZone(ctx, args[1], args[2])
 		if err != nil {
@@ -252,7 +269,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", rec.Name, rec.Zone, rec.MailSubject)
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !config.ValidName(args[1]) {
-			return fail(errors.New(suspendUsage(prog, args[0])))
+			return usage(errors.New(suspendUsage(prog, args[0])))
 		}
 		switch args[0] {
 		case "suspend":
@@ -279,17 +296,20 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 	case "deprovision":
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
+		if len(args) < 2 || !config.ValidName(args[1]) {
+			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": <name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)"))
+		}
 		var rest []string
 		if len(args) > 2 {
 			rest = args[2:]
 		}
 		hasDrained, hasSusp := slices.Contains(rest, "--drained-to"), slices.Contains(rest, "--suspension")
 		if (hasDrained || hasSusp) && slices.Contains(rest, "--user") {
-			return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --user and --drained-to cannot be combined"))
+			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --user and --drained-to cannot be combined"))
 		}
 		if hasDrained || hasSusp {
 			if len(args) != 6 || !hasDrained || !hasSusp {
-				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to and --suspension go together (both from suspend's output)"))
+				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to and --suspension go together (both from suspend's output)"))
 			}
 			var seqArg, id string
 			for i := 2; i < 6; i += 2 {
@@ -302,10 +322,10 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 			seq, err := strconv.ParseUint(seqArg, 10, 64)
 			if err != nil {
-				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to wants a non-negative integer (the last_seq that suspend printed)"))
+				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --drained-to wants a non-negative integer (the last_seq that suspend printed)"))
 			}
 			if id == "" {
-				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --suspension wants the id that suspend printed"))
+				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --suspension wants the id that suspend printed"))
 			}
 			if err := a.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
 				return fail(err)
@@ -314,18 +334,25 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return 0
 		}
 		if len(args) != 2 && !(len(args) == 4 && args[2] == "--user") {
-			return fail(errors.New(deprovisionUsage))
+			return usage(errors.New(deprovisionUsage))
 		}
 		if len(args) == 4 {
 			// A public user key (U + 55 base32 characters); the guard compares it with the record's user.
 			if !validUserKeyShape(args[3]) {
-				return fail(errors.New(deprovisionUsage + "\n" + pfx + ": --user wants a NATS user public key (U, then 55 upper-case base32 characters)"))
+				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --user wants a NATS user public key (U, then 55 upper-case base32 characters)"))
 			}
 			if err := a.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
 				return fail(err)
 			}
 			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; revoke its NATS user with your operator tooling)\n", args[1], args[3][:8])
 			return 0
+		}
+		// Deprovision is idempotent, so rollbacks can call it freely; this verb refuses a name that was never there.
+		if ok, err := a.Exists(ctx, args[1]); err != nil {
+			return fail(err)
+		} else if !ok {
+			fmt.Fprintf(stderr, "no endpoint named %s\n", args[1])
+			return 1
 		}
 		if err := a.Deprovision(ctx, args[1]); err != nil {
 			return fail(err)
@@ -373,23 +400,68 @@ func metaSuffix(r store.Record) string {
 	return b.String()
 }
 
-// provisionMeta reads the optional metadata flags of `provision`. opt returns a single-valued flag's value.
+// provisionMeta reads the optional metadata flags of `provision` and refuses any other flag, a flag without a value
+// and a stray argument. opt returns a single-valued flag's value.
 func provisionMeta(prog string, args []string, opt func(string) string) (madmin.Meta, error) {
 	labels := map[string]string{}
 	var caps []string
-	for i := 2; i+1 < len(args); i++ {
+	bad := errors.New(provisionUsage(prog))
+	seen := map[string]bool{}
+	for i := 2; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			return madmin.Meta{}, bad
+		}
 		switch args[i] {
 		case "--label":
 			k, v, ok := strings.Cut(args[i+1], "=")
 			if !ok || v == "-" {
-				return madmin.Meta{}, errors.New(provisionUsage(prog))
+				return madmin.Meta{}, bad
 			}
 			labels[k] = v
 		case "--cap":
 			caps = append(caps, args[i+1])
+		case "--user", "--account", "--note", "--role", "--host", "--describe", "--zone":
+			if seen[args[i]] {
+				return madmin.Meta{}, bad
+			}
+			seen[args[i]] = true
+		default:
+			return madmin.Meta{}, bad
 		}
 	}
 	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps, Zone: opt("--zone")}, nil
+}
+
+// provisionArgs checks the arguments provision needs before anything touches the server. An invalid one is named,
+// never printed: a seed pasted into --user must not come back on the screen.
+func provisionArgs(prog, name, user, account, zone string) error {
+	use := provisionUsage(prog)
+	switch {
+	case !config.ValidName(name):
+		return errors.New(use + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+	case user == "":
+		return errors.New(use + "\n--user is required")
+	case !nkeys.IsValidPublicUserKey(user):
+		return errors.New(use + "\n--user is not a NATS user public key (U, then 55 upper-case base32 characters; the value is not shown)")
+	case account == "":
+		return errors.New(use + "\n--account is required")
+	case !nkeys.IsValidPublicAccountKey(account):
+		return errors.New(use + "\n--account is not a NATS account public key (A, then 55 upper-case base32 characters; the value is not shown)")
+	case zone != "" && !sap.ValidZone(zone):
+		return fmt.Errorf("%s\n--zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", use, sap.MaxZoneLen)
+	}
+	return nil
+}
+
+func initUsage(prog string) string {
+	return "usage: " + prog + " init   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
+}
+
+// permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
+// An endpoint added under a policy file gets narrower permissions from its zone's key instead.
+func permissionsNote(prog string) string {
+	pfx, _, _ := strings.Cut(prog, " ")
+	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` or a policy file get narrower permissions from the policy (see `" + pfx + " policy explain`)."
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.

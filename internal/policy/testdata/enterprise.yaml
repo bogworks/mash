@@ -34,7 +34,6 @@ rules:
     action: deny
     from: {internet: "yes"}
     to: {team: finance}
-    log: true
   - name: hr-is-private
     action: deny
     from: {}

@@ -65,7 +65,7 @@ func parseAdoptArgs(args []string) (adoptOpts, error) {
 		name, val, hasEq := strings.Cut(a, "=")
 		dst, ok := str[name]
 		if !ok {
-			return o, fmt.Errorf("unknown argument %q", a)
+			return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
 		}
 		if !hasEq {
 			if i+1 >= len(args) {

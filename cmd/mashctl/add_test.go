@@ -387,7 +387,7 @@ func TestAddRefusals(t *testing.T) {
 		code int
 	}{
 		{[]string{"add"}, "no endpoint name", 2},
-		{[]string{"add", "Bad_Name"}, "endpoint name", 1},
+		{[]string{"add", "Bad_Name"}, "NAME is not a valid endpoint name", 2},
 		{[]string{"add", "a"}, "already declared", 1},
 		{[]string{"add", "d", "--zone", "red", "--label", "zone=blue"}, "conflicts", 1},
 		{[]string{"add", "d", "--label", "novalue"}, "--label wants k=v", 2},

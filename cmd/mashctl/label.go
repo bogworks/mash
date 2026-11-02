@@ -47,7 +47,7 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 				return o, errors.New("--policy needs a file")
 			}
 		case strings.HasPrefix(a, "-"):
-			return o, fmt.Errorf("unknown option %q", a)
+			return o, fmt.Errorf("unknown %s", config.RejectedArg(a))
 		default:
 			rest = append(rest, a)
 		}
@@ -57,17 +57,17 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 	}
 	o.name = rest[0]
 	seen := map[string]bool{}
-	for _, a := range rest[1:] {
+	for i, a := range rest[1:] {
 		k, v, hasV := strings.Cut(a, "=")
 		if unlabel {
 			if hasV {
-				return o, fmt.Errorf("unlabel wants keys, got %q", a)
+				return o, fmt.Errorf("unlabel wants keys (k), not k=v: key argument %d has a value", i+1)
 			}
 		} else if !hasV || v == "" {
-			return o, fmt.Errorf("label wants k=v, got %q", a)
+			return o, fmt.Errorf("label wants k=v: label argument %d is not k=v (the value is not shown)", i+1)
 		}
 		if !store.ValidLabelKey(k) {
-			return o, fmt.Errorf("label key %q: a letter, then up to 31 of a-z 0-9 _ . -", k)
+			return o, fmt.Errorf("label key in argument %d: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)", i+1)
 		}
 		if seen[k] {
 			return o, fmt.Errorf("label %q given twice", k)
@@ -103,7 +103,8 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		return 1
 	}
 	if !config.ValidName(o.name) {
-		return fail("endpoint name %q: 1-48 lower-case letters, digits and single hyphens", o.name)
+		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", verb)
+		return 2
 	}
 	cfg, err := loadCtlConfig(env, false)
 	if err != nil {

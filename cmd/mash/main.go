@@ -116,6 +116,20 @@ func buildRevision(ldflags string, bi *debug.BuildInfo) string {
 	return rev
 }
 
+// sendUsage is `mash send`'s usage line.
+const sendUsage = "usage: mash send <to> [--urgent] [--kind blocker|question|task|result|fyi] [--id KEY] [text... | --file F | -]"
+
+// verbUsage is the usage line of each endpoint verb, printed for `mash VERB --help`.
+var verbUsage = map[string]string{
+	"status":  "usage: mash status",
+	"version": "usage: mash version",
+	"send":    sendUsage,
+	"read":    "usage: mash read <seq>",
+	"inbox":   "usage: mash inbox [--limit N] [--after SEQ]",
+	"who":     whoUsage,
+	"prompt":  "usage: mash prompt <to> <text...>",
+}
+
 func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Resolved before anything dispatches, so `version`, the MCP server and the SAP service all report one string.
 	// Written only when it changes, which a process does once: later commands (and the tests, which run many in
@@ -130,6 +144,16 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+	if u, ok := verbUsage[args[0]]; ok && len(args) > 1 {
+		if args[1] == "--help" || args[1] == "-h" { // the verb's usage line, and the verb does not run
+			fmt.Fprintln(stdout, u)
+			return 0
+		}
+		if args[0] == "status" || args[0] == "version" { // these take no arguments: refuse rather than ignore
+			fmt.Fprintf(stderr, "mash %s: unexpected %s\n%s\n", args[0], config.RejectedArg(args[1]), u)
+			return 2
+		}
 	}
 	if args[0] == "version" {
 		bi, _ := readBuildInfo()

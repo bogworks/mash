@@ -38,7 +38,9 @@ type Report struct {
 // Further errors for the zone: subject_label that is not a label key, and an endpoint whose subject label value is not
 // one subject token (config.ValidName).
 //
-// Warnings: a rule whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
+// Errors also: `log: true` on a rule (the field is parsed but nothing records refusals yet, so it is refused rather than ignored).
+//
+// Warnings: label values that differ only in case across endpoints for one key (Finance and finance); a rule whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
 // the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); an endpoint whose user JWT
 // would need more than MaxTagsWarn tags (the connect line); under default deny, an endpoint that can neither send
 // nor receive.
@@ -96,6 +98,9 @@ func (f *File) Check() Report {
 				errf(where, "name already used by rule %d", prev)
 			}
 			seen[rule.Name] = i + 1
+		}
+		if rule.Log {
+			errf(where, "log is not implemented yet; remove it")
 		}
 		if rule.Action != Allow && rule.Action != Deny {
 			errf(where, "action %q is not allow or deny", rule.Action)
@@ -164,6 +169,7 @@ func (f *File) Check() Report {
 			}
 		}
 	}
+	r.Warnings = append(r.Warnings, f.caseVariantWarnings(names)...)
 	p := f.plan()
 	for _, n := range names {
 		if len(p.tags[n]) > MaxTagsWarn {
@@ -183,6 +189,52 @@ func (f *File) Check() Report {
 	}
 	sort.SliceStable(r.Warnings, func(i, j int) bool { return r.Warnings[i].Where < r.Warnings[j].Where })
 	return r
+}
+
+// caseVariantWarnings finds a label key whose values, across the endpoints, differ only in case (Finance and
+// finance). Selectors compare exactly, so the two spellings are different values and a rule for one does not reach
+// the other; that is nearly always a typo, so it is a warning that names the key, both spellings and their lines.
+func (f *File) caseVariantWarnings(names []string) []Diagnostic {
+	type use struct{ value, endpoint string }
+	byKey := map[string]map[string][]use{} // key -> lower-cased value -> the uses
+	for _, n := range names {
+		for k, v := range f.Endpoints[n].Labels {
+			if byKey[k] == nil {
+				byKey[k] = map[string][]use{}
+			}
+			lv := strings.ToLower(v)
+			byKey[k][lv] = append(byKey[k][lv], use{v, n})
+		}
+	}
+	var out []Diagnostic
+	keys := make([]string, 0, len(byKey))
+	for k := range byKey {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		var lows []string
+		for lv := range byKey[k] {
+			lows = append(lows, lv)
+		}
+		sort.Strings(lows)
+		for _, lv := range lows {
+			uses := byKey[k][lv]
+			spellings := map[string]bool{}
+			for _, u := range uses {
+				spellings[u.value] = true
+			}
+			if len(spellings) < 2 {
+				continue
+			}
+			var parts []string
+			for _, u := range uses { // uses follow the sorted endpoint names
+				parts = append(parts, fmt.Sprintf("%q on endpoint %s%s", u.value, u.endpoint, lineSuffix(f.lines.endpoints[u.endpoint])))
+			}
+			out = append(out, Diagnostic{"label " + k, "values differ only in case, so rules treat them as different: " + strings.Join(parts, ", ")})
+		}
+	}
+	return out
 }
 
 // touches reports whether endpoint i of n sends to or receives from anyone (itself included) under the rules.

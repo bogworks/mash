@@ -60,7 +60,7 @@ func parsePolicyArgs(args []string, allowed ...string) (policyOpts, error) {
 		case a == "--budget" && ok("--budget"):
 			o.budget = true
 		case strings.HasPrefix(a, "-"):
-			return o, fmt.Errorf("unknown option %q", a)
+			return o, fmt.Errorf("unknown %s", config.RejectedArg(a))
 		default:
 			o.args = append(o.args, a)
 		}
@@ -126,7 +126,7 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 		return 1
 	}
 	if verb == "check" {
-		return policyCheck(path, data, stdout, stderr)
+		return policyCheck(path, data, cfg.Owner, stdout, stderr)
 	}
 	f, err := policy.Parse(data)
 	if err != nil {
@@ -137,6 +137,12 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 	case "test":
 		return policyTest(f, stdout)
 	case "explain":
+		for i, n := range o.args {
+			if !config.ValidName(n) { // named, never printed: a mistyped argument may be a secret
+				fmt.Fprintf(stderr, "mashctl: policy explain: %s is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", []string{"FROM", "TO"}[i])
+				return 2
+			}
+		}
 		x, err := policy.Explain(f, o.args[0], o.args[1])
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: policy explain: %v\n", err)
@@ -152,12 +158,24 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 // coverageNote says what rules police today (ADR 0054, ADR 0055).
 const coverageNote = "note: rules cover mail only; prompt and status probes are not covered by rules yet (open)"
 
-func policyCheck(path string, data []byte, stdout, stderr io.Writer) int {
+// policyCheck validates the file and runs the JWT size budget on what it would compile to (the budget is what apply
+// and add would refuse on, so a file that passes check but not apply was a trap). owner is the configured owner; the
+// budget does not depend on it beyond a few bytes per subject, so a placeholder stands in when none is configured.
+func policyCheck(path string, data []byte, owner string, stdout, stderr io.Writer) int {
 	f, err := policy.Parse(data)
 	if err != nil {
 		// Parse folds the Check errors into one "policy: a; b" error: show them one per line.
+		// A segment with no ": " is the rest of the previous message (a message may hold "; ").
 		msg := strings.TrimPrefix(err.Error(), "policy: ")
+		var lines []string
 		for _, m := range strings.Split(msg, "; ") {
+			if len(lines) > 0 && !strings.Contains(m, ": ") {
+				lines[len(lines)-1] += "; " + m
+				continue
+			}
+			lines = append(lines, m)
+		}
+		for _, m := range lines {
 			fmt.Fprintf(stdout, "error: %s\n", m)
 		}
 		return 1
@@ -165,6 +183,23 @@ func policyCheck(path string, data []byte, stdout, stderr io.Writer) int {
 	rep := f.Check()
 	for _, w := range rep.Warnings {
 		fmt.Fprintf(stdout, "warning: %s\n", w)
+	}
+	if owner == "" {
+		owner = "owner"
+	}
+	c, err := policy.Compile(f, owner)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: policy check: %v\n", err)
+		return 1
+	}
+	brep, err := policy.Budget(c)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: policy check: %v\n", err)
+		return 1
+	}
+	if !brep.OK {
+		fmt.Fprintln(stderr, "mashctl: policy check: over budget")
+		return 1
 	}
 	fmt.Fprintf(stdout, "check: OK - %d endpoints, %d rules\n", len(f.Endpoints), len(f.Rules))
 	return 0

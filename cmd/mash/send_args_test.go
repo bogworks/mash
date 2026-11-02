@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -44,5 +45,23 @@ func TestSendArgsErrorDoesNotCallIDUnknown(t *testing.T) {
 	err := sendArgsError(json.RawMessage(`{"to":"x","id":"job-7"}`))
 	if err == nil || strings.Contains(err.Error(), "got: id") || !strings.Contains(err.Error(), "got: no text") {
 		t.Fatalf("id reported as unknown: %v", err)
+	}
+}
+
+func TestVerbHelpAndStrayArguments(t *testing.T) {
+	env := func(string) string { return "" }
+	for _, verb := range []string{"status", "version", "who", "read", "inbox", "send", "prompt"} {
+		for _, h := range []string{"--help", "-h"} {
+			var out, errb bytes.Buffer
+			if code := run([]string{verb, h}, env, strings.NewReader(""), &out, &errb); code != 0 || !strings.HasPrefix(out.String(), "usage: mash "+verb) || errb.Len() != 0 {
+				t.Errorf("%s %s: %d %q %q", verb, h, code, out.String(), errb.String())
+			}
+		}
+	}
+	for _, verb := range []string{"status", "version"} {
+		var out, errb bytes.Buffer
+		if code := run([]string{verb, "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || !strings.Contains(errb.String(), "usage: mash "+verb) {
+			t.Errorf("%s --bogus: %d %q %q", verb, code, out.String(), errb.String())
+		}
 	}
 }

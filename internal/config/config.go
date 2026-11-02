@@ -490,3 +490,17 @@ func PlainTextWarning(url string) string {
 	}
 	return ""
 }
+
+// RejectedArg is what an error may print of a command-line argument it rejects without having validated it: the
+// flag's name when the argument is a flag (up to any "="), else only the word "argument". A positional value is never
+// printed, because a mistyped one may be a secret (a seed pasted into the wrong place).
+func RejectedArg(a string) string {
+	if !strings.HasPrefix(a, "-") {
+		return "argument"
+	}
+	name, _, _ := strings.Cut(a, "=")
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	return "option " + strconv.Quote(name)
+}
