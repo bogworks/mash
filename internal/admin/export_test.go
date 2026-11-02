@@ -44,3 +44,36 @@ func SetAfterDeprovisionPurge(f func()) (prev func()) {
 	prev, afterDeprovisionPurge = afterDeprovisionPurge, f
 	return
 }
+
+// SetLockSafety sets how long before its deadline a held lock stops being used; it returns a func that restores it.
+func SetLockSafety(dur time.Duration) (restore func()) {
+	old := lockSafety
+	lockSafety = dur
+	return func() { lockSafety = old }
+}
+
+// SetAfterLockAcquired installs a hook that runs once an operation holds its name lock; it returns the previous one.
+func SetAfterLockAcquired(f func()) (prev func()) {
+	prev, afterLockAcquired = afterLockAcquired, f
+	return
+}
+
+// LockHandle exposes a held lock's check and release to tests.
+type LockHandle struct {
+	l *streamLock
+}
+
+// AcquireLockHandle takes name's limits lock as a does.
+func AcquireLockHandle(ctx context.Context, a *Admin, name string) (*LockHandle, error) {
+	l, err := a.lockStream(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return &LockHandle{l: l}, nil
+}
+
+// Check is the lock's check.
+func (h *LockHandle) Check(ctx context.Context) error { return h.l.check(ctx) }
+
+// Release releases the lock.
+func (h *LockHandle) Release() { h.l.release(context.Background()) }

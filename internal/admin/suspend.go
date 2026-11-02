@@ -71,7 +71,7 @@ func suspendState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 // subject mash.suspended.<name>, so a sender's publish finds no stream. Only the subjects and metadata change and
 // nothing is purged. It also stores a fresh random suspension id. It is idempotent: a suspended inbox is reported as it is, with its existing id. The state's LastSeq is read after the
 // update.
-func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) {
+func (a *Admin) Suspend(ctx context.Context, name string) (_ SuspendState, err error) {
 	if !config.ValidName(name) {
 		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -80,6 +80,8 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 		return SuspendState{}, err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "suspend", &err)
+	defer end()
 	s, err := a.inboxForSuspend(ctx, name)
 	if err != nil {
 		return SuspendState{}, err
@@ -118,6 +120,9 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 	meta[store.MetaSuspendedID] = hex.EncodeToString(idb[:])
 	meta[store.MetaSuspendedUser] = savedUser
 	cfg.Subjects, cfg.Metadata = []string{store.SuspendedSubject(name)}, meta
+	if err := lk.check(ctx); err != nil {
+		return SuspendState{}, err
+	}
 	if s, err = a.js.UpdateStream(ctx, cfg); err != nil {
 		return SuspendState{}, fmt.Errorf("mash: suspend %s: %w", name, err)
 	}
@@ -127,7 +132,7 @@ func (a *Admin) Suspend(ctx context.Context, name string) (SuspendState, error) 
 // Resume restores the subjects Suspend saved and clears its metadata. It is idempotent: an inbox that is not
 // suspended is left as it is. Stale metadata on live subjects is cleared and the subjects kept; parked subjects with
 // no usable saved list are an error, never a guess.
-func (a *Admin) Resume(ctx context.Context, name string) error {
+func (a *Admin) Resume(ctx context.Context, name string) (err error) {
 	if !config.ValidName(name) {
 		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
 	}
@@ -136,6 +141,8 @@ func (a *Admin) Resume(ctx context.Context, name string) error {
 		return err
 	}
 	defer lk.release(ctx)
+	ctx, end := lk.guard(ctx, "resume", &err)
+	defer end()
 	s, err := a.inboxForSuspend(ctx, name)
 	if err != nil {
 		return err
@@ -171,6 +178,9 @@ func (a *Admin) Resume(ctx context.Context, name string) error {
 		cfg.Subjects = saved
 	} // else metadata is stale on live subjects: clear it and leave the subjects as they are
 	cfg.Metadata = meta
+	if err := lk.check(ctx); err != nil {
+		return err
+	}
 	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
 		return fmt.Errorf("mash: resume %s: %w", name, err)
 	}
