@@ -1,0 +1,196 @@
+# nproc=16 kernel=6.1.0-54-cloud-arm64 nats-server: v2.15.1 2026-11-02T23:05:18Z
+## case n=100 -hb-mode all
+bucket=dirbench-7a383b5a
+ramp_seconds=0.0 connected=100 connect_failures=0
+n=100 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.700
+streaminfo_state_per_s=6.700 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=333.333
+hb_mode=all who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=47.0 out_msgs_per_s=377.0 in_bytes_per_s=12454 out_bytes_per_s=118113
+server_cpu_cores_sum=0.022 server_cpu_cores_max=0.008 server_rss_mb=25/23/23
+bench_cpu_cores=0.010
+## case n=500 -hb-mode all
+bucket=dirbench-4f1e55af
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.666
+streaminfo_state_per_s=33.666 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.666 hb_delivered_per_s=8333.248
+hb_mode=all who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=188.0 out_msgs_per_s=8504.6 in_bytes_per_s=55615 out_bytes_per_s=2584117
+server_cpu_cores_sum=0.160 server_cpu_cores_max=0.056 server_rss_mb=49/49/48
+bench_cpu_cores=0.121
+## case n=1000 -hb-mode all
+bucket=dirbench-47e3022c
+ramp_seconds=0.2 connected=1000 connect_failures=0
+n=1000 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=66.266
+streaminfo_state_per_s=66.266 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=33.333 hb_delivered_per_s=33336.726
+hb_mode=all who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=357.8 out_msgs_per_s=33657.4 in_bytes_per_s=108003 out_bytes_per_s=10164093
+server_cpu_cores_sum=0.521 server_cpu_cores_max=0.181 server_rss_mb=83/76/74
+bench_cpu_cores=0.427
+## case n=100 -hb-mode none
+bucket=dirbench-4861b4f7
+ramp_seconds=0.1 connected=100 connect_failures=0
+n=100 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.750
+streaminfo_state_per_s=6.750 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=0.000
+hb_mode=none who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=40.6 out_msgs_per_s=37.3 in_bytes_per_s=10504 out_bytes_per_s=16219
+server_cpu_cores_sum=0.012 server_cpu_cores_max=0.005 server_rss_mb=34/61/60
+bench_cpu_cores=0.003
+## case n=500 -hb-mode none
+bucket=dirbench-048fc459
+ramp_seconds=0.2 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.633
+streaminfo_state_per_s=33.633 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.667 hb_delivered_per_s=0.000
+hb_mode=none who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=154.4 out_msgs_per_s=137.8 in_bytes_per_s=45493 out_bytes_per_s=73988
+server_cpu_cores_sum=0.036 server_cpu_cores_max=0.015 server_rss_mb=47/81/79
+bench_cpu_cores=0.012
+## case n=1000 -hb-mode none
+bucket=dirbench-96528b2d
+ramp_seconds=0.2 connected=1000 connect_failures=0
+n=1000 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=66.416
+streaminfo_state_per_s=66.416 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=33.333 hb_delivered_per_s=0.000
+hb_mode=none who_every=5m0s who_burst=false who_payload=600
+who_probes=0 who_probes_per_s=0.000 who_replies_per_s=0.0 replies_per_probe=0.0 incomplete_probes=0
+probe_ms p50=0 p99=0 max=0 last_reply_ms p50=0 p99=0 max=0
+server_in_msgs_per_s=291.5 out_msgs_per_s=258.2 in_bytes_per_s=88041 out_bytes_per_s=144384
+server_cpu_cores_sum=0.061 server_cpu_cores_max=0.027 server_rss_mb=70/110/108
+bench_cpu_cores=0.020
+## case n=100 -hb-mode probe -who-every 5m
+bucket=dirbench-f334df75
+ramp_seconds=0.0 connected=100 connect_failures=0
+n=100 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.667
+streaminfo_state_per_s=6.667 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=0.000
+hb_mode=probe who_every=5m0s who_burst=false who_payload=600
+who_probes=17 who_probes_per_s=0.283 who_replies_per_s=28.3 replies_per_probe=100.0 incomplete_probes=0
+probe_ms p50=306 p99=308 max=308 last_reply_ms p50=1 p99=2 max=2
+server_in_msgs_per_s=88.3 out_msgs_per_s=141.4 in_bytes_per_s=38756 out_bytes_per_s=61388
+server_cpu_cores_sum=0.015 server_cpu_cores_max=0.006 server_rss_mb=34/38/42
+bench_cpu_cores=0.004
+## case n=500 -hb-mode probe -who-every 5m
+bucket=dirbench-8b9a1c1d
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.483
+streaminfo_state_per_s=33.483 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.683 hb_delivered_per_s=0.000
+hb_mode=probe who_every=5m0s who_burst=false who_payload=600
+who_probes=100 who_probes_per_s=1.667 who_replies_per_s=833.3 replies_per_probe=500.0 incomplete_probes=0
+probe_ms p50=310 p99=313 max=314 last_reply_ms p50=3 p99=4 max=6
+server_in_msgs_per_s=1547.9 out_msgs_per_s=3196.2 in_bytes_per_s=878724 out_bytes_per_s=1407048
+server_cpu_cores_sum=0.071 server_cpu_cores_max=0.027 server_rss_mb=48/48/46
+bench_cpu_cores=0.036
+## case n=1000 -hb-mode probe -who-every 5m
+bucket=dirbench-d0f65f9e
+ramp_seconds=0.2 connected=1000 connect_failures=0
+n=1000 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=67.133
+streaminfo_state_per_s=67.133 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=33.333 hb_delivered_per_s=0.000
+hb_mode=probe who_every=5m0s who_burst=false who_payload=600
+who_probes=197 who_probes_per_s=3.283 who_replies_per_s=3283.3 replies_per_probe=1000.0 incomplete_probes=0
+probe_ms p50=312 p99=315 max=316 last_reply_ms p50=5 p99=8 max=9
+server_in_msgs_per_s=5776.2 out_msgs_per_s=12306.2 in_bytes_per_s=3372329 out_bytes_per_s=5399366
+server_cpu_cores_sum=0.175 server_cpu_cores_max=0.064 server_rss_mb=67/65/64
+bench_cpu_cores=0.103
+## case n=500 -hb-mode probe -who-every 1m
+bucket=dirbench-c3a2abd1
+ramp_seconds=0.1 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.300
+streaminfo_state_per_s=33.300 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.667 hb_delivered_per_s=0.000
+hb_mode=probe who_every=1m0s who_burst=false who_payload=600
+who_probes=497 who_probes_per_s=8.283 who_replies_per_s=4141.7 replies_per_probe=500.0 incomplete_probes=0
+probe_ms p50=311 p99=313 max=314 last_reply_ms p50=3 p99=5 max=6
+server_in_msgs_per_s=7038.9 out_msgs_per_s=15247.3 in_bytes_per_s=4161743 out_bytes_per_s=6659901
+server_cpu_cores_sum=0.202 server_cpu_cores_max=0.071 server_rss_mb=52/51/50
+bench_cpu_cores=0.121
+## case n=1000 -hb-mode probe -who-every 1m
+bucket=dirbench-c10b09e1
+ramp_seconds=0.2 connected=1000 connect_failures=0
+n=1000 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=67.049
+streaminfo_state_per_s=67.049 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=33.333 hb_delivered_per_s=0.000
+hb_mode=probe who_every=1m0s who_burst=false who_payload=600
+who_probes=997 who_probes_per_s=16.616 who_replies_per_s=16616.5 replies_per_probe=1000.0 incomplete_probes=0
+probe_ms p50=313 p99=316 max=322 last_reply_ms p50=5 p99=13 max=15
+server_in_msgs_per_s=27982.4 out_msgs_per_s=61098.7 in_bytes_per_s=16672217 out_bytes_per_s=26679018
+server_cpu_cores_sum=0.648 server_cpu_cores_max=0.222 server_rss_mb=78/79/78
+bench_cpu_cores=0.392
+## case n=100 -hb-mode probe -who-every 0 -who-burst
+bucket=dirbench-cf424611
+ramp_seconds=0.1 connected=100 connect_failures=0
+n=100 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=6.550
+streaminfo_state_per_s=6.550 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=3.333 hb_delivered_per_s=0.000
+hb_mode=probe who_every=0s who_burst=true who_payload=600
+who_probes=100 who_probes_per_s=1.667 who_replies_per_s=166.7 replies_per_probe=100.0 incomplete_probes=0
+probe_ms p50=329 p99=330 max=330 last_reply_ms p50=21 p99=22 max=22
+server_in_msgs_per_s=322.4 out_msgs_per_s=650.8 in_bytes_per_s=177013 out_bytes_per_s=282528
+server_cpu_cores_sum=0.015 server_cpu_cores_max=0.006 server_rss_mb=40/57/43
+bench_cpu_cores=0.004
+## case n=500 -hb-mode probe -who-every 0 -who-burst
+bucket=dirbench-fb5a0421
+ramp_seconds=0.2 connected=500 connect_failures=0
+n=500 sync=false replicas=1 mode=new window_s=60.0
+loads_per_s=0.000 streaminfo_per_s=0.000 directget_per_s=0.000 requests_per_s=33.549
+streaminfo_state_per_s=33.549 reloads_per_s=0.000
+request_failures=0 timeouts=0 load_failures=0
+load_duration_ms p50=0.0 p99=0.0 max=0.0 samples=0
+hb_published_per_s=16.666 hb_delivered_per_s=0.000
+hb_mode=probe who_every=0s who_burst=true who_payload=600
+who_probes=500 who_probes_per_s=8.333 who_replies_per_s=4166.6 replies_per_probe=500.0 incomplete_probes=0
+probe_ms p50=647 p99=680 max=680 last_reply_ms p50=344 p99=375 max=375
+server_in_msgs_per_s=7123.4 out_msgs_per_s=15431.5 in_bytes_per_s=4211975 out_bytes_per_s=6740286
+server_cpu_cores_sum=0.090 server_cpu_cores_max=0.033 server_rss_mb=98/87/86
+bench_cpu_cores=0.037
