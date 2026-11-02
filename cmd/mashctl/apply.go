@@ -116,6 +116,28 @@ func sysCredsPath(flagVal string, env func(string) string, cfg config.Config) (s
 	return "", errors.New("no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)")
 }
 
+// connectSys connects with the system account credentials (flagVal, MASH_SYS_CREDS or the init server's).
+func connectSys(cfg config.Config, flagVal string, env func(string) string) (*nats.Conn, error) {
+	credsPath, err := sysCredsPath(flagVal, env, cfg)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(credsPath)
+	if err != nil {
+		return nil, fmt.Errorf("system account credentials: %v", err)
+	}
+	if err := natsauth.CheckCreds(credsPath, raw); err != nil {
+		return nil, fmt.Errorf("system account credentials: %v", err)
+	}
+	opts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-policy"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
+	nc, err := nats.Connect(cfg.URL, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s with the system account credentials: %v", cfg.URL, natsauth.TLSHint(err))
+	}
+	return nc, nil
+}
+
 // runPolicyApply is `mashctl policy apply` and `mashctl policy diff`.
 func runPolicyApply(verb string, args []string, env func(string) string, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
@@ -197,22 +219,9 @@ func runPolicyApply(verb string, args []string, env func(string) string, stdout,
 	if err != nil {
 		return fail("%v", err)
 	}
-	credsPath, err := sysCredsPath(o.sysCreds, env, cfg)
+	nc, err := connectSys(cfg, o.sysCreds, env)
 	if err != nil {
 		return fail("%v", err)
-	}
-	raw, err := os.ReadFile(credsPath)
-	if err != nil {
-		return fail("system account credentials: %v", err)
-	}
-	if err := natsauth.CheckCreds(credsPath, raw); err != nil {
-		return fail("system account credentials: %v", err)
-	}
-	opts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
-		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-policy"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
-	nc, err := nats.Connect(cfg.URL, opts...)
-	if err != nil {
-		return fail("connect %s with the system account credentials: %v", cfg.URL, natsauth.TLSHint(err))
 	}
 	defer nc.Close()
 

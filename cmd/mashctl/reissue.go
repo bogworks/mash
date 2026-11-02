@@ -136,42 +136,100 @@ func readCreds(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// credsDiff is how a creds file's JWT differs from what a mint now would issue for the endpoint.
+type credsDiff struct {
+	TagsAdd, TagsRemove []string // tags the policy now gives the endpoint that the JWT lacks; tags the JWT carries that it no longer has
+	WrongSigner         bool     // the issuer is not the zone key's public key
+	Issuer, ZoneKey     string   // the JWT's issuer and the zone key it should have (public keys)
+	WrongAccount        bool     // the issuer account is not the account's key
+	WrongName           bool     // the JWT's name is not the endpoint's
+}
+
+func (d credsDiff) stale() bool {
+	return len(d.TagsAdd) > 0 || len(d.TagsRemove) > 0 || d.WrongSigner || d.WrongAccount || d.WrongName
+}
+
+// text is the difference in words, "" when there is none.
+func (d credsDiff) text() string {
+	var parts []string
+	if len(d.TagsAdd) > 0 {
+		parts = append(parts, "tags to add: "+strings.Join(d.TagsAdd, ", "))
+	}
+	if len(d.TagsRemove) > 0 {
+		parts = append(parts, "tags to remove: "+strings.Join(d.TagsRemove, ", "))
+	}
+	if d.WrongSigner {
+		parts = append(parts, fmt.Sprintf("signed by %s, not the zone key %s", d.Issuer, d.ZoneKey))
+	}
+	if d.WrongAccount {
+		parts = append(parts, "issued for another account")
+	}
+	if d.WrongName {
+		parts = append(parts, "carries another name")
+	}
+	return strings.Join(parts, "; ")
+}
+
 // staleCreds reports whether e's creds file holds a JWT that differs from what a mint now would issue: other tags, a
-// different issuer than the zone key's, or a different issuer account. A missing file wraps fs.ErrNotExist.
+// different issuer than the zone key's, a different issuer account or another name. A missing file wraps fs.ErrNotExist.
 func staleCreds(keys mint.Keys, cfg config.Config, e policy.CompiledEndpoint) (bool, error) {
 	p, err := credsFileFor(cfg, e.Name)
 	if err != nil {
 		return false, err
 	}
+	d, err := compareCreds(keys, p, e)
+	return d.stale(), err
+}
+
+// compareCreds is the comparison behind `reissue --changed` and `policy drift` for the creds file at p.
+func compareCreds(keys mint.Keys, p string, e policy.CompiledEndpoint) (credsDiff, error) {
+	var d credsDiff
 	raw, err := readCreds(p)
 	if err != nil {
-		return false, err
+		return d, err
 	}
 	token, err := jwt.ParseDecoratedJWT(raw)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", p, err)
+		return d, fmt.Errorf("%s: %w", p, err)
 	}
 	uc, err := jwt.DecodeUserClaims(token)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", p, err)
+		return d, fmt.Errorf("%s: %w", p, err)
 	}
 	zkp, err := keys.ZoneKey(e.Zone, false)
 	if err != nil {
-		return false, err
+		return d, err
 	}
 	zpub, err := zkp.PublicKey()
 	zkp.Wipe()
 	if err != nil {
-		return false, err
+		return d, err
 	}
 	akp, apub, err := keys.Account()
 	if err != nil {
-		return false, err
+		return d, err
 	}
 	akp.Wipe()
 	have := slices.Clone([]string(uc.Tags))
 	slices.Sort(have)
-	return !slices.Equal(have, e.Tags) || uc.Issuer != zpub || uc.IssuerAccount != apub, nil
+	for _, t := range e.Tags {
+		if !slices.Contains(have, t) {
+			d.TagsAdd = append(d.TagsAdd, t)
+		}
+	}
+	for _, t := range slices.Compact(have) {
+		if !slices.Contains(e.Tags, t) {
+			d.TagsRemove = append(d.TagsRemove, t)
+		}
+	}
+	if !slices.Equal(have, e.Tags) && len(d.TagsAdd) == 0 && len(d.TagsRemove) == 0 {
+		d.TagsRemove = []string{"(a repeated tag)"} // only a repeated tag differs: still stale
+	}
+	d.Issuer, d.ZoneKey = uc.Issuer, zpub
+	d.WrongSigner = uc.Issuer != zpub
+	d.WrongAccount = uc.IssuerAccount != apub
+	d.WrongName = uc.Name != e.Name
+	return d, nil
 }
 
 // reissueOne mints name's user again from the creds file's user key and replaces the file atomically.
