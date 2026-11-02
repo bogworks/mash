@@ -150,6 +150,10 @@ A zone that has a scoped signing key on the server but is not in the file would 
 
 Apply is not a transaction across NATS claims, JetStream resources and local files. If the push is not acknowledged by every server, or the read-back does not match, it prints `PARTIAL` with what was done (for example, zone keys created locally), what was not confirmed, and the command to retry, and exits 1. `mashctl policy apply` is idempotent: running it again pushes what still differs.
 
+#### What apply does not do
+
+Apply, `diff` and `--dry-run` change and compare the account claims only, and `already up to date` means exactly that: every server holds the zone keys of the policy. After a success, a diff or a dry run, when the policy has endpoints, they print a short `Not covered by apply` block with the same three points. First, user credentials issued before an apply keep the permissions of the key they were signed with and the exception tags they carry: an `allow` or `deny` tag change takes effect only when that endpoint's user JWT is re-issued with `mashctl add`, and apply cannot see issued tags (the block names up to five endpoints that carry exception tags). Re-issue is `mashctl add`'s job, not apply's. Second, credentials minted by other tools (for example `nsc`) under the account key keep their own permissions until they are revoked: no rule is enforced on them. Revocation and the cutover are a later, separate step of the plan; ADR 0052's cutover note already says that no rule is enforced before the old credentials are revoked. Third, a drift check that compares the issued state (`mashctl policy drift`) is planned, not yet available.
+
 ### Finding endpoints: `who` filters and `--json`
 
 ```

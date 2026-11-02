@@ -268,7 +268,7 @@ func TestApplyPushesZonesAndUsersGetExactlyTheirPermissions(t *testing.T) {
 	// Second apply: nothing to push.
 	jwtNow := e.accountJWT()
 	out, errb, code = e.run("policy", "apply")
-	if code != 0 || errb != "" || !strings.Contains(out, "already up to date") {
+	if code != 0 || errb != "" || !strings.Contains(out, "account claims already up to date") {
 		t.Fatalf("second apply: %d\n%s\n%s", code, out, errb)
 	}
 	if !strings.Contains(out, "acknowledged the unchanged JWT") {
@@ -340,7 +340,7 @@ func TestZoneAbsentFromFileIsRefusedUnlessRemovedOrKept(t *testing.T) {
 		if args[1] == "diff" {
 			want = 0
 		}
-		if code != want || errb != "" || !strings.Contains(out, "REFUSED unless --remove-zone c or --keep-zone c") || strings.Contains(out, "already up to date") {
+		if code != want || errb != "" || !strings.Contains(out, "REFUSED unless --remove-zone c or --keep-zone c") || strings.Contains(out, "account claims already up to date") {
 			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
 		}
 		if e.accountJWT() != before {
@@ -355,14 +355,14 @@ func TestZoneAbsentFromFileIsRefusedUnlessRemovedOrKept(t *testing.T) {
 func TestKeepZoneProceedsWithTheWarning(t *testing.T) {
 	e, cpub := dropZoneC(t)
 	out, errb, code := e.run("policy", "apply", "--keep-zone", "c")
-	if code != 0 || errb != "" || !strings.Contains(out, "zone c is outside the policy and its key stays active") || !strings.Contains(out, "already up to date") {
+	if code != 0 || errb != "" || !strings.Contains(out, "zone c is outside the policy and its key stays active") || !strings.Contains(out, "account claims already up to date") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
 	if _, ok := scopedSigners(e.claims())[cpub]; !ok {
 		t.Fatal("zone c's key was removed")
 	}
 	// an unknown zone name is an error
-	if out, _, code := e.run("policy", "apply", "--keep-zone", "nope"); code != 1 || strings.Contains(out, "already up to date") {
+	if out, _, code := e.run("policy", "apply", "--keep-zone", "nope"); code != 1 || strings.Contains(out, "account claims already up to date") {
 		t.Fatalf("%d\n%s", code, out)
 	}
 }
@@ -380,7 +380,7 @@ func TestRemoveZoneRemovesTheSignerAndKeepsTheKeyFile(t *testing.T) {
 		t.Fatalf("the local zone key file is gone: %v", err)
 	}
 	// nothing is outside the policy any more
-	if out, _, code := e.run("policy", "apply"); code != 0 || !strings.Contains(out, "already up to date") || strings.Contains(out, "outside the policy") {
+	if out, _, code := e.run("policy", "apply"); code != 0 || !strings.Contains(out, "account claims already up to date") || strings.Contains(out, "outside the policy") {
 		t.Fatalf("%d\n%s", code, out)
 	}
 }

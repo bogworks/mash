@@ -133,7 +133,7 @@ func TestAckedAndVerifiedThenNoOp(t *testing.T) {
 		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
 	}
 	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 2 || !strings.Contains(out.String(), "already up to date") {
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 2 || !strings.Contains(out.String(), "account claims already up to date") {
 		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
 	}
 	if fk.lastPush != fk.token {
@@ -446,7 +446,7 @@ func TestOutsidePolicyZones(t *testing.T) {
 		if mode == Diff {
 			want = 0
 		}
-		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "already up to date") || fk.pushes != pushes || fk.token != tok {
+		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "account claims already up to date") || fk.pushes != pushes || fk.token != tok {
 			t.Fatalf("%s: %d\n%s", mode, code, out.String())
 		}
 	}
@@ -461,7 +461,7 @@ func TestOutsidePolicyZones(t *testing.T) {
 	// keep: proceeds with the warning, nothing pushed to the account but the unchanged JWT
 	out.Reset()
 	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, KeepZones: []string{"legacy"}}, &out); code != 0 ||
-		!strings.Contains(out.String(), "zone legacy is outside the policy and its key stays active") || !strings.Contains(out.String(), "already up to date") {
+		!strings.Contains(out.String(), "zone legacy is outside the policy and its key stays active") || !strings.Contains(out.String(), "account claims already up to date") {
 		t.Fatalf("%d\n%s", code, out.String())
 	}
 	// remove: the signer is gone from the JWT, the other zones stay
@@ -515,5 +515,28 @@ func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
 	ks, fk, c := setup(t)
 	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: -1}, &bytes.Buffer{}); code != 1 || fk.pushes != 0 {
 		t.Fatalf("negative servers: %d", code)
+	}
+}
+
+// A successful apply, a diff and a dry run print the "Not covered by apply" block, naming the endpoints that carry
+// exception tags, and the up-to-date text says it is about the account claims.
+func TestNotCoveredBlockOnSuccess(t *testing.T) {
+	ks, fk, c := setup(t)
+	c.Endpoints[0].Tags = []string{"allow:b.y"}
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	for i, mode := range []Mode{Diff, Apply, Apply} {
+		var out bytes.Buffer
+		if code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
+			t.Fatalf("%d: %d\n%s", i, code, out.String())
+		}
+		s := out.String()
+		for _, w := range []string{"Not covered by apply:", "1 endpoint(s) carry exception tags: x", "mashctl add", "nsc", "mashctl policy drift) is planned"} {
+			if !strings.Contains(s, w) {
+				t.Fatalf("%d: missing %q\n%s", i, w, s)
+			}
+		}
+		if i == 2 && !strings.Contains(s, "account claims already up to date") {
+			t.Fatalf("%s", s)
+		}
 	}
 }

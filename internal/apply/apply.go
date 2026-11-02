@@ -295,8 +295,9 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		if changed {
 			pf("\n%s: dry run, nothing was changed on the server and no key was created.\n", p.Mode)
 		} else {
-			pf("\n%s: the resolver's copy already matches the file; no server was asked (apply confirms every server).\n", p.Mode)
+			pf("\n%s: the account claims on the resolver's copy already match the file; no server was asked (apply confirms every server).\n", p.Mode)
 		}
+		notCovered(out, p)
 		pf("%s\n", NotATransaction)
 		return 0
 	}
@@ -356,10 +357,13 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 		return unconfirmed(out, p, createdList, len(acks), why, changed)
 	}
 	if !changed {
-		pf("\n%s: already up to date: the claims are unchanged, and all %d server(s) acknowledged the unchanged JWT sent again and the resolver answers with it.\n%s\n", p.Mode, len(acks), NotATransaction)
+		pf("\n%s: account claims already up to date: the claims are unchanged, and all %d server(s) acknowledged the unchanged JWT sent again and the resolver answers with it. This covers the account claims only, not user credentials already issued.\n", p.Mode, len(acks))
+		notCovered(out, p)
+		pf("%s\n", NotATransaction)
 		return 0
 	}
 	pf("\npushed: %d server(s) acknowledged the claims update and the resolver now answers with the new signing keys (%d zones).\n", len(acks), len(plans))
+	notCovered(out, p)
 	pf("%s\n", NotATransaction)
 	return 0
 }
@@ -825,4 +829,33 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 			}
 		}
 	}
+}
+
+// notCovered prints the fixed block of what apply does not do, when the policy has endpoints. It is printed only on
+// success, diff and dry-run, never on a refusal or an error.
+func notCovered(out io.Writer, p Params) {
+	eps := p.Compiled.Endpoints
+	if len(eps) == 0 {
+		return
+	}
+	var tagged []string
+	for _, e := range eps {
+		if len(e.Tags) > 0 {
+			tagged = append(tagged, e.Name)
+		}
+	}
+	sort.Strings(tagged)
+	a := "user credentials issued before this apply keep the permissions of the key they were signed with and the exception tags they carry: an allow/deny tag change takes effect only when that endpoint's user JWT is re-issued (mashctl add), and apply cannot see issued tags"
+	if len(tagged) > 0 {
+		names := tagged
+		more := ""
+		if len(names) > 5 {
+			names, more = names[:5], ", ..."
+		}
+		a += fmt.Sprintf(" (%d endpoint(s) carry exception tags: %s%s)", len(tagged), strings.Join(names, ", "), more)
+	}
+	fmt.Fprintln(out, "Not covered by apply:")
+	fmt.Fprintln(out, "  - "+a)
+	fmt.Fprintln(out, "  - credentials minted by other tools (for example nsc) under the account key keep their own permissions until revoked: no rule is enforced on them")
+	fmt.Fprintln(out, "  - a drift check of the issued state (mashctl policy drift) is planned")
 }
