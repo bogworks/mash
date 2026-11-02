@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +310,92 @@ func TestStartWithoutNatsServer(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(s.serverDir, n)); err == nil {
 			t.Errorf("%s was created though nothing started", n)
 		}
+	}
+}
+
+// fakeNatsServer puts a nats-server shell script with the given body first on PATH.
+func fakeNatsServer(t *testing.T, body string) {
+	t.Helper()
+	d := t.TempDir()
+	if err := os.WriteFile(filepath.Join(d, "nats-server"), []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", d+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestStartRefusesOccupiedPort(t *testing.T) {
+	s := newSetup(t)
+	s.generate(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	fakeNatsServer(t, "touch "+filepath.Join(s.root, "launched")+"; sleep 5")
+	p := s.pl.Params
+	p.Port = ln.Addr().(*net.TCPAddr).Port
+	pid, err := Start(p)
+	if err == nil || pid != 0 || !strings.Contains(err.Error(), "already") || !strings.Contains(err.Error(), strconv.Itoa(p.Port)) {
+		t.Fatalf("Start: %d %v", pid, err)
+	}
+	for _, n := range []string{ServerLog, ServerPID} {
+		if _, err := os.Stat(filepath.Join(s.serverDir, n)); err == nil {
+			t.Errorf("%s was created though nothing started", n)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "launched")); err == nil {
+		t.Error("a server was launched")
+	}
+}
+
+func TestStartChildExitedReportsLog(t *testing.T) {
+	s := newSetup(t)
+	s.generate(t)
+	fakeNatsServer(t, "echo 'bind: address already in use' >&2; exit 1")
+	p := s.pl.Params
+	p.Port = freePort(t)
+	pid, err := Start(p)
+	if err == nil || pid != 0 || !strings.Contains(err.Error(), "server.log") || !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("Start: %d %v", pid, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.serverDir, ServerPID)); err == nil {
+		t.Error("pid file left behind")
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestCheckServerName(t *testing.T) {
+	if err := checkServerName(ServerName); err != nil {
+		t.Error(err)
+	}
+	if err := checkServerName("other"); err == nil {
+		t.Error("accepted another server's name")
+	}
+	if err := checkServerName(""); err == nil {
+		t.Error("accepted an empty name")
+	}
+}
+
+func TestCheckPortFree(t *testing.T) {
+	if err := checkPortFree(freePort(t)); err != nil {
+		t.Error(err)
 	}
 }

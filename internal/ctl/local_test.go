@@ -2,6 +2,7 @@ package ctl
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -180,5 +182,65 @@ func TestPlainInitIsUnchanged(t *testing.T) {
 func TestUsageListsInitLocal(t *testing.T) {
 	if u := Usage("mashctl"); !strings.Contains(u, "init --local [--dir D] [--owner O] [--port P] [--start]") {
 		t.Fatal(u)
+	}
+}
+
+// stubStart replaces the server start and bucket init seams; it restores them on cleanup.
+func stubStart(t *testing.T) {
+	t.Helper()
+	s, i := startLocalServer, initLocalBuckets
+	t.Cleanup(func() { startLocalServer, initLocalBuckets = s, i })
+	startLocalServer = func(bootstrap.Params) (int, error) { return 4242, nil }
+	initLocalBuckets = func(string, config.Config, io.Writer, io.Writer) int { return 0 }
+}
+
+func TestInitLocalStartConfigElsewhere(t *testing.T) {
+	stubStart(t)
+	for name, mod := range map[string]func(e *localEnv){
+		"config.json elsewhere": func(e *localEnv) {
+			e.cfg.URL, e.cfg.Owner, e.cfg.AdminCreds = "nats://other:4222", "alice", "/x/admin.creds"
+		},
+		"MASH_URL override": func(e *localEnv) {
+			e.cfg.URL = "nats://other:4222"
+			e.cfg.Owner = "alice"
+			e.cfg.AdminCreds = filepath.Join(e.root, "cfg", "server", "mashadmin.creds")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newLocalEnv(t)
+			mod(e)
+			code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, errs)
+			}
+			for _, want := range []string{"points elsewhere", `"url": "nats://127.0.0.1:4222"`, `"owner": "alice"`, "admin_creds", "MASH_URL"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("output lacks %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "Ready") || strings.Contains(out, "provision <name>") {
+				t.Errorf("claims readiness or recommends provision:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestInitLocalStartConfigMatches(t *testing.T) {
+	stubStart(t)
+	e := newLocalEnv(t)
+	e.cfg.URL, e.cfg.Owner = "nats://127.0.0.1:4222", "alice"
+	e.cfg.AdminCreds = filepath.Join(e.root, "cfg", "server", "mashadmin.creds")
+	code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
+	if code != 0 || !strings.Contains(out, "Ready") || strings.Contains(out, "points elsewhere") {
+		t.Fatalf("exit %d: %s\n%s", code, out, errs)
+	}
+}
+
+func TestInitLocalStartNoConfigIsReady(t *testing.T) {
+	stubStart(t)
+	e := newLocalEnv(t)
+	code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
+	if code != 0 || !strings.Contains(out, "Ready") || strings.Contains(out, "points elsewhere") {
+		t.Fatalf("exit %d: %s\n%s", code, out, errs)
 	}
 }

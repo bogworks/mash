@@ -38,7 +38,7 @@ const (
 
 	adminUserName = "mashadmin"
 	sysUserName   = "sys"
-	serverName    = "mash-local"
+	ServerName    = "mash-local"
 )
 
 // Account limits for JetStream, the defaults docs/operations.md describes (2G of disk, 64 streams, 128 consumers).
@@ -260,7 +260,7 @@ func confQuote(s string) string {
 func serverConfFor(p Params, sysPub, sysJWT, acctPub, acctJWT string) string {
 	var b strings.Builder
 	b.WriteString("# Written by `mashctl init --local`. A local development server: it listens on loopback only and has no TLS.\n")
-	fmt.Fprintf(&b, "server_name: %s\n", serverName)
+	fmt.Fprintf(&b, "server_name: %s\n", ServerName)
 	fmt.Fprintf(&b, "listen: 127.0.0.1:%d\n", p.Port)
 	fmt.Fprintf(&b, "operator: %s\n", confQuote(p.path(OperatorJWT)))
 	fmt.Fprintf(&b, "system_account: %s\n", sysPub)

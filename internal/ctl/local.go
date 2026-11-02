@@ -14,6 +14,18 @@ import (
 	"github.com/bogworks/mash/internal/ctlkeys"
 )
 
+// Seams for tests.
+var (
+	startLocalServer = bootstrap.Start
+	initLocalBuckets func(prog string, c config.Config, stdout, stderr io.Writer) int
+)
+
+func init() {
+	initLocalBuckets = func(prog string, c config.Config, stdout, stderr io.Writer) int {
+		return Run(prog, c, []string{"init"}, stdout, stderr)
+	}
+}
+
 func initLocalUsage(prog string) string {
 	return "usage: " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
 }
@@ -99,11 +111,19 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q\n", pl.URL, owner, pl.Creds)
 	}
 
+	// Later commands use the loaded configuration (or, when this run wrote config.json, what that file now says,
+	// unless a MASH_* variable overrides it): does that name the server just configured?
+	same := func(have, want string) bool { return have == want || (have == "" && pl.Config != nil) }
+	elsewhere := !same(cfg.URL, pl.URL) || !same(cfg.AdminCreds, pl.Creds) || !same(cfg.Owner, owner)
+
 	if !start {
+		if elsewhere {
+			fmt.Fprintf(stdout, "\nNote: your configuration points elsewhere: %s commands will not use this server until config.json (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS) has the three settings above.\n", prog)
+		}
 		fmt.Fprintf(stdout, "\nNext:\n  1. start the server:      nats-server -c %s\n  2. create the buckets:    %s init\n  3. add an endpoint:       %s provision <name> --user U --account A   (`%s add` is coming)\n", pl.ConfPath(), prog, prog, prog)
 		return 0
 	}
-	pid, err := bootstrap.Start(pl.Params)
+	pid, err := startLocalServer(pl.Params)
 	if err != nil {
 		return fail(err)
 	}
@@ -111,9 +131,16 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	c := cfg
 	c.URL, c.Owner, c.AdminCreds = pl.URL, owner, pl.Creds
 	c.TLSCA, c.TLSCert, c.TLSKey = "", "", "" // the local server has no TLS
-	if code := Run(prog, c, []string{"init"}, stdout, stderr); code != 0 {
+	if code := initLocalBuckets(prog, c, stdout, stderr); code != 0 {
 		fmt.Fprintf(stderr, "%s: the server is running (pid %d) but its buckets were not created; run: %s init\n", pfx, pid, prog)
 		return code
+	}
+	if elsewhere {
+		fmt.Fprintf(stdout, "\nthe local server is running, but your configuration points elsewhere\n")
+		fmt.Fprintf(stdout, "  %s commands use url %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these three:\n", prog, cfg.URL, cfg.AdminCreds, cfg.Owner)
+		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q\n", pl.URL, owner, pl.Creds)
+		fmt.Fprintf(stdout, "  (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS)\n")
+		return 0
 	}
 	fmt.Fprintf(stdout, "\nReady: the local server is up at %s. Add an endpoint with: %s provision <name> --user U --account A   (`%s add` is coming)\n", pl.URL, prog, prog)
 	return 0
