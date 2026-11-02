@@ -18,7 +18,15 @@
 // load. -mode new runs each endpoint's poll through endpoint.DirPoller, the decision logic of ADR 0065 (one unfiltered
 // stream info per poll, a full load only when the state moved or the forced reload is due, jittered waits).
 //
+// -hb-mode (docs/evidence/2026-11-02-heartbeat-fanout) varies the heartbeat side: all (default, today) = every endpoint
+// publishes a heartbeat and holds the standing agents.hb.*.<owner>.* subscription; none = it publishes but holds no
+// heartbeat subscription; probe = none plus each endpoint answers $SRV.INFO.agents with a -who-payload byte registration-like
+// reply and runs a who probe every -who-every (random first offset; 0 = none) or all at once once (-who-burst): subscribe a
+// fresh inbox, publish the request, wait endpoint.PresenceQuiet after the last reply or endpoint.PresenceCap.
+//
 // Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1] [-mode old|new]
+//
+//	[-hb-mode all|none|probe] [-who-every 5m] [-who-burst] [-who-payload 600]
 package main
 
 import (
@@ -55,6 +63,7 @@ const (
 	defHB      = 30 * time.Second
 	defWarm    = 10 * time.Second
 	defMeasure = 60 * time.Second
+	defWho     = 5 * time.Minute
 	fetchConc  = 64 // internal/endpoint fetchConcurrency
 	reqTimeout = 5 * time.Second
 	owner      = "o"
@@ -70,6 +79,9 @@ var (
 	cStream, cGet, cFail, cTimeout, cLoads, cLoadFail atomic.Int64
 	cState, cReloads                                  atomic.Int64 // mode new: unfiltered state requests; polls that reloaded
 	cHBPub, cHBDel                                    atomic.Int64
+	cWho, cReplies, cIncomplete                       atomic.Int64 // completed probes in the window, replies they received, probes with fewer than n replies
+	whoN                                              int
+	whoDurs, whoLast                                  []float64 // probe duration until quiet / until the last reply, ms
 	measuring                                         atomic.Bool
 	durMu                                             sync.Mutex
 	durs                                              []float64
@@ -122,6 +134,10 @@ func run() int {
 	warm := flag.Duration("warm", defWarm, "wait after ramp-up before measuring")
 	measure := flag.Duration("measure", defMeasure, "measured window")
 	mode := flag.String("mode", "old", "old: every poll is a full load (as measured); new: poll through endpoint.DirPoller (ADR 0065)")
+	hbMode := flag.String("hb-mode", "all", "all: publish heartbeats and hold the standing subscription (today); none: publish, no subscription; probe: none plus who probes")
+	whoEvery := flag.Duration("who-every", defWho, "hb-mode probe: each endpoint probes this often (random first offset); 0 = no periodic probes")
+	whoBurst := flag.Bool("who-burst", false, "hb-mode probe: every endpoint probes once in the same instant, 5 s into the measured window")
+	whoPayload := flag.Int("who-payload", 600, "hb-mode probe: bytes of each simulated registration reply")
 	scratch := flag.Bool("i-know-this-is-a-scratch-server", false, "allow non-loopback -urls (the tool creates and deletes its own dirbench-* bucket only)")
 	flag.Parse()
 	u := strings.Split(*urls, ",")
@@ -135,6 +151,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "-mode must be old or new")
 		return 2
 	}
+	if *hbMode != "all" && *hbMode != "none" && *hbMode != "probe" {
+		fmt.Fprintln(os.Stderr, "-hb-mode must be all, none or probe")
+		return 2
+	}
+	whoN = *n
 	if !*scratch {
 		if err := checkLoopback(u); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -185,7 +206,13 @@ func run() int {
 				connFail.Add(1)
 				return
 			}
-			_, _ = nc.Subscribe("agents.hb.*."+owner+".*", func(*nats.Msg) { cHBDel.Add(1) })
+			if *hbMode == "all" {
+				_, _ = nc.Subscribe("agents.hb.*."+owner+".*", func(*nats.Msg) { cHBDel.Add(1) })
+			}
+			if *hbMode == "probe" {
+				reply := make([]byte, *whoPayload)
+				_, _ = nc.Subscribe("$SRV.INFO.agents", func(m *nats.Msg) { _ = m.Respond(reply) })
+			}
 			eps[i] = &ep{name, nc}
 		}()
 	}
@@ -207,16 +234,45 @@ func run() int {
 		}
 		go loop(stop, offH, *hb, func() { _ = e.nc.Publish("agents.hb.cc."+owner+"."+e.name, make([]byte, 300)); cHBPub.Add(1) })
 	}
+	burst := make(chan struct{})
+	if *hbMode == "probe" {
+		for _, e := range eps {
+			if e == nil {
+				continue
+			}
+			if *whoEvery > 0 {
+				go loop(stop, rand.N(*whoEvery), *whoEvery, func() { whoProbe(e.nc) })
+			}
+			if *whoBurst {
+				go func() {
+					select {
+					case <-stop:
+					case <-burst:
+						whoProbe(e.nc)
+					}
+				}()
+			}
+		}
+	}
 	time.Sleep(*warm)
 
 	// measured window
 	measuring.Store(true)
+	cWho.Store(0)
+	cReplies.Store(0)
+	cIncomplete.Store(0)
 	var st0, rl0, s0, g0, f0, t0, l0, lf0, hp0, hd0 = cState.Load(), cReloads.Load(), cStream.Load(), cGet.Load(), cFail.Load(), cTimeout.Load(), cLoads.Load(), cLoadFail.Load(), cHBPub.Load(), cHBDel.Load()
 	v0 := varz(m)
 	c0 := cpu(pl)
 	self0 := cpu([]string{"self"})
 	w0 := time.Now()
-	time.Sleep(*measure)
+	if *whoBurst {
+		time.Sleep(5 * time.Second)
+		close(burst)
+		time.Sleep(*measure - 5*time.Second)
+	} else {
+		time.Sleep(*measure)
+	}
 	el := time.Since(w0).Seconds()
 	v1 := varz(m)
 	c1 := cpu(pl)
@@ -235,6 +291,15 @@ func run() int {
 	fmt.Printf("load_duration_ms p50=%.1f p99=%.1f max=%.1f samples=%d\n", pct(durs, .5), pct(durs, .99), pct(durs, 1), len(durs))
 	durMu.Unlock()
 	fmt.Printf("hb_published_per_s=%.3f hb_delivered_per_s=%.3f\n", d(cHBPub.Load(), hp0), d(cHBDel.Load(), hd0))
+	fmt.Printf("hb_mode=%s who_every=%s who_burst=%v who_payload=%d\n", *hbMode, *whoEvery, *whoBurst, *whoPayload)
+	durMu.Lock()
+	sort.Float64s(whoDurs)
+	sort.Float64s(whoLast)
+	fmt.Printf("who_probes=%d who_probes_per_s=%.3f who_replies_per_s=%.1f replies_per_probe=%.1f incomplete_probes=%d\n", cWho.Load(), d(cWho.Load(), 0), d(cReplies.Load(), 0),
+		float64(cReplies.Load())/max(1, float64(cWho.Load())), cIncomplete.Load())
+	fmt.Printf("probe_ms p50=%.0f p99=%.0f max=%.0f last_reply_ms p50=%.0f p99=%.0f max=%.0f\n", pct(whoDurs, .5), pct(whoDurs, .99), pct(whoDurs, 1),
+		pct(whoLast, .5), pct(whoLast, .99), pct(whoLast, 1))
+	durMu.Unlock()
 	fmt.Printf("server_in_msgs_per_s=%.1f out_msgs_per_s=%.1f in_bytes_per_s=%.0f out_bytes_per_s=%.0f\n",
 		(v1[0]-v0[0])/el, (v1[1]-v0[1])/el, (v1[2]-v0[2])/el, (v1[3]-v0[3])/el)
 	var sum, mx float64
@@ -484,4 +549,42 @@ func rss(pids []string) string {
 		}
 	}
 	return strings.Join(out, "/")
+}
+
+// whoProbe is one `who` probe as internal/endpoint's startPresence/awaitPresence do it: a fresh inbox, one request on
+// $SRV.INFO.agents, then wait endpoint.PresenceQuiet after the last reply (once there is one) or endpoint.PresenceCap.
+// A probe that completes inside the measured window counts; replies are counted per probe.
+func whoProbe(nc *nats.Conn) {
+	inbox := nc.NewRespInbox()
+	var replies atomic.Int64
+	var lastNS atomic.Int64
+	start := time.Now()
+	sub, err := nc.Subscribe(inbox, func(*nats.Msg) { replies.Add(1); lastNS.Store(int64(time.Since(start))) })
+	if err != nil {
+		return
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	if nc.PublishRequest("$SRV.INFO.agents", inbox, nil) != nil {
+		return
+	}
+	for {
+		time.Sleep(10 * time.Millisecond)
+		el := time.Since(start)
+		if el >= endpoint.PresenceCap || (replies.Load() > 0 && el-time.Duration(lastNS.Load()) >= endpoint.PresenceQuiet) {
+			break
+		}
+	}
+	if !measuring.Load() {
+		return
+	}
+	r := replies.Load()
+	cWho.Add(1)
+	cReplies.Add(r)
+	if r < int64(whoN) {
+		cIncomplete.Add(1)
+	}
+	durMu.Lock()
+	whoDurs = append(whoDurs, float64(time.Since(start).Milliseconds()))
+	whoLast = append(whoLast, float64(lastNS.Load())/1e6)
+	durMu.Unlock()
 }
