@@ -1,11 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0052
 date: 2026-10-21
 decision-makers: Randy Bias (mash maintainer)
 recorded: 2026-10-31 (backfilled)
 ---
 
 # mash never mints NATS users or holds operator or account seeds; credentials stay 0600 on the endpoint's host
+Superseded by [0052](0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
 
 ## Context and Problem Statement
 

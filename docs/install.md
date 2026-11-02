@@ -24,8 +24,11 @@ To install the binary yourself (required for an unpinned plugin; also for the CL
 
 ```sh
 go install github.com/bogworks/mash/cmd/mash@latest
+go install github.com/bogworks/mash/cmd/mashctl@latest   # the admin tool
 mash version
 ```
+
+`mashctl` is built from source for now; it is not yet in the release assets.
 
 ## 2. The plugin
 

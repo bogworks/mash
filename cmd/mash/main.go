@@ -35,14 +35,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
   mash status                                  what a session would see (name, config, creds, channel allowlist), before launch;
                                                connects to nothing; the live parts say they need a running session
-  mash admin init                              create the directory and lease buckets (or raise their caps to the configured limits)
-  mash admin limits [name...]                  raise existing inboxes to the configured limits (config.json "limits"; never lowers)
-  mash admin limits --show                     print the effective limits
-  mash admin permissions <name> [--nsc]        the NATS permissions an endpoint user needs
-  mash admin provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]...
-  mash admin set-meta <name> [--role R] [--host H] [--label k=v]...   (a value of - clears the field; --label k=- clears that label)
-  mash admin deprovision <name> [--user U]     remove the record and inbox; with --user, only if the record's user is still U
-  mash admin list
+  mash admin <verb> ...                        deprecated; use mashctl
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 

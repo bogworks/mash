@@ -7,7 +7,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 ### Added
 
 - `internal/policy`: the policy file (labels, allow and deny rules, tests) parsed strictly, checked, explained and compiled to each endpoint's full per-recipient permission set, with a JWT size budget; `admin.PermissionsTo` narrows the peer lines to a recipient list. Not wired to any command yet; see [docs/policy-file.md](docs/policy-file.md).
-- Releases carry a CycloneDX 1.5 SBOM per binary (`mash-<os>-<arch>.cdx.json`, attested and listed in the signed `SHA256SUMS`) and SLSA provenance (`mash.intoto.jsonl`) from the `slsa-github-generator` generic generator, and the publish gate verifies all of them before a release is published. How to verify a download is in [docs/release.md](docs/release.md#verify-a-release) ([ADR-0051](docs/decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md)).
+- Releases carry a CycloneDX 1.5 SBOM per binary (`mash-<os>-<arch>.cdx.json`, attested and listed in the signed `SHA256SUMS`) and SLSA provenance (`mash.intoto.jsonl`) from the `slsa-github-generator` generic generator, and the publish gate verifies all of them before a release is published. How to verify a download is in [docs/release.md](docs/release.md#verify-a-release) ([ADR-0052](docs/decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md)).
 
 ### Fixed
 
@@ -16,6 +16,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Added
 
+- `mashctl`, the admin tool: every `mash admin` verb (init, limits, permissions, provision, set-meta, deprovision, list) is now `mashctl <verb>`, with the same arguments and output. `mash admin` still works as a deprecated alias and prints one line to stderr saying so. `mashctl` is built from source for now (`go install github.com/bogworks/mash/cmd/mashctl@latest`) and is not yet in the release assets.
 - The directory record gains `description` (free text, up to 256 characters) and `caps` (up to 8 capability words), set by the admin: `mash admin provision --describe TEXT --cap C...` and `mash admin set-meta --describe TEXT|- --cap C|- --uncap C`. `mash who --cap C` (repeatable, exact, all must be present) finds endpoints by capability, `--match` also searches the description and capabilities, `--long` and `--json` show them, and the `who` tool gains a `cap` parameter. Older readers ignore the new fields ([ADR-0050](docs/decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
 - `mash who` filters and machine-readable output: `--match TEXT` (name, role, note, labels), `--name`, `--role`, `--owner`, `--label K[=V]` (repeatable), `--online`/`--offline`, `--names` and `--json` (a documented array; `--long` adds `lease`). Filters combine with AND, no match exits 0 with empty output, a bad flag exits 2, and the unfiltered output is unchanged. The `who` tool gains optional `match`, `name`, `role`, `label`, `online` and `format` parameters that use the same filter (see [docs/operations.md](docs/operations.md#finding-endpoints-who-filters-and---json)).
 

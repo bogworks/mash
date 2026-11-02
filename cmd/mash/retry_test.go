@@ -836,11 +836,8 @@ func TestApplyRetryTiming(t *testing.T) {
 	}
 }
 
-func TestCLIAndAdminDeadlines(t *testing.T) {
+func TestCLIDeadlines(t *testing.T) {
 	if cliDeadline(config.Config{}) != 15*time.Minute || cliDeadline(config.Config{CLITimeout: time.Hour}) != time.Hour {
 		t.Fatal("cliDeadline")
-	}
-	if adminDeadline(config.Config{}) != 30*time.Second || adminDeadline(config.Config{AdminTimeout: 2 * time.Minute}) != 2*time.Minute {
-		t.Fatal("adminDeadline")
 	}
 }
