@@ -24,6 +24,30 @@ mashctl provision <name> --user U --account A       # then add endpoints (`mashc
 
 With `--start`, `mashctl` looks for `nats-server` on `PATH` (if it is missing it says so, and the files stay), starts it detached with its output in `D/server.log` and its pid in `D/server.pid`, waits up to 15 seconds for a connection with `mashadmin.creds`, and creates the buckets. To stop the server: `kill $(cat D/server.pid)`.
 
+## Adopting an existing server
+
+`mashctl init --local` stands up a server. `mashctl adopt` is its counterpart for a NATS server you already run in operator mode with a full resolver and JetStream. A URL alone proves nothing about a server: not that it is in operator mode, nor that you hold authority over its account, system account and resolver, and `mashctl` cannot stand up or reconfigure a remote server from a client URL. So adopt requires the authority to exist already, checks it, and refuses when a prerequisite is absent.
+
+```sh
+mashctl adopt --server URL [--account NAME] --operator-key FILE --account-key FILE --sys-creds FILE \
+              [--admin-creds FILE | --mint-admin] [--owner O] [--dry-run]
+```
+
+Prerequisites, all of which you supply:
+
+- `--operator-key FILE`: the operator **signing** seed (starts with `SO`). `mashctl policy apply` signs the account JWT with it.
+- `--account-key FILE`: the **identity** seed of the mash account (starts with `SA`; its public key is the account JWT's subject).
+- `--sys-creds FILE`: creds of a user of the system account.
+- `--server URL`, and the TLS settings of the loaded configuration (`tls_ca`, `tls_cert`, `tls_key`), as every other verb uses them. `--account NAME` is the account's name in its JWT (default: the owner), and `--owner O` defaults to the configured owner.
+
+Seeds are read from files only, never from arguments or environment values, the files must be mode 0600, and a seed is never printed. Without `--operator-key`, `--account-key` or `--sys-creds`, adopt exits 2 and says which is missing and why.
+
+Adopt first runs read-only checks, in this order, and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key, whose name is `NAME` and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), and its disk, stream and consumer limits are shown, with a warning when they are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers the `$SYS.REQ.SERVER.PING` and the claims lookup, which is reported as standalone or as a cluster; (5) the operator key issued the account JWT. The operator's signing-key list is not published by the server, so when the issuer is another key adopt warns that it cannot verify that your key may sign for the account; that is a warning, not an error. The permission to push claims updates is not tested, because that would change the server: `mashctl policy apply` is the first to use it. The check also refuses a key store that already holds a different operator or account key, and a `sys.creds` that already holds other creds.
+
+Then it writes, or with `--dry-run` prints exactly what it would write: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything, fsynced; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where `policy apply` looks for them); with `--admin-creds FILE`, that path as `admin_creds` in `config.json` (the file is checked to connect and not copied), or with `--mint-admin` a `mashadmin` user of the account, signed by the account key with full access as `init --local` makes it, as `<config dir>/server/mashadmin.creds` (0600; one already there that is valid for this account is kept, not replaced); `config.json` (`url`, `owner`, `admin_creds`) only if there is none (otherwise the settings are printed); and the open `policy.yaml` only if there is none. Running adopt again with the same inputs changes nothing.
+
+Adopt changes nothing on the server: it pushes no account update, creates no NATS user there (a minted `mashadmin` exists only as a local creds file, usable because the account key signed it) and no buckets. The cutover of a live account, meaning pushing zone keys and revoking the credentials issued before, is a separate step the operator runs: `mashctl init` creates the buckets, `mashctl add` mints endpoints, and `mashctl policy apply` pushes the policy. Until then, credentials minted by other tools keep working.
+
 ## The account
 
 Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.

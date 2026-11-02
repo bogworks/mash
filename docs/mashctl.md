@@ -6,6 +6,14 @@
 
 `add` needs the account signing key, which `mashctl init` creates (the bootstrap verb is PR #137; until it merges the key can be created with the `ctlkeys` package), and an account that lists the zone keys: the account push is `mashctl apply` (also a separate change). Until `apply` has pushed a new zone's key, creds minted for that zone cannot authenticate. `add` tells you when an account update is needed.
 
+## Adopting an existing server
+
+```sh
+mashctl adopt --server URL [--account NAME] --operator-key FILE --account-key FILE --sys-creds FILE [--admin-creds FILE | --mint-admin] [--owner O] [--dry-run]
+```
+
+`adopt` is `init --local` for a NATS server you already run in operator mode with a full resolver and JetStream. It needs authority you already hold (the operator signing seed, the mash account's identity seed, system account creds), because a URL does not prove it and `mashctl` cannot create authority on a server it did not set up. It checks the files, the system creds, the account on the resolver, JetStream and the operator key without changing anything, then keeps the keys in the key store, copies the system creds to `<config dir>/server/sys.creds`, optionally records or mints admin creds, and writes `config.json` and an open `policy.yaml` if absent. It changes nothing on the server; the cutover of a live account is a separate step you run (`mashctl init`, `mashctl add`, `mashctl policy apply`). See [Adopting an existing server](operations.md#adopting-an-existing-server) for the checks, the files and the refusals.
+
 ## Adding an endpoint
 
 ```sh

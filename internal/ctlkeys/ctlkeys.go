@@ -186,13 +186,19 @@ func readSeed(path string, k kind) (nkeys.KeyPair, error) {
 	return kp, nil
 }
 
-// createSeed makes a new account-type key and installs it at path without clobbering. If the file appears first
-// (another process), that file is read and returned instead.
+// createSeed makes a new key and installs it at path without clobbering (see installSeed).
 func createSeed(path string, k kind) (nkeys.KeyPair, bool, error) {
 	nk, err := k.create()
 	if err != nil {
 		return nil, false, fmt.Errorf("mashctl: generate key: %w", err)
 	}
+	return installSeed(path, k, nk)
+}
+
+// installSeed writes nk's seed to path with the custody rules of createSeed: a 0600 temp file in the same directory
+// (O_EXCL), fsync, a hard link that cannot replace an existing file, then a sync of the directory. If the file appears
+// first, that file is read and returned with created false (the caller compares it with nk).
+func installSeed(path string, k kind, nk nkeys.KeyPair) (nkeys.KeyPair, bool, error) {
 	raw, err := nk.Seed()
 	if err != nil {
 		return nil, false, errors.New("mashctl: generate key: seed unavailable")
@@ -366,4 +372,118 @@ func (a *Authority) Zones() ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// ErrDifferentKey is wrapped by ImportOperator and ImportAccount when the store already holds another key.
+var ErrDifferentKey = errors.New("mashctl: the key store already holds a different key")
+
+// ParseOperatorSeed reads the operator seed file at path (0600, a regular file, an operator-prefix seed) and returns
+// the key pair and its public key. The seed is never put in an error.
+func ParseOperatorSeed(path string) (nkeys.KeyPair, string, error) {
+	return parseSeedFile(path, operatorKind)
+}
+
+// ParseAccountSeed is ParseOperatorSeed for an account identity seed (account prefix).
+func ParseAccountSeed(path string) (nkeys.KeyPair, string, error) {
+	return parseSeedFile(path, accountKind)
+}
+
+func parseSeedFile(path string, k kind) (nkeys.KeyPair, string, error) {
+	kp, err := readSeed(path, k)
+	if err != nil {
+		return nil, "", err
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		kp.Wipe()
+		return nil, "", err
+	}
+	return kp, pub, nil
+}
+
+// ImportOperator copies the operator seed file at path into the store as operator.nk (0600, no clobber, fsync). The
+// same key already stored is not an error (created is false); a different one is ErrDifferentKey and nothing changes.
+func (a *Authority) ImportOperator(path string) (pub string, created bool, err error) {
+	return a.importKind(path, operatorFile, operatorKind)
+}
+
+// ImportAccount is ImportOperator for the account identity seed (account.nk).
+func (a *Authority) ImportAccount(path string) (pub string, created bool, err error) {
+	return a.importKind(path, accountFile, accountKind)
+}
+
+func (a *Authority) importKind(src, name string, k kind) (pub string, created bool, err error) {
+	nk, pub, err := parseSeedFile(src, k)
+	if err != nil {
+		return "", false, err
+	}
+	defer nk.Wipe()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	dst := filepath.Join(a.dir, name)
+	same := func(have nkeys.KeyPair) error {
+		defer have.Wipe()
+		hp, err := have.PublicKey()
+		if err != nil {
+			return err
+		}
+		if hp != pub {
+			return fmt.Errorf("%w: %s holds %s, not the %s key %s you gave; refusing to replace it (move it aside to adopt with another key)", ErrDifferentKey, dst, hp, k.what, pub)
+		}
+		return nil
+	}
+	if have, err := readSeed(dst, k); err == nil {
+		return pub, false, same(have)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", false, err
+	}
+	if err := a.checkDirs(true); err != nil {
+		return "", false, err
+	}
+	have, created, err := installSeed(dst, k, nk)
+	if err != nil {
+		return "", false, err
+	}
+	if !created {
+		return pub, false, same(have)
+	}
+	have.Wipe()
+	return pub, true, nil
+}
+
+// InstallFile writes data to path with the custody rules of the key files: a 0600 temp file in the same directory
+// (O_EXCL), fsync, a hard link that cannot replace an existing file, a sync of the directory. An existing path is left
+// untouched and reported with created false; the caller compares its content. The directory must exist.
+func InstallFile(path string, data []byte) (created bool, err error) {
+	var rnd [8]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return false, err
+	}
+	tmp := path + ".tmp-" + hex.EncodeToString(rnd[:])
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return false, fmt.Errorf("mashctl: create %s: %w", tmp, err)
+	}
+	defer os.Remove(tmp)
+	_, werr := f.Write(data)
+	if werr == nil {
+		werr = f.Sync()
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return false, fmt.Errorf("mashctl: write %s: %w", tmp, werr)
+	}
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("mashctl: install %s: %w", path, err)
+	}
+	_ = os.Remove(tmp)
+	if err := syncDirHook(filepath.Dir(path)); err != nil {
+		return true, fmt.Errorf("mashctl: sync %s: %w", filepath.Dir(path), err)
+	}
+	return true, nil
 }
