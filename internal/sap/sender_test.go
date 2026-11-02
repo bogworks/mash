@@ -260,7 +260,7 @@ func TestInReplyToRoundTripAndForgery(t *testing.T) {
 	}
 	// another seq under the same signature
 	for _, bad := range []string{"43." + sig, "", "nodot", ".sig", "42.", "x." + sig, "042." + sig, "+42." + sig, "0." + sig,
-		"-1." + sig, "42", "42." + sig[:len(sig)-2] + "AA", "42." + sig + "A", "99999999999999999999." + sig} {
+		"-1." + sig, "42", "42." + tamperSig(sig), "42." + sig + "A", "99999999999999999999." + sig} {
 		if _, ok := VerifyInReplyTo(h, bad); ok {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -305,7 +305,7 @@ func TestViaRoundTripAndForgery(t *testing.T) {
 	}
 	for _, bad := range []string{"origin-a#8." + sig, "origin-b#7." + sig, "", "origin-a", "origin-a#7", "origin-a7." + sig,
 		"#7." + sig, "origin-a#." + sig, "origin-a#x." + sig, "origin-a#07." + sig, "origin-a#0." + sig, "Origin-A#7." + sig,
-		"origin a#7." + sig, "origin-a\n#7." + sig, "origin-a#7.", "origin-a#7." + sig[:len(sig)-2] + "AA", "a#b#7." + sig,
+		"origin a#7." + sig, "origin-a\n#7." + sig, "origin-a#7.", "origin-a#7." + tamperSig(sig), "a#b#7." + sig,
 		"origin_a#7." + sig} {
 		if _, _, ok := VerifyVia(h, bad); ok {
 			t.Fatalf("accepted %q", bad)
@@ -323,4 +323,14 @@ func TestViaRoundTripAndForgery(t *testing.T) {
 	if _, err := id.SignVia(h, "origin-a", 0); err == nil {
 		t.Fatal("signed seq 0")
 	}
+}
+
+// tamperSig changes the last two characters of a signature, whatever they are: a fixed replacement would equal the
+// original for one signature in a few thousand and make the forgery tests flaky.
+func tamperSig(sig string) string {
+	tail := "AA"
+	if strings.HasSuffix(sig, tail) {
+		tail = "BB"
+	}
+	return sig[:len(sig)-2] + tail
 }
