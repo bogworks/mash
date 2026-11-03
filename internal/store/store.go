@@ -195,8 +195,9 @@ func MailSubjectFor(owner, zone, name string) string {
 // MaxMetaLen is the longest Role, Host or label value.
 const MaxMetaLen = 64
 
-// MaxLabels is the most labels one record may carry.
-const MaxLabels = 8
+// MaxLabels is the most labels one record may carry. It is enforced where labels are written (ValidLabels), not
+// where a record is read, so a record with more is still parsed (ADR 0072).
+const MaxLabels = 64
 
 var labelKey = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,31}$`)
 

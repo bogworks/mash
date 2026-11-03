@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,15 +51,15 @@ func TestUnknownKeyIgnored(t *testing.T) {
 
 func TestValidLabels(t *testing.T) {
 	eight := map[string]string{}
-	for _, k := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
-		eight[k] = "v"
+	for i := 0; i < MaxLabels; i++ {
+		eight[fmt.Sprintf("k%d", i)] = "v"
 	}
-	nine := map[string]string{"i": "v"}
+	nine := map[string]string{"over": "v"}
 	for k, v := range eight {
 		nine[k] = v
 	}
 	for name, l := range map[string]map[string]string{
-		"nil": nil, "one": {"team": "acme"}, "eight": eight, "dotted key": {"a.b_c-d9": "x"},
+		"nil": nil, "one": {"team": "acme"}, "at the cap": eight, "dotted key": {"a.b_c-d9": "x"},
 		"empty value": {"k": ""}, "32-char key": {"a" + strings.Repeat("b", 31): "x"},
 	} {
 		if err := ValidLabels(l); err != nil {
@@ -66,7 +67,7 @@ func TestValidLabels(t *testing.T) {
 		}
 	}
 	for name, l := range map[string]map[string]string{
-		"nine": nine, "upper key": {"Team": "x"}, "digit first": {"1a": "x"}, "empty key": {"": "x"},
+		"over the cap": nine, "upper key": {"Team": "x"}, "digit first": {"1a": "x"}, "empty key": {"": "x"},
 		"33-char key": {"a" + strings.Repeat("b", 32): "x"}, "space in key": {"a b": "x"},
 		"tab value": {"k": "a\tb"}, "newline value": {"k": "a\nb"}, "long value": {"k": strings.Repeat("x", 65)},
 	} {
@@ -128,7 +129,7 @@ func TestValidCapsAndDescription(t *testing.T) {
 			t.Errorf("%s rejected: %v", name, err)
 		}
 	}
-	for name, c := range map[string][]string{"nine": nine, "upper": {"Nats"}, "digit first": {"1a"}, "empty": {""}, "33 chars": {"a" + strings.Repeat("b", 32)},
+	for name, c := range map[string][]string{"over the cap": nine, "upper": {"Nats"}, "digit first": {"1a"}, "empty": {""}, "33 chars": {"a" + strings.Repeat("b", 32)},
 		"space": {"a b"}, "duplicate": {"a", "a"}} {
 		if err := ValidCaps(c); err == nil {
 			t.Errorf("%s accepted", name)
@@ -193,5 +194,33 @@ func TestInboxConfigZoned(t *testing.T) {
 	z.Subjects = legacy.Subjects
 	if !reflect.DeepEqual(z, legacy) {
 		t.Fatal("a zoned inbox differs from a legacy one in more than its subjects")
+	}
+}
+
+func TestValidLabelsBoundary(t *testing.T) {
+	mk := func(n int) map[string]string {
+		m := map[string]string{}
+		for i := 0; i < n; i++ {
+			m[fmt.Sprintf("k%d", i)] = "v"
+		}
+		return m
+	}
+	if err := ValidLabels(mk(MaxLabels)); err != nil {
+		t.Fatalf("%d labels: %v", MaxLabels, err)
+	}
+	if err := ValidLabels(mk(65)); err == nil || err.Error() != "mash: 65 labels; at most 64" {
+		t.Fatalf("65 labels: %v", err)
+	}
+}
+
+// The cap is enforced on write only: a stored record with more labels still parses (ADR 0072).
+func TestParseRecordAcceptsManyLabels(t *testing.T) {
+	var p []string
+	for i := 0; i < 20; i++ {
+		p = append(p, fmt.Sprintf(`"k%d":"v"`, i))
+	}
+	r, err := ParseRecord("a", []byte(`{`+baseRecord+`,"labels":{`+strings.Join(p, ",")+`}}`))
+	if err != nil || len(r.Labels) != 20 {
+		t.Fatalf("%d labels, %v", len(r.Labels), err)
 	}
 }

@@ -31,7 +31,7 @@ type Report struct {
 // Check validates the file without compiling it.
 //
 // Errors: a default other than allow or deny; an endpoint name that is not config.ValidName; labels that break the
-// directory's rules (at most store.MaxLabels (8), key a lowercase letter then up to 31 of a-z 0-9 _ . -, value non-empty
+// directory's rules (at most store.MaxLabels (64), key a lowercase letter then up to 31 of a-z 0-9 _ . -, value non-empty
 // printable text of at most 64 characters with no tab or newline); a rule with an empty or repeated name, an action
 // other than allow or deny, a missing from or to (write {} for everyone), or a selector with an invalid key or
 // value; a test naming an endpoint the file does not declare or expecting something other than allow or deny.
