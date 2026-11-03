@@ -20,7 +20,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/policy"
+	"github.com/bogworks/mash/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -300,8 +302,59 @@ func (d *Doc) Save() error {
 	return nil
 }
 
+// plainString reports whether s, written bare, reads back as the string s.
+func plainString(s string) bool {
+	var n yaml.Node
+	if err := yaml.Unmarshal([]byte(s), &n); err != nil || len(n.Content) != 1 {
+		return false
+	}
+	c := n.Content[0]
+	return c.Kind == yaml.ScalarNode && c.ShortTag() == "!!str" && c.Value == s
+}
+
+// CheckName refuses an endpoint name that policy.Parse would refuse: one that is not a valid endpoint name, or that
+// written bare would read as a YAML null or boolean.
+func CheckName(name string) error {
+	if !config.ValidName(name) {
+		return fmt.Errorf("endpoint name %q is not valid: 1-48 lower-case letters, digits and single hyphens, starting with a letter", name)
+	}
+	if !plainString(name) {
+		return fmt.Errorf("endpoint name %q would read as a YAML %s, not a name: choose another name", name, bareKind(name))
+	}
+	return nil
+}
+
+func bareKind(s string) string {
+	var n yaml.Node
+	if yaml.Unmarshal([]byte(s), &n) == nil && len(n.Content) == 1 {
+		if k := strings.TrimPrefix(n.Content[0].ShortTag(), "!!"); k == "null" || k == "bool" {
+			return k
+		}
+	}
+	return "scalar"
+}
+
+// checkLabelKeys refuses a label key the policy parser would refuse.
+func checkLabelKeys(keys []string) error {
+	for _, k := range keys {
+		if !store.ValidLabelKey(k) {
+			return fmt.Errorf("label key %q is not valid: lower-case letters, digits, '_', '.' and '-', starting with a letter, at most 32", k)
+		}
+		if !plainString(k) {
+			return fmt.Errorf("label key %q would read as a YAML %s, not a key: choose another key", k, bareKind(k))
+		}
+	}
+	return nil
+}
+
 // AddEndpoint declares a new endpoint with the given labels. It is an error when the endpoint exists.
 func (d *Doc) AddEndpoint(name string, labels map[string]string) error {
+	if err := CheckName(name); err != nil {
+		return err
+	}
+	if err := checkLabelKeys(sortedKeys(labels)); err != nil {
+		return err
+	}
 	t, err := d.tree()
 	if err != nil {
 		return err
@@ -320,6 +373,9 @@ func (d *Doc) AddEndpoint(name string, labels map[string]string) error {
 // SetLabels sets the labels in set and removes the keys in unset (a key not present is ignored). An endpoint with no
 // labels: gets one; removing the last label removes the labels: key.
 func (d *Doc) SetLabels(name string, set map[string]string, unset []string) error {
+	if err := checkLabelKeys(sortedKeys(set)); err != nil {
+		return err
+	}
 	t, err := d.tree()
 	if err != nil {
 		return err

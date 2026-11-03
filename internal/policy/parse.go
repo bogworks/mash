@@ -111,6 +111,13 @@ func checkKeys(n *yaml.Node) error {
 		return nil
 	}
 	for _, c := range n.Content {
+		if n.Kind == yaml.SequenceNode && c.Kind == yaml.ScalarNode && c.ShortTag() == "!!null" {
+			line := c.Line
+			if line <= 0 {
+				line = n.Line
+			}
+			return fmt.Errorf("line %d: a list item is null; remove it or give it a value", line)
+		}
 		if err := checkKeys(c); err != nil {
 			return err
 		}

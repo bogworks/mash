@@ -260,6 +260,10 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "add")
 		return 2
 	}
+	if err := policyfile.CheckName(o.name); err != nil {
+		fmt.Fprintf(stderr, "mashctl: add: %v\n", err)
+		return 2
+	}
 	cfg, err := loadCtlConfig(env, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
