@@ -11,7 +11,7 @@ default: allow | deny      # what applies where no rule matches; allow when abse
 subject_label: zone        # the label whose value is the zone, carried in the mail subject; zone when absent
 endpoints:                 # every endpoint the file knows
   NAME:
-    labels: {KEY: VALUE}   # at most 8
+    labels: {KEY: VALUE}   # at most 64
 rules:
   - name: UNIQUE-NAME
     action: allow | deny

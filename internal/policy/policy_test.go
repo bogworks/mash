@@ -32,7 +32,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad endpoint name", "endpoints:\n  Web_Intake: {}\n", "endpoint Web_Intake"},
 		{"bad label key", "endpoints:\n  a:\n    labels: {Team: x}\n", "label key"},
 		{"empty label value", "endpoints:\n  a:\n    labels: {team: \"\"}\n", "empty value"},
-		{"too many labels", "endpoints:\n  a:\n    labels: {a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1, h: 1, i: 1}\n", "9 labels"},
+		{"too many labels", "endpoints:\n  a:\n    labels: {" + manyLabels(65) + "}\n", "65 labels"},
 		{"empty rule name", "rules:\n  - {name: \"\", action: allow, from: {}, to: {}}\n", "name must be non-empty"},
 		{"duplicate rule name", "rules:\n  - {name: r, action: allow, from: {}, to: {}}\n  - {name: r, action: deny, from: {}, to: {}}\n", "already used by rule 1"},
 		{"missing from", "rules:\n  - {name: r, action: allow, to: {}}\n", "from is missing"},
@@ -626,5 +626,20 @@ func TestCheckWarnsOnCaseVariantLabelValues(t *testing.T) {
 	// the same spelling twice is not a variant
 	if w := mustParse(t, "endpoints:\n  a: {labels: {team: x}}\n  b: {labels: {team: x}}\n").Check().Warnings; len(w) != 0 {
 		t.Fatalf("%v", w)
+	}
+}
+
+// manyLabels returns n distinct "kN: 1" flow-mapping entries.
+func manyLabels(n int) string {
+	var p []string
+	for i := 0; i < n; i++ {
+		p = append(p, fmt.Sprintf("k%d: 1", i))
+	}
+	return strings.Join(p, ", ")
+}
+
+func TestPolicyLabelCapBoundary(t *testing.T) {
+	if _, err := Parse([]byte("endpoints:\n  a:\n    labels: {" + manyLabels(64) + "}\n")); err != nil {
+		t.Fatalf("64 labels: %v", err)
 	}
 }

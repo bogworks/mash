@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,6 +12,15 @@ import (
 )
 
 func sp(s string) *string { return &s }
+
+// manyLabels returns n distinct labels (x0, x1, ...) with value "1".
+func manyLabels(n int) map[string]string {
+	m := map[string]string{}
+	for i := 0; i < n; i++ {
+		m[fmt.Sprintf("x%d", i)] = "1"
+	}
+	return m
+}
 
 func TestProvisionMeta(t *testing.T) {
 	e, a, js := setup(t)
@@ -50,7 +60,7 @@ func TestMetaValidation(t *testing.T) {
 		}
 	}
 	for _, bad := range []map[string]string{{"Bad": "x"}, {"1x": "x"}, {"a b": "x"}, {"": "x"},
-		{"a": "1", "b": "1", "c": "1", "d": "1", "e": "1", "f": "1", "g": "1", "h": "1", "i": "1"}} {
+		manyLabels(store.MaxLabels + 1)} {
 		if _, err := a.Provision(ctx, "alpha", u, e.Account, "", admin.Meta{Labels: bad}); err == nil {
 			t.Errorf("provision accepted labels %v", bad)
 		}
@@ -181,13 +191,13 @@ func TestSetMetaLabels(t *testing.T) {
 			t.Errorf("accepted %v", bad)
 		}
 	}
-	// The cap applies after the merge: 2 existing + 6 = 8 is fine, one more is not.
-	six := map[string]string{"d": "1", "e": "1", "f": "1", "g": "1", "h": "1", "i": "1"}
-	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{Labels: six}); err != nil || len(rec.Labels) != 8 {
+	// The cap applies after the merge: 2 existing + 62 = 64 is fine, one more is not.
+	rest := manyLabels(store.MaxLabels - 2)
+	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{Labels: rest}); err != nil || len(rec.Labels) != store.MaxLabels {
 		t.Fatalf("%+v %v", rec, err)
 	}
 	if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Labels: map[string]string{"j": "1"}}); err == nil {
-		t.Fatal("ninth label accepted")
+		t.Fatal("65th label accepted")
 	}
 	// Changing an existing key at the cap, or clearing one and adding one in the same update, is fine.
 	if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Labels: map[string]string{"b": "x", "c": "", "j": "1"}}); err != nil {
@@ -286,5 +296,33 @@ func TestSetMetaDescriptionAndCaps(t *testing.T) {
 	_, _ = a.SetMeta(ctx, "alpha", admin.MetaUpdate{AddCaps: []string{"p", "q"}})
 	if rec, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{ClearCaps: true, AddCaps: []string{"z"}}); err != nil || strings.Join(rec.Caps, ",") != "z" {
 		t.Fatalf("%+v %v", rec, err)
+	}
+}
+
+// A record with the most labels, each at its longest key and value, round-trips through the directory bucket (ADR 0072).
+func TestMaxLabelsRoundTrip(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, u := e.Mint(t, "alpha")
+	full := map[string]string{}
+	for i := 0; i < store.MaxLabels; i++ {
+		k := fmt.Sprintf("k%02d", i)
+		full[k+strings.Repeat("a", 32-len(k))] = strings.Repeat("v", store.MaxMetaLen)
+	}
+	if _, err := a.Provision(ctx, "alpha", u, e.Account, "", admin.Meta{Labels: full}); err != nil {
+		t.Fatalf("provision 64 labels: %v", err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	got, err := store.GetRecord(ctx, kv, "alpha")
+	if err != nil || len(got.Labels) != store.MaxLabels {
+		t.Fatalf("%d labels, %v", len(got.Labels), err)
+	}
+	// SetMeta rewrites the full record too, and one more label is refused with the count in the message.
+	if _, err := a.SetMeta(ctx, "alpha", admin.MetaUpdate{Role: sp("r")}); err != nil {
+		t.Fatalf("set-meta on a full record: %v", err)
+	}
+	_, err = a.SetMeta(ctx, "alpha", admin.MetaUpdate{Labels: map[string]string{"extra": "1"}})
+	if err == nil || !strings.Contains(err.Error(), "mash: 65 labels; at most 64") {
+		t.Fatalf("65th label: %v", err)
 	}
 }
