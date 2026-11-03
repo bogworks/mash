@@ -87,6 +87,12 @@ back since it was minted): the revocation would not cover it. The same refusal a
 name lock is also re-checked immediately before the new creds are staged, so a reissue whose lock expired cannot
 overwrite another reissue's staged seed.
 
+`reissue --changed` selects an endpoint not only when its creds JWT differs from the policy but also when its staged
+file `<creds file>.next` exists (an interrupted rotation, even if the policy was reverted: the normal reissue resumes
+it or refuses a stale one) or when the account JWT revokes the creds file's user key. The second check needs the server
+and the system account credentials; when it cannot be answered for an endpoint, `--changed` reports it, still
+processes the others and exits 1, and never prints `nothing to reissue`.
+
 The user JWT budget ([#179](https://github.com/bogworks/mash/issues/179)) moves from 4,000 to 3,750 bytes, since JWTs
 of 3,838 bytes and above fail at the default 4,096 byte control line.
 
@@ -105,6 +111,8 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
 `TestReissueRefusesFutureIssuedOldJWT` (rotation and revoked-key path: a JWT issued in the future is refused with no revoke call, no staged file, creds and record unchanged; a past one proceeds) and `TestReissueRefusesToStageWithoutLock` (`cmd/mashctl/reissue_stage_test.go`: a lock that fails its check before staging leaves nothing staged and makes no revoke call).
 
 `TestReissueRefusesUnpublishedZoneKey` (`cmd/mashctl/reissue_rotate_test.go`: rotating and non-rotating, no revoke, no staged file, creds and record unchanged) and `TestSignerPublishedCoversEveryServer` (`internal/apply/revoked_test.go`: published on all, one server lacking it, wrong role, silent server).
+
+`TestReissueChangedSelectsRevokedKey`, `TestReissueChangedFinishesStagedRotation`, `TestReissueChangedRevocationUnknown` and `TestReissueChangedNothingToDo` (`cmd/mashctl/reissue_changed_test.go`: `--changed` selects a revoked key and a staged rotation whose JWT matches the policy; an unreadable revocation exits 1 and the other endpoints are still reissued; nothing selected prints `nothing to reissue`).
 
 `cmd/mashctl/reissue_rotate_test.go` (rotation, a revoked key rotated, refusal when revocation cannot be read, refusal without a record or with another recorded key, revoke failure
 leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence, the held name lock), `cmd/mashctl/reissue_lock_test.go` (concurrent reissues of one name leave the file and the record agreeing; the lock is held during the file rewrite) and `internal/apply/revoked_test.go` (a revocation on any one server's copy counts; a silent server refuses).

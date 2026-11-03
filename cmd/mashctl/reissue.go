@@ -95,25 +95,56 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		return 1
 	}
 
+	code := 0
 	if changed {
+		servers, serversErr := parseServers(env) // read lazily below: only an endpoint that needs the revocation check uses it
 		for _, e := range c.Endpoints {
 			stale, err := staleCreds(keys, cfg, e)
 			switch {
 			case errors.Is(err, fs.ErrNotExist):
 				fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: no creds file here\n", e.Name)
+				continue
 			case err != nil:
 				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", e.Name, err)
 				return 1
 			case stale:
 				names = append(names, e.Name)
+				continue
+			}
+			// The JWT matches the policy; the endpoint still needs a reissue when a rotation was interrupted (its staged
+			// file is there: the reissue resumes it or refuses a stale one) or when its user key is revoked.
+			p, err := credsFileFor(cfg, e.Name)
+			if err != nil {
+				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", e.Name, err)
+				return 1
+			}
+			if _, err := os.Lstat(stagePath(p)); err == nil {
+				names = append(names, e.Name)
+				continue
+			}
+			pub, err := credsUserKey(p)
+			if err == nil && serversErr != nil {
+				err = serversErr
+			}
+			revoked := false
+			if err == nil {
+				revoked, err = keyRevoked(context.Background(), cfg, env, servers, pub)
+			}
+			switch {
+			case err != nil:
+				fmt.Fprintf(stderr, "mashctl: reissue %s: cannot tell whether its user key is revoked: %v\n", e.Name, err)
+				code = 1
+			case revoked:
+				names = append(names, e.Name)
 			}
 		}
 		if len(names) == 0 {
-			fmt.Fprintln(stdout, "nothing to reissue")
-			return 0
+			if code == 0 {
+				fmt.Fprintln(stdout, "nothing to reissue")
+			}
+			return code
 		}
 	}
-	code := 0
 	warned := false
 	for _, name := range names {
 		if ep, ok := findEndpoint(c, name); ok {
@@ -148,6 +179,24 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		}
 	}
 	return code
+}
+
+// credsUserKey is the user public key (the JWT's subject) of the creds file at p; no seed is kept.
+func credsUserKey(p string) (string, error) {
+	raw, err := readCreds(p)
+	if err != nil {
+		return "", err
+	}
+	defer clear(raw)
+	token, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	}
+	uc, err := jwt.DecodeUserClaims(token)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	}
+	return uc.Subject, nil
 }
 
 // readCreds reads name's creds file at path, refusing one other users can read.
