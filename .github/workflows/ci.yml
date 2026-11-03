@@ -83,10 +83,9 @@ jobs:
         run: |
           set -eu
           if [ "$RUNNER_OS" = macOS ]; then
-            # scripts/releasecheck alone takes about 500 s under -race on the macOS runner, over a third of the job's
-            # 14 minutes of wall time (#275); Linux keeps -race on every package, so macOS runs it without.
+            # scripts/releasecheck builds release binaries and takes about 440 s even without -race, a third of the
+            # job's wall time on the 3-core macOS runner (#275); Linux runs it, with -race, on every event.
             go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
-            go test -timeout 20m ./scripts/releasecheck
           else
             go test -race -timeout 20m ./...
           fi
