@@ -34,6 +34,8 @@ mashctl add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]
 
 A zone that already has endpoints must already have its signing key: if the key file is missing, `add` refuses before changing anything, since a new key would sign creds the account JWT does not trust; restore the key file from backup. The key is created only for a new zone (a leftover key from an earlier failed add is reused).
 
+For an existing zone, or a new zone whose key file already exists (left by an earlier failed add), `add` also needs the system account credentials (`MASH_SYS_CREDS`, or `<server dir>/sys.creds` as `init --local` leaves them) to verify that the zone key is published in the account JWT as a scoped signer. It refuses, before changing anything, when the credentials are missing or the key is absent or a plain signing key (users it signed would have no restrictions); run `mashctl policy apply` (and `mashctl drift` to check). Every server's answer is checked; set `MASH_SERVERS` to the server count so none is missed. A new zone whose key this add creates is not checked: the key is new and `policy apply` publishes it.
+
 Order of operations; a failure at any step undoes the earlier ones, so no half-made endpoint is left:
 
 1. Lock and load the policy file; the name must be valid and not declared.
