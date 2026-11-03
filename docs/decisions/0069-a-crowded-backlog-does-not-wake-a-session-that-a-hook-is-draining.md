@@ -34,10 +34,13 @@ Chosen option: the second. The held state records `hookAt`, the time of the last
 the held count and stored size right after it (refreshed on every drain). The crowded "wake at once" rule is suppressed
 only while the drain is making headroom: a hook drained within the idle wake, the stream is not full, the backlog has not
 grown since the drain (count and stored size), the held size is under half the inbox byte limit (twice
-`SpoolWakeBytes`, a hard line past which a crowded backlog always wakes at once), and the inbox stream itself has
+`SpoolWakeBytes`) and the held count is under 3/2 of `SpoolWakeCount` (two hard lines past which a crowded backlog always wakes at
+once, whatever the growth check saw), and the inbox stream itself has
 headroom: its stored bytes, retained history included, read from the stream info, are under half its byte limit. The
 stream reading is fail-safe: an error, a timeout or no stream handle counts as no headroom. Otherwise it wakes at once,
-as before.
+as before. The growth check is best effort: new mail can land in the same settle pass as the drain, so the count recorded at a
+drain is the held count before that pass's arrivals, but a missed growth is still possible. The hard lines bound the damage:
+750 held messages at the default is under the consumer's 1,000 pending-message limit.
 The idle spell runs from the later of the oldest held mail and `hookAt`. A backlog nobody drains, or one that keeps
 growing, still wakes at once; one that is shrinking waits for the idle spell to pass after the last drain.
 
@@ -63,7 +66,8 @@ drain (`TestIdleSpellRunsFromTheLastDrain`), a crowded backlog nobody drains wak
 (`TestCrowdedBacklogWithoutDrainWakesAtOnce`), and a shrinking crowded backlog behind a drain waits for the idle wake after it
 (`TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell`), a backlog that grows after a drain wakes at once
 (`TestCrowdedBacklogGrowingAfterADrainWakesAtOnce`), and held bytes past twice `SpoolWakeBytes` wake at once after a drain
-(`TestCrowdedBytesPastTheHardLineWakeAfterADrain`), a stream near its byte limit or one that cannot be read wakes at once
+(`TestCrowdedBytesPastTheHardLineWakeAfterADrain`), a held count past 3/2 of `SpoolWakeCount` does too
+(`TestCrowdedCountPastTheHardLineWakesAfterADrain`), a stream near its byte limit or one that cannot be read wakes at once
 after a drain (`TestCrowdedBacklogOnAFullStreamWakesAtOnceAfterADrain`,
 `TestCrowdedBacklogWithAnUnreadableStreamWakesAtOnce`), and the stream reading is cached (`TestStreamHeadroomIsCached`).
 

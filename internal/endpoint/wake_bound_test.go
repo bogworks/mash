@@ -151,6 +151,27 @@ func TestCrowdedBacklogGrowingAfterADrainWakesAtOnce(t *testing.T) {
 	}
 }
 
+// A held count past 3/2 of SpoolWakeCount wakes at once right after a drain even though the backlog shrinks: growth
+// detection is best effort, so the count has a hard line of its own.
+func TestCrowdedCountPastTheHardLineWakesAfterADrain(t *testing.T) {
+	old := SpoolWakeCount
+	SpoolWakeCount = 5 // hard line 7
+	t.Cleanup(func() { SpoolWakeCount = old })
+	const idle = 20 * time.Second
+	ev, sp, b := boundFixture(t, idle)
+	for i := 0; i < 12; i++ {
+		sendFYI(t, b, "fyi")
+	}
+	until(t, "12 spooled", func() bool { return len(waiting(t, sp)) == 12 })
+	ev.waitFor(t, 1, 10*time.Second)
+	at := drainAt(t, sp, 1) // 11 held: shrinking, bytes low, but past the count's hard line
+	until(t, "11 held", func() bool { return len(waiting(t, sp)) == 11 })
+	ev.waitFor(t, 2, 10*time.Second)
+	if since := time.Since(at); since >= idle/2 {
+		t.Fatalf("a held count past the hard line woke %v after the drain, want far less than the idle wake %v", since, idle)
+	}
+}
+
 // Held bytes past half the inbox limit (twice SpoolWakeBytes) wake at once even right after a drain and a shrinking
 // backlog.
 func TestCrowdedBytesPastTheHardLineWakeAfterADrain(t *testing.T) {
