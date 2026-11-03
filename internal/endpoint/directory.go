@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -13,13 +14,16 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// OnlineWindow is how recently a heartbeat must have been seen (3 x 30 s, SAP §8.2).
+// OnlineWindow is how recently an answer must have been seen to count as online when no presence probe has been
+// made yet (3 x 30 s, SAP §8.2). Once a probe has run, online means answering that probe or a later one.
 var OnlineWindow = 90 * time.Second
 
 // Presence is a directory record and whether its endpoint is online.
 type Presence struct {
-	Record   store.Record
-	Online   bool
+	Record store.Record
+	Online bool
+	// LastSeen is the time of the last answer to a presence probe ($SRV.INFO); it is no longer the last heartbeat
+	// (ADR 0066). Zero when it has not answered.
 	LastSeen time.Time
 }
 
@@ -47,58 +51,9 @@ func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
 	}
 }
 
-// watchPresence records verified heartbeats from the owner's agents.
-func (e *Endpoint) watchPresence(ctx context.Context) error {
-	seen := sap.NewNonceSet(2 * sap.LiveSkew)
-	sub, err := e.nc.Subscribe("agents.hb.*."+e.cfg.Owner+".*", func(m *nats.Msg) {
-		name, ok := sap.NameFromSubject(m.Subject)
-		if !ok {
-			return
-		}
-		h, tr := sap.VerifyLive(m.Header.Get(sap.HeaderName), m.Subject, m.Data, time.Now(), seen)
-		if tr != sap.TrustVerified {
-			return
-		}
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.byUser[h.User] == name {
-			e.lastSeen[name] = time.Now()
-		}
-	})
-	if err != nil {
-		return fmt.Errorf("mash: heartbeat subscription: %w", err)
-	}
-	go func() { <-ctx.Done(); _ = sub.Unsubscribe() }()
-	go e.bootstrapPresence()
-	return nil
-}
-
-// bootstrapPresence asks every SAP agent for its registration right after
-// subscribing to heartbeats (subscribe-before-discover, SAP §8.5), so presence
-// doesn't wait a full heartbeat interval. A registration counts only when its
-// id_sig verifies and its key is the one the directory has for that name.
-func (e *Endpoint) bootstrapPresence() {
-	inbox := e.nc.NewInbox()
-	sub, err := e.nc.SubscribeSync(inbox)
-	if err != nil {
-		return
-	}
-	defer sub.Unsubscribe()
-	if err := e.nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
-		return
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		m, err := sub.NextMsg(time.Until(deadline))
-		if err != nil {
-			return
-		}
-		e.applyPresence(m)
-	}
-}
-
-// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when the answer is from this owner.
-func (e *Endpoint) applyPresence(m *nats.Msg) {
+// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when the answer is from this owner,
+// its id_sig verifies and its key is the directory's key for that name.
+func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 	var info struct {
 		Metadata  map[string]string `json:"metadata"`
 		Endpoints []struct {
@@ -107,7 +62,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) {
 		} `json:"endpoints"`
 	}
 	if json.Unmarshal(m.Data, &info) != nil || info.Metadata["owner"] != e.cfg.Owner {
-		return
+		return 0
 	}
 	md := info.Metadata
 	for _, ep := range info.Endpoints {
@@ -121,23 +76,58 @@ func (e *Endpoint) applyPresence(m *nats.Msg) {
 		e.mu.Lock()
 		if e.byUser[md["user_nkey"]] == name {
 			e.lastSeen[name] = time.Now()
+			counted++
 		}
 		e.mu.Unlock()
 	}
+	return counted
 }
 
-// Who returns the directory with presence, sorted by name.
+// Who returns the directory with presence, sorted by name. After a presence probe has completed an endpoint is online
+// when it answered that probe or a later one; before any probe, when it was seen within OnlineWindow.
 func (e *Endpoint) Who() []Presence {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make([]Presence, 0, len(e.dir))
 	for name, r := range e.dir {
 		seen := e.lastSeen[name]
-		out = append(out, Presence{Record: r, LastSeen: seen, Online: !seen.IsZero() && time.Since(seen) < OnlineWindow})
+		online := !seen.IsZero() && time.Since(seen) < OnlineWindow
+		if !e.probeAt.IsZero() {
+			online = !seen.IsZero() && !seen.Before(e.probeAt)
+		}
+		out = append(out, Presence{Record: r, LastSeen: seen, Online: online})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Record.Name < out[j].Record.Name })
 	return out
 }
+
+// WhoFresh refreshes presence when it is due, then returns Who(). It is for a running endpoint (the who tool in
+// mash serve): it asks every agent for its registration at most once per PresenceCacheTTL, one probe at a time, and
+// not again within PresenceRetryGap of a failed probe (ADR 0066). On a probe error it still returns the directory,
+// whose presence is then that of the last probe that completed. A probe that no verified registration answered (not
+// even this endpoint's, which may not have registered its service yet) is not kept for the cache time: it is retried after PresenceRetryGap, and
+// is not an error to the caller (everyone is then offline).
+func (e *Endpoint) WhoFresh(ctx context.Context) ([]Presence, error) {
+	_, err := e.presence.Ensure(ctx, func(ctx context.Context) error {
+		p := e.takeProbe()
+		if p == nil {
+			p = e.startPresence()
+		}
+		if err := e.awaitPresence(ctx, p); err != nil {
+			return err
+		}
+		if p.counted == 0 {
+			return errNoAnswers
+		}
+		return nil
+	})
+	if errors.Is(err, errNoAnswers) {
+		err = nil
+	}
+	return e.Who(), err
+}
+
+var errNoAnswers = errors.New("mash: no registration answered the presence probe")
 
 // LeaseInfo is the live host and mash version a session wrote to its lease.
 type LeaseInfo struct{ Host, Version string }
@@ -164,8 +154,7 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 	if p == nil {
 		p = e.startPresence()
 	}
-	e.awaitPresence(ctx, p)
-	return nil
+	return e.awaitPresence(ctx, p)
 }
 
 // loadDirectory reads every directory record and replaces the in-memory copy: the keys come from stream info (subjects

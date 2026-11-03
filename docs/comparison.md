@@ -207,12 +207,12 @@ mash puts each kind of traffic on the NATS layer that suits it. Both share the o
 | | Live path | Durable path |
 |---|---|---|
 | NATS layer | Core NATS publish/subscribe and request/reply; nothing stored | JetStream streams and KV buckets, on disk |
-| Used for | Signed heartbeat every 30 s (online = verified heartbeat within 90 s); `$SRV.INFO` discovery; `status` probes; live prompts, answered as a stream of chunks | Signed mail into a per-endpoint inbox stream; the directory (name to user key and mail subject); leases (one live session per name) |
+| Used for | Signed heartbeat every 30 s (published, not listened to by `mash serve`; online = answered the latest `$SRV.INFO` presence probe); `$SRV.INFO` discovery; `status` probes; live prompts, answered as a stream of chunks | Signed mail into a per-endpoint inbox stream; the directory (name to user key and mail subject); leases (one live session per name) |
 | Guarantee | At most once. SAP 0.3: chunks "MAY be lost silently" | At least once while retained: 30 days or 16 MiB per inbox, single replica[^dur-mash] |
 | Recipient not running | The message is gone; an unanswered prompt ends in error `500` after 10 minutes | The message waits in the inbox |
 | Cost | Nothing stored; one hop through the server | A disk write and an acknowledgement per send, and one stream per endpoint (a 5-stream hosted free tier fits 3 endpoints) |
 
-**Why both.** Presence and live prompts are about now; a heartbeat from an hour ago is wrong data. Mail is about later,
+**Why both.** Presence and live prompts are about now; a heartbeat from an hour ago is wrong data, so `who` asks. Mail is about later,
 so it has to be kept, acknowledged and redelivered, which core NATS does not do. SAP 0.3 defines only the live path and
 lists "JetStream-backed at-least-once streaming" as out of scope. mash adds the durable path as one declared verb, `mail`.
 

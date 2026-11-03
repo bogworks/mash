@@ -22,11 +22,14 @@
 // publishes a heartbeat and holds the standing agents.hb.*.<owner>.* subscription; none = it publishes but holds no
 // heartbeat subscription; probe = none plus each endpoint answers $SRV.INFO.agents with a -who-payload byte registration-like
 // reply and runs a who probe every -who-every (random first offset; 0 = none) or all at once once (-who-burst): subscribe a
-// fresh inbox, publish the request, wait endpoint.PresenceQuiet after the last reply or endpoint.PresenceCap.
+// fresh inbox, publish the request, wait endpoint.PresenceQuiet after the last reply or endpoint.PresenceCap. Each
+// endpoint's who calls go through the real endpoint.PresenceCache (ADR 0066): a call within -who-gap (default 30s, the
+// product's endpoint.PresenceCacheTTL) of its last successful probe is a cache hit and sends nothing; -who-gap 0
+// makes every call probe, as the numbers in docs/evidence/2026-11-02-heartbeat-fanout/results.txt were taken.
 //
 // Usage: go run ./scripts/dirbench -urls a,b,c -mon http://..,.. -pids 1,2,3 -n 100 [-sync] [-replicas 1] [-mode old|new]
 //
-//	[-hb-mode all|none|probe] [-who-every 5m] [-who-burst] [-who-payload 600]
+//	[-hb-mode all|none|probe] [-who-every 5m] [-who-burst] [-who-payload 600] [-who-gap 30s]
 package main
 
 import (
@@ -71,17 +74,19 @@ const (
 )
 
 type ep struct {
-	name string
-	nc   *nats.Conn
+	name  string
+	nc    *nats.Conn
+	cache endpoint.PresenceCache
 }
 
 var (
 	cStream, cGet, cFail, cTimeout, cLoads, cLoadFail atomic.Int64
 	cState, cReloads                                  atomic.Int64 // mode new: unfiltered state requests; polls that reloaded
 	cHBPub, cHBDel                                    atomic.Int64
-	cWho, cReplies, cIncomplete                       atomic.Int64 // completed probes in the window, replies they received, probes with fewer than n replies
+	cWho, cWhoHit, cReplies, cIncomplete              atomic.Int64 // cache hits that sent nothing; completed probes in the window, replies they received, probes with fewer than n replies
 	whoN                                              int
-	whoDurs, whoLast                                  []float64 // probe duration until quiet / until the last reply, ms
+	whoGap                                            time.Duration // -who-gap; 0 = no cache
+	whoDurs, whoLast                                  []float64     // probe duration until quiet / until the last reply, ms
 	measuring                                         atomic.Bool
 	durMu                                             sync.Mutex
 	durs                                              []float64
@@ -137,6 +142,7 @@ func run() int {
 	hbMode := flag.String("hb-mode", "all", "all: publish heartbeats and hold the standing subscription (today); none: publish, no subscription; probe: none plus who probes")
 	whoEvery := flag.Duration("who-every", defWho, "hb-mode probe: each endpoint probes this often (random first offset); 0 = no periodic probes")
 	whoBurst := flag.Bool("who-burst", false, "hb-mode probe: every endpoint probes once in the same instant, 5 s into the measured window")
+	whoGapF := flag.Duration("who-gap", 30*time.Second, "hb-mode probe: a who within this long of the endpoint's last successful probe is served from the cache (endpoint.PresenceCache; the product's PresenceCacheTTL is 30s); 0 = every who probes")
 	whoPayload := flag.Int("who-payload", 600, "hb-mode probe: bytes of each simulated registration reply")
 	scratch := flag.Bool("i-know-this-is-a-scratch-server", false, "allow non-loopback -urls (the tool creates and deletes its own dirbench-* bucket only)")
 	flag.Parse()
@@ -156,6 +162,10 @@ func run() int {
 		return 2
 	}
 	whoN = *n
+	whoGap = *whoGapF
+	if whoGap > 0 {
+		endpoint.PresenceCacheTTL = whoGap
+	}
 	if !*scratch {
 		if err := checkLoopback(u); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -213,7 +223,7 @@ func run() int {
 				reply := make([]byte, *whoPayload)
 				_, _ = nc.Subscribe("$SRV.INFO.agents", func(m *nats.Msg) { _ = m.Respond(reply) })
 			}
-			eps[i] = &ep{name, nc}
+			eps[i] = &ep{name: name, nc: nc}
 		}()
 	}
 	wg.Wait()
@@ -241,14 +251,14 @@ func run() int {
 				continue
 			}
 			if *whoEvery > 0 {
-				go loop(stop, rand.N(*whoEvery), *whoEvery, func() { whoProbe(e.nc) })
+				go loop(stop, rand.N(*whoEvery), *whoEvery, func() { whoCall(e) })
 			}
 			if *whoBurst {
 				go func() {
 					select {
 					case <-stop:
 					case <-burst:
-						whoProbe(e.nc)
+						whoCall(e)
 					}
 				}()
 			}
@@ -259,6 +269,7 @@ func run() int {
 	// measured window
 	measuring.Store(true)
 	cWho.Store(0)
+	cWhoHit.Store(0)
 	cReplies.Store(0)
 	cIncomplete.Store(0)
 	var st0, rl0, s0, g0, f0, t0, l0, lf0, hp0, hd0 = cState.Load(), cReloads.Load(), cStream.Load(), cGet.Load(), cFail.Load(), cTimeout.Load(), cLoads.Load(), cLoadFail.Load(), cHBPub.Load(), cHBDel.Load()
@@ -291,11 +302,11 @@ func run() int {
 	fmt.Printf("load_duration_ms p50=%.1f p99=%.1f max=%.1f samples=%d\n", pct(durs, .5), pct(durs, .99), pct(durs, 1), len(durs))
 	durMu.Unlock()
 	fmt.Printf("hb_published_per_s=%.3f hb_delivered_per_s=%.3f\n", d(cHBPub.Load(), hp0), d(cHBDel.Load(), hd0))
-	fmt.Printf("hb_mode=%s who_every=%s who_burst=%v who_payload=%d\n", *hbMode, *whoEvery, *whoBurst, *whoPayload)
+	fmt.Printf("hb_mode=%s who_every=%s who_burst=%v who_payload=%d who_gap=%s\n", *hbMode, *whoEvery, *whoBurst, *whoPayload, *whoGapF)
 	durMu.Lock()
 	sort.Float64s(whoDurs)
 	sort.Float64s(whoLast)
-	fmt.Printf("who_probes=%d who_probes_per_s=%.3f who_replies_per_s=%.1f replies_per_probe=%.1f incomplete_probes=%d\n", cWho.Load(), d(cWho.Load(), 0), d(cReplies.Load(), 0),
+	fmt.Printf("who_probes=%d who_probes_per_s=%.3f who_cache_hits=%d who_cache_hits_per_s=%.3f who_replies_per_s=%.1f replies_per_probe=%.1f incomplete_probes=%d\n", cWho.Load(), d(cWho.Load(), 0), cWhoHit.Load(), d(cWhoHit.Load(), 0), d(cReplies.Load(), 0),
 		float64(cReplies.Load())/max(1, float64(cWho.Load())), cIncomplete.Load())
 	fmt.Printf("probe_ms p50=%.0f p99=%.0f max=%.0f last_reply_ms p50=%.0f p99=%.0f max=%.0f\n", pct(whoDurs, .5), pct(whoDurs, .99), pct(whoDurs, 1),
 		pct(whoLast, .5), pct(whoLast, .99), pct(whoLast, 1))
@@ -551,21 +562,33 @@ func rss(pids []string) string {
 	return strings.Join(out, "/")
 }
 
+// whoCall is one who call by an endpoint: through its PresenceCache (a hit sends nothing) unless -who-gap is 0.
+func whoCall(e *ep) {
+	if whoGap <= 0 {
+		_ = whoProbe(e.nc)
+		return
+	}
+	probed, _ := e.cache.Ensure(context.Background(), func(context.Context) error { return whoProbe(e.nc) })
+	if !probed && measuring.Load() {
+		cWhoHit.Add(1)
+	}
+}
+
 // whoProbe is one `who` probe as internal/endpoint's startPresence/awaitPresence do it: a fresh inbox, one request on
 // $SRV.INFO.agents, then wait endpoint.PresenceQuiet after the last reply (once there is one) or endpoint.PresenceCap.
 // A probe that completes inside the measured window counts; replies are counted per probe.
-func whoProbe(nc *nats.Conn) {
+func whoProbe(nc *nats.Conn) error {
 	inbox := nc.NewRespInbox()
 	var replies atomic.Int64
 	var lastNS atomic.Int64
 	start := time.Now()
 	sub, err := nc.Subscribe(inbox, func(*nats.Msg) { replies.Add(1); lastNS.Store(int64(time.Since(start))) })
 	if err != nil {
-		return
+		return err
 	}
 	defer func() { _ = sub.Unsubscribe() }()
-	if nc.PublishRequest("$SRV.INFO.agents", inbox, nil) != nil {
-		return
+	if err := nc.PublishRequest("$SRV.INFO.agents", inbox, nil); err != nil {
+		return err
 	}
 	for {
 		time.Sleep(10 * time.Millisecond)
@@ -575,7 +598,7 @@ func whoProbe(nc *nats.Conn) {
 		}
 	}
 	if !measuring.Load() {
-		return
+		return nil
 	}
 	r := replies.Load()
 	cWho.Add(1)
@@ -587,4 +610,5 @@ func whoProbe(nc *nats.Conn) {
 	whoDurs = append(whoDurs, float64(time.Since(start).Milliseconds()))
 	whoLast = append(whoLast, float64(lastNS.Load())/1e6)
 	durMu.Unlock()
+	return nil
 }

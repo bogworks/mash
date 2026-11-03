@@ -164,7 +164,7 @@ An MCP server over stdio, started by Claude Code from the mash plugin. One per C
 | `send` | `to` (name), `text` (1 B – 1 MiB), optional `in_reply_to` (seq) | `sent #<seq> to <name>` after the stream's publish acknowledgement. Unknown `to` → error listing close names. |
 | `read` | `seq` | That message from the session's own inbox, rendered as in 7.2, with trust. |
 | `inbox` | optional `limit` (default 20, max 100) | The last `limit` messages in the session's own inbox, one line each. |
-| `who` | none | The directory joined with presence: online when a heartbeat was seen within 90 s. |
+| `who` | optional filters | The directory joined with presence, asked on demand: a request to `$SRV.INFO.agents`, answers counted when the id_sig verifies and the key is the directory's for that name; online when the endpoint answered the latest probe. The result is reused for 30 s (`PresenceCacheTTL`), one probe at a time, with 5 s between probes after a failure ([ADR-0066](../decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)). `last seen` is the last answer to a probe. |
 | `reply` | `request_id`, `text`, optional `done` (default true) | Answers a live SAP prompt (7.4). |
 
 Tool errors are MCP tool results with `isError: true`, so Claude sees them as text.
@@ -223,7 +223,7 @@ These permissions, applied to a user named `<name>`, are the whole security mode
 - `agents.prompt.cc.<owner>.<name>`;
 - `agents.status.cc.<owner>.<name>`;
 - `$SRV.>`;
-- `agents.hb.*.<owner>.*`, for presence.
+- `agents.hb.*.<owner>.*`: granted so a tool may listen to heartbeats; `mash serve` does not subscribe (ADR-0066: presence is asked for with `$SRV.INFO`).
 
 **No response permission.** `allow_responses` grants publishing to any reply subject the endpoint receives, so an endpoint could send itself a request whose reply subject is `$JS.API.STREAM.DELETE.<victim>` and answer it. Replies (SAP prompt chunks, `$SRV` answers) are allowed instead by `_INBOX.>` in the publish list, so a reply can only ever land in an inbox; callers must use `_INBOX.` reply subjects (every NATS client's default).
 

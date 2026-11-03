@@ -94,11 +94,11 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## A peer shows `offline` in `who`
 
-`mash who` prints `name`, `online` or `offline`, and `seen T ago` when a heartbeat was seen. A peer is online when its verified heartbeat arrived within the last 90 seconds.
+`mash who` prints `name`, `online` or `offline`, and `seen T ago` when the peer has answered a presence probe. `who` asks every running endpoint at that moment (the `who` tool inside a session reuses an answer for 30 seconds); a peer is online when it answered the latest probe with a registration that verifies, and `seen T ago` is when it last answered, not its last heartbeat. A peer that answers slower than 2 seconds can show offline for that `who`; run it again.
 
 Check:
 1. Is the peer's session running, holding its name? An offline peer still receives mail: the inbox exists whether or not the session runs, and mail waits.
-2. Clocks. A machine whose clock is off by more than 30 seconds has its live signatures and heartbeats rejected, so peers look offline. Compare `date -u` on both machines and fix with NTP (tracked in #36).
+2. Clocks. A machine whose clock is off by more than 30 seconds has its live signatures rejected (and its heartbeats, for tools that listen to them), so peers can look offline. Compare `date -u` on both machines and fix with NTP (tracked in #36).
 3. The peer may have been deprovisioned or is on another account.
 
 `who` shows only what your own endpoint can see; other endpoints' live host is not shown without admin access (see `mash who --long`).

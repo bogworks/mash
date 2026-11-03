@@ -97,3 +97,27 @@ The real endpoint verifies every heartbeat it receives, so each endpoint must ve
 - Client and servers share a 16-core shared host (other lanes' nats-servers were running and were not touched); in `all` mode the bench process used up to 0.43 cores, so server CPU may be slightly overstated or latency inflated.
 - Random first offsets spread probes evenly, so the 5- and 1-minute rows are steady-state means; the burst row is the only synchronised case. Directory polling is `-mode new` throughout; no directory change occurs in a window, so reloads are not included.
 - N is capped at 1000 here; the quadratic shapes (both the heartbeat and the probe loads) mean larger fleets would differ much more than linearly.
+
+## After: the implemented change (ADR 0066)
+
+`results-after.txt`: the real `endpoint.PresenceCache` (30 s cache, single-flight, 5 s retry gap) drives each simulated endpoint's `who` probes (`-hb-mode probe`, default `-who-gap 30s`); no standing heartbeat subscription (`none` and `probe`); directory poll in `-mode new`; 40 s warm-up, 60 s window, same host and cluster. 0 failures, 0 timeouts, 0 incomplete probes in every case.
+
+| N | variant | hb deliveries/s | server out msgs/s | server out MB/s | server CPU cores (sum / max) | probes/s (cache hits/s) | probe until quiet (ms p50 / p99) |
+|---|---|---|---|---|---|---|---|
+| 100 | today (`all`) | 333 | 377 | 0.12 | 0.022 / 0.008 | none | none |
+| 100 | nobody asks | 0 | 37 | 0.016 | 0.012 / 0.005 | 0 | none |
+| 100 | each asks every 5 min | 0 | 129 | 0.056 | 0.014 / 0.006 | 0.25 (0) | 305 / 309 |
+| 500 | today (`all`) | 8,333 | 8,505 | 2.58 | 0.160 / 0.058 | none | none |
+| 500 | nobody asks | 0 | 137 | 0.074 | 0.035 / 0.014 | 0 | none |
+| 500 | each asks every 5 min | 0 | 3,316 | 1.46 | 0.069 / 0.026 | 1.73 (0) | 310 / 313 |
+| 500 | each asks every 10 s (capped by the 30 s cache) | 0 | 18,888 | 8.25 | 0.241 / 0.084 | 10.4 (39.8) | 306 / 314 |
+| 1000 | today (`all`) | 33,337 | 33,657 | 10.2 | 0.521 / 0.180 | none | none |
+| 1000 | nobody asks | 0 | 259 | 0.145 | 0.059 / 0.026 | 0 | none |
+| 1000 | each asks every 5 min | 0 | 12,977 | 5.69 | 0.175 / 0.064 | 3.45 (0) | 312 / 316 |
+| 1000 | each asks every 10 s (capped by the 30 s cache) | 0 | 76,417 | 33.4 | 0.743 / 0.253 | 21.3 (79.3) | 313 / 320 |
+
+- Nobody asking (what almost every session does): 130 times fewer server messages and 7 to 9 times less server CPU at 1,000 endpoints (0.52 to 0.06 cores), no heartbeat delivered to anyone, no signature to verify on the client.
+- The cache works as designed: at "every 10 s" each endpoint made one probe per 30 s and answered the other two asks from memory (21.3 probes/s against 79.3 hits/s at 1,000), so the probe rate is capped at N/30 (33/s at 1,000) however often `who` is called.
+- That cap is not free at the extreme: with every endpoint asking all the time at 1,000 endpoints the servers carry 76k messages per second (cluster totals include route forwarding), 33 MB/s and 0.74 cores, against 10 MB/s and 0.52 cores today (about 1.4 times the CPU and three times the bytes, because a reply is larger than a heartbeat). No session does that; the case shows the bound, not the expectation.
+- A probe takes about 312 ms until quiet at 1,000 endpoints (300 ms of it the quiet window); the last reply arrives within 11 ms.
+- Honest limits as above (simulated endpoints, no signature verification, loopback, shared host, one 60 s run per case, the 600 B reply size is an estimate).

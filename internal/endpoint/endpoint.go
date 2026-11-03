@@ -72,7 +72,9 @@ type Endpoint struct {
 	mu       sync.RWMutex
 	dir      map[string]store.Record // by name
 	byUser   map[string]string       // user key -> name
-	lastSeen map[string]time.Time    // by name, from verified heartbeats
+	lastSeen map[string]time.Time    // by name: the last verified answer to a presence probe
+	probeAt  time.Time               // start of the latest completed presence probe (zero: none yet)
+	presence PresenceCache           // when WhoFresh probes
 
 	// fullDir: dir holds every directory record (loadDirectory ran); else only the ones a one-shot command read.
 	fullDir bool
@@ -537,7 +539,7 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	return fmt.Errorf("mash: lost the lease on %s to another session", e.cfg.Name)
 }
 
-// Run consumes mail and keeps the directory, presence and lease current
+// Run consumes mail and keeps the directory and lease current (presence is asked for on demand, ADR 0066)
 // until ctx ends or the lease is lost.
 func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	// This serve's relay counters go to the state directory for `mash status` (another process).
@@ -551,9 +553,6 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	every := DirectoryPoll
 	go func() { e.pollDirectory(ctx, every); close(polled) }()
 	defer func() { cancel(); <-polled }()
-	if err := e.watchPresence(ctx); err != nil {
-		return err
-	}
 	stop, err := e.consume(ctx, deliver)
 	if err != nil {
 		return err

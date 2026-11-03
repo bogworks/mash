@@ -207,3 +207,18 @@ func TestStrangerHooksDisabled(t *testing.T) {
 	}
 	eventually(t, 5*time.Second, "read acked the message", func() bool { return unreadOf(t, w, "a") == 0 })
 }
+
+// The who tool inside serve asks who is online when called (ADR 0066): the serving endpoint answers, the one that is
+// not running does not, and nothing listens to heartbeats for it.
+func TestServeWhoToolAsksNow(t *testing.T) {
+	skipOnWindows(t)
+	w := newWorld(t, "a", "b")
+	c := startFakeClaude(t, strangerEnv(w, nil), true)
+	eventually(t, 20*time.Second, "who shows a online", func() bool {
+		out := c.call(t, "who", `{}`)
+		return strings.Contains(out, "a\tonline") && strings.Contains(out, "b\toffline")
+	})
+	if out := c.call(t, "who", `{"online":true,"format":"json"}`); !strings.Contains(out, `"a"`) || strings.Contains(out, `"b"`) {
+		t.Fatalf("who online json:\n%s", out)
+	}
+}
