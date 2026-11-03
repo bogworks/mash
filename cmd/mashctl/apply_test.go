@@ -55,6 +55,13 @@ func newApplyEnv(t *testing.T, policyYAML string) *applyEnv {
 // starts, so a test can rewrite the operator or account JWTs on disk.
 func newApplyEnvTweak(t *testing.T, policyYAML string, tweak func(e *applyEnv)) *applyEnv {
 	t.Helper()
+	return newApplyEnvOpts(t, policyYAML, tweak, nil)
+}
+
+// newApplyEnvOpts is newApplyEnvTweak with a hook that may change the server options (for example to add TLS) before
+// the server starts.
+func newApplyEnvOpts(t *testing.T, policyYAML string, tweak func(e *applyEnv), optsHook func(o *server.Options)) *applyEnv {
+	t.Helper()
 	root := t.TempDir()
 	e := &applyEnv{t: t, root: root, keyDir: filepath.Join(root, "keys")}
 	ks, err := ctlkeys.Open(e.keyDir)
@@ -80,6 +87,9 @@ func newApplyEnvTweak(t *testing.T, policyYAML string, tweak func(e *applyEnv)) 
 	}
 	opts.Port = -1
 	opts.NoLog, opts.NoSigs = true, true
+	if optsHook != nil {
+		optsHook(opts)
+	}
 	srv, err := server.NewServer(opts)
 	if err != nil {
 		t.Fatal(err)
