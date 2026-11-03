@@ -23,6 +23,7 @@ import (
 
 // Admin provisions endpoints with the account's admin credentials.
 type Admin struct {
+	nc     *nats.Conn
 	js     jetstream.JetStream
 	owner  string
 	limits store.Limits
@@ -102,8 +103,11 @@ func New(nc *nats.Conn, owner string) (*Admin, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Admin{js: js, owner: owner, limits: store.DefaultLimits()}, nil
+	return &Admin{nc: nc, js: js, owner: owner, limits: store.DefaultLimits()}, nil
 }
+
+// Conn is the connection the Admin was made with. The caller owns it.
+func (a *Admin) Conn() *nats.Conn { return a.nc }
 
 // Init creates the directory and lease buckets. It is idempotent. A bucket from before buckets had a size cap (no
 // MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
@@ -734,6 +738,163 @@ func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.R
 		return store.ParseRecord(name, val)
 	}
 	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-meta; try again", name)
+}
+
+// NameLock is a held name lock (ADR 0048, ADR 0058), handed to the func WithNameLock runs. It is valid only inside that
+// func.
+type NameLock struct {
+	l *streamLock
+}
+
+// Check refuses unless the lock is still held and not about to expire (ADR 0058). Call it immediately before a write
+// the lock protects that Admin does not make itself, such as a file.
+func (n NameLock) Check(ctx context.Context) error { return n.l.check(ctx) }
+
+// WithNameLock takes name's lock, runs fn with a context that ends before the lock expires and releases the lock. fn
+// does its reads and writes through UserOfLocked and SetUserLocked (the lock is not reentrant: SetUser or UserOf inside
+// fn would wait for it) and re-checks the lock with Check before any write of its own. An error from fn that is the
+// context ending because the lock was about to expire is worded to say so.
+func (a *Admin) WithNameLock(ctx context.Context, name string, fn func(ctx context.Context, l NameLock) error) (err error) {
+	if !config.ValidName(name) {
+		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer lk.release(ctx)
+	bctx, end := lk.guard(ctx, "operation", &err)
+	defer end()
+	return fn(bctx, NameLock{l: lk})
+}
+
+// UserOf reads name's directory record and returns its user key and account. It returns ErrNoRecord when there is none.
+// It does not take the name's lock; inside WithNameLock use UserOfLocked (the read is the same).
+func (a *Admin) UserOf(ctx context.Context, name string) (user, account string, err error) {
+	if !config.ValidName(name) {
+		return "", "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	e, err := kv.Get(ctx, name)
+	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+		return "", "", ErrNoRecord
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("mash: directory %s: %w", name, err)
+	}
+	rec, err := store.ParseRecord(name, e.Value())
+	if err != nil {
+		return "", "", err
+	}
+	return rec.User, rec.Account, nil
+}
+
+// UserOfLocked is UserOf for a caller that holds name's lock l (from WithNameLock); it refuses a lock that is not
+// held or not name's.
+func (a *Admin) UserOfLocked(ctx context.Context, l NameLock, name string) (user, account string, err error) {
+	if l.l == nil || l.l.name != name {
+		return "", "", fmt.Errorf("mash: the lock held is not %s's", name)
+	}
+	if err := l.l.check(ctx); err != nil {
+		return "", "", err
+	}
+	return a.UserOf(ctx, name)
+}
+
+// SetUser is a compare-and-set of name's directory record's user key from oldUser to newUser (public user keys), for a
+// key rotation. It takes the name's lock like SetMeta, reads the record and writes it back against the revision it
+// read, re-reading and retrying if another write got in between, and keeps every other field. It refuses a name with
+// no record, a record whose account is not account, and a record whose user is neither oldUser nor newUser. It is
+// idempotent: a record that already carries newUser is returned as it is.
+func (a *Admin) SetUser(ctx context.Context, name, account, oldUser, newUser string) (store.Record, error) {
+	if err := validSetUser(name, oldUser, newUser); err != nil {
+		return store.Record{}, err
+	}
+	lk, err := a.lockStream(ctx, name)
+	if err != nil {
+		return store.Record{}, err
+	}
+	defer lk.release(ctx)
+	return a.setUser(ctx, lk, name, account, oldUser, newUser)
+}
+
+// SetUserLocked is SetUser for a caller that already holds name's lock l (from WithNameLock): it does not take the lock
+// again, and re-checks it before the write.
+func (a *Admin) SetUserLocked(ctx context.Context, l NameLock, name, account, oldUser, newUser string) (store.Record, error) {
+	if err := validSetUser(name, oldUser, newUser); err != nil {
+		return store.Record{}, err
+	}
+	if l.l == nil || l.l.name != name {
+		return store.Record{}, fmt.Errorf("mash: the lock held is not %s's", name)
+	}
+	return a.setUser(ctx, l.l, name, account, oldUser, newUser)
+}
+
+func validSetUser(name, oldUser, user string) error {
+	if !nkeys.IsValidPublicUserKey(oldUser) {
+		return fmt.Errorf("mash: %q is not a user public key (U...)", oldUser)
+	}
+	if !config.ValidName(name) {
+		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	}
+	if !nkeys.IsValidPublicUserKey(user) {
+		return fmt.Errorf("mash: %q is not a user public key (U...)", user)
+	}
+	return nil
+}
+
+// setUser is SetUser's body, run with name's lock lk held.
+func (a *Admin) setUser(ctx context.Context, lk *streamLock, name, account, oldUser, user string) (store.Record, error) {
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return store.Record{}, err
+	}
+	for try := 0; try < setMetaTries; try++ {
+		e, err := kv.Get(ctx, name)
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			return store.Record{}, fmt.Errorf("mash: endpoint %s is not provisioned", name)
+		}
+		if err != nil {
+			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+		rec, err := store.ParseRecord(name, e.Value())
+		if err != nil {
+			return store.Record{}, err
+		}
+		if rec.Account != account {
+			return store.Record{}, fmt.Errorf("mash: the record of %s belongs to account %s, not %s; left in place", name, rec.Account, account)
+		}
+		if rec.User == user {
+			return rec, nil
+		}
+		if rec.User != oldUser {
+			return store.Record{}, fmt.Errorf("mash: the record of %s names user key %s..., not %s...; left in place", name, shortKey(rec.User), shortKey(oldUser))
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(e.Value(), &obj); err != nil {
+			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
+		}
+		ub, _ := json.Marshal(user)
+		obj["user"] = ub
+		val, err := json.Marshal(obj)
+		if err != nil {
+			return store.Record{}, err
+		}
+		if err := lk.check(ctx); err != nil {
+			return store.Record{}, err
+		}
+		if _, err := kv.Update(ctx, name, val, e.Revision()); err != nil {
+			if isRevisionConflict(err) {
+				continue
+			}
+			return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
+		}
+		return store.ParseRecord(name, val)
+	}
+	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under reissue; try again", name)
 }
 
 func errBadZone(_ string) error {

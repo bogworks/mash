@@ -15,7 +15,6 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
-	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/testenv"
 )
@@ -95,21 +94,7 @@ func (h *addEnv) creds(name string) string { return filepath.Join(h.dir, name+".
 // seed writes a creds file for a declared endpoint, as an earlier add would have.
 func (h *addEnv) seed(name string) {
 	h.t.Helper()
-	data, err := os.ReadFile(h.policy)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	_, c, err := compileBytes(data, h.e.Owner)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	m, err := mint.Mint(h.keys(), c, name, nil, true)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	if err := os.WriteFile(h.creds(name), m.Creds, 0o600); err != nil {
-		h.t.Fatal(err)
-	}
+	h.seedWith(name, func(tags []string) []string { return tags })
 }
 
 func (h *addEnv) credsClaims(name string) (*jwt.UserClaims, string) {
@@ -158,6 +143,7 @@ func (h *addEnv) records() []string {
 }
 
 func TestAddAndReissue(t *testing.T) {
+	fakeKeyRevoked(t, false, nil) // an add-only reissue first asks whether its key is revoked
 	h := newAddEnv(t, addPolicy)
 	h.seed("a")
 	h.seed("b")
@@ -180,7 +166,7 @@ func TestAddAndReissue(t *testing.T) {
 		t.Errorf("name %q", uc.Name)
 	}
 	recs := h.records()
-	if len(recs) != 1 || recs[0] != "g/green/"+userPub {
+	if !slices.Contains(recs, "g/green/"+userPub) || len(recs) != 3 { // a and b are seeded with records
 		t.Fatalf("records %v (user %s)", recs, userPub)
 	}
 	got, _ := os.ReadFile(h.policy)
@@ -260,7 +246,8 @@ func TestAddAndReissue(t *testing.T) {
 
 func TestReissueNeedsZoneKeyAndNewIssuer(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
-	h.seed("a")
+	h.seedWith("a", func(tags []string) []string { return tags })
+	fakeRevoke(t, nil) // the new zone key as signer narrows the creds: the user key rotates
 	// a's creds were issued by a zone key that is no longer the zone's: --changed notices
 	if err := os.Remove(filepath.Join(h.env["MASH_KEYS_DIR"], "zones", "red.nk")); err != nil {
 		t.Fatal(err)
@@ -271,6 +258,13 @@ func TestReissueNeedsZoneKeyAndNewIssuer(t *testing.T) {
 	if _, err := h.keys().ZoneKey("red", true); err != nil {
 		t.Fatal(err)
 	}
+	// the new zone key is not in the account JWT until policy apply publishes it: the reissue refuses, revoking nothing
+	calls := fakeRevoke(t, nil)
+	fakeSignerPublished(t, false, nil)
+	if _, errb, code := h.run("reissue", "a"); code != 1 || !strings.Contains(errb, "run `mashctl policy apply` first") || len(*calls) != 0 {
+		t.Fatalf("unpublished new zone key: %d %q %+v", code, errb, *calls)
+	}
+	fakeSignerPublished(t, true, nil)
 	if out, _, code := h.run("reissue", "--changed"); code != 0 || !strings.HasPrefix(out, "reissued a ") {
 		t.Fatalf("--changed after a new zone key: %d %q", code, out)
 	}
@@ -468,11 +462,11 @@ func TestBudgetRefusal(t *testing.T) {
 }
 
 func TestBudgetWarning(t *testing.T) {
-	ok := policy.BudgetReport{OK: true, UserLimit: 4000, AccountLimit: 1 << 20, WorstUserJWTBytes: 3200, AccountJWTBytes: 1000, WorstUser: "w"}
+	ok := policy.BudgetReport{OK: true, UserLimit: 3750, AccountLimit: 1 << 20, WorstUserJWTBytes: 2950, AccountJWTBytes: 1000, WorstUser: "w"}
 	if w := budgetWarning(ok); w != "" {
 		t.Errorf("exactly 80%%: %q", w)
 	}
-	ok.WorstUserJWTBytes = 3300
+	ok.WorstUserJWTBytes = 3050
 	if w := budgetWarning(ok); !strings.HasPrefix(w, "warning: ") || !strings.Contains(w, "user JWT of w") || strings.Contains(w, "account") {
 		t.Errorf("user: %q", w)
 	}
@@ -534,26 +528,10 @@ func TestReissueRefusedOverBudget(t *testing.T) {
 // TestReissueChangedFindsCredsWithoutDenyNone: a creds file minted before every user carried deny:_none (simulated by
 // minting with the compiled tags minus the placeholder) is stale, and --changed lists it and only it.
 func TestReissueChangedFindsCredsWithoutDenyNone(t *testing.T) {
+	fakeKeyRevoked(t, false, nil) // an add-only reissue first asks whether its key is revoked
 	h := newAddEnv(t, addPolicy)
 	h.seed("b")
-	data, err := os.ReadFile(h.policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, c, err := compileBytes(data, h.e.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range c.Endpoints {
-		c.Endpoints[i].Tags = slices.DeleteFunc(slices.Clone(c.Endpoints[i].Tags), func(s string) bool { return s == admin.NoDenyTag })
-	}
-	m, err := mint.Mint(h.keys(), c, "a2", nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(h.creds("a2"), m.Creds, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	h.seedWith("a2", noDenyNone)
 	if old, _ := h.credsClaims("a2"); slices.Contains([]string(old.Tags), admin.NoDenyTag) {
 		t.Fatalf("the simulated old creds carry the placeholder: %v", old.Tags)
 	}
@@ -591,6 +569,7 @@ func TestAddOrphanRefusalText(t *testing.T) {
 
 // A policy file whose tests fail gates add and reissue exactly as it gates apply: nothing is minted or written.
 func TestFailingPolicyTestsRefuseAddAndReissue(t *testing.T) {
+	fakeKeyRevoked(t, false, nil)                                   // an add-only reissue first asks whether its key is revoked
 	const failing = "tests:\n  - {from: a, to: b, expect: allow}\n" // the rules deny a->b
 	bad := strings.Replace(addPolicy, "tests: []\n", failing, 1)
 	h := newAddEnv(t, addPolicy)

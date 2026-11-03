@@ -8,8 +8,8 @@ import (
 )
 
 // MaxTagsWarn is the number of tags on one user JWT above which Check warns: the user's JWT travels in the CONNECT
-// line, which the default server caps at 4096 bytes, and about 150 tags fill it (see UserJWTLimit).
-const MaxTagsWarn = 150
+// line, which the default server caps at 4096 bytes, and about 135 tags fill it (see UserJWTLimit).
+const MaxTagsWarn = 135
 
 // plan is the file resolved against its zones: for every ordered pair of zones whether the sending zone's key grants
 // the receiving zone as a wildcard, which users carry which exception tags, and each sender's decided recipients. It

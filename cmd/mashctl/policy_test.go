@@ -227,7 +227,7 @@ func TestPolicyShowBudget(t *testing.T) {
 	}
 	big := write(t, t.TempDir(), "big.yaml", b.String()+rules.String())
 	out, errb, code = policyRun(t, env, "policy", "show", "--budget", "--policy", big)
-	if code != 1 || !strings.Contains(out, "budget: account JWT") || !strings.Contains(errb, "over the 4000 byte limit") {
+	if code != 1 || !strings.Contains(out, "budget: account JWT") || !strings.Contains(errb, "over the 3750 byte limit") {
 		t.Fatalf("over budget: %d out-tail %q err %q", code, out[max(0, len(out)-200):], errb)
 	}
 }

@@ -54,6 +54,54 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	return nil
 }
 
+// keyRevoked reports whether the account JWT revokes the user key pub (at any time); a test replaces it.
+var keyRevoked = revokedInAccount
+
+// revokedInAccount opens the key store, connects with the system account credentials and reports, with
+// apply.KeyRevoked, whether the account JWT of any server revokes pub. It reads every server's copy, verifies each
+// against the operator trust and refuses on an incomplete server set or a silent server. Any failure to establish the
+// answer is an error, never "not revoked".
+func revokedInAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, pub string) (bool, error) {
+	return readAccount(ctx, cfg, env, servers, func(ctx context.Context, p apply.RevokeParams) (bool, error) {
+		return apply.KeyRevoked(ctx, p, pub)
+	})
+}
+
+// signerPublished reports whether the account JWT on every server lists signerPub as a scoped signing key with role
+// role; a test replaces it.
+var signerPublished = signerInAccount
+
+// signerInAccount is apply.SignerPublished over the system account connection, with the same refusals as
+// revokedInAccount: any failure to establish the answer is an error, never "published".
+func signerInAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, signerPub, role string) (bool, error) {
+	return readAccount(ctx, cfg, env, servers, func(ctx context.Context, p apply.RevokeParams) (bool, error) {
+		return apply.SignerPublished(ctx, p, signerPub, role)
+	})
+}
+
+// readAccount opens the key store, connects with the system account credentials and runs read over every server.
+func readAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, read func(context.Context, apply.RevokeParams) (bool, error)) (bool, error) {
+	keyDir, err := ctlkeys.DirFor(cfg, env)
+	if err != nil {
+		return false, err
+	}
+	ks, err := ctlkeys.Open(keyDir)
+	if err != nil {
+		return false, err
+	}
+	if _, err := sysCredsPath("", env, cfg); err != nil {
+		return false, errors.New("no system account credentials: set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)")
+	}
+	nc, err := connectSys(cfg, "", env)
+	if err != nil {
+		return false, err
+	}
+	defer nc.Close()
+	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
+	defer cancel()
+	return read(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers})
+}
+
 // parseServers reads MASH_SERVERS the way policy apply does; 0 is none given.
 func parseServers(env func(string) string) (int, error) {
 	sv := env("MASH_SERVERS")

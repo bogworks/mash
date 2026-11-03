@@ -15,9 +15,9 @@ const (
 	// (jwt.MaxTokenSize), which the server applies to every account JWT whatever max_payload says.
 	AccountJWTLimit = 1 << 20
 	// UserJWTLimit is the largest user JWT mash allows: a user's JWT travels in the CONNECT line, which the default
-	// server caps at 4096 bytes together with the signature, name and options. Measured: a 3,522 byte JWT
-	// connects, a 4,056 byte one does not. About 150 tags fit.
-	UserJWTLimit = 4000
+	// server caps at 4096 bytes together with the signature, name and options. Measured: a 3,802 byte JWT
+	// connects and a 3,838 byte one fails (#179), so the limit leaves real headroom below the failing size.
+	UserJWTLimit = 3750
 )
 
 // BudgetReport is the size of what a compile would need: the account JWT with one scoped signing key per zone and
