@@ -85,3 +85,4 @@ on), or mash's own choice on top of them.
 | [0065](0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md) | A directory poll reloads only when the directory stream moved, and is jittered | accepted | mash | 2026-11-02 |
 | [0066](0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md) | `mash serve` asks who is online when someone asks, instead of listening to every heartbeat | accepted | mash | 2026-11-02 |
 | [0068](0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md) | A change-log entry is a fragment file in `changelog.d/`, and the ADR index is generated (amends 0002) | accepted | project | 2026-11-03 |
+| [0069](0069-a-crowded-backlog-does-not-wake-a-session-that-a-hook-is-draining.md) | A crowded backlog does not wake a session that a hook is draining (amends 0028) | accepted | mash | 2026-11-03 |

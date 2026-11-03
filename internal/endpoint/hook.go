@@ -135,6 +135,7 @@ type held struct {
 	alive  time.Time       // the last keep-alive
 	wakeAt time.Time       // when the session was last woken; zero once a hook has drained since
 	wakes  int             // wakes since a hook last drained: the backoff exponent
+	hookAt time.Time       // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
 	listed map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
 	rung   map[uint64]bool // urgent messages a wake has already announced
 	fails  map[uint64]int  // consecutive spool failures per message
@@ -228,6 +229,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			delete(h.listed, seq)
 			h.full = false
 			h.wakeAt, h.wakes = time.Time{}, 0 // a hook ran: the session is not idle, and the next idle spell may wake it again
+			h.hookAt = time.Now()
 		}
 	}
 	if ran {
@@ -294,7 +296,15 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	if !h.wakeAt.IsZero() {
 		due = !oldest.IsZero() && time.Since(h.wakeAt) >= wakeBackoff(e.idleWake(), h.wakes)
 	} else {
-		due = !oldest.IsZero() && (crowded || time.Since(oldest) >= e.idleWake()) // a crowded backlog wakes at once: waiting could cost mail behind it (codex H2 on #75)
+		// A crowded backlog wakes at once: waiting could cost mail behind it (codex H2 on #75). Not while a hook is
+		// draining it: a drain shows a bounded batch, the held count stays high for many runs, and the idle spell
+		// restarts at each (ADR-0028: a busy session is never woken).
+		since := oldest
+		if h.hookAt.After(since) {
+			since = h.hookAt
+		}
+		active := !h.hookAt.IsZero() && time.Since(h.hookAt) < e.idleWake()
+		due = !oldest.IsZero() && ((crowded && !active) || time.Since(since) >= e.idleWake())
 	}
 	urgent := false
 	for _, seq := range ring {
