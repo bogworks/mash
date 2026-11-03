@@ -143,6 +143,7 @@ func (h *addEnv) records() []string {
 }
 
 func TestAddAndReissue(t *testing.T) {
+	fakeKeyRevoked(t, false, nil) // an add-only reissue first asks whether its key is revoked
 	h := newAddEnv(t, addPolicy)
 	h.seed("a")
 	h.seed("b")
@@ -520,6 +521,7 @@ func TestReissueRefusedOverBudget(t *testing.T) {
 // TestReissueChangedFindsCredsWithoutDenyNone: a creds file minted before every user carried deny:_none (simulated by
 // minting with the compiled tags minus the placeholder) is stale, and --changed lists it and only it.
 func TestReissueChangedFindsCredsWithoutDenyNone(t *testing.T) {
+	fakeKeyRevoked(t, false, nil) // an add-only reissue first asks whether its key is revoked
 	h := newAddEnv(t, addPolicy)
 	h.seed("b")
 	h.seedWith("a2", noDenyNone)
@@ -560,6 +562,7 @@ func TestAddOrphanRefusalText(t *testing.T) {
 
 // A policy file whose tests fail gates add and reissue exactly as it gates apply: nothing is minted or written.
 func TestFailingPolicyTestsRefuseAddAndReissue(t *testing.T) {
+	fakeKeyRevoked(t, false, nil)                                   // an add-only reissue first asks whether its key is revoked
 	const failing = "tests:\n  - {from: a, to: b, expect: allow}\n" // the rules deny a->b
 	bad := strings.Replace(addPolicy, "tests: []\n", failing, 1)
 	h := newAddEnv(t, addPolicy)

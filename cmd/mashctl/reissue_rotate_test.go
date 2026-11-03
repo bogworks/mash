@@ -13,6 +13,8 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/mint"
+	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
 )
 
 // seedWith writes a creds file for name as an earlier add would have, with the tag edit applied to its compiled tags,
@@ -67,7 +69,72 @@ func fakeRevoke(t *testing.T, err error) *[]revokeCall {
 		return err
 	}
 	t.Cleanup(func() { revokeUsers = prev })
+	fakeKeyRevoked(t, false, nil) // a reissue that keeps its key first asks whether the key is revoked
 	return &calls
+}
+
+// fakeKeyRevoked replaces the revoked-key seam; every call returns revoked, err and is recorded by public key.
+func fakeKeyRevoked(t *testing.T, revoked bool, err error) *[]string {
+	t.Helper()
+	var calls []string
+	prev := keyRevoked
+	keyRevoked = func(_ context.Context, _ config.Config, _ func(string) string, _ int, pub string) (bool, error) {
+		calls = append(calls, pub)
+		return revoked, err
+	}
+	t.Cleanup(func() { keyRevoked = prev })
+	return &calls
+}
+
+func TestReissueRevokedKeyRotates(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seedWith("a", noDenyNone) // add-only change, record present
+	_, oldPub := h.credsClaims("a")
+	calls := fakeRevoke(t, nil)
+	revCalls := fakeKeyRevoked(t, true, nil) // fakeRevoke resets the seam to "not revoked"
+
+	out, errb, code := h.run("reissue", "a")
+	if code != 0 || out != "reissued a (tags: deny:_none; new user key, old key revoked)\n" {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if len(*revCalls) != 1 || (*revCalls)[0] != oldPub {
+		t.Fatalf("keyRevoked calls %v", *revCalls)
+	}
+	_, newPub := h.credsClaims("a")
+	if newPub == oldPub {
+		t.Fatal("a revoked key was re-signed")
+	}
+	if len(*calls) != 1 || !slices.Equal((*calls)[0].users, []string{oldPub}) {
+		t.Fatalf("revoke calls %+v, want one for %s", *calls, oldPub)
+	}
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+newPub {
+		t.Fatalf("records %v, want user %s", recs, newPub)
+	}
+}
+
+func TestReissueRefusesWhenRevocationUnknown(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seedWith("a", noDenyNone)
+	_, oldPub := h.credsClaims("a")
+	before, _ := os.ReadFile(h.creds("a"))
+	calls := fakeRevoke(t, nil)
+	fakeKeyRevoked(t, false, errors.New("no system account credentials: x"))
+
+	out, errb, code := h.run("reissue", "a")
+	if code != 1 || out != "" || !strings.Contains(errb, "cannot tell whether the user key "+oldPub[:8]+"... is revoked: no system account credentials") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
+		t.Fatal("creds file changed")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("revoke calls %+v", *calls)
+	}
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+oldPub {
+		t.Fatalf("records %v", recs)
+	}
 }
 
 func TestReissueNarrowingRotatesKey(t *testing.T) {
@@ -277,5 +344,116 @@ func TestReissueRotationNeedsServer(t *testing.T) {
 				t.Errorf("revoke calls %+v", *calls)
 			}
 		})
+	}
+}
+
+// denyPolicy is addPolicy plus a rule that gives team x a real deny tag toward zone blue.
+var denyPolicy = strings.Replace(strings.Replace(addPolicy, "  b:\n    labels: {zone: blue}\n", "  b:\n    labels: {zone: blue}\n  b2:\n    labels: {zone: blue, tier: secret}\n", 1), "\ntests: []", "  - {name: red-blue, action: allow, from: {zone: red}, to: {zone: blue}}\n  - {name: no-b, action: deny, from: {team: x}, to: {tier: secret}}\n\ntests: []", 1)
+
+// withoutRealDeny drops the endpoint's real deny tags, as if its creds file were minted before the deny rule.
+func withoutRealDeny(tags []string) []string {
+	return slices.DeleteFunc(tags, func(s string) bool { return strings.HasPrefix(s, "deny:") && s != admin.NoDenyTag })
+}
+
+func TestReissueAddedAllowKeepsKey(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seedWith("a", func(tags []string) []string {
+		return slices.DeleteFunc(tags, func(s string) bool { return strings.HasPrefix(s, "allow:") })
+	})
+	_, oldPub := h.credsClaims("a")
+	calls := fakeRevoke(t, errors.New("must not be called"))
+	out, errb, code := h.run("reissue", "a")
+	if code != 0 || strings.Contains(out, "old key revoked") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if _, pub := h.credsClaims("a"); pub != oldPub || len(*calls) != 0 {
+		t.Errorf("key changed or revoked: %v", *calls)
+	}
+}
+
+func TestReissueAddedDenyRotates(t *testing.T) {
+	h := newAddEnv(t, denyPolicy)
+	h.seedWith("a", withoutRealDeny)
+	uc, oldPub := h.credsClaims("a")
+	if slices.ContainsFunc([]string(uc.Tags), func(s string) bool { return strings.HasPrefix(s, "deny:") && s != admin.NoDenyTag }) {
+		t.Fatal("seed holds a real deny tag")
+	}
+	calls := fakeRevoke(t, nil)
+	out, errb, code := h.run("reissue", "a")
+	if code != 0 || !strings.Contains(out, "new user key, old key revoked") || !strings.Contains(out, "deny:blue.") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	_, newPub := h.credsClaims("a")
+	if newPub == oldPub || len(*calls) != 1 || !slices.Equal((*calls)[0].users, []string{oldPub}) {
+		t.Fatalf("new %s old %s calls %+v", newPub, oldPub, *calls)
+	}
+	if recs := h.records(); !slices.Contains(recs, "a/red/"+newPub) {
+		t.Fatalf("records %v", recs)
+	}
+}
+
+func TestReissueAddedNoDenyPlaceholderKeepsKey(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seedWith("a", noDenyNone) // only deny:_none is missing
+	_, oldPub := h.credsClaims("a")
+	calls := fakeRevoke(t, errors.New("must not be called"))
+	if out, errb, code := h.run("reissue", "a"); code != 0 || strings.Contains(out, "old key revoked") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if _, pub := h.credsClaims("a"); pub != oldPub || len(*calls) != 0 {
+		t.Errorf("key changed or revoked: %v", *calls)
+	}
+}
+
+// TestReissueRefusesCredsOfAnotherAccount: a JWT issued for another account cannot be revoked from this one.
+func TestReissueRefusesCredsOfAnotherAccount(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seed("a")
+	raw, err := os.ReadFile(h.creds("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kp, err := jwt.ParseDecoratedNKey(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, _ := kp.Seed()
+	uc, oldPub := h.credsClaims("a")
+	other, err := nkeys.CreateAccount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPub, _ := other.PublicKey()
+	uc.IssuerAccount = otherPub
+	zkp, err := h.keys().ZoneKey("red", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := uc.Encode(zkp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, err := jwt.FormatUserConfig(tok, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.creds("a"), creds, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recs := h.records()
+	calls := fakeRevoke(t, nil)
+
+	out, errb, code := h.run("reissue", "a")
+	want := "a's creds file was issued for another account (" + otherPub[:8] + "...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add a again"
+	if code != 1 || out != "" || !strings.Contains(errb, want) {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(creds, after) {
+		t.Error("creds file changed")
+	}
+	if len(*calls) != 0 || !slices.Equal(recs, h.records()) || !slices.Contains(h.records(), "a/red/"+oldPub) {
+		t.Errorf("calls %+v records %v", *calls, h.records())
 	}
 }

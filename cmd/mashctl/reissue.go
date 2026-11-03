@@ -27,8 +27,9 @@ const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
 
 // runReissue is `mashctl reissue`. Every reissue signs with the creds file's stored user seed, so it first connects
 // with the admin credentials and reads the endpoint's directory record: a seed whose name has no record (retired) or
-// whose record names another user key is never reissued. A reissue that only adds tags then keeps the user key. A
-// reissue that narrows what the creds file's JWT carries (a tag removed, another signer, account or name) rotates the
+// whose record names another user key is never reissued. A reissue that only adds allow tags then keeps the user key, unless the account JWT revokes that key (it then rotates, and
+// if that cannot be read it refuses). A creds file issued for another account is refused. A
+// reissue that narrows what the creds file's JWT carries (a tag removed or a deny tag added, another signer or name) rotates the
 // user key instead, because a user JWT never expires and the old, wider one would stay valid: it revokes the old key
 // (system account credentials, as retire), then points the record at the new key, then replaces the file.
 func runReissue(args []string, env func(string) string, stdout, stderr io.Writer) int {
@@ -248,15 +249,22 @@ func compareCreds(keys mint.Keys, p string, e policy.CompiledEndpoint) (credsDif
 	return d, nil
 }
 
-// rotates reports whether the difference narrows what the old JWT grants (anything but only added tags), so that the
-// old JWT must stop working and the user key must change.
+// rotates reports whether the difference narrows what the old JWT grants (anything but added allow tags), so that the
+// old JWT must stop working and the user key must change. An added deny tag narrows (the old JWT lacks it), except the
+// placeholder admin.NoDenyTag, which addresses nothing.
 func (d credsDiff) rotates() bool {
+	for _, t := range d.TagsAdd {
+		if strings.HasPrefix(t, admin.DenyTag+":") && t != admin.NoDenyTag {
+			return true
+		}
+	}
 	return len(d.TagsRemove) > 0 || d.WrongSigner || d.WrongAccount || d.WrongName
 }
 
 // reissueOne mints name's user again and replaces the creds file atomically. Before anything is minted it checks that
 // the creds file's seed is the one the directory record names (see runReissue). It keeps the creds file's user key
-// when the policy only adds tags. Otherwise (rotated) it mints a fresh user key in memory, has the old key revoked
+// when the policy only adds allow tags and the account JWT does not revoke that key (keyRevoked; if that cannot be
+// established it refuses). Otherwise (rotated) it mints a fresh user key in memory, has the old key revoked
 // (confirmed), points the directory record at the new key and only then replaces the file.
 func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout io.Writer) (tags []string, rotated bool, err error) {
 	ep, ok := findEndpoint(c, name)
@@ -335,7 +343,25 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 		return nil, false, fmt.Errorf("the directory record of %s names user key %s..., not the creds file's %s...; the file is not the endpoint's current creds, so it is not reissued (retire and add it again)", name, ctl.ShortKey(recUser), ctl.ShortKey(seedPub))
 	}
 
+	// The old JWT can be revoked only in this account: a creds file issued for another account is refused.
+	if d.WrongAccount {
+		return nil, false, fmt.Errorf("%s's creds file was issued for another account (%s...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add %s again", name, ctl.ShortKey(oldClaims.IssuerAccount), name)
+	}
+
+	servers, err := parseServers(env)
+	if err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was changed", err)
+	}
+	// A key the account JWT revokes is never re-signed: revocation is by key and time, so a new JWT under it would
+	// work again. Not knowing is a refusal, before anything is minted.
+	revoked := false
 	if !d.rotates() {
+		revoked, err = keyRevoked(ctx, cfg, env, servers, oldPub)
+		if err != nil {
+			return nil, false, fmt.Errorf("cannot tell whether the user key %s... is revoked: %v; nothing was changed", ctl.ShortKey(oldPub), err)
+		}
+	}
+	if !d.rotates() && !revoked {
 		m, err := mint.Mint(keys, c, name, seed, false)
 		if err != nil {
 			return nil, false, err
@@ -348,17 +374,17 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 	}
 
 	// Rotating: (a) a fresh key in memory, (b) the revocation of the old key, (c) the record, (d) the file.
-	servers, err := parseServers(env)
-	if err != nil {
-		return nil, false, fmt.Errorf("%v; nothing was changed", err)
-	}
 	m, err := mint.Mint(keys, c, name, nil, false)
 	if err != nil {
 		return nil, false, err
 	}
 	defer clear(m.Creds)
 	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout); err != nil {
-		return nil, false, fmt.Errorf("the creds file's JWT is wider than the policy now allows (%s), so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); nothing was changed (the old creds still work); run the reissue again", d.text(), err)
+		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
+		if revoked {
+			why = "the user key is already revoked in the account JWT"
+		}
+		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); nothing was changed (the old creds still work); run the reissue again", why, err)
 	}
 	if _, err := adm.SetUser(ctx, name, m.AccountPub, oldPub, m.UserPub); err != nil {
 		return nil, false, fmt.Errorf("the old key %s... is revoked, so the endpoint is cut off, but its directory record was not updated (%v); the creds file and the record still agree, so run the reissue again to finish; if that keeps failing, run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)

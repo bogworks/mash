@@ -29,7 +29,16 @@ under the same key cannot cancel the old token.
 
 A reissue whose creds file carries a tag the policy no longer gives, another signer, account or name mints a new
 user key and revokes the old public key in the account JWT (`apply.RevokeUsers`, with the system account credentials,
-as `retire`). A reissue that only adds tags keeps the key.
+as `retire`). A reissue that adds a `deny:<peer>` tag rotates too, because the old JWT lacks that deny and would stay valid. Only added
+`allow:` tags (and the `deny:_none` placeholder, which addresses nothing) keep the key, unless the account JWT already
+revokes that key. A creds file whose JWT was issued for another account is refused, changing nothing, because mashctl
+can revoke only in its own account: the old JWT must be revoked where it was issued, then the endpoint retired and added again.
+
+Revocation is by key and time, so a JWT re-signed under a revoked key would work again. Every reissue therefore reads
+the account JWT (system account credentials, verified against the operator trust) before it mints anything. A key
+found in the revocation list, at any time, is rotated as above (the revocation is repeated, which is idempotent and
+raises the timestamp); a reissue never re-signs a revoked key. If the revocation state cannot be established, the
+reissue refuses and changes nothing.
 
 Every reissue, rotating or not, first connects with the admin credentials and reads the endpoint's directory record,
 because it signs with the seed stored in the creds file. It refuses, changing nothing, when the name has no record
@@ -56,14 +65,14 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
 * Good, because narrowing cuts off the old credentials; the old key's live connections close when the server takes
   the revocation.
 * Good, because a leftover creds file of a retired or replaced name is refused instead of being re-signed.
-* Bad, because no reissue is offline any more: each needs the server for the record check, and a narrowing one also
-  the system account credentials; a revocation is permanent for that key.
+* Bad, because no reissue is offline any more: each needs the server for the record check and the system account
+  credentials to read the account JWT; a revocation is permanent for that key.
 * Bad, because a failed write after a confirmed revoke leaves the endpoint cut off until it is recovered (run the
   reissue again, or retire and add it, as the message says).
 
 ### Confirmation
 
-`cmd/mashctl/reissue_rotate_test.go` (rotation, refusal without a record or with another recorded key, revoke failure
+`cmd/mashctl/reissue_rotate_test.go` (rotation, a revoked key rotated, refusal when revocation cannot be read, refusal without a record or with another recorded key, revoke failure
 leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence).
 
 ## Pros and Cons of the Options
