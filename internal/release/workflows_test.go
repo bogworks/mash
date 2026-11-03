@@ -951,7 +951,7 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 // ciOnlyJobs are ci.yml's jobs that the release gate does not require: changes (does a pull request touch code?) and
 // pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
 // review starts on; it gates neither a merge nor a release).
-var ciOnlyJobs = []string{"changes", "conformance", "pr-check"}
+var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -997,21 +997,24 @@ func TestCI_prCheckVerdict(t *testing.T) {
 		t.Fatal("pr-check has no run step")
 	}
 	for _, c := range []struct {
-		code, test, repro string
-		ok                bool
+		code, test, repro, adr string
+		ok                     bool
 	}{
-		{"true", "success", "success", true},
-		{"false", "skipped", "success", true},
-		{"false", "success", "success", true},
-		{"true", "skipped", "success", false}, // code changed but tests did not run
-		{"true", "failure", "success", false},
-		{"true", "success", "failure", false},
-		{"false", "skipped", "failure", false},
-		{"true", "cancelled", "success", false},
-		{"", "skipped", "success", false}, // the changes job failed: no answer
+		{"true", "success", "success", "success", true},
+		{"false", "skipped", "success", "success", true},
+		{"false", "success", "success", "success", true},
+		{"true", "skipped", "success", "success", false}, // code changed but tests did not run
+		{"true", "failure", "success", "success", false},
+		{"true", "success", "failure", "success", false},
+		{"false", "skipped", "failure", "success", false},
+		{"true", "cancelled", "success", "success", false},
+		{"", "skipped", "success", "success", false},     // the changes job failed: no answer
+		{"true", "success", "success", "failure", false}, // the ADR numbers check failed
+		{"false", "skipped", "success", "cancelled", false},
+		{"true", "success", "success", "", false},
 	} {
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro)
+		cmd.Env = append(os.Environ(), "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro, "ADR="+c.adr)
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != c.ok {
 			t.Errorf("code=%q test=%s reproducible=%s: ok=%v, want %v (%s)", c.code, c.test, c.repro, err == nil, c.ok, out)
