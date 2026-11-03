@@ -27,6 +27,8 @@ jobs:
           out="$(gofmt -l .)"
           if [ -n "$out" ]; then echo "gofmt would change:" >&2; echo "$out" >&2; exit 1; fi
       - run: go vet ./...
+      - name: change-log fragments are well formed
+        run: go run ./scripts/changelog check
       # TEMPORARY: the tree has 3 existing findings (SA4006 x2, ST1008 in internal/endpoint/endpoint_test.go), so this
       # step lists them without failing the job. Remove continue-on-error once they are fixed.
       - name: staticcheck

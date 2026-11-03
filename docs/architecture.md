@@ -417,7 +417,7 @@ selects the agent host adapter, and an unknown name is an error, never a fallbac
 
 ## 9. Architecture decisions
 
-The index is [`docs/decisions/README.md`](decisions/README.md). By theme:
+The complete index is [`docs/decisions/INDEX.md`](decisions/INDEX.md), generated from the records; the layer table in [`docs/decisions/README.md`](decisions/README.md) is frozen at 0066. By theme:
 
 - **Foundations:** [0002][0002] decisions are recorded as MADR records · [0003][0003] SAP plus one verb and JetStream ·
   [0004][0004] `mail` is declared, not registered · [0005][0005] SAP subject hierarchy · [0037][0037] text only, files
