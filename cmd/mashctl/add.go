@@ -347,7 +347,12 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	// has endpoints must already have its key, or the new creds would not authenticate. A key made here is left in
 	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
 	zoneExists := slices.ContainsFunc(before.Endpoints, func(e policy.CompiledEndpoint) bool { return e.Zone == ep.Zone })
-	m, err := mint.Mint(keys, after, o.name, nil, !zoneExists)
+	var mk mint.Keys = keys
+	if zoneExists {
+		// The zone key must already be published as a scoped signer; the verifier connects only now, before any record.
+		mk = scopeKeys{Authority: keys, cfg: cfg, env: env}
+	}
+	m, err := mint.Mint(mk, after, o.name, nil, !zoneExists)
 	if err != nil {
 		if zoneExists && errors.Is(err, ctlkeys.ErrNoZoneKey) {
 			dir, _ := ctlkeys.DirFor(cfg, env)

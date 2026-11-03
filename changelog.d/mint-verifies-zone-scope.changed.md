@@ -1,0 +1,1 @@
+`mashctl add` to an existing zone now verifies, with the system account credentials (`MASH_SYS_CREDS`), that the zone key is published in the account JWT as a scoped signer, and refuses otherwise (#220).
