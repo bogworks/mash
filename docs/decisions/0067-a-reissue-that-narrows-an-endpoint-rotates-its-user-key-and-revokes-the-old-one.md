@@ -66,6 +66,23 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
 `cmd/mashctl/reissue_rotate_test.go` (rotation, refusal without a record or with another recorded key, revoke failure
 leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence).
 
+## Pros and Cons of the Options
+
+### Rotate and revoke when the reissue narrows (chosen)
+
+* Good, because narrowing takes effect and a widening reissue keeps its key.
+* Bad, because the narrowing case needs the revocation and the system account credentials.
+
+### Rotate and revoke on every reissue
+
+* Good, because there is one path.
+* Bad, because every tag addition costs a permanent revocation and a new key for no gain.
+
+### Bounded expiry with renewal
+
+* Good, because every old JWT dies on its own.
+* Bad, because mash has no renewal path, and it does not shorten the window of a JWT already issued.
+
 ## More Information
 
 * Advisory GHSA-xr7f-xmcm-w98h; issue #179 (budget).
