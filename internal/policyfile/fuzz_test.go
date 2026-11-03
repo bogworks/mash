@@ -43,9 +43,7 @@ func blames(err error, touched []string) bool {
 		return true
 	}
 	for _, n := range touched {
-		// Add writes the name as given, so 0 or null lands unquoted and Parse refuses the key (a known finding: the
-		// edit guard reads it back as the same name, Save is what refuses the file).
-		if strings.Contains(msg, "endpoint "+n+" ") || strings.Contains(msg, "map key "+n+" is not a plain string") {
+		if strings.Contains(msg, "endpoint "+n+" ") {
 			return true
 		}
 	}

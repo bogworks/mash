@@ -99,19 +99,12 @@ func deref(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// nonNull counts the items of a sequence that are not null. The decoder drops a null item (`rules:\n-`), which
-// carries nothing to lose; it is a known, cosmetic finding (diagnostic line numbers after it shift), kept out of
-// the invariant so the fuzzer can look for losses that matter.
-func nonNull(v *yaml.Node) int {
-	n := 0
+// items counts the items of a sequence.
+func items(v *yaml.Node) int {
 	if v.Kind == yaml.SequenceNode {
-		for _, c := range v.Content {
-			if c = deref(c); !(c.Kind == yaml.ScalarNode && c.ShortTag() == "!!null") {
-				n++
-			}
-		}
+		return len(v.Content)
 	}
-	return n
+	return 0
 }
 
 // sourceCounts decodes data independently of Parse and returns the endpoint key texts and the rule and test item
@@ -138,9 +131,9 @@ func sourceCounts(data []byte) (endpoints []string, rules, tests int, ok bool) {
 				}
 			}
 		case "rules":
-			rules = nonNull(v)
+			rules = items(v)
 		case "tests":
-			tests = nonNull(v)
+			tests = items(v)
 		}
 	}
 	return endpoints, rules, tests, true

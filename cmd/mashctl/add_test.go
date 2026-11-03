@@ -392,6 +392,10 @@ func TestAddRefusals(t *testing.T) {
 	}{
 		{[]string{"add"}, "no endpoint name", 2},
 		{[]string{"add", "Bad_Name"}, "NAME is not a valid endpoint name", 2},
+		{[]string{"add", "null"}, `endpoint name "null" would read as a YAML null, not a name: choose another name`, 2},
+		{[]string{"add", "true"}, `would read as a YAML bool`, 2},
+		{[]string{"add", "0"}, "NAME is not a valid endpoint name", 2},
+		{[]string{"add", "Zed"}, "NAME is not a valid endpoint name", 2},
 		{[]string{"add", "a"}, "already declared", 1},
 		{[]string{"add", "d", "--zone", "red", "--label", "zone=blue"}, "conflicts", 1},
 		{[]string{"add", "d", "--label", "novalue"}, "--label wants k=v", 2},
