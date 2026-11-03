@@ -57,12 +57,19 @@ so a concurrent reissue of the same name cannot rotate the record and write its 
 and its write. The func runs on a context that ends before the lock expires, and the record update
 (`Admin.SetUserLocked`) and the file rewrite re-check the lock first.
 
-A rotating reissue runs in this order: mint the new key in memory, revoke the old key and wait for confirmation, point
-the record at the new key (`Admin.SetUser`, a compare-and-set from the old key, idempotent for the new one), then
-replace the creds file. A failure before the revocation is confirmed changes nothing and the old creds still work; run
-the reissue again. If the record update fails after the revocation, the file and record still agree, so running the
-reissue again finishes. If writing the file fails after the record update, the endpoint is cut off and a plain reissue
-is refused as the record and file disagree: `mashctl retire NAME` then `mashctl add NAME`.
+A rotating reissue runs in this order: mint the new key and stage its creds (JWT and seed) in `<creds file>.next`
+(0600, synced) before anything irreversible, revoke the old key and wait for confirmation, point the record at the new
+key (`Admin.SetUser`, a compare-and-set from the old key, idempotent for the new one), then replace the creds file
+with the staged creds and remove the staged file. A failure before the revocation is confirmed leaves the record and
+the creds file unchanged and the old creds still work. A failure after it (the record update, the lock check or the
+file write) leaves the endpoint cut off but the new seed on disk, so running `mashctl reissue NAME` again finishes the
+rotation. That reissue finds the staged file and resumes when the record names the creds file's key (rotation not yet
+recorded) or the staged key (recorded, file not swapped): it re-signs the staged key with the current policy, repeats
+the revocation of the old key (idempotent), accepts a record that already names the staged key, and replaces the
+creds file. A staged file that cannot be read, is loose, holds no user seed, whose JWT does not name its seed, or was
+issued for another account or name is refused with the instruction to remove it. A staged file whose key is the creds
+file's own (left when removing it failed after a completed rotation) is ignored. Retire and add is never the
+recovery: retiring deletes the endpoint's inbox and can lose queued mail.
 
 A bounded expiry with renewal is not adopted: mash has no renewal path for a running endpoint, so an expiry would
 cut endpoints off on a clock, and it would not shorten the window for a JWT already issued. It may be revisited with
@@ -78,8 +85,8 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
 * Good, because a leftover creds file of a retired or replaced name is refused instead of being re-signed.
 * Bad, because no reissue is offline any more: each needs the server for the record check and the system account
   credentials to read the account JWT; a revocation is permanent for that key.
-* Bad, because a failed write after a confirmed revoke leaves the endpoint cut off until it is recovered (run the
-  reissue again, or retire and add it, as the message says).
+* Bad, because a failed record update or write after a confirmed revoke leaves the endpoint cut off until the same
+  reissue is run again, and a `<creds file>.next` holding a seed sits beside the creds file until then.
 
 ### Confirmation
 

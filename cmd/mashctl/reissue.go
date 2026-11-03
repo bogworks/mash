@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
@@ -32,7 +33,9 @@ const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
 // if that cannot be read it refuses). A creds file issued for another account is refused. A
 // reissue that narrows what the creds file's JWT carries (a tag removed or a deny tag added, another signer or name) rotates the
 // user key instead, because a user JWT never expires and the old, wider one would stay valid: it revokes the old key
-// (system account credentials, as retire), then points the record at the new key, then replaces the file.
+// (system account credentials, as retire), then points the record at the new key, then replaces the file. The new creds are
+// first staged in <creds>.next, so a rotation interrupted after the revocation is finished by running the reissue again.
+// The new creds are staged in <creds>.next before anything irreversible, so an interrupted rotation is finished by running the reissue again.
 func runReissue(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	var names []string
 	var file string
@@ -265,7 +268,7 @@ func (d credsDiff) rotates() bool {
 // reissueOne mints name's user again and replaces the creds file atomically. Before anything is minted it checks that
 // the creds file's seed is the one the directory record names (see runReissue). It keeps the creds file's user key
 // when the policy only adds allow tags and the account JWT does not revoke that key (keyRevoked; if that cannot be
-// established it refuses). Otherwise (rotated) it mints a fresh user key in memory, has the old key revoked
+// established it refuses). Otherwise (rotated) it mints a fresh user key and stages its creds in <creds>.next, has the old key revoked
 // (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
 // revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
 // lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
@@ -358,7 +361,20 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if recAccount != accountPub {
 		return nil, false, fmt.Errorf("the directory record of %s belongs to account %s..., not this account's key %s...; not reissued", name, ctl.ShortKey(recAccount), ctl.ShortKey(accountPub))
 	}
-	if recUser != seedPub {
+	// A rotation that was interrupted left its new creds in the staged file. It is resumable when the record still
+	// names the creds file's key (rotation not yet recorded) or already names the staged key (recorded, file not swapped).
+	staged, err := readStaged(p, name, accountPub, seedPub)
+	if err != nil {
+		return nil, false, err
+	}
+	defer staged.wipe()
+	resume := false
+	switch {
+	case recUser == seedPub:
+		resume = staged != nil
+	case staged != nil && recUser == staged.pub:
+		resume = true
+	default:
 		return nil, false, fmt.Errorf("the directory record of %s names user key %s..., not the creds file's %s...; the file is not the endpoint's current creds, so it is not reissued (retire and add it again)", name, ctl.ShortKey(recUser), ctl.ShortKey(seedPub))
 	}
 
@@ -380,7 +396,8 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 			return nil, false, fmt.Errorf("cannot tell whether the user key %s... is revoked: %v; nothing was changed", ctl.ShortKey(oldPub), err)
 		}
 	}
-	if !d.rotates() && !revoked {
+	recorded := staged != nil && recUser == staged.pub // the record already names the staged key: the rotation must finish
+	if !d.rotates() && !revoked && !recorded {
 		m, err := mint.Mint(keys, c, name, seed, false)
 		if err != nil {
 			return nil, false, err
@@ -395,29 +412,110 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return m.Tags, false, nil
 	}
 
-	// Rotating: (a) a fresh key in memory, (b) the revocation of the old key, (c) the record, (d) the file.
-	m, err := mint.Mint(keys, c, name, nil, false)
+	// Rotating: (a) the new key, staged on disk (a resumed rotation re-signs the staged key with the current policy),
+	// (b) the revocation of the old key, (c) the record, (d) the file, which consumes the staged file. Nothing
+	// irreversible happens before the new seed is on disk.
+	var newSeed []byte
+	if resume {
+		newSeed = staged.seed
+	}
+	m, err := mint.Mint(keys, c, name, newSeed, false)
 	if err != nil {
 		return nil, false, err
 	}
 	defer clear(m.Creds)
+	sp := stagePath(p)
+	if err := stageCreds(p, m.Creds); err != nil {
+		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
+	}
 	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
 		if revoked {
 			why = "the user key is already revoked in the account JWT"
 		}
-		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); nothing was changed (the old creds still work); run the reissue again", why, err)
+		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); the directory record and the creds file are unchanged (the old creds still work) and the new key is staged in %s; run the reissue again", why, err, sp)
 	}
+	finish := fmt.Sprintf("the old key %s... is revoked, so the endpoint is cut off; the rotation is staged in %s, and running mashctl reissue %s again finishes it", ctl.ShortKey(oldPub), sp, name)
 	if _, err := adm.SetUserLocked(ctx, lock, name, m.AccountPub, oldPub, m.UserPub); err != nil {
-		return nil, false, fmt.Errorf("the old key %s... is revoked, so the endpoint is cut off, but its directory record was not updated (%v); the creds file and the record still agree, so run the reissue again to finish; if that keeps failing, run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
 	}
 	if err := lock.Check(ctx); err != nil {
-		return nil, false, fmt.Errorf("the old key %s... is revoked and the record names the new key, but %v; the endpoint is cut off, and a plain reissue is now refused because the file and the record disagree: run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+		return nil, false, fmt.Errorf("%s: the record names the new key, but %v", finish, err)
 	}
 	if err := writeCreds(p, m.Creds); err != nil {
-		return nil, false, fmt.Errorf("the old key %s... is revoked and the record names the new key, but the new creds file could not be written (%v), so the endpoint is cut off; a plain reissue is now refused because the file and the record disagree: run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+		return nil, false, fmt.Errorf("%s: the new creds file could not be written (%v)", finish, err)
 	}
+	os.Remove(sp) // best effort: a leftover holding the creds file's own key is ignored by the next reissue
 	return m.Tags, true, nil
+}
+
+// stagePath is the staged-rotation file beside the creds file at p.
+func stagePath(p string) string { return p + ".next" }
+
+// stageCreds writes the new creds of a rotation to the staged file beside p, atomically with mode 0600 and synced.
+func stageCreds(p string, creds []byte) error { return replaceCreds(stagePath(p), creds) }
+
+// stagedRotation is a parsed staged file: the new key's public key and seed.
+type stagedRotation struct {
+	pub  string
+	seed []byte
+}
+
+func (s *stagedRotation) wipe() {
+	if s != nil {
+		clear(s.seed)
+	}
+}
+
+// readStaged reads the staged file of the creds file at p, nil when there is none (or when it holds the creds file's
+// own key: the leftover of a rotation whose file was swapped). A file that is unreadable, loose, not a user seed, whose
+// JWT does not name its seed, or that was issued for another account or name is refused.
+func readStaged(p, name, accountPub, mainPub string) (*stagedRotation, error) {
+	sp := stagePath(p)
+	stale := func(why string) error {
+		return fmt.Errorf("the staged file %s %s; remove the stale staged file %s and run again", sp, why, sp)
+	}
+	if _, err := os.Lstat(sp); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	raw, err := readCreds(sp)
+	if err != nil {
+		return nil, stale("cannot be read (" + err.Error() + ")")
+	}
+	defer clear(raw)
+	kp, err := jwt.ParseDecoratedNKey(raw)
+	if err != nil {
+		return nil, stale("holds no user seed")
+	}
+	defer kp.Wipe()
+	pub, err := kp.PublicKey()
+	if err != nil || !nkeys.IsValidPublicUserKey(pub) {
+		return nil, stale("holds no user seed")
+	}
+	sd, err := kp.Seed()
+	if err != nil {
+		return nil, stale("holds no user seed")
+	}
+	token, err := jwt.ParseDecoratedJWT(raw)
+	var uc *jwt.UserClaims
+	if err == nil {
+		uc, err = jwt.DecodeUserClaims(token)
+	}
+	if err != nil {
+		return nil, stale("holds no readable JWT")
+	}
+	switch {
+	case uc.Subject != pub:
+		return nil, stale("has a JWT for a different key than its seed")
+	case uc.IssuerAccount != accountPub:
+		return nil, stale("was issued for another account")
+	case uc.Name != name:
+		return nil, stale("was issued for another name")
+	}
+	if pub == mainPub {
+		return nil, nil
+	}
+	return &stagedRotation{pub: pub, seed: append([]byte(nil), sd...)}, nil
 }
 
 // writeCreds is how a reissue replaces a creds file; a test replaces it.
