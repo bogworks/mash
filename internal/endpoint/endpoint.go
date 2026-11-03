@@ -51,6 +51,10 @@ type Endpoint struct {
 	// duplicateWindow overrides store.InboxDuplicateWindow for the seen set (tests that shorten the stream's window).
 	duplicateWindow time.Duration
 
+	headMu sync.Mutex // guards the stream-headroom cache (streamHasHeadroom)
+	headAt time.Time
+	headOK bool
+
 	cfg  config.Config
 	nc   *nats.Conn
 	js   jetstream.JetStream

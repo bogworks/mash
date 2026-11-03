@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -48,6 +49,11 @@ var (
 	// SpoolWakeBytes does the same for held bodies, well below the inbox stream's InboxMaxBytes (16 MiB, headers
 	// included), past which NATS discards the oldest messages, unacked ones too (codex H1 on #75): a quarter of it.
 	SpoolWakeBytes = store.InboxMaxBytes / 4
+	// SpoolWakeHardCount is the held count, as a multiple of SpoolWakeCount (3/2: 750 at the default), past which the
+	// drain no longer holds back a crowded wake. Growth detection after a drain is best effort (arrivals can land in
+	// the same pass as the drain), so this line does not depend on it: it stays well under the consumer's 1,000
+	// pending-message limit (ADR 0069).
+	spoolWakeHardNum, spoolWakeHardDen = 3, 2
 	// IdleWake is how long spooled mail waits for a hook before serve wakes the session: an idle session runs none. It is
 	// the default when Config.IdleWake is unset (production sets it: MASH_IDLE_WAKE / "idle_wake"), and the tests' knob.
 	IdleWake       = 45 * time.Second
@@ -128,18 +134,22 @@ func hold(batch []pending) {
 
 // held is what the spool holds unacked, by stream sequence.
 type held struct {
-	msgs   map[uint64]pending
-	at     map[uint64]time.Time // when each was spooled
-	bytes  int
-	stored int             // the held messages' stored size, headers included, as the inbox stream counts it
-	alive  time.Time       // the last keep-alive
-	wakeAt time.Time       // when the session was last woken; zero once a hook has drained since
-	wakes  int             // wakes since a hook last drained: the backoff exponent
-	listed map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
-	rung   map[uint64]bool // urgent messages a wake has already announced
-	fails  map[uint64]int  // consecutive spool failures per message
-	failed bool            // a spool failure is logged for the current spell
-	full   bool            // the byte cap turned a message away since a hook last drained
+	msgs       map[uint64]pending
+	at         map[uint64]time.Time // when each was spooled
+	bytes      int
+	stored     int             // the held messages' stored size, headers included, as the inbox stream counts it
+	alive      time.Time       // the last keep-alive
+	wakeAt     time.Time       // when the session was last woken; zero once a hook has drained since
+	wakes      int             // wakes since a hook last drained: the backoff exponent
+	hookAt     time.Time       // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
+	hookHeld   int             // the held count right after the last drain: a backlog above it has grown since
+	hookStored int             // the held stored size right after the last drain
+	added      int             // messages spooled since the last settle: arrivals of the current pass, not yet seen by a drain check
+	listed     map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
+	rung       map[uint64]bool // urgent messages a wake has already announced
+	fails      map[uint64]int  // consecutive spool failures per message
+	failed     bool            // a spool failure is logged for the current spell
+	full       bool            // the byte cap turned a message away since a hook last drained
 }
 
 // spoolTries is how many times a message is spooled before the channel delivers it instead.
@@ -180,6 +190,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			h.failed = false
 			delete(h.fails, seq)
 			h.msgs[seq] = p
+			h.added++
 			h.at[seq] = time.Now()
 			h.bytes += len(p.mail.Body)
 			h.stored += storedSize(p)
@@ -198,6 +209,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 
 // settleHeld acks what a hook has drained, keeps the rest from being redelivered, and wakes an idle session.
 func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
+	defer func() { h.added = 0 }()
 	if e.spool == nil {
 		return
 	}
@@ -228,6 +240,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			delete(h.listed, seq)
 			h.full = false
 			h.wakeAt, h.wakes = time.Time{}, 0 // a hook ran: the session is not idle, and the next idle spell may wake it again
+			h.hookAt = time.Now()
 		}
 	}
 	if ran {
@@ -238,6 +251,8 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 				delete(h.rung, seq)
 			}
 		}
+		// The count before this pass's arrivals: mail that landed in the same pass as the drain counts as growth.
+		h.hookHeld, h.hookStored = max(len(h.msgs)-h.added, 0), h.stored
 	}
 	e.healHeld(h)
 	e.wakeIfIdle(deliver, h, hl)
@@ -294,7 +309,25 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	if !h.wakeAt.IsZero() {
 		due = !oldest.IsZero() && time.Since(h.wakeAt) >= wakeBackoff(e.idleWake(), h.wakes)
 	} else {
-		due = !oldest.IsZero() && (crowded || time.Since(oldest) >= e.idleWake()) // a crowded backlog wakes at once: waiting could cost mail behind it (codex H2 on #75)
+		// A crowded backlog wakes at once: waiting could cost mail behind it (codex H2 on #75). Not while a hook is
+		// draining it: a drain shows a bounded batch, the held count stays high for many runs, and the idle spell
+		// restarts at each (ADR-0028: a busy session is never woken).
+		since := oldest
+		if h.hookAt.After(since) {
+			since = h.hookAt
+		}
+		// The drain suppresses the wake only while it makes headroom: the backlog has not grown since it, the stream
+		// is not full, and the held bytes and count are under hard lines (half the inbox limit, 3/2 of SpoolWakeCount)
+		// past which a crowded backlog always wakes at once (ADR 0069).
+		active := !h.hookAt.IsZero() && time.Since(h.hookAt) < e.idleWake() && !h.full &&
+			len(h.msgs) <= h.hookHeld && h.stored <= h.hookStored && h.stored < SpoolWakeBytes*2 &&
+			len(h.msgs) < SpoolWakeCount*spoolWakeHardNum/spoolWakeHardDen
+		// The stream's own headroom is read only when everything else already holds (a crowded backlog just after a
+		// drain), and an unreadable stream counts as full.
+		if active && crowded && !e.streamHasHeadroom(context.Background()) {
+			active = false
+		}
+		due = !oldest.IsZero() && ((crowded && !active) || time.Since(since) >= e.idleWake())
 	}
 	urgent := false
 	for _, seq := range ring {
@@ -342,6 +375,48 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	for _, seq := range ring {
 		h.rung[seq] = true
 	}
+}
+
+// headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.
+const (
+	headroomTTL     = 5 * time.Second
+	headroomTimeout = 2 * time.Second
+)
+
+// streamBytes reads the inbox stream's stored bytes and its byte limit. A package var so tests can fake it.
+var streamBytes = func(ctx context.Context, e *Endpoint) (bytes, max uint64, err error) {
+	if e.js == nil {
+		return 0, 0, errors.New("no stream handle")
+	}
+	st, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+	if err != nil {
+		return 0, 0, err
+	}
+	info, err := st.Info(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	max = uint64(store.InboxMaxBytes)
+	if info.Config.MaxBytes > 0 {
+		max = uint64(info.Config.MaxBytes)
+	}
+	return info.State.Bytes, max, nil
+}
+
+// streamHasHeadroom reports whether the inbox stream holds under half its byte limit, retained history included
+// (ADR 0069). The reading is cached for headroomTTL; any error or timeout counts as no headroom.
+func (e *Endpoint) streamHasHeadroom(ctx context.Context) bool {
+	e.headMu.Lock()
+	defer e.headMu.Unlock()
+	if !e.headAt.IsZero() && time.Since(e.headAt) < headroomTTL {
+		return e.headOK
+	}
+	ctx, cancel := context.WithTimeout(ctx, headroomTimeout)
+	defer cancel()
+	b, m, err := streamBytes(ctx, e)
+	e.headOK = err == nil && m > 0 && b < m/2
+	e.headAt = time.Now()
+	return e.headOK
 }
 
 // ackDrained acks a message a hook has shown. Under the before-ack failpoint it does not: see failpointBeforeAck.

@@ -258,6 +258,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 		if drained[seq]++; drained[seq] > 1 {
 			t.Fatalf("#%d drained twice", seq)
 		}
+		time.Sleep(3 * time.Millisecond) // a hook run takes time: the held count stays above 500 across many settles, and none may wake
 		if err := sp.Drained(seq); err != nil {
 			t.Fatal(err)
 		}
