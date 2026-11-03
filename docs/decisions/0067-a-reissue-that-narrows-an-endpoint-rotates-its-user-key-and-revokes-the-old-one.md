@@ -60,3 +60,15 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
   the system account credentials; a revocation is permanent for that key.
 * Bad, because a failed write after a confirmed revoke leaves the endpoint cut off until it is recovered (run the
   reissue again, or retire and add it, as the message says).
+
+### Confirmation
+
+`cmd/mashctl/reissue_rotate_test.go` (rotation, refusal without a record or with another recorded key, revoke failure
+leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence).
+
+## More Information
+
+* Advisory GHSA-xr7f-xmcm-w98h; issue #179 (budget).
+* Code: `cmd/mashctl/reissue.go`, `cmd/mashctl/revoke.go`, `internal/admin/admin.go` (`SetUser`, `UserOf`),
+  `internal/apply/revoke.go`.
+* Related: [ADR 0053](0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md).
