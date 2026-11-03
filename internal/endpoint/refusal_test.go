@@ -558,6 +558,12 @@ func TestTaintedSoleSendEndsAsAmbiguousTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()
 	go func() {
+		// Release the other send only once ours has registered: on a slow runner an earlier release leaves ours the sole
+		// waiter from the start, and the real server violation for the denied subject is then a definite refusal.
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for s.refusals.pending() < 2 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
 		time.Sleep(50 * time.Millisecond)
 		rel1(false) // it times out; our send is the sole remaining waiter
 		time.Sleep(50 * time.Millisecond)
