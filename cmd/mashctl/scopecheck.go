@@ -49,11 +49,28 @@ func verifyZoneScopeLive(ctx context.Context, cfg config.Config, env func(string
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	token, err := apply.NATS{Conn: nc}.Lookup(ctx, accountPub)
+	servers, err := parseServers(env)
 	if err != nil {
 		return err
 	}
-	return checkZoneScope(token, trust, accountPub, zone, zonePub)
+	tokens, err := apply.NATS{Conn: nc, Inventory: servers}.LookupAll(ctx, accountPub, servers)
+	if err != nil {
+		return err
+	}
+	return checkZoneScopeAll(tokens, trust, accountPub, zone, zonePub)
+}
+
+// checkZoneScopeAll runs checkZoneScope on every server's answer and refuses if there is none or any fails.
+func checkZoneScopeAll(tokens []string, trust apply.Trust, accountPub, zone, zonePub string) error {
+	if len(tokens) == 0 {
+		return errors.New("no server answered the account JWT lookup, so the scope of the zone key could not be verified")
+	}
+	for i, tok := range tokens {
+		if err := checkZoneScope(tok, trust, accountPub, zone, zonePub); err != nil {
+			return fmt.Errorf("server reply %d of %d holds the zone key as no scoped signer or fails verification: %w", i+1, len(tokens), err)
+		}
+	}
+	return nil
 }
 
 // checkZoneScope verifies the account JWT token and returns an error unless zonePub is a jwt.UserScope signing key in it.

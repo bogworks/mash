@@ -134,3 +134,43 @@ func TestCheckZoneScope(t *testing.T) {
 		t.Error("a JWT for another account was accepted")
 	}
 }
+
+func TestCheckZoneScopeAll(t *testing.T) {
+	op, _ := nkeys.CreateOperator()
+	opPub, _ := op.PublicKey()
+	acct, _ := nkeys.CreateAccount()
+	acctPub, _ := acct.PublicKey()
+	zone, _ := nkeys.CreateAccount()
+	zonePub, _ := zone.PublicKey()
+	enc := func(scoped bool) string {
+		ac := jwt.NewAccountClaims(acctPub)
+		if scoped {
+			us := jwt.NewUserScope()
+			us.Key = zonePub
+			us.Role = "red"
+			ac.SigningKeys.AddScopedSigner(us)
+		} else {
+			ac.SigningKeys.Add(zonePub)
+		}
+		tok, err := ac.Encode(op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	trust, err := apply.NewTrust(opPub, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, p := enc(true), enc(false)
+	if err := checkZoneScopeAll([]string{s, s, s}, trust, acctPub, "red", zonePub); err != nil {
+		t.Errorf("all scoped refused: %v", err)
+	}
+	err = checkZoneScopeAll([]string{s, p, s}, trust, acctPub, "red", zonePub)
+	if err == nil || !strings.Contains(err.Error(), "reply 2 of 3") {
+		t.Errorf("one plain among scoped: %v", err)
+	}
+	if err := checkZoneScopeAll(nil, trust, acctPub, "red", zonePub); err == nil {
+		t.Error("empty list accepted")
+	}
+}

@@ -54,8 +54,8 @@ mashctl command already needs it. `reissue` takes the same check once ADR 0067 (
 * Good, because it reuses the lookup and verification `policy apply` uses; no new trust path.
 * Bad, because `add` into an existing zone now needs the system account creds and a reachable server, where it needed
   the admin creds and a reachable server before.
-* Bad, because a clustered account whose servers disagree is judged by the one answer the lookup returns; the full-set
-  rule of `apply` is not applied to a read.
+* Good, because every answering server's copy is checked; with `MASH_SERVERS` unset it waits for answers to settle, so
+  a silent server is not noticed.
 
 ### Confirmation
 
