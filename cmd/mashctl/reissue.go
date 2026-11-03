@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -431,6 +432,13 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return m.Tags, false, nil
 	}
 
+	// A revocation covers only JWTs issued at or before its time: an old JWT that claims a later issue time (a clock
+	// that was ahead or has since been set back) would stay valid, so the rotation would report success without
+	// cutting it off. Refused before anything is staged or revoked, on the revoked-key path too.
+	if iat := time.Unix(oldClaims.IssuedAt, 0).UTC(); iat.After(reissueNow()) {
+		return nil, false, fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", name, iat.Format(time.RFC3339))
+	}
+
 	// Rotating: (a) the new key, staged on disk (a resumed rotation re-signs the staged key with the current policy),
 	// (b) the revocation of the old key, (c) the record, (d) the file, which consumes the staged file. Nothing
 	// irreversible happens before the new seed is on disk.
@@ -444,6 +452,10 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	}
 	defer clear(m.Creds)
 	sp := stagePath(p)
+	// The lock may have expired while the key was minted: another reissue could hold it and own the staged file now.
+	if err := nameLockCheck(ctx, lock); err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
+	}
 	if err := stageCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
 	}
@@ -467,6 +479,12 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	os.Remove(sp) // best effort: a leftover holding the creds file's own key is ignored by the next reissue
 	return m.Tags, true, nil
 }
+
+// reissueNow and nameLockCheck are seams for tests.
+var (
+	reissueNow    = time.Now
+	nameLockCheck = func(ctx context.Context, l admin.NameLock) error { return l.Check(ctx) }
+)
 
 // stagePath is the staged-rotation file beside the creds file at p.
 func stagePath(p string) string { return p + ".next" }

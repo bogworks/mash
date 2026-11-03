@@ -81,6 +81,12 @@ A bounded expiry with renewal is not adopted: mash has no renewal path for a run
 cut endpoints off on a clock, and it would not shorten the window for a JWT already issued. It may be revisited with
 a renewal design.
 
+A revocation covers only JWTs issued at or before its time, so a rotation refuses, before staging or revoking
+anything, when the old creds JWT claims an issue time later than this machine's clock (clock skew, or a clock set
+back since it was minted): the revocation would not cover it. The same refusal applies on the revoked-key path. The
+name lock is also re-checked immediately before the new creds are staged, so a reissue whose lock expired cannot
+overwrite another reissue's staged seed.
+
 The user JWT budget ([#179](https://github.com/bogworks/mash/issues/179)) moves from 4,000 to 3,750 bytes, since JWTs
 of 3,838 bytes and above fail at the default 4,096 byte control line.
 
@@ -95,6 +101,8 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
   reissue is run again, and a `<creds file>.next` holding a seed sits beside the creds file until then.
 
 ### Confirmation
+
+`TestReissueRefusesFutureIssuedOldJWT` (rotation and revoked-key path: a JWT issued in the future is refused with no revoke call, no staged file, creds and record unchanged; a past one proceeds) and `TestReissueRefusesToStageWithoutLock` (`cmd/mashctl/reissue_stage_test.go`: a lock that fails its check before staging leaves nothing staged and makes no revoke call).
 
 `TestReissueRefusesUnpublishedZoneKey` (`cmd/mashctl/reissue_rotate_test.go`: rotating and non-rotating, no revoke, no staged file, creds and record unchanged) and `TestSignerPublishedCoversEveryServer` (`internal/apply/revoked_test.go`: published on all, one server lacking it, wrong role, silent server).
 

@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"github.com/bogworks/mash/internal/admin"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/mint"
 	"github.com/nats-io/jwt/v2"
@@ -174,4 +177,87 @@ func TestReissueRotationLeavesNoStagedFile(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	h.noStaged("a")
+}
+
+// An old JWT that claims to be issued in the future is refused on a rotation, and on the revoked-key path, with
+// nothing staged, revoked or changed; one issued in the past proceeds.
+func TestReissueRefusesFutureIssuedOldJWT(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		edit    func([]string) []string
+		revoked bool
+	}{
+		{"narrowing", extraTag, false},
+		{"revoked key", noDenyNone, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAddEnv(t, addPolicy)
+			h.seedWith("a", tc.edit)
+			_, oldPub := h.credsClaims("a")
+			before, _ := os.ReadFile(h.creds("a"))
+			recs := h.records()
+			calls := fakeRevoke(t, nil)
+			fakeKeyRevoked(t, tc.revoked, nil)
+
+			prev := reissueNow
+			reissueNow = func() time.Time { return time.Now().Add(-time.Hour) } // the JWT was minted "an hour from now"
+			out, errb, code := h.run("reissue", "a")
+			reissueNow = prev
+			if code != 1 || out != "" || !strings.Contains(errb, "a's current creds JWT claims it was issued in the future (") || !strings.Contains(errb, "fix this machine's clock") {
+				t.Fatalf("%d %q %q", code, out, errb)
+			}
+			noSecrets(t, out, errb)
+			if len(*calls) != 0 {
+				t.Fatalf("revoke calls %+v", *calls)
+			}
+			h.noStaged("a")
+			if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
+				t.Fatal("creds file changed")
+			}
+			if !slices.Equal(recs, h.records()) {
+				t.Fatalf("records %v, want %v", h.records(), recs)
+			}
+
+			// Issued in the past (the real clock): proceeds.
+			out, errb, code = h.run("reissue", "a")
+			if code != 0 {
+				t.Fatalf("%d %q %q", code, out, errb)
+			}
+			if _, pub := h.credsClaims("a"); pub == oldPub || len(*calls) != 1 {
+				t.Fatalf("key %s, revoke calls %+v", pub, *calls)
+			}
+		})
+	}
+}
+
+// A name lock that is no longer held before staging stops the rotation: nothing staged, no revoke call.
+func TestReissueRefusesToStageWithoutLock(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seedWith("a", extraTag)
+	before, _ := os.ReadFile(h.creds("a"))
+	recs := h.records()
+	calls := fakeRevoke(t, nil)
+
+	checks := 0
+	prev := nameLockCheck
+	nameLockCheck = func(context.Context, admin.NameLock) error {
+		checks++
+		return errors.New("the name lock for a expired")
+	}
+	out, errb, code := h.run("reissue", "a")
+	nameLockCheck = prev
+	if code != 1 || out != "" || !strings.Contains(errb, "the name lock for a expired") || checks != 1 {
+		t.Fatalf("%d %q %q checks %d", code, out, errb, checks)
+	}
+	noSecrets(t, out, errb)
+	if len(*calls) != 0 {
+		t.Fatalf("revoke calls %+v", *calls)
+	}
+	h.noStaged("a")
+	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
+		t.Fatal("creds file changed")
+	}
+	if !slices.Equal(recs, h.records()) {
+		t.Fatalf("records %v", h.records())
+	}
 }
