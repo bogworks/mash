@@ -57,6 +57,9 @@ func verifyZoneScopeLive(ctx context.Context, cfg config.Config, env func(string
 	if err != nil {
 		return err
 	}
+	if servers > 0 && len(tokens) < servers {
+		return fmt.Errorf("only %d of the %d servers (MASH_SERVERS) answered the account JWT lookup, so the scope of the zone key could not be verified on all of them", len(tokens), servers)
+	}
 	return checkZoneScopeAll(tokens, trust, accountPub, zone, zonePub)
 }
 
