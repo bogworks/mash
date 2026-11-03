@@ -27,6 +27,12 @@ under the same key cannot cancel the old token.
 
 ## Decision Outcome
 
+Every reissue, rotating or not, first requires the zone key that will sign the new JWT to be published: its public key
+must be a scoped signing key with the zone's role in the account JWT on every server (`apply.SignerPublished`, same
+every-server read and refusals as `apply.KeyRevoked`). Otherwise it refuses, changing nothing (`run mashctl policy
+apply first`), before it stages, revokes or writes anything, also when it resumes a staged rotation. Without this a
+rotation could revoke the working old key and leave only creds that cannot connect.
+
 A reissue whose creds file carries a tag the policy no longer gives, another signer, account or name mints a new
 user key and revokes the old public key in the account JWT (`apply.RevokeUsers`, with the system account credentials,
 as `retire`). A reissue that adds a `deny:<peer>` tag rotates too, because the old JWT lacks that deny and would stay valid. Only added
@@ -89,6 +95,8 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
   reissue is run again, and a `<creds file>.next` holding a seed sits beside the creds file until then.
 
 ### Confirmation
+
+`TestReissueRefusesUnpublishedZoneKey` (`cmd/mashctl/reissue_rotate_test.go`: rotating and non-rotating, no revoke, no staged file, creds and record unchanged) and `TestSignerPublishedCoversEveryServer` (`internal/apply/revoked_test.go`: published on all, one server lacking it, wrong role, silent server).
 
 `cmd/mashctl/reissue_rotate_test.go` (rotation, a revoked key rotated, refusal when revocation cannot be read, refusal without a record or with another recorded key, revoke failure
 leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence, the held name lock), `cmd/mashctl/reissue_lock_test.go` (concurrent reissues of one name leave the file and the record agreeing; the lock is held during the file rewrite) and `internal/apply/revoked_test.go` (a revocation on any one server's copy counts; a silent server refuses).

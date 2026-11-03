@@ -86,6 +86,66 @@ func fakeKeyRevoked(t *testing.T, revoked bool, err error) *[]string {
 	return &calls
 }
 
+type signerCall struct{ pub, role string }
+
+// fakeSignerPublished replaces the published-signer seam; every call returns published, err and is recorded.
+func fakeSignerPublished(t *testing.T, published bool, err error) *[]signerCall {
+	t.Helper()
+	var calls []signerCall
+	prev := signerPublished
+	signerPublished = func(_ context.Context, _ config.Config, _ func(string) string, _ int, pub, role string) (bool, error) {
+		calls = append(calls, signerCall{pub, role})
+		return published, err
+	}
+	t.Cleanup(func() { signerPublished = prev })
+	return &calls
+}
+
+// A reissue, rotating or not, refuses when the zone key that would sign the new JWT is not published, before it
+// stages, revokes or writes anything.
+func TestReissueRefusesUnpublishedZoneKey(t *testing.T) {
+	for _, rotating := range []bool{true, false} {
+		h := newAddEnv(t, addPolicy)
+		if rotating {
+			h.seedWith("a", extraTag)
+		} else {
+			h.seedWith("a", noDenyNone)
+		}
+		_, oldPub := h.credsClaims("a")
+		before, _ := os.ReadFile(h.creds("a"))
+		calls := fakeRevoke(t, nil)
+		sig := fakeSignerPublished(t, false, nil)
+
+		out, errb, code := h.run("reissue", "a")
+		if code != 1 || out != "" || !strings.Contains(errb, "is not in the account JWT on every server: run `mashctl policy apply` first; nothing was changed") {
+			t.Fatalf("rotating=%v: %d %q %q", rotating, code, out, errb)
+		}
+		noSecrets(t, out, errb)
+		zk, _ := h.keys().ZoneKey("red", false)
+		zpub, _ := zk.PublicKey()
+		if len(*sig) != 1 || (*sig)[0] != (signerCall{zpub, "red"}) {
+			t.Fatalf("signer calls %+v", *sig)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("revoke calls %+v", *calls)
+		}
+		if _, err := os.Stat(h.creds("a") + ".next"); !os.IsNotExist(err) {
+			t.Error("a staged file was written")
+		}
+		if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
+			t.Fatal("creds file changed")
+		}
+		if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+oldPub {
+			t.Fatalf("records %v", recs)
+		}
+		// not knowing is a refusal too
+		fakeSignerPublished(t, false, errors.New("only 1 of 2 servers answered"))
+		if _, errb, code := h.run("reissue", "a"); code != 1 || !strings.Contains(errb, "cannot tell whether the zone key") || !strings.Contains(errb, "nothing was changed") {
+			t.Fatalf("unknown: %d %q", code, errb)
+		}
+	}
+}
+
 func TestReissueRevokedKeyRotates(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	h.seedWith("a", noDenyNone) // add-only change, record present

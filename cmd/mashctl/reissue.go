@@ -387,6 +387,25 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if err != nil {
 		return nil, false, fmt.Errorf("%v; nothing was changed", err)
 	}
+	// The zone key signs the new JWT, so the account JWT on every server must list it with the zone's role: a JWT
+	// signed by an unpublished key cannot connect, and a rotation would have revoked the working old key for it.
+	// Checked before anything is staged, minted or revoked, also when a staged rotation is resumed.
+	zkp, err := keys.ZoneKey(ep.Zone, false)
+	if err != nil {
+		return nil, false, fmt.Errorf("zone %q has no signing key: %w; nothing was changed", ep.Zone, err)
+	}
+	zpub, err := zkp.PublicKey()
+	zkp.Wipe()
+	if err != nil {
+		return nil, false, err
+	}
+	published, err := signerPublished(ctx, cfg, env, servers, zpub, ep.Zone)
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot tell whether the zone key %s... for zone %s is in the account JWT on every server: %v; nothing was changed", ctl.ShortKey(zpub), ep.Zone, err)
+	}
+	if !published {
+		return nil, false, fmt.Errorf("the zone key %s... for zone %s is not in the account JWT on every server: run `mashctl policy apply` first; nothing was changed", ctl.ShortKey(zpub), ep.Zone)
+	}
 	// A key the account JWT revokes is never re-signed: revocation is by key and time, so a new JWT under it would
 	// work again. Not knowing is a refusal, before anything is minted.
 	revoked := false

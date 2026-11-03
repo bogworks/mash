@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
 )
 
 func TestKeyRevokedCoversEveryServer(t *testing.T) {
@@ -71,5 +72,57 @@ func TestKeyRevokedCoversEveryServer(t *testing.T) {
 	}
 	if fk.pushes != 0 {
 		t.Fatal("KeyRevoked pushed")
+	}
+}
+
+func TestSignerPublishedCoversEveryServer(t *testing.T) {
+	ks, fk, _ := setup(t)
+	op, _, _ := ks.Operator()
+	_, apub, _ := ks.Account()
+	zk, _ := nkeys.CreateAccount()
+	zpub, _ := zk.PublicKey()
+	encode := func(role string) string {
+		ac := jwt.NewAccountClaims(apub)
+		if role != "" {
+			sc := jwt.NewUserScope()
+			sc.Key = zpub
+			sc.Role = role
+			ac.SigningKeys.AddScopedSigner(sc)
+		}
+		tok, err := ac.Encode(op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	good, bare, wrong := encode("red"), encode(""), encode("blue")
+	p := RevokeParams{Keys: ks, Resolver: fk, Servers: 2}
+	fk.servers = ServerSet{Names: []string{"s1", "s2"}, Expected: 2}
+	ctx := context.Background()
+
+	fk.all = []string{good, good}
+	if got, err := SignerPublished(ctx, p, zpub, "red"); err != nil || !got {
+		t.Fatalf("published on all: %v %v", got, err)
+	}
+	for _, all := range [][]string{{good, bare}, {bare, good}} {
+		fk.all = all
+		if got, err := SignerPublished(ctx, p, zpub, "red"); err != nil || got {
+			t.Fatalf("one server lacks the key: %v %v", got, err)
+		}
+	}
+	fk.all = []string{good, wrong}
+	if got, err := SignerPublished(ctx, p, zpub, "red"); err != nil || got {
+		t.Fatalf("wrong role: %v %v", got, err)
+	}
+	fk.all = []string{good}
+	if got, err := SignerPublished(ctx, p, zpub, "red"); err == nil || got {
+		t.Fatalf("silent server: %v %v", got, err)
+	}
+	fk.all = []string{good, ""}
+	if got, err := SignerPublished(ctx, p, zpub, "red"); err == nil || got {
+		t.Fatalf("server with no JWT: %v %v", got, err)
+	}
+	if fk.pushes != 0 {
+		t.Fatal("SignerPublished pushed")
 	}
 }

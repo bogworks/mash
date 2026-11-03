@@ -258,6 +258,13 @@ func TestReissueNeedsZoneKeyAndNewIssuer(t *testing.T) {
 	if _, err := h.keys().ZoneKey("red", true); err != nil {
 		t.Fatal(err)
 	}
+	// the new zone key is not in the account JWT until policy apply publishes it: the reissue refuses, revoking nothing
+	calls := fakeRevoke(t, nil)
+	fakeSignerPublished(t, false, nil)
+	if _, errb, code := h.run("reissue", "a"); code != 1 || !strings.Contains(errb, "run `mashctl policy apply` first") || len(*calls) != 0 {
+		t.Fatalf("unpublished new zone key: %d %q %+v", code, errb, *calls)
+	}
+	fakeSignerPublished(t, true, nil)
 	if out, _, code := h.run("reissue", "--changed"); code != 0 || !strings.HasPrefix(out, "reissued a ") {
 		t.Fatalf("--changed after a new zone key: %d %q", code, out)
 	}
