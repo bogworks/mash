@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,29 +94,74 @@ func TestCrowdedBacklogWithoutDrainWakesAtOnce(t *testing.T) {
 	}
 }
 
-// A crowded backlog behind a hook drain waits for the idle wake after the drain: no wake before it, then a wake.
+// A crowded backlog behind a hook drain waits for the idle wake after the drain while it is shrinking: no wake before
+// it, then a wake.
 func TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell(t *testing.T) {
 	old := SpoolWakeCount
 	SpoolWakeCount = 5
 	t.Cleanup(func() { SpoolWakeCount = old })
 	ev, sp, b := boundFixture(t, boundIdle)
-	ctx := context.Background()
-	send := func() {
-		t.Helper()
-		if _, err := b.SendWith(ctx, "a", "fyi", SendOptions{Kind: kind.FYI}); err != nil {
-			t.Fatal(err)
-		}
+	for i := 0; i < 6; i++ {
+		sendFYI(t, b, "fyi")
 	}
-	send()
-	until(t, "1 spooled", func() bool { return len(waiting(t, sp)) == 1 })
-	at := drainAt(t, sp, 1)
-	for i := 0; i < 5; i++ { // crowded now, and the drain was moments ago
-		send()
-	}
-	until(t, "5 spooled", func() bool { return len(waiting(t, sp)) == 5 })
+	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	at := drainAt(t, sp, 1) // 5 held: still crowded, and not growing
+	until(t, "5 held", func() bool { return len(waiting(t, sp)) == 5 })
 	noWakeBefore(t, ev, at, boundIdle*6/10)
 	ev.waitFor(t, 1, boundIdle+5*time.Second)
 	if since := time.Since(at); since < boundIdle {
 		t.Fatalf("woken %v after the drain, want at least the idle wake %v", since, boundIdle)
+	}
+}
+
+func sendFYI(t *testing.T, b *Endpoint, body string) {
+	t.Helper()
+	if _, err := b.SendWith(context.Background(), "a", body, SendOptions{Kind: kind.FYI}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A drain does not hold back the wake once new mail makes the crowded backlog grow: the wake comes long before the
+// idle wake.
+func TestCrowdedBacklogGrowingAfterADrainWakesAtOnce(t *testing.T) {
+	old := SpoolWakeCount
+	SpoolWakeCount = 5
+	t.Cleanup(func() { SpoolWakeCount = old })
+	const idle = 20 * time.Second
+	ev, sp, b := boundFixture(t, idle)
+	for i := 0; i < 6; i++ {
+		sendFYI(t, b, "fyi")
+	}
+	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	// The first six crowd the backlog and wake it once; the drain then restarts the wake state.
+	ev.waitFor(t, 1, 10*time.Second)
+	at := drainAt(t, sp, 1) // 5 held
+	until(t, "5 held", func() bool { return len(waiting(t, sp)) == 5 })
+	time.Sleep(time.Second) // let the endpoint see the drain before the new mail, or both land in one pass
+	sendFYI(t, b, "new")    // 6 held: above the post-drain count
+	ev.waitFor(t, 2, 10*time.Second)
+	if since := time.Since(at); since >= idle/2 {
+		t.Fatalf("a growing crowded backlog woke %v after the drain, want far less than the idle wake %v", since, idle)
+	}
+}
+
+// Held bytes past half the inbox limit (twice SpoolWakeBytes) wake at once even right after a drain and a shrinking
+// backlog.
+func TestCrowdedBytesPastTheHardLineWakeAfterADrain(t *testing.T) {
+	oldB, oldC := SpoolWakeBytes, SpoolWakeCount
+	SpoolWakeBytes = 2 << 10
+	t.Cleanup(func() { SpoolWakeBytes, SpoolWakeCount = oldB, oldC })
+	const idle = 20 * time.Second
+	ev, sp, b := boundFixture(t, idle)
+	body := strings.Repeat("x", 1<<10)
+	for i := 0; i < 7; i++ { // 7 KiB and more held: over 2 * SpoolWakeBytes after one drain
+		sendFYI(t, b, body)
+	}
+	until(t, "7 spooled", func() bool { return len(waiting(t, sp)) == 7 })
+	at := drainAt(t, sp, 1)
+	until(t, "6 held", func() bool { return len(waiting(t, sp)) == 6 })
+	ev.waitFor(t, 1, 10*time.Second)
+	if since := time.Since(at); since >= idle/2 {
+		t.Fatalf("held bytes past the hard line woke %v after the drain, want far less than the idle wake %v", since, idle)
 	}
 }

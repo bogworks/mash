@@ -128,19 +128,21 @@ func hold(batch []pending) {
 
 // held is what the spool holds unacked, by stream sequence.
 type held struct {
-	msgs   map[uint64]pending
-	at     map[uint64]time.Time // when each was spooled
-	bytes  int
-	stored int             // the held messages' stored size, headers included, as the inbox stream counts it
-	alive  time.Time       // the last keep-alive
-	wakeAt time.Time       // when the session was last woken; zero once a hook has drained since
-	wakes  int             // wakes since a hook last drained: the backoff exponent
-	hookAt time.Time       // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
-	listed map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
-	rung   map[uint64]bool // urgent messages a wake has already announced
-	fails  map[uint64]int  // consecutive spool failures per message
-	failed bool            // a spool failure is logged for the current spell
-	full   bool            // the byte cap turned a message away since a hook last drained
+	msgs       map[uint64]pending
+	at         map[uint64]time.Time // when each was spooled
+	bytes      int
+	stored     int             // the held messages' stored size, headers included, as the inbox stream counts it
+	alive      time.Time       // the last keep-alive
+	wakeAt     time.Time       // when the session was last woken; zero once a hook has drained since
+	wakes      int             // wakes since a hook last drained: the backoff exponent
+	hookAt     time.Time       // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
+	hookHeld   int             // the held count right after the last drain: a backlog above it has grown since
+	hookStored int             // the held stored size right after the last drain
+	listed     map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
+	rung       map[uint64]bool // urgent messages a wake has already announced
+	fails      map[uint64]int  // consecutive spool failures per message
+	failed     bool            // a spool failure is logged for the current spell
+	full       bool            // the byte cap turned a message away since a hook last drained
 }
 
 // spoolTries is how many times a message is spooled before the channel delivers it instead.
@@ -240,6 +242,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 				delete(h.rung, seq)
 			}
 		}
+		h.hookHeld, h.hookStored = len(h.msgs), h.stored
 	}
 	e.healHeld(h)
 	e.wakeIfIdle(deliver, h, hl)
@@ -303,7 +306,11 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		if h.hookAt.After(since) {
 			since = h.hookAt
 		}
-		active := !h.hookAt.IsZero() && time.Since(h.hookAt) < e.idleWake()
+		// The drain suppresses the wake only while it makes headroom: the backlog has not grown since it, the stream
+		// is not full, and the held bytes are under half the inbox limit (a hard line past which a crowded backlog
+		// always wakes at once) (ADR 0069).
+		active := !h.hookAt.IsZero() && time.Since(h.hookAt) < e.idleWake() && !h.full &&
+			len(h.msgs) <= h.hookHeld && h.stored <= h.hookStored && h.stored < SpoolWakeBytes*2
 		due = !oldest.IsZero() && ((crowded && !active) || time.Since(since) >= e.idleWake())
 	}
 	urgent := false
