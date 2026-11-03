@@ -70,7 +70,7 @@ func suspendState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 // Suspend parks name's inbox stream: it saves the stream's subjects in its metadata and replaces them with the one
 // subject mash.suspended.<name>, so a sender's publish finds no stream. Only the subjects and metadata change and
 // nothing is purged. It also stores a fresh random suspension id. It is idempotent: a suspended inbox is reported as it is, with its existing id. The state's LastSeq is read after the
-// update.
+// update and settled, so it is the final one.
 func (a *Admin) Suspend(ctx context.Context, name string) (_ SuspendState, err error) {
 	if !config.ValidName(name) {
 		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
@@ -126,7 +126,33 @@ func (a *Admin) Suspend(ctx context.Context, name string) (_ SuspendState, err e
 	if s, err = a.js.UpdateStream(ctx, cfg); err != nil {
 		return SuspendState{}, fmt.Errorf("mash: suspend %s: %w", name, err)
 	}
-	return suspendState(ctx, name, s)
+	return settledState(ctx, name, s)
+}
+
+// settledState is suspendState for a stream just parked: a publish the stream accepted before the update can still
+// be queued for ingest and stored after it returns, so it reads again until last_seq is unchanged across two reads
+// 50 ms apart. It stops at ctx or after 2 s and returns what it last read; it never fails for want of a quiet stream.
+func settledState(ctx context.Context, name string, s jetstream.Stream) (SuspendState, error) {
+	const gap, limit = 50 * time.Millisecond, 2 * time.Second
+	deadline := time.Now().Add(limit)
+	st, err := suspendState(ctx, name, s)
+	for err == nil && time.Now().Add(gap).Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return st, nil
+		case <-time.After(gap):
+		}
+		next, nerr := suspendState(ctx, name, s)
+		if nerr != nil {
+			return st, nil
+		}
+		settled := next.LastSeq == st.LastSeq
+		st = next
+		if settled {
+			break
+		}
+	}
+	return st, err
 }
 
 // Resume restores the subjects Suspend saved and clears its metadata. It is idempotent: an inbox that is not

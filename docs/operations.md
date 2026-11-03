@@ -304,7 +304,7 @@ To read the last of an endpoint's mail before removing it, stop new mail first, 
 ```sh
 mashctl suspend design      # suspended design: id 9f3c..., last_seq 41, msgs 38
 mashctl suspended design    # exit 0 if suspended, 3 if not, 1 on any error
-# read the inbox through sequence 41 (the last_seq above); it is final while the endpoint stays suspended
+# read the inbox through sequence 41 (the last_seq above); it is final while the endpoint stays suspended (suspend waits for a publish accepted just before the park to land, so it is already final when printed)
 mashctl deprovision design --suspension 9f3c... --drained-to 41
 ```
 
