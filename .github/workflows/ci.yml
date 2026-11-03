@@ -80,7 +80,16 @@ jobs:
           # The words internal to the maintainers, from a repository variable (data through env): the standalone
           # source scan in cmd/mash fails on any of them.
           MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
-        run: go test -race -timeout 20m ./...
+        run: |
+          set -eu
+          if [ "$RUNNER_OS" = macOS ]; then
+            # scripts/releasecheck alone takes about 500 s under -race on the macOS runner, over a third of the job's
+            # 14 minutes of wall time (#275); Linux keeps -race on every package, so macOS runs it without.
+            go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
+            go test -timeout 20m ./scripts/releasecheck
+          else
+            go test -race -timeout 20m ./...
+          fi
       - name: Leave nothing behind (macOS)
         if: always() && matrix.os == 'macos-latest'
         run: |
