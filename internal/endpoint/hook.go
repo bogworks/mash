@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -311,6 +312,11 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		// always wakes at once) (ADR 0069).
 		active := !h.hookAt.IsZero() && time.Since(h.hookAt) < e.idleWake() && !h.full &&
 			len(h.msgs) <= h.hookHeld && h.stored <= h.hookStored && h.stored < SpoolWakeBytes*2
+		// The stream's own headroom is read only when everything else already holds (a crowded backlog just after a
+		// drain), and an unreadable stream counts as full.
+		if active && crowded && !e.streamHasHeadroom(context.Background()) {
+			active = false
+		}
 		due = !oldest.IsZero() && ((crowded && !active) || time.Since(since) >= e.idleWake())
 	}
 	urgent := false
@@ -359,6 +365,48 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	for _, seq := range ring {
 		h.rung[seq] = true
 	}
+}
+
+// headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.
+const (
+	headroomTTL     = 5 * time.Second
+	headroomTimeout = 2 * time.Second
+)
+
+// streamBytes reads the inbox stream's stored bytes and its byte limit. A package var so tests can fake it.
+var streamBytes = func(ctx context.Context, e *Endpoint) (bytes, max uint64, err error) {
+	if e.js == nil {
+		return 0, 0, errors.New("no stream handle")
+	}
+	st, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+	if err != nil {
+		return 0, 0, err
+	}
+	info, err := st.Info(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	max = uint64(store.InboxMaxBytes)
+	if info.Config.MaxBytes > 0 {
+		max = uint64(info.Config.MaxBytes)
+	}
+	return info.State.Bytes, max, nil
+}
+
+// streamHasHeadroom reports whether the inbox stream holds under half its byte limit, retained history included
+// (ADR 0069). The reading is cached for headroomTTL; any error or timeout counts as no headroom.
+func (e *Endpoint) streamHasHeadroom(ctx context.Context) bool {
+	e.headMu.Lock()
+	defer e.headMu.Unlock()
+	if !e.headAt.IsZero() && time.Since(e.headAt) < headroomTTL {
+		return e.headOK
+	}
+	ctx, cancel := context.WithTimeout(ctx, headroomTimeout)
+	defer cancel()
+	b, m, err := streamBytes(ctx, e)
+	e.headOK = err == nil && m > 0 && b < m/2
+	e.headAt = time.Now()
+	return e.headOK
 }
 
 // ackDrained acks a message a hook has shown. Under the before-ack failpoint it does not: see failpointBeforeAck.

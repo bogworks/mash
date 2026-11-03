@@ -33,8 +33,11 @@ a third wake mid-drain on slow runners (the held count in the wake text was 570,
 Chosen option: the second. The held state records `hookAt`, the time of the last drain, and `hookHeld` and `hookStored`,
 the held count and stored size right after it (refreshed on every drain). The crowded "wake at once" rule is suppressed
 only while the drain is making headroom: a hook drained within the idle wake, the stream is not full, the backlog has not
-grown since the drain (count and stored size), and the held size is under half the inbox byte limit (twice
-`SpoolWakeBytes`, a hard line past which a crowded backlog always wakes at once). Otherwise it wakes at once, as before.
+grown since the drain (count and stored size), the held size is under half the inbox byte limit (twice
+`SpoolWakeBytes`, a hard line past which a crowded backlog always wakes at once), and the inbox stream itself has
+headroom: its stored bytes, retained history included, read from the stream info, are under half its byte limit. The
+stream reading is fail-safe: an error, a timeout or no stream handle counts as no headroom. Otherwise it wakes at once,
+as before.
 The idle spell runs from the later of the oldest held mail and `hookAt`. A backlog nobody drains, or one that keeps
 growing, still wakes at once; one that is shrinking waits for the idle spell to pass after the last drain.
 
@@ -44,6 +47,8 @@ growing, still wakes at once; one that is shrinking waits for the idle spell to 
 * Good, because a stalled drain (no hook for the idle wake) wakes the session even if the backlog is crowded.
 * Good, because incoming mail that grows the backlog, a full stream, or held bytes past half the inbox limit wake at
   once, so one drain cannot hide a backlog from the session while the inbox could discard unacked older mail.
+* Bad, because a stream-info request is made, at most once per 5 s (cached) and only for a crowded backlog just after a
+  drain.
 * Bad, because the first wake after a drain stops waits one idle wake (the default) for a crowded backlog that is below
   half the byte limit and not growing.
 * Bad, because the shift of the idle spell to the later of the oldest held mail and the last drain also delays the non-crowded idle wake, by up to one idle wake after an unrelated drain.
@@ -58,7 +63,9 @@ drain (`TestIdleSpellRunsFromTheLastDrain`), a crowded backlog nobody drains wak
 (`TestCrowdedBacklogWithoutDrainWakesAtOnce`), and a shrinking crowded backlog behind a drain waits for the idle wake after it
 (`TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell`), a backlog that grows after a drain wakes at once
 (`TestCrowdedBacklogGrowingAfterADrainWakesAtOnce`), and held bytes past twice `SpoolWakeBytes` wake at once after a drain
-(`TestCrowdedBytesPastTheHardLineWakeAfterADrain`).
+(`TestCrowdedBytesPastTheHardLineWakeAfterADrain`), a stream near its byte limit or one that cannot be read wakes at once
+after a drain (`TestCrowdedBacklogOnAFullStreamWakesAtOnceAfterADrain`,
+`TestCrowdedBacklogWithAnUnreadableStreamWakesAtOnce`), and the stream reading is cached (`TestStreamHeadroomIsCached`).
 
 ## Pros and Cons of the Options
 
@@ -79,4 +86,4 @@ drain (`TestIdleSpellRunsFromTheLastDrain`), a crowded backlog nobody drains wak
 
 ## More Information
 
-* Amends the backlog rule of ADR-0028. Code: `internal/endpoint/hook.go` (`held.hookAt`, `held.hookHeld`, `wakeIfIdle`).
+* Amends the backlog rule of ADR-0028. Code: `internal/endpoint/hook.go` (`held.hookAt`, `held.hookHeld`, `wakeIfIdle`, `streamHasHeadroom`).

@@ -2,7 +2,9 @@ package endpoint
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -167,5 +169,70 @@ func TestCrowdedBytesPastTheHardLineWakeAfterADrain(t *testing.T) {
 	ev.waitFor(t, 1, 10*time.Second)
 	if since := time.Since(at); since >= idle/2 {
 		t.Fatalf("held bytes past the hard line woke %v after the drain, want far less than the idle wake %v", since, idle)
+	}
+}
+
+// fakeStreamBytes sets the stream-headroom seam before the endpoints start and restores it after; it returns the call count.
+func fakeStreamBytes(t *testing.T, bytes, max uint64, err error) *atomic.Int32 {
+	t.Helper()
+	var calls atomic.Int32
+	old := streamBytes
+	streamBytes = func(context.Context, *Endpoint) (uint64, uint64, error) {
+		calls.Add(1)
+		return bytes, max, err
+	}
+	t.Cleanup(func() { streamBytes = old })
+	return &calls
+}
+
+// crowdedAfterADrain crowds the backlog, lets it wake once, then drains one: a shrinking crowded backlog right after a
+// drain. It returns the events and the drain time.
+func crowdedAfterADrain(t *testing.T) (ev *events, at time.Time) {
+	t.Helper()
+	old := SpoolWakeCount
+	SpoolWakeCount = 5
+	t.Cleanup(func() { SpoolWakeCount = old })
+	ev, sp, b := boundFixture(t, 20*time.Second)
+	for i := 0; i < 6; i++ {
+		sendFYI(t, b, "fyi")
+	}
+	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	ev.waitFor(t, 1, 10*time.Second)
+	at = drainAt(t, sp, 1)
+	until(t, "5 held", func() bool { return len(waiting(t, sp)) == 5 })
+	return ev, at
+}
+
+// A stream already near its byte limit (retained history) wakes a shrinking crowded backlog at once after a drain.
+func TestCrowdedBacklogOnAFullStreamWakesAtOnceAfterADrain(t *testing.T) {
+	calls := fakeStreamBytes(t, 90, 100, nil)
+	ev, at := crowdedAfterADrain(t)
+	ev.waitFor(t, 2, 10*time.Second)
+	if since := time.Since(at); since >= 10*time.Second {
+		t.Fatalf("woke %v after the drain, want far less than the idle wake", since)
+	}
+	if calls.Load() == 0 {
+		t.Fatal("the stream was never read")
+	}
+}
+
+// An unreadable stream is no headroom: the wake is at once.
+func TestCrowdedBacklogWithAnUnreadableStreamWakesAtOnce(t *testing.T) {
+	fakeStreamBytes(t, 0, 0, errors.New("no info"))
+	ev, _ := crowdedAfterADrain(t)
+	ev.waitFor(t, 2, 10*time.Second)
+}
+
+// The reading is cached: many settles in one window read the stream once.
+func TestStreamHeadroomIsCached(t *testing.T) {
+	calls := fakeStreamBytes(t, 1, 100, nil)
+	e := &Endpoint{}
+	for i := 0; i < 50; i++ {
+		if !e.streamHasHeadroom(context.Background()) {
+			t.Fatal("no headroom at 1% of the limit")
+		}
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("stream read %d times in one window, want 1", n)
 	}
 }
