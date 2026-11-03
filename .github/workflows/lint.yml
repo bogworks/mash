@@ -27,6 +27,17 @@ jobs:
           out="$(gofmt -l .)"
           if [ -n "$out" ]; then echo "gofmt would change:" >&2; echo "$out" >&2; exit 1; fi
       - run: go vet ./...
+      # Three fuzz targets at 20 s each, about 60 s in all (plus build time). A finding fails the job and Go writes the
+      # reproducer under testdata/fuzz/, which the runner discards: the next step prints it to the log. See "Fuzzing the policy file"
+      # in CONTRIBUTING.md.
+      - name: policy fuzz (fixed budget)
+        run: |
+          go test ./internal/policy -run '^$' -fuzz '^FuzzParse$' -fuzztime 20s
+          go test ./internal/policy -run '^$' -fuzz '^FuzzCheckCompile$' -fuzztime 20s
+          go test ./internal/policyfile -run '^$' -fuzz '^FuzzLoadEdit$' -fuzztime 20s
+      - name: policy fuzz reproducers (only after a finding)
+        if: failure()
+        run: find internal -path '*/testdata/fuzz/*' -type f -newer go.mod -exec sh -c 'echo "== $1"; cat "$1"' _ {} \;
       - name: change-log fragments are well formed
         run: go run ./scripts/changelog check
       # TEMPORARY: the tree has 3 existing findings (SA4006 x2, ST1008 in internal/endpoint/endpoint_test.go), so this
