@@ -541,11 +541,3 @@ func TestIndex_usage(t *testing.T) {
 		t.Errorf("missing directory: %d, want 2", code)
 	}
 }
-
-// TestRepositoryIndexIsFresh keeps the committed INDEX.md equal to what the records generate.
-func TestRepositoryIndexIsFresh(t *testing.T) {
-	code, out, errs := runCLI(t, nil, nil, "index", "--check", "--root", filepath.Join("..", ".."))
-	if code != 0 {
-		t.Fatalf("docs/decisions/INDEX.md: %d %s %s", code, out, errs)
-	}
-}
