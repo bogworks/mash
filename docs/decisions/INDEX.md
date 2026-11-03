@@ -68,4 +68,8 @@
 | [0064](0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md) | Relay by asking is traced, not blocked: content-free trace lines and counters | accepted | 2026-11-02 |
 | [0065](0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md) | A directory poll reloads only when the directory stream moved, and is jittered | accepted | 2026-11-02 |
 | [0066](0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md) | `mash serve` asks who is online when someone asks, instead of listening to every heartbeat | accepted | 2026-11-02 |
+| [0067](0067-a-reissue-that-narrows-an-endpoint-rotates-its-user-key-and-revokes-the-old-one.md) | A reissue that narrows an endpoint rotates its user key and revokes the old one | accepted | 2026-11-03 |
 | [0068](0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md) | A change-log entry is a fragment file in `changelog.d/`, and the ADR index is generated, so a pull request edits neither shared file | accepted | 2026-11-03 |
+| [0069](0069-a-crowded-backlog-does-not-wake-a-session-that-a-hook-is-draining.md) | A crowded backlog does not wake a session that a hook is draining | accepted | 2026-11-03 |
+| [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md) | The next ADR number is a file, `NEXT`, and the lint refuses a duplicate or stale number | accepted | 2026-11-03 |
+| [0071](0071-mashctl-add-checks-the-zone-key-is-a-scoped-signer-in-the-account-jwt-before-minting.md) | `mashctl add` checks that the zone key is a scoped signer in the account JWT before minting | proposed | 2026-11-03 |
