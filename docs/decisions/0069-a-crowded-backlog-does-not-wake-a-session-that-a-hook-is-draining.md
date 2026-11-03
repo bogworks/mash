@@ -40,11 +40,17 @@ last drain.
 * Good, because a draining session is not woken on every settle.
 * Good, because a stalled drain (no hook for the idle wake) wakes the session even if the backlog is crowded.
 * Bad, because the first wake after a drain stops waits one idle wake (the default) even for a crowded backlog.
+* Bad, because the shift of the idle spell to the later of the oldest held mail and the last drain also delays the non-crowded idle wake, by up to one idle wake after an unrelated drain.
 
 ### Confirmation
 
 `TestBoundaryBurstWakesOnce` drains with a small delay per message, which models a hook run taking time; before this change
 it failed with extra wakes, after it the wake count stays at two.
+
+`internal/endpoint/wake_bound_test.go` pins the bound: held mail does not wake before the idle wake has run from the last
+drain (`TestIdleSpellRunsFromTheLastDrain`), a crowded backlog nobody drains wakes at once
+(`TestCrowdedBacklogWithoutDrainWakesAtOnce`), and a crowded backlog behind a drain waits for the idle wake after it
+(`TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell`).
 
 ## Pros and Cons of the Options
 
