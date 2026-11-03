@@ -386,10 +386,9 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := kv.Purge(context.Background(), "a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else","host":"h","pid":"1"}`)); err != nil {
+	// A Put overwrites whatever is there; Purge then Create raced with serve's refresh re-creating the key between
+	// the two calls ("wrong last sequence ... key exists").
+	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else","host":"h","pid":"1"}`)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -439,8 +438,9 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	}
 	js, _ := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	_ = kv.Purge(context.Background(), "a")
-	if _, err := kv.Create(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
+	// Another session takes the name. A Put overwrites whatever is there; a Purge then Create raced with serve's own
+	// refresh re-creating the key between the two calls ("wrong last sequence ... key exists").
+	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
 		t.Fatal(err)
 	}
 	select {
