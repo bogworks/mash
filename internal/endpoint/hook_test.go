@@ -117,7 +117,9 @@ func TestHookSwitchOverShowsEachMessageOnce(t *testing.T) {
 // costs no wake at all.
 func TestHookIdleWake(t *testing.T) {
 	old := IdleWake
-	IdleWake = 400 * time.Millisecond
+	// Long enough that a slow runner (macOS CI) cannot let IdleWake pass between two sends or before a drain: the test
+	// asserts "no wake" windows measured against it.
+	IdleWake = time.Second
 	t.Cleanup(func() { IdleWake = old })
 	f := newFixture(t, "a", "b")
 	_, ev, sp := f.runSpooled(t, "a")
@@ -154,7 +156,7 @@ func TestHookIdleWake(t *testing.T) {
 		t.Fatalf("the wake %q", got)
 	}
 	send("three") // the same idle spell: no second wake within the first backoff (2x IdleWake)
-	time.Sleep(IdleWake / 2)
+	time.Sleep(IdleWake / 4)
 	if got := ev.all(); len(got) != 1 {
 		t.Fatalf("woke again within the backoff: %q", got)
 	}
