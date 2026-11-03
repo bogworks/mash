@@ -21,8 +21,15 @@ import (
 // lease. Lease refreshes are an hour apart, so every lease write a test sees is the count's own.
 func wakingFixture(t *testing.T) (*fixture, spool.Spool, *Endpoint, jetstream.KeyValue) {
 	t.Helper()
+	return wakingFixtureWith(t, 50*time.Millisecond)
+}
+
+// wakingFixtureWith is wakingFixture with the coalesce window set before the endpoint starts (the package variable is
+// read by its goroutines, so it must not change afterwards).
+func wakingFixtureWith(t *testing.T, coalesce time.Duration) (*fixture, spool.Spool, *Endpoint, jetstream.KeyValue) {
+	t.Helper()
 	oldR, oldW, oldC := LeaseRefresh, WakingWriteMin, wakingCoalesce
-	LeaseRefresh, WakingWriteMin, wakingCoalesce = time.Hour, 400*time.Millisecond, 50*time.Millisecond
+	LeaseRefresh, WakingWriteMin, wakingCoalesce = time.Hour, 400*time.Millisecond, coalesce
 	t.Cleanup(func() { LeaseRefresh, WakingWriteMin, wakingCoalesce = oldR, oldW, oldC })
 	f := newFixture(t, "a", "b")
 	_, _, sp := f.runSpooled(t, "a")
@@ -144,7 +151,8 @@ func TestWakingPendingChannelMailIsNotPending(t *testing.T) {
 
 // Several quick arrivals are one extra lease write, not one each.
 func TestWakingPendingWritesAreThrottled(t *testing.T) {
-	_, _, b, kv := wakingFixture(t)
+	// The burst must fit inside one coalesce window however slow the sends are, or it is two writes by design.
+	_, _, b, kv := wakingFixtureWith(t, 2*time.Second)
 	ctx := context.Background()
 	leaseUntil(t, kv, "the first stamp", func(lv leaseValue) bool { return lv.WakingPendingAt != "" })
 	time.Sleep(2 * WakingWriteMin) // quiet: the next write is the burst's
@@ -365,7 +373,12 @@ func TestWakingPendingEvictionOnRealStream(t *testing.T) {
 	t.Cleanup(func() { LeaseRefresh = oldR })
 	f := newFixture(t, "a", "b")
 	ctx := context.Background()
-	ep, _, _ := f.runSpooled(t, "a")
+	ep, _, sp := f.runSpooled(t, "a")
+	// A hook has run, so mail is held unacked in the spool; otherwise it is delivered and acked after the settle
+	// window, leaves the count, and how many are counted at any moment depends on timing.
+	if err := sp.Touch(); err != nil {
+		t.Fatal(err)
+	}
 	b := f.client(t, "b")
 	for i := 0; i < 3; i++ {
 		if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
