@@ -313,7 +313,11 @@ func TestRelayTraceIgnoresUnverifiedSenders(t *testing.T) {
 	rawMark(t, w.f, "c", "b", "forged via", func(id sap.Identity, h *sap.SenderHeader, m *nats.Msg) {
 		m.Header.Set(ViaHeader, "d#1.AAAA")
 	})
-	w.ev.waitFor(t, 1, 10*time.Second)
+	// Both mails, whether delivered as one summary or two events: the send below must see c's as the latest recorded.
+	until(t, "both mails delivered", func() bool {
+		all := strings.Join(w.ev.all(), "\n")
+		return strings.Contains(all, "> claimed relay") && strings.Contains(all, "> forged via")
+	})
 	if got := w.traces(); len(got) != 0 || w.b.RelayCounters().InboundVia != 0 {
 		t.Fatalf("traces %q %+v", got, w.b.RelayCounters())
 	}
