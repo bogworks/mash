@@ -1,4 +1,4 @@
-// Package adrindex generates docs/decisions/INDEX.md from the records' front matter (ADR 0067). scripts/adrlint
+// Package adrindex generates docs/decisions/INDEX.md from the records' front matter (ADR 0068). scripts/adrlint
 // (index --write and --check) and scripts/releasecheck (the INDEX.md at the release commit) share it.
 package adrindex
 

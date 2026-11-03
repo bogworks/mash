@@ -8,7 +8,7 @@ import (
 	"github.com/bogworks/mash/internal/adrindex"
 )
 
-// Release preparation writes the change log and the ADR index once, so a pull request never edits them (ADR 0067).
+// Release preparation writes the change log and the ADR index once, so a pull request never edits them (ADR 0068).
 // The gate proves, from git at X (never the working tree), that preparation happened.
 
 const (

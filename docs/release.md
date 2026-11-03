@@ -51,7 +51,7 @@ The numbered steps are what the command does in each state, and the manual path 
 1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (ubuntu-latest)`,
    `test (macos-latest)` and `reproducible` (all from GitHub Actions) on X itself.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
-   shared files are written ([ADR 0067](decisions/0067-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
+   shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
    ```sh
    go run ./scripts/changelog assemble --version X.Y.Z --date YYYY-MM-DD   # fragments and Unreleased into CHANGELOG.md
    go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md

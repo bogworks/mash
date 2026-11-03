@@ -1,4 +1,4 @@
-// Command changelog keeps CHANGELOG.md out of pull requests (ADR 0067): a user-facing change adds a fragment file
+// Command changelog keeps CHANGELOG.md out of pull requests (ADR 0068): a user-facing change adds a fragment file
 // changelog.d/<slug>.<kind>.md, and release preparation folds the fragments into CHANGELOG.md.
 //
 //	changelog check [--root r] [--dir changelog.d]

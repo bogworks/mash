@@ -1,7 +1,7 @@
 # Change-log fragments
 
 A pull request that changes what a user sees adds one file here. It does not edit `CHANGELOG.md`: two pull requests
-that both did would conflict, and release preparation writes that file once ([ADR 0067](../docs/decisions/0067-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)).
+that both did would conflict, and release preparation writes that file once ([ADR 0068](../docs/decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)).
 
 ## Name
 

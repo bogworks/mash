@@ -17,7 +17,7 @@
 //	   "### Confirmation" sit under Decision Outcome
 //	c  every README link to an ADR resolves; every relative link in an ADR resolves; numbers are unique (gaps are
 //	   allowed: a number may be reserved by an in-flight PR). A record need not be listed in README.md: existing in the
-//	   directory is the rule (ADR 0067; the README's table is frozen at 0066 and INDEX.md lists every record)
+//	   directory is the rule (ADR 0068; the README's table is frozen at 0066 and INDEX.md lists every record)
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
 //	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file

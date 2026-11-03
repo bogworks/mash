@@ -68,4 +68,4 @@
 | [0064](0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md) | Relay by asking is traced, not blocked: content-free trace lines and counters | accepted | 2026-11-02 |
 | [0065](0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md) | A directory poll reloads only when the directory stream moved, and is jittered | accepted | 2026-11-02 |
 | [0066](0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md) | `mash serve` asks who is online when someone asks, instead of listening to every heartbeat | accepted | 2026-11-02 |
-| [0067](0067-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md) | A change-log entry is a fragment file in `changelog.d/`, and the ADR index is generated, so a pull request edits neither shared file | accepted | 2026-11-03 |
+| [0068](0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md) | A change-log entry is a fragment file in `changelog.d/`, and the ADR index is generated, so a pull request edits neither shared file | accepted | 2026-11-03 |

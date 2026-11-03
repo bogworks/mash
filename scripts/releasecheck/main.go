@@ -387,7 +387,7 @@ func check(ctx context.Context, o Options) error {
 		merr = release.CheckPluginVersion([]byte(manifest), o.Version)
 	}
 	r.step("the plugin manifest names the release version", merr)
-	// Release preparation ran: the change log fragments are assembled and the ADR index is regenerated (ADR 0067).
+	// Release preparation ran: the change log fragments are assembled and the ADR index is regenerated (ADR 0068).
 	r.step("the change log fragments are assembled", changelogAssembled(o, x))
 	r.step("the ADR index is current", adrIndexFresh(o, x))
 	// The candidate and the previous release's binaries are built and downloaded once, by the plugin step, and the
