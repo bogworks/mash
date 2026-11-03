@@ -87,6 +87,29 @@ func TestAddNewZoneSkipsScopeCheck(t *testing.T) {
 	}
 }
 
+func TestAddNewZoneWithLeftoverKeyRefusedWhenScopeUnverified(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	if _, err := h.keys().ZoneKey("green", true); err != nil { // left by an earlier failed add
+		t.Fatal(err)
+	}
+	calls := stubScope(t, errors.New("the signing key of zone green is not published in the account JWT as a scoped signer: run `mashctl policy apply`"))
+	recs := h.records()
+	out, errb, code := h.run("add", "g", "--zone", "green")
+	if code != 1 || out != "" || !strings.Contains(errb, "zone green") || !strings.Contains(errb, "mashctl policy apply") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if *calls != 1 {
+		t.Errorf("verifier called %d times", *calls)
+	}
+	if _, err := os.Stat(h.creds("g")); !os.IsNotExist(err) {
+		t.Error("creds written")
+	}
+	if !slices.Equal(recs, h.records()) {
+		t.Errorf("directory changed: %v -> %v", recs, h.records())
+	}
+}
+
 func TestLiveVerifierNeedsSysCreds(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	err := verifyZoneScopeLive(context.Background(), config.Config{}, func(string) string { return "" }, h.keys(), "red", "A")

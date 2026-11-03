@@ -348,8 +348,10 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
 	zoneExists := slices.ContainsFunc(before.Endpoints, func(e policy.CompiledEndpoint) bool { return e.Zone == ep.Zone })
 	var mk mint.Keys = keys
-	if zoneExists {
-		// The zone key must already be published as a scoped signer; the verifier connects only now, before any record.
+	_, keyErr := keys.ZoneKey(ep.Zone, false)
+	if zoneExists || keyErr == nil {
+		// A key that already exists (the zone has endpoints, or an earlier failed add left it) must be published as a
+		// scoped signer; only a key this call creates is exempt. The verifier connects only now, before any record.
 		mk = scopeKeys{Authority: keys, cfg: cfg, env: env}
 	}
 	m, err := mint.Mint(mk, after, o.name, nil, !zoneExists)
