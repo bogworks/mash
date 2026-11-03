@@ -28,13 +28,14 @@ func boundFixture(t *testing.T, idle time.Duration) (*events, spool.Spool, *Endp
 	return ev, sp, f.client(t, "b")
 }
 
-// noWakeBefore fails if the session was woken before d has passed since start; it sleeps up to that point first.
-func noWakeBefore(t *testing.T, ev *events, start time.Time, d time.Duration) {
+// noWakeBefore fails if the session was woken again (beyond the already wakes seen) before d has passed since start; it
+// sleeps up to that point first.
+func noWakeBefore(t *testing.T, ev *events, start time.Time, d time.Duration, already int) {
 	t.Helper()
 	if wait := time.Until(start.Add(d)); wait > 0 {
 		time.Sleep(wait)
 	}
-	if got := ev.all(); len(got) != 0 {
+	if got := ev.all(); len(got) != already {
 		t.Fatalf("woken %v after the drain, before the idle wake (%v) ran from it: %q", time.Since(start), boundIdle, got)
 	}
 }
@@ -67,7 +68,7 @@ func TestIdleSpellRunsFromTheLastDrain(t *testing.T) {
 		t.Fatalf("woken before the idle wake: %q", got)
 	}
 	at := drainAt(t, sp, 2)
-	noWakeBefore(t, ev, at, boundIdle*6/10) // past where the oldest mail alone would wake it
+	noWakeBefore(t, ev, at, boundIdle*6/10, 0) // past where the oldest mail alone would wake it
 	ev.waitFor(t, 1, boundIdle+5*time.Second)
 	if since := time.Since(at); since < boundIdle {
 		t.Fatalf("woken %v after the drain, want at least the idle wake %v", since, boundIdle)
@@ -105,10 +106,13 @@ func TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell(t *testing.T) {
 		sendFYI(t, b, "fyi")
 	}
 	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	// The six crowd the backlog and wake it once, however late a slow runner delivers that wake; only then drain, so
+	// that wake cannot be taken for one that the drain should have held back.
+	ev.waitFor(t, 1, 10*time.Second)
 	at := drainAt(t, sp, 1) // 5 held: still crowded, and not growing
 	until(t, "5 held", func() bool { return len(waiting(t, sp)) == 5 })
-	noWakeBefore(t, ev, at, boundIdle*6/10)
-	ev.waitFor(t, 1, boundIdle+5*time.Second)
+	noWakeBefore(t, ev, at, boundIdle*6/10, 1)
+	ev.waitFor(t, 2, boundIdle+5*time.Second)
 	if since := time.Since(at); since < boundIdle {
 		t.Fatalf("woken %v after the drain, want at least the idle wake %v", since, boundIdle)
 	}
