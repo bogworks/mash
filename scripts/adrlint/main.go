@@ -2,6 +2,7 @@
 //
 //	adrlint docs [--root r] [--base <git ref>] [dir]   lint every NNNN-title.md in dir (default docs/decisions)
 //	adrlint pr --files <path> [--root r] [--dir dir]   check a pull request's "Decision:" line
+//	adrlint index [--write|--check] [--root r] [--dir dir]   print, write or verify docs/decisions/INDEX.md
 //
 // --root (default ".") is the tree being judged: dir resolves under it and, with --base, git runs as "git -C root". The
 // workflow runs a checker built from the base branch with --root pointing at the pull request's checkout, so a pull
@@ -10,20 +11,25 @@
 // docs rules (each violation is one file:line: message line on stdout, all are reported):
 //
 //	a  MADR front matter: status (proposed|accepted|rejected|deprecated|superseded by ADR-NNNN, optionally followed by
-//	   ";" and a free-text note; an ADR-NNNN in the note must exist and be listed), date (YYYY-MM-DD) and
-//	   decision-makers; a "superseded by ADR-NNNN" status must name an ADR file that exists and is listed in README.md
+//	   ";" and a free-text note; an ADR-NNNN in the note must exist), date (YYYY-MM-DD) and
+//	   decision-makers; a "superseded by ADR-NNNN" status must name an ADR file that exists
 //	b  the first heading is "# <title>"; the "##" sections are present and in order; "### Consequences" and
 //	   "### Confirmation" sit under Decision Outcome
-//	c  README.md links every ADR and every README link to an ADR resolves; every relative link in an ADR resolves;
-//	   numbers are unique (gaps are allowed: a number may be reserved by an in-flight PR)
+//	c  every README link to an ADR resolves; every relative link in an ADR resolves; numbers are unique (gaps are
+//	   allowed: a number may be reserved by an in-flight PR). A record need not be listed in README.md: existing in the
+//	   directory is the rule (ADR 0067; the README's table is frozen at 0066 and INDEX.md lists every record)
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
 //	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
-// --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist, be listed in
-// README.md and be among the changed paths (the pull request adds or changes that record); "none" on a change under a
-// protected path (docs/decisions/ included) needs the "decision-confirmed" label.
+// --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
+// the changed paths (the pull request adds or changes that record); "none" on a change under a protected path
+// (docs/decisions/ included) needs the "decision-confirmed" label.
+//
+// index generates INDEX.md in dir from every NNNN-title.md's front matter and first heading (internal/adrindex): a
+// table of number, title, status and date, sorted by number. Without a flag it prints the file; --write writes it;
+// --check exits 1 when the file is missing or differs from what would be generated, naming the first difference.
 //
 // Exit 0: ok. Exit 1: violations. Exit 2: usage or an unreadable input.
 package main
@@ -42,6 +48,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bogworks/mash/internal/adrindex"
 )
 
 const (
@@ -130,12 +138,14 @@ func run(args []string, e env) int {
 		return runDocs(args[1:], e)
 	case "pr":
 		return runPR(args[1:], e)
+	case "index":
+		return runIndex(args[1:], e)
 	}
 	return usage(e, "unknown mode "+args[0])
 }
 
 func usage(e env, msg string) int {
-	fmt.Fprintf(e.stderr, "adrlint: %s\nusage: adrlint docs [--root r] [--base <git ref>] [dir]\n       adrlint pr --files <path> [--root r] [--dir dir]\n", msg)
+	fmt.Fprintf(e.stderr, "adrlint: %s\nusage: adrlint docs [--root r] [--base <git ref>] [dir]\n       adrlint pr --files <path> [--root r] [--dir dir]\n       adrlint index [--write|--check] [--root r] [--dir dir]\n", msg)
 	return 2
 }
 
@@ -319,7 +329,6 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 	}
 
 	// c: README links.
-	listed := map[string]bool{}
 	inFence := false
 	for i, ln := range splitLines(readme) {
 		if strings.HasPrefix(strings.TrimSpace(ln), "```") {
@@ -333,7 +342,6 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 			if target == "" || !nameRE.MatchString(filepath.Base(target)) {
 				continue
 			}
-			listed[filepath.Base(target)] = true
 			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(target))); err != nil {
 				vs = append(vs, viol(filepath.Join(dir, "README.md"), i+1, "link to %s does not resolve", target))
 			}
@@ -346,15 +354,9 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !listed[n] {
-			vs = append(vs, viol(path, 1, "not listed in README.md (needs a link whose target is %s)", n))
-		}
 		vs = append(vs, lintADR(path, dir, splitLines(b), extra, func(num string) string {
 			for _, f := range files {
 				if f[:4] == num {
-					if !listed[f] {
-						return fmt.Sprintf("ADR-%s (%s) is not listed in README.md", num, f)
-					}
 					return ""
 				}
 			}
@@ -416,7 +418,7 @@ func sectionName(text string) string {
 }
 
 // lintADR applies rules a, b, d and the link half of c to one ADR. target reports a problem with the ADR number a
-// "superseded by" status names ("" when it exists and is listed).
+// "superseded by" status names ("" when it exists).
 func lintADR(path, dir string, lines []string, extra *regexp.Regexp, target func(num string) string) []string {
 	var vs []string
 
@@ -443,7 +445,7 @@ func lintADR(path, dir string, lines []string, extra *regexp.Regexp, target func
 				}
 				for _, m := range refs {
 					if msg := target(m[1]); msg != "" {
-						vs = append(vs, viol(path, s.line, "status %q names a missing or unlisted record: %s", s.val, msg))
+						vs = append(vs, viol(path, s.line, "status %q names a missing record: %s", s.val, msg))
 					}
 				}
 			}
@@ -752,22 +754,85 @@ func checkPR(body string, changed, labels []string, dir, rel string) ([]string, 
 	if file == "" {
 		return []string{fmt.Sprintf("PR body: Decision: %s names no file %s/%s-*.md", d, rel, num)}, nil
 	}
-	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
-	if err != nil {
-		return nil, err
-	}
-	listed := false
-	for _, m := range linkRE.FindAllStringSubmatch(string(readme), -1) {
-		if t := linkTarget(m[1]); t != "" && filepath.Base(t) == file {
-			listed = true
-			break
-		}
-	}
-	if !listed {
-		return []string{fmt.Sprintf("PR body: Decision: %s is not listed in %s/README.md", d, rel)}, nil
-	}
 	if !slices.Contains(changed, rel+"/"+file) {
 		return []string{fmt.Sprintf("PR body: Decision: %s names %s/%s, but this pull request does not add or change that record: it must add or change the ADR it names", d, rel, file)}, nil
 	}
 	return nil, nil
+}
+
+func runIndex(args []string, e env) int {
+	fs := flag.NewFlagSet("index", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	write := fs.Bool("write", false, "write INDEX.md in the decisions directory")
+	check := fs.Bool("check", false, "exit 1 when INDEX.md is missing or stale")
+	dir := fs.String("dir", defaultDir, "the decisions directory (under --root unless absolute)")
+	root := fs.String("root", ".", "the tree to judge; dir resolves under it")
+	pos, err := parseFlags(fs, args)
+	if err != nil || len(pos) != 0 || (*write && *check) {
+		return usage(e, "index takes [--write|--check] [--root r] [--dir dir]")
+	}
+	fsDir, _ := resolveDir(*root, *dir)
+	names, _, err := adrFiles(fsDir)
+	if err != nil {
+		fmt.Fprintln(e.stderr, "adrlint:", err)
+		return 2
+	}
+	var files []adrindex.File
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(fsDir, n))
+		if err != nil {
+			fmt.Fprintln(e.stderr, "adrlint:", err)
+			return 2
+		}
+		files = append(files, adrindex.File{Name: n, Content: string(b)})
+	}
+	want := adrindex.Generate(files)
+	path := filepath.Join(fsDir, "INDEX.md")
+	switch {
+	case *write:
+		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+			fmt.Fprintln(e.stderr, "adrlint:", err)
+			return 2
+		}
+		fmt.Fprintf(e.stdout, "wrote %s (%d records)\n", path, len(files))
+		return 0
+	case *check:
+		have, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(e.stdout, "%s: missing: run go run ./scripts/adrlint index --write\n", path)
+			return 1
+		}
+		if err != nil {
+			fmt.Fprintln(e.stderr, "adrlint:", err)
+			return 2
+		}
+		if msg := firstDiff(string(have), want); msg != "" {
+			fmt.Fprintf(e.stdout, "%s: stale (%s): run go run ./scripts/adrlint index --write\n", path, msg)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprint(e.stdout, want)
+	return 0
+}
+
+// firstDiff names the first line where have and want differ, or "" when they are equal.
+func firstDiff(have, want string) string {
+	if have == want {
+		return ""
+	}
+	h, w := strings.Split(have, "\n"), strings.Split(want, "\n")
+	for i := 0; i < len(h) || i < len(w); i++ {
+		var a, b string
+		if i < len(h) {
+			a = h[i]
+		}
+		if i < len(w) {
+			b = w[i]
+		}
+		if a != b {
+			return fmt.Sprintf("line %d: have %q, want %q", i+1, a, b)
+		}
+	}
+	return "differs"
 }

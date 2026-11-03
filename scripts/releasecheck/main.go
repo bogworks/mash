@@ -12,6 +12,8 @@
 // It then signs SHA256SUMS (ssh-keygen -Y sign, namespace mash-release) after checking every line against those builds, verifies
 // the signature against ci/release.allowed_signers at X and uploads SHA256SUMS.sig; RELEASE_SIGNING_KEY names the key (the one that signs the tag).
 // With --consumer (maintainers only: needs a downstream consumer's checkout) it also runs that checkout's own check of mash against X, as its .mash-consumer-check manifest directs (docs/release.md): opt-in, as it can take 30+ minutes.
+// It refuses a candidate that still has change-log fragments in changelog.d/ (other than README.md) or whose
+// docs/decisions/INDEX.md differs from what the records at X generate (internal/adrindex), both read from git at X.
 // It refuses to tag while an earlier vN.N.N tag has a release that is a draft or missing, unless docs/skipped-releases.txt
 // at X records it with a reason. It reports every problem, not the first. Exit 0 passed, 3 refused, 4 the gate could not decide, 2 usage.
 package main
@@ -385,6 +387,9 @@ func check(ctx context.Context, o Options) error {
 		merr = release.CheckPluginVersion([]byte(manifest), o.Version)
 	}
 	r.step("the plugin manifest names the release version", merr)
+	// Release preparation ran: the change log fragments are assembled and the ADR index is regenerated (ADR 0067).
+	r.step("the change log fragments are assembled", changelogAssembled(o, x))
+	r.step("the ADR index is current", adrIndexFresh(o, x))
 	// The candidate and the previous release's binaries are built and downloaded once, by the plugin step, and the
 	// latency step reuses them.
 	bins := &binaries{}

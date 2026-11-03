@@ -50,7 +50,15 @@ The numbered steps are what the command does in each state, and the manual path 
 
 1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (ubuntu-latest)`,
    `test (macos-latest)` and `reproducible` (all from GitHub Actions) on X itself.
-2. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
+2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
+   shared files are written ([ADR 0067](decisions/0067-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
+   ```sh
+   go run ./scripts/changelog assemble --version X.Y.Z --date YYYY-MM-DD   # fragments and Unreleased into CHANGELOG.md
+   go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md
+   ```
+   and set `plugin/.claude-plugin/plugin.json`'s `version` to `X.Y.Z`. `assemble --dry-run` prints the section first.
+   Merge it and take its merge commit as X.
+3. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
    the release repository (never a configured origin), checks X is an ancestor, reads X's check runs through `gh`
    (every page, latest run per name, from `github-actions` only), builds X twice in fresh clones, and runs the binary to
    compare `mash <version> (commit X)` exactly. It prints the pin (a `compat.json:` line with the version and commit) for a downstream consumer that pins mash releases. Exit 0 passed, 3 refused,
@@ -76,9 +84,13 @@ The numbered steps are what the command does in each state, and the manual path 
    plugin that cannot be run (no `hooks.json`, an unreadable file) is a note, not a refusal.
    Before tagging v`X.Y.Z`, `plugin/.claude-plugin/plugin.json`'s `version` must be `X.Y.Z`: release-check refuses
    otherwise, because Claude Code updates an installed plugin only on a version change.
+   It refuses a candidate that still has a file under `changelog.d/` other than `README.md` ("changelog fragments were
+   not assembled"), and one whose `docs/decisions/INDEX.md` differs from what `adrlint index` generates from the
+   records at X ("is stale"); both are read from git at X, not the working tree, and a candidate without
+   `docs/decisions/` has no index to check.
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
-3. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
-4. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
+4. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
+5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
    targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
    attests build provenance for the four binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
    CycloneDX SBOM per binary and attests it, and calls the SLSA generic generator for `mash.intoto.jsonl` (see "SBOM and
@@ -86,11 +98,11 @@ The numbered steps are what the command does in each state, and the manual path 
    `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`),
    `SHA256SUMS` (which lists the binaries, the SBOMs, `mash.intoto.jsonl` and the script) and a changelog.
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
-5. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
+6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --deny-self-hosted-runners` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and `slsa-verifier verify-artifact` passes on each binary against `mash.intoto.jsonl` (with `--builder-id` for the pinned generator, and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; so is a missing `slsa-verifier`; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
-6. **Pin (optional):** a downstream consumer that pins mash releases records `{"version": "<version>", "commit": "<X>"}` in its own manifest.
+7. **Pin (optional):** a downstream consumer that pins mash releases records `{"version": "<version>", "commit": "<X>"}` in its own manifest.
 
 ## Optional: check a downstream consumer
 

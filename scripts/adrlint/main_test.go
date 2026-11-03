@@ -113,12 +113,12 @@ func TestDocs(t *testing.T) {
 		{"a: bad status", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe")), []string{adr + ":2: status \"maybe\""}},
 		{"a: superseded status ok", with(good(), adr, edit(goodADR, "status: accepted", "status: Superseded by ADR-0002"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
 		{"a: superseded by a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-9999")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
-		{"a: superseded by an unlisted ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), []string{"ADR-0002 (0002-new.md) is not listed in README.md"}},
+		{"a: superseded by an unlisted ADR is fine", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), nil},
 		{"a: bad superseded", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by 2")), []string{"status \"superseded by 2\""}},
 		{"a: status with a note", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002 (the read tool acks)"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
 		{"a: status with a note and no ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; the clause is moved")), nil},
 		{"a: status note names a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-9999 (x)")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
-		{"a: status note names an unlisted ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002"), "0002-new.md", goodADR), []string{"ADR-0002 (0002-new.md) is not listed in README.md"}},
+		{"a: status note names an unlisted ADR is fine", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002"), "0002-new.md", goodADR), nil},
 		{"a: note after a bad keyword", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe; accepted")), []string{`status "maybe; accepted"`}},
 		{"d: front matter is not checked", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers: A lead, B")), nil},
 		{"d: body occurrence of lead still fails", with(good(), adr, edit(goodADR, "A driver.", "The lead decides.")), []string{`forbidden vocabulary "lead"`}},
@@ -129,7 +129,8 @@ func TestDocs(t *testing.T) {
 		{"b: no consequences", with(good(), adr, edit(goodADR, "### Consequences", "### Results")), []string{`no "### Consequences"`}},
 		{"b: confirmation outside outcome", with(good(), adr, edit(edit(goodADR, "### Confirmation\n\nA test confirms it.\n", ""), "### One\n", "### Confirmation\n")), []string{`no "### Confirmation"`}},
 		{"b: title not first", with(good(), adr, edit(goodADR, "# Use one way to do the thing", "## Use one way")), []string{"first heading"}},
-		{"c: not in README", with(good(), "README.md", "# Decisions\n"), []string{adr + ":1: not listed in README.md"}},
+		{"c: an ADR not listed in README is accepted", with(good(), "README.md", "# Decisions\n"), nil},
+		{"c: an unlisted new ADR is accepted", with(good(), "0002-new.md", goodADR), nil},
 		{"c: README link dead", with(good(), "README.md", goodReadme+"- [0002](0002-gone.md)\n"), []string{"README.md:4: link to 0002-gone.md does not resolve"}},
 		{"c: ADR link dead", with(good(), adr, edit(goodADR, "guide.md", "nope.md")), []string{`link "nope.md" does not resolve`}},
 		{"c: duplicate number", with(good(), "0001-other.md", goodADR, "README.md", goodReadme+"- [x](0001-other.md)\n"), []string{"number 0001 is used by more than one"}},
@@ -168,7 +169,7 @@ func TestDocs(t *testing.T) {
 func TestDocs_reportsEveryViolation(t *testing.T) {
 	dir := tree(t, with(good(), "0001-use-one-way.md", edit(edit(goodADR, "status: accepted", "status: nope"), "A driver.", "a lane"), "README.md", "# x\n"))
 	_, out, _ := runCLI(t, nil, nil, "docs", dir)
-	for _, w := range []string{"status \"nope\"", "forbidden vocabulary", "not listed in README.md"} {
+	for _, w := range []string{"status \"nope\"", "forbidden vocabulary"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -338,7 +339,7 @@ func TestPR(t *testing.T) {
 		{name: "indented does not count", body: "  Decision: none", files: "README.md\n", want: "no Decision line"},
 		{name: "duplicate", body: "Decision: none\nDecision: ADR-0001\n", files: "README.md\n", want: "2 Decision lines"},
 		{name: "ADR file missing", body: "Decision: ADR-0009", files: "README.md\n", want: "names no file"},
-		{name: "ADR not in README", body: "Decision: ADR-0001", files: "docs/decisions/0001-use-one-way.md\n", readme: "# Decisions\n", want: "not listed in"},
+		{name: "ADR not in README but changed", body: "Decision: ADR-0001", files: "docs/decisions/0001-use-one-way.md\n", readme: "# Decisions\n"},
 		{name: "none on internal/sap", body: "Decision: none", files: "internal/sap/a.go\n", want: "decision-confirmed"},
 		{name: "none on internal/store", body: "Decision: none", files: "internal/store/a.go\n", want: "decision-confirmed"},
 		{name: "none on permissions.go", body: "Decision: none", files: "internal/admin/permissions.go\n", want: "decision-confirmed"},
@@ -458,5 +459,93 @@ func TestForbiddenWordsFromEnv(t *testing.T) {
 				t.Errorf("fail = %v, want %v; output:\n%s", got, tc.fail, out)
 			}
 		})
+	}
+}
+
+func indexTree(t *testing.T) (root string) {
+	t.Helper()
+	root = t.TempDir()
+	dir := filepath.Join(root, "docs", "decisions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"README.md":           goodReadme,
+		"0002-second-one.md":  edit(edit(goodADR, "status: accepted", "status: accepted; a long note | with a pipe"), "# Use one way to do the thing", "# Second | one"),
+		"0001-use-one-way.md": goodADR,
+	}
+	for n, c := range files {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestIndex_printsSortedTableAndWriteThenCheckPasses(t *testing.T) {
+	root := indexTree(t)
+	code, out, errs := runCLI(t, nil, nil, "index", "--root", root)
+	if code != 0 || errs != "" {
+		t.Fatalf("index: %d %q", code, errs)
+	}
+	for _, w := range []string{
+		"<!-- generated by scripts/adrlint index --write; do not edit -->\n",
+		"| ADR | Title | Status | Date |",
+		"| [0001](0001-use-one-way.md) | Use one way to do the thing | accepted | 2026-10-31 |",
+		`| [0002](0002-second-one.md) | Second \| one | accepted | 2026-10-31 |`, // note after ";" collapsed
+	} {
+		if !strings.Contains(out, w) {
+			t.Errorf("output lacks %q:\n%s", w, out)
+		}
+	}
+	if strings.Index(out, "[0001]") > strings.Index(out, "[0002]") {
+		t.Errorf("not sorted by number:\n%s", out)
+	}
+	if strings.Contains(out, "README.md |") {
+		t.Errorf("README is not a record:\n%s", out)
+	}
+	if code, out, _ := runCLI(t, nil, nil, "index", "--check", "--root", root); code != 1 || !strings.Contains(out, "missing") {
+		t.Fatalf("check without a file: %d %q", code, out)
+	}
+	if code, _, errs := runCLI(t, nil, nil, "index", "--write", "--root", root); code != 0 {
+		t.Fatalf("write: %d %q", code, errs)
+	}
+	if code, out, _ := runCLI(t, nil, nil, "index", "--check", "--root", root); code != 0 || out != "" {
+		t.Fatalf("fresh check: %d %q", code, out)
+	}
+	disk, _ := os.ReadFile(filepath.Join(root, "docs", "decisions", "INDEX.md"))
+	if string(disk) != out {
+		t.Errorf("written file differs from printed output")
+	}
+}
+
+func TestIndex_checkFailsWhenStale(t *testing.T) {
+	root := indexTree(t)
+	runCLI(t, nil, nil, "index", "--write", "--root", root)
+	// A new record makes the file stale; so does an edited status.
+	if err := os.WriteFile(filepath.Join(root, "docs", "decisions", "0003-third.md"), []byte(goodADR), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCLI(t, nil, nil, "index", "--check", "--root", root)
+	if code != 1 || !strings.Contains(out, "stale") || !strings.Contains(out, "0003") || !strings.Contains(out, "--write") {
+		t.Fatalf("stale check: %d %q", code, out)
+	}
+}
+
+func TestIndex_usage(t *testing.T) {
+	root := indexTree(t)
+	if code, _, _ := runCLI(t, nil, nil, "index", "--write", "--check", "--root", root); code != 2 {
+		t.Errorf("--write with --check: %d, want 2", code)
+	}
+	if code, _, _ := runCLI(t, nil, nil, "index", "--root", filepath.Join(root, "nope")); code != 2 {
+		t.Errorf("missing directory: %d, want 2", code)
+	}
+}
+
+// TestRepositoryIndexIsFresh keeps the committed INDEX.md equal to what the records generate.
+func TestRepositoryIndexIsFresh(t *testing.T) {
+	code, out, errs := runCLI(t, nil, nil, "index", "--check", "--root", filepath.Join("..", ".."))
+	if code != 0 {
+		t.Fatalf("docs/decisions/INDEX.md: %d %s %s", code, out, errs)
 	}
 }
