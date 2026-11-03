@@ -273,7 +273,8 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 | Directory poll | 15 s, each wait jittered plus or minus 25 percent | No recorded reason for 15 s. A watch would need consumer rights ([ADR-0011][0011]). Each poll is one small stream-info request and reloads only when the stream moved ([ADR-0065][0065]) | Fixed |
 | Directory forced reload | 20 min, due time jittered plus or minus 25 percent per endpoint | A stale view cannot outlive it, whatever the stream state says ([ADR-0065][0065]) | Fixed |
 | Relay window | 60 s | How soon after mail from one sender a send to another endpoint is traced as a relay candidate ([ADR-0064][0064]) | `relay_window` or `MASH_RELAY_WINDOW`, 1s to 1h |
-| Heartbeat / online window | 30 s / 90 s | SAP's cadence and three intervals (SAP §8.2) | Fixed |
+| Heartbeat / online window | 30 s / 90 s | SAP's cadence and three intervals (SAP §8.2). The window now applies only before the first presence probe | Fixed |
+| Presence cache / retry gap | 30 s / 5 s | The `who` tool inside a session reuses a probe's answers for 30 s, and waits 5 s after a failed probe; the worst case, every endpoint asking all the time, costs today's message rate ([ADR-0066][0066]) | Fixed (`endpoint.PresenceCacheTTL`) |
 | Live prompt keepalive / timeout | 30 s / 10 min | Keeps SAP's 60 s caller window open. No recorded reason for 10 min ([ADR-0030][0030]) | Fixed |
 | Batch settle time | 100 ms | No recorded reason ([ADR-0026][0026]) | `settle_ms` or `MASH_SETTLE_MS` |
 | Full batch limit | 10 messages and 16,384 bytes | No recorded reason ([ADR-0026][0026]) | `batch_msgs`, `batch_bytes` or `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` |
@@ -770,3 +771,4 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 [0046]: decisions/0046-a-digest-lists-mail-it-does-not-ack-it.md
 [0064]: decisions/0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md
 [0065]: decisions/0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md
+[0066]: decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md

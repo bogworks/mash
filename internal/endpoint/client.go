@@ -439,6 +439,9 @@ type presenceProbe struct {
 	start time.Time
 	kick  chan struct{}
 
+	err     error // the request could not be sent
+	counted int   // registrations awaitPresence counted (verified, the directory's key)
+
 	mu   sync.Mutex
 	msgs []*nats.Msg
 	last time.Time
@@ -460,18 +463,26 @@ func (e *Endpoint) startPresence() *presenceProbe {
 		}
 	})
 	if err != nil {
+		p.err = err
 		return p
 	}
 	p.sub = sub
-	_ = e.nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil)
+	if err := e.nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
+		p.err = err
+	}
 	return p
 }
 
 // awaitPresence waits for the window to close, then records the answers. The window closes PresenceQuiet after the
-// last answer once there is one, or PresenceCap after the request, whichever is first.
-func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) {
-	if p.sub == nil {
-		return
+// last answer once there is one, or PresenceCap after the request, whichever is first. A completed probe's start time
+// becomes the line below which an endpoint is not online. It returns an error when the request could not be sent or
+// ctx ended first; nothing is recorded then.
+func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) error {
+	if p.sub == nil || p.err != nil {
+		if p.sub != nil {
+			_ = p.sub.Unsubscribe()
+		}
+		return fmt.Errorf("mash: presence probe: %w", p.err)
 	}
 	defer func() { _ = p.sub.Unsubscribe() }()
 	deadline := p.start.Add(PresenceCap)
@@ -492,7 +503,7 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) {
 		case <-t.C:
 		case <-ctx.Done():
 			t.Stop()
-			return
+			return ctx.Err()
 		}
 		t.Stop()
 	}
@@ -500,6 +511,12 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) {
 	msgs := p.msgs
 	p.mu.Unlock()
 	for _, m := range msgs {
-		e.applyPresence(m)
+		p.counted += e.applyPresence(m)
 	}
+	e.mu.Lock()
+	if p.start.After(e.probeAt) {
+		e.probeAt = p.start
+	}
+	e.mu.Unlock()
+	return nil
 }

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-02
 decision-makers: Randy Bias (mash maintainer)
 ---
@@ -52,7 +52,11 @@ Measured on a three-server cluster with simulated endpoints (`scripts/dirbench -
 the subscription takes server output from 33,657 to 258 messages per second, 10.2 to 0.14 MB per second, and server
 CPU from 0.52 to 0.06 cores; a probe costs N replies. If every endpoint ran `who` every five minutes the cost would be
 12,306 messages per second (37 percent of today's) and 0.175 cores; every minute it would be 61,099, more than today.
-The 30-second minimum gap bounds the worst case at N squared over 30 replies per second, today's message rate. A
+The 30-second minimum gap bounds the worst case at N squared over 30 replies per second, today's message rate; measured
+with every endpoint asking every 10 seconds at 1,000 endpoints (so every ask beyond the first per 30 seconds is
+answered from the cache) it was 21,333 replies per second, 0.74 server cores and 33 MB per second of server output,
+against 0.52 cores and 10 MB per second today: the same order, about 1.4 times the CPU and three times the bytes (a
+reply is larger than a heartbeat), and that is a load that no real session produces. A
 probe takes about 312 ms until quiet (300 ms of it the quiet window); a burst of 500 endpoints asking in the same
 second received all 250,000 replies within 375 ms, with no loss.
 
@@ -65,6 +69,9 @@ second received all 250,000 replies within 375 ms, with no loss.
 * Bad, because `who` takes about a third of a second instead of reading memory, and each `who` costs N replies.
 * Bad, because the `last seen` figure is the time of the last probe an answer came to, not the last heartbeat: an
   endpoint that was online and silent between probes shows as seen at the last probe.
+* Bad, because a probe that no verified registration answers (for example one sent before an endpoint's service is
+  registered, right at start-up) is treated as failed, not cached: it is retried after five seconds and the caller sees
+  everyone offline until then, rather than a stale "everyone offline" for 30 seconds.
 * Bad, because an endpoint that only answers `$SRV.INFO` late (slower than the 2-second cap) can look offline for that
   `who`; the same holds for the command line today.
 * Heartbeats keep going out, so a tool that listens to them is unaffected. A later record may lengthen their interval.
@@ -106,4 +113,8 @@ second received all 250,000 replies within 375 ms, with no loss.
 * The measurement, method and limits: `docs/evidence/2026-11-02-heartbeat-fanout/README.md`; harness `scripts/dirbench`.
 * Code: `internal/endpoint/directory.go` (`watchPresence`, `Who`), `internal/endpoint/client.go` (`startPresence`,
   `awaitPresence`, `Refresh`), `cmd/mash/serve.go` (the `who` tool).
+* Amends [0030](0030-sessions-are-full-sap-agents.md) for `mash serve` (presence is the answer to the
+  latest probe, not a heartbeat seen within 90 seconds; sessions still publish heartbeats and answer probes); the files of the accepted records are unchanged. Other
+  accepted records mention the heartbeat subscription in passing: 0007 (the heartbeat subscribe grant is now unused)
+  and 0013 (the 90-second lease TTL was likened to the presence window).
 * Follows [ADR 0065](0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md) (#43).

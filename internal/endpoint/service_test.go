@@ -122,19 +122,13 @@ func TestWhoShowsOnline(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	f.serve(t, "a", noPrompt)
 	b := f.serve(t, "b", noPrompt)
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		online := map[string]bool{}
-		for _, p := range b.Who() {
-			online[p.Record.Name] = p.Online
-		}
-		if online["a"] && online["b"] {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("presence %+v", b.Who())
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Presence is asked for, not heard: WhoFresh probes, and both running endpoints answer (ADR 0066).
+	ps, err := b.WhoFresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if online := onlineSet(ps); !online["a"] || !online["b"] {
+		t.Fatalf("presence %+v", ps)
 	}
 }
 

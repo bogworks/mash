@@ -142,7 +142,7 @@ Deliver the credentials file to the machine that runs the session, and nowhere e
 `mash admin permissions <name>` prints the permission set as JSON; `--nsc` prints the same set as `nsc add user` flags, one argument per line. The set lets an endpoint:
 
 - send mail to any endpoint of the owner, and send live SAP prompts and status probes to them. Mail has two publish lines, `agents.mail.*.<owner>.*` (an endpoint with the legacy subject) and `agents.mail.*.<owner>.*.*` (an endpoint in a zone, see [Zones](#zones-the-mail-subject-carries-a-zone-token)); prompt and status have one each;
-- publish its own heartbeat and answer SAP discovery;
+- publish its own heartbeat and answer SAP discovery (it does not listen to other endpoints' heartbeats; `who` asks, see above);
 - read and acknowledge its own inbox, and read its own history;
 - read (never write) the directory;
 - hold its own lease and nothing else.
@@ -269,12 +269,14 @@ mash who --cap nats-accounts --online --names   # who can do this right now, for
 | `name` | string | always |
 | `owner` | string | always |
 | `online` | boolean | always |
-| `last_seen` | string, RFC 3339 UTC | when a heartbeat was seen |
+| `last_seen` | string, RFC 3339 UTC | when the endpoint last answered a presence probe (not its last heartbeat) |
 | `role`, `host`, `note`, `description` | string | when set |
 | `zone` | string | when the endpoint is in a zone (an optional key added by [ADR-0054](decisions/0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md); consumers must ignore keys they do not know) |
 | `labels` | object, key to value | when there is at least one |
 | `caps` | array of strings, sorted | when there is at least one |
 | `lease` | object with `host` and `version` | with `--long`, when this endpoint's own live lease is known |
+
+**How presence works.** Heartbeats are still published every 30 seconds by each running endpoint, and another SAP tool may listen to them, but `mash serve` no longer subscribes to them ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)). Presence is asked for when someone asks: `mash who` and the `who` tool send one request to `$SRV.INFO.agents`, which every running endpoint answers with its registration, and wait until the answers stop coming (300 ms after the last one, at most 2 s). An answer counts only when its identity signature verifies and its key is the one the directory has for that name. An endpoint is online when it answered the latest probe; `seen T ago` and `last_seen` are the time of its last answer to a probe, not of its last heartbeat. The `who` tool inside a session reuses a probe's result for 30 seconds (`endpoint.PresenceCacheTTL`) and asks again after that; one probe at a time, and after a probe that failed, or that no registration answered, the next one waits at least 5 seconds (`endpoint.PresenceRetryGap`). So the tool can be up to 30 seconds behind, and takes about a third of a second when it has to ask. `mash who` on the command line always probes. Before the first probe an endpoint with no answer shows offline.
 
 The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `cap` (an array of capability words), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
 
@@ -481,7 +483,8 @@ These timings are not configurable: peers and the server must agree on them, so 
 | Name | Value | Where | Why fixed |
 |---|---|---|---|
 | Heartbeat interval | 30 s | `endpoint.HeartbeatInterval` (`internal/endpoint/service.go`) | Endpoints publish presence at this rate; the online window below assumes it. |
-| Online window | 90 s (3 heartbeats) | `endpoint.OnlineWindow` (`directory.go`) | How recently a heartbeat must be seen for `who` to show an endpoint online; every reader must apply the same rule. |
+| Presence cache / retry gap | 30 s / 5 s | `endpoint.PresenceCacheTTL`, `endpoint.PresenceRetryGap` (`presence.go`) | How long the `who` tool inside a session reuses a probe's answers, and the shortest wait after a failed probe ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)). |
+| Online window | 90 s (3 heartbeats) | `endpoint.OnlineWindow` (`directory.go`) | Only before any presence probe has run (an endpoint seen within it is online). Once a probe has run, online means answered the latest probe. |
 | Lease TTL | 90 s | `store.LeaseTTL` (`internal/store/store.go`) | The lease bucket's expiry: how long a crashed holder blocks its name. It is set on the bucket, so every session shares it. |
 | Lease refresh | 30 s | `endpoint.LeaseRefresh` (`endpoint.go`) | A third of the TTL, so two missed refreshes do not lose the lease. |
 | Directory poll | 15 s, each wait jittered plus or minus 25 percent; first poll at a random offset | `endpoint.DirectoryPoll` (`directory.go`) | A running endpoint asks the directory stream for its state (one unfiltered stream info, a few hundred bytes) and re-reads the directory (a filtered stream info plus one direct get per record) only when the stream's creation time, message count, last sequence or last time changed. It needs no consumer, which endpoints may not create ([ADR 0065](decisions/0065-a-directory-poll-reloads-only-when-the-directory-stream-moved-and-is-jittered.md)). Idle cost is linear in the number of endpoints. |

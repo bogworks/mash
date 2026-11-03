@@ -28,10 +28,11 @@ ulimit -n 200000
 { echo "# nproc=$(nproc) kernel=$(uname -r) $(/home/randyb/.local/bin/nats-server --version) $(date -u +%FT%TZ)"
 # MODE: old (default, as recorded in results.txt) or new (the poll of ADR 0065, endpoint.DirPoller)
 MODE=${MODE:-new}
+# WHO_GAP: dirbench -who-gap (the PresenceCache time of -hb-mode probe; default 30s as the product, 0 = the raw probes of results.txt)
 # CASES: newline separated dirbench argument lists (default: the full matrix)
 CASES=${CASES:-$'100 -hb-mode all\n500 -hb-mode all\n1000 -hb-mode all\n100 -hb-mode none\n500 -hb-mode none\n1000 -hb-mode none\n100 -hb-mode probe -who-every 5m\n500 -hb-mode probe -who-every 5m\n1000 -hb-mode probe -who-every 5m\n500 -hb-mode probe -who-every 1m\n1000 -hb-mode probe -who-every 1m\n100 -hb-mode probe -who-every 0 -who-burst\n500 -hb-mode probe -who-every 0 -who-burst'}
 while IFS= read -r case; do
   echo "## case n=$case"
-  nice -n 10 $BENCH -urls $URLS -mon $MON -pids $P -mode $MODE -warm ${WARM:-40s} -measure ${MEASURE:-60s} -n $case 2>&1
+  nice -n 10 $BENCH -urls $URLS -mon $MON -pids $P -mode $MODE ${WHO_GAP:+-who-gap $WHO_GAP} -warm ${WARM:-40s} -measure ${MEASURE:-60s} -n $case 2>&1
   sleep 5
 done <<<"$CASES"; } | tee $OUT
