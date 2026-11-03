@@ -18,6 +18,8 @@
 //	c  every README link to an ADR resolves; every relative link in an ADR resolves; numbers are unique (gaps are
 //	   allowed: a number may be reserved by an in-flight PR). A record need not be listed in README.md: existing in the
 //	   directory is the rule (ADR 0068; the README's table is frozen at 0066 and INDEX.md lists every record)
+//	   docs/decisions/NEXT holds the next free number (highest + 1, four digits and a newline): a pull request that adds
+//	   an ADR takes it and bumps NEXT (ADR 0070)
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
 //	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
@@ -328,6 +330,13 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		}
 	}
 
+	// c: NEXT names the next free number, so two pull requests do not both pick the same one (ADR 0070).
+	highest := 0
+	if len(nums) > 0 {
+		highest = nums[len(nums)-1]
+	}
+	vs = append(vs, lintNext(dir, highest)...)
+
 	// c: README links.
 	inFence := false
 	for i, ln := range splitLines(readme) {
@@ -364,6 +373,25 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		})...)
 	}
 	return vs, nil
+}
+
+var nextRE = regexp.MustCompile(`^[0-9]{4}\n$`)
+
+// lintNext checks <dir>/NEXT: exactly four digits and a newline, and one more than the highest ADR number (0001 with none).
+func lintNext(dir string, highest int) []string {
+	path := filepath.Join(dir, "NEXT")
+	want := fmt.Sprintf("%04d", highest+1)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return []string{viol(path, 1, "NEXT is missing or unreadable (%v): it must hold %s and a newline; take the number NEXT names and bump NEXT in the same PR", err, want)}
+	}
+	if !nextRE.Match(b) {
+		return []string{viol(path, 1, "NEXT must be exactly 4 digits and a newline, found %q; expected %q", string(b), want+"\n")}
+	}
+	if got := string(b[:4]); got != want {
+		return []string{viol(path, 1, "NEXT holds %s but the next free number is %s (highest ADR is %04d): take the number NEXT names and bump NEXT in the same PR", got, want, highest)}
+	}
+	return nil
 }
 
 // linkTarget returns the file part of a markdown link target, or "" for an external link or a bare anchor.

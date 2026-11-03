@@ -8,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 permissions:
   contents: read
 env:
@@ -146,10 +147,24 @@ jobs:
       - name: staticcheck
         continue-on-error: true
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+  # ADR numbers: docs/decisions/NEXT names the next free number and no two records share one (ADR 0070). It runs on every
+  # event and on the checked-out tree, which for Mergify's queue run is the combined commit (a pull_request run on the
+  # queue's merge of the pull requests ahead). Two pull requests that take the same number bump NEXT to the same value,
+  # git merges that cleanly, and neither pull request's own run sees the other's record: only a check on the combined
+  # commit catches the duplicate. merge_group is also a trigger so a GitHub merge queue gets the same check.
+  adr-numbers:
+    timeout-minutes: 5
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go run ./scripts/adrlint docs
   # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed (test
   # may skip a pull request that touches no code). always(), so a failed or skipped job still gives a verdict.
   pr-check:
-    needs: [changes, test, reproducible]
+    needs: [changes, test, reproducible, adr-numbers]
     if: always()
     timeout-minutes: 5
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
@@ -159,10 +174,12 @@ jobs:
           CODE: ${{ needs.changes.outputs.code }}
           TEST: ${{ needs.test.result }}
           REPRO: ${{ needs.reproducible.result }}
+          ADR: ${{ needs.adr-numbers.result }}
         run: |
           set -eu
-          echo "changes: code=$CODE; test: $TEST; reproducible: $REPRO"
+          echo "changes: code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR"
           [ "$REPRO" = success ] || { echo "reproducible: $REPRO" >&2; exit 1; }
+          [ "$ADR" = success ] || { echo "adr-numbers: $ADR" >&2; exit 1; }
           case "$CODE/$TEST" in
             */success | false/skipped) ;;
             *) echo "test: $TEST (code changed: $CODE)" >&2; exit 1 ;;
