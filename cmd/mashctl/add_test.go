@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -114,13 +115,19 @@ func (h *addEnv) credsClaims(name string) (*jwt.UserClaims, string) {
 	return uc, uc.Subject
 }
 
+var seedLike = regexp.MustCompile(`(^|[^A-Z2-7])SU[A-Z2-7]{20}`)
+
 func noSecrets(t *testing.T, outs ...string) {
 	t.Helper()
 	for _, o := range outs {
-		for _, bad := range []string{"SU", "BEGIN NATS USER JWT", "BEGIN USER NKEY SEED", "eyJ"} {
+		for _, bad := range []string{"BEGIN NATS USER JWT", "BEGIN USER NKEY SEED", "eyJ"} {
 			if strings.Contains(o, bad) {
 				t.Errorf("output holds %q: %q", bad, o)
 			}
+		}
+		// A user seed is "SU" then base32; a bare "SU" also turns up inside a public key id (e.g. "UC7MSUKQ...") by chance.
+		if seedLike.MatchString(o) {
+			t.Errorf("output holds a seed: %q", o)
 		}
 	}
 }
