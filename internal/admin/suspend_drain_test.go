@@ -55,7 +55,7 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ackedAtSuspend, refusedAtSuspend := acked.Load(), refused.Load()
+	refusedAtSuspend := refused.Load()
 	got, err := a.Suspended(ctx, "alpha")
 	if err != nil || !got.Suspended || got.LastSeq != s.LastSeq {
 		t.Fatalf("Suspended: %+v %v, Suspend gave %+v", got, err, s)
@@ -64,8 +64,10 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	close(stop)
 	done.Wait()
 
-	if n := acked.Load() - ackedAtSuspend; n != 0 {
-		t.Fatalf("%d publishes acked after Suspend returned", n)
+	// No publish may be acked past the sequence Suspend reported. (Counting acks seen after Suspend returned is racy: a
+	// publish acked just before the park can be counted by the sender goroutine just after it.)
+	if m := maxSeq.Load(); m > s.LastSeq {
+		t.Fatalf("a publish was acked at seq %d, past Suspend's last seq %d", m, s.LastSeq)
 	}
 	if refused.Load() == refusedAtSuspend {
 		t.Fatal("sender saw no refused publish after Suspend")
