@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -265,7 +266,9 @@ func (d credsDiff) rotates() bool {
 // the creds file's seed is the one the directory record names (see runReissue). It keeps the creds file's user key
 // when the policy only adds allow tags and the account JWT does not revoke that key (keyRevoked; if that cannot be
 // established it refuses). Otherwise (rotated) it mints a fresh user key in memory, has the old key revoked
-// (confirmed), points the directory record at the new key and only then replaces the file.
+// (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
+// revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
+// lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
 func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout io.Writer) (tags []string, rotated bool, err error) {
 	ep, ok := findEndpoint(c, name)
 	if !ok {
@@ -329,7 +332,23 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 		return nil, false, fmt.Errorf("a reissue first checks %s's directory record, which needs the server and the admin credentials: %v; nothing was changed", name, err)
 	}
 	defer closeAdmin()
-	recUser, recAccount, err := adm.UserOf(ctx, name)
+	// The name's lock is held from the record check to the file rewrite (ADR 0058: fn's context ends before the lock
+	// expires, and each write re-checks it), so another reissue of the same name cannot rotate the record and write
+	// its creds between our check and our write.
+	err = adm.WithNameLock(ctx, name, func(ctx context.Context, lock admin.NameLock) error {
+		var err error
+		tags, rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return tags, rotated, nil
+}
+
+// reissueLocked is the part of reissueOne that runs under name's lock.
+func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout io.Writer) (tags []string, rotated bool, err error) {
+	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
 		return nil, false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
 	}
@@ -367,7 +386,10 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 			return nil, false, err
 		}
 		defer clear(m.Creds)
-		if err := replaceCreds(p, m.Creds); err != nil {
+		if err := lock.Check(ctx); err != nil {
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		}
+		if err := writeCreds(p, m.Creds); err != nil {
 			return nil, false, err
 		}
 		return m.Tags, false, nil
@@ -386,14 +408,20 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 		}
 		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); nothing was changed (the old creds still work); run the reissue again", why, err)
 	}
-	if _, err := adm.SetUser(ctx, name, m.AccountPub, oldPub, m.UserPub); err != nil {
+	if _, err := adm.SetUserLocked(ctx, lock, name, m.AccountPub, oldPub, m.UserPub); err != nil {
 		return nil, false, fmt.Errorf("the old key %s... is revoked, so the endpoint is cut off, but its directory record was not updated (%v); the creds file and the record still agree, so run the reissue again to finish; if that keeps failing, run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
 	}
-	if err := replaceCreds(p, m.Creds); err != nil {
+	if err := lock.Check(ctx); err != nil {
+		return nil, false, fmt.Errorf("the old key %s... is revoked and the record names the new key, but %v; the endpoint is cut off, and a plain reissue is now refused because the file and the record disagree: run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
+	}
+	if err := writeCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the old key %s... is revoked and the record names the new key, but the new creds file could not be written (%v), so the endpoint is cut off; a plain reissue is now refused because the file and the record disagree: run mashctl retire %s then mashctl add %s", ctl.ShortKey(oldPub), err, name, name)
 	}
 	return m.Tags, true, nil
 }
+
+// writeCreds is how a reissue replaces a creds file; a test replaces it.
+var writeCreds = replaceCreds
 
 // replaceCreds writes creds to a 0600 temp file beside path and renames it over path.
 func replaceCreds(path string, creds []byte) error {

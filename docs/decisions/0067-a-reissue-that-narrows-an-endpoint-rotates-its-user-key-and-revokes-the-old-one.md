@@ -46,6 +46,17 @@ because it signs with the seed stored in the creds file. It refuses, changing no
 key its JWT names, or when the record's user is not that key. A leftover creds file of a retired name, or one whose
 record names another key, is therefore never reissued.
 
+The revocation read covers every server: `apply.KeyRevoked` requires a complete server set (as `RevokeUsers` does),
+looks up and verifies the account JWT of every expected server, and reports the key revoked if any copy names it. One
+copy without the revocation proves nothing in a cluster whose servers hold different copies; a silent, unverifiable
+or incomplete set refuses.
+
+The record check, the revocation check, the mint, the revocation, the record update and the creds file rewrite all run
+under the endpoint's name lock (`Admin.WithNameLock`, [ADR 0058](0058-an-operation-under-the-name-lock-stops-before-the-lock-expires-and-rechecks-it-before-writes.md)),
+so a concurrent reissue of the same name cannot rotate the record and write its creds between this reissue's check
+and its write. The func runs on a context that ends before the lock expires, and the record update
+(`Admin.SetUserLocked`) and the file rewrite re-check the lock first.
+
 A rotating reissue runs in this order: mint the new key in memory, revoke the old key and wait for confirmation, point
 the record at the new key (`Admin.SetUser`, a compare-and-set from the old key, idempotent for the new one), then
 replace the creds file. A failure before the revocation is confirmed changes nothing and the old creds still work; run
@@ -73,7 +84,7 @@ of 3,838 bytes and above fail at the default 4,096 byte control line.
 ### Confirmation
 
 `cmd/mashctl/reissue_rotate_test.go` (rotation, a revoked key rotated, refusal when revocation cannot be read, refusal without a record or with another recorded key, revoke failure
-leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence).
+leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-and-set, idempotence, the held name lock), `cmd/mashctl/reissue_lock_test.go` (concurrent reissues of one name leave the file and the record agreeing; the lock is held during the file rewrite) and `internal/apply/revoked_test.go` (a revocation on any one server's copy counts; a silent server refuses).
 
 ## Pros and Cons of the Options
 
@@ -95,6 +106,6 @@ leaving the creds file as it was) and `internal/admin/setuser_test.go` (compare-
 ## More Information
 
 * Advisory GHSA-xr7f-xmcm-w98h; issue #179 (budget).
-* Code: `cmd/mashctl/reissue.go`, `cmd/mashctl/revoke.go`, `internal/admin/admin.go` (`SetUser`, `UserOf`),
-  `internal/apply/revoke.go`.
+* Code: `cmd/mashctl/reissue.go`, `cmd/mashctl/revoke.go`, `internal/admin/admin.go` (`WithNameLock`, `SetUser`, `UserOf`),
+  `internal/apply/revoke.go`, `internal/apply/revoked.go`.
 * Related: [ADR 0053](0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md).

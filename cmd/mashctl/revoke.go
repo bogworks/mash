@@ -57,24 +57,16 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 // keyRevoked reports whether the account JWT revokes the user key pub (at any time); a test replaces it.
 var keyRevoked = revokedInAccount
 
-// revokedInAccount opens the key store, connects with the system account credentials, reads the account JWT, verifies
-// it against the operator trust and reports whether its revocation list names pub. Any failure to establish that is an
-// error, never "not revoked".
+// revokedInAccount opens the key store, connects with the system account credentials and reports, with
+// apply.KeyRevoked, whether the account JWT of any server revokes pub. It reads every server's copy, verifies each
+// against the operator trust and refuses on an incomplete server set or a silent server. Any failure to establish the
+// answer is an error, never "not revoked".
 func revokedInAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, pub string) (bool, error) {
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
 		return false, err
 	}
 	ks, err := ctlkeys.Open(keyDir)
-	if err != nil {
-		return false, err
-	}
-	akp, acctPub, err := ks.Account()
-	if err != nil {
-		return false, err
-	}
-	akp.Wipe()
-	trust, err := apply.LoadTrust(ks)
 	if err != nil {
 		return false, err
 	}
@@ -88,19 +80,7 @@ func revokedInAccount(ctx context.Context, cfg config.Config, env func(string) s
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	token, err := apply.NATS{Conn: nc, Inventory: servers}.Lookup(ctx, acctPub)
-	if err != nil {
-		return false, err
-	}
-	if token == "" {
-		return false, errors.New("no server returned the account JWT")
-	}
-	claims, err := apply.VerifyAccountJWT(token, acctPub, trust)
-	if err != nil {
-		return false, err
-	}
-	_, revoked := claims.Revocations[pub]
-	return revoked, nil
+	return apply.KeyRevoked(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers}, pub)
 }
 
 // parseServers reads MASH_SERVERS the way policy apply does; 0 is none given.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/store"
@@ -61,5 +62,43 @@ func TestSetUser(t *testing.T) {
 	}
 	if _, err := a.SetUser(ctx, "Bad Name", e.Account, u2, u1); err == nil {
 		t.Error("bad name accepted")
+	}
+}
+
+func TestWithNameLockHoldsTheLockAndTakesLockedVariants(t *testing.T) {
+	e, a, _ := setup(t)
+	ctx := context.Background()
+	_, u1 := e.Mint(t, "beta")
+	_, u2 := e.Mint(t, "beta2")
+	if _, err := a.Provision(ctx, "beta", u1, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	err := a.WithNameLock(ctx, "beta", func(ctx context.Context, l admin.NameLock) error {
+		// the lock is held: another taker times out
+		cctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		if _, err := a.SetUser(cctx, "beta", e.Account, u1, u2); err == nil {
+			t.Error("SetUser took the lock while it was held")
+		}
+		if user, _, err := a.UserOfLocked(ctx, l, "beta"); err != nil || user != u1 {
+			t.Errorf("UserOfLocked: %q %v", user, err)
+		}
+		if _, _, err := a.UserOfLocked(ctx, l, "other"); err == nil {
+			t.Error("a lock of another name was accepted")
+		}
+		if err := l.Check(ctx); err != nil {
+			t.Error(err)
+		}
+		if rec, err := a.SetUserLocked(ctx, l, "beta", e.Account, u1, u2); err != nil || rec.User != u2 {
+			t.Errorf("SetUserLocked: %+v %v", rec, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// released afterwards
+	if _, err := a.SetUser(ctx, "beta", e.Account, u1, u2); err != nil {
+		t.Errorf("the lock was not released: %v", err)
 	}
 }
