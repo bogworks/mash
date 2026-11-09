@@ -1,0 +1,4 @@
+# Exceptions to the scrub list: path<TAB>pattern<TAB>reason
+# path is a repo-relative file path (or archive!member), exactly; no directories, no globs.
+# pattern is a literal substring that must occur on the very line of the hit.
+# reason is one non-empty line of text. An entry that matches no hit is reported.
