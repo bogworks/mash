@@ -1,0 +1,10 @@
+# Scrub list for the one-time verification run of `go run ./scripts/scrubcheck`: words that must not
+# appear in the shipped surfaces. It is a one-time scrub list, not a CI gate. Plurals (word + "s") are
+# matched by the tool and are not listed here. One word per line; "#" lines and blank lines are ignored.
+herd
+lane
+coordinator
+rangehand
+homerange
+herdr
+theherd
