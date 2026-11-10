@@ -30,12 +30,25 @@ the credential re-issue; Phase 3 is held.
      credential that still carries such a wildcard. Tests first: an overlap test that a new-form subject with an
      owner token equal to the legacy owner is refused, and that a legacy wildcard grant cannot reach a new-form subject
      of any other herd.
-   - **Streams do not overlap.** The legacy stream keeps its own subject filter and is never altered; legacy-alias mail
-     keeps arriving in it. The new-form endpoint's stream `inbox-<flat>` takes the new subject only and has the legacy
-     stream as a source (a JetStream source copies messages with their subjects and headers intact, so signatures still
-     verify). No two streams share a subject. This replaces 1.4's "takes both subject filters" candidate. A test
-     proves signed legacy mail is read under the new identity with the same `[verified]` label and that no stream
-     subject overlaps another (INV-001, INV-003).
+   - **Streams do not overlap, and nothing is copied.** The legacy stream keeps its own subject filter and is never
+     altered; legacy-alias mail keeps arriving in it. The new-form endpoint's stream `inbox-<flat>` takes the new subject
+     only. During the window the endpoint reads **both** streams: the legacy stream through its existing durable
+     consumer, whose acknowledgement state (ack floor and pending set) is the record of what was already shown, and the
+     new stream through a new consumer. No two streams share a subject, no message is copied, and stored messages keep
+     their subjects and headers, so signatures still verify. **Why not a stream source:** a source copies messages
+     into a second stream, and a new consumer there would show already-acknowledged mail again as new. Starting the
+     source after the legacy consumer's ack floor (`OptStartSeq` = floor + 1) does not fix it: the floor is only the
+     lowest contiguous acknowledgement. mash's consumer is `AckExplicit` and its spool acknowledges a message once a hook
+     has shown it, so acknowledgements can arrive out of order (an urgent message rings first, a batch is drained in
+     the order the hook lists it), leaving acknowledged messages above the floor; a source starting at floor + 1 would
+     copy those too. Reading the old consumer avoids the question, because it already knows which messages are acked.
+     Two things to settle in a spike test before 1.4 is written: that one endpoint can hold two consumers' spool state
+     without confusing `read #seq` (the two streams' sequence numbers collide: the proposed fix is a new stream whose
+     first sequence follows the legacy stream's last, if the server supports that, else display numbers that name the
+     stream), and the rollback below. Tests first: signed legacy mail is read under the new identity with the same
+     `[verified]` label; **mail that was acknowledged before the rename, including one acknowledged out of order above the
+     ack floor, is not shown again after it**; unacked mail is shown once; and no stream subject overlaps another
+     (INV-001, INV-003).
    - **The refusal is for new-form grants only.** The REQ-027 refusal never refuses the legacy grant the window
      needs; AT-012 expects it after the break (3.2 removes the legacy grants and aliases). Window isolation is shown
      by the overlap tests above, not by AT-012.
@@ -73,36 +86,48 @@ the credential re-issue; Phase 3 is held.
     herd under DEC-007 but are never in mash's code; they get their own plan once the planner settles DEC-011 (where
     they live). This plan's earlier "not planned here" is not a statement that nobody owns them.
 
-### Proposed format of the per-owner name-acceptance rule (REQ-017, DEC-014 (c); for the seam page)
+### Proposed format of the range-level name-acceptance rule (REQ-017, DEC-014 (c); for the seam page)
 
-Offered as the consumer's proposal, to be sent to the planner; mash ships no default rule (SEAM-001).
+Offered as the consumer's proposal, revised after the planner's second pass. The seam page's wording is "a range-level
+rule that can match the agent, owner and name tokens". mash ships no default rule (SEAM-001). The rule is a standalone
+file that homerange renders; mash reads it once at start, so a change takes a restart (a directory value or the policy
+file are not used: anyone who can write the store could change the first, and the second is tied to the open zone
+question). `reply` and `lookup` are separate entry points, tested separately.
 
-- **Where it comes from.** A JSON file named by `MASH_NAME_RULE_FILE` (or `name_rule_file` in `config.json`). Absent:
-  no rule, every name mash's own syntax allows is accepted, and a plain name works outside a range (AT-006). Present but
-  unreadable or invalid: the endpoint refuses to start, with the error naming the file and the problem (fail closed).
-  Read once at start; changing it takes a restart.
-- **Every entry point, including direct clients.** `mash` and `mashctl` read the same configuration (`config.json` and
-  the environment) that gives them their owner, so one place supplies owner and rule file to every invocation: provision,
-  start, send, reply, prompt and lookup all call one function that loads the rule from that configuration. "No rule" is
-  only ever the case of a configuration that names none. Tests, one per entry point and per tool (`mash` and `mashctl`),
-  try each forbidden form and a configuration that omits the file. Stated plainly: a rule file binds honest clients;
-  it cannot bind a client with its own credentials that skips mash's code. What does is the credentials and grants
-  themselves, which is why DEC-014 chose both (retired identities and credentials, and this rule).
-- **Shape.** `{"version": 1, "rules": [ ... ]}`. Each rule: `id` (a short name), `match` (an object with any of `agent`,
-  `owner`, `name`, each an RE2 regular expression that must match the whole token, all given keys must match),
-  `entry_points` (optional list from `provision`, `start`, `send`, `reply`, `prompt`, `lookup`; default all) and
-  `message` (the text of the refusal). A name that matches any rule is refused. No `allow` rules and no ordering:
-  deny-listed forms only, so the file cannot grant what mash's syntax forbids.
+- **Where it comes from.** A JSON file named by `MASH_NAME_RULE_FILE` (or `name_rule_file` in `config.json`), read by
+  `mash` and `mashctl` alike through the configuration that already gives them their owner, so every invocation gets
+  the same rule. No file named: no rule, and `status` says "no name rule set" so a missing file is visible. A value that
+  is set but empty is invalid, not absent. A file that is unreadable or invalid, or has an unknown key, an unknown
+  version, a duplicate `id` or an empty `match`: the endpoint refuses to start, naming the file and the problem.
+- **Shape.** `{"version": 1, "rules": [ ... ]}`. Each rule: `id` (a short name), `match` and `message` (the refusal
+  text). `match` is an object over any of `agent`, `owner`, `name`; each key takes `{"is": RE}` or `{"is_not": RE}`
+  (RE2); `is` is true when the token matches, `is_not` when it does not. All given keys must hold for the rule to match,
+  and a name that matches any rule is refused. mash wraps every pattern as a whole-token match itself (`^(?:RE)$`), so
+  a pattern with an alternation cannot match part of a token; a test covers it. There are no accept rules and no
+  ordering, so the file cannot grant what mash's own syntax forbids. The window rule that refuses a new-form owner
+  equal to the legacy owner is `{"agent": {"is_not": "cc"}, "owner": {"is": "<legacy-owner>"}}`; the old-form rule is
+  `{"agent": {"is": "cc"}}`.
+- **Entry points.** The rule applies at every one, with no per-rule list, so a rule for old forms cannot be narrowed to
+  fewer: provision, start, send, reply, prompt, lookup, and the compatibility alias (REQ-016, AT-005). For `send` and
+  `prompt` both the addressed identity and the sender's own identity are checked; `reply` checks the identity being
+  answered; `lookup` checks each identity it would return.
 - **What a name is.** The identity's three tokens. A legacy identity is `(cc, <owner>, <name>)`, so a rule on `agent`
-  equal to `cc` refuses the old form without mash knowing why; mash does not know what range, herd or lane mean.
+  equal to `cc` refuses the old form without mash knowing why. **After the break a plain name still has three tokens**
+  (REQ-024 removes the constant `cc` and the one-owner setting; AT-006 needs a plain name to work outside a range, AT-012
+  needs the old form refused inside one): the owner token is the configured owner, the name token is the name, and the
+  agent token is the configured agent token, which for an endpoint outside any range defaults to the neutral `mash`.
+  Inside a range homerange supplies all three. To be confirmed by the planner: that `mash` is the right default.
 - **What a refusal says (REQ-020).** The error names the rule (`id`) and carries its `message`; for `send`, `reply` and
   `prompt` the sender is told and nothing is dropped silently.
 - **What it is not.** Not a grant (REQ-027 is separate, in grant compilation) and not a validator of the homerange
-  grammar: homerange chooses the rules and supplies the file; mash applies them as given (REQ-017). It is applied at
-  every entry point mash offers, through one function with tests per entry point (tests first, in 1.7).
-- **Questions for the planner.** Whether this carries what DEC-014 (c) needs; whether `reply` and `lookup` should be
-  separable entry points or covered with `send`; whether a per-owner file is enough or the rule should be a directory
-  or policy-file value so it can change without a restart.
+  grammar: homerange chooses the rules and supplies the file; mash applies them as given (REQ-017). It binds honest
+  clients; a client with its own credentials that skips mash's code is stopped by retired credentials and by grants,
+  which is why DEC-014 chose both.
+- **The negative tests' two configurations (1.10, 3.1) are pinned.** (A) a rule file that refuses the old forms: every
+  entry point above expects refusal. (B) no rule file, with mash's own removals in force (legacy acceptance off): every
+  entry point expects refusal by mash itself. Phase 3 makes (B) the only configuration; the tests are unchanged.
+- **Break procedure.** Because the file is read once at start, the break restarts every endpoint before AT-003 runs, so
+  AT-003 sees the rule in force.
 
 ## What the code does today
 
@@ -192,8 +217,9 @@ writers, and nothing writes a new-form record until every reader in the range ca
   rewritten. The mechanism is chosen and proved by a test before anything is enabled: signed mail queued in the legacy
   stream is readable under the new identity with the same `[verified]` label, the old name still delivers to the same
   inbox during the window (AT-004), and counts and last sequence before and after are reported for AT-003 (INV-001 to
-  INV-003). Candidates: a new-form stream that sources the legacy stream and takes both subject filters (a source keeps
-  subject and headers byte-identical), or an endpoint that drains its legacy stream first. Rollback for a lane is to
+  INV-003). The mechanism is the one in amendment 1: no copy; the endpoint reads
+  the legacy stream through its existing durable consumer and the new stream through a new one, so nothing already
+  acknowledged is shown again. Rollback for a lane is to
   stop using the new identity; the legacy stream is never altered (NFR-002), and the rollback steps are written down.
   This is the riskiest step of the plan.
 - **1.5 Grants.** Herd and range grants (`agents.mail.<range>.<herd>.>` or `.*`, `agents.mail.<range>.>`) from the
@@ -249,6 +275,23 @@ enumerate directory records and inbox streams. The pull request:
   the sender, not dropped. Mutation (AT-012): restoring old-form acceptance or an alias makes CI fail, shown once.
 - **3.4 ADR and search.** Accepts the supersession of ADR 0005's and ADR 0054's layout parts; a search of the code shows
   no remaining compatibility path.
+- **3.5 The CLI surface that goes with the zone token.** The zone token leaves the wire (REQ-006, DEC-012, REQ-024), so
+  these go with it, each listed for the planner to rule on against the CLI freeze (card #9); none is removed until that
+  ruling:
+  1. `mashctl set-zone <name> <zone>` (`internal/ctl/ctl.go:71,296`, `cmd/mashctl/main.go:46`) and its messages in
+     `add.go:233`.
+  2. `--zone Z` on `mashctl provision` (`internal/ctl/ctl.go:68`, `provisionArgs` at `:262`) and on `mashctl add`
+     (`cmd/mashctl/add.go:24,77`), and the policy's `subject_label` input that `add --zone` sets.
+  3. `--replace-zone-key ZONE`, `--remove-zone ZONE` and `--keep-zone ZONE` on `mashctl policy diff` and `policy apply`
+     (`cmd/mashctl/apply.go:41-78`), and `--keep-zone ZONE` on `mashctl policy repair` (`cmd/mashctl/drift.go:34`, with
+     the flag hints at `:572`).
+  4. The zone sections of `mashctl policy show` (`cmd/mashctl/policy.go:272-276`); output, not flags.
+  5. The additive `zone` field of `mash who --json` (`cmd/mash/whofilter.go:104`, ADR 0049's stable form): removal is
+     a change to a stable contract and is the planner's call.
+  6. Docs that describe them (`docs/mashctl.md`, `docs/policy-file.md`, `docs/install.md`) and the zone-key files and
+     per-zone users the policy compiler mints (ADR 0053, ADR 0056), which are the zone gate itself: removing them waits
+     for the zone ruling, not only the freeze.
+  Nothing else in the CLI names a zone.
 
 ## Map to the contract
 
