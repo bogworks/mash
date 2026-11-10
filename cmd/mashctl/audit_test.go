@@ -761,16 +761,20 @@ func (f *auditFixture) auditTo(t *testing.T, name string) string {
 
 type cmpOut struct {
 	Compare *struct {
-		Moved   int      `json:"moved"`
-		Removed []string `json:"identities_removed"`
-		Added   []string `json:"identities_added"`
-		Streams []struct {
+		Moved    int      `json:"moved"`
+		Vanished int      `json:"vanished"`
+		Retired  int      `json:"retired"`
+		Removed  []string `json:"identities_removed"`
+		Added    []string `json:"identities_added"`
+		Streams  []struct {
 			Stream         string `json:"stream"`
 			LastSeqBefore  uint64 `json:"last_seq_before"`
 			LastSeqNow     uint64 `json:"last_seq_now"`
 			LastSeqMoved   bool   `json:"last_seq_moved"`
 			DeliveredMoved bool   `json:"delivered_moved"`
 			AckFloorMoved  bool   `json:"ack_floor_moved"`
+			Vanished       bool   `json:"vanished"`
+			Retired        bool   `json:"retired"`
 		} `json:"streams"`
 	} `json:"compare"`
 }
@@ -1015,5 +1019,88 @@ func TestAuditExitCodeThreeCouldNotComplete(t *testing.T) {
 	f := cleanLegacyAccount(t)
 	if _, errb, code := ctlRun(t, f.e, "audit", "--creds-dir", filepath.Join(f.credsDir, "nope")); code != 3 {
 		t.Errorf("unreadable required creds directory: %d %q, want 3", code, errb)
+	}
+}
+
+// vanishFixture is a legacy account with one inbox ("alpha", with mail either queued or all acknowledged), its
+// first audit saved, and the helpers the vanish tests share.
+func vanishFixture(t *testing.T, drained bool) (*auditFixture, string) {
+	f := newAuditEnv(t)
+	f.legacy(t, "alpha")
+	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 2)
+	if drained {
+		f.ackAll(t, "alpha")
+	}
+	return f, f.auditTo(t, "first.json")
+}
+
+func (f *auditFixture) dropStream(t *testing.T, name string) {
+	t.Helper()
+	if err := f.js.DeleteStream(context.Background(), sap.InboxStream(name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *auditFixture) deprovisionAndForget(t *testing.T, name string) {
+	t.Helper()
+	if _, errb, code := ctlRun(t, f.e, "deprovision", name); code != 0 {
+		t.Fatalf("deprovision: %d %q", code, errb)
+	}
+	if err := os.Remove(filepath.Join(f.credsDir, name+".creds")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *auditFixture) compareJSON(t *testing.T, earlier string) (cmpOut, int) {
+	t.Helper()
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", earlier)
+	var c cmpOut
+	if code == 3 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil {
+		t.Fatalf("compare: %d %q\n%s", code, errb, out)
+	}
+	return c, code
+}
+
+func TestAuditCompareVanishedWithMailAndRecordGone(t *testing.T) {
+	f, first := vanishFixture(t, false)
+	f.deprovisionAndForget(t, "alpha")
+	c, code := f.compareJSON(t, first)
+	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 || len(c.Compare.Streams) != 1 || !c.Compare.Streams[0].Vanished || c.Compare.Streams[0].LastSeqBefore != 2 {
+		t.Fatalf("queued mail gone with its record: exit %d %+v", code, c.Compare)
+	}
+	txt, _, _ := f.run(t, "--compare", first)
+	if !strings.Contains(txt, "VANISHED") {
+		t.Errorf("text form must show the vanished inbox:\n%s", txt)
+	}
+}
+
+func TestAuditCompareVanishedStreamDeletedRecordKept(t *testing.T) {
+	f, first := vanishFixture(t, false)
+	f.dropStream(t, "alpha")
+	c, code := f.compareJSON(t, first)
+	if code != 1 || c.Compare.Vanished != 1 || !c.Compare.Streams[0].Vanished {
+		t.Fatalf("stream deleted, record kept: exit %d %+v", code, c.Compare)
+	}
+}
+
+func TestAuditCompareRetiredWhenDrainedAndRecordGone(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	f.deprovisionAndForget(t, "alpha")
+	c, code := f.compareJSON(t, first)
+	if code != 0 || c.Compare.Retired != 1 || c.Compare.Vanished != 0 || c.Compare.Moved != 0 || !c.Compare.Streams[0].Retired || c.Compare.Streams[0].Vanished {
+		t.Fatalf("drained inbox deprovisioned: exit %d %+v", code, c.Compare)
+	}
+	txt, _, _ := f.run(t, "--compare", first)
+	if !strings.Contains(txt, "RETIRED") {
+		t.Errorf("text form must show the retired inbox:\n%s", txt)
+	}
+}
+
+func TestAuditCompareVanishedWhenDrainedButRecordKept(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	f.dropStream(t, "alpha")
+	c, code := f.compareJSON(t, first)
+	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 || !c.Compare.Streams[0].Vanished {
+		t.Fatalf("drained, only the stream gone: exit %d %+v", code, c.Compare)
 	}
 }

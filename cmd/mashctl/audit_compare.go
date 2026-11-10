@@ -28,6 +28,12 @@ type auditCompareStream struct {
 	AckFloorBefore  uint64 `json:"ack_floor_before"`
 	AckFloorNow     uint64 `json:"ack_floor_now"`
 	AckFloorMoved   bool   `json:"ack_floor_moved"`
+
+	// Vanished: present in the earlier audit and absent now, and not retired. The mail in it may have been lost.
+	// Retired: present and drained in the earlier audit, and its directory record is gone now too (deprovisioned).
+	// The *_before fields keep what the earlier audit showed.
+	Vanished bool `json:"vanished"`
+	Retired  bool `json:"retired"`
 }
 
 // auditCompare is the current audit set against an earlier one (--compare).
@@ -37,6 +43,8 @@ type auditCompare struct {
 	Removed          []string             `json:"identities_removed"` // record keys present before and absent now
 	Added            []string             `json:"identities_added"`   // record keys absent before and present now
 	Moved            int                  `json:"moved"`              // legacy streams whose last_seq or delivered sequence moved
+	Vanished         int                  `json:"vanished"`           // legacy inboxes present before, absent now, not retired: fails --strict
+	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
 }
 
 // readEarlierAudit reads an earlier `audit --json` report. A file that is not JSON, or is another version, is refused.
@@ -58,21 +66,32 @@ func readEarlierAudit(path string) (*auditReport, error) {
 // legacyStreams is every legacy inbox the report shows: the inbox of each old-form record and the legacy inbox of
 // each renamed identity, by stream name.
 func (r auditReport) legacyStreams() map[string]auditInbox {
-	m := map[string]auditInbox{}
+	m, _ := r.legacyStreamsWithKeys()
+	return m
+}
+
+// legacyStreamsWithKeys also returns, for each stream, the directory key of the record it belongs to.
+func (r auditReport) legacyStreamsWithKeys() (map[string]auditInbox, map[string]string) {
+	m, keys := map[string]auditInbox{}, map[string]string{}
 	for _, x := range r.Records {
 		if x.Form == "legacy" {
-			m[x.Inbox.Stream] = x.Inbox
+			m[x.Inbox.Stream], keys[x.Inbox.Stream] = x.Inbox, x.Key
 		}
 	}
 	for _, x := range r.Renames {
-		m[x.LegacyInbox.Stream] = x.LegacyInbox
+		m[x.LegacyInbox.Stream], keys[x.LegacyInbox.Stream] = x.LegacyInbox, x.Flat
 	}
-	return m
+	return m, keys
 }
 
 func compareAudits(before, now auditReport) *auditCompare {
 	c := &auditCompare{AgainstGenerated: before.Generated, Streams: []auditCompareStream{}, Removed: []string{}, Added: []string{}}
-	b, n := before.legacyStreams(), now.legacyStreams()
+	b, bkeys := before.legacyStreamsWithKeys()
+	n := now.legacyStreams()
+	recordNow := map[string]bool{}
+	for _, r := range now.Records {
+		recordNow[r.Key] = true
+	}
 	names := map[string]bool{}
 	for k := range b {
 		names[k] = true
@@ -98,6 +117,16 @@ func compareAudits(before, now auditReport) *auditCompare {
 		if s.LastSeqMoved || s.DeliveredMoved {
 			c.Moved++
 		}
+		if bi.Present && !ni.Present {
+			// A drained inbox whose record is gone too was deprovisioned: retired. Anything else may have lost mail.
+			if bi.drained() && !recordNow[bkeys[name]] {
+				s.Retired = true
+				c.Retired++
+			} else {
+				s.Vanished = true
+				c.Vanished++
+			}
+		}
 		c.Streams = append(c.Streams, s)
 	}
 	was, is := map[string]bool{}, map[string]bool{}
@@ -122,11 +151,16 @@ func compareAudits(before, now auditReport) *auditCompare {
 
 func writeCompareText(w io.Writer, c *auditCompare) {
 	cl := config.Clean
-	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved)
+	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired)
 	for _, s := range c.Streams {
 		state := "unchanged"
 		if s.LastSeqMoved || s.DeliveredMoved {
 			state = "MOVED"
+		}
+		if s.Vanished {
+			state = "VANISHED"
+		} else if s.Retired {
+			state = "RETIRED"
 		}
 		fmt.Fprintf(w, "compare stream %s\t%s\tlast_seq %d->%d\tdelivered %d->%d\tack_floor %d->%d\tpresent %t->%t\n", cl(s.Stream), state,
 			s.LastSeqBefore, s.LastSeqNow, s.DeliveredBefore, s.DeliveredNow, s.AckFloorBefore, s.AckFloorNow, s.PresentBefore, s.PresentNow)

@@ -142,11 +142,26 @@ the one this mashctl writes; a file that is not JSON, is another version, or can
 before and not now, and the reverse) and `streams`: one entry per legacy inbox stream in either audit (the inbox of an
 old-form record and the legacy inbox of a renamed identity), sorted, each with `present_before`, `present_now` and a
 before, now and moved triple for `last_seq`, for the `deliver` consumer's `delivered` (stream sequence) and for its
-`ack_floor`. A stream has moved when it is present now and its `last_seq` or its `delivered` differs: mail was stored
-or mail was read. The ack floor is shown but does not count by itself. `moved` is the number of streams that moved.
+`ack_floor`, and two flags, `vanished` and `retired`. A stream has moved when it is present now and its `last_seq` or
+its `delivered` differs: mail was stored or mail was read. The ack floor is shown but does not count by itself.
+`moved` is the number of streams that moved.
 
-With `--strict`, `--compare` fails (exit 1) when `moved` is above 0, and on every other finding: any orphan, any
-alias whose legacy inbox is not drained, any problem.
+A legacy inbox that was present in the earlier audit and is absent now has either `vanished` or `retired`. The
+`*_before` fields keep what the earlier audit showed.
+
+- `retired`: the inbox was drained in the earlier audit and its directory record is gone now as well (it was
+  deprovisioned). It is shown and does not fail `--strict`. "Drained" is the audit's own rule for a legacy inbox (see
+  `renames[].drained`): the stream held no message, or its `deliver` consumer had nothing pending, nothing
+  unacknowledged and an ack floor that covered every stored message. For a plain legacy record the earlier JSON has
+  no `drained` field, so the rule is applied to its earlier `inbox`.
+- `vanished`: every other inbox that disappeared: it held mail that was not drained, or its record is still in the
+  directory (so the stream was deleted or purged under a live record). A vanished inbox is the audit's signal that
+  mail may have been lost. `vanished` in the report is the number of such streams.
+
+A stream that is present now and was absent before is not a vanished one; its record shows in `identities_added`.
+
+With `--strict`, `--compare` fails (exit 1) when `moved` or `vanished` is above 0, and on every other finding: any
+orphan, any alias whose legacy inbox is not drained, any problem.
 
 ## What it cannot see
 
@@ -161,7 +176,7 @@ What it can show is that a legacy stream stored a message (`last_seq`, `last_tim
 `delivered_last`) between two audits. An old-form sender writing to a name with no stream is invisible to it.
 
 So "two clean audits a day apart" means exactly this: both runs were `--strict` clean (exit 0), and `--compare` of the
-second against the first shows no legacy movement (`moved` 0, with `--strict` the second exits 0). That is evidence
+second against the first shows no legacy movement (`moved` 0 and `vanished` 0, with `--strict` the second exits 0). That is evidence
 that no stream stored or delivered mail in that day. It is not evidence about publishes or connections the audit
 cannot see.
 
@@ -170,7 +185,7 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, or a legacy inbox that vanished. Standard error says what was counted |
 | 2 | a usage error |
 | 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON or another version. Nothing is printed on standard output |
 

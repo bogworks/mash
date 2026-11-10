@@ -168,7 +168,7 @@ func (r auditReport) findings() int {
 	s := r.Summary
 	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
 	if r.Compare != nil {
-		n += r.Compare.Moved
+		n += r.Compare.Moved + r.Compare.Vanished
 	}
 	return n
 }
@@ -523,12 +523,12 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if o.strict && rep.findings() > 0 {
 		s := rep.Summary
-		moved := 0
+		moved, vanished := 0, 0
 		if rep.Compare != nil {
-			moved = rep.Compare.Moved
+			moved, vanished = rep.Compare.Moved, rep.Compare.Vanished
 		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved since the earlier audit\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved)
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved and %d vanished since the earlier audit\n",
+			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished)
 		return 1
 	}
 	return 0
