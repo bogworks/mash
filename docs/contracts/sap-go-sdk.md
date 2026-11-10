@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-5 (draft-2 answered the critic's first pass, draft-3 mash-lead's review and the second pass, draft-4 the third pass, draft-5 the fourth; Appendix A) |
+| Contract id and revision | sap-go-sdk, revision draft-6 (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 records Randy's answers to the open questions; Appendix A) |
 | Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
@@ -194,9 +194,9 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   answered, version mismatch) from a remote error.
 - Acceptance: AT-001, AT-004.
 
-### REQ-008: Sender identity (§13), optional and additive
-- Source: Derived. SAP §13 (SAP:L717-L1072). The official SDKs implement it (prior-art report §2). Whether it is in
-  scope is Q3.
+### REQ-008: Sender identity (§13), optional in SAP and in scope here
+- Source: Derived from SAP §13 (SAP:L717-L1072); in scope: Confirmed, "Signing is in scope. We need it." (Randy,
+  2026-11-10; Q3).
 - **Signing.** When given a seed, the SDK MUST sign heartbeats, and both `prompt` and `status` requests, with
   `Agent-Sender` (§13.5; caller checklist SAP:L709). It MUST NOT sign a reply, `status` replies included (SAP:L1052).
 - **Payload limit.** The caller MUST count the `Agent-Sender` header bytes in its local `max_payload` check
@@ -274,19 +274,17 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   reference agent (`agent-sdk/python/examples/_reference_agent.py`). It also runs the official TypeScript and Python
   callers against a Go host. Every combination runs on a pinned `nats-server`; Synadia's CI pins 2.12.7.
 - MUST: the runs cover discovery, a text prompt, an envelope with attachments, a mid-stream query, an error stream,
-  status and heartbeat, and, with §13 in scope, a signed request in both directions.
+  status and heartbeat, and a signed request in both directions.
 - Acceptance: AT-003.
 
 ### REQ-012: Synadia's identity vectors pass
 - Source: Derived. `synadia-agents/test-fixtures/identity/` (`sender-vectors.json`, `id-sig-vectors.json`,
   `agent-id-fixtures.json`, `keys.json`): "Known-answer vectors ... verified by every SDK".
-- MUST: with §13 in scope, the Go SDK passes every vector in those files, pinned by commit.
+- MUST: the Go SDK passes every vector in those files, pinned by commit.
 - Acceptance: AT-005.
 
 ### REQ-013: A conformance runner others can use
-- Source: Proposed. mash-lead asked for "a test harness others can run" (2026-11-10). It goes beyond Randy's words, so
-  Randy ratifies it explicitly (Q12). If he cuts it, REQ-010's catalog and REQ-011's interop CI remain the conformance
-  evidence.
+- Source: Confirmed. "yes sapconform" (Randy, 2026-11-10; Q12).
 - MUST: a command-line runner, `sapconform` or similar, tests an SAP agent (host) over NATS as a black box.
 - MUST: it lists every host-role catalog obligation in one of three groups:
   - **checkable:** checked on every run;
@@ -325,10 +323,17 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - **Commits.** Commits carry whatever sign-off Synadia requires (Q5).
 - Acceptance: AT-007.
 
-### REQ-015: Its own public repository, never inside mash
-- Source: Proposed for "never inside mash" (mash-lead's recommendation, 2026-11-10, following REQ-001). It needs
-  Randy's ruling with Q1. The module path is Q2.
-- MUST: the SDK lives in a repository of its own. It is public from its first release.
+### REQ-015: A new standalone public repository, never inside mash
+- Source: Confirmed for a new repository: "Put it in a new repo." (Randy, 2026-11-10). The choice between a fork of
+  upstream and a standalone repository is answered in Q1: standalone, `bogworks/agents.go`. The module path follows
+  NATS's conventions (Q2, "USe go module path standards that conform to what NATS already does").
+- MUST: the SDK lives in the new repository `github.com/bogworks/agents.go`, not a fork. It is public from its first
+  release.
+- MUST: the module path is `github.com/bogworks/agents.go` (Q2). There is one module at the root, with the caller,
+  host and identity code in subpackages. Releases are tagged `v0.x.y` at the root. From v2 on, the path takes a `/v2`
+  suffix (Go's major-version rule, as `github.com/nats-io/jwt/v2` does).
+- MUST: interop tests that need dependencies beyond nats.go and nkeys live in a separate test module (`test/go.mod`),
+  as `synadia-io/orbit.go` does with its `<module>/test` modules. This keeps the runtime dependency list to REQ-014's.
 - MUST: it does not depend on mash and does not import any bogworks package.
 - Acceptance: AT-007, AT-009.
 
@@ -360,7 +365,9 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - MUST: if Synadia declines, whether at the issue (no pull request wanted) or on the pull request, the decline is
   recorded with Synadia's reply as evidence. It is a deviation for Randy to accept, not completion by default. If Randy
   accepts an issue-stage decline, no pull request is needed.
-- MUST: Randy, or someone he names, opens both (Q4).
+- MUST: Synadia is not asked first. The SDK is built, then offered: "Do not ask Synadia." (Randy, 2026-11-10; Q4).
+  The issue and pull request come after the 0.x release that meets AT-001 to AT-007, AT-009 and AT-010.
+- MUST: Randy, or someone he names, opens both. Any sign-off is in the name Randy Bias (Q5).
 - MUST: the contract is met when the issue and pull request are open and answered or waiting, or when a decline is
   accepted by Randy. Synadia does not have to merge (section 8).
 - Acceptance: AT-008.
@@ -525,7 +532,7 @@ The review records are completion evidence.
 - The SDK answers as the spec says.
 - No call blocks past its context or its inactivity timeout.
 
-### AT-005: Sender identity (runnable check, with §13 in scope)
+### AT-005: Sender identity (runnable check)
 - Synadia's identity vectors pass, pinned by commit.
 - Live verification is tested for every 400, 401 and 403 case of §13.7 (SAP:L927-L971).
 - Stored verification (§13.8) is tested separately for authorship only:
@@ -619,37 +626,44 @@ The review records are completion evidence.
 
 ### Open questions for Randy
 
-1. **Q1, where the repository lives [blocking].**
-   - Options:
-     - (a) a new public repository in the bogworks organisation, for example `bogworks/sap-go`;
-     - (b) the randybias account;
-     - (c) a subdirectory module offered straight to `synadia-ai/synadia-agents` from the start. This conflicts with
-       REQ-015, so choosing it needs a revised contract before READY.
-   - Writer recommends (a): it is public, separate from mash, and movable to Synadia later. mash-lead recommends a
-     separate public bogworks repository.
-   - Owner: Randy.
-2. **Q2, the module path and package names [blocking with Q1].**
-   - Options: `github.com/bogworks/<repo>` now, renamed if Synadia takes it; or ask Synadia for the path first (Q4).
-   - Package split, mirroring the official caller and host split: `sap` (shared types), `sap/caller`, `sap/host`,
-     `sap/identity`.
-   - Owner: Randy, after Synadia's answer if asked first.
-3. **Q3, is §13 in scope [blocking].**
-   - Options: (a) yes, as the official SDKs have it; (b) core first, §13 in a second contract. Choosing (b) needs a
-     revised contract before READY, because REQ-001, REQ-008, REQ-010, REQ-012 and AT-005 assume §13 is in scope.
-   - Writer recommends (a): mash depends on §13 (mash ADR 0017), and the vectors exist.
-   - Owner: Randy.
-4. **Q4, ask Synadia before or after building [blocking, because it can settle Q1 and Q2].**
-   - Options: (a) an issue now asking whether they want a Go SDK and in what form, before code; (b) build to 0.1 and
-     then offer it.
-   - Writer recommends (a): nats.go's norm is an issue first, no Go SDK request exists, and the answer may settle Q1
-     and Q2.
-   - Who speaks to Synadia: Randy.
-5. **Q5, sign-off [blocking for the upstream pull request, only if Synadia requires it].**
-   - `synadia-agents` states no sign-off policy. nats.go requires `Signed-off-by` with a legal name. The answer to Q4
-     says which applies. If neither does, Q5 is moot.
-   - An agent cannot certify the Developer Certificate of Origin. Options: Randy signs off the commits offered
-     upstream; Synadia waives it; or another arrangement Randy chooses.
-   - Owner: Randy.
+1. **Q1, where the repository lives: answered.** Randy: "Put it in a new repo. Presumably a fork of upstream?"
+   - **The writer's answer: a new standalone repository, `bogworks/agents.go`, not a fork.** A fork of
+     `synadia-ai/synadia-agents` makes the eventual pull request a branch away. That is its one advantage, and it is
+     outweighed by four costs:
+     - **The fork is a TypeScript and Python monorepo.** The Go SDK would be a `go.mod` in a subdirectory, for example
+       `go/`, with module path `github.com/bogworks/synadia-agents/go` and tags with a directory prefix (`go/v0.1.0`),
+       the orbit.go pattern.
+     - **The path changes anyway.** If Synadia merges the subdirectory, the module path becomes
+       `github.com/synadia-ai/synadia-agents/go`, so every importer changes its path whether we fork or not.
+     - **Upstream's tooling comes with the fork.** Upstream's CI workflows, `CODEOWNERS` (their maintainer teams),
+       release workflows and dependabot all arrive in our repository. Their workflows assume GitHub-hosted runners,
+       which our standing order forbids, so they would have to be disabled or rewritten. A fork would also keep pulling
+       their TypeScript and Python changes that we don't build.
+     - **A standalone repository can still be offered as a fork would be.** Its tree drops into upstream as a `go/`
+       subdirectory in one pull request, which is what REQ-017 asks. Synadia can also take a transfer of the
+       repository, or host a `synadia-io/agents.go`, which matches their own Go repositories (`synadia-io/orbit.go`).
+   - What this means for REQ-015: the repository is `bogworks/agents.go`, public, and not a fork. If Synadia adopts
+     it, the module path changes once, while the SDK is still 0.x, before any compatibility promise.
+   - Randy confirms or overrides at ratification.
+2. **Q2, the module path: answered from NATS's conventions.**
+   - The NATS conventions:
+     - **Repository and module path.** A Go client library's repository is named `<name>.go` and its module path is
+       the repository path (`github.com/nats-io/nats.go`). Libraries that aren't clients use a plain name
+       (`github.com/nats-io/nkeys`).
+     - **One module, subpackages.** One module carries its subpackages (`nats.go/micro`, `nats.go/jetstream`).
+     - **Per-directory modules.** These appear only in a collection of independent extensions (`orbit.go`, tags
+       `<dir>/vX.Y.Z`).
+     - **Major versions.** From v2 on, a major version takes a path suffix (`github.com/nats-io/jwt/v2`). v0 and v1
+       have none (`nats.go` is v1.55.0, and `nkeys` v0.4.17).
+   - The derived path is **`github.com/bogworks/agents.go`**. It is a client library for the protocol whose service
+     name is `agents` (SAP:L142) and whose official packages are `@synadia-ai/agents` and `synadia-ai-agents`. It is
+     one module, with packages `agents` (shared types), `agents/caller`, `agents/host`, `agents/identity`, and
+     `cmd/sapconform`, tagged `v0.x.y` at the root, with `/v2` from v2.
+3. **Q3, is §13 in scope: answered.** Yes. "Signing is in scope. We need it." (Randy, 2026-11-10.)
+4. **Q4, ask Synadia first: answered.** No. "Do not ask Synadia." Build, then offer upstream (REQ-017).
+5. **Q5, sign-off: answered.** If Synadia requires sign-off, it is in the name Randy Bias (Randy, 2026-11-10). An agent
+   does not sign the Developer Certificate of Origin. Randy, or the person he names, signs off the commits offered
+   upstream.
 6. **Q6, the spec's licence [not blocking].**
    - `synadia-agent-sdk-docs` has no licence file.
    - The catalog cites the spec by line and does not copy its text (REQ-010).
@@ -672,13 +686,12 @@ The review records are completion evidence.
     - Card #129 is done only when that one is too.
     - Owner: mash-lead.
 12. **Q12, ratify the Proposed scope explicitly [blocking].**
-    - These go beyond Randy's words and are each Proposed:
-      - the `sapconform` runner (REQ-013);
+    - Decided: the `sapconform` runner is in ("yes sapconform", Randy, 2026-11-10; REQ-013).
+    - Still Proposed, each for Randy to keep or cut at ratification:
       - the upstream-ready repository files and dependency limits (REQ-014);
       - concurrency, Go version, logging and documentation (REQ-019, REQ-020);
       - the outgoing-header hook (REQ-016);
-      - the NFR-004 budget.
-    - Randy keeps or cuts each one at ratification.
+      - the NFR-004 performance budget. The planner recommends dropping it.
 
 ### Delegated to the team
 
@@ -729,10 +742,13 @@ The review records are completion evidence.
 
 ## Readiness
 
-- Result: DRAFT. It goes to mash-lead, then the planner, then Randy.
+- Result: DRAFT. It goes to mash-lead, then the planner, then Randy. Randy's answers to Q1 to Q5 and to the runner in
+  Q12 are recorded verbatim: Randy, 2026-11-10, via the planner: "Do not ask Synadia. Put it in a new repo. Presumably a fork of upstream? Signing is in scope. We need it. yes sapconform. Randy Bias. USe go module path standards that conform to what NATS already does."
+- **Answered by Randy (2026-11-10):** Q1 (standalone repository, the writer's answer to his fork question), Q2 (path
+  from NATS's conventions), Q3, Q4, Q5, and the runner in Q12.
 - **Blocking before READY:**
-  - Q1, Q2, Q3, Q4 and Q12;
-  - Q5 for the upstream pull request only;
+  - Randy's confirmation of the Q1 answer (standalone, not a fork) and the Q2 path;
+  - the rest of Q12;
   - the critic's blocking findings. Four passes ran, with 9 blocking findings on draft-1, 4 on draft-2, 5 on draft-3
     and 2 on draft-4, all accepted and applied (Appendix A). The critic has not read draft-5.
 - **Not blocking:** Q6 to Q9 and Q11. Q10 is decided in REQ-013.
