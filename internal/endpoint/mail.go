@@ -141,11 +141,13 @@ type seenSet struct {
 	m      map[string]seenEntry
 	seqs   map[spool.Ref]struct{} // (stream, sequence) of signed mail shown
 
-	ackFloor   func() (uint64, bool) // the consumer's ack floor (stream sequence); false when unknown. Nil: never prune
-	pruneAt    int                   // set size from which the ack floor is consulted
-	pruneEvery time.Duration         // minimum time between ack floor reads
+	// ackFloors is each stream's consumer's ack floor (stream sequence); false when unknown. A stream with none is never
+	// pruned. Each stream's shown sequences are pruned by its own floor only; the (user, nonce) keys are global.
+	ackFloors  map[string]func() (uint64, bool)
+	pruneAt    int           // set size from which the ack floors are consulted
+	pruneEvery time.Duration // minimum time between ack floor reads
 	lastCheck  time.Time
-	lastFloor  uint64
+	lastFloor  map[string]uint64
 }
 
 const (
@@ -219,7 +221,7 @@ func (s *seenSet) mark(p pending) {
 // pruneSeqs forgets the shown sequences the consumer has acknowledged, when the set is large enough to be worth it
 // and the floor has not been read too recently.
 func (s *seenSet) pruneSeqs() {
-	if s.ackFloor == nil || len(s.seqs) < s.pruneAt {
+	if len(s.ackFloors) == 0 || len(s.seqs) < s.pruneAt {
 		return
 	}
 	now := time.Now()
@@ -227,14 +229,22 @@ func (s *seenSet) pruneSeqs() {
 		return
 	}
 	s.lastCheck = now
-	floor, ok := s.ackFloor()
-	if !ok || floor <= s.lastFloor {
+	if s.lastFloor == nil {
+		s.lastFloor = map[string]uint64{}
+	}
+	floors := map[string]uint64{}
+	for stream, read := range s.ackFloors {
+		if floor, ok := read(); ok && floor > s.lastFloor[stream] {
+			floors[stream] = floor
+			s.lastFloor[stream] = floor
+		}
+	}
+	if len(floors) == 0 {
 		return
 	}
-	s.lastFloor = floor
 	for q := range s.seqs {
-		// The floor is the primary consumer's: another stream's refs are not pruned by it.
-		if q.Stream == "" && q.Seq <= floor {
+		// A stream's floor prunes that stream's refs only.
+		if floor, ok := floors[q.Stream]; ok && q.Seq <= floor {
 			delete(s.seqs, q)
 		}
 	}
@@ -259,8 +269,9 @@ func (e *Endpoint) consumerAckFloor(cons jetstream.Consumer) func() (uint64, boo
 	}
 }
 
-// wakingProbe reads the consumer's and the inbox stream's state from the server for the waking tracker.
-func (e *Endpoint) wakingProbe(cons jetstream.Consumer) wakingProbe {
+// wakingProbe reads the consumer's and the inbox stream's state (the stream named stream) from the server for the
+// waking tracker.
+func (e *Endpoint) wakingProbe(cons jetstream.Consumer, stream string) wakingProbe {
 	return func(ctx context.Context) (uint64, int, uint64, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
@@ -270,7 +281,7 @@ func (e *Endpoint) wakingProbe(cons jetstream.Consumer) wakingProbe {
 			return 0, 0, 0, err
 		}
 		e.noteServerTime(ci.TimeStamp, t0, time.Now())
-		s, err := e.js.Stream(ctx, sap.InboxStream(e.key))
+		s, err := e.js.Stream(ctx, stream)
 		if err != nil {
 			return 0, 0, 0, err
 		}
@@ -293,85 +304,138 @@ type pending struct {
 	ts   string // the signed timestamp of signed mail, to tell a copy from a re-send
 }
 
+// inboxSource is one stream an endpoint's consumer reads: the primary inbox stream (ref stream "") and, for an
+// endpoint with an alias, the legacy inbox stream (LegacyStream) through its existing durable consumer.
+type inboxSource struct {
+	ref    string // the MsgRef stream: "" or LegacyStream
+	stream string // the JetStream stream name
+	cons   jetstream.Consumer
+}
+
+// sources are the streams this endpoint reads, primary first.
+func (e *Endpoint) sources() []inboxSource {
+	out := []inboxSource{{ref: "", stream: sap.InboxStream(e.key)}}
+	if e.hasLegacyStream() {
+		out = append(out, inboxSource{ref: LegacyStream, stream: sap.InboxStream(e.legacyKey)})
+	}
+	return out
+}
+
 // consume starts the inbox consumer and its delivery worker. The consumer's
 // callback only classifies and queues; one worker goroutine gathers messages
 // until SettleMS pass with no new one, pushes them as one event, then acks
 // them (a failed write naks them for redelivery). Being the only writer, the
 // worker keeps stream order and makes de-duplication exact. The returned
 // stop waits for the consumer to close and the worker to finish.
+//
+// An endpoint with an alias consumes a second stream, the legacy inbox stream, through the durable consumer it already
+// has there (never a new one: a fresh consumer would deliver mail the old one acknowledged). Both feed the one queue,
+// so the worker is still the only writer. A message's ack goes to its own delivery, whichever stream it came from.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
-	cons, err := e.js.Consumer(ctx, sap.InboxStream(e.key), store.Consumer)
-	if err != nil {
-		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
+	srcs := e.sources()
+	for i := range srcs {
+		cons, err := e.js.Consumer(ctx, srcs[i].stream, store.Consumer)
+		if err != nil {
+			if srcs[i].ref == LegacyStream {
+				return nil, fmt.Errorf("mash: legacy inbox consumer: %w", err)
+			}
+			return nil, fmt.Errorf("mash: inbox consumer: %w", err)
+		}
+		srcs[i].cons = cons
 	}
 	queue := make(chan pending, maxPending)
-	// The startup messages are those the consumer held unacked or pending, all at or below Delivered + NumPending, read in
+	// The startup messages are those a consumer held unacked or pending, all at or below Delivered + NumPending, read in
 	// one consumer info (no extra round trip; startup is budgeted). A gap among the pending (a deleted message) only
 	// lowers this bound, which delays readiness to the server's rule and never makes it early; a later arrival is above it.
-	ci := cons.CachedInfo()
-	e.waking.start(int(ci.NumPending)+ci.NumAckPending, ci.Delivered.Stream+ci.NumPending, true, e.wakingProbe(cons))
+	starts := map[string]streamStart{}
+	probes := map[string]wakingProbe{}
+	floors := map[string]func() (uint64, bool){}
+	for _, src := range srcs {
+		ci := src.cons.CachedInfo()
+		starts[src.ref] = streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}
+		probes[src.ref] = e.wakingProbe(src.cons, src.stream)
+		floors[src.ref] = e.consumerAckFloor(src.cons)
+	}
+	e.waking.startStreams(starts, true, probes)
 	quit := make(chan struct{})
 	workerDone := make(chan struct{})
-	go e.deliverLoop(deliver, queue, quit, workerDone, e.consumerAckFloor(cons))
+	go e.deliverLoop(deliver, queue, quit, workerDone, floors)
 
-	handler := func(m jetstream.Msg) {
-		meta, err := m.Metadata()
-		if err != nil {
-			e.log.Printf("message without metadata: %v", err)
-			_ = m.Term()
-			return
-		}
-		defer e.waking.received(spool.Ref{Seq: meta.Sequence.Stream})
-		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
-		if !ok {
-			e.dropped.Add(1)
-			e.log.Printf("dropped #%d: %s sender header (claimed user %s)", meta.Sequence.Stream, trust, h.User)
-			_ = m.Ack()
-			return
-		}
-		var key string
-		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
-			key = h.User + "\x00" + h.Nonce
-		}
-		replyTo, via := senderMarks(m.Headers(), trust, h)
-		if v, err := e.viaAllowed(via); err != nil {
-			e.log.Printf("#%d: relay declaration not honoured: %v", meta.Sequence.Stream, err)
-			via = v
-		}
-		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: meta.Sequence.Stream, From: from, Trust: trust,
-			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
-			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
-			Kind:   kind.Of(m.Headers().Get(KindHeader))}}
-		e.relayInbound(p.mail.Seq, from, trust, via)
-		e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
-		select {
-		case queue <- p:
-		case <-quit:
+	handler := func(stream string) func(m jetstream.Msg) {
+		return func(m jetstream.Msg) {
+			meta, err := m.Metadata()
+			if err != nil {
+				e.log.Printf("message without metadata: %v", err)
+				_ = m.Term()
+				return
+			}
+			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
+			defer e.waking.received(ref)
+			// The sender's signature binds the subject the message was stored under, so classify checks it against the
+			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
+			from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
+			if !ok {
+				e.dropped.Add(1)
+				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
+				_ = m.Ack()
+				return
+			}
+			var key string
+			if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
+				key = h.User + "\x00" + h.Nonce
+			}
+			replyTo, via := senderMarks(m.Headers(), trust, h)
+			if v, err := e.viaAllowed(via); err != nil {
+				e.log.Printf("#%s: relay declaration not honoured: %v", FormatMsgRef(ref), err)
+				via = v
+			}
+			p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: ref.Seq, Stream: stream, From: from, Trust: trust,
+				At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
+				Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
+				Kind:   kind.Of(m.Headers().Get(KindHeader))}}
+			e.relayInboundRef(ref, from, trust, via)
+			e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
+			select {
+			case queue <- p:
+			case <-quit:
+			}
 		}
 	}
-	cc, err := cons.Consume(handler, jetstream.PullMaxMessages(100))
-	if err != nil {
-		close(quit)
-		<-workerDone
-		return nil, fmt.Errorf("mash: consume: %w", err)
+	var ccs []jetstream.ConsumeContext
+	stopAll := func() {
+		for _, cc := range ccs {
+			cc.Stop()
+		}
+		for _, cc := range ccs {
+			select {
+			case <-cc.Closed():
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+	for _, src := range srcs {
+		cc, err := src.cons.Consume(handler(src.ref), jetstream.PullMaxMessages(100))
+		if err != nil {
+			stopAll()
+			close(quit)
+			<-workerDone
+			return nil, fmt.Errorf("mash: consume: %w", err)
+		}
+		ccs = append(ccs, cc)
 	}
 	return func() {
-		cc.Stop()
-		select {
-		case <-cc.Closed():
-		case <-time.After(5 * time.Second):
-		}
+		stopAll()
 		close(quit)
 		<-workerDone
 	}, nil
 }
 
 // deliverLoop is the single writer of channel events (see consume).
-func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-chan struct{}, done chan<- struct{}, ackFloor func() (uint64, bool)) {
+func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-chan struct{}, done chan<- struct{}, ackFloors map[string]func() (uint64, bool)) {
 	defer close(done)
 	settle := time.Duration(e.cfg.SettleMS) * time.Millisecond
 	seen := newSeenSet(e.dupWindow()) // signed mail already shown, see seenSet
-	seen.ackFloor = ackFloor
+	seen.ackFloors = ackFloors
 	h := &held{msgs: map[spool.Ref]pending{}, at: map[spool.Ref]time.Time{}, rung: map[spool.Ref]bool{}, fails: map[spool.Ref]int{}}
 	tick := time.NewTicker(SpoolCheck)
 	defer tick.Stop()
@@ -785,50 +849,109 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
 }
 
-// Read returns message seq from this endpoint's own inbox.
+// streamOf is the stream of this endpoint's inbox that refs of the given ref-stream live in, with its info as of now: the
+// primary one is what the first wave of a one-shot client read (e.inbox), the legacy one is read now. A legacy ref on
+// an endpoint without that stream is ErrNoLegacyStream.
+func (e *Endpoint) streamOf(ctx context.Context, ref string) (jetstream.Stream, error) {
+	switch ref {
+	case "":
+		return e.inbox(ctx)
+	case LegacyStream:
+		if !e.hasLegacyStream() {
+			return nil, fmt.Errorf("mash: %w", ErrNoLegacyStream)
+		}
+		s, err := e.js.Stream(ctx, sap.InboxStream(e.legacyKey))
+		if err != nil {
+			return nil, fmt.Errorf("mash: legacy inbox: %w", err)
+		}
+		return s, nil
+	}
+	return nil, fmt.Errorf("mash: no stream %q on this endpoint", ref)
+}
+
+// Read returns message seq from this endpoint's own (primary) inbox.
 func (e *Endpoint) Read(ctx context.Context, seq uint64) (render.Mail, error) {
-	s, err := e.inbox(ctx)
+	return e.ReadRef(ctx, MsgRef{Seq: seq})
+}
+
+// ReadRef returns the message r names: of the endpoint's own inbox, or (r.Stream == LegacyStream) of the legacy inbox
+// stream it reads during the transition. The mail carries its stream, so it is shown with its qualified number.
+func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
+	s, err := e.streamOf(ctx, r.Stream)
 	if err != nil {
 		return render.Mail{}, err
 	}
-	raw, err := s.GetMsg(ctx, seq)
+	raw, err := s.GetMsg(ctx, r.Seq)
 	if err != nil {
-		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", seq, e.key)
+		if r.Stream == LegacyStream {
+			return render.Mail{}, fmt.Errorf("mash: no message #%s in %s's legacy inbox", FormatMsgRef(r), e.legacyKey)
+		}
+		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", r.Seq, e.key)
 	}
 	if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
 		return render.Mail{}, err
 	}
 	m, ok := e.toMail(raw)
+	m.Stream = r.Stream
 	if !ok {
-		return m, fmt.Errorf("mash: message #%d has a %s sender header and is not shown", seq, m.Trust)
+		return m, fmt.Errorf("mash: message #%s has a %s sender header and is not shown", FormatMsgRef(r), m.Trust)
 	}
 	return m, nil
 }
 
 // Inbox returns up to limit of the most recent messages in this endpoint's
-// inbox, oldest first. Forged mail is skipped.
+// inbox, oldest first. Forged mail is skipped. An endpoint that also reads a legacy stream lists both, merged by
+// store time (ties by stream, then sequence), each with its own number.
 func (e *Endpoint) Inbox(ctx context.Context, limit int) ([]render.Mail, error) {
-	s, err := e.inbox(ctx)
-	if err != nil {
-		return nil, err
+	var out []render.Mail
+	for _, src := range e.sources() {
+		s, err := e.streamOf(ctx, src.ref)
+		if err != nil {
+			return nil, err
+		}
+		info := s.CachedInfo()
+		ms, err := e.collectStream(ctx, src.ref, s.GetMsg, seqsDown(info.State.LastSeq, info.State.FirstSeq), limit)
+		out = append(out, ms...)
+		if err != nil {
+			sortMail(out)
+			return out, err
+		}
 	}
-	info := s.CachedInfo()
-	out, err := e.collect(ctx, s.GetMsg, seqsDown(info.State.LastSeq, info.State.FirstSeq), limit)
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
-	return out, err
+	sortMail(out)
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+// sortMail orders mail by store time, then stream (primary first), then sequence.
+func sortMail(ms []render.Mail) {
+	sort.SliceStable(ms, func(i, j int) bool {
+		a, b := ms[i], ms[j]
+		if !a.At.Equal(b.At) {
+			return a.At.Before(b.At)
+		}
+		return refOf(a).Less(refOf(b))
+	})
 }
 
 // InboxAfter returns up to limit of the messages after seq in this endpoint's
-// inbox, oldest first: a reader pages forward by passing the last seq it got,
+// own (primary) inbox, oldest first: a reader pages forward by passing the last seq it got,
 // which the newest-first window of Inbox cannot do once it has fallen behind.
 // Forged mail is skipped.
 func (e *Endpoint) InboxAfter(ctx context.Context, after uint64, limit int) ([]render.Mail, error) {
-	s, err := e.inbox(ctx)
+	return e.InboxAfterRef(ctx, MsgRef{Seq: after}, limit)
+}
+
+// InboxAfterRef is InboxAfter for a message of either stream: it lists the messages after after in after's own
+// stream (a page forward is per stream, because two streams' numbers are not one sequence).
+func (e *Endpoint) InboxAfterRef(ctx context.Context, after MsgRef, limit int) ([]render.Mail, error) {
+	s, err := e.streamOf(ctx, after.Stream)
 	if err != nil {
 		return nil, err
 	}
 	info := s.CachedInfo()
-	return e.collect(ctx, s.GetMsg, seqsUp(max(after+1, info.State.FirstSeq), info.State.LastSeq), limit)
+	return e.collectStream(ctx, after.Stream, s.GetMsg, seqsUp(max(after.Seq+1, info.State.FirstSeq), info.State.LastSeq), limit)
 }
 
 // getMsg is jetstream.Stream.GetMsg, replaceable in tests.
@@ -839,6 +962,11 @@ type getMsg func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (
 // forged mail; any other read error ends the listing and is returned, so a
 // broken connection is not mistaken for an empty inbox.
 func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs []uint64, limit int) ([]render.Mail, error) {
+	return e.collectStream(ctx, "", get, seqs, limit)
+}
+
+// collectStream is collect for the stream of the given ref-stream: the mail it returns carries that stream.
+func (e *Endpoint) collectStream(ctx context.Context, stream string, get getMsg, seqs []uint64, limit int) ([]render.Mail, error) {
 	var out []render.Mail
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
 	// wanted, so the limit is never passed; seqs that turn out to be gone or forged leave the next batch to top up.
@@ -864,9 +992,10 @@ func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs []uint64, limit
 				continue
 			}
 			if errs[i] != nil {
-				return out, fmt.Errorf("mash: inbox: read #%d: %w", seq, errs[i])
+				return out, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Stream: stream, Seq: seq}), errs[i])
 			}
 			if m, ok := e.toMail(raws[i]); ok {
+				m.Stream = stream
 				out = append(out, m)
 			}
 		}
@@ -898,7 +1027,7 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 	seqs := make([]string, len(show))
 	for i, p := range show {
 		mails[i] = p.mail
-		seqs[i] = strconv.FormatUint(p.mail.Seq, 10)
+		seqs[i] = FormatMsgRef(refOf(p.mail))
 	}
 	text := render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes)
 	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(show)), "seqs": strings.Join(seqs, ",")}
@@ -912,7 +1041,7 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 	for _, p := range show {
 		seen.mark(p)
 		if err := p.msg.Ack(); err != nil {
-			e.log.Printf("ack #%d: %v", p.mail.Seq, err)
+			e.log.Printf("ack #%s: %v", p.mail.Num(), err)
 		}
 		e.waking.done(refOf(p.mail))
 	}

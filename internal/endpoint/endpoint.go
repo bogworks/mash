@@ -68,6 +68,12 @@ type Endpoint struct {
 	self  store.Record
 	log   *log.Logger
 
+	// alias is the legacy identity this endpoint's own directory record says it answers to, read once by Open (a
+	// three-token endpoint only) and never again for the life of the process; legacyKey is its flat key, the name of its
+	// legacy inbox stream (sap.InboxStream). Nil when there is none: the endpoint reads its own stream only.
+	alias     *sap.EndpointIdentity
+	legacyKey string
+
 	instance    string // this process's id (lease holder, SAP instance)
 	dirKV       jetstream.KeyValue
 	leaseKV     jetstream.KeyValue
@@ -405,12 +411,27 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	}
 	// The directory record was read before the lease was taken: a deprovision in between would leave this session
 	// online for an endpoint that no longer exists. Read it again now that the name is held.
-	if _, err := store.GetRecord(ctx, e.dirKV, e.key); err != nil {
+	own, err := store.GetRecord(ctx, e.dirKV, e.key)
+	if err != nil {
 		e.Close() // gives the lease back
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
 			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.key)
 		}
 		return nil, fmt.Errorf("mash: directory: %w", err)
+	}
+	// A three-token endpoint whose record carries an alias also reads the legacy inbox stream of that identity (naming
+	// plan 1.4b). The alias is taken from this read, under the endpoint's own credentials, and is fixed for the life of
+	// the process: a later change in the directory is not adopted until restart. An alias that is not a valid legacy
+	// identity fails the open (a closed failure: mail would otherwise sit unread in a stream nobody reads).
+	if !e.ident.IsLegacy() {
+		alias, ok, err := own.AliasIdentity()
+		if err != nil {
+			e.Close()
+			return nil, fmt.Errorf("mash: %s's directory record has an invalid alias: %w", e.key, err)
+		}
+		if ok {
+			e.alias, e.legacyKey = &alias, alias.Flat()
+		}
 	}
 	return e, nil
 }

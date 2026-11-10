@@ -146,7 +146,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 	if !strings.Contains(out, "[verified] at") || !strings.Contains(out, "\nanswers #9\nrelayed from c #1\n") || !strings.Contains(out, "> fwd") {
 		t.Fatalf("read #1:\n%s", out)
 	}
-	for i, args := range []string{`{"to":"a","text":"x","via":7}`, `{"to":"a","text":"x","via":-1}`, `{"to":"a","text":"x","via":"1"}`, `{"to":"a","text":"x","via":1.5}`} {
+	for i, args := range []string{`{"to":"a","text":"x","via":7}`, `{"to":"a","text":"x","via":-1}`, `{"to":"a","text":"x","via":"L1"}`, `{"to":"a","text":"x","via":1.5}`} {
 		if r := s.call(t, 31+i, "send", args); r["isError"] != true {
 			t.Fatalf("%s: not an error: %v", args, resultText(r))
 		}

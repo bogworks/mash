@@ -15,13 +15,12 @@ import (
 // not an identity. It is the same type the spool keys by.
 //
 // What the model sees: the endpoint's own (primary) stream, Stream == "", is shown and typed as a bare number, #5.
-// A message of the legacy stream is shown and typed with an L, #L5 (display is naming plan 1.4b; until then nothing
-// produces it).
+// A message of the legacy stream is shown and typed with an L, #L5 (naming plan 1.4b).
 type MsgRef = spool.Ref
 
 // LegacyStream is the Stream of a message in the legacy inbox stream, which an endpoint reads during the transition
 // to a new identity.
-const LegacyStream = "legacy"
+const LegacyStream = render.LegacyStream
 
 // legacyPrefix is the letter that qualifies a legacy-stream number in text: #L5.
 const legacyPrefix = "L"
@@ -34,16 +33,7 @@ func refOf(m render.Mail) MsgRef { return MsgRef{Stream: m.Stream, Seq: m.Seq} }
 
 // FormatMsgRef is the text of a message number: "5" for the primary stream, "L5" for the legacy stream. A ref of any
 // other stream has no short form and is written "<stream>:<seq>", for a log line.
-func FormatMsgRef(r MsgRef) string {
-	n := strconv.FormatUint(r.Seq, 10)
-	switch r.Stream {
-	case "":
-		return n
-	case LegacyStream:
-		return legacyPrefix + n
-	}
-	return r.Stream + ":" + n
-}
+func FormatMsgRef(r MsgRef) string { return render.Num(r.Stream, r.Seq) }
 
 // ParseMsgRef reads a message number as the model types it: "5" or "#5" (the primary stream), "L5" or "#L5" (the
 // legacy stream). It does not know which streams an endpoint has: Endpoint.ResolveRef does.
@@ -63,9 +53,9 @@ func ParseMsgRef(s string) (MsgRef, error) {
 	return MsgRef{Stream: stream, Seq: seq}, nil
 }
 
-// hasLegacyStream reports whether this endpoint reads a legacy stream beside its own. None does yet (naming plan 1.4b
-// adds it).
-func (e *Endpoint) hasLegacyStream() bool { return false }
+// hasLegacyStream reports whether this endpoint reads a legacy stream beside its own: exactly when Open found an
+// alias on its own directory record (naming plan 1.4b).
+func (e *Endpoint) hasLegacyStream() bool { return e.alias != nil }
 
 // ResolveRef is ParseMsgRef for this endpoint: a legacy-stream number is an error unless the endpoint has that stream.
 func (e *Endpoint) ResolveRef(s string) (MsgRef, error) {

@@ -89,6 +89,17 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	if err := s.BindStream("", info.Config.Name+"@"+info.Created.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
+	if e.alias != nil {
+		// The legacy stream is bound on its own: its sequences are not the primary stream's, and it too can be recreated.
+		lst, err := e.js.Stream(ctx, sap.InboxStream(e.legacyKey))
+		if err != nil {
+			return fmt.Errorf("mash: legacy inbox: %w", err)
+		}
+		linfo := lst.CachedInfo()
+		if err := s.BindStream(LegacyStream, linfo.Config.Name+"@"+linfo.Created.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
 	// The previous session's waiting files are stale: the hook timestamp resets with this serve, so a later hook
 	// would print them again while NATS redelivers the unacked mail. Clear them; the redelivery is spooled again or
 	// channel-delivered, never both (codex M1 on #21).
@@ -177,7 +188,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			if err := e.spool.Put(EntryOf(p.mail)); err != nil {
 				if !h.failed {
 					h.failed = true
-					e.log.Printf("spool #%d: %v (retried, then delivered by the channel)", seq.Seq, err)
+					e.log.Printf("spool #%s: %v (retried, then delivered by the channel)", FormatMsgRef(seq), err)
 				}
 				if h.fails[seq]++; h.fails[seq] >= spoolTries {
 					delete(h.fails, seq)
@@ -356,7 +367,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	ids := make([]string, len(seqs))
 	for i, seq := range seqs {
 		mails[i] = h.msgs[seq].mail
-		ids[i] = strconv.FormatUint(seq.Seq, 10)
+		ids[i] = FormatMsgRef(seq)
 	}
 	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
 	if hl == HooklessProven {
@@ -451,7 +462,7 @@ func (e *Endpoint) ack(p pending) {
 	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
 	if err := p.msg.DoubleAck(ctx); err != nil {
-		e.log.Printf("ack #%d: %v", p.mail.Seq, err)
+		e.log.Printf("ack #%s: %v", p.mail.Num(), err)
 		return // the tombstone stays: a redelivery is acked then
 	}
 	if err := e.spool.Acked(refOf(p.mail)); err != nil {
@@ -483,7 +494,7 @@ func (e *Endpoint) healHeld(h *held) {
 			continue
 		}
 		if err := e.spool.Put(EntryOf(h.msgs[seq].mail)); err != nil {
-			e.log.Printf("spool #%d: rewrite: %v", seq.Seq, err)
+			e.log.Printf("spool #%s: rewrite: %v", FormatMsgRef(seq), err)
 		}
 	}
 }

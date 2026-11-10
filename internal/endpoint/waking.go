@@ -40,23 +40,35 @@ var (
 )
 
 // wakingTracker is the in-memory unread set (a nil one ignores everything), safe for the consumer's callback and the delivery worker.
+//
+// An endpoint reads one stream (the primary, ref stream "") or two (the primary and the legacy stream, naming plan 1.4b).
+// The startup backlog, its bound and the server probe are kept per stream, and the count is known only when every
+// stream's backlog is accounted for.
 type wakingTracker struct {
 	mu       sync.Mutex
-	unread   map[spool.Ref]bool // (stream, sequence) -> wakes
-	count    int                // the number of waking entries in unread
-	expect   int                // messages the consumer held unacked or pending when it started
-	last     map[string]uint64  // per stream: its last sequence when the consumer started; the startup messages are at or below it. start sets the primary stream's ("")
-	haveLast bool               // last was read; without it no delivery counts toward the backlog
-	seen     map[spool.Ref]bool // distinct startup messages (sequence <= that stream's last) the handler has received
-	started  bool               // the consumer has started
-	ready    bool               // the startup backlog is accounted for: the count is known
-	probe    wakingProbe        // reads the server's view at a lease refresh; nil before the consumer starts
-	notify   chan struct{}      // a change in the count (or readiness) wants a lease write; capacity 1
+	unread   map[spool.Ref]bool     // (stream, sequence) -> wakes
+	count    int                    // the number of waking entries in unread
+	expect   map[string]int         // per stream: messages its consumer held unacked or pending when it started
+	last     map[string]uint64      // per stream: its last sequence when the consumer started; the startup messages are at or below it
+	haveLast bool                   // last was read; without it no delivery counts toward the backlog
+	seen     map[spool.Ref]bool     // distinct startup messages (sequence <= that stream's last) the handler has received
+	seenN    map[string]int         // per stream: the number of seen
+	sReady   map[string]bool        // per stream: its startup backlog is accounted for
+	started  bool                   // the consumers have started
+	ready    bool                   // every stream's startup backlog is accounted for: the count is known
+	probes   map[string]wakingProbe // per stream: reads the server's view at a lease refresh; nil before the consumers start
+	notify   chan struct{}          // a change in the count (or readiness) wants a lease write; capacity 1
 }
 
-// wakingProbe is what the server says: the consumer's messages not yet delivered and delivered but unacked, and the
-// stream's first sequence.
+// wakingProbe is what the server says about one stream: its consumer's messages not yet delivered and delivered but
+// unacked, and the stream's first sequence.
 type wakingProbe func(ctx context.Context) (pending uint64, ackPending int, firstSeq uint64, err error)
+
+// streamStart is one stream's state when its consumer started.
+type streamStart struct {
+	Backlog int    // messages the consumer held unacked or pending
+	Last    uint64 // the stream's last sequence (delivered + pending)
+}
 
 func newWakingTracker() *wakingTracker {
 	return &wakingTracker{unread: map[spool.Ref]bool{}, notify: make(chan struct{}, 1)}
@@ -69,23 +81,43 @@ func (w *wakingTracker) poke() {
 	}
 }
 
-// start records the consumer's backlog size and the stream's last sequence when it started (haveLast false if that read
-// failed: then only the server's rule makes the count known). Zero is known at once.
+// start is startStreams for the primary stream alone.
 func (w *wakingTracker) start(backlog int, last uint64, haveLast bool, probe wakingProbe) {
+	w.startStreams(map[string]streamStart{"": {Backlog: backlog, Last: last}}, haveLast, map[string]wakingProbe{"": probe})
+}
+
+// startStreams records each stream's consumer backlog size and the stream's last sequence when it started (haveLast
+// false if that read failed: then only the server's rule makes the count known). Zero is known at once. probes holds
+// one probe per stream (a missing or nil one is never asked).
+func (w *wakingTracker) startStreams(streams map[string]streamStart, haveLast bool, probes map[string]wakingProbe) {
 	if w == nil {
 		return
 	}
 	w.mu.Lock()
-	w.expect, w.last, w.haveLast, w.started, w.probe = backlog, map[string]uint64{"": last}, haveLast, true, probe
-	w.seen = map[spool.Ref]bool{}
-	w.ready = w.expect <= 0
+	w.expect, w.last, w.sReady = map[string]int{}, map[string]uint64{}, map[string]bool{}
+	for name, st := range streams {
+		w.expect[name], w.last[name], w.sReady[name] = st.Backlog, st.Last, st.Backlog <= 0
+	}
+	w.haveLast, w.started, w.probes = haveLast, true, probes
+	w.seen, w.seenN = map[spool.Ref]bool{}, map[string]int{}
+	w.ready = w.allReady()
 	w.mu.Unlock()
 	w.poke()
 }
 
+// allReady reports whether every stream's startup backlog is accounted for. Hold w.mu.
+func (w *wakingTracker) allReady() bool {
+	for _, ok := range w.sReady {
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // received counts a message the handler saw (by stream sequence), whether or not it is kept (forged mail is acked at
-// once), toward the startup backlog: only a sequence at or below the stream's last at start counts, and each once, so a
-// redelivery, or a message sent after start, never stands in for one still outstanding.
+// once), toward its stream's startup backlog: only a sequence at or below the stream's last at start counts, and each
+// once, so a redelivery, or a message sent after start, never stands in for one still outstanding.
 func (w *wakingTracker) received(seq spool.Ref) {
 	if w == nil {
 		return
@@ -93,10 +125,14 @@ func (w *wakingTracker) received(seq spool.Ref) {
 	w.mu.Lock()
 	flip := false
 	last, hasLast := w.last[seq.Stream]
-	if w.started && w.haveLast && hasLast && !w.ready && seq.Seq <= last && !w.seen[seq] {
+	if w.started && w.haveLast && hasLast && !w.sReady[seq.Stream] && seq.Seq <= last && !w.seen[seq] {
 		w.seen[seq] = true
-		if len(w.seen) >= w.expect {
-			w.ready, flip = true, true
+		w.seenN[seq.Stream]++
+		if w.seenN[seq.Stream] >= w.expect[seq.Stream] {
+			w.sReady[seq.Stream] = true
+			if !w.ready && w.allReady() {
+				w.ready, flip = true, true
+			}
 		}
 	}
 	w.mu.Unlock()
@@ -164,29 +200,41 @@ func (w *wakingTracker) done(seq spool.Ref) {
 	}
 }
 
-// reconcile asks the server (no lock held across the call) and applies it: tracked sequences below the stream's first
-// are gone (evicted before they were acked) and are dropped; and the startup backlog is accounted for once nothing is
-// pending and no more is unacked than the handler holds. A failed probe changes nothing. It runs at each lease
-// refresh, not at start (start already has the consumer's info, and startup round trips are budgeted).
+// reconcile asks the server about each stream (no lock held across the calls) and applies it: tracked sequences
+// below a stream's first are gone (evicted before they were acked) and are dropped; and a stream's startup backlog is
+// accounted for once nothing is pending and no more is unacked than the handler holds of that stream. A failed probe
+// changes nothing for its stream. It runs at each lease refresh, not at start (start already has the consumer's info,
+// and startup round trips are budgeted).
 func (w *wakingTracker) reconcile(ctx context.Context) {
 	if w == nil {
 		return
 	}
 	w.mu.Lock()
-	probe := w.probe
-	w.mu.Unlock()
-	if probe == nil {
-		return
+	probes := make(map[string]wakingProbe, len(w.probes))
+	for name, p := range w.probes {
+		if p != nil {
+			probes[name] = p
+		}
 	}
-	pending, ackPending, first, err := probe(ctx)
-	if err != nil {
-		return
+	w.mu.Unlock()
+	type answer struct {
+		pending    uint64
+		ackPending int
+		first      uint64
+	}
+	got := map[string]answer{}
+	for name, probe := range probes {
+		pending, ackPending, first, err := probe(ctx)
+		if err != nil {
+			continue
+		}
+		got[name] = answer{pending, ackPending, first}
 	}
 	w.mu.Lock()
 	changed := false
 	for seq, wakes := range w.unread {
-		// first is the primary stream's first sequence: another stream's refs are not judged by it.
-		if seq.Stream == "" && seq.Seq < first {
+		// first is its own stream's first sequence: another stream's refs are not judged by it.
+		if a, ok := got[seq.Stream]; ok && seq.Seq < a.first {
 			delete(w.unread, seq)
 			if wakes {
 				w.count--
@@ -194,8 +242,19 @@ func (w *wakingTracker) reconcile(ctx context.Context) {
 			}
 		}
 	}
-	if !w.ready && w.started && pending == 0 && ackPending <= len(w.unread) {
-		w.ready, changed = true, true
+	held := map[string]int{}
+	for seq := range w.unread {
+		held[seq.Stream]++
+	}
+	if w.started {
+		for name, a := range got {
+			if !w.sReady[name] && a.pending == 0 && a.ackPending <= held[name] {
+				w.sReady[name] = true
+			}
+		}
+		if !w.ready && w.allReady() {
+			w.ready, changed = true, true
+		}
 	}
 	w.mu.Unlock()
 	if changed {

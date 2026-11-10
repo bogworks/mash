@@ -327,6 +327,36 @@ And as a hook digest (`HookBatch`): identical except the second line reads
 
 The channel wake line for the full batch of five is the first line of the full-batch example above (path F11).
 
+## N. Two-stream text (naming plan 1.4b): the qualified number and the window's errors
+
+A three-token endpoint whose own directory record carries an alias reads two inboxes while the window lasts: its own
+stream and the legacy stream of the alias. Its own stream's messages keep the bare number (`#5`); a legacy-stream
+message shows `L` before the number (`#L5`). Everything in section I that prints a message number prints it through one
+formatter (`render.Num`, also `endpoint.FormatMsgRef`), so the rows I1, I7, I13, I14 and I15 and the batch and digest
+rows print `#L5` for a legacy message and are byte-for-byte what they were for every other message. A legacy-only
+endpoint (no `agent_token`) never has a legacy stream, so it sees today's text: the golden test
+`TestGoldenLegacyOnlyText` fixes the full message, the line, the batch, the digest, the redelivered note, the channel
+event's `seqs` and the wake summary's `seqs`. `Read`/`inbox` text is the same. "Reviewer's line" is left empty.
+
+| ID | Source | Trigger | String (verbatim) | Scrub-list word or role? | Reviewer's line |
+|---|---|---|---|---|---|
+| N1 | render.go (`Num`, used by `One`, `Line`, `batch`, `redeliveredNote`) | a message of the legacy stream, in full, as an inbox line, as a digest line or in the redelivered note | the number is `L<seq>` where I1, I7, I13 and I14 print `<seq>`: `--- #L5 from %s [%s] at %s\n`, `#L5\tfrom %s [%s]\t...`, `note: (#L5 re-delivered after an interrupted hook: ...)\n` | No. | |
+| N2 | mail.go (`deliverBatch`), hook.go (`wakeIfIdle`) | channel event and wake summary that include a legacy message | meta `seqs` lists the numbers as shown, joined by commas: `5,L5`; the summary line is F11's, unchanged | No. | |
+| N3 | cmd/mash/serve.go (`readDescription`) | `tools/list` for an endpoint that has an `agent_token` (a legacy-only endpoint's J4 is unchanged) | `Read one message from your inbox by #seq. A message of your legacy inbox (shown as #L5) is read with seq "L5".` | No. | |
+| N4 | cmd/mash/serve.go (`readSchema`) | the same | `seq` is an integer or a string; its description: `message #seq: 5, or "L5" for a message of your legacy inbox` | No. | |
+| N5 | cmd/mash/serve.go (`msgNumber.UnmarshalJSON`) | `read` called with a `seq` that is neither an integer nor a string | `seq must be a message number such as 5 or "L5"` | No. | |
+| N6 | msgref.go (`ParseMsgRef`) | `read` with a `seq` that is not a number (`5`, `#5`, `L5`, `#L5`) | `mash: %q is not a message number (a number like 5, or L5 for a legacy message)` | No. | |
+| N7 | msgref.go (`ErrNoLegacyStream`, `ResolveRef`), mail.go (`streamOf`) | `read` of an L number on an endpoint that reads no legacy stream | `mash: L5: no legacy stream on this endpoint` (from `ResolveRef`); `mash: no legacy stream on this endpoint` (from `ReadRef`) | No. | |
+| N8 | mail.go (`ReadRef`) | `read` of a legacy number that is not in the legacy stream | `mash: no message #L5 in %s's legacy inbox` (the legacy endpoint's name); the own stream's T13 is unchanged | No. | |
+| N9 | mail.go (`ReadRef`, `collectStream`) | `read` or `inbox` hitting a forged message or a failed read in a stream | `mash: message #L5 has a %s sender header and is not shown`; `mash: inbox: read #L5: %w` (the bare number for the own stream, as T12 and T14) | No. | |
+| N10 | mail.go (`streamOf`) | the legacy stream cannot be read | `mash: legacy inbox: %w` | No. | |
+| N11 | endpoint.go (`Open`) | opening a three-token endpoint whose own record's alias is not a valid legacy identity (the endpoint does not start: it fails closed); the error reaches the model as the open-time error (E1, M1f) | `mash: %s's directory record has an invalid alias: %w` | No. | |
+| N12 | mail.go (`consume`) | the legacy stream's durable consumer cannot be found at start (the endpoint does not start) | `mash: legacy inbox consumer: %w` | No. | |
+| N13 | hook.go (`SetSpool`) | the legacy stream cannot be read when the spool is bound | `mash: legacy inbox: %w` | No. | |
+| N14 | endpoint log lines (stderr, not model-facing, listed because their number goes through the same formatter): `ack #%s`, `spool #%s`, `read #%s`, `dropped #%s`, `trace relay: mail #%s ...` | any of those events for a legacy message | the same text with `L5` for `5` | No. | |
+| N15 | cmd/mash/serve.go (`declaredSeq`) | `send` with `in_reply_to` or `via` naming a legacy-stream message (`"L5"`, `"#L5"`); a signed declaration carries a bare number, so it cannot say which stream | `in_reply_to/via cannot name a legacy-stream message (#L5) yet` | No. | |
+| N15 | cmd/mash/hook.go | the hook cannot mark a legacy message listed or drained (stderr) | `mash hook: marking #L5 listed: %v`, `mash hook: marking #L5 drained: %v` | No. | |
+
 ## J. MCP tools: names, descriptions, parameters, results
 
 Trigger: Claude Code's `tools/list` (descriptions and parameter descriptions are shown to the model) and each
