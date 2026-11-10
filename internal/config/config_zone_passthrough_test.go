@@ -18,7 +18,7 @@ func TestOwnerUsedAsGiven(t *testing.T) {
 			// config.json only: no MASH_OWNER.
 			home := t.TempDir()
 			writeFile(t, home, `{"url":"tls://x:4222","owner":"`+owner+`","host":"some-host-x"}`)
-			c, err := Load(envOf(map[string]string{"MASH_NAME": name, "MASH_HOST": "other-host-y"}), home)
+			c, err := load(envOf(map[string]string{"MASH_NAME": name, "MASH_HOST": "other-host-y"}), home)
 			if err != nil {
 				t.Fatalf("file owner %q name %q: %v", owner, name, err)
 			}
@@ -28,7 +28,7 @@ func TestOwnerUsedAsGiven(t *testing.T) {
 			// MASH_OWNER only: no owner in the file.
 			home = t.TempDir()
 			writeFile(t, home, `{"url":"tls://x:4222"}`)
-			c, err = Load(envOf(map[string]string{"MASH_NAME": name, "MASH_OWNER": owner}), home)
+			c, err = load(envOf(map[string]string{"MASH_NAME": name, "MASH_OWNER": owner}), home)
 			if err != nil {
 				t.Fatalf("env owner %q name %q: %v", owner, name, err)
 			}
@@ -38,7 +38,7 @@ func TestOwnerUsedAsGiven(t *testing.T) {
 			// Both: the environment wins, byte for byte, and neither is merged with the other.
 			home = t.TempDir()
 			writeFile(t, home, `{"url":"tls://x:4222","owner":"from-file"}`)
-			c, err = Load(envOf(map[string]string{"MASH_NAME": name, "MASH_OWNER": owner}), home)
+			c, err = load(envOf(map[string]string{"MASH_NAME": name, "MASH_OWNER": owner}), home)
 			if err != nil || c.Owner != owner {
 				t.Fatalf("env over file: owner %q name %q: got %q %v", owner, name, c.Owner, err)
 			}
@@ -50,7 +50,7 @@ func TestOwnerUsedAsGiven(t *testing.T) {
 func TestOwnerNotDerived(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","host":"prod-host"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "prod-ops-a", "MASH_HOST": "prod-host", "MASH_ACCOUNT": "prod"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "prod-ops-a", "MASH_HOST": "prod-host", "MASH_ACCOUNT": "prod"}), home)
 	if !errors.Is(err, ErrNoOwner) {
 		t.Fatalf("got %v, want ErrNoOwner", err)
 	}
@@ -64,7 +64,7 @@ func TestOwnerValidatedNotRepaired(t *testing.T) {
 	for _, owner := range []string{"Acme", " acme", "acme ", "a_b", "a--b", "acme.prod", strings.Repeat("o", 49)} {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://x:4222"}`)
-		c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_OWNER": owner}), home)
+		c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_OWNER": owner}), home)
 		if err == nil {
 			t.Fatalf("owner %q accepted as %q", owner, c.Owner)
 		}
