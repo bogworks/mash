@@ -61,12 +61,19 @@ func PermissionsTo(owner, name string, recipients []string) jwt.Permissions {
 // itself: its heartbeat, replies, the service API, and the JetStream and KV subjects of its own inbox, the directory
 // and its lease. name may be the template {{name()}}.
 func fixedPub(owner, name string) []string {
-	subj := sap.For(owner, name)
-	inbox := sap.InboxStream(name)
+	return fixedPubKeyed(sap.For(owner, name).HB, name)
+}
+
+// fixedPubKeyed is fixedPub with the heartbeat subject and the flat key given. A legacy endpoint's flat key is its bare
+// name (fixedPub); a new-form endpoint's is agent_owner_name (NewFormPermissions). The stream is inbox-<flat>, the
+// consumer is the shared consumer name, and the lease key is <flat>.
+func fixedPubKeyed(hb, flat string) []string {
+	inbox := sap.InboxStream(flat)
 	dir := "KV_" + store.DirectoryBucket
 	lease := "KV_" + store.LeaseBucket
+	name := flat
 	return []string{
-		subj.HB,
+		hb,
 		"_INBOX.>", // replies (SAP prompt chunks, $SRV answers) go to callers' inboxes only
 		"$SRV.>",
 		"$JS.API.INFO",
