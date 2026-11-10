@@ -296,7 +296,10 @@ What F must say out loud, because the policy file's current promise is larger:
   should split the owner or, if it needs hard isolation, use D.
 - Prompt and status stay outside the fence until the maintainer rules (ADR 0055); "fence" means mail.
 - Applying a change: a key change reaches connected endpoints on an account push; a tag change needs the named users
-  re-signed, their credentials re-delivered and the endpoints reconnected. A policy counts as applied only after a live
+  re-signed, their credentials re-delivered and the endpoints reconnected. A change that narrows (adding a `deny:`
+  tag, removing an `allow:` tag) must also rotate the user's key and revoke the old one, as ADR 0067 requires, because
+  user JWTs carry no expiry and the old, wider JWT stays valid for anyone holding it; revocation must be confirmed on
+  every server before the policy counts as applied. A policy counts as applied only after a live
   check that a denied publish is refused. The existing `drift` and `apply` verification do this for zones and would be
   reused.
 - Before building: a live-server test of the one-key-with-tags variant (agent and owner as administrator-signed tags
