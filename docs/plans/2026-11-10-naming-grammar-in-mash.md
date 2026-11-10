@@ -83,6 +83,9 @@ the credential re-issue; Phase 3 is held.
      already covers fetches on both streams. No wildcard stream name, no create or delete subject. 3.2 removes the
      transition lines with the rest of the bridge; the overlap tests also assert that a new-form user cannot name any
      other inbox stream.
+     The window user also gets the legacy alias's own lease key lines, exactly the two `fixedPub` gives a legacy user
+     (`$KV.mash-leases.<legacy-name>` and `$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.<legacy-name>`), because it
+     holds the legacy lease while it reads the legacy stream; no wildcard key and no other lease key.
    - **The refusal is for new-form grants only.** The REQ-027 refusal never refuses the legacy grant the window
      needs; AT-012 expects it after the break (3.2 removes the legacy grants and aliases). Window isolation is shown
      by the overlap tests above, not by AT-012.
