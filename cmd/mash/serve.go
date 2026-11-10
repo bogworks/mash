@@ -741,6 +741,9 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 					fmt.Fprintf(&b, "\t%s %s", f.k, f.v)
 				}
 			}
+			if r.Alias != nil {
+				fmt.Fprintf(&b, "\talias %s/%s", r.Alias.Owner, r.Alias.Name)
+			}
 			lk := make([]string, 0, len(r.Labels))
 			for k := range r.Labels {
 				lk = append(lk, k)

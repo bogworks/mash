@@ -1,0 +1,1 @@
+The directory record may carry an optional `alias` (the legacy owner and name a three-token record answers to during the transition window), admission treats it as part of the identity, and `mash who --long` shows it (`who --json` has an `alias` key only for such a record). Nothing writes it yet. A reader older than this release ignores the field.

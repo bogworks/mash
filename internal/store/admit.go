@@ -22,8 +22,35 @@ import (
 // A record whose key equals id's flat key is the identity being re-admitted and is skipped, so a retried provision of
 // the same endpoint works.
 func Admit(id sap.EndpointIdentity, zone string, existing []Record) error {
+	return AdmitWithAlias(id, nil, zone, existing)
+}
+
+// AdmitWithAlias is Admit for a new-form id that also answers to the legacy identity alias (ADR 0076), or for any id
+// when alias is nil. The alias's subjects count as part of the identity. With a non-nil alias (id must be new-form,
+// alias legacy, owners different) it also refuses when
+//   - no existing unzoned legacy record has exactly the alias's owner and name: the alias names no legacy endpoint;
+//   - another new-form record already claims the same alias: one alias per legacy identity;
+//   - the alias overlaps an existing new-form identity.
+//
+// For every id, with or without an alias, it refuses an id that overlaps the alias of an existing record, unless id is
+// the legacy endpoint that alias names.
+func AdmitWithAlias(id sap.EndpointIdentity, alias *sap.EndpointIdentity, zone string, existing []Record) error {
 	if err := id.Validate(); err != nil {
 		return fmt.Errorf("mash: admit: %w", err)
+	}
+	if alias != nil {
+		if id.IsLegacy() {
+			return fmt.Errorf("mash: admit %s refused: a legacy identity cannot carry an alias", id)
+		}
+		if !alias.IsLegacy() {
+			return fmt.Errorf("mash: admit %s refused: the alias %s is not a legacy identity", id, alias)
+		}
+		if err := alias.Validate(); err != nil {
+			return fmt.Errorf("mash: admit %s refused: alias: %w", id, err)
+		}
+		if alias.Owner == id.Owner {
+			return fmt.Errorf("mash: admit %s refused: alias owner equals the identity's owner (%q): the legacy wildcard filter would reach it", id, id.Owner)
+		}
 	}
 	if !id.IsLegacy() {
 		zone = ""
@@ -52,6 +79,38 @@ func Admit(id sap.EndpointIdentity, zone string, existing []Record) error {
 		}
 		if id.IsLegacy() && !other.IsLegacy() && id.Owner == other.Owner {
 			return fmt.Errorf("mash: admit %s refused: owner equals a new-form owner (%q, existing endpoint %s): this legacy wildcard filter would reach it", id, id.Owner, key)
+		}
+		// The alias of an existing record is part of that record's identity.
+		oa, has, err := r.AliasIdentity()
+		if err != nil {
+			return fmt.Errorf("mash: admit %s refused: unmodellable alias on record %s: %w", id, key, err)
+		}
+		if has {
+			if other.IsLegacy() {
+				return fmt.Errorf("mash: admit %s refused: record %s is legacy and carries an alias", id, key)
+			}
+			if alias != nil && alias.Owner == oa.Owner && alias.Name == oa.Name {
+				return fmt.Errorf("mash: admit %s refused: alias %s/%s is already claimed by %s", id, alias.Owner, alias.Name, key)
+			}
+			isNamed := id.IsLegacy() && id.Owner == oa.Owner && id.Name == oa.Name
+			if !isNamed && sap.Overlaps(id, oa) {
+				return fmt.Errorf("mash: admit %s refused: overlap with the alias %s/%s of existing endpoint %s", id, oa.Owner, oa.Name, key)
+			}
+		}
+		if alias != nil && !other.IsLegacy() && sap.Overlaps(*alias, other) {
+			return fmt.Errorf("mash: admit %s refused: its alias %s/%s overlaps existing endpoint %s (%s)", id, alias.Owner, alias.Name, key, other)
+		}
+	}
+	if alias != nil {
+		named := false
+		for _, r := range existing {
+			if r.Zone == "" && r.Name == alias.Name && r.Owner == alias.Owner && r.Key() == r.Name {
+				named = true
+				break
+			}
+		}
+		if !named {
+			return fmt.Errorf("mash: admit %s refused: the alias names no legacy endpoint (%s/%s): an unzoned legacy record with that owner and name must exist", id, alias.Owner, alias.Name)
 		}
 	}
 	return nil
