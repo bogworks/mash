@@ -65,6 +65,7 @@ type auditDeliver struct {
 	DeliveredLast        string `json:"delivered_last,omitempty"` // RFC 3339, UTC; absent when the server reports none
 	AckFloorLast         string `json:"ack_floor_last,omitempty"`
 	NumRedelivered       int    `json:"num_redelivered"`
+	Created              string `json:"created,omitempty"` // when the consumer was created, RFC 3339 UTC; absent when the server reports none
 }
 
 type auditInbox struct {
@@ -74,6 +75,7 @@ type auditInbox struct {
 	FirstSeq  uint64       `json:"first_seq"`
 	LastSeq   uint64       `json:"last_seq"`
 	LastTime  string       `json:"last_time,omitempty"` // when the stream last stored a message, RFC 3339 UTC
+	Created   string       `json:"created,omitempty"`   // when the stream was created, RFC 3339 UTC; absent when the server reports none
 	Subjects  []string     `json:"subjects"`
 	Suspended bool         `json:"suspended"`
 	Deliver   auditDeliver `json:"deliver"`
@@ -168,7 +170,7 @@ func (r auditReport) findings() int {
 	s := r.Summary
 	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
 	if r.Compare != nil {
-		n += r.Compare.Moved + r.Compare.Vanished
+		n += r.Compare.Moved + r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown
 	}
 	return n
 }
@@ -180,13 +182,14 @@ func toAuditInbox(name string, st *admin.AuditStream) auditInbox {
 	}
 	in.Present, in.Msgs, in.FirstSeq, in.LastSeq, in.Suspended = true, st.Msgs, st.FirstSeq, st.LastSeq, st.Suspended
 	in.LastTime = auditTime(&st.LastTime)
+	in.Created = auditTime(&st.Created)
 	in.Subjects = append(in.Subjects, st.Subjects...)
 	if st.Deliver != nil {
 		d := st.Deliver
 		in.Deliver = auditDeliver{Present: true, Pending: d.Pending, AckPending: d.AckPending, DeliverPolicy: d.DeliverPolicy,
 			StartSeq: d.StartSeq, StartTime: d.StartTime, FilterSubjects: append([]string{}, d.FilterSubjects...),
 			AckFloor: d.AckFloor, Delivered: d.Delivered, DeliveredConsumerSeq: d.DeliveredConsumer, AckFloorConsumerSeq: d.AckFloorConsumer,
-			DeliveredLast: auditTime(d.DeliveredLast), AckFloorLast: auditTime(d.AckFloorLast), NumRedelivered: d.NumRedelivered}
+			DeliveredLast: auditTime(d.DeliveredLast), AckFloorLast: auditTime(d.AckFloorLast), NumRedelivered: d.NumRedelivered, Created: auditTime(&d.Created)}
 	}
 	return in
 }
@@ -523,12 +526,15 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if o.strict && rep.findings() > 0 {
 		s := rep.Summary
-		moved, vanished := 0, 0
+		moved, vanished, recreated, unknown := 0, 0, 0, 0
 		if rep.Compare != nil {
-			moved, vanished = rep.Compare.Moved, rep.Compare.Vanished
+			moved, vanished, recreated, unknown = rep.Compare.Moved, rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown
 		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved and %d vanished since the earlier audit\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished)
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit\n",
+			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated)
+		if unknown > 0 {
+			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d legacy stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
+		}
 		return 1
 	}
 	return 0

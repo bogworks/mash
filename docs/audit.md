@@ -160,7 +160,27 @@ A legacy inbox that was present in the earlier audit and is absent now has eithe
 
 A stream that is present now and was absent before is not a vanished one; its record shows in `identities_added`.
 
-With `--strict`, `--compare` fails (exit 1) when `moved` or `vanished` is above 0, and on every other finding: any
+### Recreated streams
+
+Equal sequences do not prove a stream is the same stream: a legacy stream deleted and made again can be refilled to
+the same `last_seq`, `delivered` and `ack_floor`. So each inbox in the audit JSON carries `created`, when the server
+created the stream, and its `deliver` object carries `created`, when the server created the consumer. Both are RFC 3339
+in UTC with the nanoseconds the server gives, and are left out only when the server gives a zero time.
+
+When a stream is present in both audits and its `created`, or its `deliver` consumer's `created`, differs, the
+`streams` entry has `recreated: true` (with `created_before`, `created_now`, `deliver_created_before` and
+`deliver_created_now` shown), `compare.recreated` counts it, the text form prints `RECREATED`, and `--strict --compare`
+exits 1 whatever the sequences say.
+
+An earlier audit made before these fields existed cannot prove anything. When a creation time is missing in either
+audit for a stream present in both, the entry has `creation_unknown: true`, `compare.creation_unknown` counts it and the
+text form prints `UNKNOWN`. Without `--strict` it is only shown. With `--strict` it fails (exit 1) and standard error
+says the earlier audit lacks creation times and must be regenerated: run `mashctl audit --json` again with this
+mashctl, and compare a later audit against that file.
+
+The `created` fields are additive, so the report `version` stays 1.
+
+With `--strict`, `--compare` fails (exit 1) when `moved`, `vanished`, `recreated` or `creation_unknown` is above 0, and on every other finding: any
 orphan, any alias whose legacy inbox is not drained, any problem.
 
 ## What it cannot see
@@ -176,7 +196,7 @@ What it can show is that a legacy stream stored a message (`last_seq`, `last_tim
 `delivered_last`) between two audits. An old-form sender writing to a name with no stream is invisible to it.
 
 So "two clean audits a day apart" means exactly this: both runs were `--strict` clean (exit 0), and `--compare` of the
-second against the first shows no legacy movement (`moved` 0 and `vanished` 0, with `--strict` the second exits 0). That is evidence
+second against the first shows no legacy movement (`moved`, `vanished`, `recreated` and `creation_unknown` all 0, with `--strict` the second exits 0). That is evidence
 that no stream stored or delivered mail in that day. It is not evidence about publishes or connections the audit
 cannot see.
 
@@ -185,7 +205,7 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, or a legacy inbox that vanished. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks creation times. Standard error says what was counted |
 | 2 | a usage error |
 | 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON or another version. Nothing is printed on standard output |
 

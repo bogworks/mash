@@ -28,6 +28,7 @@
         "first_seq": 1,
         "last_seq": 1,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.acme.team1.ops1"
         ],
@@ -43,7 +44,8 @@
           "delivered": 0,
           "delivered_consumer_seq": 0,
           "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       }
     },
@@ -65,6 +67,7 @@
         "first_seq": 1,
         "last_seq": 3,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.*.o.alpha"
         ],
@@ -80,7 +83,8 @@
           "delivered": 0,
           "delivered_consumer_seq": 0,
           "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       }
     },
@@ -102,6 +106,7 @@
         "first_seq": 1,
         "last_seq": 2,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.claude.team2.beta"
         ],
@@ -117,7 +122,8 @@
           "delivered": 0,
           "delivered_consumer_seq": 0,
           "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       }
     },
@@ -139,6 +145,7 @@
         "first_seq": 1,
         "last_seq": 2,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.*.o.ops1"
         ],
@@ -155,7 +162,8 @@
           "delivered_consumer_seq": 1,
           "ack_floor_consumer_seq": 0,
           "delivered_last": "<TIME>",
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       }
     }
@@ -175,6 +183,7 @@
         "first_seq": 1,
         "last_seq": 2,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.*.o.ops1"
         ],
@@ -191,7 +200,8 @@
           "delivered_consumer_seq": 1,
           "ack_floor_consumer_seq": 0,
           "delivered_last": "<TIME>",
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       },
       "new_inbox": {
@@ -201,6 +211,7 @@
         "first_seq": 1,
         "last_seq": 1,
         "last_time": "<TIME>",
+        "created": "<TIME>",
         "subjects": [
           "agents.mail.acme.team1.ops1"
         ],
@@ -216,7 +227,8 @@
           "delivered": 0,
           "delivered_consumer_seq": 0,
           "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0
+          "num_redelivered": 0,
+          "created": "<TIME>"
         }
       },
       "drained": false,

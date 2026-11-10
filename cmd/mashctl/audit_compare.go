@@ -34,6 +34,17 @@ type auditCompareStream struct {
 	// The *_before fields keep what the earlier audit showed.
 	Vanished bool `json:"vanished"`
 	Retired  bool `json:"retired"`
+
+	// Creation times of the stream and of its `deliver` consumer, as the earlier and the current audit show them.
+	// Recreated: present in both and a creation time differs, so the stream (or its consumer) was deleted and made
+	// again and equal sequences prove nothing. CreationUnknown: present in both and a creation time is missing in
+	// either audit (an earlier audit made before `created` existed), so recreation can be neither shown nor ruled out.
+	CreatedBefore        string `json:"created_before,omitempty"`
+	CreatedNow           string `json:"created_now,omitempty"`
+	DeliverCreatedBefore string `json:"deliver_created_before,omitempty"`
+	DeliverCreatedNow    string `json:"deliver_created_now,omitempty"`
+	Recreated            bool   `json:"recreated"`
+	CreationUnknown      bool   `json:"creation_unknown"`
 }
 
 // auditCompare is the current audit set against an earlier one (--compare).
@@ -44,6 +55,8 @@ type auditCompare struct {
 	Added            []string             `json:"identities_added"`   // record keys absent before and present now
 	Moved            int                  `json:"moved"`              // legacy streams whose last_seq or delivered sequence moved
 	Vanished         int                  `json:"vanished"`           // legacy inboxes present before, absent now, not retired: fails --strict
+	Recreated        int                  `json:"recreated"`          // legacy streams or deliver consumers present in both audits with a different creation time: fails --strict
+	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
 	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
 }
 
@@ -117,6 +130,22 @@ func compareAudits(before, now auditReport) *auditCompare {
 		if s.LastSeqMoved || s.DeliveredMoved {
 			c.Moved++
 		}
+		if bi.Present && ni.Present {
+			s.CreatedBefore, s.CreatedNow = bi.Created, ni.Created
+			s.DeliverCreatedBefore, s.DeliverCreatedNow = bi.Deliver.Created, ni.Deliver.Created
+			both := bi.Deliver.Present && ni.Deliver.Present
+			streamDiffers := bi.Created != "" && ni.Created != "" && bi.Created != ni.Created
+			deliverDiffers := both && bi.Deliver.Created != "" && ni.Deliver.Created != "" && bi.Deliver.Created != ni.Deliver.Created
+			missing := bi.Created == "" || ni.Created == "" || (both && (bi.Deliver.Created == "" || ni.Deliver.Created == ""))
+			switch {
+			case streamDiffers || deliverDiffers:
+				s.Recreated = true
+				c.Recreated++
+			case missing:
+				s.CreationUnknown = true
+				c.CreationUnknown++
+			}
+		}
 		if bi.Present && !ni.Present {
 			// A drained inbox whose record is gone too was deprovisioned: retired. Anything else may have lost mail.
 			if bi.drained() && !recordNow[bkeys[name]] {
@@ -151,11 +180,16 @@ func compareAudits(before, now auditReport) *auditCompare {
 
 func writeCompareText(w io.Writer, c *auditCompare) {
 	cl := config.Clean
-	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired)
+	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired, %d recreated, %d creation unknown\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired, c.Recreated, c.CreationUnknown)
 	for _, s := range c.Streams {
 		state := "unchanged"
 		if s.LastSeqMoved || s.DeliveredMoved {
 			state = "MOVED"
+		}
+		if s.Recreated {
+			state = "RECREATED"
+		} else if s.CreationUnknown {
+			state = "UNKNOWN"
 		}
 		if s.Vanished {
 			state = "VANISHED"

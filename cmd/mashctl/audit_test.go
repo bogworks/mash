@@ -270,7 +270,7 @@ func serverState(t *testing.T, js jetstream.JetStream) string {
 func (f *auditFixture) normalize(s string) string {
 	s = strings.ReplaceAll(s, f.credsDir, "<CREDS-DIR>")
 	// message and consumer times are the real time of the run
-	s = regexp.MustCompile(`"(last_time|delivered_last|ack_floor_last)": "[^"]*"`).ReplaceAllString(s, `"$1": "<TIME>"`)
+	s = regexp.MustCompile(`"(last_time|delivered_last|ack_floor_last|created)": "[^"]*"`).ReplaceAllString(s, `"$1": "<TIME>"`)
 	for k, v := range f.users {
 		s = strings.ReplaceAll(s, k, v)
 	}
@@ -1102,5 +1102,150 @@ func TestAuditCompareVanishedWhenDrainedButRecordKept(t *testing.T) {
 	c, code := f.compareJSON(t, first)
 	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 || !c.Compare.Streams[0].Vanished {
 		t.Fatalf("drained, only the stream gone: exit %d %+v", code, c.Compare)
+	}
+}
+
+// recreateLegacyStream deletes name's inbox stream and makes it again from the same configuration, with its
+// `deliver` consumer, refilled with n messages that are all read and acknowledged: the sequences come out as before.
+func (f *auditFixture) recreateLegacyStream(t *testing.T, name string, n int) {
+	t.Helper()
+	ctx := context.Background()
+	s, err := f.js.Stream(ctx, sap.InboxStream(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.js.DeleteStream(ctx, sap.InboxStream(name)); err != nil {
+		t.Fatal(err)
+	}
+	ns, err := f.js.CreateStream(ctx, info.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ns.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
+		t.Fatal(err)
+	}
+	f.publish(t, sap.For(f.e.Owner, name).Mail, n)
+	f.ackAll(t, name)
+}
+
+type recreatedOut struct {
+	Compare *struct {
+		Recreated       int `json:"recreated"`
+		CreationUnknown int `json:"creation_unknown"`
+		Moved           int `json:"moved"`
+		Streams         []struct {
+			Recreated       bool   `json:"recreated"`
+			CreationUnknown bool   `json:"creation_unknown"`
+			CreatedBefore   string `json:"created_before"`
+			CreatedNow      string `json:"created_now"`
+			DeliverBefore   string `json:"deliver_created_before"`
+			DeliverNow      string `json:"deliver_created_now"`
+		} `json:"streams"`
+	} `json:"compare"`
+}
+
+func (f *auditFixture) recreatedJSON(t *testing.T, earlier string) (recreatedOut, string, int) {
+	t.Helper()
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", earlier)
+	var c recreatedOut
+	if code == 3 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Streams) != 1 {
+		t.Fatalf("compare: %d %q\n%s", code, errb, out)
+	}
+	return c, errb, code
+}
+
+func TestAuditCompareStreamRecreatedSameSequences(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	f.recreateLegacyStream(t, "alpha", 2)
+	c, errb, code := f.recreatedJSON(t, first)
+	s := c.Compare.Streams[0]
+	if code != 1 || c.Compare.Recreated != 1 || !s.Recreated || s.CreatedBefore == "" || s.CreatedNow == "" || s.CreatedBefore == s.CreatedNow {
+		t.Fatalf("recreated stream with equal sequences: exit %d err=%q %+v", code, errb, c.Compare)
+	}
+	if c.Compare.Moved != 0 {
+		t.Errorf("sequences are equal, nothing moved: %+v", c.Compare)
+	}
+	if txt, _, _ := f.run(t, "--compare", first); !strings.Contains(txt, "RECREATED") {
+		t.Errorf("text form must show RECREATED:\n%s", txt)
+	}
+}
+
+func TestAuditCompareDeliverConsumerRecreated(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	f.recreateLegacyConsumer(t, "alpha", func(c *jetstream.ConsumerConfig) {})
+	f.ackAll(t, "alpha")
+	c, errb, code := f.recreatedJSON(t, first)
+	s := c.Compare.Streams[0]
+	if code != 1 || c.Compare.Recreated != 1 || !s.Recreated || s.DeliverBefore == "" || s.DeliverNow == "" || s.DeliverBefore == s.DeliverNow || s.CreatedBefore != s.CreatedNow {
+		t.Fatalf("only the deliver consumer recreated: exit %d err=%q %+v", code, errb, c.Compare)
+	}
+}
+
+func TestAuditCompareNothingRecreatedPasses(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	c, errb, code := f.recreatedJSON(t, first)
+	if code != 0 || c.Compare.Recreated != 0 || c.Compare.CreationUnknown != 0 || c.Compare.Streams[0].Recreated {
+		t.Fatalf("nothing recreated: exit %d err=%q %+v", code, errb, c.Compare)
+	}
+}
+
+// An earlier audit made before the `created` fields cannot prove the stream was not recreated.
+func TestAuditCompareEarlierWithoutCreationTimes(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	raw, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	var strip func(v any)
+	strip = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			if _, ok := x["created"]; ok {
+				delete(x, "created")
+				removed++
+			}
+			for _, e := range x {
+				strip(e)
+			}
+		case []any:
+			for _, e := range x {
+				strip(e)
+			}
+		}
+	}
+	strip(doc)
+	if removed != 2 {
+		t.Fatalf("removed %d created fields, want 2 (stream and deliver)", removed)
+	}
+	stripped, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(t.TempDir(), "old.json")
+	if err := os.WriteFile(old, stripped, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, errb, code := f.recreatedJSON(t, old)
+	if code != 1 || c.Compare.CreationUnknown != 1 || !c.Compare.Streams[0].CreationUnknown || c.Compare.Recreated != 0 {
+		t.Fatalf("earlier audit without creation times, strict: exit %d %+v", code, c.Compare)
+	}
+	if !strings.Contains(errb, "lacks creation times") || !strings.Contains(errb, "regenerate") {
+		t.Errorf("strict note missing: %q", errb)
+	}
+	out, errb, code := f.run(t, "--json", "--compare", old)
+	if code != 0 || !strings.Contains(out, `"creation_unknown": true`) {
+		t.Errorf("non-strict shows it and exits 0: %d %q\n%s", code, errb, out)
+	}
+	if txt, _, _ := f.run(t, "--compare", old); !strings.Contains(txt, "UNKNOWN") {
+		t.Errorf("text form must show UNKNOWN:\n%s", txt)
 	}
 }
