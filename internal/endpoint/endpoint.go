@@ -253,6 +253,15 @@ func connect(ctx context.Context, url string, opts ...nats.Option) (*nats.Conn, 
 	}
 }
 
+// refuseAgentToken fails closed: the endpoint still builds its subjects from the legacy identity, so a configured
+// three-token identity would silently operate the wrong endpoint. Remove this once the endpoint uses cfg.Identity().
+func refuseAgentToken(cfg config.Config) error {
+	if cfg.AgentToken != "" {
+		return errors.New("mash: agent_token is set but this build cannot run a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")
+	}
+	return nil
+}
+
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
 // anything else that classifies mail from every sender wants that.
 func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
@@ -262,6 +271,9 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 // OpenClientWith is OpenClient for a one-shot command that knows what it needs: the requests for it go out together
 // with the identity check, so the command pays for one wave of round trips, not one per thing it reads.
 func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) (*Endpoint, error) {
+	if err := refuseAgentToken(cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
 	}
@@ -339,6 +351,9 @@ func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
 
 // Open connects, checks the identity and takes the endpoint's lease.
 func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
+	if err := refuseAgentToken(cfg); err != nil {
+		return nil, err
+	}
 	e, err := OpenClientWith(ctx, cfg, ClientOptions{FullDirectory: true, holding: true})
 	if err != nil {
 		return nil, err

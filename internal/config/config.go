@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -38,6 +39,7 @@ type Config struct {
 	Owner           string        // SAP owner token
 	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
 	Name            string        // endpoint name (MASH_NAME); empty = inert
+	AgentToken      string        // MASH_AGENT_TOKEN / "agent_token": the agent token of a three-token identity; empty = the legacy identity
 	Creds           string        // endpoint credentials file
 	SettleMS        int           // quiet time before a batch is pushed
 	BatchMsgs       int           // a batch up to this many messages is shown in full
@@ -75,18 +77,19 @@ type Config struct {
 
 // SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
 var SourceKeys = map[string]string{
-	"url": "MASH_URL", "owner": "MASH_OWNER", "admin_creds": "MASH_ADMIN_CREDS",
+	"url": "MASH_URL", "owner": "MASH_OWNER", "agent_token": "MASH_AGENT_TOKEN", "admin_creds": "MASH_ADMIN_CREDS",
 	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "MASH_INSECURE_LOOPBACK",
 }
 
 type file struct {
-	URL        string `json:"url"`
-	Owner      string `json:"owner"`
-	Creds      string `json:"creds"`
-	SettleMS   *int   `json:"settle_ms"`
-	BatchMsgs  *int   `json:"batch_msgs"`
-	BatchBytes *int   `json:"batch_bytes"`
-	IdleWake   string `json:"idle_wake"`
+	URL        string          `json:"url"`
+	Owner      string          `json:"owner"`
+	AgentToken json.RawMessage `json:"agent_token"` // kept raw: null, "" and non-strings are present but invalid
+	Creds      string          `json:"creds"`
+	SettleMS   *int            `json:"settle_ms"`
+	BatchMsgs  *int            `json:"batch_msgs"`
+	BatchBytes *int            `json:"batch_bytes"`
+	IdleWake   string          `json:"idle_wake"`
 
 	RelayWindow string `json:"relay_window"`
 
@@ -353,6 +356,7 @@ func Load(env func(string) string, home string) (Config, error) {
 		return c, err
 	}
 
+	fileAgentSet := false
 	str := func(dst *string, key string) {
 		if v := env(key); v != "" {
 			*dst = v
@@ -363,6 +367,14 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.Name, "MASH_NAME")
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
+	str(&c.AgentToken, "MASH_AGENT_TOKEN")
+	// An empty MASH_AGENT_TOKEN reads as unset: env is a func(string) string and cannot report presence.
+	if f.AgentToken != nil {
+		if env("MASH_AGENT_TOKEN") == "" {
+			c.AgentToken = agentTokenOf(f.AgentToken)
+		}
+		fileAgentSet = true
+	}
 	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
 	c.recordSources(f, env, home)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
@@ -453,7 +465,12 @@ func Load(env func(string) string, home string) (Config, error) {
 	if c.Name == "" {
 		return c, nil
 	}
-	if !ValidName(c.Name) {
+	// A key that is present in config.json but empty is invalid, not absent. (Load reads the environment through a
+	// func(string) string, which cannot tell a variable set to "" from an unset one, so that case reads as unset.)
+	if fileAgentSet && c.AgentToken == "" {
+		return c, errors.New("mash: config.json \"agent_token\" must be a non-empty string: give an agent token, or remove the key for the legacy identity")
+	}
+	if c.AgentToken == "" && !ValidName(c.Name) {
 		return c, fmt.Errorf("mash: MASH_NAME %q: use 1-48 lower-case letters, digits and single hyphens, starting with a letter", c.Name)
 	}
 	if c.URL == "" {
@@ -468,8 +485,13 @@ func Load(env func(string) string, home string) (Config, error) {
 		}
 		return c, ErrNoOwner
 	}
-	if !ValidName(c.Owner) {
+	if c.AgentToken == "" && !ValidName(c.Owner) {
 		return c, fmt.Errorf("mash: owner %q: use 1-48 lower-case letters, digits and single hyphens", c.Owner)
+	}
+	if c.AgentToken != "" {
+		if _, err := c.Identity(); err != nil {
+			return c, fmt.Errorf("mash: %s: %w", identitySetting(err), err)
+		}
 	}
 	if c.Creds == "" {
 		if dir == "" {
@@ -480,11 +502,37 @@ func Load(env func(string) string, home string) (Config, error) {
 	return c, nil
 }
 
+// Identity is the endpoint's identity: the legacy one of Owner and Name when AgentToken is empty, else the three-token
+// identity of AgentToken, Owner and Name. The error of sap is returned as is; it names the rule that failed.
+func (c Config) Identity() (sap.EndpointIdentity, error) {
+	if c.Name == "" {
+		return sap.EndpointIdentity{}, errors.New("mash: no identity: no endpoint name is configured (MASH_NAME)")
+	}
+	if c.AgentToken == "" {
+		return sap.Legacy(c.Owner, c.Name)
+	}
+	return sap.New(c.AgentToken, c.Owner, c.Name)
+}
+
+// identitySetting names the setting a sap identity error is about.
+func identitySetting(err error) string {
+	m := err.Error()
+	switch {
+	case strings.HasPrefix(m, "sap: agent token"), strings.HasPrefix(m, "sap: agent "):
+		return "MASH_AGENT_TOKEN (config.json \"agent_token\")"
+	case strings.HasPrefix(m, "sap: owner"):
+		return "owner (config.json \"owner\" or MASH_OWNER)"
+	case strings.HasPrefix(m, "sap: name"):
+		return "MASH_NAME"
+	}
+	return "MASH_AGENT_TOKEN, owner and MASH_NAME"
+}
+
 // recordSources fills Source and FileValues from the file f and the environment, as Load applied them: an environment
 // variable that is set and not empty wins, else a value the file set, else the default.
 func (c *Config) recordSources(f file, env func(string) string, home string) {
 	c.Source, c.FileValues = map[string]string{}, map[string]string{}
-	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "admin_creds": ExpandHome(f.AdminCreds, home),
+	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "agent_token": agentTokenOf(f.AgentToken), "admin_creds": ExpandHome(f.AdminCreds, home),
 		"tls_ca": f.TLSCA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
 	if f.InsecureLoopback != nil {
 		fileVals["insecure_loopback"] = strconv.FormatBool(*f.InsecureLoopback)
@@ -594,4 +642,14 @@ func RejectedArg(a string) string {
 		name = name[:32]
 	}
 	return "option " + strconv.Quote(name)
+}
+
+// agentTokenOf is the value of a present agent_token key: the string, or "" for null, an empty string or any other
+// JSON type, which Load then refuses.
+func agentTokenOf(raw json.RawMessage) string {
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	return v
 }
