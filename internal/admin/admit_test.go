@@ -289,3 +289,77 @@ func TestAdmissionLockHeldDuringAdmit(t *testing.T) {
 		t.Fatalf("admission lock not released: %v", err)
 	}
 }
+
+func TestSetZoneRefusedWhileNewFormExists(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	putNewFormRecord(t, js, user, "acme", "team1", "ops1")
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	before, err := kv.Get(ctx, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, err := js.Stream(ctx, sap.InboxStream("alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjBefore := s1.CachedInfo().Config.Subjects
+
+	_, err = a.SetZone(ctx, "alpha", "z1")
+	if err == nil || !strings.Contains(err.Error(), "zoned legacy endpoint") || !strings.Contains(err.Error(), "acme_team1_ops1") {
+		t.Fatalf("want refusal naming the rule and the record, got %v", err)
+	}
+	after, err := kv.Get(ctx, "alpha")
+	if err != nil || after.Revision() != before.Revision() {
+		t.Fatalf("record changed: %v", err)
+	}
+	s2, _ := js.Stream(ctx, sap.InboxStream("alpha"))
+	if got := s2.CachedInfo().Config.Subjects; strings.Join(got, ",") != strings.Join(subjBefore, ",") {
+		t.Fatalf("stream subjects changed: %v -> %v", subjBefore, got)
+	}
+}
+
+func TestSetZoneLegacyOnlyUnchanged(t *testing.T) {
+	e, a, _ := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "alpha")
+	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := a.SetZone(ctx, "alpha", "z1"); err != nil || rec.Zone != "z1" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+}
+
+func TestProvisionLegacyOnlyUnzonedSkipsRecordReads(t *testing.T) {
+	e, a, _ := setup(t)
+	ctx := context.Background()
+	for _, n := range []string{"a1", "a2", "a3", "a4"} {
+		_, u := e.Mint(t, n)
+		if _, err := a.Provision(ctx, n, u, e.Account, "", admin.Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var gets atomic.Int32
+	prev := admin.SetAfterDirectoryGet(func(string) { gets.Add(1) })
+	defer admin.SetAfterDirectoryGet(prev)
+	_, u := e.Mint(t, "a5")
+	if _, err := a.Provision(ctx, "a5", u, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if n := gets.Load(); n != 0 {
+		t.Fatalf("unzoned legacy-only provision read %d records", n)
+	}
+	// a zoned provision still reads them
+	_, u6 := e.Mint(t, "a6")
+	if _, err := a.Provision(ctx, "a6", u6, e.Account, "", admin.Meta{Zone: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if gets.Load() == 0 {
+		t.Fatal("zoned provision read no records")
+	}
+}

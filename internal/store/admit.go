@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -17,7 +18,8 @@ import (
 //     legacy wildcard mail filter would reach the new-form endpoint;
 //   - a zoned legacy endpoint and a new-form one would coexist: a zoned legacy endpoint has a six-token subject that
 //     Overlaps does not model, so disjointness cannot be proved;
-//   - an existing record names no identity, since it cannot be modelled (fail closed).
+//   - an existing record names no identity, since it cannot be modelled (fail closed). A legacy-keyed record (no
+//     underscore in its key) is not modelled when id is legacy: the pair is never compared.
 //
 // A record whose key equals id's flat key is the identity being re-admitted and is skipped, so a retried provision of
 // the same endpoint works.
@@ -32,6 +34,11 @@ func Admit(id sap.EndpointIdentity, zone string, existing []Record) error {
 	for _, r := range existing {
 		key := r.KeyOrName()
 		if key == self {
+			continue
+		}
+		if id.IsLegacy() && !strings.Contains(key, "_") {
+			// Two legacy identities are never compared, so an odd legacy record that has no modellable identity
+			// cannot matter here and must not block a legacy-only directory.
 			continue
 		}
 		other, err := r.Identity()

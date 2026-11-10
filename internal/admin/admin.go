@@ -261,6 +261,9 @@ const admissionLockName = "_admission"
 // afterAdmissionLock is a test seam that runs once Provision holds the admission lock; nil in production.
 var afterAdmissionLock func()
 
+// afterDirectoryGet is a test seam that runs before each per-record read of admit; nil in production.
+var afterDirectoryGet func(key string)
+
 // admit lists the directory and applies store.Admit to the legacy identity of name under a.owner. A value that does
 // not parse is skipped when its key is a legacy-shaped key, as before admission existed, but only while no listed key
 // looks new-form (has an underscore). Once one does, any read or parse error on any key refuses the provision (fail
@@ -279,8 +282,16 @@ func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name, zone str
 	}
 	slices.Sort(keys)
 	newForm := slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") })
+	if !newForm && zone == "" {
+		// Legacy-only directory and an unzoned legacy identity: legacy identities are never compared, so there is
+		// nothing to refuse and no record needs reading.
+		return store.Admit(id, zone, nil)
+	}
 	var recs []store.Record
 	for _, k := range keys {
+		if afterDirectoryGet != nil {
+			afterDirectoryGet(k)
+		}
 		r, err := store.GetRecord(ctx, kv, k)
 		if err != nil {
 			if newForm || strings.Contains(k, "_") {
@@ -1004,6 +1015,13 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record,
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "set-zone", &err)
 	defer end()
+	// Same lock order as Provision: the name's lock, then the directory-wide admission lock. Giving a legacy
+	// endpoint a zone is an admission decision, so it is made under the same lock.
+	adm, err := a.lockStream(ctx, admissionLockName)
+	if err != nil {
+		return store.Record{}, err
+	}
+	defer adm.release(ctx)
 	for try := 0; try < setMetaTries; try++ {
 		e, err := kv.Get(ctx, name)
 		if errors.Is(err, jetstream.ErrKeyNotFound) {
@@ -1018,6 +1036,13 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record,
 		}
 		if rec.Zone != "" && rec.Zone != zone {
 			return store.Record{}, fmt.Errorf("mash: endpoint %s is in zone %q; moving it to another zone, or back to legacy, is not supported", name, rec.Zone)
+		}
+		if rec.Zone != zone {
+			// The endpoint is gaining a zone: refuse before anything changes if a zoned legacy endpoint could not
+			// coexist with the directory's records.
+			if err := a.admit(ctx, kv, name, zone); err != nil {
+				return store.Record{}, err
+			}
 		}
 		if err := a.addZoneFilterLocked(ctx, lk, name, zone); err != nil {
 			return store.Record{}, err
@@ -1037,6 +1062,9 @@ func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record,
 			return store.Record{}, err
 		}
 		if err := lk.check(ctx); err != nil {
+			return store.Record{}, err
+		}
+		if err := adm.check(ctx); err != nil {
 			return store.Record{}, err
 		}
 		if _, err := kv.Update(ctx, name, val, e.Revision()); err != nil {

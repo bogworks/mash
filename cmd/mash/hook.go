@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"time"
 
@@ -120,15 +121,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if len(listed) > 0 && !anyListed(shown) {
 		// New mail fits in full: see whether the listed mail fits with it. Only a batch with no digest line is taken.
 		all := append(slices.Clone(fresh), listed...)
-		slices.SortFunc(all, func(a, b spool.Entry) int {
-			if a.Ref() == b.Ref() {
-				return 0
-			}
-			if a.Ref().Less(b.Ref()) {
-				return -1
-			}
-			return 1
-		})
+		sort.Slice(all, func(i, j int) bool { return all[i].Ref().Less(all[j].Ref()) })
 		if out2, shown2 := adapter.Present(pres, all); !anyListed(shown2) {
 			out, shown = out2, shown2
 		}
