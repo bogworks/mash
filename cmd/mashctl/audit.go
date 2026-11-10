@@ -18,7 +18,11 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const auditUsage = "usage: mashctl audit [--json] [--strict] [--creds-dir DIR]\n"
+// exitAuditIncomplete is the exit code of an audit that could not complete: no server, unreadable required input, a
+// bad --compare file. 1 is --strict findings and 2 is usage.
+const exitAuditIncomplete = 3
+
+const auditUsage = "usage: mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]\n"
 
 // auditVersion is the version field of the JSON report. It changes only when a field is removed or changes meaning.
 const auditVersion = 1
@@ -53,8 +57,14 @@ type auditDeliver struct {
 	StartSeq       uint64   `json:"start_seq"`
 	StartTime      string   `json:"start_time,omitempty"`
 	FilterSubjects []string `json:"filter_subjects"`
-	AckFloor       uint64   `json:"ack_floor"`
-	Delivered      uint64   `json:"delivered"`
+	AckFloor       uint64   `json:"ack_floor"` // stream sequence
+	Delivered      uint64   `json:"delivered"` // stream sequence
+
+	DeliveredConsumerSeq uint64 `json:"delivered_consumer_seq"`
+	AckFloorConsumerSeq  uint64 `json:"ack_floor_consumer_seq"`
+	DeliveredLast        string `json:"delivered_last,omitempty"` // RFC 3339, UTC; absent when the server reports none
+	AckFloorLast         string `json:"ack_floor_last,omitempty"`
+	NumRedelivered       int    `json:"num_redelivered"`
 }
 
 type auditInbox struct {
@@ -63,6 +73,7 @@ type auditInbox struct {
 	Msgs      uint64       `json:"msgs"`
 	FirstSeq  uint64       `json:"first_seq"`
 	LastSeq   uint64       `json:"last_seq"`
+	LastTime  string       `json:"last_time,omitempty"` // when the stream last stored a message, RFC 3339 UTC
 	Subjects  []string     `json:"subjects"`
 	Suspended bool         `json:"suspended"`
 	Deliver   auditDeliver `json:"deliver"`
@@ -105,8 +116,9 @@ type auditOrphanLease struct {
 }
 
 type auditOrphanCreds struct {
-	File string `json:"file"`
-	User string `json:"user"`
+	File   string `json:"file"`
+	User   string `json:"user"`
+	Staged bool   `json:"staged"` // a *.creds.next file: credentials staged by an interrupted rotation
 }
 
 type auditOrphans struct {
@@ -145,14 +157,20 @@ type auditReport struct {
 	Orphans     auditOrphans   `json:"orphans"`
 	FencedLease []string       `json:"fenced_leases"` // lease keys holding a deprovision tombstone and no record: expected, they expire
 	Problems    []auditProblem `json:"problems"`
+	Notes       []string       `json:"notes"` // sorted; things skipped or absent that are not findings
 	Summary     auditSummary   `json:"summary"`
+	Compare     *auditCompare  `json:"compare,omitempty"` // only with --compare
 }
 
-// findings is how many things --strict counts: every orphan, every undrained alias and every item the audit could not
-// read (it cannot call what it did not read clean).
+// findings is how many things --strict counts: every orphan, every undrained alias, every item the audit could not
+// read (it cannot call what it did not read clean) and, with --compare, every legacy stream that moved.
 func (r auditReport) findings() int {
 	s := r.Summary
-	return s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
+	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
+	if r.Compare != nil {
+		n += r.Compare.Moved
+	}
+	return n
 }
 
 func toAuditInbox(name string, st *admin.AuditStream) auditInbox {
@@ -161,14 +179,24 @@ func toAuditInbox(name string, st *admin.AuditStream) auditInbox {
 		return in
 	}
 	in.Present, in.Msgs, in.FirstSeq, in.LastSeq, in.Suspended = true, st.Msgs, st.FirstSeq, st.LastSeq, st.Suspended
+	in.LastTime = auditTime(&st.LastTime)
 	in.Subjects = append(in.Subjects, st.Subjects...)
 	if st.Deliver != nil {
 		d := st.Deliver
 		in.Deliver = auditDeliver{Present: true, Pending: d.Pending, AckPending: d.AckPending, DeliverPolicy: d.DeliverPolicy,
 			StartSeq: d.StartSeq, StartTime: d.StartTime, FilterSubjects: append([]string{}, d.FilterSubjects...),
-			AckFloor: d.AckFloor, Delivered: d.Delivered}
+			AckFloor: d.AckFloor, Delivered: d.Delivered, DeliveredConsumerSeq: d.DeliveredConsumer, AckFloorConsumerSeq: d.AckFloorConsumer,
+			DeliveredLast: auditTime(d.DeliveredLast), AckFloorLast: auditTime(d.AckFloorLast), NumRedelivered: d.NumRedelivered}
 	}
 	return in
+}
+
+// auditTime is t as RFC 3339 UTC with fractional seconds, or "" for nil or the zero time.
+func auditTime(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // drained reports whether a legacy inbox can be cut off. An inbox that is gone, or one that holds no message, is
@@ -203,7 +231,7 @@ func (in auditInbox) drained() bool {
 // user public key (or to an error); skipUsers are keys that are not endpoints' (the admin's).
 func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []credsFile, skipUsers map[string]bool) auditReport {
 	rep := auditReport{Version: auditVersion, Owner: owner, CredsDirs: dirs,
-		Records: []auditRecord{}, Renames: []auditRename{}, FencedLease: []string{}, Problems: []auditProblem{},
+		Records: []auditRecord{}, Renames: []auditRename{}, FencedLease: []string{}, Problems: []auditProblem{}, Notes: []string{},
 		Orphans: auditOrphans{Streams: []auditOrphanStream{}, Leases: []auditOrphanLease{}, Creds: []auditOrphanCreds{}}}
 	streams := map[string]*admin.AuditStream{}
 	for i := range snap.Streams {
@@ -246,7 +274,17 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			Form: form, User: r.User, Zone: r.Zone, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
 		if r.Alias != nil {
 			ar.Alias = &auditAlias{Owner: r.Alias.Owner, Name: r.Alias.Name}
-			if aid, ok, err := r.AliasIdentity(); err == nil && ok {
+			aid, ok, aerr := r.AliasIdentity()
+			if aerr != nil {
+				// an alias that names no legacy identity: the audit cannot say which inbox is the old one, so it reports the
+				// record as a problem (which fails --strict) and claims the inbox the alias's name would give, so mail
+				// stored there is not reported as an orphan instead.
+				rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: key, Error: "invalid alias: " + aerr.Error()})
+				if r.Alias.Name != "" {
+					claimedStream[sap.InboxStream(r.Alias.Name)] = true
+				}
+			}
+			if aerr == nil && ok {
 				legacy := aid.Flat()
 				claimedStream[sap.InboxStream(legacy)] = true
 				rn := auditRename{Identity: id.String(), Flat: key, Alias: *ar.Alias,
@@ -282,7 +320,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			rep.Problems = append(rep.Problems, auditProblem{What: "creds", Item: c.path, Error: c.err.Error()})
 		case users[c.user] || skipUsers[c.user]:
 		default:
-			rep.Orphans.Creds = append(rep.Orphans.Creds, auditOrphanCreds{File: c.path, User: c.user})
+			rep.Orphans.Creds = append(rep.Orphans.Creds, auditOrphanCreds{File: c.path, User: c.user, Staged: c.staged})
 		}
 	}
 	slices.SortFunc(rep.Orphans.Creds, func(a, b auditOrphanCreds) int { return strings.Compare(a.File, b.File) })
@@ -312,45 +350,60 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 }
 
 // credsFile is one creds file found in a managed directory: its public user key, or why it could not be read.
+// staged is a *.creds.next file.
 type credsFile struct {
-	path string
-	user string
-	err  error
+	path   string
+	user   string
+	err    error
+	staged bool
 }
 
-// scanCreds reads the user public key of every regular *.creds file in dirs (not the staged .next files, not
-// symbolic links). Only the JWT's subject is read: the seed and the token are never kept or shown. A directory that
-// does not exist is skipped when optional, else an error.
-func scanCreds(dirs []string, optional bool) ([]credsFile, error) {
+// scanCreds reads the user public key of every regular *.creds and *.creds.next (staged) file in dirs. Only the JWT's
+// subject is read: the seed and the token are never kept or shown, so a staged file is as safe to read as a creds
+// file. A symbolic link is skipped, and so is a directory that does not exist when optional (else an error); each
+// skip is returned as a note.
+func scanCreds(dirs []string, optional bool) ([]credsFile, []string, error) {
 	var out []credsFile
+	var notes []string
 	for _, d := range dirs {
 		ents, err := os.ReadDir(d)
 		if errors.Is(err, fs.ErrNotExist) && optional {
+			notes = append(notes, fmt.Sprintf("creds directory %s does not exist: nothing scanned there", config.Clean(d)))
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("mashctl: audit: creds directory: %w", err)
+			return nil, nil, fmt.Errorf("mashctl: audit: creds directory: %w", err)
 		}
 		for _, e := range ents {
-			if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".creds") {
+			staged := strings.HasSuffix(e.Name(), ".creds.next")
+			if !staged && !strings.HasSuffix(e.Name(), ".creds") {
 				continue
 			}
 			p := filepath.Join(d, e.Name())
+			if e.Type()&fs.ModeSymlink != 0 {
+				notes = append(notes, fmt.Sprintf("creds file %s is a symbolic link: skipped, so its user key is not matched", config.Clean(p)))
+				continue
+			}
+			if !e.Type().IsRegular() {
+				continue
+			}
 			u, err := credsUserKey(p)
 			if err != nil {
 				// the error may name a path and a parse failure, never the file's content
-				out = append(out, credsFile{path: p, err: errors.New(config.Clean(strings.TrimPrefix(err.Error(), p+": ")))})
+				out = append(out, credsFile{path: p, staged: staged, err: errors.New(config.Clean(strings.TrimPrefix(err.Error(), p+": ")))})
 				continue
 			}
-			out = append(out, credsFile{path: p, user: u})
+			out = append(out, credsFile{path: p, user: u, staged: staged})
 		}
 	}
-	return out, nil
+	slices.Sort(notes)
+	return out, notes, nil
 }
 
 type auditOpts struct {
 	json, strict bool
 	credsDir     string
+	compare      string
 }
 
 func parseAuditArgs(args []string) (auditOpts, error) {
@@ -368,15 +421,21 @@ func parseAuditArgs(args []string) (auditOpts, error) {
 			} else {
 				o.strict = true
 			}
-		case "--creds-dir":
+		case "--creds-dir", "--compare":
+			var v string
 			switch {
 			case hasInline && inline != "":
-				o.credsDir = inline
+				v = inline
 			case !hasInline && i+1 < len(args) && args[i+1] != "":
 				i++
-				o.credsDir = args[i]
+				v = args[i]
 			default:
-				return o, errors.New("--creds-dir needs a value")
+				return o, fmt.Errorf("%s needs a value", name)
+			}
+			if name == "--creds-dir" {
+				o.credsDir = v
+			} else {
+				o.compare = v
 			}
 		default:
 			return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
@@ -393,23 +452,31 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprintf(stderr, "mashctl: audit: %v\n%s", err, auditUsage)
 		return 2
 	}
+	var earlier *auditReport
+	if o.compare != "" {
+		earlier, err = readEarlierAudit(o.compare)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitAuditIncomplete
+		}
+	}
 	// audit changes nothing and acts as no endpoint, so a set agent_token (which makes the writing verbs refuse) is no
 	// reason to refuse it.
 	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, errAgentTokenSet) {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return exitAuditIncomplete
 	}
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return exitAuditIncomplete
 	}
 	defer closeAdmin()
 	snap, err := adm.Audit(ctx)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return exitAuditIncomplete
 	}
 
 	dirs, optional := []string{}, true
@@ -422,10 +489,10 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 			}
 		}
 	}
-	creds, err := scanCreds(dirs, optional)
+	creds, notes, err := scanCreds(dirs, optional)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return exitAuditIncomplete
 	}
 	skip := map[string]bool{} // the admin's and the system account's creds are in the same directory but are no endpoint's
 	for _, p := range []string{cfg.AdminCreds, env("MASH_SYS_CREDS")} {
@@ -438,12 +505,17 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	rep := buildAudit(cfg.Owner, snap, dirs, creds, skip)
 	rep.Generated = auditNow().UTC().Format(time.RFC3339)
+	rep.Notes = append(rep.Notes, notes...)
+	slices.Sort(rep.Notes)
+	if earlier != nil {
+		rep.Compare = compareAudits(*earlier, rep)
+	}
 
 	if o.json {
 		b, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {
 			fmt.Fprintln(stderr, err)
-			return 1
+			return exitAuditIncomplete
 		}
 		fmt.Fprintf(stdout, "%s\n", b)
 	} else {
@@ -451,8 +523,12 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if o.strict && rep.findings() > 0 {
 		s := rep.Summary
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems)
+		moved := 0
+		if rep.Compare != nil {
+			moved = rep.Compare.Moved
+		}
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved since the earlier audit\n",
+			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved)
 		return 1
 	}
 	return 0
@@ -473,6 +549,7 @@ func inboxText(in auditInbox) string {
 		if d.StartTime != "" {
 			consumer += "\tstart_time " + config.Clean(d.StartTime)
 		}
+		consumer += fmt.Sprintf("\tdelivered %d\tnum_redelivered %d", d.Delivered, d.NumRedelivered)
 	}
 	return fmt.Sprintf("stream %s\tmsgs %d\tfirst %d\tlast %d\tsuspended %t\tpending %d\tack_pending %d\t%s\tsubjects %s", config.Clean(in.Stream), in.Msgs, in.FirstSeq, in.LastSeq,
 		in.Suspended, d.Pending, d.AckPending, consumer, config.Clean(strings.Join(in.Subjects, ",")))
@@ -516,12 +593,22 @@ func writeAuditText(w io.Writer, r auditReport) {
 		fmt.Fprintf(w, "orphan lease %s\n", c(x.Key))
 	}
 	for _, x := range r.Orphans.Creds {
-		fmt.Fprintf(w, "orphan creds %s\tuser %s\n", c(x.File), c(x.User))
+		staged := ""
+		if x.Staged {
+			staged = "\tstaged"
+		}
+		fmt.Fprintf(w, "orphan creds %s\tuser %s%s\n", c(x.File), c(x.User), staged)
 	}
 	for _, k := range r.FencedLease {
 		fmt.Fprintf(w, "fenced lease %s (a deprovision tombstone; it expires)\n", c(k))
 	}
 	for _, p := range r.Problems {
 		fmt.Fprintf(w, "not readable %s %s: %s\n", p.What, c(p.Item), c(p.Error))
+	}
+	for _, n := range r.Notes {
+		fmt.Fprintf(w, "note: %s\n", c(n))
+	}
+	if r.Compare != nil {
+		writeCompareText(w, r.Compare)
 	}
 }

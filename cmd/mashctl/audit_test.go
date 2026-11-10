@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -268,6 +269,8 @@ func serverState(t *testing.T, js jetstream.JetStream) string {
 // stable labels, so the output can be compared with the golden file.
 func (f *auditFixture) normalize(s string) string {
 	s = strings.ReplaceAll(s, f.credsDir, "<CREDS-DIR>")
+	// message and consumer times are the real time of the run
+	s = regexp.MustCompile(`"(last_time|delivered_last|ack_floor_last)": "[^"]*"`).ReplaceAllString(s, `"$1": "<TIME>"`)
 	for k, v := range f.users {
 		s = strings.ReplaceAll(s, k, v)
 	}
@@ -503,10 +506,10 @@ func TestAuditUsageAndErrors(t *testing.T) {
 			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}
-	// no server: exit 1
+	// no server: exit 3 (could not complete)
 	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
 	var out, errb bytes.Buffer
-	if code := runEnv([]string{"audit"}, func(k string) string { return env[k] }, &out, &errb); code != 1 {
+	if code := runEnv([]string{"audit"}, func(k string) string { return env[k] }, &out, &errb); code != 3 {
 		t.Errorf("unreachable server: %d %q", code, errb.String())
 	}
 	// an empty account audits cleanly
@@ -715,5 +718,302 @@ func TestAuditBadRecordClaimsItsResources(t *testing.T) {
 	}
 	if len(r.Orphans.Streams) != 0 || len(r.Orphans.Leases) != 0 || len(r.Orphans.Creds) != 0 {
 		t.Errorf("a resource of an existing (unreadable) entry is reported as an orphan: %+v", r.Orphans)
+	}
+}
+
+// A record whose alias cannot be modelled (the store refuses to parse one, so this is a record a future writer or a
+// hand edit could leave) is a problem, so --strict fails, while its resources stay claimed.
+func TestAuditMalformedAliasIsAProblem(t *testing.T) {
+	id, err := sap.New("acme", "team1", "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := store.Record{Name: "ops1", Owner: "team1", Agent: sap.AgentName, AgentToken: "acme", Account: "A", User: "UX",
+		MailSubject: id.Subjects().Mail, Created: "2026-11-10T00:00:00Z", Alias: &store.Alias{Owner: "Bad Owner", Name: "ops1"}}
+	snap := admin.AuditSnapshot{Records: []store.Record{rec}, Streams: []admin.AuditStream{
+		{Name: sap.InboxStream(id.Flat()), Msgs: 0},
+		{Name: sap.InboxStream("ops1"), Msgs: 2, FirstSeq: 1, LastSeq: 2, Subjects: []string{"agents.mail.*.x.ops1"}},
+	}}
+	rep := buildAudit("o", snap, nil, nil, nil)
+	if len(rep.Problems) != 1 || rep.Problems[0].What != "record" || rep.Problems[0].Item != id.Flat() || !strings.Contains(rep.Problems[0].Error, "alias") {
+		t.Fatalf("want one alias problem on %s: %+v", id.Flat(), rep.Problems)
+	}
+	if len(rep.Orphans.Streams) != 0 {
+		t.Errorf("the alias's legacy stream must stay claimed: %+v", rep.Orphans.Streams)
+	}
+	if len(rep.Records) != 1 || rep.findings() == 0 {
+		t.Errorf("record kept and --strict must fail: records=%d findings=%d", len(rep.Records), rep.findings())
+	}
+}
+
+func (f *auditFixture) auditTo(t *testing.T, name string) string {
+	t.Helper()
+	out, errb, code := f.run(t, "--json")
+	if code != 0 {
+		t.Fatalf("audit --json: %d %q", code, errb)
+	}
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+type cmpOut struct {
+	Compare *struct {
+		Moved   int      `json:"moved"`
+		Removed []string `json:"identities_removed"`
+		Added   []string `json:"identities_added"`
+		Streams []struct {
+			Stream         string `json:"stream"`
+			LastSeqBefore  uint64 `json:"last_seq_before"`
+			LastSeqNow     uint64 `json:"last_seq_now"`
+			LastSeqMoved   bool   `json:"last_seq_moved"`
+			DeliveredMoved bool   `json:"delivered_moved"`
+			AckFloorMoved  bool   `json:"ack_floor_moved"`
+		} `json:"streams"`
+	} `json:"compare"`
+}
+
+func cleanLegacyAccount(t *testing.T) *auditFixture {
+	f := newAuditEnv(t)
+	f.legacy(t, "alpha")
+	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 2)
+	f.ackAll(t, "alpha")
+	return f
+}
+
+func TestAuditCompareMovement(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	first := f.auditTo(t, "first.json")
+	if _, errb, code := f.run(t, "--strict"); code != 0 {
+		t.Fatalf("baseline not strict clean: %d %q", code, errb)
+	}
+	// nothing moves: passes
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", first)
+	if code != 0 {
+		t.Fatalf("nothing moved, --strict --compare: %d %q\n%s", code, errb, out)
+	}
+	var c cmpOut
+	if err := json.Unmarshal([]byte(out), &c); err != nil || c.Compare == nil || c.Compare.Moved != 0 || len(c.Compare.Streams) != 1 {
+		t.Fatalf("compare object: %v %+v", err, c.Compare)
+	}
+	// one more message that is not read: last_seq moves, delivered does not
+	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 1)
+	out, errb, code = f.run(t, "--json", "--compare", first)
+	if code != 0 {
+		t.Fatalf("without --strict: %d %q", code, errb)
+	}
+	c = cmpOut{}
+	if err := json.Unmarshal([]byte(out), &c); err != nil || c.Compare == nil || c.Compare.Moved != 1 {
+		t.Fatalf("compare: %v %s", err, out)
+	}
+	s := c.Compare.Streams[0]
+	if s.Stream != "inbox-alpha" || !s.LastSeqMoved || s.LastSeqBefore != 2 || s.LastSeqNow != 3 || s.DeliveredMoved {
+		t.Errorf("stream compare: %+v", s)
+	}
+	if _, errb, code := f.run(t, "--strict", "--compare", first); code != 1 || errb == "" {
+		t.Fatalf("one more message must fail --strict --compare: %d %q", code, errb)
+	}
+	// read and acknowledged: delivered and ack floor move too
+	f.ackAll(t, "alpha")
+	out, _, _ = f.run(t, "--json", "--compare", first)
+	c = cmpOut{}
+	_ = json.Unmarshal([]byte(out), &c)
+	if s := c.Compare.Streams[0]; !s.DeliveredMoved || !s.AckFloorMoved {
+		t.Errorf("delivered and ack floor must show movement: %+v", s)
+	}
+	// text form
+	txt, _, _ := f.run(t, "--compare", first)
+	if !strings.Contains(txt, "compare") || !strings.Contains(txt, "inbox-alpha") || !strings.Contains(txt, "moved") {
+		t.Errorf("text compare:\n%s", txt)
+	}
+	// compare is read only
+	before := serverState(t, f.js)
+	f.run(t, "--strict", "--compare", first)
+	if serverState(t, f.js) != before {
+		t.Error("compare changed the server")
+	}
+}
+
+func TestAuditCompareIdentities(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	first := f.auditTo(t, "first.json")
+	f.legacy(t, "gamma")
+	out, _, code := f.run(t, "--json", "--compare", first)
+	var c cmpOut
+	if code != 0 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Added) != 1 || c.Compare.Added[0] != "gamma" || len(c.Compare.Removed) != 0 {
+		t.Fatalf("added: %d %+v", code, c.Compare)
+	}
+	second := f.auditTo(t, "second.json")
+	if _, errb, code := ctlRun(t, f.e, "deprovision", "gamma"); code != 0 {
+		t.Fatalf("deprovision: %d %q", code, errb)
+	}
+	out, _, _ = f.run(t, "--json", "--compare", second)
+	c = cmpOut{}
+	_ = json.Unmarshal([]byte(out), &c)
+	if c.Compare == nil || len(c.Compare.Removed) != 1 || c.Compare.Removed[0] != "gamma" {
+		t.Fatalf("removed: %+v", c.Compare)
+	}
+}
+
+func TestAuditCompareStrictFailsOnOrphanOrUndrained(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	first := f.auditTo(t, "first.json")
+	if _, err := f.js.CreateStream(context.Background(), store.InboxConfigFor(f.e.Owner, "ghost", store.DefaultLimits())); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := f.run(t, "--strict", "--compare", first); code != 1 {
+		t.Fatalf("orphan with --compare --strict: %d", code)
+	}
+}
+
+func TestAuditCompareBadFile(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	dir := t.TempDir()
+	write := func(name, s string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for name, p := range map[string]string{
+		"malformed": write("a.json", "{not json"),
+		"version":   write("b.json", `{"version": 2, "records": []}`),
+		"noversion": write("c.json", `{"records": []}`),
+		"missing":   filepath.Join(dir, "nope.json"),
+	} {
+		out, errb, code := f.run(t, "--compare", p)
+		if code != 3 || errb == "" || out != "" {
+			t.Errorf("%s: exit %d out=%q err=%q, want 3 and nothing on stdout", name, code, out, errb)
+		}
+	}
+	if _, errb, code := f.run(t, "--compare"); code != 2 || !strings.Contains(errb, "usage: mashctl audit") {
+		t.Errorf("--compare without a value: %d %q", code, errb)
+	}
+}
+
+func TestAuditLegacyStreamEvidenceFields(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	out, _, _ := f.run(t, "--json")
+	var r struct {
+		Records []struct {
+			Inbox struct {
+				LastSeq  uint64 `json:"last_seq"`
+				LastTime string `json:"last_time"`
+				Deliver  struct {
+					Delivered      uint64 `json:"delivered"`
+					DeliveredCons  uint64 `json:"delivered_consumer_seq"`
+					DeliveredLast  string `json:"delivered_last"`
+					AckFloor       uint64 `json:"ack_floor"`
+					AckFloorCons   uint64 `json:"ack_floor_consumer_seq"`
+					AckFloorLast   string `json:"ack_floor_last"`
+					NumRedelivered *int   `json:"num_redelivered"`
+				} `json:"deliver"`
+			} `json:"inbox"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Records) != 1 {
+		t.Fatal(err, out)
+	}
+	in := r.Records[0].Inbox
+	d := in.Deliver
+	if in.LastSeq != 2 || in.LastTime == "" || d.Delivered != 2 || d.DeliveredCons != 2 || d.DeliveredLast == "" || d.AckFloor != 2 || d.AckFloorCons != 2 || d.AckFloorLast == "" || d.NumRedelivered == nil {
+		t.Errorf("evidence fields missing: %+v", in)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, in.LastTime); err != nil {
+		t.Errorf("last_time: %v", err)
+	}
+}
+
+type notesOut struct {
+	Notes   []string `json:"notes"`
+	Orphans struct {
+		Creds []struct {
+			File   string `json:"file"`
+			Staged bool   `json:"staged"`
+		} `json:"creds"`
+	} `json:"orphans"`
+	Problems []struct{ What, Item, Error string } `json:"problems"`
+}
+
+func TestAuditNotesSymlinkAndMissingDir(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	if err := os.Symlink(filepath.Join(f.credsDir, "alpha.creds"), filepath.Join(f.credsDir, "link.creds")); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := f.run(t, "--json", "--strict")
+	var n notesOut
+	if code != 0 || json.Unmarshal([]byte(out), &n) != nil {
+		t.Fatalf("notes are not findings: %d %q", code, errb)
+	}
+	if len(n.Notes) != 1 || !strings.Contains(n.Notes[0], "link.creds") || !strings.Contains(n.Notes[0], "symbolic link") {
+		t.Errorf("symlink note: %q", n.Notes)
+	}
+	txt, _, _ := f.run(t)
+	if !strings.Contains(txt, "note") || !strings.Contains(txt, "link.creds") {
+		t.Errorf("text form lacks the note:\n%s", txt)
+	}
+	// the default creds directory is missing (a fresh HOME): a note, exit 0
+	out, errb, code = ctlRun(t, f.e, "audit", "--json")
+	n = notesOut{}
+	if code != 0 || json.Unmarshal([]byte(out), &n) != nil || len(n.Notes) == 0 || !strings.Contains(strings.Join(n.Notes, "\n"), "does not exist") {
+		t.Errorf("missing default dir: %d %q notes=%q", code, errb, n.Notes)
+	}
+	if !sort.StringsAreSorted(n.Notes) {
+		t.Errorf("notes not sorted: %q", n.Notes)
+	}
+}
+
+func (f *auditFixture) putStaged(t *testing.T, src, name string) {
+	t.Helper()
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.credsDir, name+".creds.next"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuditStagedCreds(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	// a staged file whose user matches a record is not an orphan; one that matches none is, with staged true
+	alphaCreds := filepath.Join(f.credsDir, "alpha.creds")
+	f.putStaged(t, alphaCreds, "alpha")
+	out, _, code := f.run(t, "--json", "--strict")
+	var n notesOut
+	if code != 0 || json.Unmarshal([]byte(out), &n) != nil || len(n.Orphans.Creds) != 0 {
+		t.Fatalf("matching staged file: %d %+v", code, n.Orphans)
+	}
+	strayCreds, _ := f.e.Mint(t, "stray")
+	f.putStaged(t, strayCreds, "stray")
+	out, errb, code := f.run(t, "--json", "--strict")
+	n = notesOut{}
+	if code != 1 || errb == "" || json.Unmarshal([]byte(out), &n) != nil || len(n.Orphans.Creds) != 1 || !n.Orphans.Creds[0].Staged || filepath.Base(n.Orphans.Creds[0].File) != "stray.creds.next" {
+		t.Fatalf("stray staged file: %d %q %+v", code, errb, n.Orphans)
+	}
+	noSecrets(t, out)
+	// an unreadable staged file is a problem
+	if err := os.WriteFile(filepath.Join(f.credsDir, "junk.creds.next"), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code = f.run(t, "--json", "--strict")
+	n = notesOut{}
+	_ = json.Unmarshal([]byte(out), &n)
+	found := false
+	for _, p := range n.Problems {
+		found = found || (p.What == "creds" && strings.HasSuffix(p.Item, "junk.creds.next"))
+	}
+	if code != 1 || !found {
+		t.Errorf("junk staged file must be a problem: %d %+v", code, n.Problems)
+	}
+}
+
+func TestAuditExitCodeThreeCouldNotComplete(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	if _, errb, code := ctlRun(t, f.e, "audit", "--creds-dir", filepath.Join(f.credsDir, "nope")); code != 3 {
+		t.Errorf("unreadable required creds directory: %d %q, want 3", code, errb)
 	}
 }

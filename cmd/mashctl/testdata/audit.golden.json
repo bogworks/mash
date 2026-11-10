@@ -27,6 +27,7 @@
         "msgs": 1,
         "first_seq": 1,
         "last_seq": 1,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.acme.team1.ops1"
         ],
@@ -39,7 +40,10 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 0
+          "delivered": 0,
+          "delivered_consumer_seq": 0,
+          "ack_floor_consumer_seq": 0,
+          "num_redelivered": 0
         }
       }
     },
@@ -60,6 +64,7 @@
         "msgs": 3,
         "first_seq": 1,
         "last_seq": 3,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.*.o.alpha"
         ],
@@ -72,7 +77,10 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 0
+          "delivered": 0,
+          "delivered_consumer_seq": 0,
+          "ack_floor_consumer_seq": 0,
+          "num_redelivered": 0
         }
       }
     },
@@ -93,6 +101,7 @@
         "msgs": 2,
         "first_seq": 1,
         "last_seq": 2,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.claude.team2.beta"
         ],
@@ -105,7 +114,10 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 0
+          "delivered": 0,
+          "delivered_consumer_seq": 0,
+          "ack_floor_consumer_seq": 0,
+          "num_redelivered": 0
         }
       }
     },
@@ -126,6 +138,7 @@
         "msgs": 2,
         "first_seq": 1,
         "last_seq": 2,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.*.o.ops1"
         ],
@@ -138,7 +151,11 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 1
+          "delivered": 1,
+          "delivered_consumer_seq": 1,
+          "ack_floor_consumer_seq": 0,
+          "delivered_last": "<TIME>",
+          "num_redelivered": 0
         }
       }
     }
@@ -157,6 +174,7 @@
         "msgs": 2,
         "first_seq": 1,
         "last_seq": 2,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.*.o.ops1"
         ],
@@ -169,7 +187,11 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 1
+          "delivered": 1,
+          "delivered_consumer_seq": 1,
+          "ack_floor_consumer_seq": 0,
+          "delivered_last": "<TIME>",
+          "num_redelivered": 0
         }
       },
       "new_inbox": {
@@ -178,6 +200,7 @@
         "msgs": 1,
         "first_seq": 1,
         "last_seq": 1,
+        "last_time": "<TIME>",
         "subjects": [
           "agents.mail.acme.team1.ops1"
         ],
@@ -190,7 +213,10 @@
           "start_seq": 0,
           "filter_subjects": [],
           "ack_floor": 0,
-          "delivered": 0
+          "delivered": 0,
+          "delivered_consumer_seq": 0,
+          "ack_floor_consumer_seq": 0,
+          "num_redelivered": 0
         }
       },
       "drained": false,
@@ -219,12 +245,14 @@
     "creds": [
       {
         "file": "<CREDS-DIR>/stray.creds",
-        "user": "USER-stray"
+        "user": "USER-stray",
+        "staged": false
       }
     ]
   },
   "fenced_leases": [],
   "problems": [],
+  "notes": [],
   "summary": {
     "records": 4,
     "legacy": 2,

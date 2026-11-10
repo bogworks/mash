@@ -1,6 +1,6 @@
 # mashctl audit: the population, from its sources
 
-`mashctl audit` lists mash's side of the population as the server and the creds directories hold it: every directory
+`mashctl audit` lists mash's side of the population as the server and the creds directories hold it (its state, not its use, see [What it cannot see](#what-it-cannot-see)): every directory
 record and every inbox stream in the account, which are running, which have the old form and which the new, the
 state of each inbox, the orphans, and for every identity that carries an alias the drain state of its legacy inbox.
 It is read only: it writes nothing to the server and nothing to disk, and it can be run at any time, on any number of
@@ -8,12 +8,14 @@ machines. It needs the same admin credentials and settings as the other `mashctl
 `MASH_ADMIN_CREDS`, `MASH_OWNER`), and unlike the writing verbs it also runs when `agent_token` is set.
 
 ```text
-mashctl audit [--json] [--strict] [--creds-dir DIR]
+mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]
 ```
 
 - `--json` prints the report as JSON; without it, the same facts as tab-separated text lines.
 - `--creds-dir DIR` scans DIR for creds files instead of the directories `mashctl add` writes to (the config
   directory, and the legacy `~/.config/mash` when it is there).
+- `--compare EARLIER.json` reads the JSON of an earlier `audit --json` and adds a comparison with it (see
+  [`--compare`](#compare)). A file that is not JSON, or is another report version, is refused with exit 3.
 - `--strict` exits 1 when there is a finding (see [Exit codes](#exit-codes)).
 
 The output is the evidence for an audit, so it is deterministic: records, renames, orphans and problems are sorted
@@ -24,7 +26,7 @@ The output is the evidence for an audit, so it is deterministic: records, rename
 
 Top level: `version` (always 1; it changes only when a field is removed or changes meaning), `generated` (RFC 3339,
 UTC; the only timestamp, and the one a comparison ignores), `owner`, `creds_dirs` (the directories scanned),
-`records`, `renames`, `orphans`, `fenced_leases`, `problems` and `summary`.
+`records`, `renames`, `orphans`, `fenced_leases`, `problems`, `notes`, `summary` and, only with `--compare`, `compare`.
 
 ### `records`: one per directory record, sorted by `key`
 
@@ -42,12 +44,19 @@ UTC; the only timestamp, and the one a comparison ignores), `owner`, `creds_dirs
 The directory record has no field that says where it came from, so the report has no `source` field.
 
 `inbox` (also `legacy_inbox` and `new_inbox` under `renames`): `stream` (`inbox-<key>`), `present` (the stream exists;
-when `false` the counts are 0), `msgs`, `first_seq`, `last_seq`, `subjects` (as configured, sorted; a suspended
+when `false` the counts are 0), `msgs`, `first_seq`, `last_seq` (the sequence of the last message ever stored, which
+only grows), `last_time` (when the stream last stored a message, RFC 3339 UTC; absent for a stream that never held
+one), `subjects` (as configured, sorted; a suspended
 stream shows the one parked subject), `suspended`, and `deliver`: the stream's durable consumer `deliver` with
 `present`, `pending` (stored and not yet delivered), `ack_pending` (delivered and not yet acknowledged), and the
 consumer's configuration: `deliver_policy` (`all`, `last`, `new`, `by_start_sequence`, `by_start_time` or
 `last_per_subject`), `start_seq`, `start_time` (only when set), `filter_subjects` (empty when unfiltered), `ack_floor`
 (the stream sequence up to which everything is acknowledged) and `delivered` (the highest stream sequence delivered).
+For the comparison of two audits the consumer also shows `delivered_consumer_seq` and `ack_floor_consumer_seq` (the
+same two points as consumer sequences), `delivered_last` and `ack_floor_last` (when each last moved, RFC 3339 UTC;
+absent when the server reports none) and `num_redelivered` (messages redelivered and not yet acknowledged). The two
+`*_last` times and `last_time` are the only fields besides `generated` that differ between two runs for a reason of
+time alone; everything else is a sequence or a count.
 
 The text form shows the same per inbox on one line: `suspended`, `deliver` (`true` or `false`) and, when a consumer
 exists, `policy`, `start_seq`, `filter`, `ack_floor` (and `start_time` when set). An orphan stream line shows
@@ -75,6 +84,11 @@ Otherwise every one of these must hold, and `drained` is `false` if any fails:
 - the consumer has no filter other than the stream's own subjects;
 - `ack_floor` has reached the stream's `last_seq`.
 
+`drained` is not `unused`. A legacy stream can show `msgs` 0 (everything was read and acknowledged, or purged) while its
+`last_seq` is still moving, because mail is still being sent to the old name and read as it arrives. `drained` says
+only that nothing is waiting at the moment of the read. Whether the old name is still used is shown only by the
+`last_seq` and the consumer's `delivered` of two audits, which is what `--compare` reports.
+
 The counts alone are not the rule: a consumer deleted and recreated to skip the stored messages shows `pending` 0 and
 `ack_pending` 0 while those messages are unread. That is why the policy, start sequence and filter are in the report.
 
@@ -87,10 +101,12 @@ The counts alone are not the rule: a consumer deleted and recreated to skip the 
   recently held a name nobody provisioned (or the record was deleted by hand while it ran). The admin's own lock keys
   (`limits-lock.*`) are not leases and are not listed.
 - `creds`: a `*.creds` file in the scanned directories whose user public key matches no record's `user`. Each has
-  `file` and `user`. Read it as: a leftover from an interrupted `add`, a retired endpoint, or a rotation that never
+  `file`, `user` and `staged`. Read it as: a leftover from an interrupted `add`, a retired endpoint, or a rotation that never
   finished. The admin's and the system account's creds files (`MASH_ADMIN_CREDS`, `MASH_SYS_CREDS`) are found by
   their user key and are not listed. Only the user public key of the JWT is read from a creds file; the seed and the
-  token are never kept or printed. Staged `*.creds.next` files are not scanned.
+  token are never kept or printed. A staged `*.creds.next` file (the credentials of an interrupted
+  rotation) is read the same way, only its public user key, and treated like a creds file: it is an orphan when its
+  user matches no record, and then has `staged: true`; one that cannot be read is a problem.
 
 `fenced_leases` lists lease keys that hold only a deprovision tombstone and have no record. That is what a
 deprovision leaves for up to 90 seconds, so it is not an orphan.
@@ -98,27 +114,70 @@ deprovision leaves for up to 90 seconds, so it is not an orphan.
 ### `problems`
 
 Things the audit could not read, each with `what` (`record` or `creds`), `item` and `error`: a directory value that
-does not parse as a record, a record that names no identity, a creds file that cannot be read (for example one that
+does not parse as a record, a record that names no identity, a record whose alias names no legacy identity (the record stays in `records`, and the inbox the alias's name would give is not reported as an orphan), a creds file or staged creds file that cannot be read (for example one that
 other users can read). A problem is not a verdict on the item: fix it and run again. A directory entry that does not
 parse still exists, so the audit claims by its key the inbox stream and the lease it would own, and by its raw `user`
 field the creds file of that user; those are not listed as orphans (the problem is the finding).
+
+### `notes`
+
+A sorted list of strings for things skipped or absent that are not findings and never change the exit code: a
+`*.creds` or `*.creds.next` file that is a symbolic link (skipped, so its user key is not matched and its user can
+show up as an orphan elsewhere), and a default creds directory that does not exist (nothing was scanned there). They
+are also printed as `note:` lines.
 
 ### `summary`
 
 Counts: `records`, `legacy`, `new`, `running`, `renamed`, `undrained`, `orphan_streams`, `orphan_leases`,
 `orphan_creds`, `problems`.
 
+<a id="compare"></a>
+## `--compare`: what moved between two audits
+
+`mashctl audit --compare EARLIER.json` reads the JSON an earlier `audit --json` wrote and adds a `compare` object to
+the report (and `compare` lines to the text form). It reads nothing else from disk and changes nothing. The earlier file's `version` must be
+the one this mashctl writes; a file that is not JSON, is another version, or cannot be read exits 3.
+
+`compare` holds `against_generated`, `moved`, `identities_removed` and `identities_added` (directory keys present
+before and not now, and the reverse) and `streams`: one entry per legacy inbox stream in either audit (the inbox of an
+old-form record and the legacy inbox of a renamed identity), sorted, each with `present_before`, `present_now` and a
+before, now and moved triple for `last_seq`, for the `deliver` consumer's `delivered` (stream sequence) and for its
+`ack_floor`. A stream has moved when it is present now and its `last_seq` or its `delivered` differs: mail was stored
+or mail was read. The ack floor is shown but does not count by itself. `moved` is the number of streams that moved.
+
+With `--strict`, `--compare` fails (exit 1) when `moved` is above 0, and on every other finding: any orphan, any
+alias whose legacy inbox is not drained, any problem.
+
+## What it cannot see
+
+The audit reads the state of the server: the directory, the streams, the consumers, the leases and the creds files.
+It does not see use. In particular it cannot see:
+
+- publishes to a legacy subject that has no stream: the mail goes nowhere and leaves no trace here;
+- connections: who is connected, with which credentials, and to which subjects they publish or subscribe;
+- an endpoint that has no stream, and a client that publishes or consumes without being an endpoint.
+
+What it can show is that a legacy stream stored a message (`last_seq`, `last_time`) or had one read (`delivered`,
+`delivered_last`) between two audits. An old-form sender writing to a name with no stream is invisible to it.
+
+So "two clean audits a day apart" means exactly this: both runs were `--strict` clean (exit 0), and `--compare` of the
+second against the first shows no legacy movement (`moved` 0, with `--strict` the second exits 0). That is evidence
+that no stream stored or delivered mail in that day. It is not evidence about publishes or connections the audit
+cannot see.
+
 ## Exit codes
 
-- 0: the audit completed, whatever it found.
-- 1: the audit could not complete (no server, no credentials, an unreadable creds directory), or `--strict` found
-  something: an orphan of any kind, an alias whose legacy inbox is not drained, or a problem (an item the audit could
-  not read, which it cannot call clean). A `--strict` run says what it counted on standard error.
-- 2: a usage error.
+| code | meaning |
+| --- | --- |
+| 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved. Standard error says what was counted |
+| 2 | a usage error |
+| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON or another version. Nothing is printed on standard output |
 
 ## The drain check before a break
 
-Before the transition grant on a legacy stream is revoked, run `mashctl audit --strict` (or `--json` and read
-`renames[].drained`): every renamed identity must show `drained: true`, that is the rule above on its
-legacy inbox (nothing pending, nothing unacknowledged, and a consumer that covers every stored message). Two clean audits a day apart (`--strict` exit 0 both times, and equal output apart from `generated`) are
-the evidence.
+Before the transition grant on a legacy stream is revoked, run `mashctl audit --strict --json > day1.json` and read
+`renames[].drained`: every renamed identity must show `drained: true`, that is the rule above on its
+legacy inbox (nothing pending, nothing unacknowledged, and a consumer that covers every stored message). A day later run
+`mashctl audit --strict --compare day1.json`. Two clean audits a day apart are both exits 0 and a `compare` that shows
+no legacy movement, with the limits in [What it cannot see](#what-it-cannot-see).
