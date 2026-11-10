@@ -303,8 +303,15 @@ writers, and nothing writes a new-form record until every reader in the range ca
   default, un-policied permission set and refuses every policy-compiled user (amendment 2), with a clear error.
 - **1.6 Provisioning and display.** `mash` and `mashctl` provision, start and address an endpoint by its three tokens as
   well as by a legacy name, still behind the setting; `who`, `inbox`, message headers and trust lines show each token
-  byte-identical (REQ-006). Provisioning refuses a name that was retired (ADR 0015's tombstone) so a retired old-form
-  name is never reassigned (INV-002). The interface is open (see the gaps).
+  byte-identical (REQ-006). Provisioning refuses a retired new-form identity, so a retired name is never reassigned (INV-002). The plan first said
+  to rely on ADR 0015's tombstone; that tombstone lives in the lease bucket and expires after the lease TTL (90 seconds),
+  so the refusal would lapse. For new-form identities mash therefore writes a durable retired marker instead (the
+  no-TTL bucket `mash-retired`, one key per flat identity, written by the new-form deprovision before it removes
+  anything, or, for the user-key-guarded removal, after its guarded record delete succeeds so a refused removal never burns
+  a live name; checked by provisioning under the admission lock; there is no release path). A legacy deprovision of a name
+  that a new-form record names as its alias is refused, so no alias is left dangling. Legacy names stay reusable:
+  INV-002's scope is the new-form identity, and the break's name rule, which refuses `cc`, ends old-form use. This still
+  passes the contract's tests (AT-002 and INV-002 for new-form names). The interface is open (see the gaps).
 - **1.7 The name-acceptance rule.** DEC-014 chose (c): homerange retires old identities and credentials, and mash applies
   a range-level rule that homerange supplies as configuration (it can match the agent, owner and name tokens) at every
   entry point (provision, start, send, reply, live prompt, directory lookup, the compatibility alias). This pull request builds the mechanism, with no default rule (SEAM-001), tests first:

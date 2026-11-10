@@ -136,11 +136,11 @@ func New(nc *nats.Conn, owner string) (*Admin, error) {
 // Conn is the connection the Admin was made with. The caller owns it.
 func (a *Admin) Conn() *nats.Conn { return a.nc }
 
-// Init creates the directory and lease buckets. It is idempotent. A bucket from before buckets had a size cap (no
+// Init creates the directory, lease and retired-name buckets. It is idempotent. A bucket from before buckets had a size cap (no
 // MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
 // configured limit is raised to it; a larger one is kept (a limit is never lowered), and nothing is purged.
 func (a *Admin) Init(ctx context.Context) error {
-	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits)} {
+	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
 		if kv, err := a.js.KeyValue(ctx, cfg.Bucket); err == nil {
 			st, err := kv.Status(ctx)
 			if err != nil {
@@ -229,7 +229,10 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	// Lock order: the name's lock first, then the directory-wide admission lock, always. The admission lock is a leaf
 	// (never held while waiting for another lock), so no cycle is possible. It makes list-admit-create atomic across
 	// names. ANY writer of a directory record (including new-form provisioning) MUST take the same lock, via
-	// lockStream(ctx, admissionLockName), around its own list-and-create.
+	// lockStream(ctx, admissionLockName), around its own list-and-create. ProvisionIdentity takes three locks in this
+	// order: its flat key's, then its alias's legacy name lock (this same per-name lock), then the admission lock. No
+	// cycle: a flat key (it holds "_") is never a legacy name, Provision, Deprovision and the other legacy writers hold
+	// only their own name's lock and then the leaf, and a lock wait is bounded by lockWait.
 	adm, err := a.lockStream(ctx, admissionLockName)
 	if err != nil {
 		return store.Record{}, err
@@ -338,31 +341,43 @@ func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name, zone str
 // createInboxLocked creates name's inbox stream, or updates an existing one to the configured limits unless that
 // would lower a cap. The caller holds name's lock.
 func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name, zone string) (jetstream.Stream, error) {
-	existing, err := a.js.Stream(ctx, sap.InboxStream(name))
+	return a.createStreamLocked(ctx, lk, name, func(existing jetstream.Stream) jetstream.StreamConfig {
+		cfg := store.InboxConfigZoned(a.owner, zone, name, a.limits)
+		if existing != nil && zone == "" {
+			// A retried legacy provision must not drop the exact zone filter a stream already has.
+			for _, sub := range existing.CachedInfo().Config.Subjects {
+				if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
+					cfg.Subjects = append(cfg.Subjects, sap.MailFilterZone(a.owner, z, name))
+					break
+				}
+			}
+		}
+		return cfg
+	})
+}
+
+// createStreamLocked is the create-or-update of the inbox stream inbox-<key> that both provisioning paths share: it
+// reads any existing stream, refuses a suspended one or an update that would lower a cap, then writes the
+// configuration build returns (build gets the existing stream, nil when there is none). The caller holds key's lock.
+func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key string, build func(existing jetstream.Stream) jetstream.StreamConfig) (jetstream.Stream, error) {
+	existing, err := a.js.Stream(ctx, sap.InboxStream(key))
 	if err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 		return nil, fmt.Errorf("mash: inbox stream: %w", err)
 	}
 	if afterStreamRead != nil {
 		afterStreamRead(a.limits.InboxMaxBytes)
 	}
-	if err == nil {
-		if _, ok := suspendedSubjects(name, existing.CachedInfo().Config); ok {
-			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", name, name)
+	if err != nil {
+		existing = nil
+	} else {
+		if _, ok := suspendedSubjects(key, existing.CachedInfo().Config); ok {
+			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", key, key)
 		}
-		if err := refuseLowering(name, existing.CachedInfo().Config, a.limits); err != nil {
+		if err := refuseLowering(key, existing.CachedInfo().Config, a.limits); err != nil {
 			return nil, err
 		}
 	}
-	cfg := store.InboxConfigZoned(a.owner, zone, name, a.limits)
-	if err == nil && zone == "" {
-		// A retried legacy provision must not drop the exact zone filter a stream already has.
-		for _, sub := range existing.CachedInfo().Config.Subjects {
-			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
-				cfg.Subjects = append(cfg.Subjects, sap.MailFilterZone(a.owner, z, name))
-				break
-			}
-		}
-	}
+	cfg := build(existing)
 	if err := lk.check(ctx); err != nil {
 		return nil, err
 	}
@@ -1165,6 +1180,11 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	if err != nil {
 		return err
 	}
+	adm, err := a.guardLegacyAlias(ctx, kv, name)
+	if err != nil {
+		return err
+	}
+	defer adm.release(ctx)
 	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
@@ -1193,10 +1213,18 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 			return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)
 		}
 	}
+	// A new-form identity is burned before anything is removed (INV-002): a crash after this leaves the name retired
+	// and the record in place, and the same call run again finishes the removal.
+	if err := a.retireLocked(ctx, lk, kv, name, ruser); err != nil {
+		return partialIf(revoked, name, ruser, err)
+	}
 	if err := fence(ctx, lease, name); err != nil {
 		return partialIf(revoked, name, ruser, err)
 	}
 	if err := lk.check(ctx); err != nil {
+		return partialIf(revoked, name, ruser, err)
+	}
+	if err := adm.check(ctx); err != nil {
 		return partialIf(revoked, name, ruser, err)
 	}
 	if err := kv.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
@@ -1284,6 +1312,11 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	case rec.User != savedUser:
 		return fmt.Errorf("mash: endpoint %s: its record belongs to a different user key than when it was suspended (left in place)", name)
 	}
+	adm, err := a.guardLegacyAlias(ctx, kv, name)
+	if err != nil {
+		return err
+	}
+	defer adm.release(ctx)
 	if afterDeprovisionGet != nil {
 		afterDeprovisionGet()
 	}
@@ -1293,6 +1326,9 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	revoked, err := a.revokeLocked(ctx, lk, name, rec.User)
 	if err != nil {
 		return err
+	}
+	if err := adm.check(ctx); err != nil {
+		return partialIf(revoked, name, rec.User, err)
 	}
 	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
@@ -1309,6 +1345,8 @@ var (
 	ErrRecordOtherUser = errors.New("its record belongs to another user key (left in place)")
 	// ErrRecordChanged: the record was replaced or changed between the read and the delete.
 	ErrRecordChanged = errors.New("the record changed; left in place")
+	// ErrAliased: a new-form record's alias names this legacy endpoint.
+	ErrAliased = errors.New("a new-form endpoint aliases it (left in place)")
 	// ErrNoRecord: there is no directory record, so nothing proves who owns the name (or its inbox stream).
 	ErrNoRecord = errors.New("it has no directory record, so nothing proves the key owns it (left in place)")
 )
@@ -1355,6 +1393,11 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "deprovision", &err)
 	defer end()
+	adm, err := a.guardLegacyAlias(ctx, kv, name)
+	if err != nil {
+		return err
+	}
+	defer adm.release(ctx)
 	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
 	purged, revoked := false, false
 	for try := 0; try < setMetaTries && !purged; try++ {
@@ -1362,6 +1405,11 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
 			if try > 0 {
 				return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
+			}
+			if id, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
+				// A new-form name whose record is already gone: the remains of a removal that stopped after the
+				// purge and before its marker. Complete it from the flat key and the caller's user.
+				return a.finishAfterPurge(ctx, lk, lease, name, id, user)
 			}
 			return refusal(name, ErrNoRecord)
 		}
@@ -1392,6 +1440,9 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 				return err
 			}
 		}
+		if err := adm.check(ctx); err != nil {
+			return partialIf(revoked, name, user, err)
+		}
 		err = kv.Purge(ctx, name, jetstream.LastRevision(e.Revision()))
 		switch {
 		case err == nil:
@@ -1409,7 +1460,96 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()
 	}
+	// The marker follows the guarded purge, never precedes it: a refused or failed guarded removal leaves the record
+	// and must not burn a live name (the marker has no release).
+	if err := a.retireMarker(ctx, lk, name, user); err != nil { // new-form only
+		return partialIf(revoked, name, user, err)
+	}
 	return partialIf(revoked, name, user, a.fenceAndDeleteInbox(ctx, lk, lease, name))
+}
+
+// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: it writes the
+// retired marker (an existing one keeps its first time) then fences and deletes the inbox. With no record nothing
+// proves who owned the name, so the marker is built from the flat key id and the caller's user; an existing marker
+// for another user refuses. The caller holds name's lock.
+func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string, id sap.EndpointIdentity, user string) error {
+	retired, err := a.retiredKV(ctx)
+	if err != nil {
+		return err
+	}
+	switch e, err := retired.Get(ctx, name); {
+	case err == nil:
+		var m store.Retired
+		if json.Unmarshal(e.Value(), &m) == nil && m.User != "" && m.User != user {
+			return refusal(name, ErrRecordOtherUser)
+		}
+	case !errors.Is(err, jetstream.ErrKeyNotFound):
+		return fmt.Errorf("mash: retired marker %s: %w", name, err)
+	}
+	if err := a.retireMarker(ctx, lk, name, user); err != nil {
+		return err
+	}
+	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
+}
+
+// aliasGuard is the admission lock a legacy removal holds while it checks that no new-form record aliases the name.
+// A nil guard (a new-form key) holds nothing.
+type aliasGuard struct{ l *streamLock }
+
+func (g *aliasGuard) release(ctx context.Context) {
+	if g != nil {
+		g.l.release(ctx)
+	}
+}
+
+func (g *aliasGuard) check(ctx context.Context) error {
+	if g == nil {
+		return nil
+	}
+	return g.l.check(ctx)
+}
+
+// guardLegacyAlias is the alias check of every path that removes a legacy record (a key without "_"). Under the
+// directory-wide admission lock (taken after the caller's name lock, never before it) it refuses when a new-form
+// record's alias names this owner and name: removing the record would leave that alias dangling, and a legacy
+// Provision of the name could then hand its bridge permissions to a different endpoint. It returns the held lock,
+// which the caller releases once the record is removed, or nil for a new-form key. A directory with no new-form key
+// is not read. Otherwise every record is read and one that cannot be read refuses (fail closed), as admission does.
+// The caller holds name's lock.
+func (a *Admin) guardLegacyAlias(ctx context.Context, kv jetstream.KeyValue, name string) (*aliasGuard, error) {
+	if strings.Contains(name, "_") {
+		return nil, nil
+	}
+	adm, err := a.lockStream(ctx, admissionLockName)
+	if err != nil {
+		return nil, err
+	}
+	g := &aliasGuard{l: adm}
+	keys, err := kv.Keys(ctx)
+	if errors.Is(err, jetstream.ErrNoKeysFound) {
+		return g, nil
+	}
+	if err != nil {
+		g.release(ctx)
+		return nil, fmt.Errorf("mash: refusing to deprovision %s: list directory: %w", name, err)
+	}
+	if !slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") }) {
+		return g, nil
+	}
+	recs, err := a.directoryRecords(ctx, kv)
+	if err != nil {
+		g.release(ctx)
+		return nil, fmt.Errorf("mash: refusing to deprovision %s: %w (left in place)", name, err)
+	}
+	for _, r := range recs {
+		if r.Alias != nil && r.Alias.Owner == a.owner && r.Alias.Name == name {
+			g.release(ctx)
+			holder := r.KeyOrName()
+			return nil, &refusedError{name: name, why: ErrAliased,
+				text: fmt.Sprintf("the new-form endpoint %s still names it as its alias; retire or re-point %s first (nothing was removed)", holder, holder)}
+		}
+	}
+	return g, nil
 }
 
 // IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it
@@ -1447,6 +1587,9 @@ func (r *refusedError) Error() string {
 	return "mash: refusing to deprovision " + r.name + ": " + r.why.Error()
 }
 func (r *refusedError) Unwrap() error { return r.why }
+
+// isTombstone reports whether a lease value is the tombstone Deprovision writes.
+func isTombstone(v []byte) bool { return bytes.Contains(v, []byte(`"deprovisioned":true`)) }
 
 // fence writes the lease tombstone for name.
 func fence(ctx context.Context, lease jetstream.KeyValue, name string) error {
@@ -1513,7 +1656,7 @@ func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
 	if lease, err := a.js.KeyValue(ctx, store.LeaseBucket); err == nil {
 		switch e, err := lease.Get(ctx, name); {
 		case err == nil:
-			return !bytes.Contains(e.Value(), []byte(`"deprovisioned":true`)), nil
+			return !isTombstone(e.Value()), nil
 		case !errors.Is(err, jetstream.ErrKeyNotFound):
 			return false, fmt.Errorf("mash: lease %s: %w", name, err)
 		}

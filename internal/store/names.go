@@ -6,5 +6,6 @@ package store
 const (
 	DirectoryBucket = "mash-directory"
 	LeaseBucket     = "mash-leases"
+	RetiredBucket   = "mash-retired"
 	Consumer        = "deliver"
 )

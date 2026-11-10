@@ -28,6 +28,8 @@ const (
 const (
 	DirectoryMaxBytes = 16 << 20
 	LeaseMaxBytes     = 4 << 20
+	// RetiredMaxBytes caps the retired-name bucket: one small marker per retired new-form identity, kept for good.
+	RetiredMaxBytes = 4 << 20
 )
 
 // LeaseTombstone is what Deprovision writes to an endpoint's lease key: it fences the name, so a live or
@@ -170,6 +172,24 @@ func LeaseConfig() jetstream.KeyValueConfig { return LeaseConfigFor(DefaultLimit
 func LeaseConfigFor(l Limits) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: LeaseBucket, Description: "mash endpoint leases",
 		History: 1, TTL: LeaseTTL, Storage: jetstream.FileStorage, MaxBytes: l.LeaseMaxBytes}
+}
+
+// RetiredConfig is the retired-name bucket: flat identity -> Retired, written when a new-form identity is
+// deprovisioned. It has no TTL (unlike the lease bucket, whose tombstone lapses after LeaseTTL) and nothing in mash
+// deletes from it: INV-002, a retired name is never reassigned, needs the marker to outlive the lease.
+func RetiredConfig() jetstream.KeyValueConfig {
+	return jetstream.KeyValueConfig{Bucket: RetiredBucket, Description: "mash retired new-form identities",
+		History: 1, Storage: jetstream.FileStorage, MaxBytes: RetiredMaxBytes}
+}
+
+// Retired is the value of one retired-name marker. It names the identity's three tokens and the user public key that
+// was retired; it never holds a seed or any other secret. User is empty when the record could not be read.
+type Retired struct {
+	Agent     string `json:"agent"`
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	User      string `json:"user,omitempty"`
+	RetiredAt string `json:"retired_at"` // RFC 3339, UTC
 }
 
 // Record is one directory entry (spec 6.1).
