@@ -92,24 +92,24 @@ any hit from there is added here. The rows for `docs/plans/` are hits that the s
 | docs/plans/2026-11-10-scrub-remainder.md:116:W4 | open |
 | docs/plans/2026-11-10-scrub-remainder.md:133:W4 | open |
 | docs/plans/2026-11-10-scrub-remainder.md:136:W1 | open |
-| internal/portable/portable_test.go:36:W5 | open |
-| internal/portable/portable_test.go:36:W4 | open |
-| internal/portable/portable_test.go:482:W5 | open |
-| internal/portable/portable_test.go:482:W4 | open |
+| internal/portable/portable_test.go:36:W5 | excepted (exceptions.tsv) |
+| internal/portable/portable_test.go:36:W4 | excepted (exceptions.tsv) |
+| internal/portable/portable_test.go:482:W5 | excepted (exceptions.tsv) |
+| internal/portable/portable_test.go:482:W4 | excepted (exceptions.tsv) |
 | internal/store/store_test.go:46:W1 | excepted (exceptions.tsv) |
-| scripts/adrlint/main.go:87:W1 | open |
-| scripts/adrlint/main.go:87:W6 | open |
-| scripts/adrlint/main.go:87:W2 | open |
-| scripts/adrlint/main_test.go:158:W2 | open |
-| scripts/adrlint/main_test.go:158:W1 | open |
-| scripts/adrlint/main_test.go:158:W1 | open |
-| scripts/adrlint/main_test.go:158:W6 | open |
-| scripts/adrlint/main_test.go:158:W2 | open |
-| scripts/adrlint/main_test.go:158:W1 | open |
-| scripts/adrlint/main_test.go:158:W6 | open |
-| scripts/adrlint/main_test.go:159:W2 | open |
-| scripts/adrlint/main_test.go:160:W2 | open |
-| scripts/adrlint/main_test.go:160:W2 | open |
-| scripts/adrlint/main_test.go:161:W2 | open |
-| scripts/adrlint/main_test.go:186:W2 | open |
-| scripts/adrlint/main_test.go:469:W2 | open |
+| scripts/adrlint/main.go:87:W1 | excepted (exceptions.tsv) |
+| scripts/adrlint/main.go:87:W6 | excepted (exceptions.tsv) |
+| scripts/adrlint/main.go:87:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W1 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W1 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W6 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W1 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:158:W6 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:159:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:160:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:160:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:161:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:186:W2 | excepted (exceptions.tsv) |
+| scripts/adrlint/main_test.go:469:W2 | excepted (exceptions.tsv) |
