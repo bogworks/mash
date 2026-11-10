@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -296,8 +297,10 @@ func TestConfigASend(t *testing.T) {
 func TestConfigALookup(t *testing.T) {
 	w := newConfigAWorld(t)
 	ctx := context.Background()
+	// The hook runs in the open's parallel first wave: guard the slice.
+	var readMu sync.Mutex
 	var read []string
-	hook := func(key string) error { read = append(read, key); return nil }
+	hook := func(key string) error { readMu.Lock(); read = append(read, key); readMu.Unlock(); return nil }
 	fetchRecordHook.Store(&hook)
 	defer fetchRecordHook.Store(nil)
 	var keys []string
@@ -324,7 +327,9 @@ func TestConfigALookup(t *testing.T) {
 		})
 	}
 	// With the rule in force at open, the first wave reads no refused record.
+	readMu.Lock()
 	read = nil
+	readMu.Unlock()
 	rc := w.f.cfgNF(w.me)
 	rc.NameRule = w.rule
 	c2, err := OpenClientWith(ctx, rc, ClientOptions{Records: keys})
@@ -332,6 +337,8 @@ func TestConfigALookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(c2.Close)
+	readMu.Lock()
+	defer readMu.Unlock()
 	for _, k := range read {
 		for _, form := range configAForms(w.f.e.Owner) {
 			if k == form.key && form.want != "" {
