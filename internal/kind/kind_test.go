@@ -31,6 +31,53 @@ func TestWakes(t *testing.T) {
 	}
 }
 
+// TestKindInventoryIsTrue pins the behaviour docs/evidence/scrub/kinds.md describes: the five kinds, which wake, and
+// that nothing outside the inventory is accepted on send or read as anything but task on receipt.
+func TestKindInventoryIsTrue(t *testing.T) {
+	wantAll := []Kind{Blocker, Question, Task, Result, FYI}
+	if len(All) != len(wantAll) {
+		t.Fatalf("All = %v; want %v", All, wantAll)
+	}
+	for i, k := range wantAll {
+		if All[i] != k {
+			t.Fatalf("All[%d] = %q; want %q", i, All[i], k)
+		}
+	}
+
+	inventory := map[Kind]bool{Blocker: true, Question: true, Task: true, Result: false, FYI: false}
+	if len(inventory) != len(All) {
+		t.Fatalf("inventory has %d rows, All has %d kinds: a kind needs a row", len(inventory), len(All))
+	}
+	for _, k := range All {
+		want, ok := inventory[k]
+		if !ok {
+			t.Errorf("kind %q has no inventory row", k)
+			continue
+		}
+		if k.Wakes() != want {
+			t.Errorf("%q.Wakes() = %v; inventory says %v", k, k.Wakes(), want)
+		}
+	}
+
+	for _, name := range []string{"dispatch-to-supervisor", "urgent", "supervisor", "worker"} {
+		_, err := Parse(name)
+		if err == nil || !strings.Contains(err.Error(), "blocker|question|task|result|fyi") {
+			t.Errorf("Parse(%q) error = %v; want a refusal listing the five kinds", name, err)
+		}
+		if got := Of(name); got != Task {
+			t.Errorf("Of(%q) = %q; want task", name, got)
+		}
+	}
+
+	for _, k := range All {
+		for _, in := range []string{string(k), strings.ToUpper(string(k)), "  " + strings.ToUpper(string(k)[:1]) + string(k)[1:] + "\t"} {
+			if got, err := Parse(in); err != nil || got != k {
+				t.Errorf("Parse(%q) = %q, %v; want %q", in, got, err, k)
+			}
+		}
+	}
+}
+
 func TestTag(t *testing.T) {
 	long := strings.Repeat("x", 281)
 	edge := strings.Repeat("é", 280) // 280 characters, 560 bytes
