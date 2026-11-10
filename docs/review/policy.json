@@ -1,0 +1,58 @@
+{
+  "min_complete": 1,
+  "default_tier": "standard",
+  "questions": [
+    {
+      "id": "hardcoded-environment",
+      "severity": "high",
+      "text": "Does this change hard-code an environment assumption: a home-relative or absolute path, a directory layout, a host, org or person name, or a location for build output or caches, that should be configurable or derived from the configured workspace?"
+    }
+  ],
+  "tiers": [
+    {
+      "name": "security-critical",
+      "block": ["blocker", "high", "medium"],
+      "round_cap": 6,
+      "paths": [
+        "internal/admin/**",
+        "internal/policy/**",
+        "internal/sap/**",
+        "internal/store/admit*",
+        "cmd/mashctl/**",
+        ".github/**",
+        ".mergify.yml"
+      ]
+    },
+    {
+      "name": "tests-and-docs",
+      "block": ["blocker"],
+      "round_cap": 2,
+      "paths": [
+        "**/*_test.go",
+        "**/testdata/**",
+        "docs/**",
+        "**/*.md"
+      ]
+    },
+    {
+      "name": "standard",
+      "block": ["blocker", "high"],
+      "round_cap": 4,
+      "paths": [
+        "cmd/**",
+        "internal/**",
+        "scripts/**",
+        "plugin/**",
+        "ci/**",
+        "go.mod",
+        "go.sum"
+      ]
+    }
+  ],
+  "models": [
+    {"provider": "openrouter", "model": "z-ai/glm-5.3-flash"}
+  ],
+  "fallback_models": [
+    {"provider": "openrouter", "model": "z-ai/glm-5.3"}
+  ]
+}
