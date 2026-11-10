@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-3 (draft-2 answered the critic's first pass; draft-3 answers mash-lead's review and the critic's second pass; Appendix A) |
+| Contract id and revision | sap-go-sdk, revision draft-4 (draft-2 answered the critic's first pass, draft-3 mash-lead's review and the second pass, draft-4 the third pass; Appendix A) |
 | Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
@@ -135,7 +135,8 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   and status values, and end at the zero-byte terminator (§6). It MUST accept both the string and object forms of a
   `response` chunk's `data` (SAP:L364).
 - **Queries.** It MUST let the program answer a mid-stream query exactly once (§7).
-- **Timeout.** It MUST apply a per-stream inactivity timeout (default 60 s, SAP:L402) and support cancellation by
+- **Timeout.** It MUST apply a per-stream inactivity timeout (SAP:L402). The default of 60 s is the spec's
+  recommendation, adopted as SDK policy (Proposed). It MUST support cancellation by
   dropping the subscription (SAP:L413).
 - **Errors.** It MUST inspect error headers on every message before the body (§9). When the error body is empty or
   not valid JSON, it MUST fall back to the `Nats-Service-Error` header as the description (SAP:L593).
@@ -174,7 +175,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   - The host declares `protocol_version` and `endpoints` by default.
   - The tracker's offline threshold defaults to 3 × `interval_s` (a recommendation, SAP:L480), and the program can
     configure it.
-  - The tracker subscribes to the heartbeat wildcard before its first PING (a SHOULD, §8.5, SAP:L531).
+  - The tracker subscribes to the heartbeat wildcard before its first PING (a SHOULD, §8.5, SAP:L533).
 - MUST: the SDK provides a heartbeat tracker.
 - Acceptance: AT-001, AT-003.
 
@@ -200,7 +201,13 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   `Agent-Sender` (§13.5; caller checklist SAP:L709). It MUST NOT sign a reply, `status` replies included (SAP:L1052).
 - **Payload limit.** The caller MUST count the `Agent-Sender` header bytes in its local `max_payload` check
   (SAP:L887).
-- **Verifying.** It MUST verify live messages (30 s window, nonce replay set) and stored messages (§13.6, SAP:L973-L980).
+- **Verifying.** It MUST verify live messages (§13.7, SAP:L927-L971: 30 s window, nonce replay set). It MUST verify
+  stored messages for authorship only (§13.8, SAP:L973-L980: signature and `sub`, no time window and no nonce set,
+  redelivery accepted, deduplication on `(user, nonce)` left to the consumer).
+- **Own identity (§13.4, SAP:L832-L858).** When the connection's identity is unknown (no reply to
+  `$SYS.REQ.USER.INFO`, or a permissions error), the SDK MUST NOT guess and MUST NOT keep the failure for the
+  connection's lifetime: it retries after a short interval (SAP:L851). A connection with no or unknown identity sends
+  no `Agent-Sender` header, and fails locally against a `signed` endpoint.
   It MUST classify senders as verified, claimed or absent.
 - **Declaring the requirement (§13.9, SAP:L982-L1003).** A host with §13 configured MUST declare `min_sender_trust`
   in its `prompt` endpoint metadata and nothing on `status`. A caller MUST read the declaration from discovery. It MUST
@@ -282,6 +289,11 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
     file, such as a seed for §13, session-aware settings or the account and server layout;
   - **not checkable:** cannot be observed over NATS, with the reason.
 
+  The classification is fixed in the catalog, not chosen at run time. An obligation whose effect a NATS client can
+  observe (a message published, a reply, a header, a registration record, a heartbeat or its cadence) is never "not
+  checkable". It is checked, or it needs configuration. Every "not checkable" entry is reviewed like a catalog
+  exclusion (REQ-010).
+
   The report is complete: every host obligation appears in exactly one group.
 - Scope decided here: testing callers needs a driver for the caller under test, so it is out of this contract and
   listed as a follow-on. The runner's report states that it covers host obligations only, so it never claims caller
@@ -325,7 +337,9 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - SDK policy (Proposed): a hook to add application headers to outgoing requests. SAP neither requires nor forbids it.
   Randy may cut it at ratification (Q12).
 - MUST: no extension point is named for, or shaped around, one consumer.
-- MUST: a written mapping from mash's `internal/sap` to the SDK's API shows which SDK call replaces each piece. That
+- MUST: a written mapping from mash's `internal/sap` to the SDK's API shows which SDK call replaces each SAP piece,
+  and lists each mash-only piece (the `mail` verb, zones, the mash signature variants, the stricter token rule) as
+  staying in mash for the follow-on rebuild, with the extension point it would use, if any. That
   is the evidence a later consumer can build on it. The mapping is context for the follow-on contract, not a
   requirement on the SDK's API.
 - Acceptance: AT-010.
@@ -336,8 +350,9 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   subdirectory module, as a repository of theirs, or linked from theirs.
 - MUST: a pull request follows that contains the SDK, or the concrete upstream integration Synadia asks for, in the
   form they name. A link-only pull request does not meet this.
-- MUST: if Synadia declines any pull request, the decline is recorded as a deviation for Randy to accept. It is not
-  completion by default.
+- MUST: if Synadia declines, whether at the issue (no pull request wanted) or on the pull request, the decline is
+  recorded with Synadia's reply as evidence. It is a deviation for Randy to accept, not completion by default. If Randy
+  accepts an issue-stage decline, no pull request is needed.
 - MUST: Randy, or someone he names, opens both (Q4).
 - MUST: the contract is met when the issue and pull request are open and answered or waiting, or when a decline is
   accepted by Randy. Synadia does not have to merge (section 8).
@@ -480,7 +495,11 @@ The review records are completion evidence.
   - drop an unknown envelope field;
   - accept a replayed nonce;
   - sign a reply;
-  - refuse a `status` request on identity grounds.
+  - refuse a `status` request on identity grounds;
+  - stop publishing heartbeats.
+- Beyond that fixed list, each release also runs one behavioural mutation drawn from every catalog section that has a
+  MUST, chosen by the reviewer. An obligation whose linked tests survive its mutation is hollow, and that fails
+  AT-002.
 
 ### AT-003: Interop (runnable check)
 - In CI (bogworks self-hosted runners; GitHub-hosted runners are excluded by standing order):
@@ -501,7 +520,13 @@ The review records are completion evidence.
 
 ### AT-005: Sender identity (runnable check, with §13 in scope)
 - Synadia's identity vectors pass, pinned by commit.
-- Live and stored verification is tested for every 400, 401 and 403 case of SAP:L927-L971.
+- Live verification is tested for every 400, 401 and 403 case of §13.7 (SAP:L927-L971).
+- Stored verification (§13.8) is tested separately for authorship only:
+  - a valid record older than 30 s verifies;
+  - a redelivered record verifies again;
+  - a bad signature or `sub` mismatch fails.
+- An unknown own identity (a timed-out `$SYS.REQ.USER.INFO`) is retried and recovers, and sends no `Agent-Sender`
+  header meanwhile.
 - A replayed nonce is refused.
 - A non-§13 peer interoperates.
 - A `status` request is signed by the caller, and a host answers it after a failed classification (logged, not
@@ -519,6 +544,8 @@ The review records are completion evidence.
 - Its report states that it covers host obligations only, and lists every host obligation as checked, needs
   configuration, or not checkable.
 - One run supplies the configuration file and turns the needs-configuration checks it covers into pass or fail.
+- A run against a host that publishes no heartbeat reports the heartbeat obligations as failed, not as not
+  checkable.
 
 ### AT-007: Ready to offer (inspection, plus a runnable check)
 - A clean external Go module, outside the repository, runs `go get` on the public tag and then builds and runs a
@@ -534,7 +561,8 @@ The review records are completion evidence.
 - The REQ-017 issue and pull request exist, with their URLs and Synadia's response or the absence of one recorded.
 - The pull request's diff contains the SDK, or the integration Synadia asked for, as their issue reply shows. A
   link-only change fails.
-- If Synadia declined, Randy's written acceptance of that deviation is recorded.
+- If Synadia declined, at the issue or on the pull request, their reply and Randy's written acceptance of that
+  deviation are recorded. An accepted issue-stage decline stands in for the pull request.
 
 ### AT-009: No mash (runnable check, plus a review)
 - A CI check fails on any import of a bogworks module, and on the identifiers or subjects named in REQ-001 (`mail`
@@ -545,7 +573,8 @@ The review records are completion evidence.
 ### AT-010: Building on it without forking it (demonstrated state)
 - An example program in the SDK's own examples uses every REQ-016 extension point and builds only on the public API.
   It must be unrelated to any one consumer.
-- The REQ-016 mapping document exists and names the SDK call that replaces each piece of mash's `internal/sap`.
+- The REQ-016 mapping document exists. It names the SDK call that replaces each SAP piece of mash's `internal/sap`,
+  and assigns each mash-only piece to the follow-on rebuild.
 - A spike that rebuilds mash on the SDK is not part of this contract. It belongs to the follow-on rebuild contract
   (Q11).
 
@@ -694,8 +723,8 @@ The review records are completion evidence.
 - **Blocking before READY:**
   - Q1, Q2, Q3, Q4 and Q12;
   - Q5 for the upstream pull request only;
-  - the critic's blocking findings. Two passes ran: 9 blocking findings on draft-1 and 4 on draft-2, all accepted and
-    applied (Appendix A). The critic has not read draft-3.
+  - the critic's blocking findings. Three passes ran, with 9 blocking findings on draft-1, 4 on draft-2 and 5 on
+    draft-3, all accepted and applied (Appendix A). The critic has not read draft-4.
 - **Not blocking:** Q6 to Q9 and Q11. Q10 is decided in REQ-013.
 
 ## What the standard got wrong
@@ -744,6 +773,22 @@ resolved (F-02, F-05 to F-09, F-11). Each partial finding is answered by the new
 | G-09: Q5 rested on nats.go's sign-off rule, while `synadia-agents` states none. | nonblocking | Accepted. Q5 is conditional on what Synadia requires, as the answer to Q4 shows. |
 
 The critic has not read draft-3.
+
+### Third pass, on draft-3
+
+Same critic and command. It judged these resolved: G-01, G-02, G-06, G-07, G-09, F-02, F-06 and F-07. It judged these
+partly resolved, each answered by a new finding below: G-03, G-04, G-05, G-08, F-05, F-08, F-09 and F-11.
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| H-01: the catalog and the runner could overclaim coverage. "Not checkable" needed only a reason, and only eight behaviours were mutated. | blocking | Accepted. An obligation a NATS client can observe is never "not checkable": the classification is fixed in the catalog and reviewed (REQ-013). AT-002 adds a heartbeat mutation and one mutation per catalog section that has a MUST. AT-006 adds the no-heartbeat host. |
+| H-02: the §13.4 rule to retry an unknown own identity (SAP:L851) was missing. | blocking | Accepted. It is in REQ-008, with the no-header and local-refusal behaviour, and tested in AT-005. |
+| H-03: AT-005 mixed live and stored verification. Stored verification skips the window and the nonce set (SAP:L977-L980). | blocking | Accepted. REQ-008 and AT-005 split them. Stored records are tested for authorship only, including an old record and a redelivered one. |
+| H-04: the mash mapping asked for an SDK call for every piece, including mash-only pieces the SDK must not have. | blocking | Accepted. The mapping covers SAP pieces only, and assigns mash-only pieces to the follow-on rebuild. |
+| H-05: a decline at the issue stage had no completion path. | blocking | Accepted. A decline at either stage is recorded with Synadia's reply, as a deviation for Randy. An accepted issue-stage decline stands in for the pull request. |
+| H-06: the citations needed fixing (§13.8 not §13.6; SAP:L533 not L531), and the recommended 60 s timeout was not marked as policy. | nonblocking | Accepted and corrected. The G-05 row above cites L531 as it was written for draft-2; L533 is the line. |
+
+The critic has not read draft-4.
 
 ### mash-lead's review of draft-2 (2026-11-10), applied in draft-3
 
