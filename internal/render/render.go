@@ -89,7 +89,7 @@ func One(m Mail) string {
 		inst += fmt.Sprintf("answers #%d\n", m.ReplyTo)
 	}
 	if m.Via != "" {
-		inst += "relayed from " + m.Via + "\n"
+		inst += "relayed from " + viaText(m.Via) + "\n"
 	}
 	if m.Instance != "" {
 		inst += "instance: " + m.Instance + "\n" // never from the body: bodies are quoted
@@ -101,7 +101,7 @@ func One(m Mail) string {
 	if m.Redelivered {
 		inst += "note: " + redeliveredNote(m.Seq) + "\n"
 	}
-	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s%s", m.Seq, m.From, m.Trust, stamp(m.At), inst, quote(m.Body))
+	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s%s", m.Seq, sap.Display(m.From), m.Trust, stamp(m.At), inst, quote(m.Body))
 }
 
 // redeliveredNote tells the model a message may have been shown already (at-least-once delivery: a hook interrupted
@@ -117,7 +117,7 @@ func instField(m Mail) string {
 		f += fmt.Sprintf("\tanswers #%d", m.ReplyTo)
 	}
 	if m.Via != "" {
-		f += "\trelayed from " + m.Via
+		f += "\trelayed from " + viaText(m.Via)
 	}
 	if m.Instance != "" {
 		f += "\tinstance " + m.Instance
@@ -130,7 +130,7 @@ func instField(m Mail) string {
 
 // Line renders a message as one line: seq, sender, time, size, first line, kind.
 func Line(m Mail) string {
-	return fmt.Sprintf("#%d\tfrom %s [%s]\t%s\t%d B\t%s\tkind %s", m.Seq, m.From, m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body), m.Kind) + instField(m)
+	return fmt.Sprintf("#%d\tfrom %s [%s]\t%s\t%d B\t%s\tkind %s", m.Seq, sap.Display(m.From), m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body), m.Kind) + instField(m)
 }
 
 // Batch renders msgs for the endpoint named to, of owner: in full when there are at most maxMsgs and their
@@ -182,7 +182,7 @@ func batch(msgs []Mail, owner string, maxMsgs, maxBytes int, note string) string
 	fmt.Fprintf(&b, "%s, digest, from %s%s\nShown as a digest (%d B). %s\n\n",
 		plural(len(msgs)), senders(owner, msgs, digestSenders), kinds(msgs), total, note)
 	for _, m := range msgs {
-		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s\tkind %s%s\n", m.Seq, m.From, m.Trust, len(m.Body), firstLine(m.Body), m.Kind, instField(m))
+		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s\tkind %s%s\n", m.Seq, sap.Display(m.From), m.Trust, len(m.Body), firstLine(m.Body), m.Kind, instField(m))
 	}
 	return b.String()
 }
@@ -229,11 +229,23 @@ func senders(owner string, msgs []Mail, max int) string {
 	return strings.Join(out, ", ")
 }
 
+// viaText is a relay declaration "<origin> #<seq>" with the origin in its display form (ADR 0081).
+func viaText(via string) string {
+	if origin, seq, ok := strings.Cut(via, " #"); ok {
+		return sap.Display(origin) + " #" + seq
+	}
+	return via
+}
+
 // Sender is the one place a sender's name is shown, for a receiver of owner, by the sender's endpoint name:
+//   - a three-token sender: agent.owner.name, whatever its owner;
 //   - a sender whose owner is unknown (not in the directory): the name alone;
 //   - another owner than the receiver's: owner/name (devops/nats-ops);
 //   - otherwise: the name as is.
 func Sender(owner string, m Mail) string {
+	if d := sap.Display(m.From); d != m.From {
+		return d // three tokens: the owner is already one of them (ADR 0081)
+	}
 	if m.Owner == "" || owner == "" || m.Owner == owner {
 		return m.From
 	}

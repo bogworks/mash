@@ -154,7 +154,7 @@ func TestNewFormMailBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := aev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from ag_team_b [verified]") || !strings.Contains(got[0], "hello a") {
+	if !strings.Contains(got[0], "from ag.team.b [verified]") || !strings.Contains(got[0], "hello a") {
 		t.Fatalf("event: %s", got[0])
 	}
 	m, err := a.Read(ctx, seq)
@@ -171,7 +171,7 @@ func TestNewFormMailBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = bev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from ag_team_a [verified]") || !strings.Contains(got[0], "hello b") {
+	if !strings.Contains(got[0], "from ag.team.a [verified]") || !strings.Contains(got[0], "hello b") {
 		t.Fatalf("event: %s", got[0])
 	}
 	if m, err := b.Read(ctx, rseq); err != nil || m.From != "ag_team_a" || m.Trust != sap.TrustVerified {
@@ -224,17 +224,33 @@ func TestNewFormMailBothWays(t *testing.T) {
 	}
 }
 
-// A recipient that is neither a legacy name nor a key is refused with a clear error, not looked up.
-func TestNewFormRecipientMustBeAKey(t *testing.T) {
+// A recipient may be written as a legacy name, the flat key or the canonical agent.owner.name (ADR 0081); anything
+// else is refused with an error that names the canonical form, not looked up.
+func TestNewFormRecipientMayBeCanonicalOrFlat(t *testing.T) {
 	f := newFixture(t)
 	ida := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
+	idb := f.addNewForm(t, "ag", "team", "b", newFormOpts{})
 	a := f.clientNF(t, ida)
-	_, err := a.Send(context.Background(), "ag.team.b", "hi", 0)
-	if err == nil || !strings.Contains(err.Error(), "not an endpoint key") {
-		t.Fatalf("send to a display form: %v", err)
+	if idb.Flat() != "ag_team_b" || idb.String() != "ag.team.b" {
+		t.Fatalf("setup %q %q", idb.Flat(), idb.String())
+	}
+	for _, to := range []string{"ag.team.b", "ag_team_b"} {
+		if _, err := a.Send(context.Background(), to, "hi", 0); err != nil {
+			t.Fatalf("send to %q: %v", to, err)
+		}
+	}
+	for _, bad := range []string{"ag.team", "ag.team.b.c", "ag.team_b", "cc.team.b", "Ag.team.b"} {
+		_, err := a.Send(context.Background(), bad, "hi", 0)
+		if err == nil || !strings.Contains(err.Error(), "not an endpoint key") || !strings.Contains(err.Error(), "agent.owner.name") ||
+			strings.Contains(err.Error(), "as who shows it (agent_owner_name)") {
+			t.Fatalf("send to %q: %v", bad, err)
+		}
 	}
 	if _, err := a.Send(context.Background(), "ag_team_nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
 		t.Fatalf("send to an unknown key: %v", err)
+	}
+	if _, err := a.Send(context.Background(), "ag.team.nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
+		t.Fatalf("send to an unknown canonical form: %v", err)
 	}
 }
 
@@ -262,7 +278,7 @@ func TestNewFormAndLegacyCoexistWithoutCrosstalk(t *testing.T) {
 	if len(lg) != 1 || !strings.Contains(lg[0], "to legacy a") || !strings.Contains(lg[0], "from b [verified]") || strings.Contains(lg[0], "new-form") {
 		t.Fatalf("legacy a got %q", lg)
 	}
-	if len(ng) != 1 || !strings.Contains(ng[0], "to new-form a") || !strings.Contains(ng[0], "from ag_team_b [verified]") || strings.Contains(ng[0], "legacy") {
+	if len(ng) != 1 || !strings.Contains(ng[0], "to new-form a") || !strings.Contains(ng[0], "from ag.team.b [verified]") || strings.Contains(ng[0], "legacy") {
 		t.Fatalf("new-form a got %q", ng)
 	}
 	// Each stream holds exactly its own message.
@@ -307,8 +323,11 @@ func TestNewFormPromptRoundTrip(t *testing.T) {
 	if err != nil || subj != "agents.prompt.ag.team.a" {
 		t.Fatalf("discover: %q %v", subj, err)
 	}
-	if _, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag.team.a"); err == nil || !strings.Contains(err.Error(), "not an endpoint key") {
-		t.Fatalf("a display form: %v", err)
+	if s2, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag.team.a"); err != nil || s2 != subj {
+		t.Fatalf("the canonical form names the same endpoint: %q %v", s2, err)
+	}
+	if _, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag.team"); err == nil || !strings.Contains(err.Error(), "not an endpoint key") {
+		t.Fatalf("not three tokens: %v", err)
 	}
 	var out bytes.Buffer
 	if err := Prompt(ctx, b.Conn(), b.Identity(), b.Key(), subj, "ping", &out); err != nil {
@@ -338,8 +357,8 @@ func TestNewFormOpenFailsClosed(t *testing.T) {
 	}{
 		{"no record", noRec, "is not provisioned"},
 		{"unusable record", bad, "is not provisioned"},
-		{"credentials of another new-form endpoint", wrong, "do not match endpoint ag_team_wrong"},
-		{"credentials of the bare name", bare, "do not match endpoint ag_team_bare"},
+		{"credentials of another new-form endpoint", wrong, "do not match endpoint ag.team.wrong"},
+		{"credentials of the bare name", bare, "do not match endpoint ag.team.bare"},
 	} {
 		for opener, open := range map[string]func() error{
 			"Open":       func() error { _, err := Open(context.Background(), f.cfgNF(tc.id)); return err },

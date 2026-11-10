@@ -518,7 +518,7 @@ type SendTimeoutError struct {
 func (e *SendTimeoutError) Error() string {
 	return fmt.Sprintf("mash: send to %s timed out; the message may or may not have been delivered. "+
 		"Retry with --id %s (the send tool's id) within %s to send it at most once; after that a retry may store a second copy. (%v)",
-		e.To, e.Key, DuplicateWindowText(), e.Err) + e.ambiguousClause()
+		sap.Display(e.To), e.Key, DuplicateWindowText(), e.Err) + e.ambiguousClause()
 }
 
 func (e *SendTimeoutError) ambiguousClause() string {
@@ -561,6 +561,7 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 // or a random one; the message's nonce and Nats-Msg-Id derive from it, so a retry with the key is dropped by the
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
+	to = sap.KeyOf(to) // the canonical agent.owner.name names the same recipient as its flat key (ADR 0081)
 	// The name rule comes first: before the inbox or the directory is read, and nothing is dropped silently.
 	if err := e.checkSelf(pointSendSender); err != nil {
 		return SendResult{}, err
@@ -685,7 +686,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 			e.refusals.markDirty(msg.Subject)
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
-		return SendResult{}, fmt.Errorf("mash: send to %s: %w", to, err)
+		return SendResult{}, fmt.Errorf("mash: send to %s: %w", sap.Display(to), err)
 	}
 	if !ack.Duplicate {
 		e.relaySent(to, o.Via, viaOrigin)
@@ -742,11 +743,13 @@ func (e *Endpoint) ownerOf(name string) string {
 
 // lookup resolves a name through the directory (the live copy, else a read).
 func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error) {
+	// A recipient may be written canonical (ADR 0081).
+	name = sap.KeyOf(name)
 	if err := e.checkKey(pointLookup, name); err != nil { // before the directory is read: a gone record gets the rule, not "not found"
 		return store.Record{}, err
 	}
 	if !validDirectoryKey(name) {
-		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", name)
+		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the canonical agent.owner.name as who shows it (the flat agent_owner_name is accepted too)", name)
 	}
 	e.mu.RLock()
 	rec, ok := e.dir[name]
@@ -756,7 +759,7 @@ func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error
 	}
 	rec, err := store.GetRecord(ctx, e.dirKV, name)
 	if err != nil {
-		return store.Record{}, fmt.Errorf("mash: no endpoint named %q (see who)", name)
+		return store.Record{}, fmt.Errorf("mash: no endpoint named %q (see who)", sap.Display(name))
 	}
 	return rec, nil
 }
@@ -793,7 +796,7 @@ func (e *Endpoint) Read(ctx context.Context, seq uint64) (render.Mail, error) {
 	}
 	raw, err := s.GetMsg(ctx, seq)
 	if err != nil {
-		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", seq, e.key)
+		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", seq, e.Display())
 	}
 	if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
 		return render.Mail{}, err

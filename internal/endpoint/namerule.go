@@ -35,8 +35,8 @@ func checkRule(rule *namerule.Rule, point string, id sap.EndpointIdentity) error
 
 // keyIdentity is the identity a directory key (or a recipient argument) names, formed as mash resolves it: a bare
 // legacy name is the legacy identity (cc, owner, name) under the asking endpoint's owner; the flat key of a
-// three-token endpoint (agent_owner_name) is that identity. The dotted display form is not a recipient form and is
-// not parsed. ok is false for anything else, which the code that follows refuses on its own terms.
+// three-token endpoint (agent_owner_name) is that identity. Callers turn a canonical agent.owner.name into the flat key
+// first (sap.KeyOf). ok is false for anything else, which the code that follows refuses on its own terms.
 func keyIdentity(owner, key string) (sap.EndpointIdentity, bool) {
 	if config.ValidName(key) {
 		id, err := sap.Legacy(owner, key)
@@ -69,6 +69,7 @@ func (e *Endpoint) checkSelf(point string) error {
 // addressed one are checked against the name rule first, so a refusal comes back before anything is asked of the
 // network.
 func (e *Endpoint) DiscoverRecipient(ctx context.Context, arg string) (string, error) {
+	arg = sap.KeyOf(arg)
 	if err := e.checkSelf(pointPromptSender); err != nil {
 		return "", err
 	}

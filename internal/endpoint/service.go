@@ -410,15 +410,16 @@ func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, e
 }
 
 // DiscoverRecipient is Discover for a recipient argument: a legacy endpoint name (looked up under owner, as Discover
-// does) or the flat key of a three-token endpoint (agent_owner_name, which carries its own owner). Any other argument
-// is an error that says so; the display forms are not parsed here.
+// does), or a three-token endpoint written canonically (agent.owner.name) or as its flat key (agent_owner_name); both
+// carry their own owner. Any other argument is an error that says so.
 func DiscoverRecipient(ctx context.Context, nc *nats.Conn, owner, arg string) (string, error) {
+	arg = sap.KeyOf(arg) // the canonical agent.owner.name is accepted as well (ADR 0081)
 	if config.ValidName(arg) {
 		return Discover(ctx, nc, owner, arg)
 	}
 	id, err := sap.FromFlat(arg)
 	if err != nil {
-		return "", fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", arg)
+		return "", fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the canonical agent.owner.name as who shows it (the flat agent_owner_name is accepted too)", arg)
 	}
 	return DiscoverIdentity(ctx, nc, id)
 }
@@ -459,7 +460,7 @@ func discoverSubject(ctx context.Context, nc *nats.Conn, owner, want, name strin
 			}
 		}
 	}
-	return "", fmt.Errorf("mash: %s is not online (no SAP registration answered)", name)
+	return "", fmt.Errorf("mash: %s is not online (no SAP registration answered)", sap.Display(name))
 }
 
 // Prompt sends a signed live prompt to subject and writes the streamed reply

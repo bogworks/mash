@@ -151,8 +151,12 @@ func orphanFix(name string) string {
 
 // orphanText says an existing record or creds file for a name the policy file lacks looks like an interrupted add.
 // Callers use it only after checking that the policy file has no endpoint of that name.
-func orphanText(name string) string {
-	return fmt.Sprintf("%s looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint %s): %s", name, name, orphanFix(name))
+func orphanText(name string) string { return orphanTextShown(name, name) }
+
+// orphanTextShown is orphanText for a directory key that people read in another form (a three-token endpoint's
+// canonical agent.owner.name, ADR 0081): the name is shown, the command keeps the key.
+func orphanTextShown(shown, key string) string {
+	return fmt.Sprintf("%s looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint %s): %s", shown, shown, orphanFix(key))
 }
 
 // credsFileFor is where name's creds live: an existing file in the config directories, else <config dir>/name.creds.

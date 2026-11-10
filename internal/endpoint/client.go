@@ -269,6 +269,7 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 
 	want := []string{e.key}
 	for _, n := range opts.Records {
+		n = sap.KeyOf(n) // a recipient may be written canonical (ADR 0081)
 		// A key the name rule refuses is not read: lookup of it reports the rule, not the record.
 		if n != e.key && validDirectoryKey(n) && e.checkKey(pointLookup, n) == nil {
 			want = append(want, n)
@@ -314,12 +315,12 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	}
 	selfRes := got[e.key]
 	if selfRes.err != nil {
-		return fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.key, selfRes.err)
+		return fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.Display(), selfRes.err)
 	}
 	self := selfRes.rec
 	if self.User != e.id.User {
 		return fmt.Errorf("mash: the credentials in %s (user %s) do not match endpoint %s (user %s)",
-			e.cfg.Creds, e.id.User, e.key, self.User)
+			e.cfg.Creds, e.id.User, e.Display(), self.User)
 	}
 	e.self = self
 	// The compatibility alias is an identity the record answers to: the rule applies to it too. The alias is data of
@@ -533,7 +534,8 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) error {
 }
 
 // validDirectoryKey reports whether name can be a directory key: a legacy endpoint
-// name, or the flat form (agent_owner_name) of a new-form identity.
+// name, or the flat form (agent_owner_name) of a new-form identity. The canonical agent.owner.name is an input form
+// only: callers turn it into the flat key first (sap.KeyOf).
 func validDirectoryKey(name string) bool {
 	if config.ValidName(name) {
 		return true
