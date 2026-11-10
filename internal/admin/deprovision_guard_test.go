@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -257,5 +258,75 @@ func TestLegacyDeprovisionAliasRace(t *testing.T) {
 	}
 	if !newThere && perr == nil {
 		t.Fatalf("provision succeeded but its record is missing")
+	}
+}
+
+// A guarded removal of a new-form key that was never provisioned (a mistyped command) changes nothing: ErrNoRecord, no
+// marker, no lease fence, and an unrelated inbox stream with that flat name survives.
+func TestDeprovisionIfUserNeverProvisionedChangesNothing(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	id := newID(t, "acme", "team1", "ghost")
+	_, user := e.Mint(t, "ghost")
+	if _, err := js.CreateStream(ctx, jetstream.StreamConfig{Name: sap.InboxStream(id.Flat()), Subjects: []string{"unrelated." + id.Flat()}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := a.DeprovisionIfUser(ctx, id.Flat(), user); !errors.Is(err, admin.ErrNoRecord) {
+			t.Fatalf("want ErrNoRecord, got %v", err)
+		}
+	}
+	if markerPresent(t, js, id.Flat()) {
+		t.Fatal("a never-provisioned name was burned")
+	}
+	if _, err := js.Stream(ctx, sap.InboxStream(id.Flat())); err != nil {
+		t.Fatalf("the unrelated stream was deleted: %v", err)
+	}
+	if leasePresent(t, js, id.Flat()) {
+		t.Fatal("the lease was fenced")
+	}
+}
+
+// A partial provision (stream, no record, no marker) keeps its mail and gets no marker from a guarded removal.
+func TestDeprovisionIfUserPartialProvisionKeepsStreamAndWritesNoMarker(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if err := dir.Purge(ctx, id.Flat()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeprovisionIfUser(ctx, id.Flat(), user); !errors.Is(err, admin.ErrNoRecord) {
+		t.Fatalf("want ErrNoRecord, got %v", err)
+	}
+	if markerPresent(t, js, id.Flat()) {
+		t.Fatal("a marker was written for a record-less partial provision")
+	}
+	if _, err := js.Stream(ctx, sap.InboxStream(id.Flat())); err != nil {
+		t.Fatalf("the inbox stream was deleted: %v", err)
+	}
+	if leasePresent(t, js, id.Flat()) {
+		t.Fatal("the lease was fenced")
+	}
+}
+
+// A final marker with the record gone: the guarded removal is idempotent and still finishes the fence and inbox delete.
+func TestDeprovisionIfUserFinalMarkerRecordGoneIsIdempotent(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if err := dir.Purge(ctx, id.Flat()); err != nil {
+		t.Fatal(err)
+	}
+	putMarker(t, js, id, user, store.RetiredFinal)
+	for i := 0; i < 2; i++ {
+		if err := a.DeprovisionIfUser(ctx, id.Flat(), user); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
+	if _, err := js.Stream(ctx, sap.InboxStream(id.Flat())); err == nil {
+		t.Fatal("the inbox stream was left")
 	}
 }

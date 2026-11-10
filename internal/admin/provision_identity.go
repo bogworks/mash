@@ -509,28 +509,6 @@ func (a *Admin) finalizeRetire(ctx context.Context, lk *streamLock, pm *retireMa
 	return nil
 }
 
-// retireFinalDirect writes a final marker for a record that is already gone and has no marker (the remains of a
-// removal from before markers had two phases). An existing one keeps its first retired-at.
-func (a *Admin) retireFinalDirect(ctx context.Context, lk *streamLock, key, user string) error {
-	id, ok := newFormKey(key)
-	if !ok {
-		return nil
-	}
-	kv, err := a.retiredKV(ctx)
-	if err != nil {
-		return err
-	}
-	if err := lk.check(ctx); err != nil {
-		return err
-	}
-	val, _ := json.Marshal(store.Retired{Agent: id.Agent, Owner: id.Owner, Name: id.Name, User: user,
-		RetiredAt: time.Now().UTC().Format(time.RFC3339), State: store.RetiredFinal})
-	if _, err := kv.Create(ctx, key, val); err != nil && !errors.Is(err, jetstream.ErrKeyExists) {
-		return fmt.Errorf("mash: retired marker %s: %w", key, err)
-	}
-	return nil
-}
-
 // abortRetire runs when a removal was definitively refused before the record was purged (or the guarded purge was
 // refused by the server): it deletes the pending marker, revision-guarded, and returns err. It deletes a marker this
 // call wrote, or, when superseded is set, a pending marker it resumed too (the retirement did not happen). It first

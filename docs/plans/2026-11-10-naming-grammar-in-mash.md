@@ -312,8 +312,8 @@ writers, and nothing writes a new-form record until every reader in the range ca
   the record purged (guarded by revision for the user-key path), then the marker is made `final`. A pending marker blocks
   provisioning like a final one (INV-002). The pending marker is deleted only on a definitive refusal (a check before the purge, or the server refusing the
   revision-guarded purge, even after the revoke), revision-guarded and only while the call still holds its locks; a purge
-  with an unknown outcome, a crash or a lost lock leaves it pending, and running the command again finishes it (a missing
-  marker is rewritten final). A pending marker for another user key than a live record is superseded and deleted; a final
+  with an unknown outcome, a crash or a lost lock leaves it pending, and running the command again finishes it (a marker that vanished while being made final is rewritten final; a
+  record-less call with no marker at all changes nothing and never invents one). A pending marker for another user key than a live record is superseded and deleted; a final
   one with such a record refuses (INV-002). The bucket is opened fail-closed (a TTL, another history, or an evicting
   stream, meaning discard other than new, a max age or a max message count, is refused, never modified), and provisioning
   refuses a bucket with no room for one more marker. Provisioning checks the marker under the admission lock; there is

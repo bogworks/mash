@@ -1441,7 +1441,8 @@ var afterDeprovisionPurge func()
 // --user) finishes it.
 //
 // With no record nothing proves ownership, so it refuses even when the inbox stream exists (a provision that failed
-// before writing its record): remove that stream with a plain deprovision.
+// before writing its record): remove that stream with a plain deprovision. The one exception is a new-form key with a
+// retired marker, the remains of an interrupted removal, which it finishes; with no marker it changes nothing.
 func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err error) {
 	kv, err := a.dir(ctx)
 	if err != nil {
@@ -1480,10 +1481,10 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 					keep = true
 					return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
 				}
-				if id, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
-					// A new-form name whose record is already gone: the remains of a removal that stopped after the
-					// purge. Complete it from the flat key and the caller's user.
-					return a.finishAfterPurge(ctx, lk, lease, name, id, user)
+				if _, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
+					// A new-form name whose record is already gone: finished only if a retired marker shows a
+					// removal began (else ErrNoRecord, nothing changed).
+					return a.finishAfterPurge(ctx, lk, lease, name, user)
 				}
 				return refusal(name, ErrNoRecord)
 			}
@@ -1563,23 +1564,24 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	return partialIf(revoked, name, user, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }
 
-// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: it makes a pending
-// marker final (an existing marker keeps its first time), or writes a final one when there is none, then fences and
-// deletes the inbox. With no record nothing proves who owned the name, so a marker for another user than the
-// caller's refuses; without a marker it is built from the flat key and the caller's user. The caller holds name's lock.
-func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string, id sap.EndpointIdentity, user string) error {
+// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: the remains of a
+// removal that stopped after the purge. Only an existing retired marker proves such a removal began (the marker is
+// written pending before anything is revoked or purged), so with no marker it refuses with ErrNoRecord and changes
+// nothing: a never-provisioned name, or a partial provision's inbox stream, is neither burned nor deleted. A pending
+// marker becomes final (it keeps its first time); a final one is left as it is; a marker for another user than the
+// caller's refuses. Then the lease is fenced and the inbox deleted. The caller holds name's lock.
+func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string, user string) error {
 	pm, err := a.loadRetire(ctx, name)
 	if err != nil {
 		return err
 	}
-	if pm != nil {
-		if pm.m.User != "" && pm.m.User != user {
-			return refusal(name, ErrRecordOtherUser)
-		}
-		if err := a.finalizeRetire(ctx, lk, pm, user); err != nil {
-			return err
-		}
-	} else if err := a.retireFinalDirect(ctx, lk, name, user); err != nil {
+	if pm == nil {
+		return refusal(name, ErrNoRecord)
+	}
+	if pm.m.User != "" && pm.m.User != user {
+		return refusal(name, ErrRecordOtherUser)
+	}
+	if err := a.finalizeRetire(ctx, lk, pm, user); err != nil {
 		return err
 	}
 	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
