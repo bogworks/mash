@@ -97,8 +97,8 @@ the credential re-issue; Phase 3 is held.
    Tests first: a fixture account with legacy and new-form identities.
 6. **New step 1.10: the Phase 3 negative tests land in Phase 1** (D183: "don't lose this"), against a configuration
    with legacy acceptance off, so they are in CI before the break. They try each old form at every REQ-016 entry point
-   and expect refusal under that configuration. Phase 3 then deletes the code that the configuration switched off and
-   makes that configuration the only one; the tests stay unchanged. This replaces 3.1's "written first" with "already
+   and expect refusal under that configuration. Phase 3 then deletes the code that the legacy-off configuration (B) switched
+   off; B and the rule-file configuration (A, which stays permanently) are both kept and the tests stay unchanged. This replaces 3.1's "written first" with "already
    running", and Phase 3 stays a single held pull request.
 7. **2.2 no longer waits for new-form endpoints.** Only zoned legacy endpoints and policy-compiled users wait for the
    zone ruling.
@@ -133,31 +133,46 @@ question). `reply` and `lookup` are separate entry points, tested separately.
   text). `match` is an object over any of `agent`, `owner`, `name`; each key takes `{"is": RE}` or `{"is_not": RE}`
   (RE2); `is` is true when the token matches, `is_not` when it does not. All given keys must hold for the rule to match,
   and a name that matches any rule is refused. mash wraps every pattern as a whole-token match itself (`^(?:RE)$`), so
-  a pattern with an alternation cannot match part of a token; a test covers it. There are no accept rules and no
-  ordering, so the file cannot grant what mash's own syntax forbids. The window rule that refuses a new-form owner
+  a pattern with an alternation cannot match part of a token; a test covers it. `is` and `is_not` on the same key, an empty object under a key, an empty `match`, and a missing or empty `id` or
+  `message` each refuse start. There are no accept rules and no ordering, so the file cannot grant what mash's own
+  syntax forbids. The window rule that refuses a new-form owner
   equal to the legacy owner is `{"agent": {"is_not": "cc"}, "owner": {"is": "<legacy-owner>"}}`; the old-form rule is
-  `{"agent": {"is": "cc"}}`.
+  `{"agent": {"is": "cc"}}`. Inside a range the file also refuses the reserved plain-name token with
+  `{"agent": {"is": "mash"}}`, so a plain name cannot be used there (AT-012).
+- **Which file is in force when.** The window rule and the old-form rule are never in force together (together they
+  refuse the legacy aliases the window needs). During the window, from Phase 1 until the break, the file holds the
+  window rule (new-form owner equal to the legacy owner refused) and the `mash` rule. At the break the planner's
+  procedure replaces the file with the old-form rule (`cc`, and `mash` inside a range) and withdraws the window rule in
+  the same step; every endpoint is restarted before AT-003 runs.
 - **Entry points.** The rule applies at every one, with no per-rule list, so a rule for old forms cannot be narrowed to
   fewer: provision, start, send, reply, prompt, lookup, and the compatibility alias (REQ-016, AT-005). For `send` and
   `prompt` both the addressed identity and the sender's own identity are checked; `reply` checks the identity being
-  answered; `lookup` checks each identity it would return.
+  answered; `lookup` of a refused identity fails loudly with the named-rule error (REQ-020, AT-005); it never silently omits it.
 - **What a name is.** The identity's three tokens. A legacy identity is `(cc, <owner>, <name>)`, so a rule on `agent`
   equal to `cc` refuses the old form without mash knowing why. **After the break a plain name still has three tokens**
   (REQ-024 removes the constant `cc` and the one-owner setting; AT-006 needs a plain name to work outside a range, AT-012
   needs the old form refused inside one): the owner token is the configured owner, the name token is the name, and the
-  agent token is the configured agent token, which for an endpoint outside any range defaults to the neutral `mash`.
-  Inside a range homerange supplies all three. To be confirmed by the planner: that `mash` is the right default.
+  agent token is the configured agent token, which defaults to the neutral `mash` when no agent token is configured (mash
+  cannot know whether there is a range). The configuration key is `agent_token` (environment `MASH_AGENT_TOKEN`; the
+  environment wins over the file, as for the owner). `mash` is a **reserved** token (planner, confirmed): no deployment
+  uses it as a range, and the range's rule file refuses it by exact match inside a range (below). Inside a range
+  homerange supplies all three tokens.
 - **What a refusal says (REQ-020).** The error names the rule (`id`) and carries its `message`; for `send`, `reply` and
   `prompt` the sender is told and nothing is dropped silently.
 - **What it is not.** Not a grant (REQ-027 is separate, in grant compilation) and not a validator of the homerange
   grammar: homerange chooses the rules and supplies the file; mash applies them as given (REQ-017). It binds honest
   clients; a client with its own credentials that skips mash's code is stopped by retired credentials and by grants,
   which is why DEC-014 chose both.
-- **The negative tests' two configurations (1.10, 3.1) are pinned.** (A) a rule file that refuses the old forms: every
-  entry point above expects refusal. (B) no rule file, with mash's own removals in force (legacy acceptance off): every
-  entry point expects refusal by mash itself. Phase 3 makes (B) the only configuration; the tests are unchanged.
-- **Break procedure.** Because the file is read once at start, the break restarts every endpoint before AT-003 runs, so
-  AT-003 sees the rule in force.
+- **The negative tests' two configurations (1.10, 3.1) are pinned.** (A) a rule file that refuses the old forms
+  (`cc`, and `mash` inside a range): every entry point above expects refusal, including the `cc` and plain-name cases of
+  AT-012. A **stays permanently**, in CI, after the break. (B) no rule file, with mash's own removals in force (the
+  constant-`cc` parsing and the six-token subject gone): it covers only what mash's own syntax removes. mash cannot
+  refuse `cc` or a plain name by itself without hard-coding the grammar (REQ-017), and AT-006 needs a plain name to
+  work with no rule, so Phase 3 does **not** make B the only configuration.
+- **Visibility and the break procedure.** With no file named, `status` says so, and when a file is loaded it names the
+  file and a digest of its content. The file is read once at start, so the break restarts every endpoint before AT-003
+  runs, and the break procedure and AT-003 check that every endpoint reports a rule loaded (and the expected digest);
+  an endpoint with no rule inside a range fails that check.
 
 ## What the code does today
 
@@ -274,10 +289,11 @@ writers, and nothing writes a new-form record until every reader in the range ca
   byte-identical (REQ-006). Provisioning refuses a name that was retired (ADR 0015's tombstone) so a retired old-form
   name is never reassigned (INV-002). The interface is open (see the gaps).
 - **1.7 The name-acceptance rule.** DEC-014 chose (c): homerange retires old identities and credentials, and mash applies
-  a per-owner rule that homerange supplies as configuration at every entry point (provision, start, send, reply, live
-  prompt, directory lookup). This pull request builds the mechanism, with no default rule (SEAM-001), tests first:
+  a range-level rule that homerange supplies as configuration (it can match the agent, owner and name tokens) at every
+  entry point (provision, start, send, reply, live prompt, directory lookup, the compatibility alias). This pull request builds the mechanism, with no default rule (SEAM-001), tests first:
   with a rule configured each entry point refuses a name it forbids; with none, a plain name still works outside a range
-  (AT-006). The rule's format is open and the seam page needs Randy's approval (D145); see the gaps.
+  (AT-006). The format is the proposal in the amendments section above; the seam page that carries it needs Randy's
+  approval (D145), and 1.7 holds until the planner has settled it.
 - **1.8 Old-form use log.** Every use of the old form at each entry point is counted so AT-003 can read it
   (REQ-014, AT-004). Built whether or not a window is used.
 - Evidence: AT-004 as a test (mail to the old and the new name lands in one inbox under one identity and the use is
@@ -305,36 +321,40 @@ identities are already unaddressable and unstartable (AT-003 requires that pre-b
 enumerate directory records and inbox streams. The pull request:
 
 - **3.1 Negative tests, written first** (the commit order shows them failing), checked in with the code they guard, one
-  per REQ-016 entry point and per old form: the old endpoint name as a mash name (`x-masterplanner`), the legacy subject
-  `agents.mail.cc.homerange.<name>`, ADR 0054's six-token subject, any name under the agent token `cc`, and a grant on
-  `agents.mail.*.homerange.*`, each through a direct mash client and, where homerange's path exists, through it. They run
+  per REQ-016 entry point and per old form, in the two configurations pinned above: the old endpoint name as a mash name
+  (`x-masterplanner`), the legacy subject `agents.mail.cc.homerange.<name>`, ADR 0054's six-token subject, any name
+  under the agent token `cc`, a plain name inside a range, and a grant on `agents.mail.*.homerange.*`, each through a
+  direct mash client and, where homerange's path exists, through it. They run
   in CI on every change from then on and are never removed or skipped.
 - **3.2 Remove the compatibility.** **Drain before revoking:** the transition grant on a legacy stream stays until
   that stream's durable consumer has zero pending and zero unacknowledged messages; 1.9's enumeration reports it per
   identity, the break procedure checks it, and 3.2 refuses to remove a grant whose legacy consumer is not drained (a
   test proves it). Then: old-form acceptance in mash's name rule, the legacy subjects and their grants, the
-  constant `cc` token and the one-owner setting, five-or-six token parsing, every alias, the use log, the setting from
-  Phase 1, and the mash herd's temporary names.
+  constant `cc` token and the one-owner setting, five-or-six token parsing (the six-token subject form and its
+  acceptance), every alias, the use log, the setting from Phase 1, and the mash herd's temporary names. The zone CLI and
+  the zone-key files stay (3.5).
 - **3.3 Loud refusal.** A refused name or grant names the rule it broke (REQ-020); mail to an old-form name is refused to
   the sender, not dropped. Mutation (AT-012): restoring old-form acceptance or an alias makes CI fail, shown once.
 - **3.4 ADR and search.** Accepts the supersession of ADR 0005's and ADR 0054's layout parts; a search of the code shows
   no remaining compatibility path.
-- **3.5 The CLI surface that goes with the zone token.** The zone token leaves the wire (REQ-006, DEC-012, REQ-024), so
-  these go with it, each listed for the planner to rule on against the CLI freeze (card #9); none is removed until that
-  ruling:
-  1. `mashctl set-zone <name> <zone>` (`internal/ctl/ctl.go:71,296`, `cmd/mashctl/main.go:46`) and its messages in
-     `add.go:233`.
-  2. `--zone Z` on `mashctl provision` (`internal/ctl/ctl.go:68`, `provisionArgs` at `:262`) and on `mashctl add`
-     (`cmd/mashctl/add.go:24,77`), and the policy's `subject_label` input that `add --zone` sets.
-  3. `--replace-zone-key ZONE`, `--remove-zone ZONE` and `--keep-zone ZONE` on `mashctl policy diff` and `policy apply`
-     (`cmd/mashctl/apply.go:41-78`), and `--keep-zone ZONE` on `mashctl policy repair` (`cmd/mashctl/drift.go:34`, with
-     the flag hints at `:572`).
-  4. The zone sections of `mashctl policy show` (`cmd/mashctl/policy.go:272-276`); output, not flags.
-  5. The additive `zone` field of `mash who --json` (`cmd/mash/whofilter.go:104`, ADR 0049's stable form): removal is
-     a change to a stable contract and is the planner's call.
-  6. Docs that describe them (`docs/mashctl.md`, `docs/policy-file.md`, `docs/install.md`) and the zone-key files and
-     per-zone users the policy compiler mints (ADR 0053, ADR 0056), which are the zone gate itself: removing them waits
-     for the zone ruling, not only the freeze.
+- **3.5 The zone CLI surface stays (planner's ruling on the CLI freeze, card #9, D188).** None of these is removed
+  by Phase 3, and none changes until D188 is settled; Phase 3 removes only the six-token subject form and its
+  acceptance. Once subjects carry no zone, each item would behave as follows (our proposal; the behaviour is ours to
+  propose, the freeze is the planner's):
+  1. `mashctl set-zone <name> <zone>` (`internal/ctl/ctl.go:71,296`, `cmd/mashctl/main.go:46`): **refuse** with a clear
+     message that a zone no longer addresses mail and that `set-meta --label` is the way to label an endpoint, because
+     its whole meaning was to move an endpoint's mail subject.
+  2. `--zone Z` on `mashctl provision` (`internal/ctl/ctl.go:68`, `provisionArgs` at `:262`): **refuse** with the same
+     message (it provisions a zoned inbox). On `mashctl add` (`cmd/mashctl/add.go:24,77`): **work on the label only**: it
+     still sets the policy's subject label, prints that the mail subject does not change, and the policy compiler keeps
+     grouping by it until the zone ruling.
+  3. `--replace-zone-key`, `--remove-zone` and `--keep-zone` on `policy diff`, `policy apply` and `policy repair`
+     (`cmd/mashctl/apply.go:41-78`, `cmd/mashctl/drift.go:34`): **unchanged**; they act on the account's signing keys,
+     which are the zone gate and wait for the zone ruling.
+  4. The zone sections of `mashctl policy show` (`cmd/mashctl/policy.go:272-276`): **unchanged**.
+  5. The `zone` field of `mash who --json` (`cmd/mash/whofilter.go:104`, ADR 0049): **stays**, additive; it reads the
+     record's field, which new-form records leave empty.
+  6. Docs (`docs/mashctl.md`, `docs/policy-file.md`, `docs/install.md`) follow whatever each item does.
   Nothing else in the CLI names a zone.
 
 ## Map to the contract
@@ -368,9 +388,9 @@ friends.
    language's zones and the compiled permissions of existing policy files. That is a policy-semantics change, outside
    both contracts' decisions. It can meet any step that compiles grants (1.5, and 2.2); until ruled, new-form
    provisioning refuses a zoned endpoint (1.5) and 2.2 waits.
-2. **The per-owner name-acceptance rule's format (REQ-017, DEC-014 (c), SEAM-001 sentence 2).** The enforcement location
-   is settled (retirement and mash-applied configuration). The configuration's shape is not specified and the seam page
-   that would carry it is unwritten and needs Randy's approval (D145). Needed before 1.7.
+2. **The name-acceptance rule (REQ-017, DEC-014 (c), SEAM-001 sentence 2).** Enforcement location is settled
+   (retirement and mash-applied configuration) and the format is proposed above; what remains is the seam page, which
+   the planner writes and Randy approves. Needed before 1.7.
 3. **The provisioning interface (1.6).** The contract delegates how mash lays out the tokens; the CLI redesign is
    frozen (card #9). Do `mash` and `mashctl` gain flags, or is the identity supplied by configuration only? Needed
    before 1.6.
