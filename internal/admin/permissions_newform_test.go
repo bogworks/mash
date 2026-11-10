@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -189,13 +190,28 @@ func TestWindowBridge(t *testing.T) {
 	if inbox != "inbox-ops1" || store.Consumer != "deliver" {
 		t.Fatalf("stream %q consumer %q: the literal expectations below are stale", inbox, store.Consumer)
 	}
-	wantLines(t, "pub", p.Pub.Allow, append([]string{
+	lease := []string{
+		"$KV.mash-leases.ops1",
+		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.ops1",
+	}
+	if store.LeaseBucket != "mash-leases" {
+		t.Fatalf("lease bucket %q: the literal expectations below are stale", store.LeaseBucket)
+	}
+	wantLines(t, "pub", p.Pub.Allow, append(append([]string{
 		"agents.mail.cc.legowner.*",
 		"agents.prompt.cc.legowner.*",
 		"agents.status.cc.legowner.*",
 		"agents.hb.cc.legowner.ops1",
-	}, transition...))
-	wantLines(t, "literal transition lines", jwt.StringList(filterJS(p.Pub.Allow)), []string{
+	}, transition...), lease...))
+	for _, g := range p.Pub.Allow {
+		if strings.HasPrefix(g, "$KV.") && !slices.Contains(lease, g) {
+			t.Errorf("kv line %q other than the alias's lease key", g)
+		}
+		if strings.Contains(g, "KV_") && !slices.Contains(lease, g) {
+			t.Errorf("kv stream line %q other than the alias's lease key", g)
+		}
+	}
+	wantLines(t, "literal transition lines", jwt.StringList(slices.DeleteFunc(filterJS(p.Pub.Allow), func(g string) bool { return slices.Contains(lease, g) })), []string{
 		"$JS.API.STREAM.INFO.inbox-ops1",
 		"$JS.API.CONSUMER.INFO.inbox-ops1.deliver",
 		"$JS.API.CONSUMER.MSG.NEXT.inbox-ops1.deliver",
@@ -799,6 +815,8 @@ func newBridgeEnv(t *testing.T) *bridgeEnv {
 		otherLeg: sap.InboxStream(otherLegacy.Name), otherNew: sap.InboxStream(otherNew.Flat()), nc: nc, v: watchErrors(nc)}
 }
 
+func (b *bridgeEnv) otherNewFlat() string { return strings.TrimPrefix(b.otherNew, "inbox-") }
+
 func (b *bridgeEnv) consumerInfo(t *testing.T, stream string) *jetstream.ConsumerInfo {
 	t.Helper()
 	ctx := context.Background()
@@ -890,6 +908,126 @@ func TestWindowBridgeLegacyInboxOnServer(t *testing.T) {
 		t.Fatalf("after 2: floor %d pending %d, want 3 and 2", info.AckFloor.Stream, info.NumAckPending)
 	}
 	b.v.none(t, "legacy reads and acks")
+}
+
+// The window user holds the legacy alias's lease key through the real KV client: acquire, renew, read, release.
+func TestWindowBridgeLegacyLeaseOnServer(t *testing.T) {
+	b := newBridgeEnv(t)
+	ctx := context.Background()
+	pjs, err := jetstream.New(b.nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := pjs.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		t.Fatalf("lease bucket: %v", err)
+	}
+	const key = "ops1"
+	rev, err := kv.Create(ctx, key, []byte("holder"))
+	if err != nil {
+		t.Fatalf("acquire (create): %v", err)
+	}
+	rev2, err := kv.Update(ctx, key, []byte("holder2"), rev)
+	if err != nil {
+		t.Fatalf("renew (update): %v", err)
+	}
+	ent, err := kv.Get(ctx, key)
+	if err != nil || string(ent.Value()) != "holder2" || ent.Revision() != rev2 {
+		t.Fatalf("read: %v %v", ent, err)
+	}
+	if err := kv.Delete(ctx, key, jetstream.LastRevision(rev2)); err != nil {
+		t.Fatalf("release (delete): %v", err)
+	}
+	if _, err := kv.Get(ctx, key); !errors.Is(err, jetstream.ErrKeyNotFound) {
+		t.Fatalf("after release: %v", err)
+	}
+	// Re-acquire over the delete marker, the way the endpoint does, then purge.
+	if _, err := kv.Create(ctx, key, []byte("again")); err != nil {
+		t.Fatalf("re-acquire: %v", err)
+	}
+	if err := kv.Purge(ctx, key); err != nil {
+		t.Fatalf("purge own key: %v", err)
+	}
+	b.v.none(t, "own legacy lease lifecycle")
+}
+
+// The same user is refused every other lease key and the rest of the KV and stream surface.
+func TestWindowBridgeLegacyLeaseDenialsOnServer(t *testing.T) {
+	b := newBridgeEnv(t)
+	ctx := context.Background()
+	pjs, err := jetstream.New(b.nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := pjs.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	akv, err := b.js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := func() context.Context {
+		c, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
+		t.Cleanup(cancel)
+		return c
+	}
+	// Seed the other keys as admin so update, delete and read have something to hit.
+	others := []string{"lead", "ops2", b.otherNewFlat()}
+	revs := map[string]uint64{}
+	for _, k := range others {
+		r, err := akv.Create(short(), k, []byte("theirs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		revs[k] = r
+	}
+	for _, k := range others {
+		if _, err := kv.Create(short(), k, []byte("stolen")); err == nil {
+			t.Errorf("create %s succeeded", k)
+		}
+		b.v.expect(t, "$KV."+store.LeaseBucket+"."+k)
+		if _, err := kv.Update(short(), k, []byte("stolen"), revs[k]); err == nil {
+			t.Errorf("update %s succeeded", k)
+		}
+		b.v.expect(t, "$KV."+store.LeaseBucket+"."+k)
+		if err := kv.Delete(short(), k, jetstream.LastRevision(revs[k])); err == nil {
+			t.Errorf("delete %s succeeded", k)
+		}
+		b.v.expect(t, "$KV."+store.LeaseBucket+"."+k)
+		if err := kv.Purge(short(), k); err == nil {
+			t.Errorf("purge %s succeeded", k)
+		}
+		b.v.expect(t, "$KV."+store.LeaseBucket+"."+k)
+		if _, err := kv.Get(short(), k); err == nil {
+			t.Errorf("read %s succeeded", k)
+		}
+		b.v.expect(t, "$JS.API.DIRECT.GET.KV_"+store.LeaseBucket+".$KV."+store.LeaseBucket+"."+k)
+	}
+	// Wildcard key read, bucket-level subjects, other buckets and the lease stream.
+	b.v.denied(t, b.nc, "$JS.API.DIRECT.GET.KV_"+store.LeaseBucket, `{"last_by_subj":"$KV.`+store.LeaseBucket+`.lead"}`)
+	b.v.denied(t, b.nc, "$JS.API.DIRECT.GET.KV_"+store.LeaseBucket+".$KV."+store.LeaseBucket+".*", "")
+	b.v.deniedPub(t, b.nc, "$KV."+store.LeaseBucket+".>")
+	b.v.deniedPub(t, b.nc, "$KV."+store.DirectoryBucket+".ops1")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.PURGE.KV_"+store.LeaseBucket, "{}")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.DELETE.KV_"+store.LeaseBucket, "")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.UPDATE.KV_"+store.LeaseBucket, "{}")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.CREATE.KV_"+store.LeaseBucket, "{}")
+	dir, err := pjs.KeyValue(ctx, store.DirectoryBucket)
+	if err == nil {
+		if _, err := dir.Put(short(), "ops1", []byte("x")); err == nil {
+			t.Error("directory write succeeded")
+		}
+	}
+	for _, k := range others {
+		e, err := akv.Get(short(), k)
+		if err != nil || string(e.Value()) != "theirs" || e.Revision() != revs[k] {
+			t.Errorf("key %s changed: %v %v", k, e, err)
+		}
+	}
+	if _, err := akv.Get(ctx, "ops1"); err == nil {
+		t.Error("alias key appeared without the user writing it")
+	}
 }
 
 // The same user can touch nothing else: no other stream or consumer, and no create, update, delete or purge anywhere.
