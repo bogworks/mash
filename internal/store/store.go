@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -268,22 +269,99 @@ func validText(field, v string, max int) error {
 	return nil
 }
 
-// ParseRecord decodes a directory value and checks it names key.
+// legacyCheck applies the legacy record checks to r as the record for key.
+func legacyCheck(key string, r Record) error {
+	if r.Name != key || r.User == "" || r.MailSubject == "" {
+		return fmt.Errorf("directory %s: incomplete record", key)
+	}
+	if r.Zone != "" && !sap.ValidZone(r.Zone) {
+		return fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+	}
+	if want := MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
+		return fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
+	}
+	return nil
+}
+
+// looksNewForm reports whether r, read under key, was meant as a new-form record: an agent token other than the
+// legacy "cc" that is a valid new-form token, and either a flat-looking key or the new-form mail subject. A legacy
+// record that is merely broken does not look new-form, so its error text is unchanged.
+func looksNewForm(key string, r Record) bool {
+	if r.AgentToken == "" || r.AgentToken == sap.AgentToken {
+		return false
+	}
+	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
+	if err != nil {
+		return strings.Contains(key, "_")
+	}
+	return strings.Contains(key, "_") || r.MailSubject == id.Subjects().Mail
+}
+
+// newFormCheck applies the new-form record rules to r as the record for key and returns its identity.
+func newFormCheck(key string, r Record) (sap.EndpointIdentity, error) {
+	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
+	if err != nil {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form identity (agent_token, owner, name) is invalid: %w", key, err)
+	}
+	if key != id.Flat() {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form record must be keyed by its flat identity %q", key, id.Flat())
+	}
+	if want := id.Subjects().Mail; r.MailSubject != want {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form mail subject %q is not %q", key, r.MailSubject, want)
+	}
+	if r.Zone != "" {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form record must not have a zone (got %q)", key, r.Zone)
+	}
+	if r.User == "" {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: incomplete record", key)
+	}
+	return id, nil
+}
+
+// ParseRecord decodes a directory value and checks it names key. A record that passes the legacy checks is a legacy
+// record; otherwise it may be a new-form record (three-token identity, keyed by the flat form), else the legacy error
+// is returned, unless the record looks new-form, when the broken new-form rule is named.
 func ParseRecord(key string, value []byte) (Record, error) {
 	var r Record
 	if err := json.Unmarshal(value, &r); err != nil {
 		return Record{}, fmt.Errorf("directory %s: %w", key, err)
 	}
-	if r.Name != key || r.User == "" || r.MailSubject == "" {
-		return Record{}, fmt.Errorf("directory %s: incomplete record", key)
+	lerr := legacyCheck(key, r)
+	if lerr == nil {
+		return r, nil
 	}
-	if r.Zone != "" && !sap.ValidZone(r.Zone) {
-		return Record{}, fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
-	}
-	if want := MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
-		return Record{}, fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
+	if _, nerr := newFormCheck(key, r); nerr != nil {
+		if looksNewForm(key, r) {
+			return Record{}, nerr
+		}
+		return Record{}, lerr
 	}
 	return r, nil
+}
+
+// Identity is the endpoint identity r names: the legacy identity when r satisfies the legacy checks (keyed by its
+// name), else the new-form identity of (agent_token, owner, name).
+func (r Record) Identity() (sap.EndpointIdentity, error) {
+	if legacyCheck(r.Name, r) == nil {
+		if id, err := sap.Legacy(r.Owner, r.Name); err == nil {
+			return id, nil
+		}
+	}
+	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
+	if err != nil {
+		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: record names no identity: %w", r.Name, err)
+	}
+	return newFormCheck(id.Flat(), r)
+}
+
+// Key is the directory key of r: the flat identity for a new-form record, the name for a legacy one. It is empty
+// when r names no valid identity.
+func (r Record) Key() string {
+	id, err := r.Identity()
+	if err != nil {
+		return ""
+	}
+	return id.Flat()
 }
 
 // GetRecord reads name's directory record.
