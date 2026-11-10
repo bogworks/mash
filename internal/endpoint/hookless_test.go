@@ -132,11 +132,11 @@ func TestReadAcksOnlyWhenProvenHookless(t *testing.T) {
 	seq := waiting(t, sp)[0].Seq
 	held := func(what string) {
 		t.Helper()
-		if n := unread(t, a); n != 1 || len(waiting(t, sp)) != 1 || sp.IsDrained(seq) {
-			t.Fatalf("%s: unread %d, waiting %d, drained %v, want a held, undrained message", what, n, len(waiting(t, sp)), sp.IsDrained(seq))
+		if n := unread(t, a); n != 1 || len(waiting(t, sp)) != 1 || sp.IsDrained(spool.Ref{Seq: seq}) {
+			t.Fatalf("%s: unread %d, waiting %d, drained %v, want a held, undrained message", what, n, len(waiting(t, sp)), sp.IsDrained(spool.Ref{Seq: seq}))
 		}
 	}
-	if a.MarkRead(seq) {
+	if a.MarkRead(MsgRef{Seq: seq}) {
 		t.Fatal("MarkRead drained in the normal state")
 	}
 	held("normal")
@@ -145,23 +145,23 @@ func TestReadAcksOnlyWhenProvenHookless(t *testing.T) {
 	if st, _ := a.Hookless(); st != HooklessSuspected {
 		t.Fatalf("state %v, want suspected", st)
 	}
-	if a.MarkRead(seq) {
+	if a.MarkRead(MsgRef{Seq: seq}) {
 		t.Fatal("MarkRead drained in the suspected state")
 	}
 	held("suspected")
 	twoToolCalls(a)
-	if a.MarkRead(seq + 100) {
+	if a.MarkRead(MsgRef{Seq: seq + 100}) {
 		t.Fatal("MarkRead drained a message that is not held")
 	}
 	held("proven, other seq")
-	if !a.MarkRead(seq) {
+	if !a.MarkRead(MsgRef{Seq: seq}) {
 		t.Fatal("MarkRead did not drain in the proven state")
 	}
 	until(t, "acked", func() bool { return unread(t, a) == 0 })
 	if len(waiting(t, sp)) != 0 {
 		t.Fatalf("still waiting: %+v", waiting(t, sp))
 	}
-	if a.MarkRead(seq) {
+	if a.MarkRead(MsgRef{Seq: seq}) {
 		t.Fatal("MarkRead drained a message already acked")
 	}
 }
@@ -186,7 +186,7 @@ func TestAHookRunEndsHooklessMode(t *testing.T) {
 		t.Fatalf("state %v after a hook ran, want none", st)
 	}
 	seq := waiting(t, sp)[0].Seq
-	if a.MarkRead(seq) {
+	if a.MarkRead(MsgRef{Seq: seq}) {
 		t.Fatal("MarkRead drained after a hook ran")
 	}
 	ev.waitFor(t, 3, 5*time.Second) // the backoff wake is back
@@ -194,7 +194,7 @@ func TestAHookRunEndsHooklessMode(t *testing.T) {
 	if len(w) != 1 {
 		t.Fatalf("waiting %+v", w)
 	}
-	if err := sp.Drained(w[0].Seq); err != nil { // a hook shows it
+	if err := sp.Drained(spool.Ref{Seq: w[0].Seq}); err != nil { // a hook shows it
 		t.Fatal(err)
 	}
 	until(t, "acked once a hook drained it", func() bool { return unread(t, a) == 0 })
@@ -214,7 +214,7 @@ func TestSubagentHookIsNotHookless(t *testing.T) {
 	if st, _ := a.Hookless(); st != HooklessNone {
 		t.Fatalf("state %v, want none", st)
 	}
-	if a.MarkRead(waiting(t, sp)[0].Seq) {
+	if a.MarkRead(MsgRef{Seq: waiting(t, sp)[0].Seq}) {
 		t.Fatal("MarkRead drained while hooks run")
 	}
 	for _, w := range ev.all() {

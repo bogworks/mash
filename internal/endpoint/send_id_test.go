@@ -10,6 +10,7 @@ import (
 
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
 	"github.com/nats-io/nats.go/jetstream"
@@ -200,7 +201,7 @@ func TestSendIDValidation(t *testing.T) {
 // and acked, not shown twice. A repeat of a pruned nonce at a new sequence is a new send and is shown.
 func TestRedeliveryOfAPrunedMessageIsDroppedAndAcked(t *testing.T) {
 	e := &Endpoint{duplicateWindow: time.Second}
-	h := &held{msgs: map[uint64]pending{}}
+	h := &held{msgs: map[spool.Ref]pending{}}
 	seen := newSeenSet(e.dupWindow())
 	base := time.Now()
 	at := func(i int) time.Time { return base.Add(time.Duration(i) * 10 * time.Second) } // each past the 1 s window
@@ -231,7 +232,7 @@ func TestRedeliveryOfAPrunedMessageIsDroppedAndAcked(t *testing.T) {
 // its redelivery must still be dropped and acked.
 func TestShownSequencePrunedOnlyBelowTheAckFloor(t *testing.T) {
 	e := &Endpoint{duplicateWindow: time.Second}
-	h := &held{msgs: map[uint64]pending{}}
+	h := &held{msgs: map[spool.Ref]pending{}}
 	seen := newSeenSet(e.dupWindow())
 	seen.pruneAt, seen.pruneEvery = 64, 0
 	floor, floorOK := uint64(0), true
@@ -268,13 +269,13 @@ func TestShownSequencePrunedOnlyBelowTheAckFloor(t *testing.T) {
 	// Once the floor passes #1 (and the rest up to 400), those are pruned and the later ones are kept.
 	floorOK = true
 	show(502)
-	if _, ok := seen.seqs[1]; ok {
+	if _, ok := seen.seqs[spool.Ref{Seq: 1}]; ok {
 		t.Fatal("#1 is below the ack floor and should be pruned")
 	}
-	if _, ok := seen.seqs[400]; ok {
+	if _, ok := seen.seqs[spool.Ref{Seq: 400}]; ok {
 		t.Fatal("#400 is at the ack floor and should be pruned")
 	}
-	if _, ok := seen.seqs[401]; !ok || len(seen.seqs) != 102 {
+	if _, ok := seen.seqs[spool.Ref{Seq: 401}]; !ok || len(seen.seqs) != 102 {
 		t.Fatalf("sequences above the floor must be kept: holds %d, want 102", len(seen.seqs))
 	}
 }

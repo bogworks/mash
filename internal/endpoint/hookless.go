@@ -146,7 +146,7 @@ func (e *Endpoint) Hookless() (Hookless, int) {
 // never drains what it lists, the read is what makes it seen. (2) The session is proven hookless and the message is
 // waiting in the spool: no hook will show it. In every other state it does nothing, and the message stays held until
 // a hook shows it. It reports whether it drained. Call it only after a successful Read; the inbox tool never calls it.
-func (e *Endpoint) MarkRead(seq uint64) bool {
+func (e *Endpoint) MarkRead(seq MsgRef) bool {
 	e.hl.mu.Lock()
 	sp, bound := e.hl.sp, e.hl.bound
 	e.hl.mu.Unlock()
@@ -161,7 +161,7 @@ func (e *Endpoint) MarkRead(seq uint64) bool {
 	// Under the spool lock, as a hook's drain is: the message is either waiting or already drained.
 	unlock, err := sp.Lock()
 	if err != nil {
-		e.log.Printf("read #%d: %v", seq, err)
+		e.log.Printf("read #%d: %v", seq.Seq, err)
 		return false
 	}
 	defer unlock()
@@ -169,7 +169,7 @@ func (e *Endpoint) MarkRead(seq uint64) bool {
 		return false
 	}
 	if err := sp.Drained(seq); err != nil {
-		e.log.Printf("read #%d: marking it drained: %v", seq, err)
+		e.log.Printf("read #%d: marking it drained: %v", seq.Seq, err)
 		return false
 	}
 	return true

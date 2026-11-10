@@ -13,8 +13,11 @@ import (
 
 // Mail is one message as delivered.
 type Mail struct {
-	Seq  uint64
-	From string
+	Seq uint64
+	// Stream names the stream Seq is a sequence of; empty for the endpoint's own (primary) stream, whose numbers are
+	// shown bare. It is part of the message's identity (with Seq) and is not printed here.
+	Stream string
+	From   string
 	// Instance is the sender's verified instance id; empty when it sent none
 	// or the binding did not verify.
 	Instance string

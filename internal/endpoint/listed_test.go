@@ -35,7 +35,7 @@ func listAll(t *testing.T, sp spool.Spool) []uint64 {
 	t.Helper()
 	var seqs []uint64
 	for _, e := range waiting(t, sp) {
-		if err := sp.Listed(e.Seq); err != nil {
+		if err := sp.Listed(spool.Ref{Seq: e.Seq}); err != nil {
 			t.Fatal(err)
 		}
 		seqs = append(seqs, e.Seq)
@@ -59,10 +59,10 @@ func TestListedStaysUnackedUntilRead(t *testing.T) {
 	if n := unread(t, a); n != 2 {
 		t.Fatalf("unread %d after a digest, want 2 (listed is not seen)", n)
 	}
-	if a.MarkRead(seqs[1] + 100) {
+	if a.MarkRead(MsgRef{Seq: seqs[1] + 100}) {
 		t.Fatal("MarkRead drained a message that is not held")
 	}
-	if !a.MarkRead(seqs[0]) {
+	if !a.MarkRead(MsgRef{Seq: seqs[0]}) {
 		t.Fatal("MarkRead did not drain a listed message")
 	}
 	until(t, "the read message is acked", func() bool { return unread(t, a) == 1 })
@@ -70,10 +70,10 @@ func TestListedStaysUnackedUntilRead(t *testing.T) {
 	if n := unread(t, a); n != 1 {
 		t.Fatalf("unread %d, want 1: the other listed message is still unread", n)
 	}
-	if sp.IsListed(seqs[0]) {
+	if sp.IsListed(spool.Ref{Seq: seqs[0]}) {
 		t.Fatal("the read message is still marked listed")
 	}
-	if !sp.IsListed(seqs[1]) || !sp.Has(seqs[1]) {
+	if !sp.IsListed(spool.Ref{Seq: seqs[1]}) || !sp.Has(spool.Ref{Seq: seqs[1]}) {
 		t.Fatal("the unread message lost its listed mark or its file")
 	}
 }
@@ -88,7 +88,7 @@ func TestReadOfAnUnlistedMessageStillDoesNotAckInTheNormalState(t *testing.T) {
 	}
 	sendQuestions(t, f, 1)
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
-	if a.MarkRead(waiting(t, sp)[0].Seq) {
+	if a.MarkRead(MsgRef{Seq: waiting(t, sp)[0].Seq}) {
 		t.Fatal("MarkRead drained an unlisted message in the normal state")
 	}
 }
@@ -159,11 +159,13 @@ func TestListedIsAckedWhenALaterHookShowsItInFull(t *testing.T) {
 	if n := unread(t, a); n != 1 {
 		t.Fatalf("unread %d, want 1", n)
 	}
-	if err := sp.Drained(seq); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: seq}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "acked", func() bool { return unread(t, a) == 0 })
-	until(t, "forgotten", func() bool { return !sp.IsListed(seq) && !sp.IsDrained(seq) && !sp.Has(seq) })
+	until(t, "forgotten", func() bool {
+		return !sp.IsListed(spool.Ref{Seq: seq}) && !sp.IsDrained(spool.Ref{Seq: seq}) && !sp.Has(spool.Ref{Seq: seq})
+	})
 }
 
 // A restart (a rebind) spools the unacked listed mail again as new mail: one digest of it, then no wake loop.
@@ -210,7 +212,7 @@ func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 	t.Cleanup(stop2)
 	until(t, "respooled", func() bool { return len(waiting(t, sp)) == 3 })
 	for _, e := range waiting(t, sp) {
-		if e.Listed || sp.IsListed(e.Seq) {
+		if e.Listed || sp.IsListed(spool.Ref{Seq: e.Seq}) {
 			t.Fatalf("#%d is still listed after the rebind: it would never be shown again", e.Seq)
 		}
 	}

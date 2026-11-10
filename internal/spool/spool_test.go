@@ -43,12 +43,12 @@ func TestPermissions(t *testing.T) {
 	if err := s.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	for p, want := range map[string]os.FileMode{s.Dir: 0o700, s.drained(): 0o700, s.file(7): 0o600, filepath.Join(s.Dir, marker): 0o600} {
+	for p, want := range map[string]os.FileMode{s.Dir: 0o700, s.drained(): 0o700, s.file(Ref{Seq: 7}): 0o600, filepath.Join(s.Dir, marker): 0o600} {
 		if got := mode(t, p); got != want {
 			t.Errorf("%s: %o, want %o", p, got, want)
 		}
 	}
-	if err := s.Drained(7); err != nil {
+	if err := s.Drained(Ref{Seq: 7}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mode(t, filepath.Join(s.drained(), "7")); got != 0o600 {
@@ -83,25 +83,25 @@ func TestDrainedThenAcked(t *testing.T) {
 	if err := s.Put(Entry{Seq: 4}); err != nil {
 		t.Fatal(err)
 	}
-	if s.IsDrained(4) {
+	if s.IsDrained(Ref{Seq: 4}) {
 		t.Fatal("drained before the hook")
 	}
-	if err := s.Drained(4); err != nil {
+	if err := s.Drained(Ref{Seq: 4}); err != nil {
 		t.Fatal(err)
 	}
-	if w, _ := s.Waiting(); len(w) != 0 || !s.IsDrained(4) {
-		t.Fatalf("after drain: waiting %v drained %v", w, s.IsDrained(4))
+	if w, _ := s.Waiting(); len(w) != 0 || !s.IsDrained(Ref{Seq: 4}) {
+		t.Fatalf("after drain: waiting %v drained %v", w, s.IsDrained(Ref{Seq: 4}))
 	}
 	if err := s.Put(Entry{Seq: 4}); err != nil { // a redelivery spooled before serve noticed
 		t.Fatal(err)
 	}
-	if err := s.Acked(4); err != nil {
+	if err := s.Acked(Ref{Seq: 4}); err != nil {
 		t.Fatal(err)
 	}
-	if w, _ := s.Waiting(); len(w) != 0 || s.IsDrained(4) {
-		t.Fatalf("after ack: waiting %v drained %v", w, s.IsDrained(4))
+	if w, _ := s.Waiting(); len(w) != 0 || s.IsDrained(Ref{Seq: 4}) {
+		t.Fatalf("after ack: waiting %v drained %v", w, s.IsDrained(Ref{Seq: 4}))
 	}
-	if err := s.Acked(4); err != nil {
+	if err := s.Acked(Ref{Seq: 4}); err != nil {
 		t.Fatalf("acking twice: %v", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestClearWaitingKeepsTombstones(t *testing.T) {
 	if err := s.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Drained(2); err != nil {
+	if err := s.Drained(Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(s.Dir, ".put-123"), []byte("x"), 0o600); err != nil {
@@ -157,7 +157,7 @@ func TestClearWaitingKeepsTombstones(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Dir, ".put-123")); err == nil {
 		t.Fatal("temp file kept")
 	}
-	if !s.IsDrained(2) {
+	if !s.IsDrained(Ref{Seq: 2}) {
 		t.Fatal("tombstone lost")
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, ".hooked")); err != nil {
@@ -174,7 +174,7 @@ func TestBindClearsTombstonesWhenTheStreamChanges(t *testing.T) {
 	if err := s.Put(Entry{Seq: 1, Body: []byte("x")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Drained(2); err != nil {
+	if err := s.Drained(Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Touch(); err != nil {
@@ -183,14 +183,14 @@ func TestBindClearsTombstonesWhenTheStreamChanges(t *testing.T) {
 	if err := s.Bind("s1"); err != nil {
 		t.Fatal(err)
 	}
-	if w, _ := s.Waiting(); len(w) != 1 || !s.IsDrained(2) {
-		t.Fatalf("same stream changed the spool: %+v drained=%v", w, s.IsDrained(2))
+	if w, _ := s.Waiting(); len(w) != 1 || !s.IsDrained(Ref{Seq: 2}) {
+		t.Fatalf("same stream changed the spool: %+v drained=%v", w, s.IsDrained(Ref{Seq: 2}))
 	}
 	if err := s.Bind("s2"); err != nil {
 		t.Fatal(err)
 	}
-	if w, _ := s.Waiting(); len(w) != 0 || s.IsDrained(2) {
-		t.Fatalf("new stream kept: %+v drained=%v", w, s.IsDrained(2))
+	if w, _ := s.Waiting(); len(w) != 0 || s.IsDrained(Ref{Seq: 2}) {
+		t.Fatalf("new stream kept: %+v drained=%v", w, s.IsDrained(Ref{Seq: 2}))
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, ".hooked")); err != nil {
 		t.Fatalf("marker lost: %v", err)
@@ -274,7 +274,7 @@ func TestShownMarksRedelivery(t *testing.T) {
 			t.Fatalf("#%d redelivered before it was shown", e.Seq)
 		}
 	}
-	if err := s.MarkShown(1, 2); err != nil {
+	if err := s.MarkShown(Ref{Seq: 1}, Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mode(t, filepath.Join(s.shown(), "1")); got != 0o600 {
@@ -290,11 +290,11 @@ func TestShownMarksRedelivery(t *testing.T) {
 	if got := flags(); got != [3]bool{true, true, false} {
 		t.Fatalf("flags %v", got)
 	}
-	b, _ := os.ReadFile(s.file(1))
+	b, _ := os.ReadFile(s.file(Ref{Seq: 1}))
 	if strings.Contains(string(b), "edelivered") {
 		t.Fatalf("persisted in the entry: %s", b)
 	}
-	if err := s.Drained(1); err != nil {
+	if err := s.Drained(Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(s.shown(), "1")); err == nil {
@@ -312,13 +312,13 @@ func TestShownMarksRedelivery(t *testing.T) {
 	if w, _ := s.Waiting(); len(w) != 1 || !w[0].Redelivered {
 		t.Fatalf("a redelivery after a restart is not flagged: %+v", w)
 	}
-	if err := s.Acked(2); err != nil {
+	if err := s.Acked(Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(s.shown(), "2")); err == nil {
 		t.Fatal("Acked left the shown marker")
 	}
-	if err := s.MarkShown(5); err != nil {
+	if err := s.MarkShown(Ref{Seq: 5}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Bind("stream-1"); err != nil {
@@ -333,7 +333,7 @@ func TestShownMarksRedelivery(t *testing.T) {
 func TestMarkShownCreatesItsDirectory(t *testing.T) {
 	s := newSpool(t)
 	os.Remove(s.shown())
-	if err := s.MarkShown(4); err != nil {
+	if err := s.MarkShown(Ref{Seq: 4}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mode(t, s.shown()); got != 0o700 {
@@ -516,43 +516,43 @@ func TestListedMarkLifecycle(t *testing.T) {
 	}
 	put(1)
 	put(2)
-	if err := s.MarkShown(1); err != nil {
+	if err := s.MarkShown(Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Listed(1); err != nil {
+	if err := s.Listed(Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	w, _ := s.Waiting()
-	if len(w) != 2 || !w[0].Listed || w[1].Listed || w[0].Redelivered || s.IsDrained(1) || !s.IsListed(1) || s.IsListed(2) {
-		t.Fatalf("after Listed(1): %+v drained %v", w, s.IsDrained(1))
+	if len(w) != 2 || !w[0].Listed || w[1].Listed || w[0].Redelivered || s.IsDrained(Ref{Seq: 1}) || !s.IsListed(Ref{Seq: 1}) || s.IsListed(Ref{Seq: 2}) {
+		t.Fatalf("after Listed(1): %+v drained %v", w, s.IsDrained(Ref{Seq: 1}))
 	}
 	if mode(t, filepath.Join(s.Dir, "listed", "1")) != 0o600 {
 		t.Fatal("listed mark is not 0600")
 	}
-	if err := s.Listed(2); err != nil {
+	if err := s.Listed(Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Drained(2); err != nil || s.IsListed(2) || !s.IsDrained(2) {
+	if err := s.Drained(Ref{Seq: 2}); err != nil || s.IsListed(Ref{Seq: 2}) || !s.IsDrained(Ref{Seq: 2}) {
 		t.Fatalf("a drain keeps the listed mark: %v", err)
 	}
-	if err := s.Acked(2); err != nil || s.IsDrained(2) {
+	if err := s.Acked(Ref{Seq: 2}); err != nil || s.IsDrained(Ref{Seq: 2}) {
 		t.Fatal(err)
 	}
-	if err := s.ClearWaiting(); err != nil || s.IsListed(1) {
+	if err := s.ClearWaiting(); err != nil || s.IsListed(Ref{Seq: 1}) {
 		t.Fatalf("ClearWaiting kept the listed mark: %v", err)
 	}
 	put(1)
-	if err := s.Listed(1); err != nil {
+	if err := s.Listed(Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Bind("stream-a"); err != nil || s.IsListed(1) {
+	if err := s.Bind("stream-a"); err != nil || s.IsListed(Ref{Seq: 1}) {
 		t.Fatalf("Bind to a new stream kept the listed mark: %v", err)
 	}
 	put(3)
-	if err := s.Listed(3); err != nil {
+	if err := s.Listed(Ref{Seq: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Acked(3); err != nil || s.IsListed(3) {
+	if err := s.Acked(Ref{Seq: 3}); err != nil || s.IsListed(Ref{Seq: 3}) {
 		t.Fatalf("Acked kept the listed mark: %v", err)
 	}
 }

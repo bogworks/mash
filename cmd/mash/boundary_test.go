@@ -243,9 +243,9 @@ func TestBoundaryUnicodeAtTheHookCap(t *testing.T) {
 								switch {
 								case full && listed:
 									t.Fatalf("#%d is both shown in full and listed", seq)
-								case full && (!strings.Contains(ctx, "\n> "+b) || !sp.IsDrained(seq)):
+								case full && (!strings.Contains(ctx, "\n> "+b) || !sp.IsDrained(spool.Ref{Seq: seq})):
 									t.Fatalf("#%d is shown with a truncated body, or not drained", seq)
-								case listed && (!sp.IsListed(seq) || sp.IsDrained(seq) || !sp.Has(seq)):
+								case listed && (!sp.IsListed(spool.Ref{Seq: seq}) || sp.IsDrained(spool.Ref{Seq: seq}) || !sp.Has(spool.Ref{Seq: seq})):
 									t.Fatalf("#%d is listed in a digest but not marked listed and unread", seq)
 								case listed && !strings.Contains(ctx, "Read each with the read tool (#seq); they stay unread until you do."):
 									t.Fatalf("a digest lists #%d without the read guidance:\n%.300s", seq, ctx)
@@ -257,8 +257,8 @@ func TestBoundaryUnicodeAtTheHookCap(t *testing.T) {
 								t.Fatalf("#%d was printed %d times, want exactly once (seen %v)", i, seen[i], seen)
 							}
 							seq := uint64(i)
-							if sp.IsDrained(seq) == sp.IsListed(seq) {
-								t.Fatalf("#%d: drained %v listed %v: want exactly one", i, sp.IsDrained(seq), sp.IsListed(seq))
+							if sp.IsDrained(spool.Ref{Seq: seq}) == sp.IsListed(spool.Ref{Seq: seq}) {
+								t.Fatalf("#%d: drained %v listed %v: want exactly one", i, sp.IsDrained(spool.Ref{Seq: seq}), sp.IsListed(spool.Ref{Seq: seq}))
 							}
 						}
 					})
@@ -340,7 +340,7 @@ func TestBoundaryBurstDrainShowsUrgentFirstAndEachOnce(t *testing.T) {
 		if seen[i] != 1 {
 			t.Fatalf("#%d shown %d times, want once", i, seen[i])
 		}
-		if !sp.IsDrained(uint64(i)) {
+		if !sp.IsDrained(spool.Ref{Seq: uint64(i)}) {
 			t.Fatalf("#%d shown but not drained", i)
 		}
 	}

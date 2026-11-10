@@ -199,7 +199,7 @@ func TestHookDrainWithZeroBatchMsgs(t *testing.T) {
 	if w, _ := sp.Waiting(); len(w) != 2 || !w[0].Listed || !w[1].Listed {
 		t.Fatalf("waiting %+v, want both listed", w)
 	}
-	if sp.IsDrained(1) || sp.IsDrained(2) {
+	if sp.IsDrained(spool.Ref{Seq: 1}) || sp.IsDrained(spool.Ref{Seq: 2}) {
 		t.Fatal("a digest drained what it listed")
 	}
 }
@@ -700,8 +700,8 @@ func TestHookDigestListsAndDoesNotDrain(t *testing.T) {
 		t.Fatalf("no digest with the unread note:\n%s", out)
 	}
 	for i := uint64(1); i <= 2; i++ {
-		if !sp.IsListed(i) || sp.IsDrained(i) || !sp.Has(i) {
-			t.Fatalf("#%d: listed %v drained %v has %v, want listed, undrained, waiting", i, sp.IsListed(i), sp.IsDrained(i), sp.Has(i))
+		if !sp.IsListed(spool.Ref{Seq: i}) || sp.IsDrained(spool.Ref{Seq: i}) || !sp.Has(spool.Ref{Seq: i}) {
+			t.Fatalf("#%d: listed %v drained %v has %v, want listed, undrained, waiting", i, sp.IsListed(spool.Ref{Seq: i}), sp.IsDrained(spool.Ref{Seq: i}), sp.Has(spool.Ref{Seq: i}))
 		}
 	}
 	if again := runHook(t, env, "PostToolUse"); again != "" {
@@ -734,19 +734,19 @@ func TestHookALaterFullShowingDrainsListedMail(t *testing.T) {
 	if strings.Contains(out, "digest") || !strings.Contains(out, "> "+strings.Repeat("c", 90)) || strings.Contains(out, "#1") {
 		t.Fatalf("new mail alone expected:\n%s", out)
 	}
-	if !sp.IsDrained(3) || !sp.IsListed(1) || !sp.IsListed(2) || sp.IsDrained(1) {
+	if !sp.IsDrained(spool.Ref{Seq: 3}) || !sp.IsListed(spool.Ref{Seq: 1}) || !sp.IsListed(spool.Ref{Seq: 2}) || sp.IsDrained(spool.Ref{Seq: 1}) {
 		t.Fatal("the new message is drained and the listed ones left listed")
 	}
 	put(4, "small")
 	// 60 + 60 + 5 bytes is still over 100 B: not taken together. Read the first (as the read tool does), leaving one.
-	if err := sp.Drained(1); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	out = runHook(t, env, "PostToolUse")
 	if strings.Contains(out, "digest") || !strings.Contains(out, "> small") || !strings.Contains(out, "> "+strings.Repeat("b", 60)) {
 		t.Fatalf("listed #2 should be shown in full with #4:\n%s", out)
 	}
-	if !sp.IsDrained(2) || !sp.IsDrained(4) || sp.IsListed(2) {
+	if !sp.IsDrained(spool.Ref{Seq: 2}) || !sp.IsDrained(spool.Ref{Seq: 4}) || sp.IsListed(spool.Ref{Seq: 2}) {
 		t.Fatal("a full showing did not drain the listed message")
 	}
 }

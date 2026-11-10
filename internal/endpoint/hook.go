@@ -86,7 +86,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 		return fmt.Errorf("mash: inbox: %w", err)
 	}
 	info := st.CachedInfo() // the response to the request just made
-	if err := s.Bind(info.Config.Name + "@" + info.Created.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := s.BindStream("", info.Config.Name+"@"+info.Created.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
 	// The previous session's waiting files are stale: the hook timestamp resets with this serve, so a later hook
@@ -132,24 +132,24 @@ func hold(batch []pending) {
 	}
 }
 
-// held is what the spool holds unacked, by stream sequence.
+// held is what the spool holds unacked, by (stream, sequence).
 type held struct {
-	msgs       map[uint64]pending
-	at         map[uint64]time.Time // when each was spooled
+	msgs       map[spool.Ref]pending
+	at         map[spool.Ref]time.Time // when each was spooled
 	bytes      int
-	stored     int             // the held messages' stored size, headers included, as the inbox stream counts it
-	alive      time.Time       // the last keep-alive
-	wakeAt     time.Time       // when the session was last woken; zero once a hook has drained since
-	wakes      int             // wakes since a hook last drained: the backoff exponent
-	hookAt     time.Time       // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
-	hookHeld   int             // the held count right after the last drain: a backlog above it has grown since
-	hookStored int             // the held stored size right after the last drain
-	added      int             // messages spooled since the last settle: arrivals of the current pass, not yet seen by a drain check
-	listed     map[uint64]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
-	rung       map[uint64]bool // urgent messages a wake has already announced
-	fails      map[uint64]int  // consecutive spool failures per message
-	failed     bool            // a spool failure is logged for the current spell
-	full       bool            // the byte cap turned a message away since a hook last drained
+	stored     int                // the held messages' stored size, headers included, as the inbox stream counts it
+	alive      time.Time          // the last keep-alive
+	wakeAt     time.Time          // when the session was last woken; zero once a hook has drained since
+	wakes      int                // wakes since a hook last drained: the backoff exponent
+	hookAt     time.Time          // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
+	hookHeld   int                // the held count right after the last drain: a backlog above it has grown since
+	hookStored int                // the held stored size right after the last drain
+	added      int                // messages spooled since the last settle: arrivals of the current pass, not yet seen by a drain check
+	listed     map[spool.Ref]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
+	rung       map[spool.Ref]bool // urgent messages a wake has already announced
+	fails      map[spool.Ref]int  // consecutive spool failures per message
+	failed     bool               // a spool failure is logged for the current spell
+	full       bool               // the byte cap turned a message away since a hook last drained
 }
 
 // spoolTries is how many times a message is spooled before the channel delivers it instead.
@@ -160,7 +160,7 @@ const spoolTries = 3
 func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *seenSet) {
 	var fallback []pending // messages the spool would not take: the channel's, as before any hook
 	for _, p := range show {
-		seq := p.mail.Seq
+		seq := refOf(p.mail)
 		switch {
 		case e.spool.IsDrained(seq):
 			e.ackDrained(p)
@@ -177,7 +177,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			if err := e.spool.Put(EntryOf(p.mail)); err != nil {
 				if !h.failed {
 					h.failed = true
-					e.log.Printf("spool #%d: %v (retried, then delivered by the channel)", seq, err)
+					e.log.Printf("spool #%d: %v (retried, then delivered by the channel)", seq.Seq, err)
 				}
 				if h.fails[seq]++; h.fails[seq] >= spoolTries {
 					delete(h.fails, seq)
@@ -223,7 +223,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			// Listed in a digest: the model was told of it, so it neither rings nor wakes again and is not a waking
 			// message for orchestrators, but it stays unacked until read (ADR 0046). The hook ran: the idle spell restarts.
 			if h.listed == nil {
-				h.listed = map[uint64]bool{}
+				h.listed = map[spool.Ref]bool{}
 			}
 			h.listed[seq] = true
 			e.waking.listed(seq)
@@ -277,7 +277,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	if len(h.msgs) == 0 {
 		return
 	}
-	var ring []uint64
+	var ring []spool.Ref
 	// Listed mail was announced by the digest and waits for the model to read it: it never wakes (ADR 0046).
 	if len(h.msgs) == len(h.listed) {
 		return
@@ -345,18 +345,18 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	if len(ring) == 0 && !due && !notice {
 		return
 	}
-	seqs := make([]uint64, 0, len(h.msgs))
+	seqs := make([]spool.Ref, 0, len(h.msgs))
 	for seq := range h.msgs {
 		if !h.listed[seq] { // the summary does not announce listed mail again
 			seqs = append(seqs, seq)
 		}
 	}
-	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
 	mails := make([]render.Mail, len(seqs))
 	ids := make([]string, len(seqs))
 	for i, seq := range seqs {
 		mails[i] = h.msgs[seq].mail
-		ids[i] = strconv.FormatUint(seq, 10)
+		ids[i] = strconv.FormatUint(seq.Seq, 10)
 	}
 	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
 	if hl == HooklessProven {
@@ -447,14 +447,14 @@ const ackTimeout = 2 * time.Second
 // ack acks a shown message and forgets it in the spool, but only once the server has confirmed the ack: a lost
 // fire-and-forget ack would leave the message unacked with no tombstone, to be shown again.
 func (e *Endpoint) ack(p pending) {
-	defer e.waking.done(p.mail.Seq) // shown, whether or not the server confirms the ack
+	defer e.waking.done(refOf(p.mail)) // shown, whether or not the server confirms the ack
 	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
 	if err := p.msg.DoubleAck(ctx); err != nil {
 		e.log.Printf("ack #%d: %v", p.mail.Seq, err)
 		return // the tombstone stays: a redelivery is acked then
 	}
-	if err := e.spool.Acked(p.mail.Seq); err != nil {
+	if err := e.spool.Acked(refOf(p.mail)); err != nil {
 		e.log.Printf("%v", err)
 	}
 }
@@ -463,7 +463,7 @@ func (e *Endpoint) ack(p pending) {
 // hook holds the spool lock from its read to its drained marks, so under the lock a message is either drained
 // (its tombstone is there: left alone) or still waiting; the file is never re-created for one a hook just showed.
 func (e *Endpoint) healHeld(h *held) {
-	var bad []uint64
+	var bad []spool.Ref
 	for seq := range h.msgs {
 		if !e.spool.Has(seq) && !e.spool.IsDrained(seq) {
 			bad = append(bad, seq)
@@ -483,20 +483,20 @@ func (e *Endpoint) healHeld(h *held) {
 			continue
 		}
 		if err := e.spool.Put(EntryOf(h.msgs[seq].mail)); err != nil {
-			e.log.Printf("spool #%d: rewrite: %v", seq, err)
+			e.log.Printf("spool #%d: rewrite: %v", seq.Seq, err)
 		}
 	}
 }
 
 // EntryOf is a message as the spool keeps it.
 func EntryOf(m render.Mail) spool.Entry {
-	return spool.Entry{Seq: m.Seq, From: m.From, Trust: string(m.Trust), Instance: m.Instance, Owner: m.Owner, At: m.At, Body: m.Body,
+	return spool.Entry{Seq: m.Seq, Stream: m.Stream, From: m.From, Trust: string(m.Trust), Instance: m.Instance, Owner: m.Owner, At: m.At, Body: m.Body,
 		Urgent: m.Urgent, Kind: string(m.Kind.Norm()), ReplyTo: m.ReplyTo, Via: m.Via}
 }
 
 // MailOf is a spooled message as render shows it.
 func MailOf(e spool.Entry) render.Mail {
-	return render.Mail{Seq: e.Seq, From: e.From, Trust: sap.Trust(e.Trust), Instance: e.Instance, Owner: e.Owner, At: e.At, Body: e.Body,
+	return render.Mail{Seq: e.Seq, Stream: e.Stream, From: e.From, Trust: sap.Trust(e.Trust), Instance: e.Instance, Owner: e.Owner, At: e.At, Body: e.Body,
 		Urgent: e.Urgent, Kind: kind.Of(e.Kind), ReplyTo: e.ReplyTo, Via: e.Via, Redelivered: e.Redelivered}
 }
 
