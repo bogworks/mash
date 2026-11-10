@@ -295,23 +295,23 @@ func TestCheck_refusals(t *testing.T) {
 			gitT(t, f.repo, "add", "-A")
 			gitT(t, f.repo, "commit", "-q", "-m", "unpushed")
 			f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
-			f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "test (macos)", f.o.X), ciRun(3, "reproducible", f.o.X)})
+			f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "reproducible", f.o.X)})
 		},
-		"a required check missing": func(f *fixture) { f.setCI("test (linux)", "test (macos)") },
+		"a required check missing": func(f *fixture) { f.setCI("test (linux)") },
 		"a required check failing": func(f *fixture) {
-			runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "test (macos)", f.x), ciRun(3, "reproducible", f.x)}
-			runs[2]["conclusion"] = "failure"
+			runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "reproducible", f.x)}
+			runs[1]["conclusion"] = "failure"
 			f.setCIPages(f.x, 100, runs)
 		},
 		"a check still running": func(f *fixture) {
-			runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "test (macos)", f.x), ciRun(3, "reproducible", f.x)}
-			runs[2]["status"] = "in_progress"
-			runs[2]["conclusion"] = nil
+			runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "reproducible", f.x)}
+			runs[1]["status"] = "in_progress"
+			runs[1]["conclusion"] = nil
 			f.setCIPages(f.x, 100, runs)
 		},
 		"green checks for another commit": func(f *fixture) {
 			other := strings.Repeat("e", 40)
-			f.setCIPages(other, 100, []map[string]any{ciRun(1, "test (linux)", other), ciRun(2, "test (macos)", other), ciRun(3, "reproducible", other)})
+			f.setCIPages(other, 100, []map[string]any{ciRun(1, "test (linux)", other), ciRun(2, "reproducible", other)})
 		},
 		"two builds that differ": func(f *fixture) {
 			n := 0
@@ -368,7 +368,7 @@ func TestCheck_aPluginManifestAtAnotherVersionIsRefused(t *testing.T) {
 		gitT(t, f.repo, "push", "-q", "origin", "main")
 		f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
 		f.setCI(release.RequiredChecks...)
-		f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "test (macos)", f.o.X), ciRun(3, "reproducible", f.o.X)})
+		f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "reproducible", f.o.X)})
 		err := f.check()
 		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "plugin/.claude-plugin/plugin.json") {
 			t.Errorf("%s: want a refusal naming the manifest, got %v", name, err)
@@ -388,7 +388,7 @@ func TestCheck_aForkConfiguredAsOriginDoesNotMakeACandidateOnMain(t *testing.T) 
 	gitT(t, f.repo, "push", "-q", fork, "HEAD:refs/heads/main")
 	gitT(t, f.repo, "remote", "set-url", "origin", fork)
 	f.o.X = forkX
-	f.setCIPages(forkX, 100, []map[string]any{ciRun(1, "test (linux)", forkX), ciRun(2, "test (macos)", forkX), ciRun(3, "reproducible", forkX)})
+	f.setCIPages(forkX, 100, []map[string]any{ciRun(1, "test (linux)", forkX), ciRun(2, "reproducible", forkX)})
 	err := f.check() // Remote is still the release repository: main fetched from it does not contain forkX
 	if err == nil || exitCode(err) != 3 {
 		t.Fatalf("a candidate only on a fork's main passed: %v", err)
@@ -415,7 +415,7 @@ func TestCheck_aTruncatedOrMalformedCIResponseCannotPass(t *testing.T) {
 	if err := f.check(); err == nil {
 		t.Fatal("a response without total_count passed")
 	}
-	runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "test (macos)", f.x), ciRun(3, "reproducible", f.x)}
+	runs := []map[string]any{ciRun(1, "test (linux)", f.x), ciRun(2, "reproducible", f.x)}
 	b, _ := json.Marshal(map[string]any{"total_count": 3, "check_runs": runs[:1]})
 	write(t, dir, "ci-1.json", string(b)) // page 1 holds 1 of 3, page 2 is empty: truncated
 	write(t, dir, "ci-2.json", `{"total_count": 3, "check_runs": []}`)
@@ -814,7 +814,7 @@ func commitPlugin(t *testing.T, f *fixture, name, body string) {
 	gitT(t, f.repo, "commit", "-q", "--allow-empty", "-m", "plugin")
 	gitT(t, f.repo, "push", "-q", "origin", "main")
 	f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
-	f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "test (macos)", f.o.X), ciRun(3, "reproducible", f.o.X)})
+	f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "reproducible", f.o.X)})
 }
 
 func TestCheck_pluginRunsAgainstThePreviousReleasesBinary(t *testing.T) {
@@ -1196,7 +1196,7 @@ func commitContract(t *testing.T, f *fixture, body, subject string) {
 	gitT(t, f.repo, "commit", "-q", "--allow-empty", "-m", subject)
 	gitT(t, f.repo, "push", "-q", "origin", "main")
 	f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
-	f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "test (macos)", f.o.X), ciRun(3, "reproducible", f.o.X)})
+	f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "reproducible", f.o.X)})
 }
 
 func TestCheck_renderContractStep(t *testing.T) {

@@ -37,17 +37,22 @@ run for a person's approval; that setting, not the runner choice, is what keeps 
 `adr-lint` workflow keeps its `pull_request_target` handling unchanged (checker built from the base branch, the pull
 request as data only); its fork safety does not depend on the runner.
 
-The macOS test leg stays. ci.yml's `test` matrix has two entries, `os: linux` on `[self-hosted, rh-linux]` and
-`os: macos` on `[self-hosted, rh-macos]`, so the check names are `test (linux)` and `test (macos)`: the job sets `name: test (${{ matrix.os }})` explicitly, because an unnamed include-only matrix job would be named after every matrix value, `runs-on` list included. The macOS runner is
-Intel x64 with 2 vCPU and runs one job at a time; a queued macOS job waits, and that wait is accepted.
+The macOS test leg stays, as an advisory check. ci.yml has two test jobs, no matrix: `test` on `[self-hosted, rh-linux]`
+(`name: test (linux)`) and `test-macos` on `[self-hosted, rh-macos]` (`name: test (macos)`), under the same conditions.
+The macOS runner is Intel x64 with 2 vCPU and runs one job at a time; a queued macOS job waits, and that wait is accepted.
+The macOS leg is advisory until x-lead confirms the macOS runner no longer pauses running jobs: `test (macos)` is not in <!-- adrlint:allow vocabulary -->
+`pr-check`'s needs, not in `release.RequiredChecks` and not a required status check, so it gates no merge and no release,
+yet its result stays visible (the job does not use `continue-on-error`, so a failure shows as a failed check). Once x-lead <!-- adrlint:allow vocabulary -->
+confirms, it returns to `pr-check`'s needs and to the required checks (`TODO(macos-gate)` in ci.yml).
 
 Required check names change: `test (ubuntu-latest)` becomes `test (linux)` and `test (macos-latest)` becomes
 `test (macos)`; `reproducible`, `lint`, `adr-lint`, `govulncheck`, `codeql` and `pr-check` keep their names.
-`release.RequiredChecks` and the branch ruleset must carry the new names, and the ruleset must change in the same step as
-this merge.
+The required check set is `test (linux)`, `reproducible`, `lint`, `adr-lint`, `govulncheck`, `codeql` and `pr-check`;
+`test (macos)` is not in it while the macOS leg is advisory. `release.RequiredChecks` (`test (linux)`, `reproducible`) and the
+branch ruleset must carry these names, and the ruleset must change in the same step as this merge.
 
 A guard test, `internal/release/workflows_selfhosted_test.go`, fails unless every job-level `runs-on` is exactly the list
-`[self-hosted, rh-linux]` or `[self-hosted, rh-macos]`. A matrix-driven `runs-on: ${{ matrix.<key> }}` passes only if
+`[self-hosted, rh-linux]` or `[self-hosted, rh-macos]`. A matrix-driven `runs-on: ${{ matrix.<key> }}` (ci.yml has none now) passes only if
 every value the matrix supplies is one of those two lists. It also fails on `||` in a `runs-on`, on a hosted label
 (`ubuntu-*`, `macos-*`, `windows-*`) anywhere outside a comment, on a host name, and on a job-level `uses:` of a reusable workflow outside this repository (a local `./.github/workflows/...` caller passes; step-level `uses:` of actions is not covered).
 
@@ -57,7 +62,8 @@ Release provenance changes with this rule. `slsa-framework/slsa-github-generator
 
 * Good, because no job can reach a GitHub-hosted runner.
 * Good, because a missing runner is visible as a queued job.
-* Good, because macOS stays tested and only the two `test` check names change.
+* Good, because macOS stays tested and visible, and a paused macOS runner cannot block a merge or a release.
+* Bad, because a macOS-only failure no longer blocks a merge or a release until the leg is required again.
 * Bad, because fork pull request code runs on a runner the maintainers operate once a person approves the run; the
   approval setting is the control and it lives outside the repository.
 * Bad, because one macOS job at a time makes macOS the slowest leg in the queue.

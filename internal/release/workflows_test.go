@@ -263,32 +263,13 @@ func TestCI_producesTheCheckNamesTheGateRequires(t *testing.T) {
 	w := load(t, "ci.yml")
 	var names []string
 	for jn, j := range w.Jobs {
-		var osValues []any
-		if m, ok := j.Strategy.Matrix["os"].([]any); ok {
-			osValues = m
+		if len(j.Strategy.Matrix) != 0 {
+			t.Errorf("job %s is matrixed: a check name must be exactly the job's name", jn)
 		}
-		if inc, ok := j.Strategy.Matrix["include"].([]any); ok {
-			for _, e := range inc {
-				if o, ok := e.(map[string]any)["os"]; ok {
-					osValues = append(osValues, o)
-				}
-			}
-		}
-		if len(osValues) == 0 {
-			if j.Name != "" {
-				names = append(names, j.Name)
-			} else {
-				names = append(names, jn)
-			}
-			continue
-		}
-		for _, o := range osValues {
-			// A matrix job carries an explicit name built from its os value (an unnamed include-only matrix job would be
-			// named after every matrix value, runs-on array included: TestCI_requiredJobsKeepTheirCheckNames).
-			if j.Name != "test (${{ matrix.os }})" {
-				t.Errorf("job %s: matrix job name %q, want the expression test (${{ matrix.os }})", jn, j.Name)
-			}
-			names = append(names, strings.ReplaceAll(j.Name, "${{ matrix.os }}", fmt.Sprint(o)))
+		if j.Name != "" {
+			names = append(names, j.Name)
+		} else {
+			names = append(names, jn)
 		}
 	}
 	sort.Strings(names)
@@ -347,14 +328,14 @@ var jobConditions = map[string]string{
 	"dry-run-verify": "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && " + allFourSucceeded + " }}",
 }
 
-// ci.yml's check names are the job names, except the test job's explicit test (${{ matrix.os }}): a name that differs from
+// ci.yml's check names are the job names, except the test jobs' explicit test (linux) and test (macos): a name that differs from
 // the job id, a condition or a matrix on a required job would silently make the gate refuse every candidate.
 func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 	for jn, j := range load(t, "ci.yml").Jobs {
-		if jn == "test" {
-			// GitHub would name an unnamed include-only matrix job "test (linux, [self-hosted, rh-linux])": the name is explicit.
-			if j.Name != "test (${{ matrix.os }})" {
-				t.Errorf("the test job is named %q, want exactly test (${{ matrix.os }}) so its checks are test (linux) and test (macos)", j.Name)
+		if want, ok := map[string]string{"test": "test (linux)", "test-macos": "test (macos)"}[jn]; ok {
+			// The check name differs from the job id on purpose, and no matrix may rename it.
+			if j.Name != want {
+				t.Errorf("the %s job is named %q, want exactly %s", jn, j.Name, want)
 			}
 		} else if j.Name != "" && j.Name != jn {
 			t.Errorf("job %s is named %q: its check run would not be called %q", jn, j.Name, jn)
@@ -439,11 +420,17 @@ func TestWorkflows_noBareDoubleBracketUnderSetE(t *testing.T) {
 	}
 }
 
-// One OS failing must not hide the other's result: the matrix runs to the end.
-func TestCI_matrixDoesNotFailFast(t *testing.T) {
-	j := load(t, "ci.yml").Jobs["test"]
-	if j.Strategy.FailFast == nil || *j.Strategy.FailFast {
-		t.Fatal("ci.yml test matrix must set fail-fast: false")
+// One OS failing must not hide the other's result: the two legs are separate jobs that do not need each other.
+func TestCI_osLegsAreIndependentJobs(t *testing.T) {
+	w := load(t, "ci.yml")
+	for _, jn := range []string{"test", "test-macos"} {
+		j := w.Jobs[jn]
+		if len(j.Strategy.Matrix) != 0 {
+			t.Errorf("%s must not be matrixed", jn)
+		}
+		if n := fmt.Sprint(j.Needs); n != "changes" && n != "[changes]" {
+			t.Errorf("%s needs %v, want only changes (the legs must not cancel or skip each other)", jn, j.Needs)
+		}
 	}
 }
 
@@ -972,7 +959,8 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 // ciOnlyJobs are ci.yml's jobs that the release gate does not require: changes (does a pull request touch code?) and
 // pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
 // review starts on; it gates neither a merge nor a release).
-var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check"}
+// test (macos) is advisory (ADR 0079, TODO(macos-gate) in ci.yml): visible, but it gates neither a merge nor a release.
+var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check", "test (macos)"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -999,6 +987,12 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	push, _ := on["push"].(map[string]any)
 	if _, ignores := push["paths-ignore"]; ignores {
 		t.Error("push must not use paths-ignore: a docs-only head of main would have no test runs, and the release gate refuses it")
+	}
+	if strings.Contains(needs, "test-macos") {
+		t.Errorf("pr-check needs test-macos, which is advisory (TODO(macos-gate) in ci.yml): %v", j.Needs)
+	}
+	if mj := w.Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != w.Jobs["test"].If || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
+		t.Errorf("test-macos must run under the same condition as test, on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
 	}
 	if tj := w.Jobs["test"]; !strings.Contains(tj.If, "github.event_name == 'push'") {
 		t.Errorf("the test job must always run on a push (the release gate reads main's check runs): if %q", tj.If)

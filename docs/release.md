@@ -48,8 +48,9 @@ The reasoning is in [decision 0042](decisions/0042-sign-sha256sums-with-sshsig.m
 
 The numbered steps are what the command does in each state, and the manual path when it cannot run.
 
-1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (linux)`,
-   `test (macos)` and `reproducible` (all from GitHub Actions, run on the maintainers' self-hosted runners) on X itself.
+1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (linux)`
+   and `reproducible` (both from GitHub Actions, run on the maintainers' self-hosted runners) on X itself. `test (macos)` runs
+   on every push to `main` but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
    shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
    ```sh
@@ -367,7 +368,7 @@ and tick it off in the repository's setup issue.
       read-only.
 - [ ] Ruleset for `main`, as specified in [branch-protection.md](branch-protection.md) (follow that file; the points
       that are easy to miss): require a pull request, with the Mergify app as the bypass actor for its tested
-      fast-forward merges; require the status checks `test (linux)`, `test (macos)`, `reproducible`,
+      fast-forward merges; require the status checks `test (linux)`, `reproducible`,
       `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
       Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are

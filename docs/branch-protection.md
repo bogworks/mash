@@ -13,8 +13,10 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   a maintainer's approval, push more code, and still satisfy the queue's `approved-reviews-by` condition; `.mergify.yml`
   also dismisses approvals on an outside author's push.
 - **Require status checks to pass**, with branches up to date:
-  - `test (linux)`, `test (macos)`, `reproducible` (from `ci.yml`; the release gate in
-    `scripts/release-check` requires exactly these names, so never rename them),
+  - `test (linux)`, `reproducible` (from `ci.yml`; the release gate in
+    `scripts/release-check` requires exactly these names, so never rename them). `test (macos)` is advisory
+    (ADR 0079): do not require it until x-lead confirms the macOS runner no longer pauses running jobs,
+    then add it here, to `pr-check`'s needs and to `release.RequiredChecks`,
   - `lint` (from `lint.yml`),
   - `adr-lint` (from `adr-lint.yml`; it checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify
     queue condition, so add it as required once the workflow is on `main`),
