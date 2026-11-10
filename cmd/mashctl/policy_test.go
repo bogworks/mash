@@ -46,7 +46,7 @@ func policyRun(t *testing.T, env map[string]string, args ...string) (string, str
 		env["HOME"] = t.TempDir()
 	}
 	var out, errb bytes.Buffer
-	code := run(args, func(k string) string { return env[k] }, &out, &errb)
+	code := runEnv(args, func(k string) string { return env[k] }, &out, &errb)
 	return out.String(), errb.String(), code
 }
 

@@ -87,7 +87,7 @@ var afterLabelLoad func()
 // runLabel is `mashctl label` and `mashctl unlabel`. It edits the policy file, the source of truth; nothing touches
 // the server or any creds unless --sync is given, and then only the directory record's labels, after the save. What
 // the edit leaves to do is printed, always including the directory labels, which `mashctl policy apply` does not reconcile.
-func runLabel(unlabel bool, args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runLabel(unlabel bool, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	verb, usage := "label", labelUsage
 	if unlabel {
 		verb = "unlabel"
@@ -105,7 +105,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, stdout, stde
 		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", verb)
 		return 2
 	}
-	cfg, err := loadCtlConfig(env, false)
+	cfg, err := loadCtlConfig(env, lookup, false)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

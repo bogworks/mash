@@ -29,7 +29,7 @@ func envOf(m map[string]string) func(string) string {
 func TestLoadDefaults(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestLoadDefaults(t *testing.T) {
 func TestEnvOverridesFile(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://file:4222","owner":"o","settle_ms":5}`)
-	c, err := Load(envOf(map[string]string{
+	c, err := load(envOf(map[string]string{
 		"MASH_NAME": "a", "MASH_URL": "tls://env:4222", "MASH_OWNER": "p",
 		"MASH_CREDS": "/x/y.creds", "MASH_SETTLE_MS": "7", "MASH_BATCH_MSGS": "3",
 		"MASH_BATCH_BYTES": "99", "MASH_ADMIN_CREDS": "/a.creds",
@@ -67,7 +67,7 @@ func TestEnvOverridesFile(t *testing.T) {
 func TestFileSettingsUsedWithoutEnv(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://f:4222","owner":"o","settle_ms":5,"batch_msgs":2,"batch_bytes":64}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestFileSettingsUsedWithoutEnv(t *testing.T) {
 
 func TestInertWithoutName(t *testing.T) {
 	home := t.TempDir()
-	c, err := Load(envOf(nil), home)
+	c, err := load(envOf(nil), home)
 	if err != nil {
 		t.Fatalf("inert load must not fail: %v", err)
 	}
@@ -89,11 +89,11 @@ func TestInertWithoutName(t *testing.T) {
 
 func TestMissingURLIsErrorUnlessInert(t *testing.T) {
 	home := t.TempDir()
-	_, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_OWNER": "o"}), home)
+	_, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_OWNER": "o"}), home)
 	if err == nil || !strings.Contains(err.Error(), "url") {
 		t.Fatalf("want url error, got %v", err)
 	}
-	_, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1"}), home)
+	_, err = load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1"}), home)
 	if err == nil || !strings.Contains(err.Error(), "owner") {
 		t.Fatalf("want owner error, got %v", err)
 	}
@@ -113,17 +113,17 @@ func TestRejectsBadNames(t *testing.T) {
 		}
 	}
 	home := t.TempDir()
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "Bad", "MASH_URL": "u", "MASH_OWNER": "o"}), home); err == nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "Bad", "MASH_URL": "u", "MASH_OWNER": "o"}), home); err == nil {
 		t.Fatal("bad MASH_NAME must be rejected")
 	}
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "O"}), home); err == nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "O"}), home); err == nil {
 		t.Fatal("bad owner must be rejected")
 	}
 }
 
 func TestBadNumbersRejected(t *testing.T) {
 	home := t.TempDir()
-	_, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o", "MASH_SETTLE_MS": "x"}), home)
+	_, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o", "MASH_SETTLE_MS": "x"}), home)
 	if err == nil {
 		t.Fatal("non-numeric MASH_SETTLE_MS must be rejected")
 	}
@@ -136,7 +136,7 @@ func TestLaunchTokenFromTheEnvironment(t *testing.T) {
 		for k, v := range base {
 			env[k] = v
 		}
-		return Load(func(k string) string { return env[k] }, t.TempDir())
+		return load(func(k string) string { return env[k] }, t.TempDir())
 	}
 	if c, err := load("tok-1.A_b"); err != nil || c.LaunchToken != "tok-1.A_b" {
 		t.Fatalf("%+v %v", c, err)
@@ -156,7 +156,7 @@ func TestIdleWakeSettings(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	if c, err := load(`,"idle_wake":"2m"`, map[string]string{}); err != nil || c.IdleWake != 2*time.Minute {
 		t.Fatalf("file: %v %v", c.IdleWake, err)
@@ -185,7 +185,7 @@ func TestRelayWindowSettings(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	if c, err := load("", map[string]string{}); err != nil || c.RelayWindow != 60*time.Second {
 		t.Fatalf("default: %v %v", c.RelayWindow, err)
@@ -218,7 +218,7 @@ func TestTimeoutSettings(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	if c, err := load("", map[string]string{}); err != nil || c.OpenTimeout != 20*time.Second || c.CallTimeout != 15*time.Second {
 		t.Fatalf("defaults: %v %v %v", c.OpenTimeout, c.CallTimeout, err)
@@ -260,7 +260,7 @@ func TestMoreTimeoutSettings(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://f:4222","owner":"o"`+file+`}`)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	keys := []struct {
 		key, env string
@@ -305,7 +305,7 @@ func TestLoadSpoolFromStart(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, file)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	base := `"url":"tls://x:4222","owner":"o"`
 	for _, tc := range []struct {
@@ -336,18 +336,18 @@ func TestLoadSpoolFromStart(t *testing.T) {
 
 func TestLimitsConfig(t *testing.T) {
 	home := t.TempDir()
-	c, err := Load(envOf(nil), home)
+	c, err := load(envOf(nil), home)
 	if err != nil || c.Limits != store.DefaultLimits() {
 		t.Fatalf("no file: %+v %v", c.Limits, err)
 	}
 	writeFile(t, home, `{"limits":{"inbox_max_bytes":"64MiB","inbox_max_age":"7d","directory_max_bytes":2097152,"lease_max_bytes":"1GiB","inbox_max_consumers":4}}`)
-	c, err = Load(envOf(nil), home)
+	c, err = load(envOf(nil), home)
 	want := store.Limits{InboxMaxBytes: 64 << 20, InboxMaxAge: 7 * 24 * time.Hour, DirectoryMaxBytes: 2 << 20, LeaseMaxBytes: 1 << 30, InboxMaxConsumers: 4}
 	if err != nil || c.Limits != want {
 		t.Fatalf("custom: %+v %v", c.Limits, err)
 	}
 	writeFile(t, home, `{"limits":{"inbox_max_age":"36h"}}`)
-	if c, err = Load(envOf(nil), home); err != nil || c.Limits.InboxMaxAge != 36*time.Hour || c.Limits.InboxMaxBytes != 16<<20 {
+	if c, err = load(envOf(nil), home); err != nil || c.Limits.InboxMaxAge != 36*time.Hour || c.Limits.InboxMaxBytes != 16<<20 {
 		t.Fatalf("partial: %+v %v", c.Limits, err)
 	}
 	for _, bad := range []struct{ body, key string }{
@@ -367,7 +367,7 @@ func TestLimitsConfig(t *testing.T) {
 		{`{"limits":[1]}`, "limits"},
 	} {
 		writeFile(t, home, bad.body)
-		if _, err := Load(envOf(nil), home); err == nil || !strings.Contains(err.Error(), bad.key) {
+		if _, err := load(envOf(nil), home); err == nil || !strings.Contains(err.Error(), bad.key) {
 			t.Errorf("%s: %v", bad.body, err)
 		}
 		if err := ValidateFile([]byte(bad.body)); err == nil {
@@ -402,14 +402,14 @@ func TestParseSizeAndAge(t *testing.T) {
 func TestTLSSettingsFileAndEnv(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","tls_ca":"/f/ca.pem","tls_cert":"/f/c.pem","tls_key":"/f/k.pem"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.TLSCA != "/f/ca.pem" || c.TLSCert != "/f/c.pem" || c.TLSKey != "/f/k.pem" {
 		t.Fatalf("file: got %q %q %q", c.TLSCA, c.TLSCert, c.TLSKey)
 	}
-	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/e/ca.pem", "MASH_TLS_CERT": "/e/c.pem", "MASH_TLS_KEY": "/e/k.pem"}), home)
+	c, err = load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/e/ca.pem", "MASH_TLS_CERT": "/e/c.pem", "MASH_TLS_KEY": "/e/k.pem"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,20 +421,20 @@ func TestTLSSettingsFileAndEnv(t *testing.T) {
 func TestTLSCertAndKeyMustBeSetTogether(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","tls_cert":"/f/c.pem"}`)
-	_, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	_, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err == nil || !strings.Contains(err.Error(), "tls_cert") || !strings.Contains(err.Error(), "tls_key") {
 		t.Fatalf("file cert only: err = %v", err)
 	}
 	// The environment can complete the pair, and can break one.
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err != nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err != nil {
 		t.Fatalf("pair completed by env: %v", err)
 	}
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o"}`)
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err == nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_KEY": "/e/k.pem"}), home); err == nil {
 		t.Fatal("key only: want an error")
 	}
 	// The files are read at connect time, not at load.
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/missing"}), home); err != nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_TLS_CA": "/missing"}), home); err != nil {
 		t.Fatalf("missing CA file at load: %v", err)
 	}
 }
@@ -477,7 +477,7 @@ func TestXDGConfigHomeUsedWhenItHasConfig(t *testing.T) {
 	home, xdg := t.TempDir(), t.TempDir()
 	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
 	writeIn(t, filepath.Join(xdg, "mash"), `{"url":"tls://new:1","owner":"new"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestXDGConfigHomeUsedWhenItHasConfig(t *testing.T) {
 func TestOldConfigStillReadWhenXDGHasNone(t *testing.T) {
 	home, xdg := t.TempDir(), t.TempDir()
 	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +513,7 @@ func TestUnreadableXDGDirFailsLoudlyNotLegacy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(mashDir, "config.json")); err == nil {
 		t.Skip("the OS ignores the directory mode")
 	}
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
 	if err == nil {
 		t.Fatalf("Load succeeded with %+v, want an error", c)
 	}
@@ -531,7 +531,7 @@ func TestMissingXDGConfigFallsBackToLegacyEvenWithXDGDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestRelativeXDGConfigHomeIgnored(t *testing.T) {
 	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
 	t.Chdir(t.TempDir())
 	writeIn(t, filepath.Join("rel", "mash"), `{"url":"tls://rel:1","owner":"rel"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": "rel"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": "rel"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,17 +557,17 @@ func TestRelativeXDGConfigHomeIgnored(t *testing.T) {
 func TestNoHomeNeedingAPathIsAnError(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// The default creds path needs a directory.
-	_, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o"}), "")
+	_, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o"}), "")
 	if !errors.Is(err, ErrNoConfigDir) {
 		t.Fatalf("err %v", err)
 	}
 	// So do url and owner, which would have come from the file.
-	_, err = Load(envOf(map[string]string{"MASH_NAME": "a"}), "")
+	_, err = load(envOf(map[string]string{"MASH_NAME": "a"}), "")
 	if !errors.Is(err, ErrNoConfigDir) || !strings.Contains(err.Error(), "set HOME or XDG_CONFIG_HOME") {
 		t.Fatalf("err %v", err)
 	}
 	// A relative XDG_CONFIG_HOME does not stand in for the home.
-	_, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o", "XDG_CONFIG_HOME": "rel"}), "")
+	_, err = load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "u", "MASH_OWNER": "o", "XDG_CONFIG_HOME": "rel"}), "")
 	if !errors.Is(err, ErrNoConfigDir) {
 		t.Fatalf("err %v", err)
 	}
@@ -575,7 +575,7 @@ func TestNoHomeNeedingAPathIsAnError(t *testing.T) {
 
 func TestNoHomeWithEverythingFromTheEnvironmentLoads(t *testing.T) {
 	t.Chdir(t.TempDir())
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "MASH_CREDS": "/etc/a.creds"}), "")
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "MASH_CREDS": "/etc/a.creds"}), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestNoHomeWithEverythingFromTheEnvironmentLoads(t *testing.T) {
 	}
 	// An absolute XDG_CONFIG_HOME is enough of a home for the default creds path.
 	xdg := t.TempDir()
-	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "XDG_CONFIG_HOME": xdg}), "")
+	c, err = load(envOf(map[string]string{"MASH_NAME": "a", "MASH_URL": "tls://x:1", "MASH_OWNER": "o", "XDG_CONFIG_HOME": xdg}), "")
 	if err != nil || c.Creds != filepath.Join(xdg, "mash", "a.creds") {
 		t.Fatalf("got %+v, %v", c, err)
 	}
@@ -593,14 +593,14 @@ func TestNoHomeWithEverythingFromTheEnvironmentLoads(t *testing.T) {
 func TestTildeExpandedInCreds(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"u","owner":"o","creds":"~/x.creds","admin_creds":"~"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Creds != filepath.Join(home, "x.creds") || c.AdminCreds != home {
 		t.Fatalf("got %q, %q", c.Creds, c.AdminCreds)
 	}
-	c, err = Load(envOf(map[string]string{"MASH_NAME": "a", "MASH_CREDS": "~/e.creds", "MASH_ADMIN_CREDS": "~/adm/a.creds"}), home)
+	c, err = load(envOf(map[string]string{"MASH_NAME": "a", "MASH_CREDS": "~/e.creds", "MASH_ADMIN_CREDS": "~/adm/a.creds"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +612,7 @@ func TestTildeExpandedInCreds(t *testing.T) {
 func TestTildeUserNotExpanded(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"u","owner":"o","creds":"~bob/x","admin_creds":"~bob"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,7 +672,7 @@ func TestLoadDefaultCredsFallBackToLegacy(t *testing.T) {
 	if err := os.WriteFile(lp, []byte("c"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "XDG_CONFIG_HOME": xdg}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +764,7 @@ func TestMashDirVariables(t *testing.T) {
 			if _, ok := env["XDG_CONFIG_HOME"]; !ok {
 				env["XDG_CONFIG_HOME"] = ""
 			}
-			c, err := Load(envOf(env), home)
+			c, err := load(envOf(env), home)
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("err %v, want one naming %s", err, tc.err)
@@ -794,7 +794,7 @@ func TestMashConfigDirHasNoFallback(t *testing.T) {
 	if got, want := FindFile(env, home, "policy.md"), filepath.Join(mdir, "policy.md"); got != want {
 		t.Fatalf("FindFile %q, want %q", got, want)
 	}
-	c, err := Load(env, home)
+	c, err := load(env, home)
 	if !errors.Is(err, ErrNoURL) { // nothing in MASH_CONFIG_DIR yet: neither the XDG nor the legacy url is read
 		t.Fatalf("err %v, want ErrNoURL", err)
 	}
@@ -807,7 +807,7 @@ func TestMashConfigDirHasNoFallback(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mdir, "config.json"), []byte(`{"url":"tls://x:4222","owner":"o"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if c, err = Load(env, home); err != nil || c.URL != "tls://x:4222" || c.Creds != filepath.Join(mdir, "a.creds") {
+	if c, err = load(env, home); err != nil || c.URL != "tls://x:4222" || c.Creds != filepath.Join(mdir, "a.creds") {
 		t.Fatalf("url %q creds %q err %v", c.URL, c.Creds, err)
 	}
 }
@@ -817,7 +817,7 @@ func TestLoadInsecureLoopback(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, home, file)
 		env["MASH_NAME"] = "a"
-		return Load(envOf(env), home)
+		return load(envOf(env), home)
 	}
 	base := `"url":"nats://127.0.0.1:4222","owner":"o"`
 	for _, tc := range []struct {
@@ -842,7 +842,7 @@ func TestLoadInsecureLoopback(t *testing.T) {
 func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://file:4222","owner":"fileowner","admin_creds":"~/a.creds","tls_ca":"/file/ca.pem"}`)
-	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://env:4222", "MASH_TLS_CERT": "/c.pem", "MASH_TLS_KEY": "/k.pem"}), home)
+	c, err := load(envOf(map[string]string{"MASH_URL": "tls://env:4222", "MASH_TLS_CERT": "/c.pem", "MASH_TLS_KEY": "/k.pem"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -870,7 +870,7 @@ func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 
 func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 	home := t.TempDir()
-	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://e:1", "MASH_OWNER": "o", "MASH_INSECURE_LOOPBACK": "1"}), home)
+	c, err := load(envOf(map[string]string{"MASH_URL": "tls://e:1", "MASH_OWNER": "o", "MASH_INSECURE_LOOPBACK": "1"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -887,7 +887,7 @@ func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://same:4222","insecure_loopback":false}`)
-	c, err := Load(envOf(map[string]string{"MASH_URL": "tls://same:4222"}), home)
+	c, err := load(envOf(map[string]string{"MASH_URL": "tls://same:4222"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,4 +897,9 @@ func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 	if c.FileValues["insecure_loopback"] != "false" || c.Source["insecure_loopback"] != "config.json" {
 		t.Errorf("%v %v", c.Source, c.FileValues)
 	}
+}
+
+// load is Load over a plain env func: a variable is present iff its value is not empty.
+func load(env func(string) string, home string) (Config, error) {
+	return Load(LookupFromFunc(env), home)
 }

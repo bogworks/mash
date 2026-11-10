@@ -66,7 +66,7 @@ func newRTTWorld(t *testing.T, n int) *rttWorld {
 		if token != "" {
 			env["MASH_LAUNCH_TOKEN"] = token
 		}
-		cfg, err := config.Load(envFrom(env), env["HOME"])
+		cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), env["HOME"])
 		if err != nil {
 			t.Fatal(err)
 		}

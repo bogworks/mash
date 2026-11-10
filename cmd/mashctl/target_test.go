@@ -45,7 +45,7 @@ func loadCfg(t *testing.T, fileBody string, env map[string]string) (config.Confi
 		all[k] = v
 	}
 	get := func(k string) string { return all[k] }
-	cfg, err := config.Load(get, all["HOME"])
+	cfg, err := config.Load(config.LookupFromFunc(get), all["HOME"])
 	if err != nil {
 		t.Fatal(err)
 	}

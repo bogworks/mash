@@ -580,7 +580,7 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	}
 	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds, "MASH_URL": "nats://127.0.0.1:1"}
 	cliOut, _ := runStatusCLI(t, env)
-	cfg, err := config.Load(envFrom(env), home)
+	cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), home)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,7 +51,7 @@ func main() {
 	// A session that is killed (Claude Code exiting, a closed terminal) shuts
 	// down cleanly, so serve releases its lease instead of leaving it to expire.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-	code := runCtx(ctx, os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr)
+	code := runLookup(ctx, os.Args[1:], os.Getenv, os.LookupEnv, os.Stdin, os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
 }
@@ -58,6 +59,11 @@ func main() {
 // run is main with its environment injected, for tests.
 func run(args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return runCtx(context.Background(), args, env, stdin, stdout, stderr)
+}
+
+// runCtx is runLookup for callers that only have an env func (tests): a variable is present iff it is not empty.
+func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runLookup(ctx, args, env, config.LookupFromFunc(env), stdin, stdout, stderr)
 }
 
 // commit is set by -ldflags "-X main.commit=<sha>"; otherwise the VCS revision stamped by go build is used.
@@ -130,7 +136,9 @@ var verbUsage = map[string]string{
 	"prompt":  "usage: mash prompt <to> <text...>",
 }
 
-func runCtx(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+// runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads, so that a
+// MASH_AGENT_TOKEN that is set but empty is seen.
+func runLookup(ctx context.Context, args []string, env func(string) string, lookup config.Lookup, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Resolved before anything dispatches, so `version`, the MCP server and the SAP service all report one string.
 	// Written only when it changes, which a process does once: later commands (and the tests, which run many in
 	// one process beside live sessions that read it) only read.
@@ -171,7 +179,20 @@ func runCtx(ctx context.Context, args []string, env func(string) string, stdin i
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	cfg, err := config.Load(env, home)
+	cfg, err := config.Load(lookup, home)
+	// hook and admin build their spool and subjects from cfg.Owner and cfg.Name without going through endpoint.Open*
+	// (which refuses itself), so with agent_token set they would act on the legacy identity: refuse first.
+	// An empty MASH_AGENT_TOKEN is a config error that hook would swallow as a no-op: refuse it too.
+	if args[0] == "hook" || args[0] == "admin" {
+		if cfg.AgentToken != "" {
+			fmt.Fprintln(stderr, endpoint.ErrAgentTokenUnsupported)
+			return 1
+		}
+		if errors.Is(err, config.ErrAgentTokenEmpty) {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
 		// An unknown host is refused loudly, never read as claude: a hook that ran with the wrong adapter would

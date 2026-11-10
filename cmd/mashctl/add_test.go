@@ -78,7 +78,7 @@ func newAddEnv(t *testing.T, src string) *addEnv {
 func (h *addEnv) run(args ...string) (string, string, int) {
 	h.t.Helper()
 	var out, errb bytes.Buffer
-	code := run(args, func(k string) string { return h.env[k] }, &out, &errb)
+	code := runEnv(args, func(k string) string { return h.env[k] }, &out, &errb)
 	return out.String(), errb.String(), code
 }
 
@@ -426,7 +426,7 @@ func TestAddRefusals(t *testing.T) {
 
 func TestAddUsageListsVerbs(t *testing.T) {
 	var b bytes.Buffer
-	run([]string{"help"}, func(string) string { return "" }, &b, &b)
+	runEnv([]string{"help"}, func(string) string { return "" }, &b, &b)
 	for _, want := range []string{"mashctl add NAME", "mashctl reissue NAME"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("usage lacks %q", want)

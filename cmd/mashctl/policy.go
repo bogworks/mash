@@ -82,7 +82,7 @@ func policyPath(flagVal string, env func(string) string, cfg config.Config) (str
 }
 
 // runPolicy handles `mashctl policy ...`. It needs no server and no admin credentials.
-func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runPolicy(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	usage := func() int { fmt.Fprint(stderr, policyUsage); return 2 }
 	if len(args) == 0 {
 		return usage()
@@ -94,11 +94,11 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 	case "show":
 		allowed = []string{"--json", "--budget"}
 	case "apply", "diff":
-		return runPolicyApply(verb, rest, env, stdout, stderr)
+		return runPolicyApply(verb, rest, env, lookup, stdout, stderr)
 	case "drift":
-		return runPolicyDrift(rest, env, stdout, stderr)
+		return runPolicyDrift(rest, env, lookup, stdout, stderr)
 	case "repair":
-		return runPolicyRepair(rest, env, stdout, stderr)
+		return runPolicyRepair(rest, env, lookup, stdout, stderr)
 	default:
 		return usage()
 	}
@@ -110,7 +110,7 @@ func runPolicy(args []string, env func(string) string, stdout, stderr io.Writer)
 	if want := map[string]int{"explain": 2}[verb]; len(o.args) != want {
 		return usage()
 	}
-	cfg, err := config.Load(env, env("HOME"))
+	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
 		fmt.Fprintln(stderr, err)
 		return 1

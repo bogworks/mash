@@ -114,7 +114,7 @@ func newApplyEnvOpts(t *testing.T, policyYAML string, tweak func(e *applyEnv), o
 func (e *applyEnv) run(args ...string) (string, string, int) {
 	e.t.Helper()
 	var out, errb bytes.Buffer
-	code := run(args, func(k string) string { return e.env[k] }, &out, &errb)
+	code := runEnv(args, func(k string) string { return e.env[k] }, &out, &errb)
 	return out.String(), errb.String(), code
 }
 

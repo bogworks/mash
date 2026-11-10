@@ -106,8 +106,8 @@ func parseAddArgs(args []string) (addOpts, error) {
 }
 
 // loadCtlConfig is config.Load for the verbs that need the owner; offline verbs also pass ErrNoURL.
-func loadCtlConfig(env func(string) string, needURL bool) (config.Config, error) {
-	cfg, err := config.Load(env, env("HOME"))
+func loadCtlConfig(env func(string) string, lookup config.Lookup, needURL bool) (config.Config, error) {
+	cfg, err := loadConfig(env, lookup)
 	if err != nil && (needURL || !errors.Is(err, config.ErrNoURL)) {
 		return cfg, err
 	}
@@ -246,7 +246,7 @@ func consequences(before, after *policy.Compiled) []string {
 }
 
 // runAdd is `mashctl add`.
-func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	o, err := parseAddArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: add: %v\n%s", err, addUsage)
@@ -264,7 +264,7 @@ func runAdd(args []string, env func(string) string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "mashctl: add: %v\n", err)
 		return 2
 	}
-	cfg, err := loadCtlConfig(env, true)
+	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

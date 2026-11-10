@@ -45,7 +45,7 @@ func TestConcurrentReissueKeepsFileAndRecordTogether(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var out, errb strings.Builder
-			codes[i] = run([]string{"reissue", "a"}, func(k string) string { return h.env[k] }, &out, &errb)
+			codes[i] = runEnv([]string{"reissue", "a"}, func(k string) string { return h.env[k] }, &out, &errb)
 		}()
 	}
 	wg.Wait()

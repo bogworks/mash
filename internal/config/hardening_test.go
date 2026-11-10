@@ -72,7 +72,7 @@ func TestRelativePathsResolveAgainstConfigDir(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","admin_creds":"admin.creds","tls_ca":"ca.pem","tls_cert":"c.pem","tls_key":"k.pem"}`)
 	t.Chdir(t.TempDir())
-	c, err := Load(envOf(nil), home)
+	c, err := load(envOf(nil), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRelativePathsResolveAgainstConfigDir(t *testing.T) {
 func TestAbsolutePathsKept(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","admin_creds":"/etc/a.creds","tls_ca":"/etc/ca.pem"}`)
-	c, err := Load(envOf(nil), home)
+	c, err := load(envOf(nil), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestWorldWritableConfigRefused(t *testing.T) {
 		if err := os.Chmod(p, c.mode); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Load(envOf(nil), home)
+		_, err := load(envOf(nil), home)
 		if c.refused {
 			if err == nil || !strings.Contains(err.Error(), "chmod go-w "+p) {
 				t.Errorf("mode %04o: want a refusal with a chmod hint, got %v", c.mode, err)
