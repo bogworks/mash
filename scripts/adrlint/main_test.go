@@ -370,6 +370,29 @@ func TestPR(t *testing.T) {
 		{name: "none on internal/render", body: "Decision: none", files: "internal/render/a.go\n", want: "decision-confirmed"},
 		{name: "none on internal/render with the label", body: "Decision: none", files: "internal/render/a.go\n", labels: "decision-confirmed"},
 		{name: "none on plugin", body: "Decision: none", files: "plugin/a.json\n", want: "decision-confirmed"},
+		{name: "none on the merge gate .mergify.yml", body: "Decision: none", files: ".mergify.yml\n", want: "Decision: none"},
+		{name: "none on the merge gate .mergify.yml with the label", body: "Decision: none", files: ".mergify.yml\n", labels: "decision-confirmed"},
+		{name: "ADR on the merge gate .mergify.yml", body: "Decision: ADR-0001", files: ".mergify.yml\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "none on a workflow", body: "Decision: none", files: ".github/workflows/x.yml\n", want: "Decision: none"},
+		{name: "none on a workflow with the label", body: "Decision: none", files: ".github/workflows/x.yml\n", labels: "decision-confirmed"},
+		{name: "ADR on a workflow", body: "Decision: ADR-0001", files: ".github/workflows/x.yml\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "none on the linter's own source", body: "Decision: none", files: "scripts/adrlint/main.go\n", want: "Decision: none"},
+		{name: "none on the linter's own source with the label", body: "Decision: none", files: "scripts/adrlint/main.go\n", labels: "decision-confirmed"},
+		{name: "ADR on the linter's own source", body: "Decision: ADR-0001", files: "scripts/adrlint/main.go\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "none on internal/release", body: "Decision: none", files: "internal/release/mergify_test.go\n", want: "Decision: none"},
+		{name: "none on internal/release with the label", body: "Decision: none", files: "internal/release/mergify_test.go\n", labels: "decision-confirmed"},
+		{name: "ADR on internal/release", body: "Decision: ADR-0001", files: "internal/release/mergify_test.go\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "none on a composite action", body: "Decision: none", files: ".github/actions/x/action.yml\n", want: "Decision: none"},
+		{name: "none on a composite action with the label", body: "Decision: none", files: ".github/actions/x/action.yml\n", labels: "decision-confirmed"},
+		{name: "ADR on a composite action", body: "Decision: ADR-0001", files: ".github/actions/x/action.yml\ndocs/decisions/0001-use-one-way.md\n"},
+		{name: "none on the branch-protection doc", body: "Decision: none", files: "docs/branch-protection.md\n", want: "Decision: none"},
+		{name: "none on the branch-protection doc with the label", body: "Decision: none", files: "docs/branch-protection.md\n", labels: "decision-confirmed"},
+		{name: "ADR on the branch-protection doc", body: "Decision: ADR-0001", files: "docs/branch-protection.md\ndocs/decisions/0001-use-one-way.md\n"},
+		// git diff --no-renames lists the OLD path of a rename and a deleted path, so moving or deleting a protected file is a change to it.
+		{name: "none on a rename out of .mergify.yml (old path listed)", body: "Decision: none", files: ".mergify.yml\nelsewhere.yml\n", want: "Decision: none"},
+		{name: "none on a rename out of a workflow (old path listed)", body: "Decision: none", files: ".github/workflows/label-reset.yml\nnotes/label-reset.yml\n", want: "Decision: none"},
+		{name: "none on a deleted .mergify.yml", body: "Decision: none", files: ".mergify.yml\n", want: "decision-confirmed"},
+		{name: "none on a deleted protected file with the label", body: "Decision: none", files: "scripts/adrlint/main.go\n", labels: "decision-confirmed"},
 		{name: "none on another admin file", body: "Decision: none", files: "internal/admin/other.go\n"},
 		{name: "none on a look-alike prefix", body: "Decision: none", files: "internal/sapper/a.go\ninternal/storex/a.go\n"},
 		{name: "none on protected with the label", body: "Decision: none", files: "internal/sap/a.go\n", labels: "bug, decision-confirmed"},
@@ -400,6 +423,44 @@ func TestPR(t *testing.T) {
 			}
 			if code != 1 || !strings.Contains(out, tc.want) {
 				t.Fatalf("want exit 1 with %q, got %d %q %q", tc.want, code, out, errs)
+			}
+		})
+	}
+}
+
+// The confirmation must come from a "labeled" run on the current head: on synchronize, reopened and opened the label is
+// ignored (a push removes it, and adr-lint may read it before that removal lands).
+func TestPRConfirmationNeedsALabeledRun(t *testing.T) {
+	for _, tc := range []struct {
+		action, via string
+		pass        bool
+	}{
+		{"synchronize", "flag", false}, {"reopened", "flag", false}, {"opened", "flag", false},
+		{"synchronize", "env", false}, {"reopened", "env", false}, {"opened", "env", false},
+		{"labeled", "flag", true}, {"labeled", "env", true}, {"edited", "flag", true}, {"unlabeled", "flag", true}, {"", "flag", true},
+	} {
+		t.Run(tc.action+"/"+tc.via, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "docs", "decisions")
+			os.MkdirAll(dir, 0o755)
+			for n, c := range with(good(), "README.md", goodReadme) {
+				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+			}
+			fl := filepath.Join(t.TempDir(), "files")
+			os.WriteFile(fl, []byte("internal/sap/x.go\n"), 0o644)
+			envs := map[string]string{"PR_BODY": "Decision: none", "PR_LABELS": "decision-confirmed"}
+			args := []string{"pr", "--files", fl, "--root", root}
+			if tc.via == "env" {
+				envs["PR_ACTION"] = tc.action
+			} else if tc.action != "" {
+				args = append(args, "--action", tc.action)
+			}
+			code, out, errs := runCLI(t, nil, envs, args...)
+			if tc.pass && (code != 0 || out != "") {
+				t.Fatalf("want pass, got %d %q %q", code, out, errs)
+			}
+			if !tc.pass && (code != 1 || !strings.Contains(out, "decision-confirmed")) {
+				t.Fatalf("want exit 1 naming the label, got %d %q %q", code, out, errs)
 			}
 		})
 	}

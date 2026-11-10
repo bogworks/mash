@@ -395,7 +395,7 @@ and tick it off in the repository's setup issue.
 - [ ] In its dashboard enable **both** Merge Queue and Merge Protections: `auto_merge_conditions` in `.mergify.yml`
       need Merge Protections.
 
-**Labels:** `critical`, `pipeline`, `docs`, `hold`, `queued`, `dequeued`, `safe-to-review`, `security-ok`.
+**Labels:** `critical`, `pipeline`, `docs`, `hold`, `lead-approved`, `decision-confirmed`, `queued`, `dequeued`, `safe-to-review`, `security-ok`.
 
 **Maintainer automation** (kept outside this repository; add the repository to each):
 
@@ -407,4 +407,6 @@ and tick it off in the repository's setup issue.
 
 - [ ] GitHub-hosted runners only: no self-hosted runner on a public repository, because it would run fork code on the
       maintainers' machines. Set the `RUNNER_LINUX` repository variable only to a runner the maintainers control, never
-      for fork pull requests (the workflows already route forks to `ubuntu-latest`).
+      for fork pull requests (the workflows already route forks to `ubuntu-latest`). The one exception is `adr-lint.yml`,
+      which runs on the self-hosted runners labelled `self-hosted, rh-linux`, including fork pull requests once a person
+      approves them, because it runs from the base branch and executes nothing from the pull request.

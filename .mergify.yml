@@ -1,7 +1,7 @@
 # Mergify merge queue for bogworks/mash, mirroring the orchestrator's queue (its .mergify.yml explains each choice in
-# full). Every key is documented at https://docs.mergify.com/ . The checks named here are ci.yml's job names;
-# internal/release/mergify_test.go fails if one of them is not a job ci.yml runs, since a name CI never publishes can
-# never be satisfied and the queue would time out.
+# full). Every key is documented at https://docs.mergify.com/ . The checks named here are job names in ci.yml,
+# adr-lint.yml or label-reset.yml; internal/release/mergify_test.go fails if one of them is not a job one of those runs,
+# since a name CI never publishes can never be satisfied and the queue would time out.
 
 # One ordered queue, one queue run at a time: fast-forward allows only serial mode
 # (https://docs.mergify.com/merge-queue/queue-modes/).
@@ -11,7 +11,9 @@ merge_queue:
 
 # A pull request is queued by itself once it is not a draft and not held; queue_conditions still make it wait for
 # codex-review and pr-check. `hold` is the operator's brake on one PR. These take effect only with Merge Protections
-# enabled on the repository (a dashboard setting; see the PR that added this file).
+# enabled on the repository (a dashboard setting; see the PR that added this file). The approval-or-`lead-approved` gate
+# is deliberately not repeated here: queue_conditions apply to every queued pull request however it was queued, so
+# auto-merge only queues it and cannot skip that gate, and a second copy would be one more list to keep in step.
 merge_protections_settings:
   auto_merge_conditions:
     - -draft
@@ -31,15 +33,26 @@ queue_rules:
       # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
       # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
       - check-success = adr-lint
-      # Outside contributors: a pull request reaches the queue only if a maintainer wrote it or approved it. The queue
-      # run executes the pull request's code in CI, and codex-review reads attacker-controlled
-      # text, so neither a green check nor the review is enough on its own (docs/security/threat-model.md). The
-      # logins are listed explicitly, not "any approval": Mergify's docs do not say that `approved-reviews-by` counts
-      # only reviewers with write access (they say it of other review conditions), so the list is what we rely on.
-      # Add a maintainer's login to BOTH lines.
+      # label-reset (.github/workflows/label-reset.yml) removes lead-approved and decision-confirmed on every push. It
+      # must have run, and succeeded, on this head before it can enter the queue, so a push cannot slip in on the
+      # previous head's label (fail closed).
+      - check-success = label-reset
+      # Entry needs a recorded maintainer approval or the `lead-approved` label. Authorship is NOT a condition: the
+      # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
+      # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's
+      # pull request and the queue, and that failed once. The lead applies `lead-approved` at merge time, and
+      # .github/workflows/label-reset.yml removes it on every push, so the label never covers later code
+      # (docs/decisions/0078-*.md). A recorded approval is not reset the same way: the dismiss-approvals rule below
+      # skips pull requests authored by the maintainer's login (agents push as it), so on those a push does not
+      # dismiss an approval through Mergify; it dismisses one only on an outside author's pull request. The queue run executes the pull request's code in CI, and codex-review reads
+      # attacker-controlled text, so neither a green check nor the review is enough on its own
+      # (docs/security/threat-model.md). The approver's login is listed explicitly, not "any approval": Mergify's docs
+      # do not say that `approved-reviews-by` counts only reviewers with write access (they say it of other review
+      # conditions), so the list is what we rely on. Add a maintainer's login to this line and to the
+      # dismiss-approvals rule below. `label != hold` above stays the brake on top of this gate.
       - or:
-          - author = randybias
           - approved-reviews-by = randybias
+          - label = lead-approved
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
@@ -78,11 +91,14 @@ priority_rules:
 # conditions on the pull request's current state, not on events, and no condition says "the head changed since the
 # label was set". That belongs to the review watcher, which sees each head.
 
-# A maintainer's approval must not carry over to code pushed after it: the first rule below has Mergify dismiss
-# approvals when an outside author pushes a new commit (`when: synchronize`), so `approved-reviews-by` in the queue
-# conditions turns false until a maintainer approves the new head. GitHub's own "Dismiss stale pull request approvals
-# when new commits are pushed" setting does the same (docs/branch-protection.md); the rule keeps it true even if that
-# setting is off.
+# A maintainer's approval on an OUTSIDE author's pull request must not carry over to code pushed after it: the first rule
+# below has Mergify dismiss approvals when that author pushes a new commit (`when: synchronize`), so
+# `approved-reviews-by` in the queue conditions turns false until a maintainer approves the new head. The rule excludes
+# pull requests authored by the maintainer's login (`-author = randybias`), which is the login agents push as, so on
+# those Mergify dismisses nothing; there the label path is the gate that is reset on every push (label-reset.yml), and
+# GitHub does not let an author approve their own pull request. GitHub's own "Dismiss stale pull request approvals
+# when new commits are pushed" setting would do the same for every author, but it is a target in
+# docs/branch-protection.md, not set today (the ruleset has no pull-request rule).
 # Labels and notices, so a session sets only `critical` by hand (Workflow Automation, a dashboard setting).
 pull_request_rules:
   - name: dismiss approvals when an outside author pushes

@@ -63,10 +63,18 @@ const (
 // protected are the paths where "Decision: none" needs a reviewer's decision-confirmed label. A trailing slash is a
 // directory prefix; anything else is one file. They are the decision-bearing code: the SAP wire, the store, permissions,
 // config, the endpoint, the plugin, the MCP server (ADR 0023), the host adapter seam (ADR 0032), the spool (ADR 0025), the
-// render compatibility contract (ADR 0034), and the records themselves.
+// render compatibility contract (ADR 0034), and the records themselves. The merge gate (.mergify.yml), the workflows
+// (.github/workflows/), composite actions (.github/actions/), this linter's own source (scripts/adrlint/), the release
+// tests (internal/release/: mergify_test.go and the workflow tests run from the pull request's head and assert the gate's
+// shape) and the settings record (docs/branch-protection.md) are in too: they decide what may merge or say how it is
+// guarded, so a "Decision: none" pull request must not change them without a reviewer's confirmation (ADR 0078). The
+// changed-path list must include a rename's old path and a deletion (git diff --no-renames), or a move out of a
+// protected path would escape.
 var protected = []string{
 	"internal/sap/", "internal/store/", "internal/admin/permissions.go", "internal/config/", "internal/endpoint/", "plugin/",
 	"internal/mcp/", "internal/host/", "internal/spool/", "internal/render/", "docs/decisions/",
+	".mergify.yml", ".github/workflows/", "scripts/adrlint/",
+	"internal/release/", ".github/actions/", "docs/branch-protection.md",
 }
 
 // sections are the required "##" headings, in order.
@@ -702,9 +710,10 @@ func runPR(args []string, e env) int {
 	files := fs.String("files", "", "file listing the changed paths, one per line")
 	dir := fs.String("dir", defaultDir, "the decisions directory (under --root unless absolute)")
 	root := fs.String("root", ".", "the tree to judge; dir resolves under it")
+	action := fs.String("action", "", "the pull_request event action (default: PR_ACTION); synchronize, reopened and opened ignore the "+confirmedLabel+" label")
 	pos, err := parseFlags(fs, args)
 	if err != nil || len(pos) != 0 || *files == "" {
-		return usage(e, "pr takes --files <path> [--root r] [--dir dir]")
+		return usage(e, "pr takes --files <path> [--root r] [--dir dir] [--action a]")
 	}
 	fb, err := os.ReadFile(*files)
 	if err != nil {
@@ -722,6 +731,15 @@ func runPR(args []string, e env) int {
 		if l = strings.TrimSpace(l); l != "" {
 			labels = append(labels, l)
 		}
+	}
+	if *action == "" {
+		*action = e.getenv("PR_ACTION")
+	}
+	// The confirmation must come from a "labeled" run on the current head: a push, a reopen and an open each reset the
+	// label (label-reset.yml), possibly after this run read it, and that removal starts no new run.
+	switch *action {
+	case "synchronize", "reopened", "opened":
+		labels = slices.DeleteFunc(labels, func(l string) bool { return l == confirmedLabel })
 	}
 	fsDir, rel := resolveDir(*root, *dir)
 	vs, err := checkPR(e.getenv("PR_BODY"), changed, labels, fsDir, rel)
