@@ -209,7 +209,7 @@ func credsPath(cfg config.Config) string {
 	case cfg.Creds != "":
 		return cfg.Creds
 	case cfg.Name != "" && cfg.Dir != "":
-		return cfg.Find(cfg.Name + ".creds")
+		return cfg.Find(cfg.CredsName() + ".creds")
 	}
 	return ""
 }
@@ -401,7 +401,12 @@ func deliveryLines(src *statusSource) []string {
 	case cfg.Name == "" || cfg.Owner == "":
 		out = append(out, "delivery: hooks n/a - no endpoint")
 	default:
-		sp := spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}
+		sdir, derr := endpoint.SpoolDir(cfg)
+		if derr != nil {
+			out = append(out, "delivery: hooks n/a - no valid endpoint identity")
+			break
+		}
+		sp := spool.Spool{Dir: sdir}
 		own := src.owned.Load()
 		if own == nil {
 			out = append(out, "delivery: hooks n/a - this session does not hold the lease yet")
@@ -432,6 +437,15 @@ func deliveryLines(src *statusSource) []string {
 	return append(out, line)
 }
 
+// readRelayCounters reads the counters file under the endpoint's state location.
+func readRelayCounters(cfg config.Config) (endpoint.RelayCounters, bool) {
+	o, n, err := endpoint.StateLocation(cfg)
+	if err != nil {
+		return endpoint.RelayCounters{}, false
+	}
+	return endpoint.ReadRelayCounters(cfg.StateDir, o, n)
+}
+
 // relayLine shows the relay-trace counters (ADR 0064). Inside serve they are the running endpoint's; from the shell
 // (another process) they are what the serve of this endpoint wrote to its state directory, with the start time of that
 // run, since the shell cannot tell whether it is still running. Missing or unreadable: "none recorded".
@@ -442,7 +456,7 @@ func relayLine(src *statusSource) string {
 	since := ""
 	if src.cli {
 		var ok bool
-		if c, ok = endpoint.ReadRelayCounters(cfg.StateDir, cfg.Owner, cfg.Name); !ok {
+		if c, ok = readRelayCounters(cfg); !ok {
 			return none
 		}
 		since = fmt.Sprintf(" (since %s)", c.Started.UTC().Format(time.RFC3339))

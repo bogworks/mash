@@ -56,6 +56,8 @@ var MaxSignedAge = 5 * time.Minute
 // shownName is the sender name as displayed: a self-declared name only when it
 // is a valid endpoint name, else a short form of the key (never raw text).
 func shownName(h sap.SenderHeader) string {
+	// Only a legacy-valid name is shown for a sender that is not proven: a flat key is shown only from the directory
+	// (classify), never as a self-declared name.
 	if config.ValidName(h.Name) {
 		return h.Name
 	}
@@ -268,7 +270,7 @@ func (e *Endpoint) wakingProbe(cons jetstream.Consumer) wakingProbe {
 			return 0, 0, 0, err
 		}
 		e.noteServerTime(ci.TimeStamp, t0, time.Now())
-		s, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+		s, err := e.js.Stream(ctx, sap.InboxStream(e.key))
 		if err != nil {
 			return 0, 0, 0, err
 		}
@@ -298,7 +300,7 @@ type pending struct {
 // worker keeps stream order and makes de-duplication exact. The returned
 // stop waits for the consumer to close and the worker to finish.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
-	cons, err := e.js.Consumer(ctx, sap.InboxStream(e.cfg.Name), store.Consumer)
+	cons, err := e.js.Consumer(ctx, sap.InboxStream(e.key), store.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
 	}
@@ -586,7 +588,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 			return SendResult{}, err
 		}
 	}
-	h, err := e.id.Sign(rec.MailSubject, data, e.cfg.Name, time.Now(), SendNonce(e.cfg.Name, to, key))
+	h, err := e.id.Sign(rec.MailSubject, data, e.key, time.Now(), SendNonce(e.key, to, key))
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -693,7 +695,7 @@ func (e *Endpoint) viaOrigin(ctx context.Context, seq uint64) (string, error) {
 		return "", fmt.Errorf("mash: no message #%d in your inbox to relay", seq)
 	}
 	h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
-	if trust == sap.TrustForged || trust == sap.TrustMalformed || trust == sap.TrustAbsent || !config.ValidName(h.Name) {
+	if trust == sap.TrustForged || trust == sap.TrustMalformed || trust == sap.TrustAbsent || !validDirectoryKey(h.Name) {
 		return "", fmt.Errorf("mash: message #%d names no sender that can be declared as the origin of a relay", seq)
 	}
 	return h.Name, nil
@@ -729,6 +731,9 @@ func (e *Endpoint) ownerOf(name string) string {
 
 // lookup resolves a name through the directory (the live copy, else a read).
 func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error) {
+	if !validDirectoryKey(name) {
+		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", name)
+	}
 	e.mu.RLock()
 	rec, ok := e.dir[name]
 	e.mu.RUnlock()
@@ -747,7 +752,7 @@ func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error
 func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 	s, err, ok := e.pre.takeInbox()
 	if !ok {
-		s, err = e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+		s, err = e.js.Stream(ctx, sap.InboxStream(e.key))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox: %w", err)
@@ -773,7 +778,7 @@ func (e *Endpoint) Read(ctx context.Context, seq uint64) (render.Mail, error) {
 	}
 	raw, err := s.GetMsg(ctx, seq)
 	if err != nil {
-		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", seq, e.cfg.Name)
+		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", seq, e.key)
 	}
 	if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
 		return render.Mail{}, err

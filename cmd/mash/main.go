@@ -180,18 +180,16 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		home, _ = os.UserHomeDir()
 	}
 	cfg, err := config.Load(lookup, home)
-	// hook and admin build their spool and subjects from cfg.Owner and cfg.Name without going through endpoint.Open*
-	// (which refuses itself), so with agent_token set they would act on the legacy identity: refuse first.
-	// An empty MASH_AGENT_TOKEN is a config error that hook would swallow as a no-op: refuse it too.
-	if args[0] == "hook" || args[0] == "admin" {
-		if cfg.AgentToken != "" {
-			fmt.Fprintln(stderr, endpoint.ErrAgentTokenUnsupported)
-			return 1
-		}
-		if errors.Is(err, config.ErrAgentTokenEmpty) {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
+	// admin acts on the legacy identity (naming plan 1.6 gives it the three-token one), so with agent_token set it
+	// refuses rather than operate the wrong endpoint. An empty MASH_AGENT_TOKEN is a config error that hook would
+	// swallow as a no-op: refuse it for hook and admin both.
+	if args[0] == "admin" && cfg.AgentToken != "" {
+		fmt.Fprintln(stderr, errAdminAgentToken)
+		return 1
+	}
+	if (args[0] == "hook" || args[0] == "admin") && errors.Is(err, config.ErrAgentTokenEmpty) {
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -224,3 +222,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	fmt.Fprintf(stderr, "mash: unknown command %q\n\n%s", args[0], usage)
 	return 2
 }
+
+// errAdminAgentToken is mash admin's refusal of a configured agent_token.
+var errAdminAgentToken = errors.New("mash: agent_token is set but mash admin cannot act on a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")

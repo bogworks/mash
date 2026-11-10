@@ -55,13 +55,18 @@ type Endpoint struct {
 	headAt time.Time
 	headOK bool
 
-	cfg  config.Config
-	nc   *nats.Conn
-	js   jetstream.JetStream
-	id   sap.Identity
-	subj sap.Subjects
-	self store.Record
-	log  *log.Logger
+	cfg config.Config
+	// ident is the endpoint's identity (cfg.Identity()) and key its directory/stream/lease key, ident.Flat(): the bare
+	// name for a legacy endpoint (today's value), agent_owner_name for a three-token one. Every key and subject of
+	// the endpoint derives from these; cfg.Name is display text only.
+	ident sap.EndpointIdentity
+	key   string
+	nc    *nats.Conn
+	js    jetstream.JetStream
+	id    sap.Identity
+	subj  sap.Subjects
+	self  store.Record
+	log   *log.Logger
 
 	instance    string // this process's id (lease holder, SAP instance)
 	dirKV       jetstream.KeyValue
@@ -253,17 +258,42 @@ func connect(ctx context.Context, url string, opts ...nats.Option) (*nats.Conn, 
 	}
 }
 
-// ErrAgentTokenUnsupported is the refusal for a configured agent_token: every mash path that would act on the legacy
-// identity returns it, so the text is written once.
-var ErrAgentTokenUnsupported = errors.New("mash: agent_token is set but this build cannot run a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")
-
-// refuseAgentToken fails closed: the endpoint still builds its subjects from the legacy identity, so a configured
-// three-token identity would silently operate the wrong endpoint. Remove this once the endpoint uses cfg.Identity().
-func refuseAgentToken(cfg config.Config) error {
-	if cfg.AgentToken != "" {
-		return ErrAgentTokenUnsupported
+// identityOf is the identity, key and subjects an endpoint with cfg works under. A legacy configuration (no
+// agent_token) gets exactly today's values and never an error here: its key is cfg.Name and its subjects
+// sap.For(owner, name). A three-token one must have a valid identity.
+func identityOf(cfg config.Config) (sap.EndpointIdentity, string, sap.Subjects, error) {
+	if cfg.AgentToken == "" {
+		id, _ := cfg.Identity() // zero when the legacy rule fails: the legacy paths never needed it
+		return id, cfg.Name, sap.For(cfg.Owner, cfg.Name), nil
 	}
-	return nil
+	id, err := cfg.Identity()
+	if err != nil {
+		return sap.EndpointIdentity{}, "", sap.Subjects{}, err
+	}
+	return id, id.Flat(), id.Subjects(), nil
+}
+
+// StateLocation is where an endpoint's state (spool, relay counters) lives under the state directory: the owner and
+// the directory name. A legacy endpoint is (owner, name), as always; a three-token one is (its owner token, its flat
+// key), so two identities that share a name token never share a directory. An invalid identity is an error.
+func StateLocation(cfg config.Config) (owner, name string, err error) {
+	if cfg.AgentToken == "" {
+		return cfg.Owner, cfg.Name, nil
+	}
+	id, err := cfg.Identity()
+	if err != nil {
+		return "", "", err
+	}
+	return id.Owner, id.Flat(), nil
+}
+
+// SpoolDir is the spool directory of the endpoint cfg configures (see StateLocation).
+func SpoolDir(cfg config.Config) (string, error) {
+	o, n, err := StateLocation(cfg)
+	if err != nil {
+		return "", err
+	}
+	return spool.Dir(cfg.StateDir, o, n), nil
 }
 
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
@@ -275,11 +305,12 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 // OpenClientWith is OpenClient for a one-shot command that knows what it needs: the requests for it go out together
 // with the identity check, so the command pays for one wave of round trips, not one per thing it reads.
 func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) (*Endpoint, error) {
-	if err := refuseAgentToken(cfg); err != nil {
-		return nil, err
-	}
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
+	}
+	ident, key, subj, err := identityOf(cfg)
+	if err != nil {
+		return nil, err
 	}
 	if err := config.CheckCredsMode(cfg.Creds); err != nil {
 		return nil, err
@@ -288,14 +319,14 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if err != nil {
 		return nil, err
 	}
-	if err := checkCredsFor(cfg.Creds, cfg.Name); err != nil {
+	if err := checkCredsFor(cfg.Creds, key); err != nil {
 		return nil, err
 	}
 	refs := newRefusals()
 	nc, err := connect(ctx, cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
-		nats.CustomInboxPrefix(sap.InboxPrefix(cfg.Name)),
+		nats.CustomInboxPrefix(sap.InboxPrefix(key)),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(2*time.Second),
 		nats.ReconnectJitter(5*time.Second, 5*time.Second),
@@ -308,7 +339,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, fmt.Errorf("mash: connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
 	}
 	refs.flush = nc.FlushWithContext
-	e := &Endpoint{cfg: cfg, nc: nc, id: id, subj: sap.For(cfg.Owner, cfg.Name),
+	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
 		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
 		dir:           map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
@@ -340,14 +371,14 @@ func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
 		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but the lease bucket can't be read: %w", err)
 	}
 	if err != nil {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease can't be read (is its serve running?): %w", e.cfg.Name, err)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease can't be read (is its serve running?): %w", e.key, err)
 	}
 	var lv leaseValue
 	if err := json.Unmarshal(val, &lv); err != nil || lv.Instance == "" {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease names no instance", e.cfg.Name)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease names no instance", e.key)
 	}
 	if lv.LaunchToken != e.cfg.LaunchToken {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN does not match the launch holding %s's lease: this shell is not that session's", e.cfg.Name)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN does not match the launch holding %s's lease: this shell is not that session's", e.key)
 	}
 	e.instance = lv.Instance
 	return nil
@@ -355,9 +386,6 @@ func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
 
 // Open connects, checks the identity and takes the endpoint's lease.
 func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
-	if err := refuseAgentToken(cfg); err != nil {
-		return nil, err
-	}
 	e, err := OpenClientWith(ctx, cfg, ClientOptions{FullDirectory: true, holding: true})
 	if err != nil {
 		return nil, err
@@ -371,10 +399,10 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	}
 	// The directory record was read before the lease was taken: a deprovision in between would leave this session
 	// online for an endpoint that no longer exists. Read it again now that the name is held.
-	if _, err := store.GetRecord(ctx, e.dirKV, e.cfg.Name); err != nil {
+	if _, err := store.GetRecord(ctx, e.dirKV, e.key); err != nil {
 		e.Close() // gives the lease back
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.cfg.Name)
+			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.key)
 		}
 		return nil, fmt.Errorf("mash: directory: %w", err)
 	}
@@ -404,18 +432,18 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 	// marker and the update over it were three round trips. The update over the marker the open saw is one: it takes
 	// the key only if nothing has been written to it since.
 	if e.hold.err != nil && errors.Is(e.hold.err, jetstream.ErrKeyDeleted) && e.hold.rev > 0 {
-		if rev, err := kv.Update(ctx, e.cfg.Name, val, e.hold.rev); err == nil {
+		if rev, err := kv.Update(ctx, e.key, val, e.hold.rev); err == nil {
 			e.leaseRev.Store(rev)
 			e.keepLease()
 			return nil
 		}
 	}
-	rev, err := kv.Create(ctx, e.cfg.Name, val)
+	rev, err := kv.Create(ctx, e.key, val)
 	if errors.Is(err, jetstream.ErrKeyExists) {
-		held := &LeaseHeldError{Name: e.cfg.Name, Host: "?", PID: "?", Since: "?"}
-		if cur, gerr := kv.Get(ctx, e.cfg.Name); gerr == nil {
+		held := &LeaseHeldError{Name: e.key, Host: "?", PID: "?", Since: "?"}
+		if cur, gerr := kv.Get(ctx, e.key); gerr == nil {
 			if fenced(cur.Value()) {
-				return fmt.Errorf("%w: %s", ErrDeprovisioned, e.cfg.Name)
+				return fmt.Errorf("%w: %s", ErrDeprovisioned, e.key)
 			}
 			var lv leaseValue
 			if json.Unmarshal(cur.Value(), &lv) == nil {
@@ -432,7 +460,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 				// never judged and expires normally. The compare-and-set loses to any write made since the lease was
 				// read.
 				if me := ourMachine(); me != "" && lv.Machine == me && lv.PID != fmt.Sprint(os.Getpid()) && holderGone(lv.PID, lv.Start) {
-					if rev, uerr := kv.Update(ctx, e.cfg.Name, val, cur.Revision()); uerr == nil {
+					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
 						e.log.Printf("lease: took over from dead holder %s (pid %s)", lv.Instance, lv.PID)
 						e.leaseRev.Store(rev)
 						e.keepLease()
@@ -512,7 +540,7 @@ func (e *Endpoint) keepLease() {
 func (e *Endpoint) refreshLease(ctx context.Context) error {
 	e.waking.reconcile(ctx)
 	val := e.lease()
-	rev, err := e.leaseKV.Update(ctx, e.cfg.Name, val, e.leaseRev.Load())
+	rev, err := e.leaseKV.Update(ctx, e.key, val, e.leaseRev.Load())
 	if err == nil {
 		e.leaseRev.Store(rev)
 		return nil
@@ -525,14 +553,14 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	// Our revision is stale. Either an earlier refresh landed but its reply was
 	// lost (the entry is still ours: adopt it), the entry expired during an
 	// outage (re-take it if free), or another session holds the name.
-	if cur, gerr := e.leaseKV.Get(ctx, e.cfg.Name); gerr == nil {
+	if cur, gerr := e.leaseKV.Get(ctx, e.key); gerr == nil {
 		if fenced(cur.Value()) {
-			return fmt.Errorf("%w: %s", ErrDeprovisioned, e.cfg.Name)
+			return fmt.Errorf("%w: %s", ErrDeprovisioned, e.key)
 		}
 		var lv leaseValue
 		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
 			e.leaseRev.Store(cur.Revision())
-			if rev, uerr := e.leaseKV.Update(ctx, e.cfg.Name, val, cur.Revision()); uerr == nil {
+			if rev, uerr := e.leaseKV.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
 				e.leaseRev.Store(rev)
 			} else {
 				e.log.Printf("lease refresh: %v (will retry)", uerr)
@@ -543,7 +571,7 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 		e.log.Printf("lease check: %v (will retry)", gerr)
 		return nil
 	}
-	rev, cerr := e.leaseKV.Create(ctx, e.cfg.Name, val)
+	rev, cerr := e.leaseKV.Create(ctx, e.key, val)
 	if cerr == nil {
 		e.leaseRev.Store(rev)
 		return nil
@@ -552,21 +580,21 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 		e.log.Printf("lease re-take: %v (will retry)", cerr) // e.g. a lost reply: next tick adopts it
 		return nil
 	}
-	if cur, gerr := e.leaseKV.Get(ctx, e.cfg.Name); gerr == nil {
+	if cur, gerr := e.leaseKV.Get(ctx, e.key); gerr == nil {
 		var lv leaseValue
 		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
 			e.leaseRev.Store(cur.Revision())
 			return nil
 		}
 	}
-	return fmt.Errorf("mash: lost the lease on %s to another session", e.cfg.Name)
+	return fmt.Errorf("mash: lost the lease on %s to another session", e.key)
 }
 
 // Run consumes mail and keeps the directory and lease current (presence is asked for on demand, ADR 0066)
 // until ctx ends or the lease is lost.
 func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	// This serve's relay counters go to the state directory for `mash status` (another process).
-	e.relay.persistTo(relayCountersPath(e.cfg.StateDir, e.cfg.Owner, e.cfg.Name), e.Instance, e.log.Printf)
+	e.relay.persistTo(e.relayCountersPath(), e.Instance, e.log.Printf)
 	defer e.relay.stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -618,13 +646,13 @@ var releaseTimeout = 3 * time.Second
 func (e *Endpoint) releaseLease(ctx context.Context) error {
 	rev := e.leaseRev.Load()
 	for {
-		err := e.leaseKV.Delete(ctx, e.cfg.Name, jetstream.LastRevision(rev))
+		err := e.leaseKV.Delete(ctx, e.key, jetstream.LastRevision(rev))
 		if err == nil {
 			return nil
 		}
 		var apiErr *jetstream.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence {
-			cur, gerr := e.leaseKV.Get(ctx, e.cfg.Name)
+			cur, gerr := e.leaseKV.Get(ctx, e.key)
 			switch {
 			case errors.Is(gerr, jetstream.ErrKeyNotFound) || errors.Is(gerr, jetstream.ErrKeyDeleted):
 				return nil // already gone
@@ -649,6 +677,14 @@ func (e *Endpoint) releaseLease(ctx context.Context) error {
 
 // Name is this endpoint's name.
 func (e *Endpoint) Name() string { return e.cfg.Name }
+
+// Key is this endpoint's directory key (the flat identity): the bare name for a legacy endpoint, agent_owner_name for
+// a three-token one. It is what the endpoint signs as, what its stream, lease and directory record are keyed by, and
+// what who and the mail labels show.
+func (e *Endpoint) Key() string { return e.key }
+
+// EndpointIdentity is this endpoint's identity (agent, owner and name tokens).
+func (e *Endpoint) EndpointIdentity() sap.EndpointIdentity { return e.ident }
 
 // Dropped counts forged or malformed mail that was discarded.
 func (e *Endpoint) Dropped() int64 { return e.dropped.Load() }

@@ -267,9 +267,9 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	}
 	e.js = js
 
-	want := []string{e.cfg.Name}
+	want := []string{e.key}
 	for _, n := range opts.Records {
-		if n != e.cfg.Name && config.ValidName(n) {
+		if n != e.key && validDirectoryKey(n) {
 			want = append(want, n)
 		}
 	}
@@ -287,7 +287,7 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	}
 	if opts.Inbox {
 		tasks = append(tasks, func() {
-			e.pre.inbox, e.pre.inboxErr = js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+			e.pre.inbox, e.pre.inboxErr = js.Stream(ctx, sap.InboxStream(e.key))
 			e.pre.inboxSet = true
 		})
 	}
@@ -297,12 +297,12 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 				e.hold.kv = kv
 			}
 		}, func() {
-			e.hold.rev, e.hold.err = e.directGetKVRev(ctx, store.LeaseBucket, e.cfg.Name)
+			e.hold.rev, e.hold.err = e.directGetKVRev(ctx, store.LeaseBucket, e.key)
 		})
 	}
 	if opts.Lease {
 		tasks = append(tasks, func() {
-			e.pre.lease, e.pre.leaseErr = e.directGetKV(ctx, store.LeaseBucket, e.cfg.Name)
+			e.pre.lease, e.pre.leaseErr = e.directGetKV(ctx, store.LeaseBucket, e.key)
 			e.pre.leaseAt, e.pre.leaseSet = time.Now(), true
 		})
 	}
@@ -311,14 +311,14 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	if kvErr != nil {
 		return fmt.Errorf("mash: directory: %w", kvErr)
 	}
-	selfRes := got[e.cfg.Name]
+	selfRes := got[e.key]
 	if selfRes.err != nil {
-		return fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.cfg.Name, selfRes.err)
+		return fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.key, selfRes.err)
 	}
 	self := selfRes.rec
 	if self.User != e.id.User {
 		return fmt.Errorf("mash: the credentials in %s (user %s) do not match endpoint %s (user %s)",
-			e.cfg.Creds, e.id.User, e.cfg.Name, self.User)
+			e.cfg.Creds, e.id.User, e.key, self.User)
 	}
 	e.self = self
 	// The endpoint's own mail subject is the one its record says: a zoned endpoint advertises its zoned subject.
@@ -375,7 +375,7 @@ func (e *Endpoint) ownLease(ctx context.Context) ([]byte, error) {
 	if v, err, ok := e.pre.takeLease(); ok {
 		return v, err
 	}
-	return e.directGetKV(ctx, store.LeaseBucket, e.cfg.Name)
+	return e.directGetKV(ctx, store.LeaseBucket, e.key)
 }
 
 // loadSenders reads the directory records the senders of raw need before the mail is classified: a client that did

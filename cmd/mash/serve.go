@@ -169,12 +169,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
-	// With agent_token set the legacy identity must not be touched at all: no spool, no state, before endpoint.Open
-	// refuses.
-	if cfg.AgentToken != "" {
-		fmt.Fprintln(stderr, endpoint.ErrAgentTokenUnsupported)
-		return degraded(endpoint.ErrorInstructions(cfg.Name, endpoint.ErrAgentTokenUnsupported), true)
-	}
 	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
 	var policy []byte
@@ -274,7 +268,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			ep.NoChannel()
 		}
 		boundAt := time.Now() // before the bind, so a hook run once this session owns the spool is never missed
-		if err := ep.SetSpool(spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}, adapter.OwnerToken(os.Getenv)); err != nil {
+		sdir, err := endpoint.SpoolDir(cfg)
+		if err == nil {
+			err = ep.SetSpool(spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
+		}
+		if err != nil {
 			if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
@@ -710,7 +708,7 @@ func liveLeases(ctx context.Context, ep *endpoint.Endpoint) map[string]endpoint.
 	c, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if li, ok := ep.OwnLease(c); ok {
-		return map[string]endpoint.LeaseInfo{ep.Name(): li}
+		return map[string]endpoint.LeaseInfo{ep.Key(): li}
 	}
 	return nil
 }
@@ -809,7 +807,11 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
 // removes the record. A spool that cannot be written costs only that detection.
 func noteWaiting(cfg config.Config) func() {
-	s := spool.Spool{Dir: spool.Dir(cfg.StateDir, cfg.Owner, cfg.Name)}
+	dir, err := endpoint.SpoolDir(cfg)
+	if err != nil {
+		return func() {}
+	}
+	s := spool.Spool{Dir: dir}
 	ppid := os.Getppid()
 	if s.Init() != nil {
 		return func() {}

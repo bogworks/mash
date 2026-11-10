@@ -107,6 +107,20 @@ func InboxConfigZoned(owner, zone, name string, l Limits) jetstream.StreamConfig
 	if zone != "" {
 		subjects = append(subjects, sap.MailFilterZone(owner, zone, name))
 	}
+	return inboxStreamConfig(name, subjects, l)
+}
+
+// InboxConfigIdentity is the inbox stream of the endpoint id under limits l: inbox-<flat key> filtered on the
+// identity's own mail subject only (id.MailFilter()). For a legacy identity it is InboxConfigFor(owner, name, l).
+func InboxConfigIdentity(id sap.EndpointIdentity, l Limits) jetstream.StreamConfig {
+	if id.IsLegacy() {
+		return InboxConfigFor(id.Owner, id.Name, l)
+	}
+	return inboxStreamConfig(id.Flat(), []string{id.MailFilter()}, l)
+}
+
+// inboxStreamConfig is the one stream shape every inbox has; key is the directory key the stream is named for.
+func inboxStreamConfig(name string, subjects []string, l Limits) jetstream.StreamConfig {
 	return jetstream.StreamConfig{
 		Name:              sap.InboxStream(name),
 		Description:       "mash inbox for " + name,

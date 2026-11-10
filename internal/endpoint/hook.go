@@ -81,7 +81,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	// a stream recreated since, while this session waited for the lease, would bind the spool to the old identity,
 	// keep its tombstones, and ack new mail unshown (codex H1 on #121). It is the one stream-info request serve's
 	// startup makes, so it adds no wave.
-	st, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+	st, err := e.js.Stream(ctx, sap.InboxStream(e.key))
 	if err != nil {
 		return fmt.Errorf("mash: inbox: %w", err)
 	}
@@ -388,7 +388,7 @@ var streamBytes = func(ctx context.Context, e *Endpoint) (bytes, max uint64, err
 	if e.js == nil {
 		return 0, 0, errors.New("no stream handle")
 	}
-	st, err := e.js.Stream(ctx, sap.InboxStream(e.cfg.Name))
+	st, err := e.js.Stream(ctx, sap.InboxStream(e.key))
 	if err != nil {
 		return 0, 0, err
 	}

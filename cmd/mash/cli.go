@@ -126,10 +126,10 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return fail(err)
 		}
 		if res.Duplicate {
-			fmt.Fprintf(stdout, "sent #%d from %s to %s (duplicate of --id %s: already delivered, nothing new stored)\n", res.Seq, cfg.Name, args[1], sendID)
+			fmt.Fprintf(stdout, "sent #%d from %s to %s (duplicate of --id %s: already delivered, nothing new stored)\n", res.Seq, ep.Key(), args[1], sendID)
 			return 0
 		}
-		fmt.Fprintf(stdout, "sent #%d from %s to %s\n", res.Seq, cfg.Name, args[1])
+		fmt.Fprintf(stdout, "sent #%d from %s to %s\n", res.Seq, ep.Key(), args[1])
 	case "read":
 		if len(args) != 2 {
 			return fail(fmt.Errorf("usage: mash read <seq>"))
@@ -180,12 +180,12 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return fail(fmt.Errorf("usage: mash prompt <to> <text...>"))
 		}
 		c, cc := short()
-		subj, err := endpoint.Discover(c, ep.Conn(), cfg.Owner, args[1])
+		subj, err := endpoint.DiscoverRecipient(c, ep.Conn(), cfg.Owner, args[1])
 		cc()
 		if err != nil {
 			return fail(err)
 		}
-		if err := endpoint.Prompt(ctx, ep.Conn(), ep.Identity(), cfg.Name, subj, strings.Join(args[2:], " "), stdout); err != nil {
+		if err := endpoint.Prompt(ctx, ep.Conn(), ep.Identity(), ep.Key(), subj, strings.Join(args[2:], " "), stdout); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintln(stdout)

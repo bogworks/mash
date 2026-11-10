@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"github.com/bogworks/mash/internal/spool"
 )
 
-const agentTokenRefusal = "mash: agent_token is set but this build cannot run a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)"
+const adminAgentTokenRefusal = "mash: agent_token is set but mash admin cannot act on a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)"
 
 func agentTokenEnv(t *testing.T) map[string]string {
 	return map[string]string{
@@ -22,44 +21,64 @@ func agentTokenEnv(t *testing.T) map[string]string {
 	}
 }
 
-func TestAgentTokenRefusalTextIsShared(t *testing.T) {
-	if endpoint.ErrAgentTokenUnsupported.Error() != agentTokenRefusal {
-		t.Fatalf("text changed: %q", endpoint.ErrAgentTokenUnsupported)
-	}
-}
-
-// With agent_token set, every verb that would act on the legacy identity refuses, whether it reaches
-// endpoint.Open* (which refuses itself) or not (hook, admin: refused in main).
-func TestAgentTokenRefusedByEveryActingVerb(t *testing.T) {
-	for _, args := range [][]string{
-		{"hook"}, {"admin", "whatever"}, {"admin"}, {"send", "b", "hi"}, {"read", "1"}, {"inbox"}, {"who"}, {"prompt", "b", "hi"},
-	} {
+// mash admin acts on the legacy identity (naming plan 1.6), so it still refuses with agent_token set.
+func TestAgentTokenRefusedByAdmin(t *testing.T) {
+	for _, args := range [][]string{{"admin", "whatever"}, {"admin"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			var out, errb bytes.Buffer
-			code := runCtx(ctx, args, envFrom(agentTokenEnv(t)), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
-			if code == 0 {
-				t.Fatalf("exit 0; stdout %q stderr %q", out.String(), errb.String())
-			}
-			if !strings.Contains(errb.String(), agentTokenRefusal) {
-				t.Fatalf("stderr %q", errb.String())
-			}
-			if strings.Contains(out.String(), "additionalContext") {
-				t.Fatalf("stdout %q", out.String())
+			code := runCtx(ctx, args, envFrom(agentTokenEnv(t)), strings.NewReader(""), &out, &errb)
+			if code == 0 || !strings.Contains(errb.String(), adminAgentTokenRefusal) {
+				t.Fatalf("code %d stderr %q", code, errb.String())
 			}
 		})
 	}
 }
 
-// serve degrades instead of exiting, but its endpoint comes from endpoint.Open, which refuses with the same text.
-func TestAgentTokenRefusedByServeOpen(t *testing.T) {
-	cfg := mustLoadAgentTokenCfg(t)
-	if _, err := endpoint.Open(context.Background(), cfg); err == nil || err.Error() != agentTokenRefusal {
-		t.Fatalf("Open: %v", err)
+// The verbs wired in step 2c no longer refuse: with creds that do not exist they fail at the credentials, like a legacy
+// endpoint does, and hook is a silent no-op with no spool.
+func TestAgentTokenVerbsAreNotRefused(t *testing.T) {
+	for _, args := range [][]string{{"send", "b", "hi"}, {"read", "1"}, {"inbox"}, {"who"}, {"prompt", "b", "hi"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			var out, errb bytes.Buffer
+			code := runCtx(ctx, args, envFrom(agentTokenEnv(t)), strings.NewReader(""), &out, &errb)
+			if code == 0 || strings.Contains(errb.String(), "cannot run a three-token identity") || !strings.Contains(errb.String(), "credentials") {
+				t.Fatalf("code %d stdout %q stderr %q", code, out.String(), errb.String())
+			}
+		})
 	}
-	if _, err := endpoint.OpenClient(context.Background(), cfg); err == nil || err.Error() != agentTokenRefusal {
-		t.Fatalf("OpenClient: %v", err)
+	var out, errb bytes.Buffer
+	env := agentTokenEnv(t)
+	env["MASH_STATE_DIR"] = t.TempDir()
+	if code := runCtx(context.Background(), []string{"hook"}, envFrom(env), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb); code != 0 || out.String() != "" {
+		t.Fatalf("hook: code %d stdout %q stderr %q", code, out.String(), errb.String())
+	}
+}
+
+// serve opens as the three-token identity: it no longer prints the refusal, and fails (here, at the credentials).
+func TestAgentTokenServeOpensTheIdentity(t *testing.T) {
+	env := agentTokenEnv(t)
+	env["MASH_STATE_DIR"] = t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var out, errb bytes.Buffer
+	_ = runCtx(ctx, []string{"serve"}, envFrom(env), strings.NewReader(""), &out, &errb)
+	if strings.Contains(errb.String(), "cannot run a three-token identity") || !strings.Contains(errb.String(), "credentials") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+// A new-form endpoint's spool is keyed by its flat identity, never by the bare name a legacy endpoint of the same name
+// token would use.
+func TestAgentTokenSpoolIsKeyedByFlatIdentity(t *testing.T) {
+	cfg := mustLoadAgentTokenCfg(t)
+	cfg.StateDir = "/s"
+	d, err := endpoint.SpoolDir(cfg)
+	if err != nil || d != spool.Dir("/s", "o", "ag_o_a") || d == spool.Dir("/s", cfg.Owner, cfg.Name) {
+		t.Fatalf("spool dir %q %v", d, err)
 	}
 }
 
@@ -68,7 +87,7 @@ func TestAgentTokenLeavesStatusPluginVersionWorking(t *testing.T) {
 	for _, args := range [][]string{{"status"}, {"version"}, {"plugin", "--help"}, {"help"}} {
 		var out, errb bytes.Buffer
 		code := runCtx(context.Background(), args, envFrom(agentTokenEnv(t)), strings.NewReader(""), &out, &errb)
-		if strings.Contains(errb.String(), agentTokenRefusal) {
+		if strings.Contains(errb.String(), adminAgentTokenRefusal) {
 			t.Errorf("%v refused: %q", args, errb.String())
 		}
 		if args[0] == "status" || args[0] == "version" || args[0] == "help" {
@@ -113,27 +132,5 @@ func TestEmptyAgentTokenRefusedByHookAndAdmin(t *testing.T) {
 				t.Fatalf("unset token refused: %q", errb.String())
 			}
 		})
-	}
-}
-
-// serve refuses before any spool or state action: the spool directory is neither created nor touched.
-func TestAgentTokenServeDoesNotTouchSpool(t *testing.T) {
-	env := agentTokenEnv(t)
-	state := t.TempDir()
-	env["MASH_STATE_DIR"] = state
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var out, errb bytes.Buffer
-	code := runCtx(ctx, []string{"serve"}, envFrom(env), strings.NewReader(""), &out, &errb)
-	_ = code
-	if !strings.Contains(errb.String(), agentTokenRefusal) {
-		t.Fatalf("stderr %q", errb.String())
-	}
-	if ents, _ := os.ReadDir(state); len(ents) != 0 {
-		t.Fatalf("state dir touched: %v", ents)
-	}
-	cfg := mustLoadAgentTokenCfg(t)
-	if _, err := os.Stat(spool.Dir(state, cfg.Owner, cfg.Name)); err == nil {
-		t.Fatal("spool dir exists")
 	}
 }
