@@ -437,6 +437,10 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				return
 			}
 			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
+			if !e.leaseHeldFor(stream) {
+				_ = m.Nak() // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+				return
+			}
 			defer e.waking.received(ref)
 			// The sender's signature binds the subject the message was stored under, so classify checks it against the
 			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
@@ -444,7 +448,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			if !ok {
 				e.dropped.Add(1)
 				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
-				if stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading() {
+				if e.leaseHeldFor(stream) {
 					_ = m.Ack()
 				}
 				return
@@ -633,7 +637,8 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		var batch []pending
 		select {
 		case <-quit:
-			return // held messages stay unacked: redelivered to the next session
+			e.releaseOnQuit(h, nil, queue) // held messages stay unacked: redelivered to the next session
+			return
 		case <-tick.C:
 			e.settleHeld(deliver, h)
 			continue
@@ -644,14 +649,15 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		for len(batch) < maxPending {
 			select {
 			case <-quit:
-				return // unacked: redelivered to the next session
+				e.releaseOnQuit(h, batch, queue) // unacked: redelivered to the next session
+				return
 			case p := <-queue:
 				batch = append(batch, p)
 			case <-time.After(settle):
 				break gather
 			}
 		}
-		e.dropHeldLegacy(h)
+		e.dropHeld(h)
 		if batch = e.dropUnleased(batch); len(batch) == 0 {
 			continue
 		}
@@ -681,6 +687,25 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 			continue
 		}
 		e.deliverBatch(deliver, show, seen)
+	}
+}
+
+// releaseOnQuit is the end of the deliver loop. When the lease is gone, what the loop still holds (the gathered batch,
+// the queue, mail held for a hook) is nak'd at once, so the new holder is redelivered it now rather than after the
+// ack wait; none of it is acked. With the lease held it does nothing: that mail waits out the ack wait, as it always did.
+func (e *Endpoint) releaseOnQuit(h *held, batch []pending, queue <-chan pending) {
+	if !e.anyLeaseGone() {
+		return
+	}
+	e.dropUnleased(batch)
+	for {
+		select {
+		case p := <-queue:
+			e.dropUnleased([]pending{p})
+		default:
+			e.dropHeld(h)
+			return
+		}
 	}
 }
 
@@ -1225,7 +1250,7 @@ func seqsUp(from, to uint64) []uint64 {
 // deliverBatch is the channel path: show goes out as one event, then is acked (a failed write naks it for redelivery).
 func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet) {
 	if show = e.fenceLegacy(show); len(show) == 0 {
-		return
+		return // the lease is gone: nothing is delivered or acked
 	}
 	mails := make([]render.Mail, len(show))
 	seqs := make([]string, len(show))

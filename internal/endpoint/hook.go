@@ -280,7 +280,7 @@ var testSettleSeam func()
 // settleHeld acks what a hook has drained, keeps the rest from being redelivered, and wakes an idle session.
 func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 	defer func() { h.added = 0 }()
-	e.dropHeldLegacy(h)
+	e.dropHeld(h)
 	if e.spool == nil {
 		return
 	}

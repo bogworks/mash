@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/bogworks/mash/internal/endpoint"
 )
 
 var (
@@ -39,6 +41,9 @@ func TestMain(m *testing.M) {
 		fakeClaudeMain()
 		return
 	}
+	// In-process serves share a parent and a session id: without this each would take the lease from the one before as
+	// an earlier serve of the same session (ADR 0082). A test that wants that calls asSession.
+	endpoint.OurSession = func() endpoint.SessionIdent { return endpoint.SessionIdent{} }
 	code := m.Run()
 	if binDir != "" {
 		os.RemoveAll(binDir)

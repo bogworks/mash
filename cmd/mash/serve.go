@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -77,6 +80,16 @@ var (
 	mcpPingEvery = 30 * time.Second
 	mcpPingWait  = 10 * time.Second
 
+	// A held lease whose holder is an earlier serve of this same session (ADR 0082) that was not taken over (the
+	// compare-and-set lost to a write made since) is retried after sameSessionRetry, up to sameSessionTries times in a
+	// row, then every leaseRetry.
+	sameSessionRetry = time.Second
+	sameSessionTries = 5
+
+	// A serve superseded by a newer serve of its session exits when its parent changes; it looks every parentWatchEvery.
+	parentWatchEvery = time.Second
+	getppid          = os.Getppid // replaceable in tests
+
 	acquireAttempts atomic.Int64 // Opens started by the retry loop
 	acquiredCount   atomic.Int64 // retry Opens that took the lease
 
@@ -113,6 +126,16 @@ type sessionState struct {
 	waiting  *endpoint.LeaseHeldError
 	retrying error
 	failed   error
+	// superseded: a newer mash serve of the same session took the lease from this one; it names that serve. This
+	// server is inactive: it answers the tools with that and exits when its client closes it or its parent changes.
+	superseded *endpoint.LeaseLostError
+}
+
+// supersededText is what a superseded serve says: the newer serve of the same session handles the mail.
+func supersededText(name string, l *endpoint.LeaseLostError) string {
+	return fmt.Sprintf("mash: this server was superseded by a newer mash serve of the same session (pid %s, host %s); "+
+		"mail for endpoint %s is handled there, and this server is inactive. Use the mash tools of the newer server.",
+		l.PID, l.Host, name)
 }
 
 // usable is the endpoint a tool call may use, or the reason it cannot.
@@ -125,6 +148,8 @@ func (s *sessionState) usable(name string) (*endpoint.Endpoint, error) {
 	case s.retrying != nil:
 		return nil, fmt.Errorf("mash could not reach the server for endpoint %s (%v) and is retrying; mail is off until it connects",
 			name, s.retrying)
+	case s.superseded != nil:
+		return nil, errors.New(supersededText(name, s.superseded))
 	default:
 		return nil, fmt.Errorf("mash is waiting for endpoint %s (held by %s pid %s since %s); mail is off until it is free",
 			name, s.waiting.Host, s.waiting.PID, s.waiting.Since)
@@ -189,8 +214,9 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
 	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
 	// Removed on every exit, and at once when the first attempt binds (the bind also removes it, spool.OwnRecord).
-	clearWaiter := noteWaiting(cfg)
+	clearWaiter, noteHeld := noteWaiting(cfg)
 	defer clearWaiter()
+	startPPID := getppid()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
 	ep, err := openEndpoint(openCtx, cfg)
 	openCancel()
@@ -199,6 +225,9 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	var held *endpoint.LeaseHeldError
 	var startErr error // a transient first failure, retried
+	if errors.As(err, &held) {
+		noteHeld(held)
+	}
 	if err != nil && !errors.As(err, &held) {
 		if !transient(err) {
 			fmt.Fprintln(stderr, err)
@@ -246,12 +275,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		waited := ep == nil
 		if waited {
 			var ok bool
-			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify); !ok {
+			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify, noteHeld); !ok {
 				return
 			}
 			clearWaiter() // this serve now holds the lease
 		}
-		defer ep.Close()
+		closeEP := sync.OnceFunc(ep.Close)
+		defer closeEP()
 		select {
 		case <-srv.ChannelReady():
 		case <-ctx.Done():
@@ -301,6 +331,37 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
 		}
 		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
+			var lostTo *endpoint.LeaseLostError
+			if errors.As(err, &lostTo) && lostTo.SameSession {
+				// A newer serve of this same session holds the lease (ADR 0082): this one has stopped consuming and
+				// refreshing. It stays up, inactive and labelled, until its client closes it or its parent changes.
+				ep.StopService()
+				state.Store(&sessionState{superseded: lostTo})
+				closeEP()
+				fmt.Fprintf(stderr, "%v; superseded by a newer mash serve of this session (pid %s); this server is inactive\n", err, lostTo.PID)
+				told := make(chan struct{})
+				go func() {
+					_ = srv.Notify(supersededText(cfg.Name, lostTo), map[string]string{"error": "true"})
+					close(told)
+				}()
+				select {
+				case <-told:
+				case <-time.After(2 * time.Second):
+				}
+				t := time.NewTicker(parentWatchEvery)
+				defer t.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+						if getppid() != startPPID {
+							cancel()
+							return
+						}
+					}
+				}
+			}
 			// The lease is gone (another session holds the name): stop the SAP
 			// service first, so the two never split prompts or heartbeat as
 			// one, then tell Claude, but never let a blocked stdout hold up
@@ -335,14 +396,32 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 // transient error. It sends the waiting notice once Claude Code is ready, and the terminal notice on a permanent
 // failure. It returns the endpoint it now owns; on false the caller has nothing to close.
 func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *atomic.Pointer[sessionState],
-	held *endpoint.LeaseHeldError, startErr error, stderr io.Writer, notify func(string)) (*endpoint.Endpoint, bool) {
+	held *endpoint.LeaseHeldError, startErr error, stderr io.Writer, notify func(string), noteHeld func(*endpoint.LeaseHeldError)) (*endpoint.Endpoint, bool) {
 	type result struct {
 		ep  *endpoint.Endpoint
 		err error
 	}
 	results := make(chan result, 1)
 	ready := srv.ChannelReady()
-	timer := time.NewTimer(leaseRetry)
+	sameTries := 0
+	// heldDelay is the wait before the next attempt against holder h: short for an earlier serve of this same session
+	// that was not taken over, a few times in a row, else leaseRetry.
+	heldDelay := func(h *endpoint.LeaseHeldError) time.Duration {
+		if h == nil || !h.SameSession {
+			sameTries = 0
+			return leaseRetry
+		}
+		if sameTries < sameSessionTries {
+			sameTries++
+			return sameSessionRetry
+		}
+		return leaseRetry
+	}
+	first := leaseRetry
+	if held != nil {
+		first = heldDelay(held)
+	}
+	timer := time.NewTimer(first)
 	defer timer.Stop()
 	inflight, heldSent := false, false
 	var failed error
@@ -371,10 +450,17 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 		case ctx.Err() != nil:
 			return nil, true // cancellation is never "held"
 		case errors.As(r.err, &h):
+			// The holder is read again on every attempt: what the tools, status, the hook notice and Claude are told
+			// is the holder now, not the one the first attempt found.
+			changed := held == nil || held.PID != h.PID || held.Host != h.Host
 			held, lastTransient = h, nil
 			state.Store(&sessionState{waiting: h})
+			noteHeld(h)
 			transientSince, backoff = time.Time{}, leaseRetry
-			timer.Reset(leaseRetry)
+			timer.Reset(heldDelay(h))
+			if changed && heldSent && ready == nil {
+				notify(h.Error() + "; mail is off for this session. mash is retrying every " + leaseRetry.String() + ".")
+			}
 		case transient(r.err) && (transientSince.IsZero() || time.Since(transientSince) < transientBudget):
 			if transientSince.IsZero() {
 				transientSince = time.Now()
@@ -886,25 +972,40 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 
 // noteWaiting records this serve in its endpoint's spool as waiting for the lease (spool.NoteWaiter), so a hook of the
 // same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
-// removes the record. A spool that cannot be written costs only that detection.
-func noteWaiting(cfg config.Config) func() {
+// removes the record, and the function that records who holds the lease (the spool's lease-wait state, which a hook of
+// this session turns into a notice, ADR 0082); the removal removes that state too. A spool that cannot be written costs
+// only these.
+func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
 	dir, err := endpoint.SpoolDir(cfg)
 	if err != nil {
-		return func() {}
+		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}
 	s := spool.Spool{Dir: dir}
 	ppid := os.Getppid()
+	session := os.Getenv("CLAUDE_CODE_SESSION_ID")
 	if s.Init() != nil {
-		return func() {}
+		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}
 	if unlock, err := s.Lock(); err == nil {
-		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: os.Getenv("CLAUDE_CODE_SESSION_ID")})
+		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session})
 		unlock()
 	}
+	// instance tells this serve's state from another serve's (the files are shared, and a pid can be reused or, in a test,
+	// shared): the state is removed only if it still names this serve.
+	var rb [8]byte
+	_, _ = rand.Read(rb[:])
+	instance := hex.EncodeToString(rb[:])
 	return func() {
-		if unlock, err := s.Lock(); err == nil {
-			_ = s.ClearWaiter(ppid)
-			unlock()
+			if unlock, err := s.Lock(); err == nil {
+				_ = s.ClearWaiter(ppid)
+				_ = s.ClearWaitState(os.Getpid(), instance)
+				unlock()
+			}
+		}, func(h *endpoint.LeaseHeldError) {
+			if unlock, err := s.Lock(); err == nil {
+				_ = s.NoteWaitState(spool.WaitState{HolderPID: h.PID, HolderHost: h.Host, HolderSince: h.Since,
+					ServePID: os.Getpid(), Instance: instance, ParentPID: ppid, Session: session, Updated: time.Now().UTC()})
+				unlock()
+			}
 		}
-	}
 }

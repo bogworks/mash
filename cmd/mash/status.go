@@ -299,6 +299,9 @@ func connectionLine(src *statusSource) string {
 		return fmt.Sprintf("connection: FAILED - %s. Next: fix the cause (see the creds and config lines) and restart Claude Code", redactText(st.failed.Error()))
 	case st.retrying != nil:
 		return fmt.Sprintf("connection: RETRYING - could not reach the server, last error: %s. mash retries on its own", redactText(st.retrying.Error()))
+	case st.superseded != nil:
+		return fmt.Sprintf("connection: SUPERSEDED - a newer mash serve of this session (host %s, pid %s) holds endpoint %s and handles its mail; this server is inactive and exits when its client closes it. Next: use the mash tools of the newer server",
+			redactText(st.superseded.Host), redactText(st.superseded.PID), cfg.Name)
 	case st.waiting != nil:
 		return fmt.Sprintf("connection: WAITING - the lease for endpoint %s is held by another session (host %s, pid %s, since %s). mash retries on its own. Next: end that session, or start this one with a different MASH_NAME",
 			cfg.DisplayName(), redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
