@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-6 (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 records Randy's answers to the open questions; Appendix A) |
+| Contract id and revision | sap-go-sdk, revision draft-7 (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 recorded Randy's answers; draft-7 renames the repository and prepares the upstream landing on his draft-6 comments; Appendix A) |
 | Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
@@ -307,9 +307,9 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - MUST: the runner's checks are the catalog's checks, not a second list.
 - Acceptance: AT-006.
 
-### REQ-014: Ready for Synadia to take
-- Source: Proposed. These are the writer's reading of what an upstreamable Go SDK needs. Randy's words ask only that it
-  be PR'd to Synadia. Evidence: `nats-io/nats.go` `CONTRIBUTING.md` (`Signed-off-by` in commits and PR, CNCF Code of Conduct, an
+### REQ-014: Ready for Synadia to take, from day one
+- Source: Confirmed in scope: "we should be prepping to submit it upstream" (Randy, 2026-11-10, on draft-6). The items
+  below follow what Synadia's repositories and NATS's Go repositories expect. Evidence: `nats-io/nats.go` `CONTRIBUTING.md` (`Signed-off-by` in commits and PR, CNCF Code of Conduct, an
   issue first, no non-essential dependencies); `synadia-io/orbit.go` `CONTRIBUTING.md` (per-directory modules, commit
   subjects prefixed with the module); the Apache-2.0 licence of `synadia-ai/synadia-agents`.
 - **Licence.** Apache-2.0, with a `LICENSE`, a `NOTICE` if needed, and an SPDX header in each file.
@@ -321,19 +321,28 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   TypeScript SDK does. Runnable examples for a caller and a host.
 - **Go versions.** It supports the two most recent Go releases.
 - **Commits.** Commits carry whatever sign-off Synadia requires (Q5).
+- **Shaped to land as a folder (REQ-017).** The repository root is written to become `go/` in
+  `synadia-ai/synadia-agents` unchanged:
+  - nothing in the code or tests depends on its location in the repository;
+  - the Apache-2.0 `LICENSE` sits beside `go.mod`, as each upstream SDK directory carries its own;
+  - Synadia's identity vectors are vendored under `testdata/` with their source commit, so that after the move they can
+    instead be read from upstream's `test-fixtures/`;
+  - CI is a single workflow that upstream can adopt as a path-filtered `go-sdk.yml` beside theirs.
 - Acceptance: AT-007.
 
-### REQ-015: A new standalone public repository, never inside mash
-- Source: Confirmed for a new repository: "Put it in a new repo." (Randy, 2026-11-10). The choice between a fork of
-  upstream and a standalone repository is answered in Q1: standalone, `bogworks/agents.go`. The module path follows
-  NATS's conventions (Q2, "USe go module path standards that conform to what NATS already does").
-- MUST: the SDK lives in the new repository `github.com/bogworks/agents.go`, not a fork. It is public from its first
-  release.
-- MUST: the module path is `github.com/bogworks/agents.go` (Q2). There is one module at the root, with the caller,
-  host and identity code in subpackages. Releases are tagged `v0.x.y` at the root. From v2 on, the path takes a `/v2`
-  suffix (Go's major-version rule, as `github.com/nats-io/jwt/v2` does).
+### REQ-015: A new standalone public repository, named for SAP, never inside mash
+- Source: Confirmed: "Put it in a new repo." and "public is fine." (Randy, 2026-11-10). The name must read as part of
+  SAP: "'agents' is too generic" (Randy, on draft-6). The fork question and the name are answered in Q1, and the module
+  path in Q2.
+- MUST: the SDK lives in the new public repository `github.com/bogworks/synadia-agents.go`, not a fork.
+- MUST: the module path is `github.com/bogworks/synadia-agents.go` (Q2). One module sits at the root; the caller, host
+  and identity code are subpackages. Releases are tagged `v0.x.y` at the root. From v2 on, the path takes a `/v2`
+  suffix (Go's major-version rule, as `github.com/nats-io/jwt/v2` does). The package name is `agents`, as `nats.go`'s
+  is `nats`.
+- MUST: until Synadia accepts it, the README says it is an independent implementation of SAP, written to be offered
+  upstream, and not published or endorsed by Synadia.
 - MUST: interop tests that need dependencies beyond nats.go and nkeys live in a separate test module (`test/go.mod`),
-  as `synadia-io/orbit.go` does with its `<module>/test` modules. This keeps the runtime dependency list to REQ-014's.
+  as `synadia-io/orbit.go` does with its `<module>/test` modules. This keeps the runtime dependencies to REQ-014's.
 - MUST: it does not depend on mash and does not import any bogworks package.
 - Acceptance: AT-007, AT-009.
 
@@ -358,8 +367,18 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 
 ### REQ-017: Offered to Synadia
 - Source: Confirmed. "PR it to Synadia" (card #129).
-- MUST: an issue on `synadia-ai/synadia-agents` offers the SDK and asks how Synadia wants it: in their monorepo as a
-  subdirectory module, as a repository of theirs, or linked from theirs.
+- MUST: an issue on `synadia-ai/synadia-agents` offers the SDK. The recommended landing is a single pull request that
+  adds the repository's tree as the folder `go/`. Their monorepo keeps one directory per language SDK
+  (`client-sdk/typescript`, `agent-sdk/python`), and a Go module carries caller and host together. In that pull request:
+  - **Module path.** It becomes `github.com/synadia-ai/synadia-agents/go`. Releases are tagged `go/vX.Y.Z`, the
+    per-directory tag pattern of `synadia-io/orbit.go` and of upstream's own per-package tags (`python-v0.8.1`).
+  - **What changes for users.** They change their import path once, with no API change. This happens while the SDK is
+    0.x, before any compatibility promise. The final bogworks release marks its module `// Deprecated: moved to
+    github.com/synadia-ai/synadia-agents/go`, and the bogworks repository is archived with a pointer.
+  - **CI.** Upstream gains a path-filtered `go-sdk.yml` workflow modeled on theirs.
+- MAY: if Synadia prefers a standalone Go repository, the fallback is a transfer to `synadia-ai/synadia-agents.go`.
+  That keeps the history and the import path's shape; GitHub redirects the old URL, but Go users still change the
+  path.
 - MUST: a pull request follows that contains the SDK, or the concrete upstream integration Synadia asks for, in the
   form they name. A link-only pull request does not meet this.
 - MUST: if Synadia declines, whether at the issue (no pull request wanted) or on the pull request, the decline is
@@ -626,25 +645,29 @@ The review records are completion evidence.
 
 ### Open questions for Randy
 
-1. **Q1, where the repository lives: answered.** Randy: "Put it in a new repo. Presumably a fork of upstream?"
-   - **The writer's answer: a new standalone repository, `bogworks/agents.go`, not a fork.** A fork of
-     `synadia-ai/synadia-agents` makes the eventual pull request a branch away. That is its one advantage, and it is
-     outweighed by four costs:
-     - **The fork is a TypeScript and Python monorepo.** The Go SDK would be a `go.mod` in a subdirectory, for example
-       `go/`, with module path `github.com/bogworks/synadia-agents/go` and tags with a directory prefix (`go/v0.1.0`),
-       the orbit.go pattern.
-     - **The path changes anyway.** If Synadia merges the subdirectory, the module path becomes
-       `github.com/synadia-ai/synadia-agents/go`, so every importer changes its path whether we fork or not.
-     - **Upstream's tooling comes with the fork.** Upstream's CI workflows, `CODEOWNERS` (their maintainer teams),
-       release workflows and dependabot all arrive in our repository. Their workflows assume GitHub-hosted runners,
-       which our standing order forbids, so they would have to be disabled or rewritten. A fork would also keep pulling
-       their TypeScript and Python changes that we don't build.
-     - **A standalone repository can still be offered as a fork would be.** Its tree drops into upstream as a `go/`
-       subdirectory in one pull request, which is what REQ-017 asks. Synadia can also take a transfer of the
-       repository, or host a `synadia-io/agents.go`, which matches their own Go repositories (`synadia-io/orbit.go`).
-   - What this means for REQ-015: the repository is `bogworks/agents.go`, public, and not a fork. If Synadia adopts
-     it, the module path changes once, while the SDK is still 0.x, before any compatibility promise.
-   - Randy confirms or overrides at ratification.
+1. **Q1, where the repository lives, and its name: answered.**
+   - Randy: "Put it in a new repo. Presumably a fork of upstream?" and, on draft-6, "'agents' is too generic ... we
+     should be prepping to submit it upstream. public is fine."
+   - **Not a fork.** A new standalone public repository. A fork of `synadia-ai/synadia-agents` makes the eventual
+     pull request a branch away. That is its one advantage, and it is outweighed by four costs:
+     - **The fork is a TypeScript and Python monorepo.** The Go SDK would be a `go.mod` in a subdirectory, with a
+       path such as `github.com/bogworks/synadia-agents/go` and tags like `go/v0.1.0`.
+     - **The path changes anyway.** It changes again on an upstream merge.
+     - **Upstream's tooling comes with the fork.** Upstream's CI, `CODEOWNERS`, release workflows and dependabot arrive
+       in our repository. Their workflows assume GitHub-hosted runners, which our standing order forbids.
+     - **A standalone repository can still be offered as a fork would be.** It is shaped to drop into upstream as
+       `go/` in one pull request (REQ-014, REQ-017).
+   - **The name: `synadia-agents.go`.** Three candidates, each in NATS's `<name>.go` form:
+
+     | Candidate | Module path now | After the recommended folder landing | After a transfer (fallback) | Reading |
+     |---|---|---|---|---|
+     | **`synadia-agents.go` (chosen)** | `github.com/bogworks/synadia-agents.go` | `github.com/synadia-ai/synadia-agents/go` | `github.com/synadia-ai/synadia-agents.go` | Names it after the repository it is meant to join. A Go developer reads it as the Go member of `synadia-agents`, beside `@synadia-ai/agents` and `synadia-ai-agents`, the way `nats.go` sits beside `nats.js` and `nats.py`. |
+     | `sap.go` | `github.com/bogworks/sap.go` | as above | `github.com/synadia-ai/sap.go` | Short, but "SAP" is not in any Synadia package or repository name, and in search and in Go import lists it collides with SAP SE's many Go libraries. |
+     | `agent-protocol.go` | `github.com/bogworks/agent-protocol.go` | as above | `github.com/synadia-ai/agent-protocol.go` | Says "protocol", but drops Synadia and is as generic as `agents`, which is Randy's objection. |
+
+     `synadia-agents.go` puts Synadia's name on a bogworks repository before Synadia has accepted it. The README says
+     plainly that it is independent until accepted (REQ-015).
+   - Randy confirms the name at ratification.
 2. **Q2, the module path: answered from NATS's conventions.**
    - The NATS conventions:
      - **Repository and module path.** A Go client library's repository is named `<name>.go` and its module path is
@@ -655,10 +678,12 @@ The review records are completion evidence.
        `<dir>/vX.Y.Z`).
      - **Major versions.** From v2 on, a major version takes a path suffix (`github.com/nats-io/jwt/v2`). v0 and v1
        have none (`nats.go` is v1.55.0, and `nkeys` v0.4.17).
-   - The derived path is **`github.com/bogworks/agents.go`**. It is a client library for the protocol whose service
-     name is `agents` (SAP:L142) and whose official packages are `@synadia-ai/agents` and `synadia-ai-agents`. It is
-     one module, with packages `agents` (shared types), `agents/caller`, `agents/host`, `agents/identity`, and
-     `cmd/sapconform`, tagged `v0.x.y` at the root, with `/v2` from v2.
+   - The derived path is **`github.com/bogworks/synadia-agents.go`** (the name is from Q1). It is one module, with
+     package `agents` at the root (shared types; the package name is SAP's service name, SAP:L142, as `nats.go`'s is
+     `nats`). The subpackages are `caller`, `host`, `identity` and `cmd/sapconform`. Tags are `v0.x.y` at the root,
+     with `/v2` from v2.
+   - After the recommended upstream landing, the path becomes `github.com/synadia-ai/synadia-agents/go`, with tags
+     `go/vX.Y.Z` (REQ-017).
 3. **Q3, is §13 in scope: answered.** Yes. "Signing is in scope. We need it." (Randy, 2026-11-10.)
 4. **Q4, ask Synadia first: answered.** No. "Do not ask Synadia." Build, then offer upstream (REQ-017).
 5. **Q5, sign-off: answered.** If Synadia requires sign-off, it is in the name Randy Bias (Randy, 2026-11-10). An agent
@@ -686,9 +711,9 @@ The review records are completion evidence.
     - Card #129 is done only when that one is too.
     - Owner: mash-lead.
 12. **Q12, ratify the Proposed scope explicitly [blocking].**
-    - Decided: the `sapconform` runner is in ("yes sapconform", Randy, 2026-11-10; REQ-013).
+    - Decided: the `sapconform` runner is in ("yes sapconform", Randy, 2026-11-10; REQ-013). The upstream-ready files
+      and dependency limits (REQ-014) are in, because Randy is "prepping to submit it upstream" (on draft-6).
     - Still Proposed, each for Randy to keep or cut at ratification:
-      - the upstream-ready repository files and dependency limits (REQ-014);
       - concurrency, Go version, logging and documentation (REQ-019, REQ-020);
       - the outgoing-header hook (REQ-016);
       - the NFR-004 performance budget. The planner recommends dropping it.
@@ -742,12 +767,17 @@ The review records are completion evidence.
 
 ## Readiness
 
-- Result: DRAFT. It goes to mash-lead, then the planner, then Randy. Randy's answers to Q1 to Q5 and to the runner in
-  Q12 are recorded verbatim: Randy, 2026-11-10, via the planner: "Do not ask Synadia. Put it in a new repo. Presumably a fork of upstream? Signing is in scope. We need it. yes sapconform. Randy Bias. USe go module path standards that conform to what NATS already does."
-- **Answered by Randy (2026-11-10):** Q1 (standalone repository, the writer's answer to his fork question), Q2 (path
-  from NATS's conventions), Q3, Q4, Q5, and the runner in Q12.
+- Result: DRAFT. It goes to mash-lead, then the planner, then Randy. Randy's comments on draft-6, verbatim: Randy, 2026-11-10, on draft-6, via the planner: "I don't think that makes it clear it's meant as part of SAP. 'agents' is too generic. I guess we could move it later, but we should be prepping to submit it upstream. public is fine."
+- Randy's answers to Q1 to Q5 and to the runner in Q12, verbatim: Randy, 2026-11-10, via the planner: "Do not ask Synadia. Put it in a new repo. Presumably a fork of upstream? Signing is in scope. We need it. yes sapconform. Randy Bias. USe go module path standards that conform to what NATS already does."
+- **Answered by Randy (2026-11-10):**
+  - Q1: a new repository, public. The writer answered his fork question (standalone) and chose the name
+    `synadia-agents.go` after he rejected `agents.go`.
+  - Q2: the path follows NATS's conventions.
+  - Q3, Q4 and Q5.
+  - In Q12: the runner, and the upstream-ready files.
 - **Blocking before READY:**
-  - Randy's confirmation of the Q1 answer (standalone, not a fork) and the Q2 path;
+  - Randy's confirmation of the name `synadia-agents.go`, of the standalone answer and of the folder landing
+    (REQ-017);
   - the rest of Q12;
   - the critic's blocking findings. Four passes ran, with 9 blocking findings on draft-1, 4 on draft-2, 5 on draft-3
     and 2 on draft-4, all accepted and applied (Appendix A). The critic has not read draft-5.
