@@ -36,6 +36,9 @@ the credential re-issue; Phase 3 is held.
      still carries such a wildcard. Tests first: an overlap test that a new-form subject with an owner token equal to a
      legacy owner is refused with and without a rule file; that a legacy wildcard grant cannot reach a new-form
      subject of any other owner; and a delivery test with both a legacy and a new-form record present.
+     Admission is symmetric: provisioning a legacy identity during the window also runs `sap.Overlaps` against the
+     existing new-form records (and the owner pairing is refused in either order), with a test; it runs under a
+     directory-wide admission lock so two writers of different names cannot both pass on a stale snapshot.
    - **Streams do not overlap, and nothing is copied.** The legacy stream keeps its own subject filter and is never
      altered; legacy-alias mail keeps arriving in it. The new-form endpoint's stream `inbox-<flat>` takes the new subject
      only. During the window the endpoint reads **both** streams: the legacy stream through its existing durable
