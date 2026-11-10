@@ -5,6 +5,20 @@ changes no code. The six zone command-line items stay frozen until it is ruled o
 
 **Date:** 2026-11-11. **Facts as of:** `main` at `6dbb9ca`.
 
+## Summary for the maintainer
+
+- **Was SAP broken, and quietly?** Only for mail subjects. The six-token mail subject is outside SAP 0.3 section 2's
+  five-token shape. It was recorded the day it landed (ADR 0052, line 72, as a "Bad" consequence) but never escalated
+  as a departure; SAP's own verbs (prompt, status, heartbeat) stayed five-token.
+- **Broken as conceived or as built?** As built, no defect found (tests pass; the compiler is exact). As conceived, yes
+  in one respect: the zone makes a policy attribute part of an address, which the three-token naming contract forbids.
+- **What enforces:** the permissions in each endpoint's NATS user JWT, which the server applies. **What labels do:**
+  select. Only `mashctl`, at compile time, reads a label; the server never does.
+- **"ACL"** is not a mash concept; the nearest thing is the publish permission list in the user JWT.
+- **Live today:** per x-lead, 0 zoned records of 68, no policy file deployed; removing the zone costs nothing to migrate.
+- **Recommendation (F):** the owner and agent tokens are the fence, with a bounded set of deny and cross-owner
+  exceptions as tags. **It gives up** `default: deny` inside an owner and broad label-based allow rules.
+
 ## 1. Who this is for, and the vocabulary
 
 You have not read the mash code. This section defines every term the rest uses, with a small example each.
@@ -83,10 +97,19 @@ tests that start nats-server with the compiled keys. The compile is exact by con
 expanded permissions let a sender publish to its recipients, no more and no fewer (`internal/policy/compile.go:118`,
 `Effective`). I found no defect in what it was asked to do. Two gaps are unfinished work, not bugs: ADR 0053 left
 prompt and status unpoliced "until the maintainer rules" (ADR 0055, still the state), and the compiled zone lines are
-six-token only (`internal/policy/compile.go:57`), so I could not tell from the code how a compiled user reaches an
-endpoint with no zone on record; ADR 0054 says "no zone" and zone `default` are different facts, while
-`docs/policy-file.md` treats a missing label as zone `default`. I did not test that seam; it is worth a test whichever
-option is chosen.
+six-token only (`internal/policy/compile.go:57`), so a compiled user cannot publish to an
+endpoint whose directory record has no zone (it has the five-token subject). This is the seam between ADR 0054 ("no
+zone" and zone `default` are different facts) and `docs/policy-file.md` (a missing label means zone `default`). It is
+live code, so I checked it. Established: `TestApplyPushesZonesAndUsersGetExactlyTheirPermissions`
+(`cmd/mashctl/apply_test.go:323-340`, run and passing on this commit) shows a compiled user publishing to a
+five-token mail subject is refused by the server with a permissions violation and nothing is delivered. And
+`mashctl drift` reports exactly this state ("the record has no zone (the legacy mail subject); the file says zone Z",
+`cmd/mashctl/drift.go:303`), with `repair` running `SetZone` for it. So the design closes the seam by making the
+administrator move every declared endpoint into its zone before it can be mailed; until then it is unreachable by
+compiled users. Not established: what `mash send` tells the sender in that case (ADR 0053 promises a fast "refused by
+policy" message; I did not run the send path against a legacy recipient), and whether `apply` warns before the
+restrictive policy strands a legacy endpoint. Both need a live-server run with a deployed legacy record, which this
+documentation-only change does not do.
 
 *Conception.* The zone is a single partition baked into the address. That has four costs the design already carried or
 the later naming work exposed:
@@ -221,7 +244,7 @@ A router or relay evaluating policy per message, and an auth callout deciding at
 ADR 0053 because mash is limited to what NATS does by itself and a component of ours in the path reads payloads. Nothing
 since has changed that.
 
-### F. A hybrid I think is better than any single one: A as the default, B for exceptions only
+### F. A hybrid I think is better than any single one: A as the default, B for exceptions only (preferred)
 
 Make the owner token the fence (A) and treat the policy file as an exception tool, not a mesh partition. The default
 is the owner-wide line. An administrator who needs to *narrow* inside an owner writes a few `deny` rules, compiled to
@@ -230,8 +253,15 @@ sender would exceed it; an administrator who needs to *widen* across owners writ
 than that is a signal to split the owner (A) or the account (D), not to grow the compiler.
 
 - *Enforces:* at the server (A's boundary plus B's tags).
-- *Cost:* one scoped key per owner (not per zone), tags only where an exception exists, so most users carry only the placeholder tag
-  and the account JWT stays constant. Reissue is limited to the senders an exception names.
+- *Cost, two builds.* (F1) One scoped key per owner. Under the naming contract the owner token is the group a
+  deployment assigns, so one account holds many owners, and the account JWT grows with their number. Arithmetic from
+  ADR 0052's measurement (5.9, 21 and 102 KB at 5, 20 and 100 zone keys with sparse rules, about 1 KB per key): an
+  owner key with only the fixed lines and the two tag templates is about 1 KB, so 1 MiB (1,048,576 bytes) is reached at
+  roughly a thousand owners, before the rest of the account. That is far away but not unbounded, and it is a
+  per-owner estimate, not a measurement of this key. (F2, preferred) One scoped key with the agent and owner as
+  administrator-signed tags in its templates, so the account JWT is one key whatever the number of owners; this is
+  pending a live-server test of template expansion and of the missing-tag case. Either way most users carry only the
+  placeholder tag, and reissue is limited to the senders an exception names.
 - *Breaks:* fine-grained deny across hundreds of endpoints in one owner is unsupported, by design, and `check` says so.
 - *Migration:* as B, but smaller: delete the zone-wildcard stage and the zone labels, keep the tag templates and the
   deny placeholder (ADR 0056).
@@ -302,10 +332,12 @@ What F must say out loud, because the policy file's current promise is larger:
   every server before the policy counts as applied. A policy counts as applied only after a live
   check that a denied publish is refused. The existing `drift` and `apply` verification do this for zones and would be
   reused.
-- Before building: a live-server test of the one-key-with-tags variant (agent and owner as administrator-signed tags
-  in the key's templates) against a key per owner, including template expansion and the missing-tag case, and a test
-  that compiled five-token permissions cannot publish to any six-token inbox subscription left in a zoned stream. Also
-  test the unresolved seam from section 2.2: how a compiled user reaches an endpoint that has no zone on record.
+- Before building: a live-server test of F2 (agent and owner as administrator-signed tags in the key's templates)
+  including template expansion and the missing-tag case, and a test that compiled five-token permissions cannot publish
+  to any six-token inbox subscription left in a zoned stream. The section 2.2 seam is already covered by the existing
+  test it cites; the open part is the sender's message and an `apply` warning.
+
+Build F2 (one key, agent and owner as signed tags) if its live-server test passes; otherwise F1.
 
 Next steps if ruled: an ADR that supersedes 0053 and 0054 for the subject (and amends 0055's framing), then the code
 change as small pull requests. Nothing here is ruled.
