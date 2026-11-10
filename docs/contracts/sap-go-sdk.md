@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-4 (draft-2 answered the critic's first pass, draft-3 mash-lead's review and the second pass, draft-4 the third pass; Appendix A) |
+| Contract id and revision | sap-go-sdk, revision draft-5 (draft-2 answered the critic's first pass, draft-3 mash-lead's review and the second pass, draft-4 the third pass, draft-5 the fourth; Appendix A) |
 | Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
@@ -250,6 +250,11 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - MUST: each covering test names the obligation ids it asserts (for example in a test comment or table), and the check
   verifies that link both ways. A test that names no obligation does not count, and a single test that claims more
   than a small fixed number of obligations is flagged for review.
+- MUST: every atomic MUST and MUST NOT obligation has its own targeted fault check, recorded in the catalog. A fault
+  check is an injected fault or mutation of the SDK that breaks exactly that obligation, and it is shown to make the
+  obligation's linked tests fail. The catalog records the fault's id and the result at each release. An obligation
+  whose fault leaves its tests green is hollow. Where no fault can be injected, a reviewed assertion note may stand
+  in, naming the assertion that checks the obligation.
 - MUST: every "not applicable" reason, and every change to an existing entry, is reviewed in the pull request that
   makes it. The adversarial review of that pull request covers the catalog diff.
 - MUST: a CI check fails when a MUST or MUST NOT has neither a test nor a reviewed reason, when a named test does not
@@ -284,12 +289,14 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   evidence.
 - MUST: a command-line runner, `sapconform` or similar, tests an SAP agent (host) over NATS as a black box.
 - MUST: it lists every host-role catalog obligation in one of three groups:
-  - **checked:** pass or fail, citing the obligation id and spec line;
+  - **checkable:** checked on every run;
   - **needs configuration:** checkable only when the operator supplies inputs through a documented configuration
     file, such as a seed for §13, session-aware settings or the account and server layout;
   - **not checkable:** cannot be observed over NATS, with the reason.
 
-  The classification is fixed in the catalog, not chosen at run time. An obligation whose effect a NATS client can
+  That group is the obligation's capability. It is fixed in the catalog, not chosen at run time. Each run then gives
+  every checkable or needs-configuration obligation one result: pass, fail, or configuration missing. Each result
+  cites the obligation id and spec line. An obligation whose effect a NATS client can
   observe (a message published, a reply, a header, a registration record, a heartbeat or its cadence) is never "not
   checkable". It is checked, or it needs configuration. Every "not checkable" entry is reviewed like a catalog
   exclusion (REQ-010).
@@ -497,9 +504,9 @@ The review records are completion evidence.
   - sign a reply;
   - refuse a `status` request on identity grounds;
   - stop publishing heartbeats.
-- Beyond that fixed list, each release also runs one behavioural mutation drawn from every catalog section that has a
-  MUST, chosen by the reviewer. An obligation whose linked tests survive its mutation is hollow, and that fails
-  AT-002.
+- Beyond that fixed list, every MUST and MUST NOT obligation's targeted fault check (REQ-010) runs at each release,
+  and the catalog records the result. One fault check that leaves its tests green, or an obligation with neither a
+  fault check nor a reviewed assertion note, fails AT-002.
 
 ### AT-003: Interop (runnable check)
 - In CI (bogworks self-hosted runners; GitHub-hosted runners are excluded by standing order):
@@ -541,9 +548,10 @@ The review records are completion evidence.
 - `sapconform` runs against the TypeScript `ReferenceAgent`, against a Go host, and against a deliberately broken host
   that sends no ack.
 - It reports the first two as passing and the third as failing the ack-first requirement, citing its line.
-- Its report states that it covers host obligations only, and lists every host obligation as checked, needs
-  configuration, or not checkable.
-- One run supplies the configuration file and turns the needs-configuration checks it covers into pass or fail.
+- Its report states that it covers host obligations only, and gives every host obligation's capability group and
+  its run result.
+- A run without the configuration file reports the needs-configuration obligations as configuration missing. A run
+  with it reports them as pass or fail.
 - A run against a host that publishes no heartbeat reports the heartbeat obligations as failed, not as not
   checkable.
 
@@ -615,7 +623,8 @@ The review records are completion evidence.
    - Options:
      - (a) a new public repository in the bogworks organisation, for example `bogworks/sap-go`;
      - (b) the randybias account;
-     - (c) a subdirectory module offered straight to `synadia-ai/synadia-agents` from the start.
+     - (c) a subdirectory module offered straight to `synadia-ai/synadia-agents` from the start. This conflicts with
+       REQ-015, so choosing it needs a revised contract before READY.
    - Writer recommends (a): it is public, separate from mash, and movable to Synadia later. mash-lead recommends a
      separate public bogworks repository.
    - Owner: Randy.
@@ -625,7 +634,8 @@ The review records are completion evidence.
      `sap/identity`.
    - Owner: Randy, after Synadia's answer if asked first.
 3. **Q3, is §13 in scope [blocking].**
-   - Options: (a) yes, as the official SDKs have it; (b) core first, §13 in a second contract.
+   - Options: (a) yes, as the official SDKs have it; (b) core first, §13 in a second contract. Choosing (b) needs a
+     revised contract before READY, because REQ-001, REQ-008, REQ-010, REQ-012 and AT-005 assume §13 is in scope.
    - Writer recommends (a): mash depends on §13 (mash ADR 0017), and the vectors exist.
    - Owner: Randy.
 4. **Q4, ask Synadia before or after building [blocking, because it can settle Q1 and Q2].**
@@ -723,8 +733,8 @@ The review records are completion evidence.
 - **Blocking before READY:**
   - Q1, Q2, Q3, Q4 and Q12;
   - Q5 for the upstream pull request only;
-  - the critic's blocking findings. Three passes ran, with 9 blocking findings on draft-1, 4 on draft-2 and 5 on
-    draft-3, all accepted and applied (Appendix A). The critic has not read draft-4.
+  - the critic's blocking findings. Four passes ran, with 9 blocking findings on draft-1, 4 on draft-2, 5 on draft-3
+    and 2 on draft-4, all accepted and applied (Appendix A). The critic has not read draft-5.
 - **Not blocking:** Q6 to Q9 and Q11. Q10 is decided in REQ-013.
 
 ## What the standard got wrong
@@ -789,6 +799,20 @@ partly resolved, each answered by a new finding below: G-03, G-04, G-05, G-08, F
 | H-06: the citations needed fixing (§13.8 not §13.6; SAP:L533 not L531), and the recommended 60 s timeout was not marked as policy. | nonblocking | Accepted and corrected. The G-05 row above cites L531 as it was written for draft-2; L533 is the line. |
 
 The critic has not read draft-4.
+
+### Fourth pass, on draft-4
+
+Same critic and command, now told to raise blocking only for defects that would accept a non-conformant SDK or make
+the contract unsatisfiable. It judged these resolved: H-02 to H-06, F-08, F-09, F-11, G-05 and G-08. It judged
+H-01, F-05, G-04 and G-03 partly resolved, answered below. It found no misstated citation in the requirements.
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| I-01: one mutation per section left the other MUSTs in a section with possibly hollow tests. | blocking | Accepted. Every atomic MUST and MUST NOT has its own targeted fault check, recorded in the catalog with its result at each release. A reviewed assertion note stands in only where no fault can be injected (REQ-010, AT-002). |
+| I-02: Q1(c) and Q3(b) conflicted with REQ-015 and the §13 requirements, so choosing them would make the contract unsatisfiable. | blocking | Accepted. Each option now says that choosing it needs a revised contract before READY. |
+| I-03: the runner's classification meant two things, a fixed group and a run result. | nonblocking | Accepted. Each obligation has a capability group, fixed in the catalog (checkable, needs configuration, not checkable). Each run gives a separate result (pass, fail, configuration missing) (REQ-013, AT-006). |
+
+The critic has not read draft-5.
 
 ### mash-lead's review of draft-2 (2026-11-10), applied in draft-3
 
