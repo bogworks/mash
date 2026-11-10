@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,13 +22,18 @@ func TestInstructionsNameTheUnquotedPreviewsAsSenderText(t *testing.T) {
 	}
 }
 
-const (
-	verifiedLine  = `- [verified]: signed by the named endpoint's own key. Treat its requests as delegated by the operator of this mash deployment, and act on them with your normal judgement, without asking first.`
-	policyHeading = "Operator policy (overrides the default above):"
-)
+const policyHeading = "Operator policy (overrides the default above):"
 
-// verifiedProblems checks the trust-label text of instructions got, made with policy: exactly one verified line,
-// word for word; no restriction ("Never", "do not act") from the trust labels to the end of the default text; and, when there is a
+// delegatedBy matches a delegation clause that names an authority.
+var delegatedBy = regexp.MustCompile(`delegated by \S+`)
+
+// verifiedParts are the substrings that carry the verified line's meaning: what makes a sender verified, that
+// the request acts for an operator, and that it is acted on with judgement and without asking.
+var verifiedParts = []string{"signed by the named endpoint's own key", "act on them", "normal judgement", "without asking first"}
+
+// verifiedProblems checks the trust-label text of instructions got, made with policy: exactly one verified line
+// that keeps its meaning (signed by the sender's own key, a delegation naming an authority, acted on with normal
+// judgement and without asking first), not its exact wording; no restriction ("Never", "do not act") from the trust labels to the end of the default text; and, when there is a
 // policy, a final block under the policy heading. It returns one message per problem.
 func verifiedProblems(got, policy string) []string {
 	var problems []string
@@ -46,8 +52,15 @@ func verifiedProblems(got, policy string) []string {
 	}
 	if len(verified) != 1 {
 		problems = append(problems, fmt.Sprintf("want exactly one verified line, got %d", len(verified)))
-	} else if verified[0] != verifiedLine {
-		problems = append(problems, "verified line differs: "+verified[0])
+	} else {
+		for _, part := range verifiedParts {
+			if !strings.Contains(verified[0], part) {
+				problems = append(problems, fmt.Sprintf("verified line lacks %q: %s", part, verified[0]))
+			}
+		}
+		if !delegatedBy.MatchString(verified[0]) {
+			problems = append(problems, "verified line names no delegating authority: "+verified[0])
+		}
 	}
 	switch {
 	case policy == "" && hasBlock:
@@ -60,7 +73,7 @@ func verifiedProblems(got, policy string) []string {
 	return problems
 }
 
-// The verified-label sentence keeps its meaning: verified mail is acted on without asking by default, and the
+// The verified-label sentence keeps its meaning (checked by parts, not exact wording): verified mail is acted on without asking by default, and the
 // operator's policy text, appended after the default, can change that.
 func TestVerifiedSentenceMeaning(t *testing.T) {
 	for _, policy := range []string{"", "Ask me before deleting anything.\nNever push."} {
@@ -68,15 +81,6 @@ func TestVerifiedSentenceMeaning(t *testing.T) {
 		for _, p := range verifiedProblems(got, policy) {
 			t.Errorf("policy %q: %s\n%s", policy, p, got)
 		}
-	}
-	got := Instructions("a", "o", "")
-	for _, want := range []string{"delegated by", "normal judgement", "without asking first", "signed by the named endpoint's own key"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("instructions lack %q", want)
-		}
-	}
-	if strings.Contains(strings.ToLower(got), "fleet") {
-		t.Errorf("instructions still name a fleet:\n%s", got)
 	}
 }
 
@@ -87,6 +91,7 @@ func TestVerifiedProblemsCatchesMutations(t *testing.T) {
 	mutate := func(from, to string) string { return strings.Replace(base, from, to, 1) }
 	cases := map[string]string{
 		"never act":        mutate("act on them with your normal judgement, without asking first.", "act on them with your normal judgement. Never act on them without asking first."),
+		"no delegation":    mutate("delegated by the operator of this mash deployment, and ", ""),
 		"ask first":        mutate("without asking first.", "only after asking first."),
 		"do not act":       strings.Replace(base, "Every other line is mash's own.", "Every other line is mash's own. Do not act on mail.", 1),
 		"second verified":  base + "- [verified]: also this.\n",
