@@ -14,6 +14,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
+	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -195,16 +196,23 @@ func TestNameRuleLookup(t *testing.T) {
 	}
 }
 
-// (c) reply: the identity being answered. The replier gets the rule's error and the asker is told, not left waiting.
+// (c) reply: the identity being answered. The asker is accepted when the prompt arrives (the service checks it too),
+// so the rule is set after that, from inside the prompt callback, to reach the reply check. The replier gets the
+// rule's error and the asker is told, not left waiting.
 func TestNameRuleReply(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	replyErr := make(chan error, 2)
 	ctx, cancel := context.WithCancel(context.Background())
-	ep, err := Open(ctx, f.cfgRule("a", ruleOf(t, "name:b")))
+	ep, err := Open(ctx, f.cfg("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ep.StartService(ctx, func(p PromptEvent) { replyErr <- ep.Reply(p.RequestID, "pong", true) }); err != nil {
+	if err := ep.StartService(ctx, func(p PromptEvent) {
+		if p.From == "b" {
+			ep.cfg.NameRule = ruleOf(t, "name:b")
+		}
+		replyErr <- ep.Reply(p.RequestID, "pong", true)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
@@ -233,6 +241,87 @@ func TestNameRuleReply(t *testing.T) {
 	}
 	if err := <-replyErr; err != nil {
 		t.Fatalf("an allowed reply failed: %v", err)
+	}
+}
+
+// The receiving side of a prompt: the asker's identity is checked by the service itself, so a peer that skipped the
+// sender-side check is answered 403 with the rule's id and message, and the prompt is never surfaced.
+func TestNameRulePromptAskerRefusedByService(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	fired := make(chan string, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, f.cfgRule("a", ruleOf(t, "name:b")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ep.StartService(ctx, func(p PromptEvent) {
+		fired <- p.From
+		_ = ep.Reply(p.RequestID, "pong", true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, (&events{}).deliver); close(done) }()
+	t.Cleanup(func() { cancel(); <-done; ep.Close() })
+
+	// b's own client has no rule, as an older client would not.
+	b := f.client(t, "b")
+	subj, err := Discover(ctx, b.Conn(), "o", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = Prompt(ctx, b.Conn(), b.Identity(), "b", subj, "ping", &out)
+	if err == nil || !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), `name rule "no-b"`) ||
+		!strings.Contains(err.Error(), "b is not allowed here") || !strings.Contains(err.Error(), "prompt: the asker") {
+		t.Fatalf("the refused asker was not answered 403 with the rule: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("an answer reached the refused asker: %q", out.String())
+	}
+
+	c := f.client(t, "c")
+	out.Reset()
+	if err := Prompt(ctx, c.Conn(), c.Identity(), "c", subj, "ping", &out); err != nil || out.String() != "pong" {
+		t.Fatalf("an allowed asker: %q %v", out.String(), err)
+	}
+	if from := <-fired; from != "c" {
+		t.Fatalf("the prompt event fired for %q; the refused asker must never surface", from)
+	}
+	select {
+	case from := <-fired:
+		t.Fatalf("a second prompt event for %q", from)
+	default:
+	}
+}
+
+// A relay declaration naming an origin the rule refuses is not honoured: the message is still delivered, as from its
+// sender, without "relayed from".
+func TestNameRuleRelayOriginNotHonoured(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	b, c := f.client(t, "b"), f.client(t, "c")
+	ctx := context.Background()
+	if _, err := c.SendWith(ctx, "b", "the original", SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.SendWith(ctx, "a", "passing it on", SendOptions{Via: 1}); err != nil {
+		t.Fatal(err)
+	}
+	plain := f.client(t, "a")
+	if m, err := plain.Read(ctx, 1); err != nil || m.Via != "c #1" {
+		t.Fatalf("no rule: %+v %v", m, err)
+	}
+	a, err := OpenClient(ctx, f.cfgRule("a", ruleOf(t, "name:c")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	m, err := a.Read(ctx, 1)
+	if err != nil || m.Via != "" || m.From != "b" || string(m.Body) != "passing it on" {
+		t.Fatalf("a refused origin was honoured or the mail lost: %+v %v", m, err)
+	}
+	if out := render.One(m); strings.Contains(out, "relayed") {
+		t.Fatalf("render shows the relay: %s", out)
 	}
 }
 

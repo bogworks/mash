@@ -176,3 +176,31 @@ func TestNameRuleRequiredLoadErrorWording(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A relative MASH_NAME_RULE_FILE is taken from the current directory and a relative file key from the config
+// directory; both are stored (and so printed) as the absolute path, and an error names that path too.
+func TestNameRulePathIsAbsolute(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.WriteFile(filepath.Join(cwd, "rule.json"), []byte(goodRuleFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs("rule.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": "rule.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NameRulePath != want || !filepath.IsAbs(c.NameRulePath) {
+		t.Fatalf("env relative path %q, want %q", c.NameRulePath, want)
+	}
+	if got := c.NameRule.StatusLine(c.NameRulePath); !strings.Contains(got, want) {
+		t.Fatalf("status %q does not show %q", got, want)
+	}
+	_, err = loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": "missing.json"})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(cwd, "missing.json")) {
+		t.Fatalf("error does not name the absolute path: %v", err)
+	}
+}

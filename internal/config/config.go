@@ -72,7 +72,7 @@ type Config struct {
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
 	NameRule     *namerule.Rule // MASH_NAME_RULE_FILE / "name_rule_file": the loaded rule
-	NameRulePath string         // the path it was loaded from, as configured ("" = none)
+	NameRulePath string         // the absolute path it was loaded from ("" = none)
 
 	// Provenance of the settings that decide which server a command acts on, for a command to say what it is about to
 	// act on (it informs; it changes no precedence). Keys: SourceKeys.
@@ -768,10 +768,16 @@ func (c *Config) loadNameRule(lookup Lookup, f file, dir, home string) error {
 		}
 		return nil
 	}
-	r, err := namerule.Load(path)
+	// Both forms end as one absolute path, so two endpoints that print the same path loaded the same file: the
+	// environment's relative path is taken from the current directory, the file key's from the config directory.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("mash: name rule file %s: %w", path, err)
+	}
+	r, err := namerule.Load(abs)
 	if err != nil {
 		return err
 	}
-	c.NameRule, c.NameRulePath = r, path
+	c.NameRule, c.NameRulePath = r, abs
 	return nil
 }

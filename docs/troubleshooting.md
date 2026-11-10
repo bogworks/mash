@@ -90,7 +90,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## `name rule` refused, or mash will not start with a name-rule file
 
-`mash: name rule file X: ...` at start means the file named by `MASH_NAME_RULE_FILE` (or `name_rule_file`) cannot be read or does not follow the format; the text after the path says which condition. `a name rule is required ... but no rule file is set` means `MASH_NAME_RULE_REQUIRED` is `true` and no file is named. `name rule "ID" refuses ...` is a refusal by the rule `ID`, with the rule's own message: the identity is not accepted in this deployment. Run `mash status` to see which file is loaded (`name rule: <path> sha256:<12 hex> (<N> rules)`). See "The name rule" in [operations.md](operations.md) and [name-rule.md](name-rule.md).
+`mash: name rule file X: ...` at start means the file named by `MASH_NAME_RULE_FILE` (or `name_rule_file`) cannot be read or does not follow the format; the text after the path says which condition. `a name rule is required ... but no rule file is set` means `MASH_NAME_RULE_REQUIRED` is `true` and no file is named. `name rule "ID" refuses ...` is a refusal by the rule `ID`, with the rule's own message: the identity is not accepted in this deployment. Run `mash status` to see which file is loaded, always as an absolute path (`name rule: <path> sha256:<12 hex> (<N> rules)`). See "The name rule" in [operations.md](operations.md) and [name-rule.md](name-rule.md).
 
 ## `send` timed out
 

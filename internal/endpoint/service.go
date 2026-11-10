@@ -332,6 +332,11 @@ func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(Promp
 		e.end(reply, "403", "the sender is not a mash endpoint")
 		return
 	}
+	// The name rule applies to the asker too: a peer on an older client may not have checked it on its side.
+	if err := e.checkKey(pointPromptAsker, from); err != nil {
+		e.end(reply, "403", err.Error())
+		return
+	}
 	text, err := promptText(r.Data())
 	if err != nil {
 		e.end(reply, "400", err.Error())

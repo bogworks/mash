@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
@@ -18,6 +19,8 @@ const (
 	pointReply           = "reply: the identity being answered"
 	pointPromptRecipient = "prompt: the recipient"
 	pointPromptSender    = "prompt: the sender"
+	pointPromptAsker     = "prompt: the asker"
+	pointRelayOrigin     = "mail: the declared origin of a relay"
 	pointLookup          = "lookup"
 	pointAlias           = "the compatibility alias"
 )
@@ -73,4 +76,18 @@ func (e *Endpoint) DiscoverRecipient(ctx context.Context, arg string) (string, e
 		return "", err
 	}
 	return DiscoverRecipient(ctx, e.nc, e.cfg.Owner, arg)
+}
+
+// viaAllowed applies the rule to the origin named by a verified relay declaration ("<origin> #<seq>"). Mail from a
+// refused origin is still delivered (the sender is judged on its own identity), but the declaration is not honoured:
+// via comes back empty, so the recipient is never shown "relayed from" a name the rule refuses. The error says why.
+func (e *Endpoint) viaAllowed(via string) (string, error) {
+	if via == "" || e.cfg.NameRule == nil {
+		return via, nil
+	}
+	origin, _, _ := strings.Cut(via, " #")
+	if err := e.checkKey(pointRelayOrigin, origin); err != nil {
+		return "", err
+	}
+	return via, nil
 }

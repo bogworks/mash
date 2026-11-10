@@ -334,6 +334,10 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			key = h.User + "\x00" + h.Nonce
 		}
 		replyTo, via := senderMarks(m.Headers(), trust, h)
+		if v, err := e.viaAllowed(via); err != nil {
+			e.log.Printf("#%d: relay declaration not honoured: %v", meta.Sequence.Stream, err)
+			via = v
+		}
 		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: meta.Sequence.Stream, From: from, Trust: trust,
 			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
 			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
@@ -776,6 +780,7 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
 	replyTo, via := senderMarks(raw.Header, trust, h)
+	via, _ = e.viaAllowed(via) // dropped here too; the serve path logs it
 	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data, ReplyTo: replyTo, Via: via,
 		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
 }

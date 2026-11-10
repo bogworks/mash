@@ -481,7 +481,7 @@ Mash learns of the refusal from the server's asynchronous permission-violation e
 
 A deployment can refuse identities that mash's own syntax accepts, such as a retired agent token, with a name-rule file. mash ships no default: with no file named, no rule applies and nothing changes. The file's format, the exact conditions under which it refuses start, and its compatibility rule are in [name-rule.md](name-rule.md); the deployment owns the content.
 
-Name the file with `MASH_NAME_RULE_FILE` or the key `name_rule_file` in `config.json` (the environment wins; a relative path in `config.json` is taken from the config directory). `mash` and `mashctl` read it through the same configuration, once, at start: a change takes a restart. A path that is set but empty is an error, not "no rule", and so is a file that cannot be read or does not follow the format; the error names the file and the problem, and mash does not start.
+Name the file with `MASH_NAME_RULE_FILE` or the key `name_rule_file` in `config.json` (the environment wins; a relative path in `config.json` is taken from the config directory, a relative `MASH_NAME_RULE_FILE` from the current directory; either way mash resolves it to an absolute path at start and shows that path in `mash status` and in every error, so two endpoints that show the same path loaded the same file). `mash` and `mashctl` read it through the same configuration, once, at start: a change takes a restart. A path that is set but empty is an error, not "no rule", and so is a file that cannot be read or does not follow the format; the error names the file and the problem, and mash does not start.
 
 To make sure a restart without the file cannot reopen what the rule closed, set `MASH_NAME_RULE_REQUIRED=true` (or `"name_rule_required": true`). mash then refuses to start unless a rule file was loaded. Only `true` and `false` are accepted.
 
@@ -492,7 +492,7 @@ name rule: /etc/mash/name-rule.json sha256:0123456789ab (3 rules)
 name rule: none set
 ```
 
-The digest is the first 12 hex digits of the SHA-256 of the file's bytes, so a check can confirm every endpoint loaded the same file. A refusal names the rule and carries its message, for example `mash: send: the recipient: name rule "no-cc" refuses cc.acme.peer: the agent token cc is retired`. It is returned to whoever asked, at provision, start, send, reply, prompt, lookup and the compatibility alias, and always before the directory is read.
+The digest is the first 12 hex digits of the SHA-256 of the file's bytes, so a check can confirm every endpoint loaded the same file. A refusal names the rule and carries its message, for example `mash: send: the recipient: name rule "no-cc" refuses cc.acme.peer: the agent token cc is retired`. It is returned to whoever asked, at provision, start, send, reply, prompt, lookup and the compatibility alias, and always before the directory is read. A receiving endpoint applies the rule again to a prompt's asker, answering `403` with the same text and not showing the prompt, because a peer on an older client may not have checked. A relay declaration (`relayed from`) whose origin the rule refuses is not honoured: the mail is still delivered, shown without the declaration, and the serve log says why.
 
 ## Fixed protocol constants
 
