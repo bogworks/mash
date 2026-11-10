@@ -1,0 +1,308 @@
+# What fences mail once the zone token leaves the subject
+
+**Status:** proposal, for the maintainer's ruling. `Decision: none`: this document proposes, it decides nothing and
+changes no code. The six zone command-line items stay frozen until it is ruled on.
+
+**Date:** 2026-11-11. **Facts as of:** `main` at `6dbb9ca`.
+
+## 1. Who this is for, and the vocabulary
+
+You have not read the mash code. This section defines every term the rest uses, with a small example each.
+
+- **Endpoint.** One mash identity: a named mailbox that a session (or tool) connects as. Example: `build-bot`.
+- **Subject.** NATS routes every message by a dot-separated name called a subject. Example:
+  `agents.mail.cc.acme.build-bot`. Each dot-separated piece is a **token** (so that subject has five: `agents`, `mail`,
+  `cc`, `acme`, `build-bot`). In `agents.<verb>.<agent>.<owner>.<name>` (SAP's shape, section 2), the tokens after
+  `agents` are the verb (`mail`, `prompt`, `status`, `hb`), the **agent** token (`cc`), the **owner** and the **name**.
+- **Wildcard.** In a subject pattern `*` stands for exactly one token and `>` for "one or more tokens, to the end".
+  `agents.mail.*.acme.*` matches mail to every endpoint of owner `acme`.
+- **SAP.** The Synadia Agent Protocol, version 0.3.0, the open protocol whose subject shape mash adopted.
+- **NATS user JWT.** A signed token the NATS server reads when an endpoint connects. It names the user and lists its
+  **publish permissions** (subjects it may publish to) and **subscribe permissions** (subjects it may receive from),
+  each as allow and deny lists of subject patterns. The server enforces them; the client cannot talk around them.
+  Example: publish allow `agents.mail.*.acme.*` lets that user mail any `acme` endpoint.
+- **Account, signing key.** An account is NATS's tenancy unit; mash runs one shared account. The **account signing key**
+  signs user JWTs. A **scoped signing key** is a signing key that carries a permission set: every user signed by it gets
+  exactly that set (and cannot be given more by the user's own JWT). The permission set may hold templates:
+  `{{name()}}` becomes the user's name and `{{tag(allow)}}` becomes one line per `allow:` tag on the user.
+- **Tag.** A short `key:value` string stored in a user's JWT, lower-cased by the JWT library. With a scoped key, a tag
+  is a permission: `allow:sales.hr-agent` expands, through `agents.mail.*.acme.{{tag(allow)}}`, to a publish allow line.
+- **Label.** A `key=value` string on an endpoint's directory record (the shared registry mash keeps of endpoints), up to
+  64 per record, set by the administrator, never by the endpoint about itself. Example: `team=billing`.
+- **Zone.** The one label, named by `subject_label` (default `zone`), whose value mash puts into the mail subject as an
+  extra token. Example: zone `billing` gives `agents.mail.cc.acme.billing.build-bot`. An endpoint is in exactly one zone.
+- **Policy file.** A YAML file the administrator writes: `default: allow|deny`, endpoints with labels, and rules (`allow`
+  or `deny`, a `from` selector and a `to` selector that match labels), plus tests. `mashctl` (the operator tool)
+  compiles it into the scoped keys and tags above. Example rule: deny `from {team: contractors}` `to {team: finance}`.
+- **Fence.** What this document asks about: the mechanism that stops endpoint A publishing mail to endpoint B when the
+  administrator has said it may not, in a way A cannot bypass.
+
+## 2. Findings (answering the three questions)
+
+### 2.1 How the zone got into the subject
+
+The first design fixed mail as SAP's five tokens: ADR 0005 (accepted 2026-10-21, recorded 2026-10-31) chose
+`agents.<verb>.cc.<owner>.<name>` and named "Pure SAP" a driver (`docs/decisions/0005-subjects-follow-sap-hierarchy.md`;
+design goal 5, `docs/specs/2026-10-21-mash-design.md:23`).
+
+On 2026-11-01 and 2026-11-02 the maintainer ruled that mash gains an operator tool that mints users and compiles "who
+may mail whom" into permissions (ADR 0052, ADR 0053). The constraint that forced structure into the subject is size:
+spelling out each recipient in each sender's permissions was measured to exhaust the account JWT's 1 MiB ceiling at 87
+endpoints (ADR 0052, "Measured 2026-11-02"; ADR 0053, Context). A wildcard is the only compact way to allow many
+recipients, and a wildcard needs a token to stand on. ADR 0053 therefore put one label, the zone, into the mail subject:
+`agents.mail.cc.<owner>.<zone>.<name>` (ADR 0053, Decision Outcome). ADR 0054 made it backward compatible: an endpoint
+with no zone keeps the five-token subject, a zoned inbox stream takes both the legacy subject and its own zone's
+subject, and the permission line comes in two forms (`agents.mail.*.<owner>.*` and `agents.mail.*.<owner>.*.*`).
+
+The code landed on 2026-11-02: ADRs 0052 and 0053 with the `mashctl` skeleton (PR #117, `bfa98e3`); the zone subject
+and ADR 0054 (PR #123, `4e6810e`, merged as `acf6694`); zone-wildcard compilation (PR #119, `d2fa678`, merged `900288e`);
+mail-only policing and ADR 0055 (PR #142, `0abf634`); the placeholder tag and ADR 0056 (PR #148, `8a44020`).
+
+The mash design said the cost out loud the same day: "the mail subject gains a zone token (ADR 0053), which SAP tools
+would not expect" (ADR 0052, line 72; repeated at ADR 0053, line 77).
+
+**Does it depart from SAP 0.3? Yes, for the mail subject.** SAP 0.3 section 2 (`core-protocol.md`, commit `c48cea5f`)
+says: "Every agent instance occupies a subject tree of the form: `agents.{verb}.{agent}.{owner}.{name}`", five tokens,
+and that "`agents.hb.*.*.*`" is the one fixed subject callers may subscribe to without a lookup. ADR 0005 recorded the
+same shape ("SAP fixes a five-token shape for agent subjects"). `agents.mail.cc.<owner>.<zone>.<name>` has six. SAP
+reserves four verbs (`prompt`, `hb`, `status`, `attachments`) and `mail` is not one of them, so SAP gives `mail` no
+rule and does not forbid the verb; the design relies on that (`2026-10-21-mash-design.md:57`). But the six-token subject
+is outside the one shape section 2 defines for an agent's subjects, and ADR 0054 itself says it "amends ADR 0005 for the
+mail verb". What stays conformant is the part SAP actually specifies: prompt, status and heartbeat keep five tokens
+(ADR 0054, ADR 0055), so a SAP tool still discovers, probes and prompts a mash endpoint. What does not: a tool listing
+mail with `agents.mail.*.*.*` misses zoned endpoints, and mash already resolves mail subjects through its own directory
+rather than SAP's `$SRV.INFO`, which the design calls a bend of section 2 (`2026-10-21-mash-design.md`, "Addressing
+mail"). The claim "pure SAP" is true of the SAP verbs and false of mail.
+
+### 2.2 Broken as conceived, or as implemented?
+
+**As conceived, in one respect; as implemented, not on the evidence I could run.**
+
+*Implementation.* `go test ./internal/policy ./internal/admin ./internal/sap` passes on `6dbb9ca`, including the live
+tests that start nats-server with the compiled keys. The compile is exact by construction: a property test asserts the
+expanded permissions let a sender publish to its recipients, no more and no fewer (`internal/policy/compile.go:118`,
+`Effective`). I found no defect in what it was asked to do. Two gaps are unfinished work, not bugs: ADR 0053 left
+prompt and status unpoliced "until the maintainer rules" (ADR 0055, still the state), and the compiled zone lines are
+six-token only (`internal/policy/compile.go:57`), so I could not tell from the code how a compiled user reaches an
+endpoint with no zone on record; ADR 0054 says "no zone" and zone `default` are different facts, while
+`docs/policy-file.md` treats a missing label as zone `default`. I did not test that seam; it is worth a test whichever
+option is chosen.
+
+*Conception.* The zone is a single partition baked into the address. That has four costs the design already carried or
+the later naming work exposed:
+
+1. It moves a policy attribute into identity. An endpoint's address changes when its zone does; ADR 0054 allows no
+   change of zone and no return to legacy "in this version".
+2. Only one label can be the zone. Every other label compiles to per-user tags, capped at about 135 by the 4 KiB connect
+   line (`docs/policy-file.md`, "Limits of the encoding"), so the structure that makes size independent of endpoints
+   serves exactly one grouping.
+3. It breaks SAP's shape for mail (section 2.1).
+4. It collides with the naming contract. The 2026-11-10 naming plan fixes every endpoint to three tokens, SAP's agent,
+   owner and name, with "No sixth token" (`docs/plans/2026-11-10-naming-grammar-in-mash.md`, "Target"). The code agrees
+   today: `RefuseCompiledForNewForm` refuses a policy-compiled user for a three-token identity "until the zone ruling"
+   (`internal/admin/permissions_newform.go:57`). So the compiler, as designed, cannot serve the form mash is moving to.
+
+The conclusion I draw: the compiler is a sound implementation of a design whose premise (the zone is an address token)
+the naming contract has since ruled out.
+
+### 2.3 What enforces mail today
+
+**The NATS server, from the user JWT.** An endpoint's user JWT carries its publish and subscribe permissions. The
+server refuses a publish that matches no allow line or matches a deny line. Nothing of mash's is in the message path;
+ADR 0053 rejected a router and an auth callout for that reason. The JWT is produced by `mashctl` (ADR 0052) as follows.
+
+- Without a policy: one wildcard line lets every endpoint of an owner mail every other (`agents.mail.*.<owner>.*`, plus
+  the six-token twin), design section 8, `internal/admin/permissions.go:32`.
+- With a policy file: `mashctl policy apply` compiles it into one **scoped signing key per zone** pushed into the account
+  JWT, and mints each user under its zone's key (ADR 0052, ADR 0053; `internal/policy/compile.go:70`, `Compile`). The
+  key's permission set holds the fixed per-endpoint lines as `{{name()}}` templates, one mail wildcard per recipient zone
+  that the whole sender zone may mail (`agents.mail.*.<owner>.<zoneB>.*`), and two tag templates for exceptions.
+- Exceptions are tags on the user: `allow:<zone>.<name>` and `deny:<zone>.<name>` (or `.*`), expanded by the key's
+  templates `agents.mail.*.<owner>.{{tag(allow)}}` and `...{{tag(deny)}}`. NATS lets a deny beat an allow.
+- ADR 0056: every zone key carries both templates and every user the placeholder tag `deny:_none` (a subject token no
+  name can equal), because nats-server refuses a user with no `deny:` tag under a key that has the deny template. This
+  keeps a first deny exception from re-signing a whole zone.
+- ADR 0055: only mail is policed. Each zone key carries two open lines for prompt and status
+  (`agents.prompt.*.<owner>.*`, `agents.status.*.<owner>.*`), so a deny rule does not stop a prompt or a status probe.
+
+**What labels do and do not do.** A label is a field on a directory record. The server never reads it. A label has an
+effect only because `mashctl` reads it, at compile time, and turns the result into something the server does read:
+the label named by `subject_label` becomes the zone token and the zone key an endpoint is signed under; any other label
+becomes a selector that picks endpoints for a rule, and the rule's effect appears as tags on those endpoints' users.
+Labels *select*; subjects and tags *enforce*. Changing a label with no re-apply changes nothing the server does, and
+`mashctl drift` exists to report when the two disagree (ADR 0053). Elsewhere labels only display (`who --long`) and
+filter (`who`).
+
+**"ACL".** mash has no ACL object. The word does not occur in the code or the ADRs; it appears once in
+`docs/comparison.md:146`, describing a rival's broker. The nearest mash concept is the compiled publish permission:
+what an ACL would hold (who may reach whom) is the publish allow and deny lists in the user JWT, written from the policy
+file. If "ACL" means a server-side allow list, mash's is those lines; if it means a per-endpoint list the endpoint
+consults, mash has none.
+
+**What is live.** Per x-lead: 0 zoned records of 68 and no policy files deployed. So today no
+deployment runs zones or a compiled policy; every endpoint uses the single owner-wide mail line. That is why removing
+the zone token has near-zero migration cost.
+
+## 3. The question
+
+The zone token is to leave the mail subject. Mail will have SAP's five tokens, `agents.mail.<agent>.<owner>.<name>`,
+and the default grants for a three-token endpoint are scoped to its owner token, with extras limited to mail, prompt and
+status (`internal/admin/permissions_newform.go:77`, `NewFormPermissions`: peer lines
+`agents.<verb>.<agent>.<owner>.*`, extras validated by `ValidateGrant` at line 21, which refuses a wildcard in the agent
+position). Without a zone token, **what stops endpoint A mailing endpoint B inside an owner?**
+
+## 4. Alternatives
+
+Each is judged on what it enforces and where, what it costs, what breaks, and how to get there from today. Sizes are
+ADR 0052's and 0053's measurements (nats-server 2.15.x, jwt/v2 2.8.2): account JWT ceiling 1 MiB; user JWT must fit the
+4096-byte connect line, about 135 tags or 24 literal recipients.
+
+### A. The owner token is the fence
+
+The permission boundary is the agent and owner tokens together (the third and fourth). Default grants say an endpoint mails, prompts and probes
+endpoints with its own agent and owner tokens and no one else's; reaching across owners is an explicit extra grant. No labels, tags or zones
+are involved inside an owner.
+
+- *Enforces:* at the server, in the user JWT. Already built: `NewFormPermissions` is exactly this.
+- *Cost:* near zero. One fixed permission set, no per-pair state, no signing-key proliferation, no account growth. A
+  cross-owner extra is one literal line in the user JWT; a change reissues that one user.
+- *Breaks:* nothing, today; and nothing at the owner boundary. It cannot separate two endpoints of the same owner, so
+  an owner must be sliced into several owners to get a boundary there; every extra is a grant per user.
+- *Migration:* none for live mail (no zoned records). Remove `set-zone` and `provision --zone` and the six-token lines.
+- *Naming contract:* fits exactly: the naming plan already defines an owner grant as `agents.mail.<agent>.<owner>.>` and
+  forbids a wildcard in the agent token.
+
+### B. Labels compiled into exact per-endpoint allow lists, no subject token
+
+Keep the policy file. `mashctl` compiles each sender's allowed recipients into literal publish lines or into
+`allow:<name>` tags (the tag templates work without a zone: `agents.mail.<agent>.<owner>.{{tag(allow)}}`), one line per
+permitted recipient.
+
+- *Enforces:* at the server, in the user JWT. Fine-grained to the single pair.
+- *Cost:* the size problem that created zones returns. Literal lists are quadratic: the per-endpoint-key layout crossed
+  1 MiB at 87 endpoints; user-JWT lists outgrow the connect line at about 24 recipients (ADR 0052, measured). Tags
+  stretch that to about 135 per user. Every join or leave reissues every sender that may mail the changed endpoint, and
+  re-delivers its credentials file. Operational load scales with the number of pairs.
+- *Breaks:* an owner with more than about 135 recipients per sender cannot be expressed; a label-group rule with many
+  members spends tags per member. Prompt and status remain open (ADR 0055) unless compiled too.
+- *Migration:* rewrite the compiler's zone-wildcard stage into tag-only output, drop `subject_label`, reissue users
+  (none are zoned live). Moderate engineering, no flag day.
+- *Naming contract:* fits (five tokens), with the compiler's wildcard unit gone; `RefuseCompiledForNewForm` can be lifted.
+
+### C. No server-side fence inside an owner
+
+All endpoints of an owner may mail each other. Boundaries exist only between owners (alternative A) and between NATS
+accounts. Inside an owner, authenticity rests on what mash already has: every message is signed (ADR 0017), mail from
+a `verified` sender is a delegated request, the rest is information (ADR 0019, 0020), and optionally a receiver-side
+filter discards mail from senders its directory labels do not admit.
+
+- *Enforces:* the owner boundary at the server; everything finer at the client, on the receiver, after delivery.
+- *Cost:* lowest. Nothing to compile or reissue. A receiver-side label check is small code and no JWT growth.
+- *Breaks:* a client check is not a fence: a modified or compromised receiver ignores it, and the message has been
+  delivered and stored before it runs. ADR 0053 built the compiler because "a client cannot ignore the policy" was a
+  stated requirement. Also relay by asking (A mails B to forward to C) stays unaddressed, as it is under every option.
+- *Migration:* none.
+
+### D. Hard isolation by NATS account
+
+Where a real boundary is needed inside what is now one owner, give the group its own NATS account and connect the two
+with explicit exports and imports (ADR 0052 named this "the later step for hard isolation between organisations").
+
+- *Enforces:* at the server, strongest form: an account cannot see another's subjects at all.
+- *Cost:* heaviest: an account, JetStream limits and imports per group, a service import for each permitted publish and
+  acknowledgement path, and a silent denial (the sender sees no refusal). mash's one-shared-account design
+  (ADR 0006) would have to change.
+- *Breaks:* directory, leases and the shared inbox model assume one account.
+- *Migration:* large; only justified by a tenancy requirement mash does not have today.
+
+### E. Alternatives considered and rejected
+
+A router or relay evaluating policy per message, and an auth callout deciding at connect time, were rejected in
+ADR 0053 because mash is limited to what NATS does by itself and a component of ours in the path reads payloads. Nothing
+since has changed that.
+
+### F. A hybrid I think is better than any single one: A as the default, B for exceptions only
+
+Make the owner token the fence (A) and treat the policy file as an exception tool, not a mesh partition. The default
+is the owner-wide line. An administrator who needs to *narrow* inside an owner writes a few `deny` rules, compiled to
+`deny:<name>` tags on the named senders, using the templates that exist today, with a hard cap and a `check` error if a
+sender would exceed it; an administrator who needs to *widen* across owners writes a cross-owner extra. Anything larger
+than that is a signal to split the owner (A) or the account (D), not to grow the compiler.
+
+- *Enforces:* at the server (A's boundary plus B's tags).
+- *Cost:* one scoped key per owner (not per zone), tags only where an exception exists, so most users carry only the placeholder tag
+  and the account JWT stays constant. Reissue is limited to the senders an exception names.
+- *Breaks:* fine-grained deny across hundreds of endpoints in one owner is unsupported, by design, and `check` says so.
+- *Migration:* as B, but smaller: delete the zone-wildcard stage and the zone labels, keep the tag templates and the
+  deny placeholder (ADR 0056).
+
+## 5. The opinion of Codex (Daybreak)
+
+Asked for an independent assessment of sections 2 and 4 and a recommendation, given this document as it stood before
+this section.
+
+- Command: `codex exec -m gpt-6-sol -c daybreak=true -s read-only --skip-git-repo-check` (document on standard input)
+- Setting: `daybreak=true`, model `gpt-6-sol`; CLI `codex-cli 0.166.0`
+- Date: 2026-11-10, 16:35 UTC
+
+The answer, unedited:
+
+> **I recommend F, with a narrower contract:** endpoints may mail peers in the same agent and owner by default; administrators may add a bounded number of exact recipient denies and explicit cross-owner grants. NATS enforces the publish rules, and its deny rules override a broad allow. Keep the five-token mail subject. A is a reasonable choice if the maintainer no longer requires any boundary within an owner; C largely repeats A, while its receiver filter cannot prevent delivery or storage. B recreates the scaling problem, and D is disproportionate without a tenancy requirement. E remains a viable future design if policy must be evaluated per message. [NATS authorization](https://docs.nats.io/learn/security/authorization)
+>
+> The document needs these corrections and qualifications:
+>
+> - **F changes policy semantics.** A few denies can express exceptions to an open owner, but cannot implement the current policy file’s general `default: deny` or broad label-based allow rules. Say explicitly which rules the new compiler will reject.
+> - **F’s costs are understated.** One scoped key *per owner* makes account-JWT size grow with owner count. A label rule can require reissuing every matching sender, including when a newly labeled recipient joins. Check the expanded permission lists and actual `CONNECT` size; “135 tags” and “24 recipients” are measurements for one encoding and configuration, not NATS protocol limits. The server’s `max_control_line` is configurable. [NATS configuration](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/configuration/README.md)
+> - **A permission change needs a rollout plan.** A newly issued sender JWT does not replace credentials already held by a running endpoint. Specify how existing connections are made to use the new deny and how to verify enforcement before calling a policy applied. Account updates can also cause existing connections to be reevaluated; the behavior depends on what changed. [NATS JWT administration](https://github.com/nats-io/nats.docs/blob/master/running-a-nats-service/nats_admin/jwt.md)
+> - **“Mail fence” is narrower than “cannot contact B.”** Prompt and status remain open under the stated design. If the administrator’s rule means *no interaction*, those verbs need an explicit ruling too. Also test that the compiled five-token permissions cannot publish to any remaining six-token inbox subscription.
+>
+> A potentially simpler variant of F is **one scoped signing key with administrator-signed agent and owner tags in its templates**, plus per-sender deny tags. That could avoid a key per owner, but it needs a live-server test of template expansion and missing-tag behavior before adoption. The document’s tests establish the current zone compiler’s behavior; they do not establish that this replacement works. [NATS scoped signing keys](https://docs.nats.io/learn/security/decentralized-auth)
+
+### Where I agree and disagree
+
+I agree with the recommendation of F and with these corrections, which I made to the recommendation below rather than
+to the findings: state which policy rules the new compiler refuses (the file's `default: deny` and broad label allows
+do not survive); say that prompt and status are outside the fence until ruled (ADR 0055); and test the one-key-with-tags
+variant before choosing between it and a key per owner.
+
+I disagree with one point. It says a key per owner makes the account JWT grow with the number of owners. In mash today
+there is one owner per deployment (ADR 0006), so a key per owner is one key and the size does not grow; the point
+would apply only if mash moved to many owners in one account. I also note its rollout point is partly covered by what
+ADR 0052 already measured: a change to a key reaches connected endpoints after an account push with the same
+credentials (about 0.5 s, no mail lost), while a change to one user's tags re-signs that user and re-delivers its
+credentials file, and the new permissions take effect when that user reconnects. Section 6 turns that into a required
+step. Finally, the 135-tag and 24-recipient figures are for a default server (4096-byte connect line), as Codex says;
+ADR 0052 recorded that raising `max_control_line` lifts them, at an operational cost.
+
+## 6. Recommendation
+
+**Adopt F: the agent and owner tokens are the fence, and the policy file is an exception tool, not a mesh partition.**
+
+Reasons:
+
+1. It is the only option that needs no new subject token, so mail keeps SAP's five tokens, the six-token departure
+   (section 2.1) goes away, and the compiler can serve three-token endpoints (section 2.2, point 4).
+2. It keeps a server-side fence, which ADR 0053 required and C does not give. A, the floor of F, already exists in code.
+3. It stays small: nothing to size per pair (the reason B fails), no per-group account (D). Zones are unused live
+   (0 of 68), so the migration is deleting unused paths.
+4. It still lets an administrator narrow inside an owner and widen across owners, which is the realistic need of a
+   solo developer or a small team.
+
+What F must say out loud, because the policy file's current promise is larger:
+
+- The rules the compiler accepts: `deny` rules between named endpoints or small label groups, and cross-owner
+  allows. It refuses `default: deny` for an owner and any rule whose compiled tags would exceed the per-user budget,
+  with a `check` error that names the count. A deployment that needs a general deny-by-default mesh inside an owner
+  should split the owner or, if it needs hard isolation, use D.
+- Prompt and status stay outside the fence until the maintainer rules (ADR 0055); "fence" means mail.
+- Applying a change: a key change reaches connected endpoints on an account push; a tag change needs the named users
+  re-signed, their credentials re-delivered and the endpoints reconnected. A policy counts as applied only after a live
+  check that a denied publish is refused. The existing `drift` and `apply` verification do this for zones and would be
+  reused.
+- Before building: a live-server test of the one-key-with-tags variant (agent and owner as administrator-signed tags
+  in the key's templates) against a key per owner, including template expansion and the missing-tag case, and a test
+  that compiled five-token permissions cannot publish to any six-token inbox subscription left in a zoned stream. Also
+  test the unresolved seam from section 2.2: how a compiled user reaches an endpoint that has no zone on record.
+
+Next steps if ruled: an ADR that supersedes 0053 and 0054 for the subject (and amends 0055's framing), then the code
+change as small pull requests. Nothing here is ruled.
