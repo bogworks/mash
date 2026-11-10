@@ -183,6 +183,16 @@ type Record struct {
 	// not the default zone. Readers from before this field ignore it and, for a zoned endpoint, still reach it
 	// because its inbox stream keeps the legacy subject too.
 	Zone string `json:"zone,omitempty"`
+	// Alias is the legacy identity a new-form record answers to during the transition window (ADR 0076). Only a
+	// new-form record may carry it, only provisioning writes it, and the endpoint never does. Readers from before
+	// this field ignore it. It is removed with the legacy form.
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+// Alias names a legacy identity (owner and name under the legacy rule) that a new-form record answers to.
+type Alias struct {
+	Owner string `json:"owner"`
+	Name  string `json:"name"`
 }
 
 // MailSubjectFor is the mail subject an endpoint with this owner, zone and name has: the legacy one when zone is empty.
@@ -321,6 +331,9 @@ func ParseRecord(key string, value []byte) (Record, error) {
 	}
 	lerr := legacyCheck(key, r)
 	if lerr == nil {
+		if r.Alias != nil {
+			return Record{}, fmt.Errorf("directory %s: a legacy record cannot carry an alias", key)
+		}
 		return r, nil
 	}
 	if _, nerr := newFormCheck(key, r); nerr != nil {
@@ -329,7 +342,39 @@ func ParseRecord(key string, value []byte) (Record, error) {
 		}
 		return Record{}, lerr
 	}
+	if err := aliasCheck(key, r); err != nil {
+		return Record{}, err
+	}
 	return r, nil
+}
+
+// aliasCheck applies the alias rules to a new-form record r read under key: the alias, if any, must be a valid legacy
+// identity whose owner differs from r's own owner (mash's admission rule, so the legacy wildcard filter of the alias
+// never reaches r).
+func aliasCheck(key string, r Record) error {
+	if r.Alias == nil {
+		return nil
+	}
+	if _, _, err := r.AliasIdentity(); err != nil {
+		return fmt.Errorf("directory %s: invalid alias: %w", key, err)
+	}
+	if r.Alias.Owner == r.Owner {
+		return fmt.Errorf("directory %s: alias owner %q equals the record's own owner", key, r.Alias.Owner)
+	}
+	return nil
+}
+
+// AliasIdentity is the legacy identity r's alias names. ok is false (and err nil) when r carries no alias, and false
+// with an error when the alias is not a valid legacy identity.
+func (r Record) AliasIdentity() (id sap.EndpointIdentity, ok bool, err error) {
+	if r.Alias == nil {
+		return sap.EndpointIdentity{}, false, nil
+	}
+	id, err = sap.Legacy(r.Alias.Owner, r.Alias.Name)
+	if err != nil {
+		return sap.EndpointIdentity{}, false, err
+	}
+	return id, true, nil
 }
 
 // Identity is the endpoint identity r names: the legacy identity when r satisfies the legacy checks (keyed by its

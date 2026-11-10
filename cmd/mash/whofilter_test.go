@@ -119,3 +119,32 @@ func TestWhoCapsFlagsAndRenderers(t *testing.T) {
 		t.Fatalf("json: %v %v", arr, err)
 	}
 }
+
+func TestWhoShowsAlias(t *testing.T) {
+	al := store.Record{Name: "ops1", Owner: "team1", AgentToken: "acme", Alias: &store.Alias{Owner: "legowner", Name: "ops1"}}
+	plain := store.Record{Name: "ops2", Owner: "o"}
+	ps := []endpoint.Presence{{Record: al}, {Record: plain}}
+	long := whoText(ps, true, nil)
+	if !strings.Contains(long, "\talias legowner/ops1") {
+		t.Fatalf("--long text lacks the alias: %q", long)
+	}
+	if short := whoText(ps, false, nil); strings.Contains(short, "alias") {
+		t.Fatalf("short text shows the alias: %q", short)
+	}
+	for _, l := range strings.Split(long, "\n") {
+		if strings.HasPrefix(l, "ops2") && strings.Contains(l, "alias") {
+			t.Fatalf("record without alias shows one: %q", l)
+		}
+	}
+	var out []map[string]any
+	if err := json.Unmarshal([]byte(whoJSON(ps, true, nil)), &out); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := out[0]["alias"].(map[string]any)
+	if !ok || a["owner"] != "legowner" || a["name"] != "ops1" || len(a) != 2 {
+		t.Fatalf("json alias = %v", out[0]["alias"])
+	}
+	if _, has := out[1]["alias"]; has {
+		t.Fatalf("record without alias has an alias key: %v", out[1])
+	}
+}

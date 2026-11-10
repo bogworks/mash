@@ -103,6 +103,13 @@ type whoEntry struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Zone        string            `json:"zone,omitempty"` // additive (ADR 0054): present only for a zoned endpoint
 	Lease       *whoLease         `json:"lease,omitempty"`
+	Alias       *whoAlias         `json:"alias,omitempty"` // additive (ADR 0076): present only for a record that carries an alias
+}
+
+// whoAlias is the legacy identity a new-form record answers to.
+type whoAlias struct {
+	Owner string `json:"owner"`
+	Name  string `json:"name"`
 }
 
 // whoJSON renders the presences as a JSON array (`[]` when none). Map keys encode sorted. lease is added only when
@@ -120,6 +127,9 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		}
 		if !p.LastSeen.IsZero() {
 			e.LastSeen = p.LastSeen.UTC().Format(time.RFC3339)
+		}
+		if r.Alias != nil {
+			e.Alias = &whoAlias{Owner: r.Alias.Owner, Name: r.Alias.Name}
 		}
 		if li, ok := live[r.KeyOrName()]; ok && long {
 			e.Lease = &whoLease{Host: li.Host, Version: li.Version}
