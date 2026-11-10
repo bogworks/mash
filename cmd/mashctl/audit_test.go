@@ -269,6 +269,7 @@ func serverState(t *testing.T, js jetstream.JetStream) string {
 // stable labels, so the output can be compared with the golden file.
 func (f *auditFixture) normalize(s string) string {
 	s = strings.ReplaceAll(s, f.credsDir, "<CREDS-DIR>")
+	s = strings.ReplaceAll(s, f.e.Account, "ACCOUNT") // the account's public key is random per run
 	// message and consumer times are the real time of the run
 	s = regexp.MustCompile(`"(last_time|delivered_last|ack_floor_last|created)": "[^"]*"`).ReplaceAllString(s, `"$1": "<TIME>"`)
 	for k, v := range f.users {
@@ -428,7 +429,10 @@ func TestAuditDeterministicAndWritesNothing(t *testing.T) {
 	// the text form is deterministic too, and a --strict run changes nothing either
 	t1, _, _ := f.run(t)
 	t2, _, _ := f.run(t)
-	if t1 != t2 || t1 == "" {
+	// the text header prints the real time of the run (`generated <RFC3339>`): mask it, as for the JSON form
+	genText := regexp.MustCompile(`generated \S+`)
+	t1, t2 = genText.ReplaceAllString(t1, "generated <TIME>"), genText.ReplaceAllString(t2, "generated <TIME>")
+	if t1 != t2 || t1 == "" || !strings.Contains(t1, "generated <TIME>") {
 		t.Fatalf("text form differs or is empty:\n%s\n%s", t1, t2)
 	}
 	f.run(t, "--strict")
@@ -614,20 +618,23 @@ func TestAuditInboxDrainedRule(t *testing.T) {
 		in   auditInbox
 		want bool
 	}{
-		"gone":                 {auditInbox{}, true},
-		"covers all":           {in(3, 3, 5, ok), true},
-		"empty stream":         {in(0, 6, 5, auditDeliver{Present: true, DeliverPolicy: "new", AckFloor: 5}), true},
-		"no consumer, empty":   {in(0, 6, 5, auditDeliver{}), true},
-		"no consumer, msgs":    {in(1, 5, 5, auditDeliver{}), false},
-		"pending":              {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", Pending: 1, AckFloor: 4}), false},
-		"ack pending":          {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", AckPending: 1, AckFloor: 4}), false},
-		"new":                  {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "new", AckFloor: 5}), false},
-		"start after first":    {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_sequence", StartSeq: 4, AckFloor: 5}), false},
-		"start at first":       {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_sequence", StartSeq: 3, AckFloor: 5}), true},
-		"start time":           {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_time", AckFloor: 5}), false},
-		"last":                 {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "last", AckFloor: 5}), false},
-		"filter narrower":      {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"s.b"}, AckFloor: 5}), false},
-		"filter same as subj":  {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"s.a"}, AckFloor: 5}), true},
+		"gone":               {auditInbox{}, true},
+		"covers all":         {in(3, 3, 5, ok), true},
+		"empty stream":       {in(0, 6, 5, auditDeliver{Present: true, DeliverPolicy: "new", AckFloor: 5}), true},
+		"no consumer, empty": {in(0, 6, 5, auditDeliver{}), true},
+		"no consumer, msgs":  {in(1, 5, 5, auditDeliver{}), false},
+		"pending":            {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", Pending: 1, AckFloor: 4}), false},
+		"ack pending":        {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", AckPending: 1, AckFloor: 4}), false},
+		"new":                {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "new", AckFloor: 5}), false},
+		"start after first":  {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_sequence", StartSeq: 4, AckFloor: 5}), false},
+		"start at first":     {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_sequence", StartSeq: 3, AckFloor: 5}), true},
+		"start time":         {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "by_start_time", AckFloor: 5}), false},
+		"last":               {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "last", AckFloor: 5}), false},
+		"filter narrower":    {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"s.b"}, AckFloor: 5}), false},
+		// A filter equal to the stream's CURRENT subjects can still skip stored messages from subjects the stream
+		// captured earlier, so only an unfiltered consumer proves the drain.
+		"filter same as subj":  {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"s.a"}, AckFloor: 5}), false},
+		"filter two subjects":  {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"s.a", "s.b"}, AckFloor: 5}), false},
 		"ack floor below last": {in(3, 3, 5, auditDeliver{Present: true, DeliverPolicy: "all", AckFloor: 4}), false},
 	} {
 		if got := tc.in.drained(); got != tc.want {
@@ -1247,5 +1254,157 @@ func TestAuditCompareEarlierWithoutCreationTimes(t *testing.T) {
 	}
 	if txt, _, _ := f.run(t, "--compare", old); !strings.Contains(txt, "UNKNOWN") {
 		t.Errorf("text form must show UNKNOWN:\n%s", txt)
+	}
+}
+
+// A consumer filtered to the stream's current subjects can skip stored messages from subjects the stream captured
+// earlier, so zero pending and an ack floor at last_seq prove nothing: only an unfiltered consumer proves the drain.
+func TestAuditDrainedFilteredConsumerIsNotDrained(t *testing.T) {
+	g := newAuditEnv(t)
+	g.legacy(t, "ops1")
+	subj := sap.For(g.e.Owner, "ops1").Mail
+	g.publish(t, subj, 3)
+	_, u := g.e.Mint(t, "n")
+	g.users[u] = "USER-n"
+	g.newForm(t, "acme", "team1", "ops1", u, &store.Alias{Owner: g.e.Owner, Name: "ops1"})
+	// the filter is exactly the stream's current subjects
+	st, err := g.js.Stream(context.Background(), sap.InboxStream("ops1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.CachedInfo().Config.Subjects) != 1 {
+		t.Fatalf("stream subjects: %v", st.CachedInfo().Config.Subjects)
+	}
+	g.recreateLegacyConsumer(t, "ops1", func(c *jetstream.ConsumerConfig) { c.FilterSubject = st.CachedInfo().Config.Subjects[0] })
+	g.ackAll(t, "ops1")
+
+	out, _, code := g.run(t, "--json")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var r struct {
+		Renames []struct {
+			Drained     bool `json:"drained"`
+			LegacyInbox struct {
+				Msgs    uint64 `json:"msgs"`
+				LastSeq uint64 `json:"last_seq"`
+				Deliver struct {
+					Pending    uint64   `json:"pending"`
+					AckPending int      `json:"ack_pending"`
+					AckFloor   uint64   `json:"ack_floor"`
+					Filters    []string `json:"filter_subjects"`
+				} `json:"deliver"`
+			} `json:"legacy_inbox"`
+		} `json:"renames"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Renames) != 1 {
+		t.Fatalf("report: %v %s", err, out)
+	}
+	in := r.Renames[0].LegacyInbox
+	if in.Msgs != 3 || in.Deliver.Pending != 0 || in.Deliver.AckPending != 0 || in.Deliver.AckFloor != in.LastSeq || len(in.Deliver.Filters) != 1 {
+		t.Fatalf("fixture: want 3 messages, nothing pending, ack floor at last_seq and one filter, got %+v", in)
+	}
+	if r.Renames[0].Drained {
+		t.Error("drained is true for a filtered consumer")
+	}
+	if _, errb, code := g.run(t, "--strict"); code != 1 {
+		t.Errorf("--strict exit %d (%q), want 1", code, errb)
+	}
+}
+
+// writeEdited writes the report at path with edit applied to its decoded JSON, and returns the new path.
+func writeEdited(t *testing.T, path string, edit func(m map[string]any)) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	edit(m)
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "edited.json")
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// An earlier report must be a real audit of this deployment: a stub, another owner's or another account's report
+// could not show that anything is unchanged.
+func TestAuditCompareRefusesReportThatIsNotThisDeployments(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	legacyInbox := func(m map[string]any) map[string]any {
+		return m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
+	}
+	cases := map[string]struct {
+		path string
+		want string
+	}{
+		"stub":            {writeEdited(t, first, func(m map[string]any) { clear(m); m["version"] = 1 }), "generated"},
+		"no generated":    {writeEdited(t, first, func(m map[string]any) { delete(m, "generated") }), "generated"},
+		"empty generated": {writeEdited(t, first, func(m map[string]any) { m["generated"] = "" }), "generated"},
+		"no owner":        {writeEdited(t, first, func(m map[string]any) { delete(m, "owner") }), "owner"},
+		"no records":      {writeEdited(t, first, func(m map[string]any) { delete(m, "records") }), "records"},
+		"null renames":    {writeEdited(t, first, func(m map[string]any) { m["renames"] = nil }), "renames"},
+		"no stream name":  {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m), "stream") }), "stream"},
+		"no last_seq":     {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m), "last_seq") }), "last_seq"},
+		"no delivered":    {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m)["deliver"].(map[string]any), "delivered") }), "delivered"},
+		"no ack_floor":    {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m)["deliver"].(map[string]any), "ack_floor") }), "ack_floor"},
+		"another owner":   {writeEdited(t, first, func(m map[string]any) { m["owner"] = "otherowner" }), "owner"},
+		"another account": {writeEdited(t, first, func(m map[string]any) { m["account"] = "AOTHERACCOUNTKEY" }), "account"},
+	}
+	for name, tc := range cases {
+		out, errb, code := f.run(t, "--strict", "--compare", tc.path)
+		if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, tc.want) {
+			t.Errorf("%s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", name, code, out, errb, tc.want)
+		}
+	}
+	// a valid earlier report (as written) is accepted, and carries this deployment's account
+	var rep struct {
+		Account string `json:"account"`
+	}
+	raw, _ := os.ReadFile(first)
+	if err := json.Unmarshal(raw, &rep); err != nil || rep.Account != f.e.Account {
+		t.Fatalf("report account %q, want %q (%v)", rep.Account, f.e.Account, err)
+	}
+	if out, errb, code := f.run(t, "--strict", "--compare", first); code != 0 {
+		t.Errorf("valid earlier report: exit %d out=%q err=%q", code, out, errb)
+	}
+	// empty arrays are fine when the keys are present
+	empty := writeEdited(t, first, func(m map[string]any) { m["records"], m["renames"] = []any{}, []any{} })
+	if _, errb, code := f.run(t, "--compare", empty); code != 0 {
+		t.Errorf("empty arrays, keys present: exit %d %q", code, errb)
+	}
+}
+
+// An earlier audit made before the account field cannot be bound to this deployment: non-strict shows a note,
+// --strict fails and says to regenerate.
+func TestAuditCompareEarlierWithoutAccount(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	old := writeEdited(t, first, func(m map[string]any) { delete(m, "account") })
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", old)
+	if code != 1 || !strings.Contains(errb, "account") || !strings.Contains(errb, "regenerate") {
+		t.Fatalf("strict: exit %d err=%q", code, errb)
+	}
+	var c struct {
+		Compare struct {
+			AccountUnverified bool `json:"account_unverified"`
+		} `json:"compare"`
+	}
+	if err := json.Unmarshal([]byte(out), &c); err != nil || !c.Compare.AccountUnverified {
+		t.Errorf("account_unverified not set: %v\n%s", err, out)
+	}
+	out, errb, code = f.run(t, "--json", "--compare", old)
+	if code != 0 || !strings.Contains(out, `"account_unverified": true`) {
+		t.Errorf("non-strict: exit %d err=%q\n%s", code, errb, out)
+	}
+	if txt, _, _ := f.run(t, "--compare", old); !strings.Contains(txt, "account not verified") {
+		t.Errorf("text form must say the account is not verified:\n%s", txt)
 	}
 }

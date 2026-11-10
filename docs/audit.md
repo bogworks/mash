@@ -25,7 +25,8 @@ The output is the evidence for an audit, so it is deterministic: records, rename
 ## The report (`--json`)
 
 Top level: `version` (always 1; it changes only when a field is removed or changes meaning), `generated` (RFC 3339,
-UTC; the only timestamp, and the one a comparison ignores), `owner`, `creds_dirs` (the directories scanned),
+UTC; the only timestamp, and the one a comparison ignores), `owner`, `account` (the account's public key, taken from the admin credentials' user JWT; a public key only, never a seed
+or token; it ties a `--compare` file to one deployment), `creds_dirs` (the directories scanned),
 `records`, `renames`, `orphans`, `fenced_leases`, `problems`, `notes`, `summary` and, only with `--compare`, `compare`.
 
 ### `records`: one per directory record, sorted by `key`
@@ -81,7 +82,10 @@ Otherwise every one of these must hold, and `drained` is `false` if any fails:
   `by_start_sequence` with `start_seq` at or below the stream's `first_seq`. `new`, `last`, `last_per_subject` and
   `by_start_time` skip stored messages (a start time cannot be checked against them), so they never count as drained
   while messages are stored;
-- the consumer has no filter other than the stream's own subjects;
+- the consumer has no filter at all (`filter_subjects` is empty). A filter equal to the stream's current subjects still
+  does not count: the stream may have captured other subjects earlier, and a filtered consumer skips the stored
+  messages from them, so zero `pending` and an `ack_floor` at `last_seq` can hide unread mail. mash creates `deliver`
+  unfiltered, so a filter means the consumer was recreated by hand;
 - `ack_floor` has reached the stream's `last_seq`.
 
 `drained` is not `unused`. A legacy stream can show `msgs` 0 (everything was read and acknowledged, or purged) while its
@@ -138,6 +142,16 @@ Counts: `records`, `legacy`, `new`, `running`, `renamed`, `undrained`, `orphan_s
 the report (and `compare` lines to the text form). It reads nothing else from disk and changes nothing. The earlier file's `version` must be
 the one this mashctl writes; a file that is not JSON, is another version, or cannot be read exits 3.
 
+The earlier file must also be a complete audit of this deployment, or a stub such as `{"version":1}` would pass for a
+baseline with no legacy streams. It needs a non-empty `generated` and `owner`, the `records` and `renames` arrays (empty
+is fine, absent or `null` is not) and, for each legacy inbox, the `stream` name, `present`, and when present the
+`last_seq` and the `deliver` consumer's `present`, `delivered` and `ack_floor`. Its `owner` must equal the current owner and,
+when it has an `account`, that must equal the current account. Anything else is refused with exit 3, a message on
+standard error naming what is wrong, and nothing on standard output. An earlier audit made before `account` existed
+is accepted but cannot be tied to this deployment: `compare.account_unverified` is `true` and the text form says
+`account not verified`. Without `--strict` it is only shown. With `--strict` it fails (exit 1) and standard error says
+to regenerate the earlier audit with this mashctl, as for missing creation times.
+
 `compare` holds `against_generated`, `moved`, `identities_removed` and `identities_added` (directory keys present
 before and not now, and the reverse) and `streams`: one entry per legacy inbox stream in either audit (the inbox of an
 old-form record and the legacy inbox of a renamed identity), sorted, each with `present_before`, `present_now` and a
@@ -180,7 +194,7 @@ mashctl, and compare a later audit against that file.
 
 The `created` fields are additive, so the report `version` stays 1.
 
-With `--strict`, `--compare` fails (exit 1) when `moved`, `vanished`, `recreated` or `creation_unknown` is above 0, and on every other finding: any
+With `--strict`, `--compare` fails (exit 1) when `moved`, `vanished`, `recreated` or `creation_unknown` is above 0 or `account_unverified` is true, and on every other finding: any
 orphan, any alias whose legacy inbox is not drained, any problem.
 
 ## What it cannot see
@@ -205,9 +219,9 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks creation times. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks creation times or the account. Standard error says what was counted |
 | 2 | a usage error |
-| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON or another version. Nothing is printed on standard output |
+| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete, or from another owner or account. Nothing is printed on standard output |
 
 ## The drain check before a break
 

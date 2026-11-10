@@ -58,22 +58,140 @@ type auditCompare struct {
 	Recreated        int                  `json:"recreated"`          // legacy streams or deliver consumers present in both audits with a different creation time: fails --strict
 	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
 	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
+	// AccountUnverified: the earlier audit has no `account` (made before it existed), so it cannot be tied to this
+	// deployment. Shown always; fails --strict, like missing creation times.
+	AccountUnverified bool `json:"account_unverified"`
 }
 
-// readEarlierAudit reads an earlier `audit --json` report. A file that is not JSON, or is another version, is refused.
+// earlierInbox and the types around it decode an earlier report with pointers, so a missing field is told from zero.
+type earlierInbox struct {
+	Stream  *string `json:"stream"`
+	Present *bool   `json:"present"`
+	LastSeq *uint64 `json:"last_seq"`
+	Deliver *struct {
+		Present   *bool   `json:"present"`
+		Delivered *uint64 `json:"delivered"`
+		AckFloor  *uint64 `json:"ack_floor"`
+	} `json:"deliver"`
+}
+
+type earlierReport struct {
+	Version   *int             `json:"version"`
+	Generated *string          `json:"generated"`
+	Owner     *string          `json:"owner"`
+	Records   *json.RawMessage `json:"records"`
+	Renames   *json.RawMessage `json:"renames"`
+}
+
+// check names the first field of an inbox the comparison needs and the report lacks.
+func (in earlierInbox) check(where string) error {
+	miss := func(f string) error {
+		return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: %s lacks %s", where, f)
+	}
+	switch {
+	case in.Stream == nil || *in.Stream == "":
+		return miss("stream")
+	case in.Present == nil:
+		return miss("present")
+	case !*in.Present:
+		return nil
+	case in.LastSeq == nil:
+		return miss("last_seq")
+	case in.Deliver == nil || in.Deliver.Present == nil:
+		return miss("deliver.present")
+	case !*in.Deliver.Present:
+		return nil
+	case in.Deliver.Delivered == nil:
+		return miss("deliver.delivered")
+	case in.Deliver.AckFloor == nil:
+		return miss("deliver.ack_floor")
+	}
+	return nil
+}
+
+// validateEarlier refuses a file that is not a complete audit report: the fields the comparison reads must be there,
+// or a stub such as {"version":1} would pass for a baseline with no legacy streams.
+func validateEarlier(raw []byte) error {
+	var e earlierReport
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return errors.New("mashctl: audit: --compare: the file is not an audit JSON report")
+	}
+	if e.Version == nil || *e.Version != auditVersion {
+		v := 0
+		if e.Version != nil {
+			v = *e.Version
+		}
+		return fmt.Errorf("mashctl: audit: --compare: the file is audit report version %d, this mashctl reads version %d", v, auditVersion)
+	}
+	miss := func(f string) error {
+		return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: it lacks %s", f)
+	}
+	if e.Generated == nil || *e.Generated == "" {
+		return miss("generated")
+	}
+	if e.Owner == nil || *e.Owner == "" {
+		return miss("owner")
+	}
+	if e.Records == nil || e.Renames == nil {
+		return miss("records and renames")
+	}
+	var recs []struct {
+		Key   string       `json:"key"`
+		Form  string       `json:"form"`
+		Inbox earlierInbox `json:"inbox"`
+	}
+	var rens []struct {
+		Flat        string       `json:"flat"`
+		LegacyInbox earlierInbox `json:"legacy_inbox"`
+	}
+	if err := json.Unmarshal(*e.Records, &recs); err != nil || recs == nil {
+		return miss("records (an array)")
+	}
+	if err := json.Unmarshal(*e.Renames, &rens); err != nil || rens == nil {
+		return miss("renames (an array)")
+	}
+	for _, r := range recs {
+		if r.Form == "legacy" {
+			if err := r.Inbox.check("record " + config.Clean(r.Key)); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range rens {
+		if err := r.LegacyInbox.check("rename " + config.Clean(r.Flat) + " legacy_inbox"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readEarlierAudit reads an earlier `audit --json` report. A file that is not JSON, is another version or lacks a
+// field the comparison reads is refused.
 func readEarlierAudit(path string) (*auditReport, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("mashctl: audit: --compare: %s", config.Clean(errors.Unwrap(err).Error()))
 	}
+	if err := validateEarlier(raw); err != nil {
+		return nil, err
+	}
 	var r auditReport
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return nil, errors.New("mashctl: audit: --compare: the file is not an audit JSON report")
 	}
-	if r.Version != auditVersion {
-		return nil, fmt.Errorf("mashctl: audit: --compare: the file is audit report version %d, this mashctl reads version %d", r.Version, auditVersion)
-	}
 	return &r, nil
+}
+
+// bindEarlierAudit refuses an earlier report from another owner or another account. One without an account (made
+// before the field existed) passes here and is flagged unverified in the comparison.
+func bindEarlierAudit(before *auditReport, now auditReport) error {
+	if before.Owner != now.Owner {
+		return fmt.Errorf("mashctl: audit: --compare: the earlier audit is for owner %s, this audit is for owner %s", config.Clean(before.Owner), config.Clean(now.Owner))
+	}
+	if before.Account != "" && before.Account != now.Account {
+		return fmt.Errorf("mashctl: audit: --compare: the earlier audit is for account %s, this audit is for account %s", config.Clean(before.Account), config.Clean(now.Account))
+	}
+	return nil
 }
 
 // legacyStreams is every legacy inbox the report shows: the inbox of each old-form record and the legacy inbox of
@@ -180,6 +298,9 @@ func compareAudits(before, now auditReport) *auditCompare {
 
 func writeCompareText(w io.Writer, c *auditCompare) {
 	cl := config.Clean
+	if c.AccountUnverified {
+		fmt.Fprintln(w, "compare account not verified: the earlier audit has no account field, so it cannot be tied to this deployment")
+	}
 	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired, %d recreated, %d creation unknown\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired, c.Recreated, c.CreationUnknown)
 	for _, s := range c.Streams {
 		state := "unchanged"

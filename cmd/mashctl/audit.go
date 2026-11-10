@@ -153,6 +153,7 @@ type auditReport struct {
 	Version     int            `json:"version"`
 	Generated   string         `json:"generated"`
 	Owner       string         `json:"owner"`
+	Account     string         `json:"account"` // the account's public key (never a seed or a token); binds --compare to one deployment
 	CredsDirs   []string       `json:"creds_dirs"`
 	Records     []auditRecord  `json:"records"`
 	Renames     []auditRename  `json:"renames"`
@@ -171,6 +172,9 @@ func (r auditReport) findings() int {
 	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
 	if r.Compare != nil {
 		n += r.Compare.Moved + r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown
+		if r.Compare.AccountUnverified {
+			n++
+		}
 	}
 	return n
 }
@@ -205,8 +209,10 @@ func auditTime(t *time.Time) string {
 // drained reports whether a legacy inbox can be cut off. An inbox that is gone, or one that holds no message, is
 // drained. Otherwise its `deliver` consumer must have nothing pending and nothing unacknowledged, and must be
 // configured to have delivered every stored message: deliver policy all (or a start sequence at or below the first
-// stored sequence), no filter narrower than the stream's subjects, and an ack floor that reaches the last stored
-// sequence. The counts alone are not enough: a consumer recreated to skip stored messages shows zero for both.
+// stored sequence), no filter at all, and an ack floor that reaches the last stored sequence. The counts alone are
+// not enough: a consumer recreated to skip stored messages shows zero for both. Any filter disqualifies it, even one
+// equal to the stream's current subjects: the stream may have captured other subjects earlier, whose stored messages
+// the filter skips. mash creates `deliver` unfiltered, so a filter means it was recreated by hand.
 func (in auditInbox) drained() bool {
 	if !in.Present || in.Msgs == 0 {
 		return true
@@ -224,7 +230,7 @@ func (in auditInbox) drained() bool {
 	default: // new, last, last_per_subject, by_start_time (a time cannot be compared with the stored messages), unknown
 		return false
 	}
-	if len(d.FilterSubjects) > 0 && !slices.Equal(d.FilterSubjects, in.Subjects) {
+	if len(d.FilterSubjects) > 0 {
 		return false
 	}
 	return d.AckFloor >= in.LastSeq
@@ -507,11 +513,22 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 		}
 	}
 	rep := buildAudit(cfg.Owner, snap, dirs, creds, skip)
+	if rep.Account, err = credsAccountKey(cfg.AdminCreds); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitAuditIncomplete
+	}
+	if earlier != nil {
+		if err := bindEarlierAudit(earlier, rep); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitAuditIncomplete
+		}
+	}
 	rep.Generated = auditNow().UTC().Format(time.RFC3339)
 	rep.Notes = append(rep.Notes, notes...)
 	slices.Sort(rep.Notes)
 	if earlier != nil {
 		rep.Compare = compareAudits(*earlier, rep)
+		rep.Compare.AccountUnverified = earlier.Account == ""
 	}
 
 	if o.json {
@@ -534,6 +551,9 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated)
 		if unknown > 0 {
 			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d legacy stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
+		}
+		if rep.Compare != nil && rep.Compare.AccountUnverified {
+			fmt.Fprintln(stderr, "mashctl: audit --strict: the earlier audit lacks the account field, so it cannot be tied to this deployment: regenerate it with this mashctl and compare again")
 		}
 		return 1
 	}
