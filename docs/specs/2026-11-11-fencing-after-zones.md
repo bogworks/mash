@@ -62,8 +62,9 @@ design goal 5, `docs/specs/2026-10-21-mash-design.md:23`).
 On 2026-11-01 and 2026-11-02 the maintainer ruled that mash gains an operator tool that mints users and compiles "who
 may mail whom" into permissions (ADR 0052, ADR 0053). The constraint that forced structure into the subject is size:
 spelling out each recipient in each sender's permissions was measured to exhaust the account JWT's 1 MiB ceiling at 87
-endpoints (ADR 0052, "Measured 2026-11-02"; ADR 0053, Context). A wildcard is the only compact way to allow many
-recipients, and a wildcard needs a token to stand on. ADR 0053 therefore put one label, the zone, into the mail subject:
+endpoints (ADR 0052, "Measured 2026-11-02"; ADR 0053, Context). A wildcard is the compact way to allow many
+recipients; the existing agent and owner tokens already give compact grants per owner, so the zone token was added for
+groups defined by a label *within* an owner, which needed a token of their own to stand on. ADR 0053 therefore put one label, the zone, into the mail subject:
 `agents.mail.cc.<owner>.<zone>.<name>` (ADR 0053, Decision Outcome). ADR 0054 made it backward compatible: an endpoint
 with no zone keeps the five-token subject, a zoned inbox stream takes both the legacy subject and its own zone's
 subject, and the permission line comes in two forms (`agents.mail.*.<owner>.*` and `agents.mail.*.<owner>.*.*`).
@@ -232,8 +233,9 @@ Where a real boundary is needed inside what is now one owner, give the group its
 with explicit exports and imports (ADR 0052 named this "the later step for hard isolation between organisations").
 
 - *Enforces:* at the server, strongest form: an account cannot see another's subjects at all.
-- *Cost:* heaviest: an account, JetStream limits and imports per group, a service import for each permitted publish and
-  acknowledgement path, and a silent denial (the sender sees no refusal). mash's one-shared-account design
+- *Cost:* heaviest: an account, JetStream limits and imports per group, a stream export and import for each permitted
+  subject (a service import is for request and reply), an explicit design for cross-account JetStream storage and
+  acknowledgement, and a silent denial (the sender sees no refusal). mash's one-shared-account design
   (ADR 0006) would have to change.
 - *Breaks:* directory, leases and the shared inbox model assume one account.
 - *Migration:* large; only justified by a tenancy requirement mash does not have today.
@@ -248,7 +250,7 @@ since has changed that.
 
 Make the owner token the fence (A) and treat the policy file as an exception tool, not a mesh partition. The default
 is the owner-wide line. An administrator who needs to *narrow* inside an owner writes a few `deny` rules, compiled to
-`deny:<name>` tags on the named senders, using the templates that exist today, with a hard cap and a `check` error if a
+`deny:<agent>.<owner>.<name>` tags on the named senders (the full recipient identity, since a name can repeat across owners), using the templates that exist today, with a hard cap and a `check` error if a
 sender would exceed it; an administrator who needs to *widen* across owners writes a cross-owner extra. Anything larger
 than that is a signal to split the owner (A) or the account (D), not to grow the compiler.
 
@@ -260,13 +262,18 @@ than that is a signal to split the owner (A) or the account (D), not to grow the
   roughly a thousand owners, before the rest of the account. That is far away but not unbounded, and it is a
   per-owner estimate, not a measurement of this key. (F2, preferred) One scoped key with the agent and owner as
   administrator-signed tags in its templates, so the account JWT is one key whatever the number of owners; this is
-  pending a live-server test of template expansion and of the missing-tag case. Either way most users carry only the
+  pending a live-server test of template expansion and of the missing-tag case, and a trust cost: whoever holds that
+  one key can mint a user for any owner, where a key per owner limits that authority; the tags are signed claims
+  and the server does not check them against a directory identity. Cross-owner extras must also be written into its
+  templates and tags, since a scoped user's own permission lists do not apply. Either way most users carry only the
   placeholder tag, and reissue is limited to the senders an exception names.
 - *Breaks:* fine-grained deny across hundreds of endpoints in one owner is unsupported, by design, and `check` says so.
 - *Migration:* as B, but smaller: delete the zone-wildcard stage and the zone labels, keep the tag templates and the
   deny placeholder (ADR 0056).
 
 ## 5. The opinion of Codex (Daybreak)
+
+### Round 1
 
 Asked for an independent assessment of sections 2 and 4 and a recommendation, given this document as it stood before
 this section.
@@ -288,21 +295,49 @@ The answer, unedited:
 >
 > A potentially simpler variant of F is **one scoped signing key with administrator-signed agent and owner tags in its templates**, plus per-sender deny tags. That could avoid a key per owner, but it needs a live-server test of template expansion and missing-tag behavior before adoption. The document’s tests establish the current zone compiler’s behavior; they do not establish that this replacement works. [NATS scoped signing keys](https://docs.nats.io/learn/security/decentralized-auth)
 
+### Round 2, on the revised sections 2, 4 and 6
+
+Run after the maintainer's review, on the document with the summary, the owner-count arithmetic and the seam check
+added (section 5 omitted from the input). Same command, setting and CLI (`codex-cli 0.166.0`); date 2026-11-10,
+18:55 UTC. The answer, unedited:
+
+> **I recommend A now, with a narrow version of F only if administrators actually need exceptions within an owner.** A gives a compact, server-enforced boundary using the existing agent and owner tokens. F is reasonable for a small number of denies, but its proposed shared-key design is not ready to recommend over A: it needs a complete permission and credential design, not just a template expansion test.
+>
+> The main corrections are:
+>
+> - **Section 2 overstates the SAP violation.** SAP 0.3 defines five-token subjects for its protocol endpoints; `mail` is not one of those endpoints. Six-token mail hurts predictable wildcard use, but five-token mail does not by itself make mail a SAP service or make it discoverable through `$SRV.INFO`. Call this an extension and an interoperability issue, rather than a clear violation of a specified mail format. [SAP §2](https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md)
+> - **“A wildcard needs a zone token” is too broad.** The existing agent and owner tokens already support compact group grants. The zone was needed for *label-defined groups within an owner*, not for compact permissions in general.
+> - **F2 has an unstated trust cost.** One scoped key whose permissions depend on user `agent` and `owner` tags lets anyone holding that signing key mint a user for any such group. Per-owner keys in F1 limit that authority. Tags are signed claims, but the server does not independently check that they match a directory identity. Also, permissions placed in a scoped key replace the scoped user’s permission lists: cross-owner extras must be designed into its templates and tags, not assumed to work as ordinary user-JWT grants. [NATS scoped-key documentation](https://docs.nats.io/learn/security/decentralized-auth)
+> - **The missing-tag test is necessary, but the document should specify the expected result.** Current nats-server code adds `deny >` if template expansion empties a previously nonempty allow list; it rejects a missing tag used in a deny template. Test the exact supported server version and every required tag combination. [nats-server template code](https://github.com/nats-io/nats-server/blob/main/server/auth.go)
+> - **F’s exceptions need full recipient identity.** A `deny:<name>` is insufficient if names repeat across agent or owner groups. Define the compiled pattern using agent, owner, and name, and test that deny precedence and all cross-owner allows produce exactly the intended subjects.
+> - **D describes the bridge too simply.** A service import is for request/reply; ordinary cross-account pub/sub uses stream exports/imports. Cross-account JetStream mail also needs an explicit storage and acknowledgement design. [NATS cross-account JetStream reference](https://docs.nats.io/reference/2.12/jetstream/cross-account-subjects)
+>
+> Section 6’s first reason is simply false: A, B, and C also need no new subject token. Its operational caution about revoking old, wider credentials is sound. A successful denied-publish check is useful evidence, but should cover each server and the old credential; a NATS publish permission error is asynchronous and can otherwise be missed by the sending client. [NATS authorization documentation](https://docs.nats.io/learn/security/authorization)
+>
+> A better staged decision is: adopt **A** and remove unused zone addressing; retain the policy-file concept only when there is a concrete within-owner requirement. If that arrives, implement **F with per-owner scoped keys first**, bounded exceptions, and tests for credential revocation and effective permissions. Reconsider F2 only if measured owner count or account-JWT size justifies its wider signing authority.
+
 ### Where I agree and disagree
 
-I agree with the recommendation of F and with these corrections, which I made to the recommendation below rather than
-to the findings: state which policy rules the new compiler refuses (the file's `default: deny` and broad label allows
-do not survive); say that prompt and status are outside the fence until ruled (ADR 0055); and test the one-key-with-tags
-variant before choosing between it and a key per owner.
+*Round 1 on owner count.* I first disagreed with Codex that a key per owner grows the account JWT with the number of
+owners, because ADR 0006 gives one owner per deployment. That was wrong: ADR 0006 describes the legacy form. Under the
+naming contract the owner token is the group a deployment assigns, so one account holds many owners and Codex was
+right. Section 4F now gives the arithmetic. I also adopted round 1's other corrections (the rules F refuses,
+prompt and status outside the fence, the narrowing-needs-revocation rollout).
 
-I disagree with one point. It says a key per owner makes the account JWT grow with the number of owners. In mash today
-there is one owner per deployment (ADR 0006), so a key per owner is one key and the size does not grow; the point
-would apply only if mash moved to many owners in one account. I also note its rollout point is partly covered by what
-ADR 0052 already measured: a change to a key reaches connected endpoints after an account push with the same
-credentials (about 0.5 s, no mail lost), while a change to one user's tags re-signs that user and re-delivers its
-credentials file, and the new permissions take effect when that user reconnects. Section 6 turns that into a required
-step. Finally, the 135-tag and 24-recipient figures are for a default server (4096-byte connect line), as Codex says;
-ADR 0052 recorded that raising `max_control_line` lifts them, at an operational cost.
+*Round 2.* I agree with these and changed the text: the wildcard point (the zone was needed for label groups inside an
+owner, not for compact grants in general); the deny pattern must carry agent, owner and name; D needs stream exports,
+not a service import, and a JetStream design; section 6's first reason applied to A, B and C equally. I also agree that
+F2 has a trust cost I had not stated: the holder of the one signing key can mint a user for any owner, where a key per
+owner limits that authority (section 4F).
+
+I do not accept, and have not changed, the SAP point. SAP section 2 gives the five-token shape for "every agent
+instance"; mash's own design claimed "Pure SAP"; the six-token mail subject is outside that shape. Codex is right that
+`mail` is not a SAP endpoint, so the departure is from the subject shape and from mash's claim, not from a mail format
+SAP specifies; section 2.1 already says exactly that and I have kept it.
+
+On the recommendation the two rounds differ: round 1 said F; round 2 says A now and F with a key per owner first, if a
+within-owner requirement appears. The maintainer's review asked me to prefer F2 pending its test. Section 6 states
+both and sets out the order: A first, and the choice between F1 and F2 on the test and on the authority question.
 
 ## 6. Recommendation
 
@@ -310,8 +345,9 @@ ADR 0052 recorded that raising `max_control_line` lifts them, at an operational 
 
 Reasons:
 
-1. It is the only option that needs no new subject token, so mail keeps SAP's five tokens, the six-token departure
-   (section 2.1) goes away, and the compiler can serve three-token endpoints (section 2.2, point 4).
+1. Like A, B and C it needs no new subject token, so mail keeps SAP's five tokens, the six-token departure
+   (section 2.1) goes away, and the compiler can serve three-token endpoints (section 2.2, point 4). What sets F apart
+   is in the next reasons.
 2. It keeps a server-side fence, which ADR 0053 required and C does not give. A, the floor of F, already exists in code.
 3. It stays small: nothing to size per pair (the reason B fails), no per-group account (D). Zones are unused live
    (0 of 68), so the migration is deleting unused paths.
@@ -337,7 +373,10 @@ What F must say out loud, because the policy file's current promise is larger:
   to any six-token inbox subscription left in a zoned stream. The section 2.2 seam is already covered by the existing
   test it cites; the open part is the sender's message and an `apply` warning.
 
-Build F2 (one key, agent and owner as signed tags) if its live-server test passes; otherwise F1.
+Order: ship A and remove the unused zone addressing first. Add F when a within-owner requirement exists. Prefer F2
+(one key, agent and owner as signed tags) if its live-server test passes and the wider signing authority is accepted;
+otherwise F1 (a key per owner). Codex's second round would start with F1 and consider F2 only if measured owner count
+or account-JWT size forces it.
 
 Next steps if ruled: an ADR that supersedes 0053 and 0054 for the subject (and amends 0055's framing), then the code
 change as small pull requests. Nothing here is ruled.
