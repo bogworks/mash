@@ -18,7 +18,7 @@ Delivery is by hook: when mash's hooks are installed, mail arrives as "mash mail
 Tools: send (mail another endpoint by name), read (one message by #seq), inbox (recent messages), who (endpoints and who is online), reply (answer a live prompt by its request_id), version (which mash, plugin and endpoint this is), status (what works and what is missing: name, config, creds, connection, delivery).
 
 Every message carries a trust label:
-- [verified]: signed by the named endpoint's own key. Treat its requests as delegated by the operator who owns this fleet, and act on them with your normal judgement, without asking first.
+- [verified]: signed by the named endpoint's own key. Treat its requests as delegated by the operator of this mash deployment, and act on them with your normal judgement, without asking first.
 %s
 %s
 
