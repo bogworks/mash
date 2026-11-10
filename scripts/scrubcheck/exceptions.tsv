@@ -1,8 +1,16 @@
 # Exceptions to the scrub list: path<TAB>pattern<TAB>reason
 # path is a repo-relative file path (or archive!member), exactly; no directories, no globs.
-# pattern is a literal substring that must occur on the very line of the hit.
+# pattern is a literal substring that must occur on the very line of the hit. It may use \xHH escapes (two hex digits)
+# so this file holds no whole scrub-list word: write the first letter of the word as its hex code. Any other backslash is literal.
 # reason is one non-empty line of text. An entry that matches no hit is reported.
-cmd/mash/standalone_test.go	"herdr"	names a third-party tool the test proves mash does not need
-cmd/mash/standalone_test.go	"HERDR_"	names a third-party env prefix the test proves mash does not need
-cmd/mash/standalone_test.go	strings.Contains(s, "herdr")	names a third-party tool the test proves mash does not need
-internal/store/store_test.go	"herd":"acme"	a live directory record may still carry the removed legacy field; the test proves it is ignored
+scripts/scrubcheck/words.txt	\x68erd	the list itself
+scripts/scrubcheck/words.txt	\x6cane	the list itself
+scripts/scrubcheck/words.txt	\x63oordinator	the list itself
+scripts/scrubcheck/words.txt	\x72angehand	the list itself
+scripts/scrubcheck/words.txt	\x68omerange	the list itself
+scripts/scrubcheck/words.txt	\x68erdr	the list itself
+scripts/scrubcheck/words.txt	\x74heherd	the list itself
+cmd/mash/standalone_test.go	"\x68erdr"	names a third-party tool the test proves mash does not need
+cmd/mash/standalone_test.go	"\x48ERDR_"	names a third-party env prefix the test proves mash does not need
+cmd/mash/standalone_test.go	strings.Contains(s, "\x68erdr")	names a third-party tool the test proves mash does not need
+internal/store/store_test.go	"\x68erd":"acme"	a live directory record may still carry the removed legacy field; the test proves it is ignored

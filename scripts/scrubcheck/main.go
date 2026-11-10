@@ -6,11 +6,13 @@
 // workflows (a tracked symlink is followed and its target scanned under the symlink's path; a dangling one is an
 // error), plus each -archive (repeatable): a release archive (.tar.gz, .tgz, .tar or .zip) whose members are scanned
 // one by one, or, for any other extension, a plain file such as a bare release binary. The tool's own directory,
-// scripts/scrubcheck/, is skipped entirely: it holds the word list itself, its fixtures and the exceptions inventory.
+// scripts/scrubcheck/, is scanned like any other: the scrub-list words it must name (the list itself) are covered by
+// pattern exceptions, never by a directory-wide skip.
 //
 // A word matches case-insensitively and as a whole word: a run of letters and digits (so a hyphen, an underscore or any
-// other character is a boundary) equal to a listed word, or to a listed word plus "s". "shepherd" and "herdsman" do not
-// match "herd". Plurals are generated, not listed.
+// other character is a boundary) equal to a listed word, or to a listed word plus "s". A listed word
+// glued to other letters ("xalpha", "alphasman" for a listed "alpha") does not match. Plurals are generated, not
+// listed.
 //
 // Output, on stdout, one line per hit, sorted by file, then line, then column:
 //
@@ -22,8 +24,11 @@
 // exceptions.tsv holds tab-separated path, pattern and reason. The path is a literal file path as printed (for a member,
 // archive!member); a directory ("/" suffix) or a glob (* ? [) is rejected. The pattern is a literal substring; it covers a
 // hit only when the hit's own occurrence lies inside an occurrence of the pattern on that line (or printable run), so
-// "quoted herd" excepts that herd and nothing else on the line. The reason is required. An entry that matches no hit is reported, so a stale entry
-// cannot linger. Problems print as exceptions.tsv:LINE: message. A missing exceptions file means no exceptions.
+// a pattern "quoted alpha" excepts that one occurrence of a listed "alpha" and nothing else on the line. A pattern may
+// contain \xHH escapes (two hex digits, either case), decoded before matching, so an entry can name a scrub-list word without containing it: write the first
+// letter as \x68 and the exceptions file holds no whole word. A backslash not followed by x and two hex digits is
+// literal. The reason is required. An entry that matches no hit is reported, so a stale entry cannot linger.
+// Problems print as exceptions.tsv:LINE: message. A missing exceptions file means no exceptions.
 //
 // The last line is the summary "N hits, M excepted, K exception problems". Exit 0: nothing to report. Exit 1: an
 // unexcepted hit or an exception problem. Exit 2: usage (including a stray positional argument) or an unreadable input.
@@ -48,9 +53,8 @@ import (
 )
 
 const (
-	selfDir         = "scripts/scrubcheck/"
-	defaultWords    = selfDir + "words.txt"
-	defaultExcept   = selfDir + "exceptions.tsv"
+	defaultWords    = "scripts/scrubcheck/words.txt"
+	defaultExcept   = "scripts/scrubcheck/exceptions.tsv"
 	binarySniff     = 8000
 	minPrintableRun = 4
 )
@@ -107,7 +111,7 @@ func run(args []string, stdout io.Writer) error {
 	exc := fs.String("exceptions", "", "exceptions file (default "+defaultExcept+" under -root)")
 	var archives multiFlag
 	fs.Var(&archives, "archive", "release archive (.tar.gz, .tgz, .tar, .zip) or plain file to scan too; repeatable")
-	const usage = "usage: scrubcheck [-root dir] [-words file] [-exceptions file] [-archive path]...\nskips " + selfDir + " (the word list, fixtures and inventory live there)"
+	const usage = "usage: scrubcheck [-root dir] [-words file] [-exceptions file] [-archive path]...\nscans every tracked file, including scripts/scrubcheck/; patterns in the exceptions file may use \\xHH escapes"
 	if err := fs.Parse(args); err != nil {
 		return errUsage{fmt.Errorf("scrubcheck: %w\n%s", err, usage)}
 	}
@@ -135,6 +139,8 @@ func run(args []string, stdout io.Writer) error {
 		return errUsage{err}
 	}
 	excs, problems := parseExceptions(string(excData))
+	excs, selfProblems := dropSelfExceptions(excs, *root, *exc)
+	problems = append(problems, selfProblems...)
 
 	files, err := listFiles(*root)
 	if err != nil {
@@ -142,9 +148,6 @@ func run(args []string, stdout io.Writer) error {
 	}
 	var hits []hit
 	for _, rel := range files {
-		if strings.HasPrefix(rel, selfDir) {
-			continue
-		}
 		p := filepath.Join(*root, filepath.FromSlash(rel))
 		fi, err := os.Lstat(p)
 		if err != nil {
@@ -214,7 +217,13 @@ func parseWords(s string) ([]string, error) {
 		if strings.IndexFunc(l, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) >= 0 {
 			return nil, fmt.Errorf("word list: %q is not a single word", l)
 		}
-		ws = append(ws, strings.ToLower(l))
+		w := strings.ToLower(l)
+		for _, x := range ws {
+			if x == w {
+				return nil, fmt.Errorf("word list: duplicate word %q", w)
+			}
+		}
+		ws = append(ws, w)
 	}
 	if len(ws) == 0 {
 		return nil, errors.New("word list is empty")
@@ -251,9 +260,51 @@ func parseExceptions(s string) ([]exception, []problem) {
 		if reason == "" {
 			ps = append(ps, problem{n, "no reason"})
 		}
-		es = append(es, exception{line: n, path: f[0], pattern: f[1], reason: reason})
+		es = append(es, exception{line: n, path: f[0], pattern: decodePattern(f[1]), reason: reason})
 	}
 	return es, ps
+}
+
+// dropSelfExceptions removes, and reports, each entry whose path is the exceptions file itself (compared as a
+// repo-relative path after cleaning), so such an entry cannot hide a plain word on its own line.
+func dropSelfExceptions(excs []exception, root, excPath string) ([]exception, []problem) {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(excPath))
+	if err != nil {
+		return excs, nil
+	}
+	rel = filepath.ToSlash(rel)
+	var kept []exception
+	var ps []problem
+	for _, e := range excs {
+		if filepath.ToSlash(filepath.Clean(e.path)) == rel {
+			ps = append(ps, problem{e.line, "an exception may not cover the exceptions file itself; write the pattern with \\xHH escapes"})
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept, ps
+}
+
+// decodePattern replaces each \xHH (two hex digits, either case) with the byte it names. Any other backslash is literal.
+func decodePattern(s string) string {
+	if !strings.Contains(s, "\\x") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+3 < len(s) && s[i+1] == 'x' && isHex(s[i+2]) && isHex(s[i+3]) {
+			v, _ := strconv.ParseUint(s[i+2:i+4], 16, 8)
+			b.WriteByte(byte(v))
+			i += 3
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 // applyExceptions drops the hits an exception covers. It returns the remaining hits, how many were excepted, and a
