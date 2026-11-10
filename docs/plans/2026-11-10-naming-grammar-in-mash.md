@@ -8,8 +8,8 @@ the lead has cleared it.
 
 ## Amendments of 2026-11-10 (after the planner's check)
 
-The planner checked this plan against the contract and found it conforming with the fixes below. Where an amendment and a
-step further down differ, the amendment rules. Cleared for code now: Phase 0, 1.1 to 1.3, and 1.4 for unzoned endpoints.
+The planner's second opinion, which the maintainer's delegate adopted, checked this plan against the contract and found it conforming with the fixes below. Where an amendment and a
+step further down differ, the amendment rules. Cleared for code by the maintainer's delegate now: Phase 0, 1.1 to 1.3, and 1.4 for unzoned endpoints.
 1.5 is not cleared until this amendment merges; 1.7 holds for the rule's format (see the proposal below); 2.1 waits for
 the credential re-issue; Phase 3 is held.
 
@@ -115,8 +115,8 @@ the credential re-issue; Phase 3 is held.
    from the identity, so REQ-012's flat form has nothing to apply to.
 9. **Vectors and wording.** Mash's token vectors add "does not end with a dash" and `lead-`. This plan, being a dated
    record, names the three tokens as range, herd and lane when it describes the target; REQ-007 forbids that in mash's
-   code, help and docs, not in a plan. This plan's occurrences are proposed as per-occurrence exceptions, awaiting
-   Randy's disposition on DEC-004 (the scrub plan, amendment 4); no ruling is assumed.
+   code, help and docs, not in a plan. This plan's occurrences are proposed as per-occurrence exceptions, decided
+   (D186): the six dated lines are kept as written and each is listed as a scrub exception with a reason.
 10. **Not in this plan.** The homerange validator, its vectors and the derived-identifier mapping belong to the mash
     herd under DEC-007 but are never in mash's code; they get their own plan once the planner settles DEC-011 (where
     they live). This plan's earlier "not planned here" is not a statement that nobody owns them.
@@ -146,7 +146,7 @@ question). `reply` and `lookup` are separate entry points, tested separately.
   `{"agent": {"is": "mash"}}`, so a plain name cannot be used there (AT-012).
 - **Which file is in force when.** The window rule and the old-form rule are never in force together (together they
   refuse the legacy aliases the window needs). During the window, from Phase 1 until the break, the file holds the
-  window rule (new-form owner equal to the legacy owner refused) and the `mash` rule. At the break the planner's
+  window rule (new-form owner equal to the legacy owner refused) and the `mash` rule. At the break the break
   procedure replaces the file with the old-form rule (`cc`, and `mash` inside a range) and withdraws the window rule in
   the same step; every endpoint is restarted before AT-003 runs.
 - **Entry points.** The rule applies at every one, with no per-rule list, so a rule for old forms cannot be narrowed to
@@ -307,7 +307,7 @@ writers, and nothing writes a new-form record until every reader in the range ca
   entry point (provision, start, send, reply, live prompt, directory lookup, the compatibility alias). This pull request builds the mechanism, with no default rule (SEAM-001), tests first:
   with a rule configured each entry point refuses a name it forbids; with none, a plain name still works outside a range
   (AT-006). The format is the proposal in the amendments section above; the seam page that carries it needs Randy's
-  approval (D145), and 1.7 holds until the planner has settled it.
+  approval (D145), and the hold on 1.7 is released: the seam page is approved at 1.0.0 (D193) and the format is `name-rule@1` (`docs/name-rule.md`).
 - **1.8 Old-form use log.** Every use of the old form at each entry point is counted so AT-003 can read it
   (REQ-014, AT-004). Built whether or not a window is used.
 - Evidence: AT-004 as a test (mail to the old and the new name lands in one inbox under one identity and the use is
@@ -357,10 +357,10 @@ enumerate directory records and inbox streams. The pull request:
   the sender, not dropped. Mutation (AT-012): restoring old-form acceptance or an alias makes CI fail, shown once.
 - **3.4 ADR and search.** Accepts the supersession of ADR 0005's and ADR 0054's layout parts; a search of the code shows
   no remaining compatibility path.
-- **3.5 The zone CLI surface stays (planner's ruling on the CLI freeze, card #9, D188).** None of these is removed
+- **3.5 The zone CLI surface stays (the CLI freeze waits on Randy's ruling, D188).** None of these is removed
   by Phase 3, and none changes until D188 is settled; Phase 3 removes only the six-token subject form and its
   acceptance. Once subjects carry no zone, each item would behave as follows (our proposal; the behaviour is ours to
-  propose, the freeze is the planner's):
+  propose, and the freeze waits on Randy's ruling on D188):
   1. `mashctl set-zone <name> <zone>` (`internal/ctl/ctl.go:71,296`, `cmd/mashctl/main.go:46`): **refuse** with a clear
      message that a zone no longer addresses mail and that `set-meta --label` is the way to label an endpoint, because
      its whole meaning was to move an endpoint's mail subject.
@@ -428,3 +428,12 @@ friends.
 Each pull request names the contract rows it covers, attaches its tests and records both reviews. The final record
 carries the executed AT-002, AT-007, AT-013 and AT-012 outputs with commit ids, the rollback notes, the count, last
 sequence and trust figures AT-003 reads, the deviations and the residual risks.
+
+## Rulings recorded 2026-11-10 (after the amendments)
+
+- **Both forms stay until the last deployment has moved.** Phase 3 is not near, and it still waits on Randy's go.
+- **D187: old names end by watch-then-cut.** At least 24 hours of real traffic with no old-form use, two clean audits a
+  day apart, then Randy's go. A renamed message kind is accepted with a warning for one release, then refused. This
+  governs Phase 3 and the 1.9 enumeration.
+- **D186** (scrub plan, amendment 4) is decided as in amendment 9; **D193** approves the seam page at 1.0.0; **D188**
+  (zones) keeps the zone CLI frozen until Randy rules.
