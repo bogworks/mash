@@ -399,7 +399,7 @@ func (e *Endpoint) loadSenders(ctx context.Context, raws []*jetstream.RawStreamM
 		switch {
 		case h.Name == "":
 			return e.loadSenderDirectory(ctx)
-		case config.ValidName(h.Name):
+		case validDirectoryKey(h.Name):
 			need[h.Name] = true
 		}
 	}
@@ -519,4 +519,14 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) error {
 	}
 	e.mu.Unlock()
 	return nil
+}
+
+// validDirectoryKey reports whether name can be a directory key: a legacy endpoint
+// name, or the flat form (agent_owner_name) of a new-form identity.
+func validDirectoryKey(name string) bool {
+	if config.ValidName(name) {
+		return true
+	}
+	_, err := sap.FromFlat(name)
+	return err == nil
 }

@@ -1,6 +1,9 @@
 package sap
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFor(t *testing.T) {
 	s := For("acme", "p-ops2")
@@ -111,5 +114,42 @@ func TestSplitMail(t *testing.T) {
 	}
 	if o, z, n, ok := SplitMail(ForZone("o", "zz", "n").Mail); !ok || o != "o" || z != "zz" || n != "n" {
 		t.Fatal("round trip")
+	}
+}
+
+func TestKeyFromSubject(t *testing.T) {
+	cases := map[string]struct {
+		key string
+		ok  bool
+	}{
+		"agents.prompt.cc.acme.ops1":       {"ops1", true},
+		"agents.hb.cc.acme.mash-a":         {"mash-a", true},
+		"agents.prompt.codex.team1.ops1":   {"codex_team1_ops1", true},
+		"agents.hb.acme.team1.ops1":        {"acme_team1_ops1", true},
+		"agents.prompt.Codex.team1.ops1":   {"", false},
+		"agents.prompt.codex.team_1.ops1":  {"", false},
+		"agents.prompt.codex.team1.1ops":   {"", false},
+		"agents.prompt.codex.team1.":       {"", false},
+		"agents.prompt.codex.team1.o--ps":  {"", false},
+		"agents.mail.cc.acme.default.ops1": {"", false},
+		"agents.mail.codex.acme.default.o": {"", false},
+		"agents.hb.codex.acme":             {"", false},
+		"other.hb.codex.acme.x":            {"", false},
+		"":                                 {"", false},
+	}
+	for subj, w := range cases {
+		k, ok := KeyFromSubject(subj)
+		if k != w.key || ok != w.ok {
+			t.Errorf("%q: got (%q,%v) want (%q,%v)", subj, k, ok, w.key, w.ok)
+		}
+	}
+	legacy, _ := KeyFromSubject("agents.prompt.cc.acme.ops1")
+	newer, _ := KeyFromSubject("agents.prompt.codex.acme.ops1")
+	if legacy == newer {
+		t.Fatalf("legacy and new-form subjects share key %q", legacy)
+	}
+	long := "agents.prompt.codex.acme." + strings.Repeat("n", 33)
+	if _, ok := KeyFromSubject(long); ok {
+		t.Fatal("33-character name accepted")
 	}
 }

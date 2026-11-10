@@ -69,7 +69,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 		if ep.Name != "prompt" {
 			continue
 		}
-		name, ok := sap.NameFromSubject(ep.Subject)
+		name, ok := sap.KeyFromSubject(ep.Subject)
 		if !ok || !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
 			continue
 		}
