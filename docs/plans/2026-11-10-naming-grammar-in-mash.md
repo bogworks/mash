@@ -46,9 +46,19 @@ the credential re-issue; Phase 3 is held.
      without confusing `read #seq` (the two streams' sequence numbers collide: the proposed fix is a new stream whose
      first sequence follows the legacy stream's last, if the server supports that, else display numbers that name the
      stream), and the rollback below. Tests first: signed legacy mail is read under the new identity with the same
-     `[verified]` label; **mail that was acknowledged before the rename, including one acknowledged out of order above the
+     `[verified]` label, **run with the provisioned user's credentials, not admin credentials** (a test that passes only
+     with admin creds proves nothing: see the transition grant below); **mail that was acknowledged before the rename, including one acknowledged out of order above the
      ack floor, is not shown again after it**; unacked mail is shown once; and no stream subject overlaps another
      (INV-001, INV-003).
+   - **The transition grant: the new-form user can read the legacy stream, and nothing else.** A new-form user's
+     JetStream permissions name only `inbox-<flat>`, so as specified it could not read its own queued legacy mail. During
+     the window its user also gets exactly the lines `fixedPub` gives a legacy user for the legacy inbox, for that one
+     stream and no other: `$JS.API.STREAM.INFO.inbox-<legacy-name>`, `$JS.API.CONSUMER.INFO.inbox-<legacy-name>.deliver`,
+     `$JS.API.CONSUMER.MSG.NEXT.inbox-<legacy-name>.deliver`, `$JS.ACK.inbox-<legacy-name>.deliver.>` and the
+     `$JS.API.DIRECT.GET.inbox-<legacy-name>` pair. Its connection keeps the single reply prefix `_INBOX.<flat>`, which
+     already covers fetches on both streams. No wildcard stream name, no create or delete subject. 3.2 removes the
+     transition lines with the rest of the bridge; the overlap tests also assert that a new-form user cannot name any
+     other inbox stream.
    - **The refusal is for new-form grants only.** The REQ-027 refusal never refuses the legacy grant the window
      needs; AT-012 expects it after the break (3.2 removes the legacy grants and aliases). Window isolation is shown
      by the overlap tests above, not by AT-012.
