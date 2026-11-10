@@ -29,8 +29,16 @@ import (
 //     own stream. The legacy stream stays readable by number and in the inbox listing (a read-only GetMsg changes
 //     nothing in the consumer); only the consumer is left alone. Nothing here retries: the endpoint reads the legacy
 //     stream from the next start, once the other session is gone.
-//   - lost during the session: the legacy consume loop stops, mail of that stream already queued is dropped unacked
-//     (JetStream redelivers it to the holder), and it is logged; the own stream's consumer keeps running.
+//   - lost during the session: the legacy consume loop stops, and from then on nothing of that stream is acknowledged
+//     by this endpoint, whatever its state: mail still queued or in the deliver loop's batch is dropped (dropUnleased),
+//     mail held for a hook (struct held) is forgotten with its waiting spool file (dropHeldLegacy), and every ack path
+//     (ack, the duplicate ack of dedupe, deliverBatch, the sender-header drop) is gated on mayAck. JetStream redelivers
+//     all of it to the new holder. Mail already shown before the loss gets no ack either: the next holder may show it
+//     once more (a repeat is the safe side; an ack the holder never earned would be mail loss). Its spool tombstone, if a
+//     hook had drained it, stays: it is inert while the stream is not read, and if this endpoint holds the lease again at
+//     a later start the redelivery finds the tombstone and is acked then, without being shown again. Waiting spool files
+//     never survive a start (ClearWaiting), so a restart cannot resurrect dropped legacy mail into an ack. It is logged;
+//     the own stream's consumer keeps running and its mail is unaffected.
 //   - a legacy-form session started later asks for its own key's lease, which this endpoint holds, and is refused as
 //     today. A legacy-only endpoint never reaches this code (it has no alias).
 
@@ -149,8 +157,8 @@ func (e *Endpoint) LegacyInboxLine() (line string, ok bool) {
 	return "", false
 }
 
-// dropUnleased removes the mail of the legacy stream from batch once the lease is gone, without acknowledging it:
-// the holder's consumer is redelivered it. It returns batch itself when nothing is removed.
+// dropUnleased removes the mail of the legacy stream from batch once the lease is gone, without acknowledging it (it is
+// nak'd, which redelivers it to the holder's consumer). It returns batch itself when nothing is removed.
 func (e *Endpoint) dropUnleased(batch []pending) []pending {
 	if !e.hasLegacyStream() || e.legacyReading() {
 		return batch
@@ -159,7 +167,60 @@ func (e *Endpoint) dropUnleased(batch []pending) []pending {
 	for _, p := range batch {
 		if p.mail.Stream != LegacyStream {
 			kept = append(kept, p)
+		} else if p.msg != nil {
+			_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
 		}
 	}
 	return kept
+}
+
+// mayAck reports whether this endpoint may acknowledge p: own-stream mail always; legacy mail only while the legacy
+// lease is held. The check is made at each ack, so a loss between delivery and ack withholds the ack.
+func (e *Endpoint) mayAck(p pending) bool {
+	return p.mail.Stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading()
+}
+
+// dropHeldLegacy forgets the legacy mail held for a hook once the lease is gone, acking none of it: its waiting spool
+// file is removed (so a hook cannot show what the next holder will deliver again) and it leaves the held counts. A
+// message a hook has already drained keeps its tombstone and is simply no longer tracked.
+func (e *Endpoint) dropHeldLegacy(h *held) {
+	if !e.hasLegacyStream() || e.legacyReading() || len(h.msgs) == 0 {
+		return
+	}
+	var unlock func()
+	if e.spool != nil {
+		u, err := e.spool.Lock()
+		if err != nil {
+			e.log.Printf("spool: %v", err)
+			return // retried at the next tick
+		}
+		unlock = u
+		defer unlock()
+	}
+	n := 0
+	for seq, p := range h.msgs {
+		if seq.Stream != LegacyStream {
+			continue
+		}
+		if e.spool != nil {
+			if err := e.spool.Discard(seq); err != nil {
+				e.log.Printf("%v", err)
+				continue
+			}
+		}
+		_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+		h.bytes -= len(p.mail.Body)
+		h.stored -= storedSize(p)
+		delete(h.msgs, seq)
+		delete(h.at, seq)
+		delete(h.rung, seq)
+		delete(h.listed, seq)
+		delete(h.fails, seq)
+		h.full = false
+		e.waking.done(seq)
+		n++
+	}
+	if n > 0 {
+		e.log.Printf("legacy inbox: dropped %d held message(s) unacked (the lease was lost); the next holder is redelivered them", n)
+	}
 }

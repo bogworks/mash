@@ -394,7 +394,9 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			if !ok {
 				e.dropped.Add(1)
 				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
-				_ = m.Ack()
+				if stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading() {
+					_ = m.Ack()
+				}
 				return
 			}
 			var key string
@@ -493,6 +495,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 				break gather
 			}
 		}
+		e.dropHeldLegacy(h)
 		if batch = e.dropUnleased(batch); len(batch) == 0 {
 			continue
 		}
@@ -1075,8 +1078,10 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 	}
 	for _, p := range show {
 		seen.mark(p)
-		if err := p.msg.Ack(); err != nil {
-			e.log.Printf("ack #%s: %v", p.mail.Num(), err)
+		if e.mayAck(p) {
+			if err := p.msg.Ack(); err != nil {
+				e.log.Printf("ack #%s: %v", p.mail.Num(), err)
+			}
 		}
 		e.waking.done(refOf(p.mail))
 	}

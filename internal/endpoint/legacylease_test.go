@@ -11,6 +11,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -255,5 +256,93 @@ func TestNoAliasNoLegacyLease(t *testing.T) {
 	}
 	if _, ok := leaseKey(t, f, "old"); ok {
 		t.Fatal("a lease for the legacy name exists")
+	}
+}
+
+// Legacy mail held for a hook when the lease is lost is dropped unacked, never shown or acknowledged afterwards, its
+// waiting spool files go, the own stream's held mail is unaffected, and the next holder (a legacy-form session) is
+// delivered each legacy message exactly once.
+func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	f.sendTo(t, snd, "old", "legacy-1", "legacy-2", "legacy-3")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	peer := f.addNewForm(t, "ag", "team", "peer", newFormOpts{})
+	pe := f.clientNF(t, peer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, f.cfgNF(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep.NoChannel()
+	ep.SpoolFromStart()
+	sp := spool.Spool{Dir: t.TempDir() + "/spool"}
+	if err := ep.SetSpool(sp, ""); err != nil {
+		t.Fatal(err)
+	}
+	ev := &events{}
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, ev.deliver); close(done) }()
+	t.Cleanup(func() { cancel(); <-done; ep.Close() })
+	f.sendTo(t, pe, id.Flat(), "own-held")
+	until(t, "all held", func() bool { return len(waiting(t, sp)) == 4 })
+	if i := legacyConsumerInfo(t, f, "inbox-old"); i.AckFloor.Stream != 0 || i.NumAckPending != 3 {
+		t.Fatalf("legacy consumer before the loss: %+v", i)
+	}
+
+	// The lease is lost (taken over by another session).
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, err := js.KeyValue(context.Background(), store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := json.Marshal(leaseValue{Instance: "someone-else", Host: "h", PID: "1", Since: time.Now().UTC().Format(time.RFC3339)})
+	if _, err := kv.Put(context.Background(), "old", other); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "legacy lease loss noticed", func() bool { return !ep.legacyReading() })
+	until(t, "held legacy mail dropped from the spool", func() bool {
+		w := waiting(t, sp)
+		return len(w) == 1 && string(w[0].Body) == "own-held"
+	})
+	// A hook drain of a dropped legacy ref, or any later pass, acks nothing of the legacy stream.
+	_ = sp.Drained(spool.Ref{Stream: LegacyStream, Seq: 1})
+	time.Sleep(3 * SpoolCheck)
+	if i := legacyConsumerInfo(t, f, "inbox-old"); i.AckFloor.Stream != 0 || uint64(i.NumAckPending)+i.NumPending != 3 {
+		t.Fatalf("legacy consumer after the loss: %+v (want nothing acked: all 3 pending or awaiting redelivery)", i)
+	}
+	// The own stream's held mail is unaffected: it is still held, and acked once drained.
+	if i := legacyConsumerInfo(t, f, "inbox-ag_team_new"); i.NumAckPending != 1 {
+		t.Fatalf("own consumer: %+v", i)
+	}
+	if err := sp.Drained(spool.Ref{Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "own mail acked once drained", func() bool {
+		i := legacyConsumerInfo(t, f, "inbox-ag_team_new")
+		return i.AckFloor.Stream == 1 && i.NumAckPending == 0
+	})
+
+	// The next holder: the lease is free, a legacy-form session of the identity opens and gets each message once.
+	if err := kv.Delete(context.Background(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	_, lev := f.run(t, "old")
+	until(t, "next holder shown all three", func() bool {
+		got := joined(lev)
+		return strings.Contains(got, "> legacy-1") && strings.Contains(got, "> legacy-2") && strings.Contains(got, "> legacy-3")
+	})
+	time.Sleep(300 * time.Millisecond)
+	for _, b := range []string{"legacy-1", "legacy-2", "legacy-3"} {
+		if n := strings.Count(joined(lev), "> "+b); n != 1 {
+			t.Fatalf("%s shown %d times by the next holder", b, n)
+		}
+	}
+	if strings.Contains(joined(ev), "legacy-") {
+		t.Fatalf("the old holder showed legacy mail:\n%s", joined(ev))
 	}
 }

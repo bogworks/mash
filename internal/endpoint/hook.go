@@ -221,6 +221,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 // settleHeld acks what a hook has drained, keeps the rest from being redelivered, and wakes an idle session.
 func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 	defer func() { h.added = 0 }()
+	e.dropHeldLegacy(h)
 	if e.spool == nil {
 		return
 	}
@@ -459,6 +460,9 @@ const ackTimeout = 2 * time.Second
 // fire-and-forget ack would leave the message unacked with no tombstone, to be shown again.
 func (e *Endpoint) ack(p pending) {
 	defer e.waking.done(refOf(p.mail)) // shown, whether or not the server confirms the ack
+	if !e.mayAck(p) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
 	if err := p.msg.DoubleAck(ctx); err != nil {

@@ -482,6 +482,24 @@ func (s Spool) Acked(seq Ref) error {
 	return nil
 }
 
+// Discard forgets a message that was spooled and has not been drained: its waiting file, shown mark and listed mark go,
+// and nothing is acknowledged. A drained message (its tombstone is there) is left alone, as a hook has shown it. Call it
+// under Lock, so it cannot interleave with a hook's read and drained marks.
+func (s Spool) Discard(seq Ref) error {
+	if err := checkStream(seq.Stream); err != nil {
+		return err
+	}
+	if s.IsDrained(seq) {
+		return nil
+	}
+	for _, p := range []string{s.file(seq), s.shownFile(seq), s.listedFile(seq)} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("spool: %w", err)
+		}
+	}
+	return nil
+}
+
 // Touch records a hook run (the marker's mtime).
 func (s Spool) Touch() error {
 	p := filepath.Join(s.Dir, marker)
