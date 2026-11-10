@@ -50,6 +50,13 @@ Chosen option: `approved-reviews-by` or the `lead-approved` label, with a workfl
 * Bad: the maintainer has one more step per pull request, and re-applies the label after every push.
 * Bad: a push after the label is applied leaves it set until the workflow runs; the queue run still needs
   `codex-review` and `pr-check` on the new head, and the window is the workflow's start time.
+* Bad: the label has no provenance. Mergify checks that it is set, not who set it, and write access lets any identity
+  that agents push as apply it to its own pull request. The gate therefore turns an unintended entry into a deliberate
+  act that the label's event log records; it does not stop a determined agent. Stopping that needs the approval path
+  (a recorded review by an account the agents do not hold), which stays accepted as an alternative to the label.
+* Bad: if the reset workflow fails, the label stays on the new head and the gate is open for that push. The job is
+  short and its failure shows as a failed check on the pull request, and entry still waits for `codex-review` and
+  `pr-check` on the new head, which take minutes, so the window is the time to notice a failed reset.
 * Bad: the workflow takes effect only once it is on `main`, so the pull request that adds it is not covered by it.
 
 ### Confirmation
