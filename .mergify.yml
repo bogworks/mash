@@ -1,7 +1,7 @@
 # Mergify merge queue for bogworks/mash, mirroring the orchestrator's queue (its .mergify.yml explains each choice in
-# full). Every key is documented at https://docs.mergify.com/ . The checks named here are ci.yml's job names;
-# internal/release/mergify_test.go fails if one of them is not a job ci.yml runs, since a name CI never publishes can
-# never be satisfied and the queue would time out.
+# full). Every key is documented at https://docs.mergify.com/ . The checks named here are job names in ci.yml,
+# adr-lint.yml or label-reset.yml; internal/release/mergify_test.go fails if one of them is not a job one of those runs,
+# since a name CI never publishes can never be satisfied and the queue would time out.
 
 # One ordered queue, one queue run at a time: fast-forward allows only serial mode
 # (https://docs.mergify.com/merge-queue/queue-modes/).
@@ -33,11 +33,15 @@ queue_rules:
       # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
       # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
       - check-success = adr-lint
+      # label-reset (.github/workflows/label-reset.yml) removes lead-approved and decision-confirmed on every push. It
+      # must have run, and succeeded, on this head before it can enter the queue, so a push cannot slip in on the
+      # previous head's label (fail closed).
+      - check-success = label-reset
       # Entry needs a recorded maintainer approval or the `lead-approved` label. Authorship is NOT a condition: the
       # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
       # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's
       # pull request and the queue, and that failed once. The lead applies `lead-approved` at merge time, and
-      # .github/workflows/lead-approved-reset.yml removes it on every push, so an approval never covers later code
+      # .github/workflows/label-reset.yml removes it on every push, so an approval never covers later code
       # (docs/decisions/0078-*.md). The queue run executes the pull request's code in CI, and codex-review reads
       # attacker-controlled text, so neither a green check nor the review is enough on its own
       # (docs/security/threat-model.md). The approver's login is listed explicitly, not "any approval": Mergify's docs

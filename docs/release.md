@@ -395,7 +395,7 @@ and tick it off in the repository's setup issue.
 - [ ] In its dashboard enable **both** Merge Queue and Merge Protections: `auto_merge_conditions` in `.mergify.yml`
       need Merge Protections.
 
-**Labels:** `critical`, `pipeline`, `docs`, `hold`, `lead-approved`, `queued`, `dequeued`, `safe-to-review`, `security-ok`.
+**Labels:** `critical`, `pipeline`, `docs`, `hold`, `lead-approved`, `decision-confirmed`, `queued`, `dequeued`, `safe-to-review`, `security-ok`.
 
 **Maintainer automation** (kept outside this repository; add the repository to each):
 

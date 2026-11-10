@@ -76,8 +76,10 @@ func loadMergify(t *testing.T) mergify {
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	jobs := load(t, "ci.yml").Jobs
-	for name, j := range load(t, "adr-lint.yml").Jobs { // adr-lint.yml's jobs are checks the queue waits for too
-		jobs[name] = j
+	for _, f := range []string{"adr-lint.yml", "label-reset.yml"} { // their jobs are checks the queue waits for too
+		for name, j := range load(t, f).Jobs {
+			jobs[name] = j
+		}
 	}
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	m := loadMergify(t)
@@ -92,10 +94,10 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			continue
 		}
 		if _, ok := jobs[mm[1]]; !ok {
-			t.Errorf(".mergify.yml waits for %q, which ci.yml does not run", mm[1])
+			t.Errorf(".mergify.yml waits for %q, which no workflow the queue reads (ci.yml, adr-lint.yml, label-reset.yml) runs", mm[1])
 		}
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "label != hold", "-draft", "-conflict"} {
+	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "check-success = label-reset", "label != hold", "-draft", "-conflict"} {
 		if !strings.Contains(strings.Join(queuePlain, "\n"), want) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
@@ -113,7 +115,7 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 }
 
 // The maintainer's login authors agent pull requests too, so authorship proves nothing: entry to the queue needs a
-// recorded approval or the lead-approved label (which lead-approved-reset.yml removes on every push), and the hold label
+// recorded approval or the lead-approved label (which label-reset.yml removes on every push), and the hold label
 // stays the brake in both places.
 func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	m := loadMergify(t)
@@ -145,15 +147,19 @@ func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	}
 }
 
-// The lead-approved label must not outlive the code it approved: a workflow removes it on every push. It runs on
+// The lead-approved and decision-confirmed labels must not outlive the code they covered: a workflow removes both on
+// every push (and runs on open and reopen, so the label-reset check exists on every head). It runs on
 // pull_request_target (a token that can edit labels on any pull request), so it must hold only pull-requests: write and
-// never check out or run the pull request's code.
-func TestWorkflows_leadApprovedResetsOnPush(t *testing.T) {
-	raw, err := os.ReadFile("../../.github/workflows/lead-approved-reset.yml")
+// never check out or run the pull request's code, and a failure must fail the job (no swallowed errors).
+func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
+	if _, err := os.Stat("../../.github/workflows/lead-approved-reset.yml"); err == nil {
+		t.Error("lead-approved-reset.yml still exists: it was renamed to label-reset.yml")
+	}
+	raw, err := os.ReadFile("../../.github/workflows/label-reset.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := load(t, "lead-approved-reset.yml")
+	w := load(t, "label-reset.yml")
 	on, ok := w.On.(map[string]any)
 	if !ok || len(on) != 1 {
 		t.Fatalf("on = %v, want only pull_request_target", w.On)
@@ -162,23 +168,49 @@ func TestWorkflows_leadApprovedResetsOnPush(t *testing.T) {
 	if !ok {
 		t.Fatalf("on = %v, want pull_request_target", w.On)
 	}
-	types, _ := prt["types"].([]any)
-	if len(types) != 1 || types[0] != "synchronize" {
-		t.Errorf("pull_request_target types = %v, want [synchronize]", types)
+	var types []string
+	for _, x := range prt["types"].([]any) {
+		types = append(types, x.(string))
+	}
+	sort.Strings(types)
+	if strings.Join(types, ",") != "opened,reopened,synchronize" {
+		t.Errorf("pull_request_target types = %v, want [opened reopened synchronize]", types)
 	}
 	if len(w.Permissions) != 1 || w.Permissions["pull-requests"] != "write" {
 		t.Errorf("workflow permissions = %v, want pull-requests: write only", w.Permissions)
+	}
+	if len(w.Jobs) != 1 || w.Jobs["label-reset"].Name != "label-reset" {
+		t.Errorf("jobs = %v, want the single job label-reset named label-reset (the check name)", w.Jobs)
 	}
 	for id, j := range w.Jobs {
 		if j.Permissions != nil && (len(j.Permissions) != 1 || j.Permissions["pull-requests"] != "write") {
 			t.Errorf("job %s permissions = %v, want pull-requests: write only", id, j.Permissions)
 		}
 	}
-	if strings.Contains(string(raw), "actions/checkout") {
-		t.Error("lead-approved-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
+	text := string(raw)
+	if strings.Contains(text, "actions/checkout") {
+		t.Error("label-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
 	}
-	if !strings.Contains(string(raw), "--remove-label lead-approved") {
-		t.Error("lead-approved-reset.yml does not remove the lead-approved label")
+	for _, l := range []string{"lead-approved", "decision-confirmed"} {
+		if !strings.Contains(text, l) {
+			t.Errorf("label-reset.yml does not name the %s label", l)
+		}
+	}
+	if !strings.Contains(text, `--remove-label "$label"`) {
+		t.Error("label-reset.yml does not remove labels with gh pr edit --remove-label")
+	}
+	// After the removals the labels are read again and the job fails if either is still set (re-applied concurrently, or
+	// the removal did not take).
+	removeAt := strings.Index(text, `--remove-label "$label"`)
+	if n := strings.Count(text, "gh pr view"); n < 2 {
+		t.Errorf("label-reset.yml has %d gh pr view calls, want a second read of the labels after the removals", n)
+	} else if second := strings.LastIndex(text, "gh pr view"); second < removeAt {
+		t.Error("label-reset.yml re-reads the labels before the removals, not after")
+	} else if after := text[second:]; !strings.Contains(after, "exit 1") || !strings.Contains(after, "$label") {
+		t.Error("label-reset.yml does not fail (exit 1, naming the label) when a label is still present after the removals")
+	}
+	if strings.Contains(text, "|| true") || strings.Contains(text, "continue-on-error") {
+		t.Error("label-reset.yml swallows a failure (|| true or continue-on-error): an API or token failure must fail the job")
 	}
 }
 

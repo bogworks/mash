@@ -30,14 +30,20 @@ request that should have waited entered the queue.
 
 ## Decision Outcome
 
-Chosen option: `approved-reviews-by` or the `lead-approved` label, with a workflow that removes the label on every push. <!-- adrlint:allow vocabulary -->
+Chosen option: `approved-reviews-by` or the `lead-approved` label, with a workflow that removes the approval labels on every push. <!-- adrlint:allow vocabulary -->
 
 * **Entry.** The `or:` group in the default queue rule's `queue_conditions` holds exactly
   `approved-reviews-by = <maintainer>` and `label = lead-approved`. `author = <maintainer>` is removed. <!-- adrlint:allow vocabulary -->
 * **The label.** The maintainer applies `lead-approved` at merge time, after reading the change. <!-- adrlint:allow vocabulary -->
-* **The reset.** `.github/workflows/lead-approved-reset.yml` runs on `pull_request_target` `synchronize`, holds <!-- adrlint:allow vocabulary -->
-  `pull-requests: write` only, checks out nothing and runs no pull request code, and removes the label if it is set.
-  Approvals stay dismissed on an outside author's push by the existing rule.
+* **The reset.** `.github/workflows/label-reset.yml` (job and check `label-reset`) runs on `pull_request_target`
+  `opened`, `reopened` and `synchronize`, holds `pull-requests: write` only, checks out nothing and runs no pull request
+  code. On `opened` it succeeds at once; otherwise it reads the current labels and removes both `lead-approved` <!-- adrlint:allow vocabulary -->
+  and `decision-confirmed` when set (adr-lint accepts `decision-confirmed` applied to an earlier head). It swallows no
+  error: an API or token failure fails the job. After the removals it reads the labels again and fails the job, naming the
+  label, if either is still set. Approvals stay dismissed on an outside author's push by the existing
+  rule.
+* **Fail closed.** `check-success = label-reset` is in `queue_conditions`, so the reset must have run, and succeeded,
+  on a head before it can enter the queue.
 * **The brake.** `label != hold` stays in `queue_conditions` and in `auto_merge_conditions`. The approval gate is not
   repeated in `auto_merge_conditions`: those conditions only decide when Mergify queues a pull request by itself, and
   `queue_conditions` apply to every queued pull request however it was queued.
@@ -48,23 +54,42 @@ Chosen option: `approved-reviews-by` or the `lead-approved` label, with a workfl
 * Good: the label cannot cover later code, since a push removes it.
 * Good: no second account is needed; the label works where an approval by the author's own login cannot.
 * Bad: the maintainer has one more step per pull request, and re-applies the label after every push.
-* Bad: a push after the label is applied leaves it set until the workflow runs; the queue run still needs
-  `codex-review` and `pr-check` on the new head, and the window is the workflow's start time.
 * Bad: the label has no provenance. Mergify checks that it is set, not who set it, and write access lets any identity
   that agents push as apply it to its own pull request. The gate therefore turns an unintended entry into a deliberate
   act that the label's event log records; it does not stop a determined agent. Stopping that needs the approval path
   (a recorded review by an account the agents do not hold), which stays accepted as an alternative to the label.
-* Bad: if the reset workflow fails, the label stays on the new head and the gate is open for that push. The job is
-  short and its failure shows as a failed check on the pull request, and entry still waits for `codex-review` and
-  `pr-check` on the new head, which take minutes, so the window is the time to notice a failed reset.
+* Good: the entry is fail closed. A head without a green `label-reset` check cannot enter the queue, so a failed or
+  missing reset blocks the pull request instead of leaving the label open for that push.
 * Bad: the workflow takes effect only once it is on `main`, so the pull request that adds it is not covered by it.
+* Bad, residual risk: no GitHub rule pins the checks the queue waits on. Verified read-only on 2026-11-10 with
+  `gh api repos/bogworks/mash/rulesets/26308864`: the only branch rule on the default branch is the ruleset
+  `main-protection` (enforcement active, no bypass actors) with deletion blocked, non-fast-forward blocked and one
+  required status check, `Mergify Merge Protections`; there is no required pull-request or review rule, and classic
+  branch protection is not set (404). So `codex-review`, `pr-check`, `adr-lint` and `label-reset` are conditions only in
+  `.mergify.yml`, and `check-success = <name>` matches a check run or status of that name whoever posted it. A pull
+  request that adds or edits a workflow can post a check (or, with a token, a status) with one of those names, so
+  those checks prove nothing against an author who controls workflows. What holds: `.mergify.yml`,
+  `.github/workflows/` and `scripts/adrlint/` are now protected paths in adr-lint, so `Decision: none` on them needs the
+  `decision-confirmed` label and otherwise an ADR; `label-reset` runs from the base branch (`pull_request_target`); and
+  the approval or the `lead-approved` label is still required for entry. <!-- adrlint:allow vocabulary -->
+  Closing it means requiring the checks in the ruleset with an expected source (`required_status_checks` with an
+  `integration_id`) and a required-reviews rule. That is a repository-settings change for the maintainer, not part of
+  this decision's pull request. `docs/branch-protection.md` had described more than the ruleset holds; it now states
+  the verified settings and marks the rest as the target.
 
 ### Confirmation
 
 * `TestMergify_entryNeedsApprovalOrLabel` in `internal/release/mergify_test.go`: no `author =` condition, the entry
   group is exactly the approval and `label = lead-approved`, and `label != hold` is in both places. <!-- adrlint:allow vocabulary -->
-* `TestWorkflows_leadApprovedResetsOnPush`: the workflow triggers on `pull_request_target` `synchronize` only, holds <!-- adrlint:allow vocabulary -->
-  `pull-requests: write` only, contains no `actions/checkout`, and removes `lead-approved`. <!-- adrlint:allow vocabulary -->
+* `TestWorkflows_labelResetRemovesApprovalLabels`: `label-reset.yml` exists and `lead-approved-reset.yml` does not; it <!-- adrlint:allow vocabulary -->
+  triggers on `pull_request_target` `opened`, `reopened` and `synchronize` only, holds `pull-requests: write` only,
+  contains no `actions/checkout`, removes `lead-approved` <!-- adrlint:allow vocabulary --> and `decision-confirmed`,
+  has no `|| true` or `continue-on-error`, re-reads the labels with a second `gh pr view` after the removals and fails
+  (`exit 1`) if one is still set, and its job is named `label-reset`.
+* `TestPR` in `scripts/adrlint/main_test.go`: `Decision: none` on `.mergify.yml`, a file under `.github/workflows/` or
+  `scripts/adrlint/` fails without the `decision-confirmed` label and passes with it or with an ADR.
+* `TestMergify_waitsOnlyForChecksThatExist`: `check-success = label-reset` is in `queue_conditions`, and the name is a
+  job that `label-reset.yml` runs.
 
 ## Pros and Cons of the Options
 

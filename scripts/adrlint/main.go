@@ -63,10 +63,13 @@ const (
 // protected are the paths where "Decision: none" needs a reviewer's decision-confirmed label. A trailing slash is a
 // directory prefix; anything else is one file. They are the decision-bearing code: the SAP wire, the store, permissions,
 // config, the endpoint, the plugin, the MCP server (ADR 0023), the host adapter seam (ADR 0032), the spool (ADR 0025), the
-// render compatibility contract (ADR 0034), and the records themselves.
+// render compatibility contract (ADR 0034), and the records themselves. The merge gate (.mergify.yml), the workflows
+// (.github/workflows/) and this linter's own source (scripts/adrlint/) are in too: they decide what may merge, so a
+// "Decision: none" pull request must not change them without a reviewer's confirmation (ADR 0078).
 var protected = []string{
 	"internal/sap/", "internal/store/", "internal/admin/permissions.go", "internal/config/", "internal/endpoint/", "plugin/",
 	"internal/mcp/", "internal/host/", "internal/spool/", "internal/render/", "docs/decisions/",
+	".mergify.yml", ".github/workflows/", "scripts/adrlint/",
 }
 
 // sections are the required "##" headings, in order.

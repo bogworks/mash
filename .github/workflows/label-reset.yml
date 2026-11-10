@@ -1,0 +1,55 @@
+name: label-reset
+# The lead-approved label lets a pull request into the merge queue (.mergify.yml, docs/branch-protection.md), and
+# adr-lint accepts the decision-confirmed label even when it was applied to an earlier head. Neither may cover code
+# pushed after it was applied, so this removes both on every push, and again on reopen. It also runs on open so the
+# label-reset check exists on every head: the queue requires it (fail closed), and a head with no green label-reset
+# check cannot enter.
+#
+# Trust: pull_request_target gives a token that can edit labels on a pull request from a fork, and runs THIS file from
+# the base branch. So there is no checkout and nothing from the pull request is built, sourced or run; the only inputs
+# are the pull request number and the action from the event, passed through env, never through the text of the script.
+# The token holds pull-requests: write and nothing else. Nothing here swallows an error: a failed API call fails the job.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+permissions:
+  pull-requests: write
+concurrency:
+  group: label-reset-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  label-reset:
+    name: label-reset
+    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Remove lead-approved and decision-confirmed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          LABELS: |
+            lead-approved
+            decision-confirmed
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" = "opened" ]; then
+            echo "A new pull request: nothing can have been approved yet."
+            exit 0
+          fi
+          # The current labels, not the event payload's snapshot, which can be stale.
+          current=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+          for label in $LABELS; do
+            if printf '%s\n' "$current" | grep -Fxq -- "$label"; then
+              gh pr edit "$PR" --remove-label "$label"
+            fi
+          done
+          # Read again: a label re-applied while this ran, or a removal that did not take, must fail the job.
+          after=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+          for label in $LABELS; do
+            if printf '%s\n' "$after" | grep -Fxq -- "$label"; then
+              echo "label $label is still set after the removal" >&2
+              exit 1
+            fi
+          done
