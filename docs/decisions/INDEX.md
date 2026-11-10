@@ -73,3 +73,9 @@
 | [0069](0069-a-crowded-backlog-does-not-wake-a-session-that-a-hook-is-draining.md) | A crowded backlog does not wake a session that a hook is draining | accepted | 2026-11-03 |
 | [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md) | The next ADR number is a file, `NEXT`, and the lint refuses a duplicate or stale number | accepted | 2026-11-03 |
 | [0071](0071-mashctl-add-checks-the-zone-key-is-a-scoped-signer-in-the-account-jwt-before-minting.md) | `mashctl add` checks that the zone key is a scoped signer in the account JWT before minting | proposed | 2026-11-03 |
+| [0072](0072-a-directory-record-may-carry-up-to-64-labels.md) | A directory record may carry up to 64 labels | accepted | 2026-11-03 |
+| [0073](0073-a-one-time-scrub-verification-reads-its-word-list-and-exceptions-from-data-files-and-is-not-a-standing-guard.md) | A one-time scrub verification reads its word list and exceptions from data files and is not a standing guard | superseded by ADR-0075 | 2026-11-09 |
+| [0074](0074-an-endpoint-is-three-sap-tokens-and-keys-its-storage-on-their-flat-form.md) | An endpoint is three SAP tokens and keys its storage on their flat form | proposed | 2026-11-10 |
+| [0075](0075-the-scrub-verification-scans-its-own-directory-and-keeps-its-inventory-free-of-the-words.md) | The scrub verification scans its own directory and keeps its inventory free of the words | accepted | 2026-11-10 |
+| [0076](0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md) | A three-token record may carry the legacy identity it answers to as an alias | accepted | 2026-11-10 |
+| [0077](0077-the-name-rule-file-is-versioned-and-mash-reads-two-versions-for-one-window.md) | The name-rule file is versioned, and mash reads two versions for one window | accepted | 2026-11-10 |
