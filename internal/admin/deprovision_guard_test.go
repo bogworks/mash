@@ -61,8 +61,8 @@ func TestDeprovisionIfUserRefusedRemovalWritesNoMarker(t *testing.T) {
 	}
 }
 
-// A crash after the purge and before the marker: running the same removal again writes the marker and finishes.
-func TestDeprovisionIfUserCrashAfterPurgeBeforeMarkerIsCompleted(t *testing.T) {
+// A crash after the purge and before the marker is final: the marker is pending; running the same removal again finishes it.
+func TestDeprovisionIfUserCrashAfterPurgeLeavesPendingMarkerThatIsCompleted(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
 	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
@@ -78,15 +78,11 @@ func TestDeprovisionIfUserCrashAfterPurgeBeforeMarkerIsCompleted(t *testing.T) {
 	if _, err := dir.Get(ctx, id.Flat()); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("the record should be purged: %v", err)
 	}
-	if markerPresent(t, js, id.Flat()) {
-		t.Fatal("the crash happened before the marker")
-	}
+	wantMarker(t, js, id.Flat(), store.RetiredPending, user) // the marker precedes the purge, so the name is blocked
 	if err := b.DeprovisionIfUser(ctx, id.Flat(), user); err != nil {
 		t.Fatalf("re-running must complete the removal: %v", err)
 	}
-	if !markerPresent(t, js, id.Flat()) {
-		t.Fatal("re-running did not write the marker")
-	}
+	wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
 	_, err := b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
 	wantRetired(t, err, id)
 	if err := b.DeprovisionIfUser(ctx, id.Flat(), user); err != nil { // idempotent once finished

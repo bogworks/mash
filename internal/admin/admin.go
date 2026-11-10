@@ -146,6 +146,11 @@ func (a *Admin) Init(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 			}
+			if cfg.Bucket == store.RetiredBucket {
+				if err := store.VerifyRetiredStatus(st); err != nil { // fail closed; never modified here
+					return err
+				}
+			}
 			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok && bs.StreamInfo().Config.MaxBytes > cfg.MaxBytes {
 				cfg.MaxBytes = bs.StreamInfo().Config.MaxBytes
 			}
@@ -359,7 +364,7 @@ func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name, zon
 // createStreamLocked is the create-or-update of the inbox stream inbox-<key> that both provisioning paths share: it
 // reads any existing stream, refuses a suspended one or an update that would lower a cap, then writes the
 // configuration build returns (build gets the existing stream, nil when there is none). The caller holds key's lock.
-func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key string, build func(existing jetstream.Stream) jetstream.StreamConfig) (jetstream.Stream, error) {
+func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key string, build func(existing jetstream.Stream) jetstream.StreamConfig, alsoCheck ...func() error) (jetstream.Stream, error) {
 	existing, err := a.js.Stream(ctx, sap.InboxStream(key))
 	if err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
 		return nil, fmt.Errorf("mash: inbox stream: %w", err)
@@ -380,6 +385,11 @@ func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key stri
 	cfg := build(existing)
 	if err := lk.check(ctx); err != nil {
 		return nil, err
+	}
+	for _, chk := range alsoCheck { // other locks the caller holds
+		if err := chk(); err != nil {
+			return nil, err
+		}
 	}
 	s, err := a.js.CreateOrUpdateStream(ctx, cfg)
 	if err != nil {
@@ -1161,8 +1171,10 @@ func isRevisionConflict(err error) bool {
 		(errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence)
 }
 
-// Deprovision fences name's lease with a tombstone, then removes its directory record and inbox stream. The fence
-// comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10).
+// Deprovision removes name's directory record and inbox stream and fences its lease with a tombstone. The fence
+// comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10). A
+// new-form identity's retired marker goes pending -> purge -> final (see beginRetire): the marker is written pending
+// before the user is revoked or anything is removed, and made final once the record is purged.
 func (a *Admin) Deprovision(ctx context.Context, name string) (err error) {
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
@@ -1192,48 +1204,102 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	if err := lk.check(ctx); err != nil {
 		return err
 	}
-	var revoked bool
+	// The record's user key, read under the lock. No record leaves nothing to revoke; a record that cannot be
+	// parsed hides its user key, so a removal that must revoke fails closed.
 	var ruser string
-	if a.revoke != nil {
-		// The record's user key, read under the lock. No record leaves nothing to revoke; a record that cannot be
-		// parsed hides its user key, so the removal fails closed.
-		e, err := kv.Get(ctx, name)
+	have := false
+	e, err := kv.Get(ctx, name)
+	switch {
+	case err == nil:
+		have = true
+		rec, perr := store.ParseRecord(name, e.Value())
 		switch {
-		case err == nil:
-			rec, perr := store.ParseRecord(name, e.Value())
-			if perr != nil {
-				return &refusedError{name: name, why: perr, text: "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking (nothing was removed): " + perr.Error()}
-			}
-			done, err := a.revokeLocked(ctx, lk, name, rec.User)
-			revoked, ruser = done, rec.User
+		case perr == nil:
+			ruser = rec.User
+		case a.revoke != nil:
+			return &refusedError{name: name, why: perr, text: "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking (nothing was removed): " + perr.Error()}
+		}
+	case !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted):
+		return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)
+	}
+	// First phase, before anything is revoked or purged: a new-form identity's marker is written pending (a full or
+	// failing bucket stops the call here). A name with no record is never burned, but a pending marker left by an
+	// earlier run is picked up and finished.
+	var pm *retireMark
+	if have {
+		pm, err = a.beginRetire(ctx, lk, name, ruser)
+	} else {
+		pm, err = a.loadRetire(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	var revoked, purgeTried bool
+	err = func() error {
+		if have && a.revoke != nil {
+			done, err := a.revokeLocked(ctx, lk, name, ruser)
+			revoked = done
 			if err != nil {
 				return err
 			}
-		case !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted):
-			return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)
 		}
+		if err := fence(ctx, lease, name); err != nil {
+			return err
+		}
+		if err := lk.check(ctx); err != nil {
+			return err
+		}
+		if err := adm.check(ctx); err != nil {
+			return err
+		}
+		purgeTried = true
+		if err := purgeDirectory(ctx, kv, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
+			return unfinishedPurge(name, pm, err)
+		}
+		return nil
+	}()
+	if err != nil {
+		err = partialIf(revoked, name, ruser, err)
+		// Only a definitive refusal made before the purge was tried deletes the marker; once the user is revoked the
+		// retirement is under way, and a purge that failed unknown may have succeeded: both stay pending.
+		if !revoked && !purgeTried {
+			err = a.abortRetire(ctx, lk, adm, pm, err, false)
+		}
+		return err
 	}
-	// A new-form identity is burned before anything is removed (INV-002): a crash after this leaves the name retired
-	// and the record in place, and the same call run again finishes the removal.
-	if err := a.retireLocked(ctx, lk, kv, name, ruser); err != nil {
+	if afterDeprovisionPurge != nil {
+		afterDeprovisionPurge()
+	}
+	if err := a.finalizeRetire(ctx, lk, pm, ruser); err != nil {
 		return partialIf(revoked, name, ruser, err)
-	}
-	if err := fence(ctx, lease, name); err != nil {
-		return partialIf(revoked, name, ruser, err)
-	}
-	if err := lk.check(ctx); err != nil {
-		return partialIf(revoked, name, ruser, err)
-	}
-	if err := adm.check(ctx); err != nil {
-		return partialIf(revoked, name, ruser, err)
-	}
-	if err := kv.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
-		return partialIf(revoked, name, ruser, fmt.Errorf("mash: directory record: %w", err))
 	}
 	if err := lk.check(ctx); err != nil {
 		return partialIf(revoked, name, ruser, err)
 	}
 	return partialIf(revoked, name, ruser, a.deleteInbox(ctx, name))
+}
+
+// directoryPurgeFault is a test seam: it runs after a directory purge the server accepted and may return an error
+// that replaces the result (a timeout after the work was done); nil in production.
+var directoryPurgeFault func() error
+
+// purgeDirectory purges name's directory record.
+func purgeDirectory(ctx context.Context, kv jetstream.KeyValue, name string, opts ...jetstream.KVDeleteOpt) error {
+	err := kv.Purge(ctx, name, opts...)
+	if err == nil && directoryPurgeFault != nil {
+		err = directoryPurgeFault()
+	}
+	return err
+}
+
+// unfinishedPurge words a directory purge that failed with an answer that does not say whether the server did it (a
+// timeout, a lost connection). When the name has a retired marker, the retirement is unfinished and the marker is
+// left pending: it blocks the name until the deprovision is run again, which resolves it.
+func unfinishedPurge(name string, pm *retireMark, err error) error {
+	if pm == nil {
+		return fmt.Errorf("mash: directory record: %w", err)
+	}
+	return fmt.Errorf("mash: the retirement of %s is unfinished: the directory purge did not report success (%w); its retired marker stays pending and blocks the name; run the same command again to finish it", name, err)
 }
 
 // fenceAndDeleteInbox is the part of a deprovision that follows a guarded record delete (DeprovisionIfUser,
@@ -1354,7 +1420,8 @@ var (
 // afterDeprovisionGet is a test seam between DeprovisionIfUser's read and its delete; nil in production.
 var afterDeprovisionGet func()
 
-// afterDeprovisionPurge is a test seam between DeprovisionIfUser's record delete and its lease fence; nil in production.
+// afterDeprovisionPurge is a test seam between a deprovision's record delete (Deprovision's or DeprovisionIfUser's) and
+// the finalizing of its retired marker; nil in production.
 var afterDeprovisionPurge func()
 
 // DeprovisionIfUser is Deprovision for a record that must still belong to user (a public user key): it reads the
@@ -1400,93 +1467,119 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	defer adm.release(ctx)
 	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
 	purged, revoked := false, false
-	for try := 0; try < setMetaTries && !purged; try++ {
-		e, err := kv.Get(ctx, name)
-		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-			if try > 0 {
-				return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
+	var pm *retireMark
+	// keep: the marker must stay pending (the purge's outcome is unknown, or the record vanished and nothing proves
+	// the retirement did not happen). refused: the server definitively refused the guarded purge, or the record
+	// turned out to be another user's, so the retirement did not happen and the pending marker goes.
+	var keep, refused bool
+	err = func() error {
+		for try := 0; try < setMetaTries && !purged; try++ {
+			e, err := kv.Get(ctx, name)
+			if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+				if try > 0 {
+					keep = true
+					return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
+				}
+				if id, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
+					// A new-form name whose record is already gone: the remains of a removal that stopped after the
+					// purge. Complete it from the flat key and the caller's user.
+					return a.finishAfterPurge(ctx, lk, lease, name, id, user)
+				}
+				return refusal(name, ErrNoRecord)
 			}
-			if id, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
-				// A new-form name whose record is already gone: the remains of a removal that stopped after the
-				// purge and before its marker. Complete it from the flat key and the caller's user.
-				return a.finishAfterPurge(ctx, lk, lease, name, id, user)
-			}
-			return refusal(name, ErrNoRecord)
-		}
-		if err != nil {
-			return partialIf(revoked, name, user, fmt.Errorf("mash: directory %s: %w", name, err))
-		}
-		rec, err := store.ParseRecord(name, e.Value())
-		if err != nil {
-			return partialIf(revoked, name, user, fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err))
-		}
-		if rec.User != user {
-			if try > 0 {
-				return partialIf(revoked, name, user, changed)
-			}
-			return refusal(name, ErrRecordOtherUser)
-		}
-		if afterDeprovisionGet != nil {
-			afterDeprovisionGet()
-		}
-		if err := lk.check(ctx); err != nil {
-			return partialIf(revoked, name, user, err)
-		}
-		if !revoked {
-			// rec.User == user here; once per call, since a retry only repeats for the same user.
-			done, err := a.revokeLocked(ctx, lk, name, rec.User)
-			revoked = done
 			if err != nil {
-				return err
+				return partialIf(revoked, name, user, fmt.Errorf("mash: directory %s: %w", name, err))
+			}
+			rec, err := store.ParseRecord(name, e.Value())
+			if err != nil {
+				return partialIf(revoked, name, user, fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err))
+			}
+			if rec.User != user {
+				if try > 0 {
+					refused = true
+					return partialIf(revoked, name, user, changed)
+				}
+				return refusal(name, ErrRecordOtherUser)
+			}
+			if afterDeprovisionGet != nil {
+				afterDeprovisionGet()
+			}
+			if err := lk.check(ctx); err != nil {
+				return partialIf(revoked, name, user, err)
+			}
+			if pm == nil {
+				// First phase: the marker is pending before the user is revoked or the record purged.
+				if pm, err = a.beginRetire(ctx, lk, name, user); err != nil { // new-form only
+					return err
+				}
+			}
+			if !revoked {
+				// rec.User == user here; once per call, since a retry only repeats for the same user.
+				done, err := a.revokeLocked(ctx, lk, name, rec.User)
+				revoked = done
+				if err != nil {
+					return err
+				}
+			}
+			if err := adm.check(ctx); err != nil {
+				return partialIf(revoked, name, user, err)
+			}
+			err = purgeDirectory(ctx, kv, name, jetstream.LastRevision(e.Revision()))
+			switch {
+			case err == nil:
+				purged = true
+			case isRevisionConflict(err):
+				// Another admin changed the record (SetMeta bumps the revision). Re-read: if it is still this user's,
+				// retry on the new revision; a different user or a vanished record refuses on the next pass.
+			default:
+				keep = true // the answer does not say whether the server purged it
+				return partialIf(revoked, name, user, unfinishedPurge(name, pm, err))
 			}
 		}
-		if err := adm.check(ctx); err != nil {
-			return partialIf(revoked, name, user, err)
+		if !purged {
+			refused = true // the guarded purge was refused every time: the record kept changing
+			return partialIf(revoked, name, user, changed)
 		}
-		err = kv.Purge(ctx, name, jetstream.LastRevision(e.Revision()))
-		switch {
-		case err == nil:
-			purged = true
-		case isRevisionConflict(err):
-			// Another admin changed the record (SetMeta bumps the revision). Re-read: if it is still this user's,
-			// retry on the new revision; a different user or a vanished record refuses on the next pass.
-		default:
-			return partialIf(revoked, name, user, fmt.Errorf("mash: directory record: %w", err))
+		return nil
+	}()
+	if err != nil {
+		// A definitive refusal deletes the pending marker even after the revoke (the old user stays revoked); a
+		// refusal before the purge deletes the one this call wrote; an unknown outcome leaves it pending.
+		if !purged && !keep && (refused || !revoked) {
+			err = a.abortRetire(ctx, lk, adm, pm, err, refused)
 		}
+		return err
 	}
-	if !purged {
-		return partialIf(revoked, name, user, changed)
+	if !purged { // finishAfterPurge did everything
+		return nil
 	}
 	if afterDeprovisionPurge != nil {
 		afterDeprovisionPurge()
 	}
-	// The marker follows the guarded purge, never precedes it: a refused or failed guarded removal leaves the record
-	// and must not burn a live name (the marker has no release).
-	if err := a.retireMarker(ctx, lk, name, user); err != nil { // new-form only
+	// Second phase: the marker becomes final after the guarded purge, never before it.
+	if err := a.finalizeRetire(ctx, lk, pm, user); err != nil {
 		return partialIf(revoked, name, user, err)
 	}
 	return partialIf(revoked, name, user, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }
 
-// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: it writes the
-// retired marker (an existing one keeps its first time) then fences and deletes the inbox. With no record nothing
-// proves who owned the name, so the marker is built from the flat key id and the caller's user; an existing marker
-// for another user refuses. The caller holds name's lock.
+// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: it makes a pending
+// marker final (an existing marker keeps its first time), or writes a final one when there is none, then fences and
+// deletes the inbox. With no record nothing proves who owned the name, so a marker for another user than the
+// caller's refuses; without a marker it is built from the flat key and the caller's user. The caller holds name's lock.
 func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string, id sap.EndpointIdentity, user string) error {
-	retired, err := a.retiredKV(ctx)
+	pm, err := a.loadRetire(ctx, name)
 	if err != nil {
 		return err
 	}
-	switch e, err := retired.Get(ctx, name); {
-	case err == nil:
-		var m store.Retired
-		if json.Unmarshal(e.Value(), &m) == nil && m.User != "" && m.User != user {
+	if pm != nil {
+		if pm.m.User != "" && pm.m.User != user {
 			return refusal(name, ErrRecordOtherUser)
 		}
-	case !errors.Is(err, jetstream.ErrKeyNotFound):
-		return fmt.Errorf("mash: retired marker %s: %w", name, err)
-	}
-	if err := a.retireMarker(ctx, lk, name, user); err != nil {
+		if err := a.finalizeRetire(ctx, lk, pm, user); err != nil {
+			return err
+		}
+	} else if err := a.retireFinalDirect(ctx, lk, name, user); err != nil {
 		return err
 	}
 	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
@@ -1511,7 +1604,7 @@ func (g *aliasGuard) check(ctx context.Context) error {
 
 // guardLegacyAlias is the alias check of every path that removes a legacy record (a key without "_"). Under the
 // directory-wide admission lock (taken after the caller's name lock, never before it) it refuses when a new-form
-// record's alias names this owner and name: removing the record would leave that alias dangling, and a legacy
+// record's alias names this record's owner and name: removing the record would leave that alias dangling, and a legacy
 // Provision of the name could then hand its bridge permissions to a different endpoint. It returns the held lock,
 // which the caller releases once the record is removed, or nil for a new-form key. A directory with no new-form key
 // is not read. Otherwise every record is read and one that cannot be read refuses (fail closed), as admission does.
@@ -1541,8 +1634,16 @@ func (a *Admin) guardLegacyAlias(ctx context.Context, kv jetstream.KeyValue, nam
 		g.release(ctx)
 		return nil, fmt.Errorf("mash: refusing to deprovision %s: %w (left in place)", name, err)
 	}
+	// The alias names the legacy record's own owner and name, whatever owner this admin is configured with. When
+	// the record's owner cannot be established, any alias naming the name blocks (fail closed).
+	owner, ownerKnown := "", false
+	if e, gerr := kv.Get(ctx, name); gerr == nil {
+		if rec, perr := store.ParseRecord(name, e.Value()); perr == nil && rec.Owner != "" {
+			owner, ownerKnown = rec.Owner, true
+		}
+	}
 	for _, r := range recs {
-		if r.Alias != nil && r.Alias.Owner == a.owner && r.Alias.Name == name {
+		if r.Alias != nil && r.Alias.Name == name && (!ownerKnown || r.Alias.Owner == owner) {
 			g.release(ctx)
 			holder := r.KeyOrName()
 			return nil, &refusedError{name: name, why: ErrAliased,
@@ -1557,6 +1658,10 @@ func (a *Admin) guardLegacyAlias(ctx context.Context, kv jetstream.KeyValue, nam
 func IsRefusal(err error) bool {
 	var p *partialError
 	if errors.As(err, &p) {
+		return false
+	}
+	var m *pendingMarkerError // a refusal whose pending marker could not be deleted did leave something behind
+	if errors.As(err, &m) {
 		return false
 	}
 	var r *refusedError

@@ -176,7 +176,9 @@ func LeaseConfigFor(l Limits) jetstream.KeyValueConfig {
 
 // RetiredConfig is the retired-name bucket: flat identity -> Retired, written when a new-form identity is
 // deprovisioned. It has no TTL (unlike the lease bucket, whose tombstone lapses after LeaseTTL) and nothing in mash
-// deletes from it: INV-002, a retired name is never reassigned, needs the marker to outlive the lease.
+// deletes from it: INV-002, a retired name is never reassigned, needs the marker to outlive the lease. The KV
+// stream jetstream makes for it discards new messages when full (never an old marker); VerifyRetiredStatus refuses
+// a bucket whose stream does otherwise.
 func RetiredConfig() jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: RetiredBucket, Description: "mash retired new-form identities",
 		History: 1, Storage: jetstream.FileStorage, MaxBytes: RetiredMaxBytes}
@@ -190,6 +192,45 @@ type Retired struct {
 	Name      string `json:"name"`
 	User      string `json:"user,omitempty"`
 	RetiredAt string `json:"retired_at"` // RFC 3339, UTC
+	// State is RetiredPending while a retirement has started and not finished, and RetiredFinal once the record is gone.
+	// A marker with no state (written before the two phases existed) counts as final.
+	State string `json:"state,omitempty"`
+}
+
+// The states of a retired marker. Either one blocks provisioning of the name.
+const (
+	RetiredPending = "pending"
+	RetiredFinal   = "final"
+)
+
+// IsPending reports whether the retirement this marker records was started and not finished.
+func (r Retired) IsPending() bool { return r.State == RetiredPending }
+
+// VerifyRetiredStatus is the fail-closed check of the retired-name bucket's configuration: a TTL would expire markers,
+// and a history other than RetiredConfig's is not a bucket mash made. It never changes the bucket; the error tells the
+// admin to fix or recreate it.
+func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
+	want := RetiredConfig()
+	switch {
+	case st.TTL() != 0:
+		return fmt.Errorf("mash: bucket %s has a TTL of %s: a TTL would expire retired markers and let a retired name be reassigned (INV-002); fix or recreate the bucket without a TTL (mash does not change it)", RetiredBucket, st.TTL())
+	case st.History() != int64(want.History):
+		return fmt.Errorf("mash: bucket %s keeps history %d, not %d; fix or recreate the bucket (mash does not change it)", RetiredBucket, st.History(), want.History)
+	}
+	// A stream that evicts when full (discard old), or by message count or age, would drop a marker and free its name.
+	// jetstream creates a KV stream with discard new (a full bucket refuses the write), which is what RetiredConfig gets.
+	if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok {
+		c := bs.StreamInfo().Config
+		switch {
+		case c.Discard != jetstream.DiscardNew:
+			return fmt.Errorf("mash: bucket %s evicts its oldest messages when full (discard policy %s, not new): that could drop a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.Discard)
+		case c.MaxAge != 0:
+			return fmt.Errorf("mash: bucket %s expires messages after %s: that could drop a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.MaxAge)
+		case c.MaxMsgs > 0:
+			return fmt.Errorf("mash: bucket %s is capped at %d messages: that could evict a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.MaxMsgs)
+		}
+	}
+	return nil
 }
 
 // Record is one directory entry (spec 6.1).
