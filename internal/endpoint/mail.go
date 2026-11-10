@@ -359,6 +359,9 @@ func (e *Endpoint) sources() []inboxSource {
 // it the stream is left to its holder (the consumer is not even created here), and when the lease is lost mid-session
 // its consume loop is stopped while the own stream's keeps running.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
+	if !e.graceWait(ctx) { // a takeover from a live serve of this session: let it stop first
+		return func() {}, nil
+	}
 	srcs := e.sources()
 	if !e.legacyReading() {
 		kept := srcs[:0]
@@ -448,7 +451,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			if !ok {
 				e.dropped.Add(1)
 				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
-				if e.leaseHeldFor(stream) {
+				if e.verdictFor(stream) == verdictHeld {
 					_ = m.Ack()
 				}
 				return

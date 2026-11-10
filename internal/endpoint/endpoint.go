@@ -87,6 +87,13 @@ type Endpoint struct {
 	// message of any stream is delivered or acknowledged by it (mayAck, dropUnleased, dropHeld): JetStream redelivers
 	// it all to the new holder.
 	leaseGone atomic.Bool
+	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
+	loseOwn func(error)
+	// live is the cache of the ack-time lease check (lease_fence.go).
+	live liveLease
+	// graceUntil: set when the lease was taken from a live same-session holder; consume waits for it (lease_fence.go).
+	graceMu    sync.Mutex
+	graceUntil time.Time
 
 	// legacy is the state of the legacy identity's lease, which the endpoint holds while it consumes the legacy inbox
 	// stream (legacylease.go).
@@ -514,6 +521,9 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 				if reason := e.takeoverReason(lv); reason != "" {
 					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
 						e.log.Print(e.tookOverLine(e.key, reason, lv))
+						if reason == "same" {
+							e.startGrace()
+						}
 						e.leaseRev.Store(rev)
 						e.keepLease()
 						return nil
@@ -552,6 +562,7 @@ func (e *Endpoint) keepLease() {
 		}
 		cancel()
 	}
+	e.loseOwn = lose
 	watching.Add(1)
 	go func() {
 		defer watching.Done()

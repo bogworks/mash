@@ -76,7 +76,7 @@ type legacyLease struct {
 	mu     sync.Mutex // guards cancel, done and lost: each hold has its own, never reused
 	cancel context.CancelFunc
 	done   chan struct{}
-	lost   chan error // buffered; a loss is sent once
+	lost   chan error  // buffered; a loss is sent once
 	lose   func(error) // records the loss of this hold (the refresh, the watch and the ack-time check); bound to the hold
 
 	wake    chan struct{}                         // capacity 1: the state changed (the consume loop re-checks)
@@ -123,6 +123,14 @@ func (e *Endpoint) legacyPoke() {
 		default:
 		}
 	}
+}
+
+// legacyLoser is the loss recorder of the current hold (nil before the first hold). A caller reads it before it looks at
+// the lease key, so a loss it finds is attributed to the hold it looked for: the recorder ignores a hold that is over.
+func (e *Endpoint) legacyLoser() func(error) {
+	e.legacy.mu.Lock()
+	defer e.legacy.mu.Unlock()
+	return e.legacy.lose
 }
 
 // legacyHold is the current hold's lost channel and epoch.
@@ -224,6 +232,9 @@ func (e *Endpoint) takeLegacyLease(ctx context.Context) {
 			if reason := e.takeoverReason(lv); reason != "" {
 				if rev, uerr := e.leaseKV.Update(ctx, e.legacyKey, val, cur.Revision()); uerr == nil {
 					e.log.Print(e.tookOverLine(e.legacyKey, reason, lv))
+					if reason == "same" {
+						e.startGrace()
+					}
 					e.legacyTaken(rev)
 					return
 				}
@@ -508,22 +519,35 @@ func (e *Endpoint) anyLeaseGone() bool {
 	return e.leaseGone.Load() || (e.hasLegacyStream() && !e.legacyReading())
 }
 
-// dropUnleased removes from batch the mail of every stream whose lease is gone, without acknowledging it (it is nak'd,
-// which redelivers it to the holder's consumer). It returns batch itself when nothing is removed.
+// dropUnleased removes from batch the mail that may not be delivered, without acknowledging it: that of a stream whose
+// lease is gone (nak'd, which redelivers it to the holder's consumer at once) and, when the lease cannot be confirmed
+// just now, that too (nak'd with a delay). The lease is read live (lease_fence.go), so a takeover the watch has not yet
+// noticed is noticed here, before anything is delivered; the read is reused for leaseConfirmFor, so a batch costs one.
+// It returns batch itself when nothing is removed.
 func (e *Endpoint) dropUnleased(batch []pending) []pending {
-	if !e.anyLeaseGone() {
-		return batch
-	}
-	kept := batch[:0:0]
-	for _, p := range batch {
-		if e.leaseHeldFor(p.mail.Stream) {
-			kept = append(kept, p)
-		} else {
-			if p.msg != nil {
-				_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+	var kept []pending
+	for i, p := range batch {
+		v := e.verdictFor(p.mail.Stream)
+		if v == verdictHeld {
+			if kept != nil {
+				kept = append(kept, p)
 			}
-			e.waking.done(refOf(p.mail)) // no longer ours to count
+			continue
 		}
+		if kept == nil {
+			kept = append(make([]pending, 0, len(batch)), batch[:i]...)
+		}
+		if p.msg != nil {
+			if v == verdictLost {
+				_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+			} else {
+				_ = p.msg.NakWithDelay(time.Second) // not confirmed: not delivered, not acked
+			}
+		}
+		e.waking.done(refOf(p.mail)) // no longer ours to count
+	}
+	if kept == nil {
+		return batch
 	}
 	return kept
 }
@@ -536,8 +560,9 @@ func (e *Endpoint) fenceLegacy(show []pending) []pending {
 	return e.dropUnleased(show)
 }
 
-// mayAck reports whether this endpoint may acknowledge p (leaseHeldFor its stream).
-func (e *Endpoint) mayAck(p pending) bool { return e.leaseHeldFor(p.mail.Stream) }
+// mayAck reports whether this endpoint may acknowledge p: it holds the lease for p's stream, confirmed live (an
+// unconfirmed lease is not enough: the ack is withheld and the mail redelivered).
+func (e *Endpoint) mayAck(p pending) bool { return e.verdictFor(p.mail.Stream) == verdictHeld }
 
 // dropHeld forgets the mail held for a hook that this endpoint no longer holds the lease for, acking none of it: mail of
 // a stream whose lease is gone (the own lease for every stream, the legacy identity's for the legacy stream), and mail spooled under an earlier hold than the current one (the lease

@@ -59,6 +59,18 @@ new holder at once; a repeat is the safe side, a lost message is not. Without th
 shared consumer until its next refresh, could ack mail it wrote to a client no longer processing its pipe, and that mail
 would never reach the new serve.
 
+The watch alone leaves a window of up to a second in which the earlier serve, still pulling the shared consumer, could
+deliver to its client and ack mail the new serve never sees. Two things close it. First, an ack-time fence: before the
+earlier serve delivers a batch, and before any ack (the channel path, the ack of mail a hook drained, the ack of a
+duplicate, the ack of mail dropped for its sender header), it reads its own lease key directly (and the legacy
+identity's key, for legacy-stream mail) and compares the holder's instance with its own. Another instance or a
+deprovision's tombstone marks the lease lost at once, as the watch does, and the mail is nak'd, neither delivered nor
+acked. A read that fails or exceeds 500 ms marks no loss, but nothing is delivered or acked on it: the mail is nak'd with
+a delay (before delivery) or left unacked (an ack), and JetStream redelivers it. A confirmation, or a failed
+confirmation, is reused for 200 ms, so a batch or an ack burst costs one read. Second, a grace: a serve that took the
+lease from a live holder of its own session (not from a free lease or a dead holder) pulls its consumers only after
+2 x the watch interval (2 s), so the earlier serve has stopped; a takeover of a free or dead holder has no grace.
+
 For a same-session holder the earlier serve then stops consuming and refreshing, closes its endpoint (which never touches
 the new holder's lease), and becomes superseded: its tools answer that it was superseded by a newer mash serve of the same
 session (naming the pid) and that mail is handled there, `status` shows `connection: SUPERSEDED` with the new holder, and
@@ -84,9 +96,13 @@ covered by a test. It is not used here because in the observed case the old serv
 * Good, because the earlier serve says what happened instead of reporting a name it no longer holds.
 * Good, because the session is told when its mail is off.
 * Good, because the earlier serve cannot ack mail the new serve should receive.
-* Bad, because the earlier serve reads its lease key every second (one direct get per lease held), and a window of up to
-  a second remains in which mail it receives is delivered to a client that may be gone; it is not acknowledged, so the new
-  serve is redelivered it.
+* Bad, because the earlier serve reads its lease key every second and again at each delivery batch or ack burst (one
+  direct get per lease held, at most one per 200 ms), and the new serve's first read of mail waits 2 s after a
+  same-session takeover.
+* Bad, because a residual remains: a takeover that lands after a confirmation and before the ack it permitted (at most
+  the 200 ms the confirmation is reused, plus the time of the delivery itself) is not seen, and that ack is the one
+  that can strand a message. The grace makes it unlikely rather than impossible: the new serve is not reading yet, so
+  such a message is acked only if it was already delivered to the earlier serve inside that window.
 * Bad, because the takeover trusts the session id and parent recorded in the lease, which the holder writes. Trust
   statement: session id and parent identity are claims written by the holder. A process holding the endpoint's credentials
   on the same machine is already the endpoint (it can publish and consume as it), so a same-session takeover adds no
@@ -99,7 +115,11 @@ the cases that must not take over (another session id, two different session ids
 less, another launch token). They cover the earlier serve's step-down and superseded answers and exit, learning of the loss within a second with a
 one-hour refresh interval (own and legacy lease), no ack by the earlier serve of mail it held (consumer ack floor) and
 exactly-once delivery to the new serve, the short retry, the refreshed holder, the hook notice (emit, rate limit, stale,
-cleared, other session) and the ownership-checked removal of the lease-wait state by two waiting serves.
+cleared, other session) and the ownership-checked removal of the lease-wait state by two waiting serves. They also cover the window: with a one-hour watch interval the earlier serve delivers
+nothing and acks nothing of mail that arrives after the takeover, nor of mail a hook drains after it, and the new serve
+receives each message exactly once; a lease read that times out marks no loss and acks and delivers nothing until it
+works again; one burst of checks costs one read; the new serve pulls nothing inside the grace and does after it; and
+a free lease or a dead holder has no grace.
 
 ## Pros and Cons of the Options
 
