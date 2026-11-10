@@ -21,15 +21,21 @@ the credential re-issue; Phase 3 is held.
    - **Alias subjects are exact.** A new-form endpoint takes its legacy alias (the legacy name, AT-004) as exact
      subjects with the literal agent token `cc` (`agents.<verb>.cc.<legacy-owner>.<legacy-name>`), never a wildcard in the
      agent position, and publishes its heartbeat on both its new subject and its alias. A new-form sender's window grant
-     to reach legacy endpoints is `agents.<verb>.cc.<legacy-owner>.*` (a wildcard only in the name position). Neither
+     to reach legacy endpoints is `agents.<verb>.cc.<legacy-owner>.*` for the verbs `mail`, `prompt` and `status` only
+     (a wildcard only in the name position); heartbeat publication is granted on the endpoint's own exact subjects
+     (new and alias) and never on a legacy endpoint's. Neither
      overlaps a new-form subject, because REQ-028 forbids a range named `cc`.
-   - **Outstanding wildcard credentials are inventoried, not assumed away.** Existing legacy users hold
-     `agents.mail.*.<legacy-owner>.*`, which also matches `agents.mail.<range>.<legacy-owner>.<lane>`. It overlaps a
-     new-form subject only if a herd token equals the legacy owner token, so during the window the name rule refuses a
-     new-form owner token equal to the legacy owner (proposed rule below), and AT-003's enumeration (1.9) lists every
-     credential that still carries such a wildcard. Tests first: an overlap test that a new-form subject with an
-     owner token equal to the legacy owner is refused, and that a legacy wildcard grant cannot reach a new-form subject
-     of any other herd.
+   - **Overlap is refused by mash's own admission, not by the optional rule file.** Existing legacy users hold
+     `agents.mail.*.<legacy-owner>.*`, which also matches `agents.mail.<range>.<legacy-owner>.<lane>`. Keeping new-form
+     subjects disjoint from legacy ones is mash's own subject-disjointness, not homerange grammar, so REQ-017 does not
+     stop it, and it holds with or without a rule file. During the window mash's provisioning and admission refuse
+     (a) any new-form identity for which `sap.Overlaps` finds an overlap with an existing directory record, and (b) a
+     new-form owner token equal to any legacy owner present in the account. This lands in 1.3 part 2b, before any
+     new-form record can be written (until then every path that would write one fails closed). The window rule in the
+     name-rule file is belt and braces, not the only guard. AT-003's enumeration (1.9) also lists every credential that
+     still carries such a wildcard. Tests first: an overlap test that a new-form subject with an owner token equal to a
+     legacy owner is refused with and without a rule file; that a legacy wildcard grant cannot reach a new-form
+     subject of any other owner; and a delivery test with both a legacy and a new-form record present.
    - **Streams do not overlap, and nothing is copied.** The legacy stream keeps its own subject filter and is never
      altered; legacy-alias mail keeps arriving in it. The new-form endpoint's stream `inbox-<flat>` takes the new subject
      only. During the window the endpoint reads **both** streams: the legacy stream through its existing durable
@@ -42,10 +48,17 @@ the credential re-issue; Phase 3 is held.
      has shown it, so acknowledgements can arrive out of order (an urgent message rings first, a batch is drained in
      the order the hook lists it), leaving acknowledged messages above the floor; a source starting at floor + 1 would
      copy those too. Reading the old consumer avoids the question, because it already knows which messages are acked.
-     Two things to settle in a spike test before 1.4 is written: that one endpoint can hold two consumers' spool state
-     without confusing `read #seq` (the two streams' sequence numbers collide: the proposed fix is a new stream whose
-     first sequence follows the legacy stream's last, if the server supports that, else display numbers that name the
-     stream), and the rollback below. Tests first: signed legacy mail is read under the new identity with the same
+     The spike (2026-11-10, nats-server 2.15.1, nats.go 1.54.0, run against the production permissions) settled the open
+     points. **Numbering:** `StreamConfig.FirstSeq` exists but is creation-time only and cannot keep numbers unique,
+     because the legacy stream keeps receiving alias mail during the window (legacy `#4` and new `#4` collide). The two
+     streams' messages therefore carry stream-qualified numbers (legacy `L#n`, new `N#n`, or an offset kept in endpoint
+     state) and the spool, the seen set, the waking tracker and the read and inbox tools key on (stream, sequence)
+     instead of the bare sequence; `spool.Bind` is single-stream today and becomes per stream. **Credentials:** the
+     transition lines below were verified: with them a provisioned user reads and acknowledges the legacy stream
+     through its `deliver` consumer and cannot touch any other inbox or create or delete anything; without them the
+     read times out (the violation shows only in the server log), so the endpoint logs asynchronous permission errors.
+     **No redelivery:** reading the old durable consumer after an out-of-order acknowledgement returns only the
+     unacknowledged messages; a new `DeliverAll` consumer on a copy returns all of them. Tests first: signed legacy mail is read under the new identity with the same
      `[verified]` label, **run with the provisioned user's credentials, not admin credentials** (a test that passes only
      with admin creds proves nothing: see the transition grant below); **mail that was acknowledged before the rename, including one acknowledged out of order above the
      ack floor, is not shown again after it**; unacked mail is shown once; and no stream subject overlaps another
@@ -218,7 +231,10 @@ writers, and nothing writes a new-form record until every reader in the range ca
   Tests first: legacy records, new-form records, and an old reader's refusal (documented, not hidden).
 - **1.3 Subjects and per-endpoint tokens.** Owner and agent tokens come from the endpoint's identity (all four verbs,
   heartbeat included); stream filters come from the identity; parsing accepts the legacy five-token and zoned six-token
-  forms and the new five-token form. Legacy identities produce exactly today's values (0.1 proves it).
+  forms and the new five-token form. Legacy identities produce exactly today's values (0.1 proves it). **Admission** is in 1.3 part 2b (see amendment 1,
+  "Overlap is refused by mash's own admission"): before any new-form record is written, mash refuses an identity that
+  `sap.Overlaps` an existing directory record and a new-form owner token equal to any legacy owner in the account,
+  with or without a rule file; a directory record read back is not proof of disjointness.
 - **1.4 Keys by flat identity, and a mail-preserving transition.** A new-form identity takes `inbox-<flat>`,
   `_INBOX.<flat>`, flat KV keys and user names; a legacy identity keeps its keys. The consumer name `deliver` is
   stream-scoped and stays; if the contract meant it to change, that is a clarification to ask for (below). Credential and
@@ -230,7 +246,10 @@ writers, and nothing writes a new-form record until every reader in the range ca
   INV-003). The mechanism is the one in amendment 1: no copy; the endpoint reads
   the legacy stream through its existing durable consumer and the new stream through a new one, so nothing already
   acknowledged is shown again. Rollback for a lane is to
-  stop using the new identity; the legacy stream is never altered (NFR-002), and the rollback steps are written down.
+  stop using the new identity; the legacy stream is never altered (NFR-002). Mail that arrived only on `inbox-<flat>`
+  stays stored but the legacy user cannot read it, so rollback keeps the new-form credentials until `inbox-<flat>` has
+  zero pending and zero unacknowledged messages (or the legacy user is re-issued with the mirrored transition lines
+  for `inbox-<flat>`); the rollback steps say so and a test proves no mail is left unreadable.
   This is the riskiest step of the plan.
 - **1.5 Grants.** Herd and range grants (`agents.mail.<range>.<herd>.>` or `.*`, `agents.mail.<range>.>`) from the
   configuration homerange supplies; a grant with a wildcard or `>` at or before the range position is refused with an
@@ -278,7 +297,10 @@ enumerate directory records and inbox streams. The pull request:
   `agents.mail.cc.homerange.<name>`, ADR 0054's six-token subject, any name under the agent token `cc`, and a grant on
   `agents.mail.*.homerange.*`, each through a direct mash client and, where homerange's path exists, through it. They run
   in CI on every change from then on and are never removed or skipped.
-- **3.2 Remove the compatibility.** Old-form acceptance in mash's name rule, the legacy subjects and their grants, the
+- **3.2 Remove the compatibility.** **Drain before revoking:** the transition grant on a legacy stream stays until
+  that stream's durable consumer has zero pending and zero unacknowledged messages; 1.9's enumeration reports it per
+  identity, the break procedure checks it, and 3.2 refuses to remove a grant whose legacy consumer is not drained (a
+  test proves it). Then: old-form acceptance in mash's name rule, the legacy subjects and their grants, the
   constant `cc` token and the one-owner setting, five-or-six token parsing, every alias, the use log, the setting from
   Phase 1, and the mash herd's temporary names.
 - **3.3 Loud refusal.** A refused name or grant names the rule it broke (REQ-020); mail to an old-form name is refused to
