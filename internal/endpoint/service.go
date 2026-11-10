@@ -81,6 +81,7 @@ type PromptEvent struct {
 // openPrompt is one live prompt. mu serialises everything published on its
 // reply subject, so nothing can follow the terminator (SAP §6.5).
 type openPrompt struct {
+	from   string // the asker's directory key: the identity a reply answers
 	reply  string
 	done   chan struct{}
 	mu     sync.Mutex
@@ -338,7 +339,7 @@ func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(Promp
 	}
 	_ = e.nc.Publish(reply, chunk("status", "ack"))
 	id := nuid.Next()
-	p := &openPrompt{reply: reply, done: make(chan struct{})}
+	p := &openPrompt{from: from, reply: reply, done: make(chan struct{})}
 	s.mu.Lock()
 	s.prompts[id] = p
 	s.mu.Unlock()
@@ -380,6 +381,15 @@ func (e *Endpoint) Reply(requestID, text string, done bool) error {
 	svc.mu.Lock()
 	p, ok := svc.prompts[requestID]
 	svc.mu.Unlock()
+	if ok {
+		// The identity being answered is checked first. A refused one is told why (the prompt ends with the rule's
+		// error) and the caller gets the same error.
+		if err := e.checkKey(pointReply, p.from); err != nil {
+			e.send(p, nil, true, "403", err.Error())
+			svc.forget(requestID)
+			return err
+		}
+	}
 	if !ok || !e.send(p, chunk("response", text), done, "", "") {
 		return fmt.Errorf("mash: no open prompt %q (already answered or timed out)", requestID)
 	}

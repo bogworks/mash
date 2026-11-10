@@ -110,7 +110,12 @@ func statusText(src *statusSource) string {
 	if l := identityLine(cfg); l != "" {
 		lines = append(lines, l)
 	}
-	lines = append(lines, configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src))
+	lines = append(lines, configLine(cfg, src.cfgErr))
+	// A load error that came before the rule was read leaves it unset: that is the config line's error, not "none set".
+	if src.cfgErr == nil || cfg.NameRule != nil || errors.Is(src.cfgErr, config.ErrNoURL) || errors.Is(src.cfgErr, config.ErrNoOwner) {
+		lines = append(lines, cfg.NameRule.StatusLine(cfg.NameRulePath))
+	}
+	lines = append(lines, credsLine(cfg), tlsLine(cfg), connectionLine(src))
 	if l := authLine(cfg); l != "" {
 		lines = slices.Insert(lines, len(lines)-1, l)
 	}

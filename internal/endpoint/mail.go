@@ -557,6 +557,13 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 // or a random one; the message's nonce and Nats-Msg-Id derive from it, so a retry with the key is dropped by the
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
+	// The name rule comes first: before the inbox or the directory is read, and nothing is dropped silently.
+	if err := e.checkSelf(pointSendSender); err != nil {
+		return SendResult{}, err
+	}
+	if err := e.checkKey(pointSendRecipient, to); err != nil {
+		return SendResult{}, err
+	}
 	inReplyTo := o.InReplyTo
 	var viaOrigin string
 	if o.Via > 0 {
@@ -731,6 +738,9 @@ func (e *Endpoint) ownerOf(name string) string {
 
 // lookup resolves a name through the directory (the live copy, else a read).
 func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error) {
+	if err := e.checkKey(pointLookup, name); err != nil { // before the directory is read: a gone record gets the rule, not "not found"
+		return store.Record{}, err
+	}
 	if !validDirectoryKey(name) {
 		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", name)
 	}

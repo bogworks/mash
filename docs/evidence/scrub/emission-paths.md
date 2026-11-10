@@ -557,6 +557,32 @@ the map), and the rest is a status or confirmation line.
 | `scripts/dirbench/main.go:195` (`signal.Notify`) | Not model-facing: an unrelated Go function that shares the name `Notify`. |
 | `scripts/releasecheck/latency.go` references to `additionalContext` | Not model-facing: a release test that reads hook output; it emits nothing to a session. |
 
+## N. The name rule (naming plan step 1.7, `docs/name-rule.md`)
+
+Trigger: a name-acceptance rule file is configured (`MASH_NAME_RULE_FILE` or `name_rule_file`). With no file, none of
+these strings is emitted except the status line `name rule: none set`. Line numbers are from the tree at this change.
+Owner, path and rule names in examples are invented (`acme`, `/etc/mash/name-rule.json`, `no-cc`). Extracted from source
+with placeholders as written.
+
+| ID | Source | String (verbatim) | Scrub-list word or role? | Reviewer's line |
+|---|---|---|---|---|
+| N1 | status.go:110-116 (`StatusLine`, `internal/namerule/namerule.go:306`) | `name rule: %s sha256:%s (%d rules)` (the path as configured, the first 12 hex digits of the SHA-256 of the file, the rule count); `name rule: none set` | No. No role beyond endpoint (the deployment's own file path and digest). | |
+| N2 | namerule.go:78-93, 100-106 | Load errors, each prefixed `mash: name rule file %s: ` with the path: `cannot be read: %v`; `not valid JSON: %v` (also `not a JSON object`); `trailing content after the JSON value`; `version is missing`; `version is not an integer`; `unsupported version %d (this mash reads %v)` (wraps the named error `unsupported version`) | No. | |
+| N3 | namerule.go:81 | `mash: name rule file path is empty: name a file, or leave the setting unset for no rule` | No. | |
+| N4 | namerule.go:138-254 | Load errors for the body of a version-1 file (same prefix): `unknown key %q at the top level`; `rules is missing`; `rules is not an array`; `rule %d is not an object`; `rule %d: unknown key %q`; `rule %d: id is missing or empty`; `rule %d: duplicate id %q`; `rule %q: message is missing or empty`; `rule %q: match is missing`; `rule %q: match is not an object`; `rule %q: match: unknown key %q`; `rule %q: match %s is not an object`; `rule %q: match %s: unknown key %q`; `rule %q: match %s has both is and is_not`; `rule %q: match %s has neither is nor is_not`; `rule %q: match %s: pattern %q is not valid RE2: %v`; `rule %q: match is empty` | No. The rule id and key are echoed back from the deployment's own file. | |
+| N5 | config.go:147, 714, 729, 738, 757 | Configuration errors: `mash: MASH_NAME_RULE_FILE is set but empty: give the path of a name-rule file, or unset it for no rule`; `mash: config.json "name_rule_file" must be a non-empty string: give the path of a name-rule file, or remove the key for no rule`; `mash: MASH_NAME_RULE_REQUIRED=%q is not true or false`; `mash: config.json "name_rule_required" must be true or false`; `mash: a name rule is required (name_rule_required or MASH_NAME_RULE_REQUIRED is true) but no rule file is set: set name_rule_file (MASH_NAME_RULE_FILE) to a name-rule file` | No. | |
+| N6 | namerule.go:71 | The refusal: `name rule %q refuses %s.%s.%s: %s` (rule id, the agent, owner and name tokens, the rule's own message). The message text is whatever the deployment wrote; mash adds none of its own | No. The rule's message is the deployment's text, outside mash's wording. | |
+| N7 | internal/endpoint/namerule.go:26 | Entry-point wording, the refusal wrapped as `mash: %s: ` + N6, where the entry is one of: `start`; `send: the recipient`; `send: the sender`; `reply: the identity being answered`; `prompt: the recipient`; `prompt: the sender`; `lookup`; `the compatibility alias` | No. | |
+| N8 | internal/admin/admin.go (`CheckProvision`) | `mash: provision: ` + N6 (provisioning, `mash admin provision`, `mashctl add`) | No. | |
+| N9 | internal/endpoint/service.go (`Reply`) | On a reply to a refused identity the open prompt ends with error code `403` and the N7 text (`mash: reply: the identity being answered: name rule ...`) as its description, which the asker's `prompt` prints as `mash: prompt refused: 403 <text>`; the replier's `reply` tool returns the same N7 text | No. | |
+
+Exercised example (a rule file with one rule, refused send):
+
+```text
+name rule: /etc/mash/name-rule.json sha256:0123456789ab (1 rules)
+mash: send: the recipient: name rule "no-cc" refuses cc.acme.peer: the agent token cc is retired
+```
+
 ## Items the implementer was unsure about
 
 1. Whether Claude Code shows MCP-server stderr or hook stderr to the model. The code sends mash's operator-facing text

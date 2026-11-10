@@ -269,7 +269,8 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 
 	want := []string{e.key}
 	for _, n := range opts.Records {
-		if n != e.key && validDirectoryKey(n) {
+		// A key the name rule refuses is not read: lookup of it reports the rule, not the record.
+		if n != e.key && validDirectoryKey(n) && e.checkKey(pointLookup, n) == nil {
 			want = append(want, n)
 		}
 	}
@@ -321,6 +322,16 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 			e.cfg.Creds, e.id.User, e.key, self.User)
 	}
 	e.self = self
+	// The compatibility alias is an identity the record answers to: the rule applies to it too. The alias is data of
+	// the endpoint's own record, not an identity the caller requested (that one is checked before the directory is
+	// read), so it can be checked only once the record is read: an absent record has no alias and reports "not
+	// provisioned" above. Nothing else is read for the caller past this point (the rest of the directory, the
+	// consumers), so a refused alias stops the start before any of it.
+	if alias, ok, err := self.AliasIdentity(); err == nil && ok {
+		if err := checkRule(e.cfg.NameRule, pointAlias, alias); err != nil {
+			return err
+		}
+	}
 	// The endpoint's own mail subject is the one its record says: a zoned endpoint advertises its zoned subject.
 	e.subj.Mail = self.MailSubject
 	if opts.FullDirectory {

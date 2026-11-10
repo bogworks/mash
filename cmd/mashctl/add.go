@@ -269,6 +269,10 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// The name rule comes before any key, policy edit or record: a refused name creates nothing.
+	if err := admin.CheckProvision(cfg.NameRule, cfg.Owner, o.name); err != nil {
+		return fail("%v", err)
+	}
 	path, err := policyPath(o.file, env, cfg)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)

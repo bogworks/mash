@@ -477,6 +477,23 @@ The message adds a second sentence because the server's error does not say why t
 
 Mash learns of the refusal from the server's asynchronous permission-violation error, which names the subject, and matches it to the send in flight by subject. It reports a refusal only when exactly one send is waiting on that subject at that moment and no send on the subject has ended unsettled (timed out or cancelled) while others remained. After a send that ended unsettled, the next send on the subject first runs a flush barrier and a settle of at most 25 ms, so a violation delayed from the earlier send is dropped; sends on that subject wait for it. The settle narrows the window nats.go's asynchronous error handler leaves; it cannot close it. The refusal therefore ends with the send's key (`If you retry, use --id KEY (the send tool's id): it sends at most once within 2 minutes.`), which makes a retry after a false refusal harmless. With several in flight the violation cannot be attributed (it may belong to an earlier send, or to one sent before a permission change), so none of them is refused: each keeps waiting for its ack or deadline and, if it times out, the timeout error adds that an unattributed permission violation on the subject was seen. Without it a denied publish gets no reply and would only report a timeout after the full call timeout. If a server version words that error differently, mash cannot match it and the send fails as a timeout, as before.
 
+## The name rule
+
+A deployment can refuse identities that mash's own syntax accepts, such as a retired agent token, with a name-rule file. mash ships no default: with no file named, no rule applies and nothing changes. The file's format, the exact conditions under which it refuses start, and its compatibility rule are in [name-rule.md](name-rule.md); the deployment owns the content.
+
+Name the file with `MASH_NAME_RULE_FILE` or the key `name_rule_file` in `config.json` (the environment wins; a relative path in `config.json` is taken from the config directory). `mash` and `mashctl` read it through the same configuration, once, at start: a change takes a restart. A path that is set but empty is an error, not "no rule", and so is a file that cannot be read or does not follow the format; the error names the file and the problem, and mash does not start.
+
+To make sure a restart without the file cannot reopen what the rule closed, set `MASH_NAME_RULE_REQUIRED=true` (or `"name_rule_required": true`). mash then refuses to start unless a rule file was loaded. Only `true` and `false` are accepted.
+
+`mash status` shows the rule in force on one line:
+
+```text
+name rule: /etc/mash/name-rule.json sha256:0123456789ab (3 rules)
+name rule: none set
+```
+
+The digest is the first 12 hex digits of the SHA-256 of the file's bytes, so a check can confirm every endpoint loaded the same file. A refusal names the rule and carries its message, for example `mash: send: the recipient: name rule "no-cc" refuses cc.acme.peer: the agent token cc is retired`. It is returned to whoever asked, at provision, start, send, reply, prompt, lookup and the compatibility alias, and always before the directory is read.
+
 ## Fixed protocol constants
 
 These timings are not configurable: peers and the server must agree on them, so one operator's value would break another's session or weaken a check.

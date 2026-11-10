@@ -312,6 +312,12 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if err != nil {
 		return nil, err
 	}
+	// The name rule is applied to the endpoint's own identity before anything is connected or read.
+	if cfg.NameRule != nil && ident.Validate() == nil {
+		if err := checkRule(cfg.NameRule, pointStart, ident); err != nil {
+			return nil, err
+		}
+	}
 	if err := config.CheckCredsMode(cfg.Creds); err != nil {
 		return nil, err
 	}

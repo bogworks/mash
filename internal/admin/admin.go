@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -27,7 +28,33 @@ type Admin struct {
 	js     jetstream.JetStream
 	owner  string
 	limits store.Limits
-	revoke RevokeHook // nil: the removal methods revoke nothing (see WithRevoker)
+	revoke RevokeHook     // nil: the removal methods revoke nothing (see WithRevoker)
+	rule   *namerule.Rule // nil: no name rule (see WithNameRule)
+}
+
+// WithNameRule returns a copy of a whose Provision applies rule to the identity it provisions, before the directory is
+// read (docs/name-rule.md). A nil rule accepts everything. a itself is unchanged.
+func (a *Admin) WithNameRule(rule *namerule.Rule) *Admin {
+	c := *a
+	c.rule = rule
+	return &c
+}
+
+// CheckProvision applies rule to the legacy identity of name under owner, as provisioning does. A refusal is an error
+// that names the rule and carries its message. A name or owner that is not a legacy identity passes here: the code
+// that follows refuses it on its own terms.
+func CheckProvision(rule *namerule.Rule, owner, name string) error {
+	if rule == nil {
+		return nil
+	}
+	id, err := sap.Legacy(owner, name)
+	if err != nil {
+		return nil
+	}
+	if err := rule.Check(id); err != nil {
+		return fmt.Errorf("mash: provision: %w", err)
+	}
+	return nil
 }
 
 // RevokeHook revokes the NATS user key user (a public key) of an endpoint that is about to be removed. It runs under the
@@ -172,6 +199,10 @@ func (m Meta) validate() error {
 func (a *Admin) Provision(ctx context.Context, name, user, account, note string, meta Meta) (rec store.Record, err error) {
 	if !config.ValidName(name) {
 		return store.Record{}, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+	}
+	// The name rule is applied to the identity being provisioned before the directory is read or anything is created.
+	if err := CheckProvision(a.rule, a.owner, name); err != nil {
+		return store.Record{}, err
 	}
 	if !nkeys.IsValidPublicUserKey(user) {
 		return store.Record{}, errors.New("mash: the user is not a user public key (U, then 55 base32 characters; the value is not shown)")
