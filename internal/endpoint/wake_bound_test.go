@@ -44,10 +44,10 @@ func noWakeBefore(t *testing.T, ev *events, start time.Time, d time.Duration, al
 
 // drainAt drains seq as a hook would and returns a time not after the drain, a safe lower bound for when the idle spell
 // restarted.
-func drainAt(t *testing.T, sp interface{ Drained(uint64) error }, seq uint64) time.Time {
+func drainAt(t *testing.T, sp interface{ Drained(spool.Ref) error }, seq uint64) time.Time {
 	t.Helper()
 	at := time.Now()
-	if err := sp.Drained(seq); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: seq}); err != nil {
 		t.Fatal(err)
 	}
 	return at

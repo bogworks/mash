@@ -83,17 +83,17 @@ func TestAckKeepsTheTombstoneUntilConfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := &Endpoint{spool: &sp, log: log.New(io.Discard, "", 0)}
-	if err := sp.Drained(7); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: 7}); err != nil {
 		t.Fatal(err)
 	}
 	m := &ackFake{fail: true}
 	e.ack(pending{mail: render.Mail{Seq: 7}, msg: m})
-	if !sp.IsDrained(7) {
+	if !sp.IsDrained(spool.Ref{Seq: 7}) {
 		t.Fatalf("tombstone removed though the ack was not confirmed (acks=%d doubles=%d)", m.acks, m.doubles)
 	}
 	m.fail = false
 	e.ack(pending{mail: render.Mail{Seq: 7}, msg: m})
-	if sp.IsDrained(7) {
+	if sp.IsDrained(spool.Ref{Seq: 7}) {
 		t.Fatal("tombstone kept after a confirmed ack")
 	}
 }
@@ -121,7 +121,7 @@ func TestHookAckLostToANatsRestartIsRedeliveredAndAcked(t *testing.T) {
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
 	f.e.Shutdown()
 	for _, e := range waiting(t, sp) { // the hook shows it while NATS is down
-		if err := sp.Drained(e.Seq); err != nil {
+		if err := sp.Drained(spool.Ref{Seq: e.Seq}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -187,7 +187,7 @@ func TestHookReWakesWithBackoff(t *testing.T) {
 	}
 	mu.Unlock()
 	for _, e := range waiting(t, sp) {
-		if err := sp.Drained(e.Seq); err != nil {
+		if err := sp.Drained(spool.Ref{Seq: e.Seq}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -249,7 +249,7 @@ func TestBusySessionGetsNoWake(t *testing.T) {
 	drain := func() {
 		for _, e := range waiting(t, sp) {
 			seen[e.Seq] = true
-			if err := sp.Drained(e.Seq); err != nil {
+			if err := sp.Drained(spool.Ref{Seq: e.Seq}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -370,7 +370,7 @@ func TestHookSpoolFileSelfHeals(t *testing.T) {
 				t.Fatal(err)
 			}
 			until(t, "rewritten", func() bool { w := waiting(t, sp); return len(w) == 1 && string(w[0].Body) == "keep me" })
-			if err := sp.Drained(seq); err != nil { // the hook shows it
+			if err := sp.Drained(spool.Ref{Seq: seq}); err != nil { // the hook shows it
 				t.Fatal(err)
 			}
 			until(t, "acked", func() bool { return unread(t, a) == 0 })

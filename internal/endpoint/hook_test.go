@@ -102,11 +102,11 @@ func TestHookSwitchOverShowsEachMessageOnce(t *testing.T) {
 	if n := unread(t, a); n != 1 {
 		t.Fatalf("unread %d before the hook drained, want 1 (spooled is not seen)", n)
 	}
-	if err := sp.Drained(w[0].Seq); err != nil { // the hook shows it
+	if err := sp.Drained(spool.Ref{Seq: w[0].Seq}); err != nil { // the hook shows it
 		t.Fatal(err)
 	}
 	until(t, "the drained message is acked", func() bool { return unread(t, a) == 0 })
-	until(t, "its tombstone is gone", func() bool { return !sp.IsDrained(w[0].Seq) })
+	until(t, "its tombstone is gone", func() bool { return !sp.IsDrained(spool.Ref{Seq: w[0].Seq}) })
 	if got := ev.all(); len(got) != 1 {
 		t.Fatalf("a channel event besides the fallback's: %q", got)
 	}
@@ -136,7 +136,7 @@ func TestHookIdleWake(t *testing.T) {
 	drain := func() {
 		t.Helper()
 		for _, e := range waiting(t, sp) {
-			if err := sp.Drained(e.Seq); err != nil {
+			if err := sp.Drained(spool.Ref{Seq: e.Seq}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -250,7 +250,7 @@ func (a *ackCounter) Term() error                      { a.terms++; return nil }
 func TestDedupeNeverAcksAHeldMessage(t *testing.T) {
 	e := &Endpoint{}
 	old := &ackCounter{}
-	h := &held{msgs: map[uint64]pending{5: {mail: render.Mail{Seq: 5, Body: []byte("abc")}, msg: old, key: "k1"}}, bytes: 3}
+	h := &held{msgs: map[spool.Ref]pending{{Seq: 5}: {mail: render.Mail{Seq: 5, Body: []byte("abc")}, msg: old, key: "k1"}}, bytes: 3}
 	seen := newSeenSet(0)
 	seen.mark(pending{mail: render.Mail{Seq: 5}, key: "k1"})
 	seen.mark(pending{mail: render.Mail{Seq: 6}, key: "k2"})
@@ -260,8 +260,8 @@ func TestDedupeNeverAcksAHeldMessage(t *testing.T) {
 	if len(got) != 0 || fresh.acks != 0 || old.acks != 0 {
 		t.Fatalf("held redelivery: got %d shown, acks new=%d old=%d", len(got), fresh.acks, old.acks)
 	}
-	if h.msgs[5].msg != jetstream.Msg(fresh) || h.bytes != 3 || string(h.msgs[5].mail.Body) != "abc" {
-		t.Fatalf("held entry not replaced in place: %+v bytes=%d", h.msgs[5], h.bytes)
+	if h.msgs[spool.Ref{Seq: 5}].msg != jetstream.Msg(fresh) || h.bytes != 3 || string(h.msgs[spool.Ref{Seq: 5}].mail.Body) != "abc" {
+		t.Fatalf("held entry not replaced in place: %+v bytes=%d", h.msgs[spool.Ref{Seq: 5}], h.bytes)
 	}
 
 	dup := &ackCounter{}
@@ -372,7 +372,7 @@ func TestSetSpoolClearsStaleWaiting(t *testing.T) {
 	if err := sp.Put(spool.Entry{Seq: 1, Body: []byte("old")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.Drained(2); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.SetSpool(sp, ""); err != nil {
@@ -381,7 +381,7 @@ func TestSetSpoolClearsStaleWaiting(t *testing.T) {
 	if w, _ := sp.Waiting(); len(w) != 0 {
 		t.Fatalf("stale waiting: %+v", w)
 	}
-	if !sp.IsDrained(2) {
+	if !sp.IsDrained(spool.Ref{Seq: 2}) {
 		t.Fatal("tombstone lost")
 	}
 }
@@ -397,7 +397,7 @@ func TestHookReprovisionDoesNotAckNewMailByAnOldTombstone(t *testing.T) {
 	if err := sp.Bind("old-stream"); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.Drained(1); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -516,7 +516,7 @@ func TestHookUrgentLeftHeldRingsAgain(t *testing.T) {
 	}
 	until(t, "both spooled", func() bool { return len(waiting(t, sp)) == 2 })
 	ev.waitFor(t, 1, 5*time.Second)
-	if err := sp.Drained(1); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if got := ev.waitFor(t, 2, 5*time.Second); len(got) < 2 {
@@ -559,7 +559,7 @@ func TestFailpointBeforeAckHoldsTheAck(t *testing.T) {
 	}
 	until(t, "the message is spooled", func() bool { return len(waiting(t, sp)) == 1 })
 	seq := waiting(t, sp)[0].Seq
-	if err := sp.Drained(seq); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: seq}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -574,7 +574,7 @@ func TestFailpointBeforeAckHoldsTheAck(t *testing.T) {
 	if n := unread(t, ep); n != 1 {
 		t.Fatalf("unread %d: a failpointed message must stay unacked", n)
 	}
-	if !sp.IsDrained(seq) {
+	if !sp.IsDrained(spool.Ref{Seq: seq}) {
 		t.Fatal("tombstone gone: the message was acked")
 	}
 	if len(hits) != 0 {

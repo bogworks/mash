@@ -7,7 +7,8 @@
 // To make that visible, a hook first records the seqs it is about to show in shown/<seq>; an entry read back with
 // its marker still present has Redelivered set, and the host adapter tells the model it may already have been seen.
 //
-// Layout, under Dir: <seq>.json for each message waiting (0600), shown/<seq> for each one a hook is about to show
+// Layout, under Dir (a message of a second stream is named <stream>@<seq> where <seq> is written; the endpoint's own
+// stream has no prefix): <seq>.json for each message waiting (0600), shown/<seq> for each one a hook is about to show
 // and has not yet drained, drained/<seq> for each one a hook has shown and serve has not yet acked, and .hooked,
 // whose mtime is the last hook run, listed/<seq> for each one a hook has only listed in a digest (still waiting, not
 // drained: it is drained when the model reads it or a later hook shows it in full, ADR 0046), and .alive, whose mtime is the last run of a subagent's hook. The directories are 0700.
@@ -29,7 +30,10 @@ import (
 
 // Entry is one spooled message: what render needs to show it.
 type Entry struct {
-	Seq      uint64    `json:"seq"`
+	Seq uint64 `json:"seq"`
+	// Stream names the stream Seq is a sequence of; empty for the endpoint's own (primary) stream, and then absent
+	// from the file, so a single-stream entry is byte-identical to one written before streams were keyed.
+	Stream   string    `json:"stream,omitempty"`
 	From     string    `json:"from"`
 	Trust    string    `json:"trust"`
 	Instance string    `json:"instance,omitempty"`
@@ -47,6 +51,63 @@ type Entry struct {
 	// there); the host adapter's Present sets it on the entries it rendered as digest lines, which the hook then marks
 	// listed instead of drained.
 	Listed bool `json:"-"`
+}
+
+// Ref identifies one message: the stream it is in and its sequence there. Two streams of one endpoint number from 1
+// each, so the bare sequence is not an identity once an endpoint reads more than one. The endpoint's own (primary)
+// stream is Stream == "", and its refs behave exactly as the bare sequence did.
+type Ref struct {
+	Stream string
+	Seq    uint64
+}
+
+// Ref is the entry's identity.
+func (e Entry) Ref() Ref { return Ref{Stream: e.Stream, Seq: e.Seq} }
+
+// Less orders refs: primary stream first, then by stream name, then by sequence.
+func (r Ref) Less(o Ref) bool {
+	if r.Stream != o.Stream {
+		return r.Stream < o.Stream
+	}
+	return r.Seq < o.Seq
+}
+
+// streamSep joins a stream name and a sequence in a file name: "<stream>@<seq>". The primary stream has no prefix,
+// so its files keep the names they always had ("<seq>", "<seq>.json").
+const streamSep = "@"
+
+// name is the ref's file name stem: "<seq>" for the primary stream, "<stream>@<seq>" otherwise.
+func (r Ref) name() string {
+	if r.Stream == "" {
+		return strconv.FormatUint(r.Seq, 10)
+	}
+	return r.Stream + streamSep + strconv.FormatUint(r.Seq, 10)
+}
+
+// validStream reports whether name can be a stream in a file name: no path separator, no "@", no leading dot.
+func validStream(name string) bool {
+	return !strings.ContainsAny(name, "/\\\x00"+streamSep) && !strings.HasPrefix(name, ".")
+}
+
+// checkStream is the one validation every method that builds a path from a stream name applies first.
+func checkStream(name string) error {
+	if !validStream(name) {
+		return fmt.Errorf("spool: invalid stream name %q", name)
+	}
+	return nil
+}
+
+// parseName is the inverse of name.
+func parseName(n string) (Ref, bool) {
+	stream, seqText := "", n
+	if i := strings.LastIndex(n, streamSep); i >= 0 {
+		stream, seqText = n[:i], n[i+len(streamSep):]
+		if stream == "" || !validStream(stream) {
+			return Ref{}, false
+		}
+	}
+	seq, err := strconv.ParseUint(seqText, 10, 64)
+	return Ref{Stream: stream, Seq: seq}, err == nil
 }
 
 // Spool is one endpoint's spool directory.
@@ -75,17 +136,11 @@ func (s Spool) drained() string { return filepath.Join(s.Dir, "drained") }
 func (s Spool) shown() string   { return filepath.Join(s.Dir, "shown") }
 func (s Spool) listed() string  { return filepath.Join(s.Dir, "listed") }
 
-func (s Spool) listedFile(seq uint64) string {
-	return filepath.Join(s.listed(), strconv.FormatUint(seq, 10))
-}
+func (s Spool) listedFile(r Ref) string  { return filepath.Join(s.listed(), r.name()) }
+func (s Spool) shownFile(r Ref) string   { return filepath.Join(s.shown(), r.name()) }
+func (s Spool) drainedFile(r Ref) string { return filepath.Join(s.drained(), r.name()) }
 
-func (s Spool) shownFile(seq uint64) string {
-	return filepath.Join(s.shown(), strconv.FormatUint(seq, 10))
-}
-
-func (s Spool) file(seq uint64) string {
-	return filepath.Join(s.Dir, strconv.FormatUint(seq, 10)+".json")
-}
+func (s Spool) file(r Ref) string { return filepath.Join(s.Dir, r.name()+".json") }
 
 // Init makes the spool's directories, 0700, and tightens them if they exist.
 func (s Spool) Init() error {
@@ -116,7 +171,7 @@ func (s Spool) ClearWaiting() error {
 		if d.IsDir() {
 			continue
 		}
-		_, ok := seqOf(d.Name())
+		_, ok := refOf(d.Name())
 		if !ok && !strings.HasPrefix(d.Name(), ".put-") {
 			continue
 		}
@@ -144,28 +199,30 @@ func (s Spool) clearDir(dir string) error {
 	return nil
 }
 
-// Bind scopes the spool to stream, the identity of the inbox stream. Sequences restart at 1 when the stream is
-// recreated (deprovision, then provision), so a tombstone or waiting file left by the old stream would match new
-// mail: Bind drops them all when stream differs from the one recorded, and records it. Equal, it changes nothing
-// (codex H1 on #21, round 2). Call it before anything is spooled.
-func (s Spool) Bind(stream string) error {
-	p := filepath.Join(s.Dir, streamFile)
-	if b, err := os.ReadFile(p); err == nil && string(b) == stream {
-		return nil
-	}
-	if err := s.ClearWaiting(); err != nil {
+// Bind scopes the spool's primary stream to stream, the identity of the inbox stream. It is BindStream("", stream).
+func (s Spool) Bind(stream string) error { return s.BindStream("", stream) }
+
+// BindStream scopes the spool's messages of the stream named name ("" is the endpoint's own inbox stream) to ident,
+// that stream's identity. Sequences restart at 1 when a stream is recreated (deprovision, then provision), so a
+// tombstone or waiting file left by the old stream would match new mail: BindStream drops that stream's waiting files,
+// tombstones and marks when ident differs from the one recorded, and records it. Another stream's files and marks are
+// not touched: each stream is bound on its own. Equal, it changes nothing (codex H1 on #21, round 2). Call it before
+// anything of that stream is spooled. The primary stream's marker is .stream (as it always was), another's
+// .stream.<name>.
+func (s Spool) BindStream(name, ident string) error {
+	if err := checkStream(name); err != nil {
 		return err
 	}
-	for _, dir := range []string{s.drained(), s.shown(), s.listed()} {
-		des, err := os.ReadDir(dir)
-		if err != nil && !(dir != s.drained() && errors.Is(err, fs.ErrNotExist)) {
-			return err
-		}
-		for _, d := range des {
-			if err := os.Remove(filepath.Join(dir, d.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("spool: %w", err)
-			}
-		}
+	marker := streamFile
+	if name != "" {
+		marker += "." + name
+	}
+	p := filepath.Join(s.Dir, marker)
+	if b, err := os.ReadFile(p); err == nil && string(b) == ident {
+		return nil
+	}
+	if err := s.clearStream(name); err != nil {
+		return err
 	}
 	f, err := os.CreateTemp(s.Dir, ".stream-*")
 	if err != nil {
@@ -175,7 +232,7 @@ func (s Spool) Bind(stream string) error {
 	defer os.Remove(tmp) // a no-op once renamed
 	err = f.Chmod(0o600)
 	if err == nil {
-		_, err = f.WriteString(stream)
+		_, err = f.WriteString(ident)
 	}
 	if err == nil {
 		err = f.Sync()
@@ -189,9 +246,52 @@ func (s Spool) Bind(stream string) error {
 	return os.Rename(tmp, p)
 }
 
+// clearStream removes the waiting files, tombstones and shown and listed marks of one stream. An unparseable name in
+// a mark directory counts as the primary stream's, as Bind always dropped everything there; a leftover .put-*
+// temporary file likewise.
+func (s Spool) clearStream(name string) error {
+	des, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return err
+	}
+	for _, d := range des {
+		if d.IsDir() {
+			continue
+		}
+		if r, ok := refOf(d.Name()); ok {
+			if r.Stream != name {
+				continue
+			}
+		} else if !(name == "" && strings.HasPrefix(d.Name(), ".put-")) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.Dir, d.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("spool: %w", err)
+		}
+	}
+	for _, dir := range []string{s.drained(), s.shown(), s.listed()} {
+		des, err := os.ReadDir(dir)
+		if err != nil && !(dir != s.drained() && errors.Is(err, fs.ErrNotExist)) {
+			return err
+		}
+		for _, d := range des {
+			if r, ok := parseName(d.Name()); (ok && r.Stream != name) || (!ok && name != "") {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, d.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("spool: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // Put writes e atomically (a 0600 temporary file, synced, renamed into place). A message put again (a redelivery)
 // replaces its file.
 func (s Spool) Put(e Entry) error {
+	if err := checkStream(e.Stream); err != nil {
+		return err
+	}
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -215,11 +315,11 @@ func (s Spool) Put(e Entry) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.file(e.Seq))
+	return os.Rename(tmp, s.file(e.Ref()))
 }
 
-// Waiting lists the spooled messages, oldest first. An unreadable file is skipped, not fatal: one bad entry must not
-// stop the rest.
+// Waiting lists the spooled messages, oldest first (the primary stream, then each other stream in name order, each by
+// sequence). An unreadable file is skipped, not fatal: one bad entry must not stop the rest.
 func (s Spool) Waiting() ([]Entry, error) {
 	des, err := os.ReadDir(s.Dir)
 	if err != nil {
@@ -227,16 +327,16 @@ func (s Spool) Waiting() ([]Entry, error) {
 	}
 	var out []Entry
 	for _, d := range des {
-		seq, ok := seqOf(d.Name())
+		ref, ok := refOf(d.Name())
 		if !ok || !d.Type().IsRegular() {
 			continue
 		}
-		b, err := os.ReadFile(s.file(seq))
+		b, err := os.ReadFile(s.file(ref))
 		if err != nil {
 			continue
 		}
 		var e Entry
-		if json.Unmarshal(b, &e) == nil && e.Seq == seq {
+		if json.Unmarshal(b, &e) == nil && e.Ref() == ref {
 			out = append(out, e)
 		}
 	}
@@ -247,7 +347,7 @@ func (s Spool) Waiting() ([]Entry, error) {
 				marked[d.Name()] = true
 			}
 			for i := range out {
-				out[i].Redelivered = marked[strconv.FormatUint(out[i].Seq, 10)]
+				out[i].Redelivered = marked[out[i].Ref().name()]
 			}
 		}
 	}
@@ -258,32 +358,37 @@ func (s Spool) Waiting() ([]Entry, error) {
 				marked[d.Name()] = true
 			}
 			for i := range out {
-				out[i].Listed = marked[strconv.FormatUint(out[i].Seq, 10)]
+				out[i].Listed = marked[out[i].Ref().name()]
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	sort.Slice(out, func(i, j int) bool { return out[i].Ref().Less(out[j].Ref()) })
 	return out, nil
 }
 
-func seqOf(name string) (uint64, bool) {
+// refOf is the ref a waiting file's name carries: "<seq>.json" or "<stream>@<seq>.json".
+func refOf(name string) (Ref, bool) {
 	n, ok := strings.CutSuffix(name, ".json")
 	if !ok {
-		return 0, false
+		return Ref{}, false
 	}
-	seq, err := strconv.ParseUint(n, 10, 64)
-	return seq, err == nil
+	return parseName(n)
 }
 
 // MarkShown records that a hook is about to show seqs, before it writes them out. If the hook is then killed, the
 // entries stay waiting and the next Waiting flags them Redelivered. A seq that cannot be marked stops the rest; the
 // caller shows anyway (at-least-once wins) and reports.
-func (s Spool) MarkShown(seqs ...uint64) error {
+func (s Spool) MarkShown(refs ...Ref) error {
+	for _, r := range refs {
+		if err := checkStream(r.Stream); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(s.shown(), 0o700); err != nil {
 		return err
 	}
-	for _, seq := range seqs {
-		if err := os.WriteFile(s.shownFile(seq), nil, 0o600); err != nil {
+	for _, r := range refs {
+		if err := os.WriteFile(s.shownFile(r), nil, 0o600); err != nil {
 			return err
 		}
 	}
@@ -293,7 +398,10 @@ func (s Spool) MarkShown(seqs ...uint64) error {
 // Listed marks seq as listed in a digest and not seen: its listed mark is written (atomically: a temporary file,
 // renamed) and its shown mark removed, so a later run does not flag it re-delivered. Its file stays, so a later hook
 // can show it in full; it is not drained, so serve does not ack it (ADR 0046).
-func (s Spool) Listed(seq uint64) error {
+func (s Spool) Listed(seq Ref) error {
+	if err := checkStream(seq.Stream); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.listed(), 0o700); err != nil {
 		return err
 	}
@@ -320,7 +428,10 @@ func (s Spool) Listed(seq uint64) error {
 }
 
 // IsListed reports whether a hook has listed seq in a digest and nothing has drained it since.
-func (s Spool) IsListed(seq uint64) bool {
+func (s Spool) IsListed(seq Ref) bool {
+	if checkStream(seq.Stream) != nil {
+		return false
+	}
 	_, err := os.Stat(s.listedFile(seq))
 	return err == nil
 }
@@ -328,8 +439,11 @@ func (s Spool) IsListed(seq uint64) bool {
 // Drained marks seq shown: its tombstone is written, then its file removed, then its shown mark. Tombstone first, so
 // a crash in between leaves the message both waiting and drained, which shows it again (flagged Redelivered, as the
 // mark is still there) rather than losing it.
-func (s Spool) Drained(seq uint64) error {
-	t := filepath.Join(s.drained(), strconv.FormatUint(seq, 10))
+func (s Spool) Drained(seq Ref) error {
+	if err := checkStream(seq.Stream); err != nil {
+		return err
+	}
+	t := s.drainedFile(seq)
 	if err := os.WriteFile(t, nil, 0o600); err != nil {
 		return err
 	}
@@ -346,15 +460,21 @@ func (s Spool) Drained(seq uint64) error {
 }
 
 // IsDrained reports whether a hook has shown seq and serve has not yet acked it.
-func (s Spool) IsDrained(seq uint64) bool {
-	_, err := os.Stat(filepath.Join(s.drained(), strconv.FormatUint(seq, 10)))
+func (s Spool) IsDrained(seq Ref) bool {
+	if checkStream(seq.Stream) != nil {
+		return false
+	}
+	_, err := os.Stat(s.drainedFile(seq))
 	return err == nil
 }
 
 // Acked forgets seq once serve has acked it: its tombstone, its shown mark and any waiting file (a redelivery spooled
 // again).
-func (s Spool) Acked(seq uint64) error {
-	for _, p := range []string{filepath.Join(s.drained(), strconv.FormatUint(seq, 10)), s.file(seq), s.shownFile(seq), s.listedFile(seq)} {
+func (s Spool) Acked(seq Ref) error {
+	if err := checkStream(seq.Stream); err != nil {
+		return err
+	}
+	for _, p := range []string{s.drainedFile(seq), s.file(seq), s.shownFile(seq), s.listedFile(seq)} {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("spool: %w", err)
 		}
@@ -564,13 +684,16 @@ func (s Spool) Lock() (unlock func(), err error) {
 }
 
 // Has reports whether seq's waiting file is present and parses (what Waiting would list).
-func (s Spool) Has(seq uint64) bool {
+func (s Spool) Has(seq Ref) bool {
+	if checkStream(seq.Stream) != nil {
+		return false
+	}
 	b, err := os.ReadFile(s.file(seq))
 	if err != nil {
 		return false
 	}
 	var e Entry
-	return json.Unmarshal(b, &e) == nil && e.Seq == seq
+	return json.Unmarshal(b, &e) == nil && e.Ref() == seq
 }
 
 // Told reports whether the in-session notice for key (a short hash of one copy of a session) was already printed.

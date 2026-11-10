@@ -63,7 +63,7 @@ func TestSpoolFromStartClaudeHoldsMailSentBeforeAnyHook(t *testing.T) {
 	if len(w) != 1 || string(w[0].Body) != "startup body" {
 		t.Fatalf("waiting %+v", w)
 	}
-	if err := sp.Drained(w[0].Seq); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: w[0].Seq}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "acked once drained", func() bool { return unread(t, a) == 0 })

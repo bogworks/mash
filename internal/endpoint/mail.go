@@ -19,6 +19,7 @@ import (
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -136,7 +137,7 @@ func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, stored
 type seenSet struct {
 	window time.Duration
 	m      map[string]seenEntry
-	seqs   map[uint64]struct{} // stream sequences of signed mail shown
+	seqs   map[spool.Ref]struct{} // (stream, sequence) of signed mail shown
 
 	ackFloor   func() (uint64, bool) // the consumer's ack floor (stream sequence); false when unknown. Nil: never prune
 	pruneAt    int                   // set size from which the ack floor is consulted
@@ -151,13 +152,13 @@ const (
 )
 
 type seenEntry struct {
-	seq uint64
+	ref spool.Ref
 	at  time.Time            // the store time of the latest delivery shown
 	tss map[string]time.Time // every signed timestamp shown for the key -> the store time it was shown at
 }
 
 func newSeenSet(window time.Duration) *seenSet {
-	return &seenSet{window: window, m: map[string]seenEntry{}, seqs: map[uint64]struct{}{}, pruneAt: seqPruneAt, pruneEvery: seqPruneEvery}
+	return &seenSet{window: window, m: map[string]seenEntry{}, seqs: map[spool.Ref]struct{}{}, pruneAt: seqPruneAt, pruneEvery: seqPruneEvery}
 }
 
 // dup reports whether p repeats mail already recorded.
@@ -165,14 +166,14 @@ func (s *seenSet) dup(p pending) bool {
 	if p.key == "" {
 		return false
 	}
-	if _, ok := s.seqs[p.mail.Seq]; ok {
+	if _, ok := s.seqs[refOf(p.mail)]; ok {
 		return true
 	}
 	en, ok := s.m[p.key]
 	if !ok {
 		return false
 	}
-	if en.seq == p.mail.Seq || p.mail.At.Sub(en.at) < s.window {
+	if en.ref == refOf(p.mail) || p.mail.At.Sub(en.at) < s.window {
 		return true
 	}
 	// Past the window: the same signed timestamp is a copy of the signed bytes, a new one a genuine re-send.
@@ -208,8 +209,8 @@ func (s *seenSet) mark(p pending) {
 	if p.ts != "" {
 		tss[p.ts] = p.mail.At
 	}
-	s.m[p.key] = seenEntry{seq: p.mail.Seq, at: p.mail.At, tss: tss}
-	s.seqs[p.mail.Seq] = struct{}{}
+	s.m[p.key] = seenEntry{ref: refOf(p.mail), at: p.mail.At, tss: tss}
+	s.seqs[refOf(p.mail)] = struct{}{}
 	s.pruneSeqs()
 }
 
@@ -230,7 +231,8 @@ func (s *seenSet) pruneSeqs() {
 	}
 	s.lastFloor = floor
 	for q := range s.seqs {
-		if q <= floor {
+		// The floor is the primary consumer's: another stream's refs are not pruned by it.
+		if q.Stream == "" && q.Seq <= floor {
 			delete(s.seqs, q)
 		}
 	}
@@ -317,7 +319,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			_ = m.Term()
 			return
 		}
-		defer e.waking.received(meta.Sequence.Stream)
+		defer e.waking.received(spool.Ref{Seq: meta.Sequence.Stream})
 		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
 		if !ok {
 			e.dropped.Add(1)
@@ -335,7 +337,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
 			Kind:   kind.Of(m.Headers().Get(KindHeader))}}
 		e.relayInbound(p.mail.Seq, from, trust, via)
-		e.waking.add(p.mail.Seq, p.mail.Urgent || p.mail.Kind.Wakes())
+		e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
 		select {
 		case queue <- p:
 		case <-quit:
@@ -364,7 +366,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 	settle := time.Duration(e.cfg.SettleMS) * time.Millisecond
 	seen := newSeenSet(e.dupWindow()) // signed mail already shown, see seenSet
 	seen.ackFloor = ackFloor
-	h := &held{msgs: map[uint64]pending{}, at: map[uint64]time.Time{}, rung: map[uint64]bool{}, fails: map[uint64]int{}}
+	h := &held{msgs: map[spool.Ref]pending{}, at: map[spool.Ref]time.Time{}, rung: map[spool.Ref]bool{}, fails: map[spool.Ref]int{}}
 	tick := time.NewTicker(SpoolCheck)
 	defer tick.Stop()
 	for {
@@ -399,7 +401,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if e.spool != nil {
 			kept := show[:0]
 			for _, p := range show {
-				if e.spool.IsDrained(p.mail.Seq) {
+				if e.spool.IsDrained(refOf(p.mail)) {
 					e.ack(p)
 				} else {
 					kept = append(kept, p)
@@ -425,14 +427,14 @@ func (e *Endpoint) dedupe(batch []pending, seen *seenSet, h *held) []pending {
 	var show []pending
 	inBatch := newSeenSet(e.dupWindow())
 	for _, p := range batch {
-		if hp, ok := h.msgs[p.mail.Seq]; ok {
+		if hp, ok := h.msgs[refOf(p.mail)]; ok {
 			hp.msg = p.msg
-			h.msgs[p.mail.Seq] = hp
+			h.msgs[refOf(p.mail)] = hp
 			continue
 		}
 		if seen.dup(p) || inBatch.dup(p) {
 			_ = p.msg.Ack()
-			e.waking.done(p.mail.Seq)
+			e.waking.done(refOf(p.mail))
 			continue
 		}
 		inBatch.mark(p)
@@ -892,6 +894,6 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 		if err := p.msg.Ack(); err != nil {
 			e.log.Printf("ack #%d: %v", p.mail.Seq, err)
 		}
-		e.waking.done(p.mail.Seq)
+		e.waking.done(refOf(p.mail))
 	}
 }

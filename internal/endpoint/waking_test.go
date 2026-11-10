@@ -55,7 +55,7 @@ func leaseUntil(t *testing.T, kv jetstream.KeyValue, what string, cond func(leas
 func drainAll(t *testing.T, sp spool.Spool) {
 	t.Helper()
 	for _, e := range waiting(t, sp) {
-		if err := sp.Drained(e.Seq); err != nil {
+		if err := sp.Drained(spool.Ref{Seq: e.Seq}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestWakingPendingFallsAsMailIsRead(t *testing.T) {
 	leaseUntil(t, kv, "3", func(lv leaseValue) bool { return lv.WakingPending == 3 })
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 3 })
 	w := waiting(t, sp)
-	if err := sp.Drained(w[0].Seq); err != nil {
+	if err := sp.Drained(spool.Ref{Seq: w[0].Seq}); err != nil {
 		t.Fatal(err)
 	}
 	leaseUntil(t, kv, "2", func(lv leaseValue) bool { return lv.WakingPending == 2 })
@@ -225,10 +225,10 @@ func TestWakingPendingUnknownUntilBacklogArrives(t *testing.T) {
 	if _, ok := w.snapshot(); ok {
 		t.Fatal("known with a backlog of 2 and none received")
 	}
-	w.add(1, true)
-	w.received(1)
-	w.add(2, false)
-	w.received(2)
+	w.add(spool.Ref{Seq: 1}, true)
+	w.received(spool.Ref{Seq: 1})
+	w.add(spool.Ref{Seq: 2}, false)
+	w.received(spool.Ref{Seq: 2})
 	if n, ok := w.snapshot(); !ok || n != 1 {
 		t.Fatalf("got %d %v, want 1 true", n, ok)
 	}
@@ -253,7 +253,7 @@ func TestWakingPendingUnknownPastAnyDelayUntilAccounted(t *testing.T) {
 		t.Fatal("known an hour on with 3 unacked and none held")
 	}
 	pending = 1 // not yet delivered
-	w.add(1, true)
+	w.add(spool.Ref{Seq: 1}, true)
 	ackPending = 1
 	w.reconcile(context.Background())
 	if _, ok := w.snapshot(); ok {
@@ -272,8 +272,8 @@ func TestWakingPendingEvictedMailLeavesTheCount(t *testing.T) {
 	w := newWakingTracker()
 	w.start(0, 10, true, func(context.Context) (uint64, int, uint64, error) { return 0, 3, first, nil })
 	for i := uint64(1); i <= 3; i++ {
-		w.add(i, i != 2)
-		w.received(i)
+		w.add(spool.Ref{Seq: i}, i != 2)
+		w.received(spool.Ref{Seq: i})
 	}
 	if n, _ := w.snapshot(); n != 2 {
 		t.Fatalf("count %d, want 2", n)
@@ -439,21 +439,21 @@ func TestWakingPendingOldAndFutureLeasesParse(t *testing.T) {
 func TestWakingPendingStartupBacklogCountsDistinctMessages(t *testing.T) {
 	w := newWakingTracker()
 	w.start(2, 10, true, nil)
-	w.received(1)
-	w.received(1)  // redelivered
-	w.received(11) // sent after start
-	w.received(12)
+	w.received(spool.Ref{Seq: 1})
+	w.received(spool.Ref{Seq: 1})  // redelivered
+	w.received(spool.Ref{Seq: 11}) // sent after start
+	w.received(spool.Ref{Seq: 12})
 	if _, ok := w.snapshot(); ok {
 		t.Fatal("known with one of two startup messages received (a redelivery and later arrivals do not count)")
 	}
-	w.received(2)
+	w.received(spool.Ref{Seq: 2})
 	if _, ok := w.snapshot(); !ok {
 		t.Fatal("not known with both startup messages received")
 	}
 	// Without the stream's last sequence no delivery counts; only the server's rule can make it known.
 	n := newWakingTracker()
 	n.start(1, 0, false, func(context.Context) (uint64, int, uint64, error) { return 0, 0, 1, nil })
-	n.received(1)
+	n.received(spool.Ref{Seq: 1})
 	if _, ok := n.snapshot(); ok {
 		t.Fatal("known from a delivery with the start sequence unread")
 	}

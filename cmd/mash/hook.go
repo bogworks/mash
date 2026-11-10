@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -121,14 +120,22 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if len(listed) > 0 && !anyListed(shown) {
 		// New mail fits in full: see whether the listed mail fits with it. Only a batch with no digest line is taken.
 		all := append(slices.Clone(fresh), listed...)
-		slices.SortFunc(all, func(a, b spool.Entry) int { return cmp.Compare(a.Seq, b.Seq) })
+		slices.SortFunc(all, func(a, b spool.Entry) int {
+			if a.Ref() == b.Ref() {
+				return 0
+			}
+			if a.Ref().Less(b.Ref()) {
+				return -1
+			}
+			return 1
+		})
 		if out2, shown2 := adapter.Present(pres, all); !anyListed(shown2) {
 			out, shown = out2, shown2
 		}
 	}
-	seqs := make([]uint64, len(shown))
+	seqs := make([]spool.Ref, len(shown))
 	for i, e := range shown {
-		seqs[i] = e.Seq
+		seqs[i] = e.Ref()
 	}
 	if err := sp.MarkShown(seqs...); err != nil {
 		fmt.Fprintf(stderr, "mash hook: recording what is being shown: %v; showing it anyway (a repeat after an interruption would not be flagged)\n", err)
@@ -141,10 +148,10 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	for i, e := range shown {
 		if e.Listed {
 			// Listed in a digest, not read: waiting and unacked until the model reads it (ADR 0046).
-			if err := sp.Listed(e.Seq); err != nil {
+			if err := sp.Listed(e.Ref()); err != nil {
 				fmt.Fprintf(stderr, "mash hook: marking #%d listed: %v\n", e.Seq, err)
 			}
-		} else if err := sp.Drained(e.Seq); err != nil {
+		} else if err := sp.Drained(e.Ref()); err != nil {
 			fmt.Fprintf(stderr, "mash hook: marking #%d drained: %v\n", e.Seq, err)
 		}
 		if i == 0 {

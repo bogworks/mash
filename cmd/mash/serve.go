@@ -539,7 +539,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				if json.Unmarshal(raw, &a) == nil {
 					if ep, err := state.Load().usable(name); err == nil {
-						ep.MarkRead(a.Seq)
+						ep.MarkRead(endpoint.MsgRef{Seq: a.Seq})
 					}
 				}
 			},

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/bogworks/mash/internal/spool"
 )
 
 // Waking-pending count (the lease's waking_pending and waking_pending_at), for an orchestrator that wants to know
@@ -40,16 +42,16 @@ var (
 // wakingTracker is the in-memory unread set (a nil one ignores everything), safe for the consumer's callback and the delivery worker.
 type wakingTracker struct {
 	mu       sync.Mutex
-	unread   map[uint64]bool // stream sequence -> wakes
-	count    int             // the number of waking entries in unread
-	expect   int             // messages the consumer held unacked or pending when it started
-	last     uint64          // the inbox stream's last sequence when the consumer started: the startup messages are at or below it
-	haveLast bool            // last was read; without it no delivery counts toward the backlog
-	seen     map[uint64]bool // distinct startup sequences (<= last) the handler has received
-	started  bool            // the consumer has started
-	ready    bool            // the startup backlog is accounted for: the count is known
-	probe    wakingProbe     // reads the server's view at a lease refresh; nil before the consumer starts
-	notify   chan struct{}   // a change in the count (or readiness) wants a lease write; capacity 1
+	unread   map[spool.Ref]bool // (stream, sequence) -> wakes
+	count    int                // the number of waking entries in unread
+	expect   int                // messages the consumer held unacked or pending when it started
+	last     map[string]uint64  // per stream: its last sequence when the consumer started; the startup messages are at or below it. start sets the primary stream's ("")
+	haveLast bool               // last was read; without it no delivery counts toward the backlog
+	seen     map[spool.Ref]bool // distinct startup messages (sequence <= that stream's last) the handler has received
+	started  bool               // the consumer has started
+	ready    bool               // the startup backlog is accounted for: the count is known
+	probe    wakingProbe        // reads the server's view at a lease refresh; nil before the consumer starts
+	notify   chan struct{}      // a change in the count (or readiness) wants a lease write; capacity 1
 }
 
 // wakingProbe is what the server says: the consumer's messages not yet delivered and delivered but unacked, and the
@@ -57,7 +59,7 @@ type wakingTracker struct {
 type wakingProbe func(ctx context.Context) (pending uint64, ackPending int, firstSeq uint64, err error)
 
 func newWakingTracker() *wakingTracker {
-	return &wakingTracker{unread: map[uint64]bool{}, notify: make(chan struct{}, 1)}
+	return &wakingTracker{unread: map[spool.Ref]bool{}, notify: make(chan struct{}, 1)}
 }
 
 func (w *wakingTracker) poke() {
@@ -74,8 +76,8 @@ func (w *wakingTracker) start(backlog int, last uint64, haveLast bool, probe wak
 		return
 	}
 	w.mu.Lock()
-	w.expect, w.last, w.haveLast, w.started, w.probe = backlog, last, haveLast, true, probe
-	w.seen = map[uint64]bool{}
+	w.expect, w.last, w.haveLast, w.started, w.probe = backlog, map[string]uint64{"": last}, haveLast, true, probe
+	w.seen = map[spool.Ref]bool{}
 	w.ready = w.expect <= 0
 	w.mu.Unlock()
 	w.poke()
@@ -84,13 +86,14 @@ func (w *wakingTracker) start(backlog int, last uint64, haveLast bool, probe wak
 // received counts a message the handler saw (by stream sequence), whether or not it is kept (forged mail is acked at
 // once), toward the startup backlog: only a sequence at or below the stream's last at start counts, and each once, so a
 // redelivery, or a message sent after start, never stands in for one still outstanding.
-func (w *wakingTracker) received(seq uint64) {
+func (w *wakingTracker) received(seq spool.Ref) {
 	if w == nil {
 		return
 	}
 	w.mu.Lock()
 	flip := false
-	if w.started && w.haveLast && !w.ready && seq <= w.last && !w.seen[seq] {
+	last, hasLast := w.last[seq.Stream]
+	if w.started && w.haveLast && hasLast && !w.ready && seq.Seq <= last && !w.seen[seq] {
 		w.seen[seq] = true
 		if len(w.seen) >= w.expect {
 			w.ready, flip = true, true
@@ -103,7 +106,7 @@ func (w *wakingTracker) received(seq uint64) {
 }
 
 // add records an unread message; adding one already there changes nothing.
-func (w *wakingTracker) add(seq uint64, wakes bool) {
+func (w *wakingTracker) add(seq spool.Ref, wakes bool) {
 	if w == nil {
 		return
 	}
@@ -126,7 +129,7 @@ func (w *wakingTracker) add(seq uint64, wakes bool) {
 // listed stops counting a message a hook has listed in a digest: the model was told of it and to read it, so it is not
 // mail that should wake it. It stays unread (unacked) and is forgotten by done when acked; a redelivery's add changes
 // nothing.
-func (w *wakingTracker) listed(seq uint64) {
+func (w *wakingTracker) listed(seq spool.Ref) {
 	if w == nil {
 		return
 	}
@@ -143,7 +146,7 @@ func (w *wakingTracker) listed(seq uint64) {
 }
 
 // done forgets a message that has been shown (acked).
-func (w *wakingTracker) done(seq uint64) {
+func (w *wakingTracker) done(seq spool.Ref) {
 	if w == nil {
 		return
 	}
@@ -182,7 +185,8 @@ func (w *wakingTracker) reconcile(ctx context.Context) {
 	w.mu.Lock()
 	changed := false
 	for seq, wakes := range w.unread {
-		if seq < first {
+		// first is the primary stream's first sequence: another stream's refs are not judged by it.
+		if seq.Stream == "" && seq.Seq < first {
 			delete(w.unread, seq)
 			if wakes {
 				w.count--
