@@ -95,11 +95,12 @@ the credential re-issue; Phase 3 is held.
    running or stopped, old or new form, and per renamed identity the message count, last sequence and trust label before
    and after (INV-001 to INV-003). The ops lanes add the credential files, herd definitions and launch configurations.
    Tests first: a fixture account with legacy and new-form identities.
-6. **New step 1.10: the Phase 3 negative tests land in Phase 1** (D183: "don't lose this"), against a configuration
-   with legacy acceptance off, so they are in CI before the break. They try each old form at every REQ-016 entry point
-   and expect refusal under that configuration. Phase 3 then deletes the code that the legacy-off configuration (B) switched
-   off; B and the rule-file configuration (A, which stays permanently) are both kept and the tests stay unchanged. This replaces 3.1's "written first" with "already
-   running", and Phase 3 stays a single held pull request.
+6. **New step 1.10: the rule-file negative tests land in Phase 1** (D183: "don't lose this"). Configuration A (a rule
+   file that refuses `cc`, and `mash` inside a range) passes today, so every A test (each old form and the plain name,
+   at every REQ-016 entry point) is in CI before the break and stays there permanently. The configuration B tests
+   (what mash's own removals refuse: the constant-`cc` parsing and the six-token subject) cannot pass until the code
+   they test is removed, so they are written first, failing, in Phase 3's single held pull request with the removal.
+   This replaces 3.1's "written first" for the A tests with "already running".
 7. **2.2 no longer waits for new-form endpoints.** Only zoned legacy endpoints and policy-compiled users wait for the
    zone ruling.
 8. **Clarifications to record under the completion record (contract section 8).** (a) The identity is supplied by
@@ -148,6 +149,8 @@ question). `reply` and `lookup` are separate entry points, tested separately.
   fewer: provision, start, send, reply, prompt, lookup, and the compatibility alias (REQ-016, AT-005). For `send` and
   `prompt` both the addressed identity and the sender's own identity are checked; `reply` checks the identity being
   answered; `lookup` of a refused identity fails loudly with the named-rule error (REQ-020, AT-005); it never silently omits it.
+  The requested identity is checked **before** the directory is read, so an old-form identity whose record is gone
+  still gets the named-rule error and not "not found".
 - **What a name is.** The identity's three tokens. A legacy identity is `(cc, <owner>, <name>)`, so a rule on `agent`
   equal to `cc` refuses the old form without mash knowing why. **After the break a plain name still has three tokens**
   (REQ-024 removes the constant `cc` and the one-owner setting; AT-006 needs a plain name to work outside a range, AT-012
@@ -155,7 +158,9 @@ question). `reply` and `lookup` are separate entry points, tested separately.
   agent token is the configured agent token, which defaults to the neutral `mash` when no agent token is configured (mash
   cannot know whether there is a range). The configuration key is `agent_token` (environment `MASH_AGENT_TOKEN`; the
   environment wins over the file, as for the owner). `mash` is a **reserved** token (planner, confirmed): no deployment
-  uses it as a range, and the range's rule file refuses it by exact match inside a range (below). Inside a range
+  uses it as a range, and the range's rule file refuses it by exact match inside a range (below). Reserving it adds
+  `mash` to the contract's reserved list (REQ-028); the planner amends the contract with the seam page, and until then
+  the contract still permits a range named `mash`. Inside a range
   homerange supplies all three tokens.
 - **What a refusal says (REQ-020).** The error names the rule (`id`) and carries its `message`; for `send`, `reply` and
   `prompt` the sender is told and nothing is dropped silently.
@@ -169,6 +174,11 @@ question). `reply` and `lookup` are separate entry points, tested separately.
   constant-`cc` parsing and the six-token subject gone): it covers only what mash's own syntax removes. mash cannot
   refuse `cc` or a plain name by itself without hard-coding the grammar (REQ-017), and AT-006 needs a plain name to
   work with no rule, so Phase 3 does **not** make B the only configuration.
+- **A missing file must not reopen the old forms later.** Inside a range homerange also sets `name_rule_required`
+  (environment `MASH_NAME_RULE_REQUIRED`, in the same configuration): when set, mash refuses to start without a loaded
+  rule file (fail closed), so a later restart with no file cannot reopen `cc` or the plain name. The check that every
+  endpoint reports a rule loaded is also a recurring one (AT-003's enumeration is runnable at any time, NFR-004), not only
+  a step of the break.
 - **Visibility and the break procedure.** With no file named, `status` says so, and when a file is loaded it names the
   file and a digest of its content. The file is read once at start, so the break restarts every endpoint before AT-003
   runs, and the break procedure and AT-003 check that every endpoint reports a rule loaded (and the expected digest);
@@ -282,8 +292,8 @@ writers, and nothing writes a new-form record until every reader in the range ca
   configuration homerange supplies; a grant with a wildcard or `>` at or before the range position is refused with an
   error naming REQ-027 (AT-013's accepted and refused lists as vectors; its mutation as a test). A lane of herd x
   receives mail to any lane of herd x and cannot subscribe to herd y's subjects. This lands before any new-form user is
-  minted, because it is a security rule. Until the zone question below is ruled, new-form provisioning refuses an
-  endpoint that policy gives a zone, with a clear error.
+  minted, because it is a security rule. Until the zone question below is ruled, new-form provisioning supplies only the
+  default, un-policied permission set and refuses every policy-compiled user (amendment 2), with a clear error.
 - **1.6 Provisioning and display.** `mash` and `mashctl` provision, start and address an endpoint by its three tokens as
   well as by a legacy name, still behind the setting; `who`, `inbox`, message headers and trust lines show each token
   byte-identical (REQ-006). Provisioning refuses a name that was retired (ADR 0015's tombstone) so a retired old-form
@@ -315,12 +325,13 @@ Not new mechanism: the setting is switched on and new endpoints default to the n
 ### Phase 3: removal and negative tests (REQ-016, REQ-017, REQ-020, REQ-024; AT-005, AT-012)
 
 One pull request (tests and removal together, since the negative tests cannot pass before the removal), **prepared and
-reviewed ahead of the break and held** by the lead until Randy's go, DEC-006 settled and AT-003 clean twice a day apart;
+reviewed ahead of the break and held** by the lead until Randy's go, DEC-006 settled and the period DEC-006 sets and AT-003 run immediately before the break;
 the break is irreversible and is his. Before the break the ops lanes retire old-form credentials and records so old
 identities are already unaddressable and unstartable (AT-003 requires that pre-break); mash supplies what it needs to
 enumerate directory records and inbox streams. The pull request:
 
-- **3.1 Negative tests, written first** (the commit order shows them failing), checked in with the code they guard, one
+- **3.1 Negative tests.** The A tests are already running (1.10). The B tests are written first in this pull request (the
+  commit order shows them failing) and checked in with the code they guard, one
   per REQ-016 entry point and per old form, in the two configurations pinned above: the old endpoint name as a mash name
   (`x-masterplanner`), the legacy subject `agents.mail.cc.homerange.<name>`, ADR 0054's six-token subject, any name
   under the agent token `cc`, a plain name inside a range, and a grant on `agents.mail.*.homerange.*`, each through a
