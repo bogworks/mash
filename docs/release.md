@@ -21,7 +21,7 @@ above the latest published release, and the same ordering checks run again immed
 config. Before pushing, the local tag is verified against `$RELEASE_SIGNERS` (default `docs/allowed_signers`); a tag that fails is refused (exit 3), never pushed, and deleted if this run
 created it. Exit 0 published and verified, 2 usage, 3 refused, 4 the command failed or timed
 out (rerun to resume). The reasoning is in [decision 0001](decisions/0001-publishing-is-one-resumable-command.md).
-Then do step 6 (the pin).
+Then do step 7 (record the version and commit, optional).
 
 ## Signing
 
@@ -102,7 +102,7 @@ The numbered steps are what the command does in each state, and the manual path 
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --deny-self-hosted-runners` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and `slsa-verifier verify-artifact` passes on each binary against `mash.intoto.jsonl` (with `--builder-id` for the pinned generator, and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; so is a missing `slsa-verifier`; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
-7. **Pin (optional):** a downstream consumer that pins mash releases records `{"version": "<version>", "commit": "<X>"}` in its own manifest.
+7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
 
 ## Optional: check a downstream consumer
 
