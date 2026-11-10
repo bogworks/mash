@@ -75,7 +75,9 @@ func checkTotal(agent, owner, name string) error {
 // New returns a new-form identity of SAP's agent, owner and name tokens. Each
 // token must satisfy the new token rule, and the three tokens with their two
 // separators must total at most 64 characters. New does not know any list of
-// harness names and accepts agent "cc"; that is a range-level rule.
+// harness names and accepts agent "cc"; that is a range-level rule. A new-form
+// cc identity has the same subjects as the legacy identity of the same owner and
+// name but a different flat key, so a deployment must not hold both.
 func New(agent, owner, name string) (EndpointIdentity, error) {
 	for _, p := range []struct{ pos, tok string }{{"agent", agent}, {"owner", owner}, {"name", name}} {
 		if err := checkToken(p.pos, p.tok); err != nil {
@@ -149,7 +151,10 @@ func (id EndpointIdentity) Subjects() Subjects {
 // MailFilter is the subject filter of id's inbox stream. A legacy identity gets
 // exactly MailFilter(owner, name), with a wildcard agent token; a new-form
 // identity gets its exact agent token, because the agent position is never
-// wildcarded.
+// wildcarded. The legacy wildcard also matches a new-form subject that has the
+// same owner and name under any other agent token, so while both forms exist a
+// caller must keep a new-form owner token from equalling a legacy owner (the
+// range-level name rule); this type does not know the other identities.
 func (id EndpointIdentity) MailFilter() string {
 	if id.legacy {
 		return MailFilter(id.Owner, id.Name)
@@ -159,7 +164,9 @@ func (id EndpointIdentity) MailFilter() string {
 
 // Flat is the flat key of id. A new-form identity gives agent_owner_name, which
 // is injective because tokens contain no underscore; a legacy identity gives
-// the bare name, today's key, so legacy streams and keys do not move.
+// the bare name, today's key, so legacy streams and keys do not move. The legacy
+// form is not injective across owners (two owners may share a name), exactly as
+// today; that holds until the legacy form is removed.
 func (id EndpointIdentity) Flat() string {
 	if id.legacy {
 		return id.Name
