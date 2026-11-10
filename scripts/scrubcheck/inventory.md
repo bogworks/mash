@@ -31,7 +31,7 @@ any hit from there is added here. The last 8 rows are hits that the scrub plan
 | `internal/portable/portable_test.go:36:rangehand` | `personalRE = regexp.MustCompile('(?i)randyb\|randybias\|rlb\|homerange\|rangehand\|plethorax\|dev1\|thao` | open |
 | `internal/portable/portable_test.go:482:homerange` | `for _, s := range []string{"randyb", "RandyBias", "my rlb box", "homerange", "rangehand-x", "plethorax", "dev1` | open |
 | `internal/portable/portable_test.go:482:rangehand` | `for _, s := range []string{"randyb", "RandyBias", "my rlb box", "homerange", "rangehand-x", "plethorax", "dev1` | open |
-| `internal/store/store_test.go:46:herd` | `r, err := ParseRecord("a", []byte('{'+baseRecord+',"herd":"acme","role":"r"}'))` | renamed (grouping) |
+| `internal/store/store_test.go:46:herd` | `r, err := ParseRecord("a", []byte('{'+baseRecord+',"herd":"acme","role":"r"}'))` | excepted (exceptions.tsv: a live record may still carry the legacy field) |
 | `scripts/adrlint/main.go:87:herds` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
 | `scripts/adrlint/main.go:87:herdr` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
 | `scripts/adrlint/main.go:87:lanes` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
