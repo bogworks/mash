@@ -2,7 +2,9 @@ package release
 
 import (
 	"os"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -74,9 +76,20 @@ func loadMergify(t *testing.T) mergify {
 // Every check the queue waits for is one ci.yml runs (or codex-review, the review watcher's status): a name CI never
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
-	jobs := load(t, "ci.yml").Jobs
-	for name, j := range load(t, "adr-lint.yml").Jobs { // adr-lint.yml's jobs are checks the queue waits for too
-		jobs[name] = j
+	// A check's name is the job's name: when set, else its key (a matrix job's name is not one a queue condition names).
+	names := map[string]string{}                                              // check name -> the workflow file that runs it
+	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} { // the checks the queue waits for
+		for key, j := range load(t, f).Jobs {
+			n := j.Name
+			if n == "" {
+				n = key
+			}
+			names[n] = f
+		}
+	}
+	// The queue reads a check only if its workflow runs for the pull request: label-reset is a pull_request_target one.
+	if on, _ := load(t, "label-reset.yml").On.(map[string]any); on["pull_request_target"] == nil {
+		t.Error("label-reset.yml must trigger on pull_request_target")
 	}
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	m := loadMergify(t)
@@ -90,11 +103,16 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 		if mm == nil || mm[1] == "codex-review" {
 			continue
 		}
-		if _, ok := jobs[mm[1]]; !ok {
-			t.Errorf(".mergify.yml waits for %q, which ci.yml does not run", mm[1])
+		if _, ok := names[mm[1]]; !ok {
+			t.Errorf(".mergify.yml waits for %q, which no job (by its name:, or its key when it has none) in ci.yml, adr-lint.yml or label-reset.yml is called", mm[1])
 		}
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "label != hold", "-draft", "-conflict"} {
+	for _, c := range []struct{ check, file string }{{"adr-lint", "adr-lint.yml"}, {"label-reset", "label-reset.yml"}, {"pr-check", "ci.yml"}} {
+		if names[c.check] != c.file {
+			t.Errorf("check %q is run by %q, want %q", c.check, names[c.check], c.file)
+		}
+	}
+	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "check-success = label-reset", "label != hold", "-draft", "-conflict"} {
 		if !strings.Contains(strings.Join(queuePlain, "\n"), want) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
@@ -111,36 +129,109 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	}
 }
 
-// An outside contributor's pull request must not reach the queue (which runs its code in CI) on
-// green checks alone: a maintainer must have written or approved it.
-func TestMergify_outsidersNeedAMaintainer(t *testing.T) {
+// The maintainer's login authors agent pull requests too, so authorship proves nothing: entry to the queue needs a
+// recorded approval or the lead-approved label (which label-reset.yml removes on every push), and the hold label
+// stays the brake in both places.
+func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	m := loadMergify(t)
-	_, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	plain, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
 	if len(ors) != 1 {
 		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
 	}
-	if len(ors[0]) < 2 {
-		t.Fatalf("or group %v needs at least two members", ors[0])
-	}
-	authors, approvers := map[string]bool{}, map[string]bool{}
-	for _, c := range ors[0] {
-		switch {
-		case strings.HasPrefix(c, "author = "):
-			authors[strings.TrimPrefix(c, "author = ")] = true
-		case strings.HasPrefix(c, "approved-reviews-by = "):
-			approvers[strings.TrimPrefix(c, "approved-reviews-by = ")] = true
+	for _, c := range append(append([]string{}, plain...), ors[0]...) {
+		if strings.HasPrefix(c, "author = ") {
+			t.Errorf("queue_conditions contain %q: the maintainer's login authors agent pull requests, so authorship proves nothing", c)
 		}
+	}
+	for _, c := range ors[0] {
 		if strings.Contains(c, "check-success") {
 			t.Errorf("or member %q lets a bare check satisfy the group", c)
 		}
 	}
-	if len(authors) == 0 || len(approvers) == 0 {
-		t.Fatalf("or group %v needs an author and an approved-reviews-by member", ors[0])
+	got := append([]string{}, ors[0]...)
+	sort.Strings(got)
+	want := []string{"approved-reviews-by = randybias", "label = lead-approved"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("entry or group = %v, want exactly %v", got, want)
 	}
-	for a := range authors {
-		if !approvers[a] {
-			t.Errorf("%q may author but is not an approver", a)
+	if !strings.Contains(strings.Join(plain, "\n"), "label != hold") {
+		t.Error("queue_conditions must honour the hold label")
+	}
+	if !strings.Contains(strings.Join(m.Protections.AutoMerge, "\n"), "label != hold") {
+		t.Error("auto_merge_conditions must honour the hold label")
+	}
+}
+
+// The lead-approved and decision-confirmed labels must not outlive the code they covered: a workflow removes both on
+// every push, on open (labels preset at open do not count) and on reopen. It runs on
+// pull_request_target (a token that can edit labels on any pull request), so it must hold only pull-requests: write and contents: read and
+// never check out or run the pull request's code, and a failure must fail the job (no swallowed errors).
+func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
+	if _, err := os.Stat("../../.github/workflows/lead-approved-reset.yml"); err == nil {
+		t.Error("lead-approved-reset.yml still exists: it was renamed to label-reset.yml")
+	}
+	raw, err := os.ReadFile("../../.github/workflows/label-reset.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := load(t, "label-reset.yml")
+	on, ok := w.On.(map[string]any)
+	if !ok || len(on) != 1 {
+		t.Fatalf("on = %v, want only pull_request_target", w.On)
+	}
+	prt, ok := on["pull_request_target"].(map[string]any)
+	if !ok {
+		t.Fatalf("on = %v, want pull_request_target", w.On)
+	}
+	var types []string
+	for _, x := range prt["types"].([]any) {
+		types = append(types, x.(string))
+	}
+	sort.Strings(types)
+	if strings.Join(types, ",") != "opened,reopened,synchronize" {
+		t.Errorf("pull_request_target types = %v, want [opened reopened synchronize]", types)
+	}
+	// contents: read is for gh pr view (it may need it on this repository); both are read or label-edit scopes, no write to code.
+	wantPerms := map[string]string{"pull-requests": "write", "contents": "read"}
+	if !reflect.DeepEqual(w.Permissions, wantPerms) {
+		t.Errorf("workflow permissions = %v, want exactly %v", w.Permissions, wantPerms)
+	}
+	if len(w.Jobs) != 1 || w.Jobs["label-reset"].Name != "label-reset" {
+		t.Errorf("jobs = %v, want the single job label-reset named label-reset (the check name)", w.Jobs)
+	}
+	for id, j := range w.Jobs {
+		if j.Permissions != nil && !reflect.DeepEqual(j.Permissions, wantPerms) {
+			t.Errorf("job %s permissions = %v, want exactly %v", id, j.Permissions, wantPerms)
 		}
+	}
+	text := string(raw)
+	// opened resets too: labels preset at open must not count, so there is no early exit for it.
+	if strings.Contains(text, `"opened"`) || strings.Contains(text, "exit 0") || strings.Contains(text, "ACTION") {
+		t.Error("label-reset.yml special-cases opened or exits early: labels preset at open must be removed like any other")
+	}
+	if strings.Contains(text, "actions/checkout") {
+		t.Error("label-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
+	}
+	for _, l := range []string{"lead-approved", "decision-confirmed"} {
+		if !strings.Contains(text, l) {
+			t.Errorf("label-reset.yml does not name the %s label", l)
+		}
+	}
+	if !strings.Contains(text, `--remove-label "$label"`) {
+		t.Error("label-reset.yml does not remove labels with gh pr edit --remove-label")
+	}
+	// After the removals the labels are read again and the job fails if either is still set (re-applied concurrently, or
+	// the removal did not take).
+	removeAt := strings.Index(text, `--remove-label "$label"`)
+	if n := strings.Count(text, "gh pr view"); n < 2 {
+		t.Errorf("label-reset.yml has %d gh pr view calls, want a second read of the labels after the removals", n)
+	} else if second := strings.LastIndex(text, "gh pr view"); second < removeAt {
+		t.Error("label-reset.yml re-reads the labels before the removals, not after")
+	} else if after := text[second:]; !strings.Contains(after, "exit 1") || !strings.Contains(after, "$label") {
+		t.Error("label-reset.yml does not fail (exit 1, naming the label) when a label is still present after the removals")
+	}
+	if strings.Contains(text, "|| true") || strings.Contains(text, "continue-on-error") {
+		t.Error("label-reset.yml swallows a failure (|| true or continue-on-error): an API or token failure must fail the job")
 	}
 }
 
@@ -154,12 +245,12 @@ func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	}
 	var logins []string
 	for _, c := range ors[0] {
-		if strings.HasPrefix(c, "author = ") {
-			logins = append(logins, strings.TrimPrefix(c, "author = "))
+		if strings.HasPrefix(c, "approved-reviews-by = ") {
+			logins = append(logins, strings.TrimPrefix(c, "approved-reviews-by = "))
 		}
 	}
 	if len(logins) == 0 {
-		t.Fatalf("or group %v has no author member", ors[0])
+		t.Fatalf("or group %v has no approved-reviews-by member", ors[0])
 	}
 	found := false
 	for _, r := range m.PullRequestRules {

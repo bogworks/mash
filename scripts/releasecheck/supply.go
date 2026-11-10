@@ -24,7 +24,7 @@ const sbomPredicateType = "https://cyclonedx.org/bom"
 const releaseWorkflowPath = ".github/workflows/release.yml"
 
 // attestFlags are the gh attestation verify flags that pin WHO made an attestation: the release workflow of the release
-// repository, at the release tag, on a GitHub-hosted runner. -R alone would accept any workflow of the repository on any ref.
+// repository, at the release tag. --deny-self-hosted-runners stays until the maintainer rules on the attestation question (ADR 0079). -R alone would accept any workflow of the repository on any ref.
 func attestFlags(o Options, tag string) []string {
 	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag, "--deny-self-hosted-runners"}
 }

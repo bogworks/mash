@@ -27,6 +27,29 @@ type step struct {
 	With             map[string]any    `yaml:"with"`
 }
 
+// runsOn is a job's runs-on: a scalar as written, or a sequence of labels rendered as "[a, b]".
+type runsOn string
+
+// runsOnKey is a runs-on list in the fmt.Sprint form linuxLabels and macosLabels use: "[a b]".
+func runsOnKey(r runsOn) string { return strings.ReplaceAll(string(r), ",", "") }
+
+func (r *runsOn) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		var l []string
+		if err := n.Decode(&l); err != nil {
+			return err
+		}
+		*r = runsOn("[" + strings.Join(l, ", ") + "]")
+		return nil
+	}
+	var s string
+	if err := n.Decode(&s); err != nil {
+		return err
+	}
+	*r = runsOn(s)
+	return nil
+}
+
 type job struct {
 	Name            string            `yaml:"name"`
 	If              string            `yaml:"if"`
@@ -36,7 +59,7 @@ type job struct {
 	With            map[string]any    `yaml:"with"`
 	Outputs         map[string]string `yaml:"outputs"`
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
-	RunsOn          any               `yaml:"runs-on"`
+	RunsOn          runsOn            `yaml:"runs-on"`
 	Permissions     map[string]string `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
 	Strategy        struct {
@@ -1077,6 +1100,94 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 	}
 }
 
+// adr-lint runs from the base branch (pull_request_target) and executes nothing from the pull request, so it runs on the
+// repository's self-hosted runners, labelled self-hosted and rh-linux. Fork pull requests are not skipped: they run there
+// once a person approves them. Its runs-on is exactly that list and the trigger is pull_request_target.
+func TestADRLint_selfHostedRunner(t *testing.T) {
+	wf := load(t, "adr-lint.yml")
+	if r := string(wf.Jobs["adr-lint"].RunsOn); r != "[self-hosted, rh-linux]" {
+		t.Errorf("adr-lint runs-on = %q, want [self-hosted, rh-linux]", r)
+	}
+	on, _ := wf.On.(map[string]any)
+	prt, ok := on["pull_request_target"].(map[string]any)
+	if !ok {
+		t.Fatalf("adr-lint must trigger on pull_request_target, got %v", wf.On)
+	}
+	types := fmt.Sprint(prt["types"])
+	for _, want := range []string{"labeled", "unlabeled"} {
+		if !strings.Contains(types, want) {
+			t.Errorf("adr-lint pull_request_target types lack %s: %s", want, types)
+		}
+	}
+	for _, st := range wf.Jobs["adr-lint"].Steps {
+		if strings.Contains(st.Run, "git -C \"$GITHUB_WORKSPACE/pr\" diff --no-renames") &&
+			!strings.Contains(st.Run, "# --no-renames:") {
+			t.Errorf("the --no-renames comment must sit in the step that runs git diff:\n%s", st.Run)
+		}
+		if strings.Contains(st.Run, "fetch --no-tags") && strings.Contains(st.Run, "--no-renames:") {
+			t.Errorf("the --no-renames comment is on the fetch step, not the diff step:\n%s", st.Run)
+		}
+	}
+}
+
+// A synchronize, reopened or opened run must not honour decision-confirmed (label-reset removes it, in a run that
+// triggers nothing new), so the label counts only from a labeled run on the current head. The workflow runs on labeled and
+// unlabeled, passes the event action to the checker, and reads the labels live, failing on an API error.
+func TestADRLint_confirmationNeedsALabeledRun(t *testing.T) {
+	wf := load(t, "adr-lint.yml")
+	on, _ := wf.On.(map[string]any)
+	prt, _ := on["pull_request_target"].(map[string]any)
+	types := fmt.Sprint(prt["types"])
+	for _, want := range []string{"labeled", "unlabeled", "synchronize", "reopened", "opened"} {
+		if !strings.Contains(types, want) {
+			t.Errorf("adr-lint must trigger on pull_request_target %s, got %s", want, types)
+		}
+	}
+	var st *step
+	for i, s := range wf.Jobs["adr-lint"].Steps {
+		if strings.Contains(s.Run, "adrlint\" pr ") {
+			st = &wf.Jobs["adr-lint"].Steps[i]
+		}
+	}
+	if st == nil {
+		t.Fatal("no step runs adrlint pr")
+	}
+	if st.Env["PR_ACTION"] != "${{ github.event.action }}" {
+		t.Errorf("the event action must reach the checker as PR_ACTION, got %q", st.Env["PR_ACTION"])
+	}
+	if !strings.Contains(st.Run, "gh pr view") || !strings.Contains(st.Run, "--json labels") || !strings.Contains(st.Run, "PR_LABELS=") {
+		t.Errorf("the labels must be read live with gh pr view --json labels:\n%s", st.Run)
+	}
+	if strings.Contains(fmt.Sprint(st.Env), "pull_request.labels") {
+		t.Errorf("the labels must not come from the event payload snapshot: %v", st.Env)
+	}
+	if !strings.Contains(st.Run, "set -euo pipefail") {
+		t.Error("an API error must fail the step")
+	}
+}
+
+// label-reset runs from the base branch and executes nothing from the pull request; like every job it runs on the
+// self-hosted labels (ADR 0079) and names no GitHub-hosted runner: its runs-on is exactly [self-hosted, rh-linux].
+func TestLabelReset_noHostedRunner(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/label-reset.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if hostedRunnerRE.MatchString(line) {
+			t.Errorf("label-reset.yml:%d names a GitHub-hosted runner: %s", n+1, line)
+		}
+	}
+	if r := strings.TrimSpace(string(load(t, "label-reset.yml").Jobs["label-reset"].RunsOn)); r != "[self-hosted, rh-linux]" {
+		t.Errorf("label-reset runs-on = %q, want [self-hosted, rh-linux]", r)
+	}
+}
+
+var hostedRunnerRE = regexp.MustCompile(`(ubuntu|macos|windows)-`)
+
 // A draft left behind stops the next draft before anything is built: the guard job runs scripts/draft-guard, and it is
 // the only jobs that get contents: write are guard and draft; attest holds the signing permissions with contents: read (the workflow default).
 func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
@@ -1130,7 +1241,7 @@ func TestCI_conformanceIsAdvisory(t *testing.T) {
 			t.Errorf("conformance if %q lacks %q", j.If, want)
 		}
 	}
-	if got := fmt.Sprint(j.RunsOn); got != linuxLabels {
+	if got := runsOnKey(j.RunsOn); got != linuxLabels {
 		t.Errorf("conformance runs-on %s; want %s", got, linuxLabels)
 	}
 	if needs := fmt.Sprint(w.Jobs["pr-check"].Needs); strings.Contains(needs, "conformance") {
@@ -1571,5 +1682,34 @@ func TestRelease_everyJobBelowBuildHasAStatusFunction(t *testing.T) {
 				t.Errorf("job %s needs %s but its if does not require %s", jn, n, ref)
 			}
 		}
+	}
+}
+
+// git diff drops the source of a rename unless told not to: `git mv .mergify.yml elsewhere` would list only "elsewhere" and
+// escape adr-lint's protected-path check (and a code file renamed into docs/ would skip CI). Every changed-path list a
+// workflow computes passes --no-renames, so the old path is listed too.
+func TestWorkflows_changedFileListsKeepRenameSources(t *testing.T) {
+	files, _ := filepath.Glob("../../.github/workflows/*.yml")
+	seen := 0
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") || !strings.Contains(line, "git") || !strings.Contains(line, " diff ") {
+				continue
+			}
+			if !strings.Contains(line, "--name-only") && !strings.Contains(line, "--name-status") {
+				continue
+			}
+			seen++
+			if !strings.Contains(line, "--no-renames") {
+				t.Errorf("%s:%d lists changed files without --no-renames (a rename's old path would be missing): %s", filepath.Base(f), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if seen < 2 {
+		t.Errorf("found %d changed-file lists in the workflows, want adr-lint.yml's and ci.yml's", seen)
 	}
 }

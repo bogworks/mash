@@ -2,8 +2,10 @@ name: adr-lint
 # Architecture decision records are enforced on every pull request (scripts/adrlint has the code, docs/decisions/README.md
 # the rules): the records themselves are linted, an accepted record may not be rewritten (compared with the base branch),
 # and the pull request body must carry one "Decision: none" or "Decision: ADR-NNNN" line that names a record this pull
-# request adds or changes. "none" on a change to a protected path (the SAP, store, config, endpoint, plugin, MCP, host, spool and render code, and docs/decisions/; see protected in scripts/adrlint/main.go) needs the decision-confirmed
-# label, which a reviewer applies; that is why labeled and unlabeled re-run it.
+# request adds or changes. "none" on a change to a protected path (the SAP, store, config, endpoint, plugin, MCP, host, spool and render code, docs/decisions/, the merge gate, workflows, actions, release tests and branch-protection doc; see protected in scripts/adrlint/main.go) needs the decision-confirmed
+# label, which a reviewer applies; that is why labeled and unlabeled re-run it. The label counts only in a run whose
+# event action is not synchronize, reopened or opened (PR_ACTION): on a push label-reset.yml removes it in a run that
+# starts no new one, and this run may have read it first. The labels are read live (gh pr view), not from the event.
 # This check becomes a Mergify queue condition and a required check in a follow-up pull request, once this workflow is on main.
 #
 # Trust: this runs on pull_request_target, so GitHub runs THIS workflow file from the BASE branch; a pull request cannot
@@ -12,8 +14,11 @@ name: adr-lint
 # sourced or run, no secret is used, and the token is contents: read. A pull request that changes this workflow or
 # scripts/adrlint is judged by the base branch's versions; its change takes effect once it has merged. (The first pull
 # request that adds scripts/adrlint has no checker at its base and cannot pass this workflow until a maintainer merges it.)
-# Its fork safety does not depend on the runner: the trust logic above (base-branch checker, pull request as data only) is the same wherever it runs, and a fork runs on the same self-hosted labels as every job (ADR 0079). The body and the labels reach the tool
-# through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
+# This job runs on the repository's self-hosted runners (labels self-hosted, rh-linux), like every job (ADR 0079); a pull
+# request from a fork is not skipped, it runs there once a person approves the run. Its fork safety does not depend on the
+# runner: the trust logic above (base-branch checker, pull request as data only) is the same wherever it runs, and nothing
+# from the pull request is run. The body and the labels reach the tool through env, never through the text of the shell
+# script. A fork checkout may lack the base commit, so the base commit
 # is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
 on:
   pull_request_target:
@@ -84,8 +89,15 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          git -C "$GITHUB_WORKSPACE/pr" diff --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
+          # The current labels, not the event payload's snapshot; an API error fails the step (set -e on the assignment).
+          labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
+          export PR_LABELS="$labels"
+          # --no-renames: a rename is listed as a delete plus an add, so the old path (say a protected one) is in the list.
+          git -C "$GITHUB_WORKSPACE/pr" diff --no-renames --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
           "$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr" --files "$RUNNER_TEMP/files"

@@ -1,7 +1,6 @@
 package release
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -27,7 +26,7 @@ func TestWorkflows_publishCheckIsAScheduledAudit(t *testing.T) {
 	if !ok || len(w.Jobs) != 1 {
 		t.Fatalf("publish-check.yml jobs = %d; want the one job check", len(w.Jobs))
 	}
-	if got := fmt.Sprint(j.RunsOn); got != linuxLabels {
+	if got := runsOnKey(j.RunsOn); got != linuxLabels {
 		t.Errorf("check runs on %s; want %s", got, linuxLabels)
 	}
 	if len(j.Permissions) != 2 || j.Permissions["contents"] != "write" || j.Permissions["issues"] != "write" {
