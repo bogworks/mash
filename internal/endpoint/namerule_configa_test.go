@@ -503,7 +503,13 @@ func TestConfigAReply(t *testing.T) {
 			if out.Len() != 0 {
 				t.Fatalf("an answer reached the refused asker: %q", out.String())
 			}
-			wantRefusal(t, <-replyErr, a.want, "reply")
+			// The service refuses the asker on receipt (the receiving side of prompt), so the prompt never reaches the
+			// replier: no reply is attempted at all.
+			select {
+			case err := <-replyErr:
+				t.Fatalf("the refused asker's prompt reached the replier: %v", err)
+			case <-time.After(300 * time.Millisecond):
+			}
 		})
 	}
 }
