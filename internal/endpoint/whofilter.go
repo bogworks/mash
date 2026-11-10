@@ -115,9 +115,6 @@ func (f WhoFilter) matches(p Presence) bool {
 			return false
 		}
 	}
-	if flat, ok := identityFlat(f.Match); f.Match != "" && ok {
-		return strings.ToLower(r.KeyOrName()) == flat
-	}
 	if f.Match != "" {
 		m := strings.ToLower(f.Match)
 		hit := containsFold(r.Name, m) || containsFold(r.Role, m) || containsFold(r.Note, m) || containsFold(r.Description, m)
@@ -126,6 +123,11 @@ func (f WhoFilter) matches(p Presence) bool {
 		}
 		for k, v := range r.Labels {
 			hit = hit || containsFold(k, m) || containsFold(v, m)
+		}
+		// --match is the union of the exact identity and the substring search, so a legacy record that merely
+		// mentions the identity text still appears.
+		if flat, ok := identityFlat(f.Match); ok && strings.ToLower(r.KeyOrName()) == flat {
+			hit = true
 		}
 		if !hit {
 			return false

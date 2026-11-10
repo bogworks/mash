@@ -29,6 +29,8 @@ func TestOneShowsCanonicalSender(t *testing.T) {
 
 func TestOneShowsCanonicalRelayOrigin(t *testing.T) {
 	m := tokMail(4)
+	// Rendering only: relaying mail from a three-token endpoint is refused by sap.SignVia today (it rejects
+	// underscores in a relay origin), so a real relay cannot produce this Via yet (follow-up).
 	m.Via = tokKey + " #9"
 	if out := One(m); !strings.Contains(out, "\nrelayed from "+tokDisplay+" #9\n") || strings.Contains(out, tokKey) {
 		t.Fatalf("via: %s", out)
