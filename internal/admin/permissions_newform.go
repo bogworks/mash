@@ -117,8 +117,16 @@ func NewFormPermissions(id sap.EndpointIdentity, extra []string) (jwt.Permission
 // WindowBridge is what the window adds for new-form id that has legacy alias (amendment 1, removed in 3.2): publish to
 // legacy endpoints of the alias's owner for mail, prompt and status only (wildcard in the name position only, literal
 // agent token cc), the heartbeat of the alias's own exact subject and no other, and exact subscribe grants for the
-// alias's prompt and status subjects. It refuses an id that shares the alias's owner (admission's rule: the legacy
-// wildcard filter would reach it) or overlaps it.
+// alias's prompt and status subjects.
+//
+// It also adds the transition JetStream publish grants: the lines fixedPubKeyed gives a legacy endpoint for its inbox
+// stream, for the alias's legacy inbox stream only (inbox-<alias name>) and the shared durable consumer only, so the
+// new-form user can read stream and consumer info, fetch its queued mail through the existing durable and acknowledge
+// it, and read the stream by direct get. No wildcard stream or consumer name, and no create, update, delete or purge
+// subject, is granted. The user's own reply prefix already covers the replies, so no subscribe grant is added.
+//
+// It refuses an id that shares the alias's owner (admission's rule: the legacy wildcard filter would reach it) or
+// overlaps it.
 //
 // WindowBridge trusts alias. The grants name another endpoint's exact prompt and status subjects and its heartbeat,
 // so the caller (provisioning, step 1.6) MUST verify the alias mapping first, and no check here can: the alias's
@@ -149,8 +157,22 @@ func WindowBridge(id, alias sap.EndpointIdentity) (jwt.Permissions, error) {
 		p.Pub.Allow.Add("agents." + verb + "." + sap.AgentToken + "." + alias.Owner + ".*")
 	}
 	p.Pub.Allow.Add(as.HB)
+	p.Pub.Allow.Add(legacyInboxGrants(alias)...)
 	p.Sub.Allow.Add(as.Prompt, as.Status)
 	return p, nil
+}
+
+// legacyInboxGrants is the JetStream part of fixedPubKeyed that names the inbox stream and durable consumer of the
+// legacy alias, and nothing else: it drops the directory and lease buckets, the account info and the shared lines.
+func legacyInboxGrants(alias sap.EndpointIdentity) []string {
+	inbox := sap.InboxStream(alias.Name)
+	var out []string
+	for _, g := range fixedPubKeyed(alias.Subjects().HB, alias.Name) {
+		if strings.HasSuffix(g, "."+inbox) || strings.Contains(g, "."+inbox+".") {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 func dedupe(in []string) []string {
