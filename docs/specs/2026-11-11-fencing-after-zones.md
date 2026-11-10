@@ -248,7 +248,7 @@ A router or relay evaluating policy per message, and an auth callout deciding at
 ADR 0053 because mash is limited to what NATS does by itself and a component of ours in the path reads payloads. Nothing
 since has changed that.
 
-### F. A hybrid I think is better than any single one: A as the default, B for exceptions only (preferred)
+### F. A hybrid I think is better than any single one: A as the default, B for exceptions only
 
 Make the owner token the fence (A) and treat the policy file as an exception tool, not a mesh partition. The default
 is the owner-wide line. An administrator who needs to *narrow* inside an owner writes a few `deny` rules, compiled to
@@ -262,7 +262,7 @@ than that is a signal to split the owner (A) or the account (D), not to grow the
   ADR 0052's measurement (5.9, 21 and 102 KB at 5, 20 and 100 zone keys with sparse rules, about 1 KB per key): an
   owner key with only the fixed lines and the two tag templates is about 1 KB, so 1 MiB (1,048,576 bytes) is reached at
   roughly a thousand owners, before the rest of the account. That is far away but not unbounded, and it is a
-  per-owner estimate, not a measurement of this key. (F2, preferred) One scoped key with the agent and owner as
+  per-owner estimate, not a measurement of this key. (F2) One scoped key with the agent and owner as
   administrator-signed tags in its templates, so the account JWT is one key whatever the number of owners; this is
   pending a live-server test of template expansion and of the missing-tag case, and a trust cost: whoever holds that
   one key can mint a user for any owner, where a key per owner limits that authority; the tags are signed claims
@@ -347,8 +347,7 @@ both and sets out the order: A first, and the choice between F1 and F2 on the te
 control inside an owner, add F1: a scoped key per owner, with the policy file as an exception tool (bounded deny and
 cross-owner exceptions as tags), not a mesh partition. Take F2 (one key, agent and owner as signed tags) only if the
 measured owner count or account-JWT size forces it, after its live-server test and an accepted ruling on its wider
-signing authority (whoever holds that one key can mint for every owner).** This order follows the second Codex round
-and supersedes the "preferred" mark on F2 in section 4F.
+signing authority (whoever holds that one key can mint for every owner).**
 
 Reasons:
 
