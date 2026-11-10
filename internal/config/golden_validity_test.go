@@ -34,7 +34,7 @@ func TestGoldenLoadAppliesValidNameToOwnerAndName(t *testing.T) {
 	n48 := strings.Repeat("a", 48)
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+n48+`"}`)
-	c, err := Load(envOf(map[string]string{"MASH_NAME": n48}), home)
+	c, err := load(envOf(map[string]string{"MASH_NAME": n48}), home)
 	if err != nil {
 		t.Fatalf("48-character owner and name refused: %v", err)
 	}
@@ -46,16 +46,16 @@ func TestGoldenLoadAppliesValidNameToOwnerAndName(t *testing.T) {
 		t.Errorf("creds %q, want %q", c.Creds, want)
 	}
 	n49 := n48 + "a"
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": n49}), home); err == nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": n49}), home); err == nil {
 		t.Error("49-character name accepted")
 	}
 	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+n49+`"}`)
-	if _, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
 		t.Error("49-character owner accepted")
 	}
 	for _, bad := range []string{"Up", "a_b", "a.b", "1a", "a--b", "a-"} {
 		writeFile(t, home, `{"url":"tls://x:4222","owner":"`+bad+`"}`)
-		if _, err := Load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
+		if _, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
 			t.Errorf("owner %q accepted", bad)
 		}
 	}
