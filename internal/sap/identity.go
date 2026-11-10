@@ -65,6 +65,8 @@ func checkToken(pos, t string) error {
 	return nil
 }
 
+var errLegacyAgent = fmt.Errorf("sap: agent token %q is the legacy form's agent token and is not available to a new-form identity while the legacy form exists", AgentToken)
+
 func checkTotal(agent, owner, name string) error {
 	if n := len(agent) + len(owner) + len(name) + 2; n > MaxIdentityLen {
 		return fmt.Errorf("sap: identity %s.%s.%s is %d characters with separators: at most %d (62 token characters)", agent, owner, name, n, MaxIdentityLen)
@@ -75,10 +77,19 @@ func checkTotal(agent, owner, name string) error {
 // New returns a new-form identity of SAP's agent, owner and name tokens. Each
 // token must satisfy the new token rule, and the three tokens with their two
 // separators must total at most 64 characters. New does not know any list of
-// harness names and accepts agent "cc"; that is a range-level rule. A new-form
-// cc identity has the same subjects as the legacy identity of the same owner and
-// name but a different flat key, so a deployment must not hold both.
+// harness names, but it refuses the agent token AgentToken ("cc"). That is
+// mash's own invariant, not a naming grammar: Legacy(o, n) has the subjects
+// agents.<verb>.cc.o.n and the flat key n, so New("cc", o, n) would address the
+// same subjects under a different flat key and two principals would share one
+// subject. The constraint goes away when the legacy form is removed.
+//
+// A new-form identity can also overlap a legacy one through the legacy mail
+// filter's wildcard agent token; see Overlaps. Admission must refuse an identity
+// that overlaps an existing one.
 func New(agent, owner, name string) (EndpointIdentity, error) {
+	if agent == AgentToken {
+		return EndpointIdentity{}, errLegacyAgent
+	}
 	for _, p := range []struct{ pos, tok string }{{"agent", agent}, {"owner", owner}, {"name", name}} {
 		if err := checkToken(p.pos, p.tok); err != nil {
 			return EndpointIdentity{}, err
@@ -124,6 +135,9 @@ func (id EndpointIdentity) Validate() error {
 			return fmt.Errorf("sap: legacy name %q: use 1-%d lower-case letters, digits and single hyphens, starting with a letter", id.Name, maxLegacyNameLen)
 		}
 		return nil
+	}
+	if id.Agent == AgentToken {
+		return errLegacyAgent
 	}
 	for _, p := range []struct{ pos, tok string }{{"agent", id.Agent}, {"owner", id.Owner}, {"name", id.Name}} {
 		if err := checkToken(p.pos, p.tok); err != nil {
@@ -195,4 +209,35 @@ func FromFlat(flat string) (EndpointIdentity, error) {
 		return EndpointIdentity{}, fmt.Errorf("sap: flat %q has %d underscore-separated parts: want exactly three", flat, len(p))
 	}
 	return New(p[0], p[1], p[2])
+}
+
+// Overlaps reports whether a and b can receive each other's traffic: some
+// subject of one is matched by the other's filter or subject. Mail compares
+// a.Subjects().Mail against b.MailFilter() and the reverse, with NATS token
+// matching ('*' matches exactly one token); the prompt, status and heartbeat
+// subjects are compared literally. Identical identities overlap. It is pure and
+// symmetric. Admission code must refuse an identity that overlaps an existing
+// one: the legacy mail filter agents.mail.*.o.n also matches the new-form
+// subject agents.mail.<any>.o.n.
+func Overlaps(a, b EndpointIdentity) bool {
+	sa, sb := a.Subjects(), b.Subjects()
+	if sa.Prompt == sb.Prompt || sa.Status == sb.Status || sa.HB == sb.HB || sa.Mail == sb.Mail {
+		return true
+	}
+	return subjectMatches(b.MailFilter(), sa.Mail) || subjectMatches(a.MailFilter(), sb.Mail)
+}
+
+// subjectMatches reports whether subject matches filter under NATS rules for
+// '*' (one token) and a trailing '>' (one or more tokens).
+func subjectMatches(filter, subject string) bool {
+	f, s := strings.Split(filter, "."), strings.Split(subject, ".")
+	for i, ft := range f {
+		if ft == ">" && i == len(f)-1 {
+			return len(s) > i
+		}
+		if i >= len(s) || (ft != "*" && ft != s[i]) {
+			return false
+		}
+	}
+	return len(f) == len(s)
 }

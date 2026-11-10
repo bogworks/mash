@@ -62,16 +62,75 @@ func TestNewTokenVectors(t *testing.T) {
 	}
 }
 
-func TestNewDoesNotKnowHarnessNames(t *testing.T) {
-	id, err := sap.New("cc", "o", "n")
+func TestNewRefusesLegacyAgentToken(t *testing.T) {
+	_, err := sap.New("cc", "o", "n")
+	if err == nil {
+		t.Fatal("New(cc,o,n) accepted")
+	}
+	if !strings.Contains(err.Error(), "legacy") {
+		t.Errorf("error %q should say cc is the legacy form's agent token", err)
+	}
+	for _, agent := range []string{"cc1", "acc", "a-cc", "cc-a"} {
+		id, err := sap.New(agent, "o", "n")
+		if err != nil {
+			t.Errorf("New(%q): %v", agent, err)
+			continue
+		}
+		if id.IsLegacy() || id.Flat() != agent+"_o_n" {
+			t.Errorf("New(%q): legacy=%v flat=%q", agent, id.IsLegacy(), id.Flat())
+		}
+	}
+}
+
+func TestLegacyAndCCNewFormCannotShareSubject(t *testing.T) {
+	leg, err := sap.Legacy("o", "n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id.IsLegacy() {
-		t.Error("New(cc,o,n) must not be legacy")
+	if _, err := sap.New("cc", "o", "n"); err == nil {
+		t.Errorf("New(cc,o,n) accepted beside legacy %v with subjects %v", leg, leg.Subjects())
 	}
-	if id.Flat() != "cc_o_n" {
-		t.Errorf("Flat = %q", id.Flat())
+}
+
+func TestValidateRefusesCCNewForm(t *testing.T) {
+	if err := (sap.EndpointIdentity{Agent: "cc", Owner: "o", Name: "n"}).Validate(); err == nil {
+		t.Error("literal new-form identity with Agent cc is valid")
+	}
+}
+
+func TestOverlaps(t *testing.T) {
+	mk := func(a, o, n string) sap.EndpointIdentity {
+		id, err := sap.New(a, o, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	leg, err := sap.Legacy("o", "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		a, b sap.EndpointIdentity
+		want bool
+	}{
+		{"legacy vs new, same owner and name", leg, mk("x", "o", "n"), true},
+		{"legacy vs new, other owner", leg, mk("x", "p", "n"), false},
+		{"legacy vs new, other name", leg, mk("x", "o", "m"), false},
+		{"identical new", mk("x", "o", "n"), mk("x", "o", "n"), true},
+		{"identical legacy", leg, leg, true},
+		{"new differing in agent", mk("x", "o", "n"), mk("y", "o", "n"), false},
+		{"new differing in owner", mk("x", "o", "n"), mk("x", "p", "n"), false},
+		{"new differing in name", mk("x", "o", "n"), mk("x", "o", "m"), false},
+	}
+	for _, c := range cases {
+		if got := sap.Overlaps(c.a, c.b); got != c.want {
+			t.Errorf("%s: Overlaps(a,b) = %v, want %v", c.name, got, c.want)
+		}
+		if got := sap.Overlaps(c.b, c.a); got != c.want {
+			t.Errorf("%s: Overlaps(b,a) = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
@@ -170,6 +229,7 @@ func TestFromFlatRefusals(t *testing.T) {
 		{"lead", "underscore"},
 		{"a_b", "three"},
 		{"cc_a", "three"},
+		{"cc_o_n", "legacy"},
 		{"a_b_c_d", "three"},
 		{"a__c", "empty"},
 		{"a_B_c", "lower-case"},
@@ -258,6 +318,9 @@ func TestNewFormSubjects(t *testing.T) {
 func TestValidateRejectsMisuse(t *testing.T) {
 	if err := (sap.EndpointIdentity{}).Validate(); err == nil {
 		t.Error("zero value is valid")
+	}
+	if err := (sap.EndpointIdentity{Agent: "cc", Owner: "c", Name: "d"}).Validate(); err == nil {
+		t.Error("literal new-form identity with agent cc is valid")
 	}
 	if err := (sap.EndpointIdentity{Agent: "a_b", Owner: "c", Name: "d"}).Validate(); err == nil {
 		t.Error("literal with underscore token is valid")

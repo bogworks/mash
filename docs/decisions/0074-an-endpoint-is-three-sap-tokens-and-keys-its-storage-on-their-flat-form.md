@@ -38,7 +38,9 @@ three as given, on every verb: `agents.mail.<agent>.<owner>.<name>`, with the ag
 in grants or filters. Each token is lower-case ASCII letters, digits and single dashes, starts with a letter, does not end
 with a dash, and is at most 32 characters; the two separators count towards a total of 64. These are mash's own bounds on
 subjects and stream names, replacing the 48-character cap of ADR 0036 for new-form identities. mash does not read the
-tokens as anything but SAP's agent, owner and name, and holds no list of agent names.
+tokens as anything but SAP's agent, owner and name, and holds no list of agent names. One exception is mash's own invariant, not a naming grammar: a new-form identity cannot
+use `cc` as its agent token while the legacy form exists, because `(cc, o, n)` would have the legacy identity's subjects
+under a different flat key. The constraint goes away when the legacy form is removed.
 
 Where one flat identifier is needed (stream, consumer scope, key, reply prefix, user name, file name) it is the three
 tokens joined by underscores. No token contains an underscore, so the mapping is injective and reverses by splitting.
@@ -46,7 +48,8 @@ tokens joined by underscores. No token contains an underscore, so the mapping is
 A legacy identity is `(cc, <owner>, <name>)` under today's rule (48 characters for owner and name). It keeps its subjects
 and its keys exactly, with the bare name as its flat form, so nothing stored for it moves. The legacy flat form is the bare name, so two legacy identities with the same name under
 different owners still share it, exactly as today; that limitation stays until the legacy form is removed. This type
-covers the unzoned legacy subjects; the zoned mail form of ADR 0054 stays as it is. This keeps legacy identities
+covers the unzoned legacy subjects; the zoned mail form of ADR 0054 stays as it is. The legacy mail filter `agents.mail.*.<owner>.<name>` also matches a new-form subject with the same owner and name
+under any agent token, so admission checks `sap.Overlaps` and refuses an identity that overlaps an existing one. This keeps legacy identities
 working while new-form ones are introduced; removing them is a later decision.
 
 This record is proposed. It becomes accepted with the change that makes new-form identities usable; the removal of the
