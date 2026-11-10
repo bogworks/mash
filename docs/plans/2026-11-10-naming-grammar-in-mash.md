@@ -51,8 +51,12 @@ the credential re-issue; Phase 3 is held.
      The spike (2026-11-10, nats-server 2.15.1, nats.go 1.54.0, run against the production permissions) settled the open
      points. **Numbering:** `StreamConfig.FirstSeq` exists but is creation-time only and cannot keep numbers unique,
      because the legacy stream keeps receiving alias mail during the window (legacy `#4` and new `#4` collide). The two
-     streams' messages therefore carry stream-qualified numbers (legacy `L#n`, new `N#n`, or an offset kept in endpoint
-     state) and the spool, the seen set, the waking tracker and the read and inbox tools key on (stream, sequence)
+     streams' messages therefore carry stream-qualified numbers, decided as follows (lead, 2026-11-10): the new
+     stream's numbers stay bare (`#n`, the endpoint's identity from here on); during the window only, a legacy-stream
+     message shows a qualified number (`#L5`); `read`, `inbox` and every place a `#seq` is accepted take both forms; a
+     bare `#n` never resolves to the legacy stream once the identity is new-form; 3.2 removes the qualified form; the
+     new text goes into the emission-path map in the same pull request; a legacy-only endpoint (no `agent_token`) sees
+     exactly today's numbers (golden test). Internally the seen and waking sets, acknowledgements and the batch maps key on (stream, sequence)
      instead of the bare sequence; `spool.Bind` is single-stream today and becomes per stream. **Credentials:** the
      transition lines below were verified: with them a provisioned user reads and acknowledges the legacy stream
      through its `deliver` consumer and cannot touch any other inbox or create or delete anything; without them the
@@ -249,7 +253,12 @@ writers, and nothing writes a new-form record until every reader in the range ca
   stop using the new identity; the legacy stream is never altered (NFR-002). Mail that arrived only on `inbox-<flat>`
   stays stored but the legacy user cannot read it, so rollback keeps the new-form credentials until `inbox-<flat>` has
   zero pending and zero unacknowledged messages (or the legacy user is re-issued with the mirrored transition lines
-  for `inbox-<flat>`); the rollback steps say so and a test proves no mail is left unreadable.
+  for `inbox-<flat>`); the rollback steps say so and a test proves no mail is left unreadable. This is the same rule as
+  drain-before-revoke for the legacy grant (3.2), applied in both directions. 1.4 is split into three reviewable
+  pull requests: (a) the spool and numbering keyed by (stream, seq) with no behaviour change for one stream (Phase 0's
+  goldens and the existing suite pass unchanged); (b) two-stream reading behind `agent_token`, with the no-redelivery
+  test (including out-of-order acknowledgements) run with provisioned credentials; (c) the transition grant lines, plus
+  asynchronous permission errors logged loudly as an operator-visible error instead of a silent timeout, with a test.
   This is the riskiest step of the plan.
 - **1.5 Grants.** Herd and range grants (`agents.mail.<range>.<herd>.>` or `.*`, `agents.mail.<range>.>`) from the
   configuration homerange supplies; a grant with a wildcard or `>` at or before the range position is refused with an
