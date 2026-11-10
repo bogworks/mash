@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0075
 date: 2026-11-09
 decision-makers: Randy Bias (mash maintainer)
 ---

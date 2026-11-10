@@ -1,58 +1,115 @@
 # Scrub audit inventory
 
-Every hit of `go run ./scripts/scrubcheck` on main at 6dff55f (2026-11-09), one row per hit, as the tool printed it
-(`file:line:word`). The verdict column is one of `open`, `removed`, `renamed` or `excepted` (with the commit that did
-it). The scrub itself comes in later pull requests; this one only starts the inventory, so every verdict is `open`. The
-scrub is done when no row is `open`. This file is inside the tool's own directory, which the tool skips.
+Every hit of `go run ./scripts/scrubcheck` on main at 6dff55f (2026-11-09), one row per hit, as the tool found it. A row
+is `file:line:Wn`: the file, the line, and Wn, the 1-based position in `words.txt` of the scrub-list word that hit (a
+plural counts as its base word). Neither the words nor the lines they sit on are quoted here, so this file holds no
+scrub-list word itself and the tool scans it like any other tracked file. The verdict column is one of `open`,
+`removed`, `renamed` or `excepted` (with the commit that did it). The scrub is done when no row is `open`.
 
 Tracked files only: the release archives and the plugin package are scanned through `-archive` once a build exists, and
-any hit from there is added here. The last 8 rows are hits that the scrub plan
-(`docs/plans/2026-11-10-scrub-remainder.md`) itself adds by naming the words. Regenerate the raw list with `go run ./scripts/scrubcheck`.
+any hit from there is added here. The rows for `docs/plans/` are hits that the scrub plan
+(`docs/plans/2026-11-10-scrub-remainder.md`) itself adds by naming the words. Regenerate the raw list with
+`go run ./scripts/scrubcheck`.
 
-| Hit | Line text | Verdict |
-|---|---|---|
-| `CHANGELOG.md:146:herd` | `- The '--herd' directory field and the legacy herd read. Use '--label key=value' instead.` | open |
-| `CHANGELOG.md:146:herd` | `- The '--herd' directory field and the legacy herd read. Use '--label key=value' instead.` | open |
-| `cmd/mash/standalone_serve_test.go:17:herdr` | `// environment of standalone_test.go (empty PATH and HOME, no RANGE_/HERDR_/CLAUDE variables) against the embe` | renamed (comment reworded) |
-| `cmd/mash/standalone_test.go:19:herdr` | `// Mash must be fully usable with only NATS, its SAP and its runtime dependencies: no Claude, herdr or other a` | renamed (comment reworded) |
-| `cmd/mash/standalone_test.go:22:herdr` | `var foreignTools = []string{"range", "herdr", "claude"}` | excepted (exceptions.tsv) |
-| `cmd/mash/standalone_test.go:63:herdr` | `for _, bad := range []string{"RANGE_", "HERDR_", "CLAUDE"} {` | excepted (exceptions.tsv) |
-| `cmd/mash/standalone_test.go:161:herd` | `// TestStandaloneEnvOnlyConfig runs with no config.json and no herd config: the environment alone configures m` | renamed (comment reworded) |
-| `cmd/mash/standalone_test.go:196:herdr` | `// imports herdr or claude.` | renamed (comment reworded) |
-| `cmd/mash/standalone_test.go:269:herdr` | `return strings.Contains(s, "herdr")` | excepted (exceptions.tsv) |
-| `docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:13:lane` | `\| 4 capacity \| read from the plan line of step 2 \| Room: 4 of 5 streams planned, "Room for 1 more endpoint(` | open |
-| `docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:30:lane` | `plan, not real usage. The real run's capacity check passed with 4 of 5, so the account held none of the earlie` | open |
-| `docs/evidence/2026-11-02-heartbeat-fanout/README.md:97:lanes` | `- Client and servers share a 16-core shared host (other lanes' nats-servers were running and were not touched)` | open |
-| `docs/plans/2026-11-03-next-tranche.md:18:coordinator` | `Order is the order to take them. Owners are suggestions; the coordinator assigns.` | open |
-| `docs/plans/2026-11-03-next-tranche.md:48:coordinator` | `* A release dry run on 'main' with a real Fulcio certificate exercises the generator-commit check (#163): the ` | open |
-| `docs/security/threat-model.md:229:coordinator` | `6. Should one owner support trust tiers (for example a "coordinator" endpoint whose mail delegates and "worker` | renamed (trusted/ordinary) |
-| `internal/endpoint/waking_test.go:20:lane` | `// wakingFixture is a hooked lane "a" (mail is held in its spool until drained) with a sender "b" and a reader` | renamed (endpoint) |
-| `internal/portable/portable_test.go:36:homerange` | `personalRE = regexp.MustCompile('(?i)randyb\|randybias\|rlb\|homerange\|rangehand\|plethorax\|dev1\|thao` | open |
-| `internal/portable/portable_test.go:36:rangehand` | `personalRE = regexp.MustCompile('(?i)randyb\|randybias\|rlb\|homerange\|rangehand\|plethorax\|dev1\|thao` | open |
-| `internal/portable/portable_test.go:482:homerange` | `for _, s := range []string{"randyb", "RandyBias", "my rlb box", "homerange", "rangehand-x", "plethorax", "dev1` | open |
-| `internal/portable/portable_test.go:482:rangehand` | `for _, s := range []string{"randyb", "RandyBias", "my rlb box", "homerange", "rangehand-x", "plethorax", "dev1` | open |
-| `internal/store/store_test.go:46:herd` | `r, err := ParseRecord("a", []byte('{'+baseRecord+',"herd":"acme","role":"r"}'))` | excepted (exceptions.tsv: a live record may still carry the legacy field) |
-| `scripts/adrlint/main.go:87:herds` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
-| `scripts/adrlint/main.go:87:herdr` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
-| `scripts/adrlint/main.go:87:lanes` | `vocabRE     = regexp.MustCompile('(?i)(herds?\|herdr\|lanes?\|lead\|orchestrator)')` | open |
-| `scripts/adrlint/main_test.go:158:lane` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:herd` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:herds` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:herdr` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:lane` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:herds` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:158:herdr` | `{"d: vocabulary", with(good(), adr, edit(goodADR, "A driver.", "A Lane and the lead, herd, herds, herdr, orche` | open |
-| `scripts/adrlint/main_test.go:159:lane` | `{"d: escape on the same line", with(good(), adr, edit(goodADR, "A driver.", "A lane. <!-- adrlint:allow vocabu` | open |
-| `scripts/adrlint/main_test.go:160:lane` | `{"d: escape on another line does not count", with(good(), adr, edit(goodADR, "A driver.", "<!-- adrlint:allow ` | open |
-| `scripts/adrlint/main_test.go:160:lane` | `{"d: escape on another line does not count", with(good(), adr, edit(goodADR, "A driver.", "<!-- adrlint:allow ` | open |
-| `scripts/adrlint/main_test.go:161:lanes` | `{"d: whole word only", with(good(), adr, edit(goodADR, "A driver.", "leading planes lanes_x")), nil},` | open |
-| `scripts/adrlint/main_test.go:186:lane` | `dir := tree(t, with(good(), "0001-use-one-way.md", edit(edit(goodADR, "status: accepted", "status: nope"), "A ` | open |
-| `scripts/adrlint/main_test.go:469:lane` | `{"built-in rule still applies", "zebra", "A lane.", true},` | open |
-| `docs/plans/2026-11-10-scrub-remainder.md:3:herd` | `Date: 2026-11-10. Scope: the work contract 'mash-shed-herd-idioms' (draft-4, ratified 2026-11-09) after its fi` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:23:coordinator` | `\| G1 shipped prose \| 'docs/security/threat-model.md' \| 1 \| the word "coordinator" in an open question; shi` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:29:rangehand` | `The scan finds no 'rangehand' or 'compat.json' in release scripts, their tests, workflows or 'docs/release.md'` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:56:herd` | `"owner" where it says a herd appears in mash as a zone, and REQ-009 covers translating an outside identifier i` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:75:homerange` | `- 'internal/portable/portable_test.go': its personal-name regexp must name 'homerange' and 'rangehand' to dete` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:75:rangehand` | `- 'internal/portable/portable_test.go': its personal-name regexp must name 'homerange' and 'rangehand' to dete` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:92:rangehand` | `'rangehand' and 'compat.json' over the release scripts, their tests, workflows and 'docs/release.md', and a re` | open (this plan names the words to plan their removal; see step 6) |
-| `docs/plans/2026-11-10-scrub-remainder.md:95:herd` | `herd; the requirement-to-evidence map; the review records (pre-merge review and adversarial review on another ` | open (this plan names the words to plan their removal; see step 6) |
+| Hit | Verdict |
+|---|---|
+| CHANGELOG.md:146:W1 | open |
+| CHANGELOG.md:146:W1 | open |
+| cmd/mash/standalone_test.go:22:W6 | excepted (exceptions.tsv) |
+| cmd/mash/standalone_test.go:63:W6 | excepted (exceptions.tsv) |
+| cmd/mash/standalone_test.go:269:W6 | excepted (exceptions.tsv) |
+| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:13:W2 | open |
+| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:30:W2 | open |
+| docs/evidence/2026-11-02-heartbeat-fanout/README.md:97:W2 | open |
+| docs/plans/2026-11-03-next-tranche.md:18:W3 | open |
+| docs/plans/2026-11-03-next-tranche.md:48:W3 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:5:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:5:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:18:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:33:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:34:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:93:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:93:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:100:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:100:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:117:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:117:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:120:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:121:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:128:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:168:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:171:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:172:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:181:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:203:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:204:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:211:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:212:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:212:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:215:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:215:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:216:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:216:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:217:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:224:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:225:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:252:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:253:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:263:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:284:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:295:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:295:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:296:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:297:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:297:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:298:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:298:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:298:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:305:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:306:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:320:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:320:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:322:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:322:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:333:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:340:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:341:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:342:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:354:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:386:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:386:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:392:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:392:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:393:W5 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:407:W1 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:421:W2 | open |
+| docs/plans/2026-11-10-naming-grammar-in-mash.md:422:W2 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:3:W1 | open (this plan names the words to plan their removal; see step 6) |
+| docs/plans/2026-11-10-scrub-remainder.md:64:W3 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:70:W4 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:97:W1 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:116:W5 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:116:W4 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:133:W4 | open |
+| docs/plans/2026-11-10-scrub-remainder.md:136:W1 | open |
+| internal/portable/portable_test.go:36:W5 | open |
+| internal/portable/portable_test.go:36:W4 | open |
+| internal/portable/portable_test.go:482:W5 | open |
+| internal/portable/portable_test.go:482:W4 | open |
+| internal/store/store_test.go:46:W1 | excepted (exceptions.tsv) |
+| scripts/adrlint/main.go:87:W1 | open |
+| scripts/adrlint/main.go:87:W6 | open |
+| scripts/adrlint/main.go:87:W2 | open |
+| scripts/adrlint/main_test.go:158:W2 | open |
+| scripts/adrlint/main_test.go:158:W1 | open |
+| scripts/adrlint/main_test.go:158:W1 | open |
+| scripts/adrlint/main_test.go:158:W6 | open |
+| scripts/adrlint/main_test.go:158:W2 | open |
+| scripts/adrlint/main_test.go:158:W1 | open |
+| scripts/adrlint/main_test.go:158:W6 | open |
+| scripts/adrlint/main_test.go:159:W2 | open |
+| scripts/adrlint/main_test.go:160:W2 | open |
+| scripts/adrlint/main_test.go:160:W2 | open |
+| scripts/adrlint/main_test.go:161:W2 | open |
+| scripts/adrlint/main_test.go:186:W2 | open |
+| scripts/adrlint/main_test.go:469:W2 | open |
