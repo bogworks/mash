@@ -536,7 +536,9 @@ func (a *Admin) retireFinalDirect(ctx context.Context, lk *streamLock, key, user
 // call wrote, or, when superseded is set, a pending marker it resumed too (the retirement did not happen). It first
 // re-checks that this call still holds its name lock (and the admission lock, adm, when held): a call that lost its
 // lock must not delete a marker another call may now be resuming, so it leaves it pending and says so. A failure
-// to delete is joined to err, never silent. A final marker is never deleted.
+// to delete is joined to err, never silent. A final marker is never deleted. Deleting after the old user was revoked is
+// deliberate: a definitive refusal means the record changed, so no retirement of this name happened and the live record
+// keeps its name; the revoked user stays revoked.
 func (a *Admin) abortRetire(ctx context.Context, lk *streamLock, adm *aliasGuard, pm *retireMark, err error, superseded bool) error {
 	if pm == nil || err == nil || !pm.m.IsPending() || !(pm.wrote || superseded) {
 		return err
