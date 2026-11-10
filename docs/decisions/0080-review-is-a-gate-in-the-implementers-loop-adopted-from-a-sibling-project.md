@@ -37,11 +37,12 @@ does not restate their reasoning.
    decides. Findings return to the same session.
 2. **Gates are per path, from one policy file.** `docs/review/policy.json` maps paths to a tier and the strictest tier a
    diff touches applies, regardless of the order the tiers are listed in. The tiers keep the source project's names, blocking
-   severities and round caps:
+   severities and round caps. `docs/review/policy.json` is the source of truth; this table is its state when this record
+   was accepted:
 
    | Tier | Paths | Blocks the push | Round cap |
    | --- | --- | --- | --- |
-   | `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `internal/store/**`, `cmd/mashctl/**`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
+   | `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `internal/store/**`, `internal/natsauth/**`, `internal/mint/**`, `cmd/mashctl/**`, `internal/release/**`, `scripts/buildrelease/**`, `scripts/release-check`, `scripts/build-twice`, `docs/allowed_signers`, `ci/release.allowed_signers`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
    | `standard` | `cmd/**`, `internal/**`, `scripts/**`, `plugin/**`, `ci/**`, `go.mod`, `go.sum`, and any file no tier names | blocker, high | 4 |
    | `tests-and-docs` | `**/*_test.go`, `**/testdata/**`, `docs/**`, `**/*.md` | blocker | 2 |
 
@@ -62,7 +63,11 @@ Files: `scripts/gate` (the merge gate; `--review` is this loop, `--pre-pr` the f
 (the verdict engine, standard library only), `scripts/gate_review_test.sh` (the `--review` path against a stub `ocr`),
 `docs/review/policy.json` and `docs/review/in-session-loop.md` (how it works and how it ties to `codex-review`).
 
-Changes from the source, none to the review behaviour: mash's paths and tier table; state and data directories under
+One behaviour change from the source: `--pre-pr` runs staticcheck (advisory, as in mash's CI) and the ADR lint, where
+the source runs its own file check, repository lint and golangci-lint, so that it matches the checks mash's CI runs; and
+the source's tier-b, failpoints and web-reader (rangeview) checks are dropped because mash has none of them. <!-- adrlint:allow vocabulary -->
+
+Other changes from the source, none to the review behaviour: mash's paths and tier table; state and data directories under
 `mash`; the source's failpoints, scenario, web-reader and tier-b steps removed from the full gate because mash has none of
 them, and `--pre-pr` runs staticcheck (advisory, as in CI) and the ADR lint where the source runs its own repository checks.
 The standing question in the policy says "the configured workspace" where the source names its own.
