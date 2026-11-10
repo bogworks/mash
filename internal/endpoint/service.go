@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go/micro"
 	"github.com/nats-io/nuid"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -176,7 +177,7 @@ func (e *Endpoint) heartbeat() []byte {
 		IntervalS       int           `json:"interval_s"`
 		ProtocolVersion string        `json:"protocol_version"`
 		Endpoints       map[string]ep `json:"endpoints"`
-	}{sap.AgentName, e.cfg.Owner, e.cfg.Name, e.Instance(), time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+	}{sap.AgentName, e.cfg.Owner, e.key, e.Instance(), time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		int(HeartbeatInterval / time.Second), sap.ProtocolVersion, map[string]ep{
 			"prompt": {e.subj.Prompt, e.promptMetadata()},
 			"mail":   {e.subj.Mail, map[string]string{"durable": "true"}},
@@ -191,7 +192,7 @@ func (e *Endpoint) publishHeartbeat() {
 	}
 	_ = json.Unmarshal(payload, &hb)
 	ts, _ := time.Parse(time.RFC3339, hb.TS)
-	h, err := e.id.Sign(e.subj.HB, payload, e.cfg.Name, ts, "")
+	h, err := e.id.Sign(e.subj.HB, payload, e.key, ts, "")
 	if err != nil {
 		e.log.Printf("heartbeat: %v", err)
 		return
@@ -217,7 +218,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		Version:     CurrentVersion(),
 		Description: "Claude Code (mash): " + e.cfg.Name,
 		Metadata: map[string]string{
-			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.cfg.Name,
+			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.key,
 			"protocol_version": sap.ProtocolVersion, "user_nkey": e.id.User, "account": e.id.Account,
 			"id_sig": idSig, "mail_subject": e.subj.Mail,
 		},
@@ -390,6 +391,30 @@ func (e *Endpoint) Reply(requestID, text string, done bool) error {
 
 // Discover finds name's prompt subject from $SRV.INFO.agents (SAP §4.3).
 func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, error) {
+	return discoverSubject(ctx, nc, owner, sap.For(owner, name).Prompt, name)
+}
+
+// DiscoverRecipient is Discover for a recipient argument: a legacy endpoint name (looked up under owner, as Discover
+// does) or the flat key of a three-token endpoint (agent_owner_name, which carries its own owner). Any other argument
+// is an error that says so; the display forms are not parsed here.
+func DiscoverRecipient(ctx context.Context, nc *nats.Conn, owner, arg string) (string, error) {
+	if config.ValidName(arg) {
+		return Discover(ctx, nc, owner, arg)
+	}
+	id, err := sap.FromFlat(arg)
+	if err != nil {
+		return "", fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", arg)
+	}
+	return DiscoverIdentity(ctx, nc, id)
+}
+
+// DiscoverIdentity is Discover for an endpoint known by its identity (a three-token one has its own owner and agent
+// tokens in its prompt subject); a legacy identity gives exactly Discover's answer.
+func DiscoverIdentity(ctx context.Context, nc *nats.Conn, id sap.EndpointIdentity) (string, error) {
+	return discoverSubject(ctx, nc, id.Owner, id.Subjects().Prompt, id.Flat())
+}
+
+func discoverSubject(ctx context.Context, nc *nats.Conn, owner, want, name string) (string, error) {
 	inbox := secretInbox(nc)
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
@@ -399,7 +424,6 @@ func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, e
 	if err := nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
 		return "", err
 	}
-	want := sap.For(owner, name).Prompt
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		m, err := sub.NextMsg(time.Until(deadline))

@@ -514,7 +514,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 		if dir == "" {
 			return c, ErrNoConfigDir
 		}
-		c.Creds = c.Find(c.Name + ".creds")
+		c.Creds = c.Find(c.CredsName() + ".creds")
 	}
 	return c, nil
 }
@@ -529,6 +529,17 @@ func (c Config) Identity() (sap.EndpointIdentity, error) {
 		return sap.Legacy(c.Owner, c.Name)
 	}
 	return sap.New(c.AgentToken, c.Owner, c.Name)
+}
+
+// CredsName is the base name of the endpoint's default creds file: the name for a legacy endpoint (as always), the
+// flat identity (agent_owner_name) for a three-token one, so two identities that share a name token do not share a file.
+func (c Config) CredsName() string {
+	if c.AgentToken != "" {
+		if id, err := c.Identity(); err == nil {
+			return id.Flat()
+		}
+	}
+	return c.Name
 }
 
 // identitySetting names the setting a sap identity error is about.

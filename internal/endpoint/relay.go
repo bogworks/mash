@@ -304,6 +304,15 @@ func writeJSONAtomic(path string, v any) error {
 }
 
 // relayCountersPath is where serve keeps its counters for the status command; "" without a state directory.
+// relayCountersPath is this endpoint's counters file, under its state location (StateLocation).
+func (e *Endpoint) relayCountersPath() string {
+	o, n, err := StateLocation(e.cfg)
+	if err != nil {
+		return ""
+	}
+	return relayCountersPath(e.cfg.StateDir, o, n)
+}
+
 func relayCountersPath(stateDir, owner, name string) string {
 	if stateDir == "" || owner == "" || name == "" {
 		return ""
@@ -350,10 +359,10 @@ func (e *Endpoint) relayInbound(seq uint64, from string, trust sap.Trust, via st
 // sender), and a send to a third party within the window of another endpoint's mail. It proves only adjacency in time.
 func (e *Endpoint) relaySent(to string, via uint64, origin string) {
 	defer func() { _ = recover() }() // tracing never affects a send
-	if e.relay == nil || to == e.cfg.Name {
+	if e.relay == nil || to == e.key {
 		return
 	}
-	r, age, found := e.relay.send(e.cfg.Name, to, via != 0)
+	r, age, found := e.relay.send(e.key, to, via != 0)
 	if via != 0 {
 		e.log.Printf("trace relay: sent to %s declaring a relay of #%d from %s", to, via, origin)
 	}
