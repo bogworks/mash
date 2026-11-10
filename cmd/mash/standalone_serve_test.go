@@ -14,7 +14,7 @@ import (
 
 // The standalone tests below go past the CLI: a real `mash serve` process (the MCP server, an endpoint with no agent
 // host), a live prompt answered by it, and hook delivery from its spool. Each runs the built binary with the scrubbed
-// environment of standalone_test.go (empty PATH and HOME, no RANGE_/HERDR_/CLAUDE variables) against the embedded
+// environment of standalone_test.go (empty PATH and HOME, no foreign-tool variables) against the embedded
 // test NATS, and nothing else.
 
 // standaloneWorld provisions the named endpoints through the built binary and returns each one's scrubbed environment.

@@ -16,7 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// Mash must be fully usable with only NATS, its SAP and its runtime dependencies: no Claude, herdr or other agent-orchestration
+// Mash must be fully usable with only NATS, its SAP and its runtime dependencies: no Claude or other agent-orchestration
 // config. These tests prove it through the built binary, run with a scrubbed environment.
 
 var foreignTools = []string{"range", "herdr", "claude"}
@@ -158,7 +158,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	}
 }
 
-// TestStandaloneEnvOnlyConfig runs with no config.json and no herd config: the environment alone configures mash.
+// TestStandaloneEnvOnlyConfig runs with no config.json and no fleet config: the environment alone configures mash.
 func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
@@ -193,7 +193,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 }
 
 // TestNoForeignToolInSource is a simple, honest check: no non-test Go file under cmd/ or internal/ runs, looks up or
-// imports herdr or claude.
+// imports a foreign tool or claude.
 func TestNoForeignToolInSource(t *testing.T) {
 	root := filepath.Join("..", "..")
 	fset := token.NewFileSet()

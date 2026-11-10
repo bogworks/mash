@@ -17,7 +17,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// wakingFixture is a hooked lane "a" (mail is held in its spool until drained) with a sender "b" and a reader of a's
+// wakingFixture is a hooked endpoint "a" (mail is held in its spool until drained) with a sender "b" and a reader of a's
 // lease. Lease refreshes are an hour apart, so every lease write a test sees is the count's own.
 func wakingFixture(t *testing.T) (*fixture, spool.Spool, *Endpoint, jetstream.KeyValue) {
 	t.Helper()

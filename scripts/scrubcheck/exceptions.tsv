@@ -2,3 +2,6 @@
 # path is a repo-relative file path (or archive!member), exactly; no directories, no globs.
 # pattern is a literal substring that must occur on the very line of the hit.
 # reason is one non-empty line of text. An entry that matches no hit is reported.
+cmd/mash/standalone_test.go	"herdr"	names a third-party tool the test proves mash does not need
+cmd/mash/standalone_test.go	"HERDR_"	names a third-party env prefix the test proves mash does not need
+cmd/mash/standalone_test.go	strings.Contains(s, "herdr")	names a third-party tool the test proves mash does not need

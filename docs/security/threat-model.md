@@ -226,7 +226,7 @@ its next tool call. No signature covers plugin content. Rating M.
    rotation plan?
 5. (Settled 2026-10-31: the two new findings were fixed before publication, [#178](https://github.com/bogworks/mash/pull/178)
    and [#180](https://github.com/bogworks/mash/pull/180).)
-6. Should one owner support trust tiers (for example a "coordinator" endpoint whose mail delegates and "worker"
+6. Should one owner support trust tiers (for example a "trusted" endpoint whose mail delegates and "ordinary"
    endpoints whose mail is information only)?
 7. Is 30-day plaintext retention on a provider's servers acceptable as the default, or should it be shorter?
 8. Should the quickstart script (`scripts/quickstart-synadia.sh`, which holds the API token) also own removal and
