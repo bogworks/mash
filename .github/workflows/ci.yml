@@ -54,6 +54,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
       - run: go vet ./...
       # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
       # on a slow one. A real hang still fails.
@@ -128,6 +129,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
       - name: Build every release target twice in fresh clones and compare
         run: |
           set -euo pipefail
@@ -155,6 +157,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
       - run: go build ./...
       - run: go vet ./...
       - name: gofmt reports nothing
@@ -180,6 +183,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       - run: go run ./scripts/adrlint docs
   # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed (test
   # may skip a pull request that touches no code). always(), so a failed or skipped job still gives a verdict.

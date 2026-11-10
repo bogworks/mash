@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
   codeql:
     # Code scanning is free on public repositories only; on a private one the upload fails ("Code scanning is not enabled").
@@ -40,6 +41,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       - uses: github/codeql-action/init@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
         with:
           languages: go
