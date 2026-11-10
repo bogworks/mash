@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -176,12 +177,48 @@ func TestWindowBridge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantLines(t, "pub", p.Pub.Allow, []string{
+	inbox := sap.InboxStream(alias.Name)
+	transition := []string{
+		"$JS.API.STREAM.INFO." + inbox,
+		"$JS.API.CONSUMER.INFO." + inbox + "." + store.Consumer,
+		"$JS.API.CONSUMER.MSG.NEXT." + inbox + "." + store.Consumer,
+		"$JS.ACK." + inbox + "." + store.Consumer + ".>",
+		"$JS.API.DIRECT.GET." + inbox,
+		"$JS.API.DIRECT.GET." + inbox + ".>",
+	}
+	if inbox != "inbox-ops1" || store.Consumer != "deliver" {
+		t.Fatalf("stream %q consumer %q: the literal expectations below are stale", inbox, store.Consumer)
+	}
+	wantLines(t, "pub", p.Pub.Allow, append([]string{
 		"agents.mail.cc.legowner.*",
 		"agents.prompt.cc.legowner.*",
 		"agents.status.cc.legowner.*",
 		"agents.hb.cc.legowner.ops1",
+	}, transition...))
+	wantLines(t, "literal transition lines", jwt.StringList(filterJS(p.Pub.Allow)), []string{
+		"$JS.API.STREAM.INFO.inbox-ops1",
+		"$JS.API.CONSUMER.INFO.inbox-ops1.deliver",
+		"$JS.API.CONSUMER.MSG.NEXT.inbox-ops1.deliver",
+		"$JS.ACK.inbox-ops1.deliver.>",
+		"$JS.API.DIRECT.GET.inbox-ops1",
+		"$JS.API.DIRECT.GET.inbox-ops1.>",
 	})
+	for _, g := range p.Pub.Allow {
+		if !strings.HasPrefix(g, "$JS.") {
+			continue
+		}
+		if strings.Contains(g, "inbox-*") || strings.Contains(g, "inbox->") || strings.Contains(g, "*") {
+			t.Errorf("wildcard stream or consumer name in %q", g)
+		}
+		for _, bad := range []string{"CREATE", "DELETE", "UPDATE", "PURGE", "RESTORE", "SNAPSHOT", "LEADER", "MSG.DELETE", "API.>", "JS.>"} {
+			if strings.Contains(g, bad) {
+				t.Errorf("grant %q names %s", g, bad)
+			}
+		}
+		if g == "$JS.ACK.>" || strings.HasPrefix(g, "$JS.ACK.inbox-ops1.>") {
+			t.Errorf("ack grant %q is wider than the one consumer", g)
+		}
+	}
 	wantLines(t, "sub", p.Sub.Allow, []string{
 		"agents.prompt.cc.legowner.ops1",
 		"agents.status.cc.legowner.ops1",
@@ -199,6 +236,91 @@ func TestWindowBridge(t *testing.T) {
 	if _, err := admin.WindowBridge(sap.EndpointIdentity{}, alias); err == nil {
 		t.Error("zero id accepted")
 	}
+}
+
+// filterJS returns the $JS. lines of l.
+func filterJS(l jwt.StringList) []string {
+	var out []string
+	for _, g := range l {
+		if strings.HasPrefix(g, "$JS.") {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// violations records a connection's asynchronous errors so a test can fail on an unexpected permission violation
+// and assert an expected one.
+type violations struct {
+	ch chan string
+}
+
+func watchErrors(nc *nats.Conn) *violations {
+	v := &violations{ch: make(chan string, 256)}
+	nc.SetErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+		select {
+		case v.ch <- err.Error():
+		default:
+		}
+	})
+	return v
+}
+
+// none fails the test with the text of any error the handler has received.
+func (v *violations) none(t *testing.T, what string) {
+	t.Helper()
+	time.Sleep(150 * time.Millisecond)
+	var got []string
+	for {
+		select {
+		case s := <-v.ch:
+			got = append(got, s)
+			continue
+		default:
+		}
+		break
+	}
+	if len(got) != 0 {
+		t.Fatalf("%s: unexpected async errors: %q", what, got)
+	}
+}
+
+// expect waits for one async Permissions Violation naming subj.
+func (v *violations) expect(t *testing.T, subj string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case s := <-v.ch:
+			if strings.Contains(s, "Permissions Violation") && strings.Contains(s, subj) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no Permissions Violation naming %q reached the error handler", subj)
+		}
+	}
+}
+
+// denied sends a request on subj with a short timeout: the caller must see an error (not a reply) and the error
+// handler a Permissions Violation naming subj.
+func (v *violations) denied(t *testing.T, nc *nats.Conn, subj, body string) {
+	t.Helper()
+	m, err := nc.Request(subj, []byte(body), 400*time.Millisecond)
+	if err == nil {
+		t.Errorf("%s: answered (%s)", subj, m.Data)
+		return
+	}
+	v.expect(t, subj)
+}
+
+// deniedPub is denied for a publish with no reply (an acknowledgement).
+func (v *violations) deniedPub(t *testing.T, nc *nats.Conn, subj string) {
+	t.Helper()
+	if err := nc.Publish(subj, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = nc.Flush()
+	v.expect(t, subj)
 }
 
 func TestRefuseCompiledForNewForm(t *testing.T) {
@@ -605,5 +727,237 @@ func TestLegacyUserOverlapWithNewForm(t *testing.T) {
 	}
 	if err := store.Admit(other, "", existing); err != nil {
 		t.Errorf("Admit refused the disjoint identity: %v", err)
+	}
+}
+
+// windowBridgeEnv provisions a legacy endpoint "ops1" (stream, durable consumer, five queued mails), a second legacy
+// inbox, and a second new-form endpoint's inbox, and returns a connection with the provisioned credentials of a
+// new-form user holding NewFormPermissions merged with WindowBridge for that alias.
+type bridgeEnv struct {
+	e        *testenv.Env
+	js       jetstream.JetStream
+	id       sap.EndpointIdentity
+	legacy   string // the legacy inbox stream
+	otherLeg string
+	otherNew string
+	nc       *nats.Conn
+	v        *violations
+}
+
+func newBridgeEnv(t *testing.T) *bridgeEnv {
+	t.Helper()
+	e := testenv.Start(t)
+	ctx := context.Background()
+	anc := e.Conn(t, e.AdminCreds)
+	a, err := admin.New(anc, e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	js, err := jetstream.New(anc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := newID(t, "acme", "team1", "ops1")
+	alias := legID(t, e.Owner, "ops1")
+	otherLegacy := legID(t, e.Owner, "lead")
+	otherNew := newID(t, "acme", "team2", "ops2")
+
+	mk := func(cfg jetstream.StreamConfig, subject string, n int) {
+		s, err := js.CreateStream(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i <= n; i++ {
+			if _, err := js.Publish(ctx, subject, []byte(fmt.Sprintf("mail %d", i))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mk(store.InboxConfigIdentity(alias, store.DefaultLimits()), "agents.mail.cc."+e.Owner+".ops1", 5)
+	mk(store.InboxConfigIdentity(otherLegacy, store.DefaultLimits()), "agents.mail.cc."+e.Owner+".lead", 2)
+	mk(store.InboxConfigIdentity(otherNew, store.DefaultLimits()), otherNew.Subjects().Mail, 2)
+
+	perms, err := admin.NewFormPermissions(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := admin.WindowBridge(id, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms.Pub.Allow.Add(bridge.Pub.Allow...)
+	perms.Sub.Allow.Add(bridge.Sub.Allow...)
+	creds, _ := e.MintRaw(t, "ops1", perms)
+	nc := e.ConnAs(t, creds, id.Flat())
+	return &bridgeEnv{e: e, js: js, id: id, legacy: sap.InboxStream(alias.Name),
+		otherLeg: sap.InboxStream(otherLegacy.Name), otherNew: sap.InboxStream(otherNew.Flat()), nc: nc, v: watchErrors(nc)}
+}
+
+func (b *bridgeEnv) consumerInfo(t *testing.T, stream string) *jetstream.ConsumerInfo {
+	t.Helper()
+	ctx := context.Background()
+	st, err := b.js.Stream(ctx, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.Consumer(ctx, store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
+// The transition grant, seen with the new-form user's own credentials: it reads and acknowledges the queued mail of
+// the legacy inbox through the existing durable consumer.
+func TestWindowBridgeLegacyInboxOnServer(t *testing.T) {
+	b := newBridgeEnv(t)
+	ctx := context.Background()
+	pjs, err := jetstream.New(b.nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := pjs.Stream(ctx, b.legacy)
+	if err != nil {
+		t.Fatalf("legacy STREAM.INFO: %v", err)
+	}
+	if n := st.CachedInfo().State.Msgs; n != 5 {
+		t.Fatalf("legacy stream shows %d messages, want 5", n)
+	}
+	cons, err := st.Consumer(ctx, store.Consumer)
+	if err != nil {
+		t.Fatalf("legacy CONSUMER.INFO: %v", err)
+	}
+	if info, err := cons.Info(ctx); err != nil || info.NumPending != 5 {
+		t.Fatalf("consumer info: %+v %v", info, err)
+	}
+	// DIRECT.GET of the stream, both the plain and the tailed subject.
+	// The plain form takes a sequence; the tailed form returns the last message on that subject.
+	for subj, want := range map[string][2]string{
+		"$JS.API.DIRECT.GET." + b.legacy:                                            {`{"seq":1}`, "mail 1"},
+		"$JS.API.DIRECT.GET." + b.legacy + ".agents.mail.cc." + b.e.Owner + ".ops1": {"", "mail 5"},
+	} {
+		m, err := b.nc.Request(subj, []byte(want[0]), 2*time.Second)
+		if err != nil || string(m.Data) != want[1] {
+			t.Fatalf("%s: %v %v", subj, m, err)
+		}
+	}
+
+	batch, err := cons.Fetch(5, jetstream.FetchMaxWait(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msgs []jetstream.Msg
+	for m := range batch.Messages() {
+		msgs = append(msgs, m)
+	}
+	if batch.Error() != nil || len(msgs) != 5 {
+		t.Fatalf("fetch: %d messages, err %v", len(msgs), batch.Error())
+	}
+	seq := func(m jetstream.Msg) uint64 {
+		md, err := m.Metadata()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return md.Sequence.Stream
+	}
+	bySeq := map[uint64]jetstream.Msg{}
+	for _, m := range msgs {
+		bySeq[seq(m)] = m
+	}
+	// Out of order: 3 first, then 1. The floor moves to 1 only; 2, 4 and 5 stay pending.
+	for _, s := range []uint64{3, 1} {
+		if err := bySeq[s].DoubleAck(ctx); err != nil {
+			t.Fatalf("ack %d: %v", s, err)
+		}
+	}
+	if info := b.consumerInfo(t, b.legacy); info.AckFloor.Stream != 1 || info.NumAckPending != 3 {
+		t.Fatalf("after 3,1: floor %d pending %d, want 1 and 3", info.AckFloor.Stream, info.NumAckPending)
+	}
+	if err := bySeq[2].DoubleAck(ctx); err != nil {
+		t.Fatalf("ack 2: %v", err)
+	}
+	if info := b.consumerInfo(t, b.legacy); info.AckFloor.Stream != 3 || info.NumAckPending != 2 {
+		t.Fatalf("after 2: floor %d pending %d, want 3 and 2", info.AckFloor.Stream, info.NumAckPending)
+	}
+	b.v.none(t, "legacy reads and acks")
+}
+
+// The same user can touch nothing else: no other stream or consumer, and no create, update, delete or purge anywhere.
+func TestWindowBridgeLegacyInboxDenialsOnServer(t *testing.T) {
+	b := newBridgeEnv(t)
+	ctx := context.Background()
+	cfg := `{"stream_name":"` + b.legacy + `","config":{"durable_name":"evil","ack_policy":"explicit"}}`
+	for _, other := range []string{b.otherLeg, b.otherNew} {
+		b.v.denied(t, b.nc, "$JS.API.STREAM.INFO."+other, "")
+		b.v.denied(t, b.nc, "$JS.API.CONSUMER.INFO."+other+".deliver", "")
+		b.v.denied(t, b.nc, "$JS.API.CONSUMER.MSG.NEXT."+other+".deliver", `{"batch":1,"expires":300000000}`)
+		b.v.denied(t, b.nc, "$JS.API.DIRECT.GET."+other, `{"seq":1}`)
+		b.v.denied(t, b.nc, "$JS.API.DIRECT.GET."+other+".agents.mail.x", `{"seq":1}`)
+		b.v.deniedPub(t, b.nc, "$JS.ACK."+other+".deliver.1.1.1.1.1")
+		b.v.denied(t, b.nc, "$JS.API.STREAM.DELETE."+other, "")
+		b.v.denied(t, b.nc, "$JS.API.STREAM.PURGE."+other, "{}")
+	}
+	// On the legacy stream itself nothing beyond the six lines.
+	b.v.denied(t, b.nc, "$JS.API.CONSUMER.CREATE."+b.legacy+".evil", cfg)
+	b.v.denied(t, b.nc, "$JS.API.CONSUMER.DURABLE.CREATE."+b.legacy+".evil", cfg)
+	b.v.denied(t, b.nc, "$JS.API.CONSUMER.DURABLE.CREATE."+b.legacy+".deliver", `{"stream_name":"`+b.legacy+`","config":{"durable_name":"deliver","ack_policy":"explicit","ack_wait":1}}`)
+	b.v.denied(t, b.nc, "$JS.API.CONSUMER.DELETE."+b.legacy+".deliver", "")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.UPDATE."+b.legacy, `{"name":"`+b.legacy+`","subjects":["x"]}`)
+	b.v.denied(t, b.nc, "$JS.API.STREAM.DELETE."+b.legacy, "")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.PURGE."+b.legacy, "{}")
+	b.v.denied(t, b.nc, "$JS.API.STREAM.CREATE.evil", `{"name":"evil","subjects":["evil"]}`)
+	b.v.denied(t, b.nc, "$JS.API.CONSUMER.MSG.NEXT."+b.legacy+".evil", `{"batch":1,"expires":300000000}`)
+	b.v.deniedPub(t, b.nc, "$JS.ACK."+b.legacy+".evil.1.1.1.1.1")
+
+	// Through the client library a denied call is an error, not silent success.
+	pjs, err := jetstream.New(b.nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pjs.Stream(ctx, b.otherLeg); err == nil {
+		t.Error("STREAM.INFO on another legacy inbox succeeded")
+	}
+	b.v.expect(t, "$JS.API.STREAM.INFO."+b.otherLeg)
+	lst, err := pjs.Stream(ctx, b.legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lst.CreateConsumer(ctx, jetstream.ConsumerConfig{Durable: "evil", AckPolicy: jetstream.AckExplicitPolicy}); err == nil {
+		t.Error("consumer created on the legacy stream")
+	}
+	b.v.expect(t, "$JS.API.CONSUMER.")
+
+	// No effect, seen with the admin connection.
+	for _, s := range []string{b.legacy, b.otherLeg, b.otherNew} {
+		st, err := b.js.Stream(ctx, s)
+		if err != nil {
+			t.Fatalf("stream %s gone: %v", s, err)
+		}
+		want := uint64(2)
+		if s == b.legacy {
+			want = 5
+		}
+		if n := st.CachedInfo().State.Msgs; n != want {
+			t.Errorf("stream %s has %d messages, want %d", s, n, want)
+		}
+		if _, err := st.Consumer(ctx, "evil"); err == nil {
+			t.Errorf("consumer evil exists on %s", s)
+		}
+		if info := b.consumerInfo(t, s); info.NumAckPending != 0 || info.AckFloor.Stream != 0 || info.Config.AckWait != store.ConsumerConfig().AckWait {
+			t.Errorf("consumer on %s changed: %+v", s, info)
+		}
+	}
+	if _, err := b.js.Stream(ctx, "evil"); err == nil {
+		t.Error("stream evil was created")
 	}
 }
