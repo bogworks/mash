@@ -3,8 +3,8 @@ name: release
 # builds every target twice, in two fresh clones in different directories, and fails unless the two SHA-256s match.
 # It publishes a DRAFT release, then re-checks release order (scripts/draft-guard --after-create) and fails, leaving its draft in place
 # for manual resolution, if a lower draft or a higher published release stands beside it; the maintainer runs `scripts/release-check --assets <version> <X>` (tag signature, tag at X,
-# exactly our builds attached) before publishing. Jobs run GitHub-hosted (ubuntu-latest) by default; vars.RUNNER_LINUX can point them at a
-# runner of the maintainers' choice (a tag push is never a fork pull request). No self-hosted runner is used on this public repo.
+# exactly our builds attached) before publishing. Every job runs on a self-hosted runner,
+# [self-hosted, rh-linux] (ADR 0079); a tag push is never a fork pull request.
 # Besides the four binaries a release carries a CycloneDX SBOM per binary (mash-<os>-<arch>.cdx.json, attested with
 # actions/attest-sbom) and SLSA provenance for the four binaries (mash.intoto.jsonl, from the SLSA generator's reusable
 # workflow); mash meets SLSA v1.0 Build L2, not L3 (ADR 0051). `release-check --assets` verifies all of it before the
@@ -42,7 +42,7 @@ jobs:
   guard:
     if: ${{ github.event_name == 'push' }} # a dry run has no tag to judge
     timeout-minutes: 10
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: write # `gh release list` shows drafts only to a token that can write; this job never writes
     steps:
@@ -79,7 +79,7 @@ jobs:
     needs: guard
     if: ${{ !cancelled() && (needs.guard.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.guard.result == 'skipped')) }}
     timeout-minutes: 30
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     strategy:
       fail-fast: true
       matrix:
@@ -119,7 +119,7 @@ jobs:
     # the guard succeeds and every need must have succeeded.
     if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' && needs.provenance.result == 'success' }} # never on a dry run: it creates the release
     timeout-minutes: 30
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: write
     steps:
@@ -175,7 +175,7 @@ jobs:
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       id-token: write # the OIDC token the attestation is signed with
       attestations: write
@@ -196,7 +196,7 @@ jobs:
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: read
     strategy:
@@ -235,7 +235,7 @@ jobs:
     needs: sbom
     if: ${{ !cancelled() && needs.sbom.result == 'success' }} # explicit: see build
     timeout-minutes: 15
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       id-token: write # the OIDC token the attestation is signed with
       attestations: write
@@ -265,7 +265,7 @@ jobs:
     # The SLSA generator is referenced by tag, which can move. Fail unless the tag still resolves to the commit recorded in
     # SLSA_GENERATOR_SHA. Needs no checkout and only reads public data.
     timeout-minutes: 5
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: read
     steps:
@@ -290,7 +290,7 @@ jobs:
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 10
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: read
     outputs:
@@ -333,7 +333,7 @@ jobs:
     needs: [build, attest, sbom, attest-sbom, provenance]
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' && needs.provenance.result == 'success' }}
     timeout-minutes: 20
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     permissions:
       contents: read
     steps:

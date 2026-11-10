@@ -48,8 +48,8 @@ The reasoning is in [decision 0042](decisions/0042-sign-sha256sums-with-sshsig.m
 
 The numbered steps are what the command does in each state, and the manual path when it cannot run.
 
-1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (ubuntu-latest)`,
-   `test (macos-latest)` and `reproducible` (all from GitHub Actions) on X itself.
+1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (linux)`,
+   `test (macos)` and `reproducible` (all from GitHub Actions, run on the maintainers' self-hosted runners) on X itself.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
    shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
    ```sh
@@ -305,9 +305,11 @@ tagged commit and compared it byte for byte. It does not show who built the file
       --source-ref refs/tags/v<version> --deny-self-hosted-runners
 
 This proves the release workflow (`release.yml`) of the `bogworks/mash` repository, run at the tag `v<version>` on a
-GitHub-hosted runner, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any workflow of
+runner of the repository, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any workflow of
 the repository on any ref, so the signer workflow, the source ref and the runner flag are what make the check mean
-something. It does not prove the workflow's steps were not tampered with: that attestation is made by a step inside that
+something. The release jobs now run on self-hosted runners ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)),
+which `--deny-self-hosted-runners` refuses: the flag stays until the maintainer decides what replaces it, and until then the
+verification refuses attestations produced on these runners. It does not prove the workflow's steps were not tampered with: that attestation is made by a step inside that
 workflow (SLSA v1.0 Build Level 2).
 
 **3. SBOM.**
@@ -378,7 +380,7 @@ and tick it off in the repository's setup issue.
       read-only.
 - [ ] Ruleset for `main`, as specified in [branch-protection.md](branch-protection.md) (follow that file; the points
       that are easy to miss): require a pull request, with the Mergify app as the bypass actor for its tested
-      fast-forward merges; require the status checks `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible`,
+      fast-forward merges; require the status checks `test (linux)`, `test (macos)`, `reproducible`,
       `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
       Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
@@ -405,6 +407,7 @@ and tick it off in the repository's setup issue.
 
 **CI:**
 
-- [ ] GitHub-hosted runners only: no self-hosted runner on a public repository, because it would run fork code on the
-      maintainers' machines. Set the `RUNNER_LINUX` repository variable only to a runner the maintainers control, never
-      for fork pull requests (the workflows already route forks to `ubuntu-latest`).
+- [ ] Self-hosted runners only ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)): every
+      job runs on `[self-hosted, rh-linux]` or `[self-hosted, rh-macos]`, with no GitHub-hosted fallback. Register runners
+      with those labels only on machines the maintainers control. Pull requests from forks run on them too, so keep the
+      Actions setting that holds an outside contributor's run for a person's approval (the item above).

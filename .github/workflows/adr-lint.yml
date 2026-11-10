@@ -12,7 +12,7 @@ name: adr-lint
 # sourced or run, no secret is used, and the token is contents: read. A pull request that changes this workflow or
 # scripts/adrlint is judged by the base branch's versions; its change takes effect once it has merged. (The first pull
 # request that adds scripts/adrlint has no checker at its base and cannot pass this workflow until a maintainer merges it.)
-# A pull request from a fork runs on ubuntu-latest, never on a self-hosted runner. The body and the labels reach the tool
+# Its fork safety does not depend on the runner: the trust logic above (base-branch checker, pull request as data only) is the same wherever it runs, and a fork runs on the same self-hosted labels as every job (ADR 0079). The body and the labels reach the tool
 # through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
 # is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
 on:
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
-    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)

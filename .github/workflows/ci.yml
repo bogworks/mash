@@ -1,9 +1,8 @@
 name: ci
 # Every push to main runs the test matrix, docs-only too: the release gate reads main's test runs, and a docs-only
-# head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Jobs run on GitHub-hosted
-# runners by default (ubuntu-latest, macos-latest); vars.RUNNER_LINUX can point Linux jobs at a runner of the maintainers'
-# choice, never for a fork pull request, which always gets ubuntu-latest. No self-hosted runner is used on this public
-# repo. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the test matrix.
+# head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Every job runs on a
+# self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
+# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the test matrix.
 on:
   push:
     branches: [main]
@@ -22,7 +21,7 @@ jobs:
   # Does this pull request touch code? A push always counts as code: the release gate reads main's test runs.
   changes:
     timeout-minutes: 5
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
@@ -43,22 +42,22 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
   test:
+    # No name: the matrix os values (linux, macos) make the check names test (linux) and test (macos).
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.code == 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false # one OS failing must not cancel the other and hide its result
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    # GitHub-hosted: Linux on ubuntu-latest unless vars.RUNNER_LINUX names another runner (never for a fork pull request,
-    # which always gets ubuntu-latest), macOS on macos-latest for every run, fork or not. The matrix keeps GitHub's names, so
-    # the check names the release gate requires (test (macos-latest)) don't change. No self-hosted runner is used here.
-    # runs-on cannot read job env, so the fork test is spelled out in the Linux runs-on expression.
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest') || 'macos-latest' }}
+        include:
+          - {os: linux, runs-on: [self-hosted, rh-linux]}
+          - {os: macos, runs-on: [self-hosted, rh-macos]}
+    # The macOS runner takes one job at a time; a queued macOS job waits and the wait is accepted (ADR 0079).
+    runs-on: ${{ matrix.runs-on }}
     steps:
-      # Keep every Go cache and temp dir under RUNNER_TEMP, which is wiped below (harmless on a fresh hosted runner).
+      # Keep every Go cache and temp dir under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused between jobs).
       - name: Job-local Go and temp dirs (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos'
         run: |
           mkdir -p "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
           {
@@ -71,10 +70,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: ${{ matrix.os != 'macos-latest' }}
+          cache: ${{ matrix.os != 'macos' }}
       - run: go vet ./...
       # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner and about 4x that on the
-      # macOS runner, past go test's default 10 m (run 41292329623). A real hang still fails.
+      # macOS runner (2 vCPU, Intel x64), past go test's default 10 m (run 41292329623). A real hang still fails.
       - name: go test
         env:
           # The words internal to the maintainers, from a repository variable (data through env): the standalone
@@ -84,13 +83,13 @@ jobs:
           set -eu
           if [ "$RUNNER_OS" = macOS ]; then
             # scripts/releasecheck builds release binaries and takes about 440 s even without -race, a third of the
-            # job's wall time on the 3-core macOS runner (#275); Linux runs it, with -race, on every event.
+            # job's wall time on the 2-vCPU macOS runner (#275); Linux runs it, with -race, on every event.
             go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
           else
             go test -race -timeout 20m ./...
           fi
       - name: Leave nothing behind (macOS)
-        if: always() && matrix.os == 'macos-latest'
+        if: always() && matrix.os == 'macos'
         run: |
           # Go's module cache is read-only, so make it writable before removing it.
           chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
@@ -104,9 +103,9 @@ jobs:
   reproducible:
     name: reproducible
     timeout-minutes: 30
-    # Same runner choice as the other Linux jobs: a fork pull request always gets ubuntu-latest, never vars.RUNNER_LINUX.
+    # Same runner as the other Linux jobs; a fork pull request runs on it too.
     # This is the release-facing check (codex H1 on #39).
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     env:
       CGO_ENABLED: "0"
     steps:
@@ -135,7 +134,7 @@ jobs:
   conformance:
     if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/')
     timeout-minutes: 15
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -162,7 +161,7 @@ jobs:
   # commit catches the duplicate. merge_group is also a trigger so a GitHub merge queue gets the same check.
   adr-numbers:
     timeout-minutes: 5
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -175,7 +174,7 @@ jobs:
     needs: [changes, test, reproducible, adr-numbers]
     if: always()
     timeout-minutes: 5
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     steps:
       - name: Every required job passed
         env:

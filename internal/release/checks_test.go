@@ -41,7 +41,7 @@ func TestCheckCI_failureNamesTheRun(t *testing.T) {
 		{Name: "reproducible", Status: "completed", Conclusion: "skipped"},
 		{Name: "reproducible", Status: "completed", Conclusion: "cancelled"},
 	} {
-		rs := runs("test (ubuntu-latest)", "test (macos-latest)")
+		rs := runs("test (linux)", "test (macos)")
 		bad.ID, bad.HeadSHA = 99, candidate
 		bad.App.Slug = CIApp
 		if err := CheckCI(append(rs, bad), candidate); err == nil || !strings.Contains(err.Error(), "reproducible") {
@@ -80,7 +80,7 @@ func TestCheckCI_conflictingDuplicatesOfOneIDAreRefusedWhateverTheOrder(t *testi
 	good := withApp(CheckRun{ID: 5, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"})
 	bad := good
 	bad.Conclusion = "failure"
-	rest := runs("test (ubuntu-latest)", "test (macos-latest)")
+	rest := runs("test (linux)", "test (macos)")
 	for _, rs := range [][]CheckRun{append(append([]CheckRun{}, rest...), good, bad), append(append([]CheckRun{}, rest...), bad, good)} {
 		if err := CheckCI(rs, candidate); err == nil || !strings.Contains(err.Error(), "reported twice") {
 			t.Fatalf("two results with one run id: %v", err)
@@ -208,7 +208,7 @@ func TestCheckCI_anotherAppsOwnCheckIsIgnored(t *testing.T) {
 
 // A check run written by another integration under a required name is refused, not counted.
 func TestCheckCI_aSpoofedNameFromAnotherAppIsRefused(t *testing.T) {
-	rs := runs("test (ubuntu-latest)", "test (macos-latest)")
+	rs := runs("test (linux)", "test (macos)")
 	spoof := CheckRun{ID: 90, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"}
 	spoof.App.Slug = "some-other-app"
 	if err := CheckCI(append(rs, spoof), candidate); err == nil || !strings.Contains(err.Error(), "some-other-app") {

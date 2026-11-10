@@ -28,7 +28,7 @@ type CheckRun struct {
 const CIApp = "github-actions"
 
 // RequiredChecks are the check runs ci.yml produces that a candidate must have passed.
-var RequiredChecks = []string{"test (ubuntu-latest)", "test (macos-latest)", "reproducible"}
+var RequiredChecks = []string{"test (linux)", "test (macos)", "reproducible"}
 
 func joined(problems []string) error {
 	if len(problems) == 0 {

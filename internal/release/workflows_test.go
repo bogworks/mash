@@ -36,7 +36,7 @@ type job struct {
 	With            map[string]any    `yaml:"with"`
 	Outputs         map[string]string `yaml:"outputs"`
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
-	RunsOn          string            `yaml:"runs-on"`
+	RunsOn          any               `yaml:"runs-on"`
 	Permissions     map[string]string `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
 	Strategy        struct {
@@ -269,13 +269,25 @@ func TestCI_producesTheCheckNamesTheGateRequires(t *testing.T) {
 	w := load(t, "ci.yml")
 	var names []string
 	for jn, j := range w.Jobs {
+		var osValues []any
 		if m, ok := j.Strategy.Matrix["os"].([]any); ok {
-			for _, o := range m {
-				names = append(names, fmt.Sprintf("%s (%v)", jn, o)) // GitHub names matrix jobs "<job> (<value>)"
+			osValues = m
+		}
+		if inc, ok := j.Strategy.Matrix["include"].([]any); ok {
+			for _, e := range inc {
+				if o, ok := e.(map[string]any)["os"]; ok {
+					osValues = append(osValues, o)
+				}
 			}
+		}
+		if len(osValues) == 0 {
+			names = append(names, jn)
 			continue
 		}
-		names = append(names, jn)
+		for _, o := range osValues {
+			// GitHub names matrix jobs "<job> (<value>)"
+			names = append(names, fmt.Sprintf("%s (%v)", jn, o))
+		}
 	}
 	sort.Strings(names)
 	want := append(append([]string{}, RequiredChecks...), ciOnlyJobs...)
@@ -1062,85 +1074,6 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 	}
 }
 
-// No job runs on a self-hosted runner: bogworks/mash is a public repo, and a self-hosted runner would run fork code on a
-// maintainer's machine. Every runs-on is GitHub-hosted by default (ubuntu-latest, macos-latest), or an expression whose
-// only non-hosted target is the repository variable RUNNER_LINUX, which a maintainer sets and a fork pull request never
-// reaches. No runs-on may name bf1 or a self-hosted label.
-func TestWorkflows_noSelfHostedRunners(t *testing.T) {
-	files, err := filepath.Glob("../../.github/workflows/*.yml")
-	if err != nil || len(files) == 0 {
-		t.Fatalf("no workflows: %v", err)
-	}
-	for _, f := range files {
-		name := filepath.Base(f)
-		raw, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for n, line := range strings.Split(string(raw), "\n") {
-			text := strings.TrimSpace(line)
-			if strings.HasPrefix(text, "#") {
-				continue
-			}
-			text = strings.ReplaceAll(text, "--deny-self-hosted-runners", "") // gh's flag that REFUSES self-hosted runners
-			if strings.Contains(text, "bf1") || strings.Contains(strings.ToLower(text), "self-hosted") {
-				t.Errorf("%s:%d names a self-hosted runner: %s", name, n+1, text)
-			}
-		}
-		for id, j := range load(t, name).Jobs {
-			if j.Uses != "" {
-				continue // a reusable-workflow caller job: the called workflow picks its runners
-			}
-			r := strings.TrimSpace(j.RunsOn)
-			switch {
-			case r == "ubuntu-latest" || r == "macos-latest":
-			case strings.HasPrefix(r, "${{"):
-				if !strings.Contains(r, "'ubuntu-latest'") {
-					t.Errorf("%s job %s: runs-on %q has no ubuntu-latest default", name, id, r)
-				}
-			default:
-				t.Errorf("%s job %s: runs-on %q is neither a GitHub-hosted label nor an expression", name, id, r)
-			}
-		}
-	}
-}
-
-// Every Linux job takes its runner from the repository variable RUNNER_LINUX with ubuntu-latest as the default, so a
-// maintainer can move mash's Linux CI by setting one variable. A fork pull request always gets ubuntu-latest, never
-// RUNNER_LINUX. The macOS branch of the test matrix is macos-latest for every run.
-func TestCI_linuxRunnersReadRUNNER_LINUX(t *testing.T) {
-	const want = "vars.RUNNER_LINUX || 'ubuntu-latest'"
-	for id, j := range load(t, "ci.yml").Jobs {
-		r := strings.TrimSpace(j.RunsOn)
-		if !strings.HasPrefix(r, "${{") || !strings.Contains(r, want) {
-			t.Errorf("ci.yml job %s: runs-on %q does not read %s", id, r, want)
-		}
-		if !strings.Contains(r, "&& 'ubuntu-latest' || ") {
-			t.Errorf("ci.yml job %s: runs-on %q has no ubuntu-latest fork fallback", id, r)
-		}
-		if strings.Contains(r, "&& vars.RUNNER_LINUX") {
-			t.Errorf("ci.yml job %s: runs-on %q routes a fork pull request to RUNNER_LINUX", id, r)
-		}
-		if id == "test" && !strings.HasSuffix(r, "|| 'macos-latest' }}") {
-			t.Errorf("ci.yml test job: runs-on %q does not end in macos-latest", r)
-		}
-	}
-}
-
-// release.yml builds what gets signed; a tag push is never a fork pull request, so each job reads RUNNER_LINUX with the
-// ubuntu-latest default and no fork routing. (A reusable-workflow caller job has no runs-on of its own.)
-func TestRelease_runsOnRunnerLinuxDefaultHosted(t *testing.T) {
-	const want = "${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}"
-	for id, j := range load(t, "release.yml").Jobs {
-		if j.Uses != "" {
-			continue
-		}
-		if r := strings.TrimSpace(j.RunsOn); r != want {
-			t.Errorf("release.yml job %s runs on %q; want %s", id, r, want)
-		}
-	}
-}
-
 // A draft left behind stops the next draft before anything is built: the guard job runs scripts/draft-guard, and it is
 // the only jobs that get contents: write beyond the draft job are guard and provenance (the generator's upload-assets job declares it); attest holds the signing permissions and no contents (workflow default stays read).
 func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
@@ -1194,10 +1127,8 @@ func TestCI_conformanceIsAdvisory(t *testing.T) {
 			t.Errorf("conformance if %q lacks %q", j.If, want)
 		}
 	}
-	for _, want := range []string{"vars.RUNNER_LINUX", "ubuntu-latest"} {
-		if !strings.Contains(j.RunsOn, want) {
-			t.Errorf("conformance runs-on %q lacks %q", j.RunsOn, want)
-		}
+	if got := fmt.Sprint(j.RunsOn); got != linuxLabels {
+		t.Errorf("conformance runs-on %s; want %s", got, linuxLabels)
 	}
 	if needs := fmt.Sprint(w.Jobs["pr-check"].Needs); strings.Contains(needs, "conformance") {
 		t.Errorf("pr-check needs conformance, which would make it gate a merge: %v", needs)
@@ -1482,7 +1413,7 @@ func TestRelease_provenanceJobCallsTheSLSAGeneratorByTag(t *testing.T) {
 	if j.With["base64-subjects"] != "${{ needs.hashes.outputs.base64-subjects }}" || j.With["provenance-name"] != "mash.intoto.jsonl" || j.With["upload-assets"] != false {
 		t.Errorf("provenance with: %v", j.With)
 	}
-	if len(j.Steps) != 0 || j.RunsOn != "" || j.TimeoutMinutes != 0 {
+	if len(j.Steps) != 0 || j.RunsOn != nil || j.TimeoutMinutes != 0 {
 		t.Errorf("a reusable-workflow caller takes no steps, runs-on or timeout: %+v", j)
 	}
 	raw, err := os.ReadFile("../../.github/workflows/release.yml")
