@@ -100,6 +100,10 @@ After the save the policy is compiled before and after, and each consequence is 
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
+## Auditing the population
+
+`mashctl audit [--json] [--strict] [--creds-dir DIR]` lists what the server and the creds directories hold, changes nothing, and exits 0 when it completed (`--strict` adds exit 1 for orphans and undrained legacy inboxes). See [audit.md](audit.md).
+
 ## Retiring an endpoint
 
 ```sh

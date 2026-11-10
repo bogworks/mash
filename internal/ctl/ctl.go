@@ -109,6 +109,7 @@ func Usage(prog string) string {
 	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
+		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan or an undrained inbox")
 		adoptLines(line)
 		mintLines(line)
 		retireLines(line)
