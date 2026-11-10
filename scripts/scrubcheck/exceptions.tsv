@@ -14,3 +14,12 @@ cmd/mash/standalone_test.go	"\x68erdr"	names a third-party tool the test proves 
 cmd/mash/standalone_test.go	"\x48ERDR_"	names a third-party env prefix the test proves mash does not need
 cmd/mash/standalone_test.go	strings.Contains(s, "\x68erdr")	names a third-party tool the test proves mash does not need
 internal/store/store_test.go	"\x68erd":"acme"	a live directory record may still carry the removed legacy field; the test proves it is ignored
+scripts/adrlint/main.go	\x68erds?|\x68erdr|\x6canes?	the lint rule that forbids these words in ADRs must name them
+scripts/adrlint/main_test.go	\x4cane and the lead, \x68erd, \x68erds, \x68erdr, orchestrator.")), []string{`forbidden vocabulary "\x4cane"`, `"lead"`, `"\x68erds"`, `"\x68erdr"	a test row that exercises the vocabulary rule
+scripts/adrlint/main_test.go	A \x6cane. <!--	a test row that exercises the vocabulary rule
+scripts/adrlint/main_test.go	A \x6cane.")), []string{`forbidden vocabulary "\x6cane"	a test row that exercises the vocabulary rule
+scripts/adrlint/main_test.go	\x6canes_x	a test row that exercises the vocabulary rule
+scripts/adrlint/main_test.go	"a \x6cane"	a test row that exercises the vocabulary rule
+scripts/adrlint/main_test.go	"A \x6cane."	a test row that exercises the vocabulary rule
+internal/portable/portable_test.go	\x68omerange|\x72angehand	the personal-name detector must name the words it detects
+internal/portable/portable_test.go	"\x68omerange", "\x72angehand-x"	the personal-name detector must name the words it detects
