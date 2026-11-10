@@ -125,6 +125,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	if l := legacyInboxLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
@@ -440,6 +443,23 @@ func deliveryLines(src *statusSource) []string {
 		line += fmt.Sprintf(", last at %s", last.Format(time.RFC3339))
 	}
 	return append(out, line)
+}
+
+// legacyInboxLine says whether the running endpoint consumes its legacy inbox stream: it does only while it holds the
+// legacy identity's lease. Empty from a shell (nothing is connected), with no running endpoint, and for an endpoint with
+// no alias.
+func legacyInboxLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.LegacyInboxLine(); ok {
+		return redactText(l)
+	}
+	return ""
 }
 
 // readRelayCounters reads the counters file under the endpoint's state location.

@@ -84,6 +84,10 @@ type Endpoint struct {
 	leaseDone   chan struct{}
 	leaseLost   chan error
 
+	// legacy is the state of the legacy identity's lease, which the endpoint holds while it consumes the legacy inbox
+	// stream (legacylease.go).
+	legacy legacyLease
+
 	mu       sync.RWMutex
 	dir      map[string]store.Record // by name
 	byUser   map[string]string       // user key -> name
@@ -431,6 +435,7 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 		}
 		if ok {
 			e.alias, e.legacyKey = &alias, alias.Flat()
+			e.takeLegacyLease(ctx)
 		}
 	}
 	return e, nil
@@ -566,10 +571,16 @@ func (e *Endpoint) keepLease() {
 // name (ours expired); that is fatal. Transport errors are retried next tick.
 func (e *Endpoint) refreshLease(ctx context.Context) error {
 	e.waking.reconcile(ctx)
+	return e.refreshKey(ctx, e.key, &e.leaseRev)
+}
+
+// refreshKey is refreshLease for the lease named key, whose last known revision is *revp: the endpoint's own lease, or
+// the legacy identity's while the endpoint reads the legacy stream (legacylease.go).
+func (e *Endpoint) refreshKey(ctx context.Context, key string, revp *atomic.Uint64) error {
 	val := e.lease()
-	rev, err := e.leaseKV.Update(ctx, e.key, val, e.leaseRev.Load())
+	rev, err := e.leaseKV.Update(ctx, key, val, revp.Load())
 	if err == nil {
-		e.leaseRev.Store(rev)
+		revp.Store(rev)
 		return nil
 	}
 	var apiErr *jetstream.APIError
@@ -580,15 +591,15 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	// Our revision is stale. Either an earlier refresh landed but its reply was
 	// lost (the entry is still ours: adopt it), the entry expired during an
 	// outage (re-take it if free), or another session holds the name.
-	if cur, gerr := e.leaseKV.Get(ctx, e.key); gerr == nil {
+	if cur, gerr := e.leaseKV.Get(ctx, key); gerr == nil {
 		if fenced(cur.Value()) {
-			return fmt.Errorf("%w: %s", ErrDeprovisioned, e.key)
+			return fmt.Errorf("%w: %s", ErrDeprovisioned, key)
 		}
 		var lv leaseValue
 		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
-			e.leaseRev.Store(cur.Revision())
-			if rev, uerr := e.leaseKV.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
-				e.leaseRev.Store(rev)
+			revp.Store(cur.Revision())
+			if rev, uerr := e.leaseKV.Update(ctx, key, val, cur.Revision()); uerr == nil {
+				revp.Store(rev)
 			} else {
 				e.log.Printf("lease refresh: %v (will retry)", uerr)
 			}
@@ -598,23 +609,23 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 		e.log.Printf("lease check: %v (will retry)", gerr)
 		return nil
 	}
-	rev, cerr := e.leaseKV.Create(ctx, e.key, val)
+	rev, cerr := e.leaseKV.Create(ctx, key, val)
 	if cerr == nil {
-		e.leaseRev.Store(rev)
+		revp.Store(rev)
 		return nil
 	}
 	if !errors.Is(cerr, jetstream.ErrKeyExists) {
 		e.log.Printf("lease re-take: %v (will retry)", cerr) // e.g. a lost reply: next tick adopts it
 		return nil
 	}
-	if cur, gerr := e.leaseKV.Get(ctx, e.key); gerr == nil {
+	if cur, gerr := e.leaseKV.Get(ctx, key); gerr == nil {
 		var lv leaseValue
 		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
-			e.leaseRev.Store(cur.Revision())
+			revp.Store(cur.Revision())
 			return nil
 		}
 	}
-	return fmt.Errorf("mash: lost the lease on %s to another session", e.key)
+	return fmt.Errorf("mash: lost the lease on %s to another session", key)
 }
 
 // Run consumes mail and keeps the directory and lease current (presence is asked for on demand, ADR 0066)
@@ -653,6 +664,7 @@ func (e *Endpoint) Close() {
 		e.leaseCancel()
 		<-e.leaseDone
 	}
+	e.releaseLegacyLease()
 	if e.leaseKV != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 		if err := e.releaseLease(ctx); err != nil {
@@ -671,15 +683,20 @@ var releaseTimeout = 3 * time.Second
 // conflict the entry is re-read and deleted at its current revision if it is still this instance's; another
 // instance's lease is never touched. Transport errors are retried until ctx ends.
 func (e *Endpoint) releaseLease(ctx context.Context) error {
-	rev := e.leaseRev.Load()
+	return e.releaseKey(ctx, e.key, &e.leaseRev)
+}
+
+// releaseKey is releaseLease for the lease named key (see refreshKey).
+func (e *Endpoint) releaseKey(ctx context.Context, key string, revp *atomic.Uint64) error {
+	rev := revp.Load()
 	for {
-		err := e.leaseKV.Delete(ctx, e.key, jetstream.LastRevision(rev))
+		err := e.leaseKV.Delete(ctx, key, jetstream.LastRevision(rev))
 		if err == nil {
 			return nil
 		}
 		var apiErr *jetstream.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence {
-			cur, gerr := e.leaseKV.Get(ctx, e.key)
+			cur, gerr := e.leaseKV.Get(ctx, key)
 			switch {
 			case errors.Is(gerr, jetstream.ErrKeyNotFound) || errors.Is(gerr, jetstream.ErrKeyDeleted):
 				return nil // already gone

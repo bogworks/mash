@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -331,8 +332,21 @@ func (e *Endpoint) sources() []inboxSource {
 // An endpoint with an alias consumes a second stream, the legacy inbox stream, through the durable consumer it already
 // has there (never a new one: a fresh consumer would deliver mail the old one acknowledged). Both feed the one queue,
 // so the worker is still the only writer. A message's ack goes to its own delivery, whichever stream it came from.
+//
+// The legacy stream is consumed only while this endpoint holds the legacy identity's lease (legacylease.go): without
+// it the stream is left to its holder (the consumer is not even created here), and when the lease is lost mid-session
+// its consume loop is stopped while the own stream's keeps running.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
 	srcs := e.sources()
+	if !e.legacyReading() {
+		kept := srcs[:0]
+		for _, src := range srcs {
+			if src.ref != LegacyStream {
+				kept = append(kept, src)
+			}
+		}
+		srcs = kept
+	}
 	for i := range srcs {
 		cons, err := e.js.Consumer(ctx, srcs[i].stream, store.Consumer)
 		if err != nil {
@@ -370,6 +384,9 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				return
 			}
 			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
+			if stream == LegacyStream && !e.legacyReading() {
+				return // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+			}
 			defer e.waking.received(ref)
 			// The sender's signature binds the subject the message was stored under, so classify checks it against the
 			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
@@ -402,6 +419,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		}
 	}
 	var ccs []jetstream.ConsumeContext
+	var watched sync.WaitGroup
 	stopAll := func() {
 		for _, cc := range ccs {
 			cc.Stop()
@@ -422,11 +440,25 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			return nil, fmt.Errorf("mash: consume: %w", err)
 		}
 		ccs = append(ccs, cc)
+		if src.ref == LegacyStream {
+			// A lease lost mid-session stops this consumer only.
+			watched.Add(1)
+			go func() {
+				defer watched.Done()
+				select {
+				case <-e.legacy.lost:
+					cc.Stop()
+					e.log.Printf("legacy inbox: stopped reading %s (the lease was lost); the own inbox is still read", e.legacyKey)
+				case <-quit:
+				}
+			}()
+		}
 	}
 	return func() {
 		stopAll()
 		close(quit)
 		<-workerDone
+		watched.Wait()
 	}, nil
 }
 
@@ -460,6 +492,9 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 			case <-time.After(settle):
 				break gather
 			}
+		}
+		if batch = e.dropUnleased(batch); len(batch) == 0 {
+			continue
 		}
 		if e.noChannel && e.spool == nil {
 			hold(batch) // no spool and no channel: mail stays in the inbox, unacked
