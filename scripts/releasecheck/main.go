@@ -404,7 +404,7 @@ func check(ctx context.Context, o Options) error {
 		return err
 	}
 	fmt.Fprintf(o.Out, "release-check: %s passes for v%s\n", x, o.Version)
-	fmt.Fprintf(o.Out, "compat.json: {\"version\": %q, \"commit\": %q}\n", o.Version, x)
+	fmt.Fprintf(o.Out, "version: %s commit: %s\n", o.Version, x)
 	return nil
 }
 

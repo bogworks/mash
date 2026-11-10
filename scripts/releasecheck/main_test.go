@@ -274,14 +274,26 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	write(t, filepath.Join(filepath.Dir(f.o.GH), "files"), release.SumsName, sums)
 }
 
-func TestCheck_passesAndPrintsTheCompatPin(t *testing.T) {
+func TestCheck_passesAndPrintsTheVersionAndCommit(t *testing.T) {
 	f := newFixture(t)
 	if err := f.check(); err != nil {
 		t.Fatal(err)
 	}
 	out := f.o.Out.(*bytes.Buffer).String()
-	if !strings.Contains(out, fmt.Sprintf(`compat.json: {"version": "0.1.0", "commit": %q}`, f.x)) {
-		t.Fatalf("the pin to copy into compat.json is missing:\n%s", out)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected the pass line and the version line:\n%s", out)
+	}
+	if got, want := lines[len(lines)-2], fmt.Sprintf("release-check: %s passes for v0.1.0", f.x); got != want {
+		t.Fatalf("pass line = %q, want %q", got, want)
+	}
+	if got, want := lines[len(lines)-1], fmt.Sprintf("version: 0.1.0 commit: %s", f.x); got != want {
+		t.Fatalf("version line = %q, want %q", got, want)
+	}
+	for _, w := range []string{"compat", "pin"} {
+		if strings.Contains(strings.ToLower(out), w) {
+			t.Fatalf("the output names %q:\n%s", w, out)
+		}
 	}
 }
 
