@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 
@@ -224,7 +223,7 @@ func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, env func(s
 	if err != nil {
 		return retry(err)
 	}
-	if !slices.ContainsFunc(recs, func(r store.Record) bool { return r.Name == o.name }) {
+	if _, ok := findRecord(recs, o.name); !ok {
 		fmt.Fprintf(stdout, "%s has no directory record yet; labels will be set when it is added\n", o.name)
 		return 0
 	}
@@ -253,4 +252,15 @@ func labelSummary(set map[string]string, unset []string) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, " ")
+}
+
+// findRecord is the directory record whose key is name. The key is the name for a legacy record and the flat
+// identity for a new-form one, so a new-form record whose name token is name is not the record for name.
+func findRecord(recs []store.Record, name string) (store.Record, bool) {
+	for _, r := range recs {
+		if r.KeyOrName() == name {
+			return r, true
+		}
+	}
+	return store.Record{}, false
 }

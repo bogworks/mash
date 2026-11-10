@@ -721,7 +721,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if p.Online {
 			state = "online"
 		}
-		fmt.Fprintf(&b, "%s\t%s", p.Record.Name, state)
+		fmt.Fprintf(&b, "%s\t%s", p.Record.KeyOrName(), state)
 		if !p.LastSeen.IsZero() {
 			fmt.Fprintf(&b, "\tseen %s ago", time.Since(p.LastSeen).Round(time.Second))
 		}
@@ -743,7 +743,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 			for _, k := range lk {
 				fmt.Fprintf(&b, "\tlabel.%s=%s", k, r.Labels[k])
 			}
-			if li, ok := live[r.Name]; ok {
+			if li, ok := live[r.KeyOrName()]; ok {
 				if li.Host != "" {
 					fmt.Fprintf(&b, "\tlease host %s", li.Host)
 				}

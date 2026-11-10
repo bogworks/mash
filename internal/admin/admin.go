@@ -468,7 +468,7 @@ func (a *Admin) ApplyLimits(ctx context.Context, names ...string) ([]string, err
 			return nil, err
 		}
 		for _, r := range recs {
-			names = append(names, r.Name)
+			names = append(names, r.KeyOrName())
 		}
 	}
 	var lines []string

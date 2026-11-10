@@ -83,7 +83,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 	return counted
 }
 
-// Who returns the directory with presence, sorted by name. After a presence probe has completed an endpoint is online
+// Who returns the directory with presence, sorted by directory key (the name for a legacy record). After a presence probe has completed an endpoint is online
 // when it answered that probe or a later one; before any probe, when it was seen within OnlineWindow.
 func (e *Endpoint) Who() []Presence {
 	e.mu.RLock()
@@ -97,7 +97,7 @@ func (e *Endpoint) Who() []Presence {
 		}
 		out = append(out, Presence{Record: r, LastSeen: seen, Online: online})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Record.Name < out[j].Record.Name })
+	sort.Slice(out, func(i, j int) bool { return out[i].Record.KeyOrName() < out[j].Record.KeyOrName() })
 	return out
 }
 

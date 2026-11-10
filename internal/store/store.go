@@ -362,6 +362,17 @@ func (r Record) Key() string {
 	return id.Flat()
 }
 
+// KeyOrName is Key(), or Name for a record that names no identity (a bare value that never went through
+// ParseRecord). A reader that indexes the directory, a lease or a live-presence map by a record uses this, so a
+// new-form record (keyed by its flat identity) is never confused with a legacy one of the same name; for every legacy
+// record it is Name.
+func (r Record) KeyOrName() string {
+	if k := r.Key(); k != "" {
+		return k
+	}
+	return r.Name
+}
+
 // GetRecord reads name's directory record.
 func GetRecord(ctx context.Context, kv jetstream.KeyValue, name string) (Record, error) {
 	e, err := kv.Get(ctx, name)
