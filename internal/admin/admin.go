@@ -195,9 +195,26 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "provision", &err)
 	defer end()
+	// Lock order: the name's lock first, then the directory-wide admission lock, always. The admission lock is a leaf
+	// (never held while waiting for another lock), so no cycle is possible. It makes list-admit-create atomic across
+	// names. ANY writer of a directory record (including new-form provisioning) MUST take the same lock, via
+	// lockStream(ctx, admissionLockName), around its own list-and-create.
+	adm, err := a.lockStream(ctx, admissionLockName)
+	if err != nil {
+		return store.Record{}, err
+	}
+	defer adm.release(ctx)
+	if afterAdmissionLock != nil {
+		afterAdmissionLock()
+	}
 	if _, err := kv.Get(ctx, name); err == nil {
 		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
 	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
+		return store.Record{}, err
+	}
+	// Mash's own admission rule: refuse an identity whose subjects overlap an existing endpoint's. Nothing is
+	// created before this passes.
+	if err := a.admit(ctx, kv, name, meta.Zone); err != nil {
 		return store.Record{}, err
 	}
 	// A deprovisioned name's lease key holds a tombstone until it expires: clear it, so the name works at once.
@@ -225,6 +242,9 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	if err := lk.check(ctx); err != nil {
 		return store.Record{}, err
 	}
+	if err := adm.check(ctx); err != nil {
+		return store.Record{}, err
+	}
 	if _, err := kv.Create(ctx, name, val); err != nil {
 		if errors.Is(err, jetstream.ErrKeyExists) {
 			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
@@ -232,6 +252,45 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 		return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
 	}
 	return rec, nil
+}
+
+// admissionLockName is the pseudo-name of the directory-wide admission lock. It is not a valid endpoint name
+// (config.ValidName refuses the underscore), so its lock key limits-lock._admission is no name's lock.
+const admissionLockName = "_admission"
+
+// afterAdmissionLock is a test seam that runs once Provision holds the admission lock; nil in production.
+var afterAdmissionLock func()
+
+// admit lists the directory and applies store.Admit to the legacy identity of name under a.owner. A value that does
+// not parse is skipped when its key is a legacy-shaped key, as before admission existed, but only while no listed key
+// looks new-form (has an underscore). Once one does, any read or parse error on any key refuses the provision (fail
+// closed), because an unmodellable record could hide an overlap. The caller holds the admission lock.
+func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name, zone string) error {
+	id, err := sap.Legacy(a.owner, name)
+	if err != nil {
+		return fmt.Errorf("mash: admit: %w", err)
+	}
+	keys, err := kv.Keys(ctx)
+	if errors.Is(err, jetstream.ErrNoKeysFound) {
+		return store.Admit(id, zone, nil)
+	}
+	if err != nil {
+		return fmt.Errorf("mash: admit: list directory: %w", err)
+	}
+	slices.Sort(keys)
+	newForm := slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") })
+	var recs []store.Record
+	for _, k := range keys {
+		r, err := store.GetRecord(ctx, kv, k)
+		if err != nil {
+			if newForm || strings.Contains(k, "_") {
+				return fmt.Errorf("mash: admit %s refused: unmodellable record %s in the directory: %w", id, k, err)
+			}
+			continue
+		}
+		recs = append(recs, r)
+	}
+	return store.Admit(id, zone, recs)
 }
 
 // createInboxLocked creates name's inbox stream, or updates an existing one to the configured limits unless that
