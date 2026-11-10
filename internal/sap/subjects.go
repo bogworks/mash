@@ -120,3 +120,24 @@ func NameFromSubject(subj string) (string, bool) {
 	}
 	return t[4], true
 }
+
+// KeyFromSubject returns the directory key of the endpoint a five-token
+// agents.<verb>.<agent>.<owner>.<name> subject addresses. A subject whose agent
+// token is AgentToken is legacy and its key is the bare name token, as
+// NameFromSubject gives. Any other agent token is a new-form identity and the
+// key is its flat form (agent_owner_name); tokens that fail the new token rule
+// give ok false, so no subject can name a key its tokens could not have made.
+func KeyFromSubject(subj string) (string, bool) {
+	t := strings.Split(subj, ".")
+	if len(t) != 5 || t[0] != "agents" || t[4] == "" {
+		return "", false
+	}
+	if t[2] == AgentToken {
+		return t[4], true
+	}
+	id, err := New(t[2], t[3], t[4])
+	if err != nil {
+		return "", false
+	}
+	return id.Flat(), true
+}
