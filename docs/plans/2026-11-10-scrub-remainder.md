@@ -13,6 +13,47 @@ assumption in a kind, a mapping in the code), it stops and the lead raises a con
 fixed under this plan. The retirement of the zone token in mail subjects is the naming-grammar work (plan 2b), not this
 scrub.
 
+## Amendments of 2026-11-10 (after the planner's check)
+
+The planner checked this plan against the contract and found it conforming with the fixes below. Where an amendment and a
+step further down differ, the amendment rules. Step 1 (#306) and step 2 (#307) are in review; step 3 is next.
+
+1. **Scan the tool's own directory (REQ-005, REQ-008).** The tool skips `scripts/scrubcheck/`; REQ-008 forbids
+   whole-directory exceptions and REQ-005 covers source. New step 5a, tests first: remove the skip. The list file's
+   seven lines each get a per-occurrence exception ("the list itself"); the tool's tests build their fixtures from a
+   neutral fixture list in a temporary file (plus one test that reads the real list), so they carry no listed word; the
+   tool's comments say "the scrub-list words". The inventory stops quoting the words: a row is `file:line:Wn`, where `Wn`
+   is the word's position in `words.txt`, with no line text, so the inventory itself carries none. This departs from
+   ADR 0073 ("the command skips its own directory"), so step 5a carries a new ADR that supersedes ADR 0073 and restates
+   it (the scan covers its own directory; the tool's unit tests run under `go test ./...`, only the scan does not),
+   which also settles the wording note on #300.
+2. **Audit hits on the inventory (REQ-007, AT-002).** The inventory started from the tool's hits, not the audit's. The
+   audit's release-tooling pin that can be traced is `compat.json`, which is not a listed word but is in AT-003's
+   search: `scripts/releasecheck/main.go:407`, `scripts/releasecheck/main_test.go:283-284` and `docs/release.md:64`. They
+   go on the inventory as rows, with a new step **5b: release tooling** (REQ-004, AT-003): reword the dry-run output and
+   `docs/release.md` to print the version and commit in a neutral form, tests first (the `releasecheck` test asserts the
+   neutral line). The audit's remaining hits that cannot be traced (the 32 it counted) are recorded in the completion
+   record as a deviation, with what was searched.
+3. **If DEC-006 is ruled "accept and warn for one release"**, add the removal step and a negative test that the old kind
+   is refused afterwards (the D183 pattern). If it is ruled "break at once", nothing is added.
+4. **Step 6 is a proposal.** The `CHANGELOG.md` occurrence and the other dated records are proposed as per-occurrence
+   exceptions; DEC-004 is Randy's and is open. Exceptions are by occurrence only: the planner corrected the contract's
+   "by path" wording editorially (JRN-004, REQ-008).
+5. **Step 7 cannot close AT-002 while step 6's rows wait on DEC-004.** Steps 1 to 5b do not wait; step 6 and step 7's
+   close do.
+6. **Tests-first notes for steps that lacked one.** Step 1's test must check meaning, not wording, or it becomes the
+   standing word rule D167 rejected: the pull request for step 1 (#306) is amended so the test asserts the structure and
+   meaning-bearing parts of the verified line (exactly one such line; it names who delegates, says to act, says without
+   asking first, and the operator policy block follows and overrides it) and the mutation test that a reversed meaning
+   is caught, and drops the exact-string pin and the check for a particular word. Step 2: a test that pins `Wakes()` for
+   each kind and that `Parse` refuses an unknown name, so the inventory stays true. Step 3: tests as listed there. Step 4:
+   the existing suite is the safety net (INV-002), no new test; the threat-model edit is docs only. Steps 5 and 5a: the
+   tool's own tests first. Step 5b: the `releasecheck` test first. Step 6: docs only. Step 7: the run itself.
+7. **Mutation examples carried.** AT-006's `dispatch-to-supervisor` is argued in step 2's document. AT-007's `zone_alias`
+   (a field that translates an outside identifier into a zone) goes into step 3's diff review as the example that would
+   be rejected. Step 7 adds the contract's "What the standard got wrong" section (helped, got in the way, silent where it
+   should have spoken, defect class of anything that went wrong).
+
 ## Where we start
 
 `go run ./scripts/scrubcheck` on `6dff55f` finds 37 hits in 12 files (`scripts/scrubcheck/inventory.md`). They fall into
