@@ -266,7 +266,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(rec.Name), config.Clean(rec.Name), config.Clean(rec.MailSubject), metaSuffix(rec))
+		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(rec.KeyOrName()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), metaSuffix(rec))
 	case "limits":
 		for _, n := range args[1:] {
 			if !config.ValidName(n) {
@@ -292,7 +292,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(rec.Name), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
+		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(rec.KeyOrName()), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
 	case "set-zone":
 		if len(args) != 3 || !config.ValidName(args[1]) {
 			return usage(errors.New(setZoneUsage(prog)))
@@ -307,7 +307,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(rec.Name), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
+		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(rec.KeyOrName()), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !config.ValidName(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))
@@ -401,7 +401,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return ""
 			}
 			for _, r := range recs {
-				if r.Name == args[1] {
+				if r.KeyOrName() == args[1] {
 					return r.User
 				}
 			}
@@ -479,7 +479,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", config.Clean(r.Name), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note), zoneSuffix(r))
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note), zoneSuffix(r))
 		}
 	default:
 		if prog == "mash admin" {

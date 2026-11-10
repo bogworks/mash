@@ -48,12 +48,8 @@ func looksInterrupted(cfg config.Config, credsPath, name string) bool {
 	if err != nil {
 		return false
 	}
-	for _, r := range recs {
-		if r.Name == name {
-			return true
-		}
-	}
-	return false
+	_, ok := findRecord(recs, name)
+	return ok
 }
 
 // noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
@@ -181,10 +177,8 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		return fail("%v", err)
 	}
 	user := ""
-	for _, r := range recs {
-		if r.Name == name {
-			user = r.User
-		}
+	if r, ok := findRecord(recs, name); ok {
+		user = r.User
 	}
 	var revokeOut bytes.Buffer
 	switch {

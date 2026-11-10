@@ -1,0 +1,1 @@
+Every reader that indexes the directory by a record (who, the live-lease join, drift, label, retire, list, apply-limits) now uses the record's directory key, which is the name for every existing record, so a new-form record can never be mistaken for a legacy one of the same name. No output changes for existing records.

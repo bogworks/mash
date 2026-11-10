@@ -287,7 +287,7 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 	var fixes []dirFix
 	byName := map[string]store.Record{}
 	for _, r := range recs {
-		byName[r.Name] = r
+		byName[r.KeyOrName()] = r // the policy file's endpoints are legacy names: only a legacy record has that key
 	}
 	for _, e := range c.Endpoints {
 		r, ok := byName[e.Name]
@@ -346,9 +346,9 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 		declared[e.Name] = true
 	}
 	for _, r := range recs {
-		if !declared[r.Name] {
-			out = append(out, apply.Finding{Kind: kindRecordExtra, Subject: r.Name,
-				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record): " + orphanText(r.Name)})
+		if !declared[r.KeyOrName()] {
+			out = append(out, apply.Finding{Kind: kindRecordExtra, Subject: r.KeyOrName(),
+				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record): " + orphanText(r.KeyOrName())})
 		}
 	}
 	sortFindings(out)

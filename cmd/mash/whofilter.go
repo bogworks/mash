@@ -79,7 +79,7 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 func whoNames(ps []endpoint.Presence) string {
 	names := make([]string, len(ps))
 	for i, p := range ps {
-		names[i] = p.Record.Name
+		names[i] = p.Record.KeyOrName()
 	}
 	return strings.Join(names, "\n")
 }
@@ -111,7 +111,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
-		e := whoEntry{Name: r.Name, Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description, Zone: r.Zone}
+		e := whoEntry{Name: r.KeyOrName(), Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description, Zone: r.Zone}
 		if len(r.Caps) > 0 {
 			e.Caps = r.Caps
 		}
@@ -121,7 +121,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if !p.LastSeen.IsZero() {
 			e.LastSeen = p.LastSeen.UTC().Format(time.RFC3339)
 		}
-		if li, ok := live[r.Name]; ok && long {
+		if li, ok := live[r.KeyOrName()]; ok && long {
 			e.Lease = &whoLease{Host: li.Host, Version: li.Version}
 		}
 		out = append(out, e)
