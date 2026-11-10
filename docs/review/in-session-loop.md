@@ -1,6 +1,6 @@
 # The in-session review loop
 
-[ADR 0078](../decisions/0078-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): an author
+[ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): an author
 reviews their own diff before pushing, so findings come back into the same session in minutes instead of through a pull
 request comment hours later. The process is adopted from ADR 0047 of the sibling project at `randybias/rangehand`
 (`docs/decisions/0047-review-is-a-gate-in-the-implementers-loop.md`), whose gate this one is a port of; this page says what
@@ -37,7 +37,7 @@ What `--review` does, on a private worktree of `origin/main` merged with your re
 
 | Tier | Paths | Blocks | Round cap |
 | --- | --- | --- | --- |
-| `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `internal/store/admit*`, `cmd/mashctl/**`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
+| `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `cmd/mashctl/**`, `internal/release/**`, `scripts/buildrelease/**`, `scripts/release-check`, `scripts/build-twice`, `docs/allowed_signers`, `ci/release.allowed_signers`, `internal/natsauth/**`, `internal/mint/**`, `internal/store/**`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
 | `tests-and-docs` | `**/*_test.go`, `**/testdata/**`, `docs/**`, `**/*.md` | blocker | 2 |
 | `standard` | `cmd/**`, `internal/**`, `scripts/**`, `plugin/**`, `ci/**`, `go.mod`, `go.sum`, and any file no tier names | blocker, high | 4 |
 
@@ -52,6 +52,10 @@ each model run's OCR JSON is copied next to it as `<record>.evidence-<i>.json` a
 and, per file, `run-<i>: <sha256> <exact_range> <source_artifact_sha256>` (the last two from the OCR manifest, empty if
 it has none). The evidence files are written before the record, which is the commit point: a reader that finds the
 record finds its evidence.
+
+Until the source project fixes two known weaknesses in receipts (a receipt is checked against hashes held in the same writable
+store, and OCR's recorded range and source hash are never compared), a receipt is evidence of a local review, not a substitute
+for the server-side `codex-review` run. See ADR 0080, "Known weaknesses inherited from the source".
 
 Exit codes: `0` pass, or skipped for zero coverage with no receipt (a receipt is recorded for the diff's patch-id, which the server-side `codex-review` can verify
 instead of reviewing again), `1` blocked (fix and rerun; a rerun of the same diff is the same round), `2` error (a model
@@ -76,11 +80,12 @@ which reviews each pull request head with Codex.
   must equal the number of files the diff changes. A receipt that does not verify costs nothing: the watcher reviews the
   diff in full, as it does for any head with no receipt. So a mash pull request is never less reviewed than before, and
   the receipt only saves a round.
-- **The watcher must look where the gate writes.** The gate's default store is `~/.local/share/mash/reviews/inloop-v1`
-  (with a suffix when the base policy has standing questions); the source project's watcher defaults to its own
-  project's directory. They meet only if the operator points one at the other: set `GATE_REVIEW_STORE` for the gate
-  or `REVIEW_INLOOP_STORE` for the watcher. Records are keyed by the repository slug (`bogworks_mash`), so sharing a
-  store between repositories is safe. Until that is set, the receipt is simply not found.
+- **The watcher must look where the gate writes.** The defaults now agree: with no environment set, the gate writes
+  its records to the path the watcher reads (`${XDG_DATA_HOME:-$HOME/.local/share}/<the watcher's directory>/reviews/inloop-v1`,
+  with a suffix when the base policy has standing questions; the gate and the watcher derive it the same way). The
+  path is per-user, under the user's XDG data directory, so the gate and the watcher must run as the same user on the
+  same host. Otherwise set `GATE_REVIEW_STORE` for the gate and `REVIEW_INLOOP_STORE` for the watcher to one shared
+  path. Records are keyed by the repository slug (`bogworks_mash`), so sharing a store between repositories is safe.
 - **Base branch, not the pull request.** The watcher reads `docs/review/policy.json` and builds `scripts/reviewgate`
   from the fetched `origin/<base branch>` (`git show`, `git archive`), never from the pull request's own tree, so a
   pull request cannot verify its receipt with its own policy or verifier. A base without either skips verification, so

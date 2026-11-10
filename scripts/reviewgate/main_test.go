@@ -603,7 +603,7 @@ func TestRounds(t *testing.T) {
 	}
 }
 
-// TestRepoPolicy loads the policy the repository ships and checks ADR 0078's table and its strictest-wins examples.
+// TestRepoPolicy loads the policy the repository ships and checks ADR 0080's table and its strictest-wins examples.
 func TestRepoPolicy(t *testing.T) {
 	p, err := loadPolicy(filepath.Join("..", "..", "docs", "review", "policy.json"))
 	if err != nil {
@@ -649,7 +649,17 @@ func TestRepoPolicy(t *testing.T) {
 		{[]string{"internal/policyfile/a.go"}, "standard"},
 		{[]string{"internal/store/admit.go"}, "security-critical"},
 		{[]string{"internal/store/admit_test.go"}, "security-critical"},
-		{[]string{"internal/store/store.go"}, "standard"},
+		{[]string{"internal/store/store.go"}, "security-critical"},
+		{[]string{"internal/store/other.go"}, "security-critical"},
+		{[]string{"internal/release/x.go"}, "security-critical"},
+		{[]string{"scripts/buildrelease/main.go"}, "security-critical"},
+		{[]string{"scripts/release-check"}, "security-critical"},
+		{[]string{"scripts/build-twice"}, "security-critical"},
+		{[]string{"docs/allowed_signers"}, "security-critical"},
+		{[]string{"ci/release.allowed_signers"}, "security-critical"},
+		{[]string{".github/workflows/release.yml"}, "security-critical"},
+		{[]string{"internal/natsauth/x.go"}, "security-critical"},
+		{[]string{"internal/mint/x.go"}, "security-critical"},
 		{[]string{"cmd/mashctl/main.go"}, "security-critical"},
 		{[]string{"cmd/mash/main.go"}, "standard"},
 		{[]string{"scripts/reviewgate/main.go"}, "standard"},
@@ -898,5 +908,52 @@ func TestPolicyModelsValid(t *testing.T) {
 		if c.name == "both lists" && err == nil && (len(p.FallbackModels) != 1 || p.FallbackModels[0].Model != "f") {
 			t.Errorf("fallback not parsed: %v", p.FallbackModels)
 		}
+	}
+}
+
+// ---- known weaknesses inherited from the source ----
+//
+// The two tests below pin behaviour that ADR 0080 ("Known weaknesses inherited from the source") records as
+// weaknesses. They assert today's behaviour on purpose. When the source project fixes them and mash pulls the fix, these
+// tests must be flipped deliberately, not deleted or loosened.
+
+// TestKnownWeakness_ForgedReceiptVerifies pins that a receipt written by hand, with no review behind it, verifies: verify
+// checks the evidence against hashes held in the same writable receipt.
+func TestKnownWeakness_ForgedReceiptVerifies(t *testing.T) {
+	dir := t.TempDir()
+	store := filepath.Join(dir, "store")
+	rec := filepath.Join(store, "o_r", "forged1")
+	clean := ocrJSON("complete", "openrouter", "never-ran")
+	writeFile(t, rec+".evidence-1.json", clean)
+	body := fmt.Sprintf("verdict: pass\ntier: standard\nround: 1\nmodels: never-ran\ntime: 2026-11-01T10:00:00Z\ncovered: 1\ntotal: 1\ncovered-file: cmd/x.go\nevidence: 1\nrun-1: %x  \n", sha256.Sum256([]byte(clean)))
+	writeFile(t, rec, body)
+	changed := writeFile(t, filepath.Join(dir, "changed.txt"), "cmd/x.go")
+	var out, errb bytes.Buffer
+	code := run([]string{"verify", "-store", store, "-slug", "o/r", "-patchid", "forged1", "-policy", filepath.Join("..", "..", "docs", "review", "policy.json"), "-changed", changed}, &out, &errb)
+	if code != 0 || !strings.HasPrefix(out.String(), "inloop: ocr never-ran") {
+		t.Errorf("known weakness changed (forged receipt no longer verifies; flip this test): exit %d: %q %s", code, out.String(), errb.String())
+	}
+}
+
+// TestKnownWeakness_ReceiptIgnoresRange pins that verify never compares the recorded exact_range or source artifact hash
+// with anything: a receipt whose recorded range and source hash are rewritten to other values still verifies, and verify
+// takes no range at all, only the patch-id and the changed file names.
+func TestKnownWeakness_ReceiptIgnoresRange(t *testing.T) {
+	withManifest := `{"status":"complete","llm":{"provider":"openrouter","model":"m1"},"message":"","summary":{},"comments":[],` +
+		`"manifest":{"input":{"exact_range":"aaaa..bbbb","source_artifact_sha256":"` + strings.Repeat("a", 64) + `"}}}`
+	f := newVerifyFixture(t, "pass", "standard", 1, 1, []string{"cmd/x.go"}, withManifest)
+	b, err := os.ReadFile(f.record)
+	if err != nil || !strings.Contains(string(b), "aaaa..bbbb") {
+		t.Fatalf("fixture did not record the range: %v %q", err, b)
+	}
+	if code, out := f.verify("pid1"); code != 0 {
+		t.Fatalf("baseline: exit %d: %q", code, out)
+	}
+	f.rewriteRecord(func(s string) string {
+		s = strings.ReplaceAll(s, "aaaa..bbbb", "cccc..dddd")
+		return strings.ReplaceAll(s, strings.Repeat("a", 64)+"\n", strings.Repeat("f", 64)+"\n")
+	})
+	if code, out := f.verify("pid1"); code != 0 {
+		t.Errorf("known weakness changed (verify now checks the range; flip this test): exit %d: %q", code, out)
 	}
 }

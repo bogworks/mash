@@ -3,7 +3,7 @@
 #   bash scripts/gate <ref> [--base <ref>] [--no-free] [--ocr] [--no-codex]
 #   bash scripts/gate <ref> --review [--base <ref>] [--model provider:model]... [--round-cap-ignore]
 #   bash scripts/gate <ref> --pre-pr [--base <ref>]
-# Adopted from the review process of a sibling project (ADR 0078); see docs/review/in-session-loop.md.
+# Adopted from the review process of a sibling project (ADR 0080); see docs/review/in-session-loop.md.
 # On a private worktree of <base> (default origin/main) merged with <ref>, it runs, each to its own log and
 # stopping at the first failing check: a Codex review of merge-base..<ref> (subscription; its output kept, findings
 # counted; Claude through `claude -p` when Codex is at its usage limit, see GATE_REVIEWER), ocr on the free OpenRouter model as an advisory second opinion (--no-free skips it), ocr on GLM and
@@ -14,7 +14,7 @@
 # Every state and data directory honours XDG_STATE_HOME or XDG_DATA_HOME (default ~/.local/state and ~/.local/share),
 # and the GATE_* variables (GATE_SLOT_DIR, GATE_ROUNDS_DIR, GATE_REVIEW_STORE, GATE_FINDINGS_LOG) override each one.
 # Verifying ocr's findings is judgment, not this script's: read each medium-or-higher comment against the code.
-# --review is the in-session review loop of ADR 0078, run by the author on their own diff after conformance and before
+# --review is the in-session review loop of ADR 0080, run by the author on their own diff after conformance and before
 # the push. On the same merged worktree it runs only: go build, go vet and gofmt over the changed .go files (skipped when
 # the diff touches no .go, go.mod or go.sum), then one `ocr review --format json` per model in parallel (the repeated
 # --model flags, else "models" in docs/review/policy.json, else one run with ocr's own default), then the verdict
@@ -26,7 +26,8 @@
 # judges the head as round 1 and keeps the counter as it was (the cap never fires). Env knobs: GATE_REVIEWGATE (a
 # prebuilt reviewgate binary; default: built from ./scripts/reviewgate in the checkout), GATE_ROUNDS_DIR (round
 # counters, default ~/.local/state/mash/review-loop), GATE_REVIEW_STORE (pass records, default
-# ~/.local/share/mash/reviews/inloop-v1), GATE_FINDINGS_LOG (the per-finding NDJSON log, default
+# ${XDG_DATA_HOME:-~/.local/share}/<the review watcher's directory>/reviews/inloop-v1, with the questions suffix: the path
+# the watcher reads with no env set), GATE_FINDINGS_LOG (the per-finding NDJSON log, default
 # ~/.local/share/mash/reviews/findings-v1/<owner_name>.ndjson).
 # --pre-pr is the fast guard before opening a PR: on the same merged worktree it runs, in parallel and each to its own
 # log, the deterministic guards CI's conformance and adr-numbers jobs run: gofmt and go mod tidy, go build and go vet,
@@ -132,10 +133,12 @@ if [ "$prepr" = 1 ]; then # the fast pre-PR guards; see the header. Exits here: 
 		return $rc
 	}
 	# CI runs staticcheck with continue-on-error (existing findings are listed, not failed), so findings are printed and the
-	# check passes; a staticcheck that cannot run is not a finding and still fails.
+	# check passes; a staticcheck that cannot be built or run is not a finding and still fails. `go run` exits 1 for both
+	# findings and a failed download or build, so the tool is built first and only its own exit 1 is "findings".
 	pp_staticcheck() {
-		local rc=0
-		go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./... || rc=$?
+		local rc=0 bin=$out/staticcheck
+		GOBIN=$out go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 || { echo "staticcheck could not be built" >&2; return 1; }
+		"$bin" ./... || rc=$?
 		[ "$rc" -le 1 ] || return "$rc" # 1 is "findings"; anything else is the tool failing
 		[ "$rc" = 0 ] || echo "(staticcheck findings are advisory in CI: continue-on-error)"
 		return 0
@@ -211,7 +214,7 @@ standing=$(jq -r '.questions[]? | "Also answer: \(.text) A yes is a \(.severity)
 # A review made under other standing questions is not this one: the receipt store is keyed by them (empty questions: the old store).
 qtag=; [ -z "$standing" ] || qtag=-q$(printf %s "$standing" | sha256sum | cut -c1-12)
 
-if [ "$review" = 1 ]; then # the in-session review loop (ADR 0078); see the header
+if [ "$review" = 1 ]; then # the in-session review loop (ADR 0080); see the header
 	policy=$repo/docs/review/policy.json
 	[ -f "$policy" ] || { echo "gate: --review needs $policy, and this checkout has none" >&2; exit 2; }
 
@@ -298,7 +301,8 @@ if [ "$review" = 1 ]; then # the in-session review loop (ADR 0078); see the head
 		>"$out/verdict.txt" 2>"$out/verdict.err" || vrc=$?
 	cat "$out/verdict.txt"; cat "$out/verdict.err" >&2
 	tier=$(sed -n 's/^tier: \([^ ]*\) .*/\1/p' "$out/verdict.txt" | head -1)
-	store=${GATE_REVIEW_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews/inloop-v1${qtag}}
+	# The default is the review watcher's own default store (it names its own directory, not mash's), so the two agree with no env set.
+	store=${GATE_REVIEW_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/rangehand/reviews/inloop-v1${qtag}}
 	# The findings log (docs/review/in-session-loop.md): one NDJSON line per OCR comment of every complete run, for the
 	# research re-score (which fills in "confirmed"). Best effort: a failed write never fails the gate.
 	flog=${GATE_FINDINGS_LOG:-${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews/findings-v1/${slug//\//_}.ndjson}

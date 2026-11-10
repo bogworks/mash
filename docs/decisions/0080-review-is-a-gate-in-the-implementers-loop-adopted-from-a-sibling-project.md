@@ -41,7 +41,7 @@ does not restate their reasoning.
 
    | Tier | Paths | Blocks the push | Round cap |
    | --- | --- | --- | --- |
-   | `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `internal/store/admit*`, `cmd/mashctl/**`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
+   | `security-critical` | `internal/admin/**`, `internal/policy/**`, `internal/sap/**`, `internal/store/**`, `cmd/mashctl/**`, `.github/**`, `.mergify.yml` | blocker, high, medium | 6 |
    | `standard` | `cmd/**`, `internal/**`, `scripts/**`, `plugin/**`, `ci/**`, `go.mod`, `go.sum`, and any file no tier names | blocker, high | 4 |
    | `tests-and-docs` | `**/*_test.go`, `**/testdata/**`, `docs/**`, `**/*.md` | blocker | 2 |
 
@@ -86,6 +86,23 @@ severities, round caps and the tier each representative path resolves to. `bash 
 `--review` path with a stub `ocr`: pass, block, round counting, the cap, coverage and skipped diffs, a failed preview,
 questions in the background and the findings log. `go run ./scripts/adrlint docs` checks this record. A review by a real
 `ocr` run and the watcher's verification of a mash receipt are not covered by any test in this repository.
+
+### Known weaknesses inherited from the source
+
+A Codex adversarial review of pull request #352 (gpt-6-sol, 2026-11-10) found two weaknesses in the receipt mechanism
+this record adopts. Both are in the source project's design, and mash carries them unchanged.
+
+* **Forged receipts.** `reviewgate verify` checks a receipt's evidence against hashes stored in that same writable
+  receipt. Anyone who can write the store the watcher reads can write a `pass` record and a matching evidence file for an
+  unreviewed patch, and `verify` recomputes a pass.
+* **Stale receipts.** A receipt is looked up by patch-id and changed file names only. OCR's `exact_range` and source
+  artifact hash are recorded but never checked, so after a rebase onto changed surrounding code an old clean review can
+  waive review of the new combination. The patch-id also omits hunk line numbers.
+
+mash does not diverge from the source: the fix belongs at the source, and mash pulls it. Until it is fixed, a receipt is
+evidence of a local review and not a substitute for the server-side `codex-review` run. `TestKnownWeakness_ForgedReceiptVerifies`
+and `TestKnownWeakness_ReceiptIgnoresRange` in `scripts/reviewgate/main_test.go` pin today's behaviour; when the source
+fixes these, those tests must be flipped deliberately.
 
 ## Pros and Cons of the Options
 

@@ -1,4 +1,4 @@
-// Command reviewgate is the verdict engine of the in-session review gate (ADR 0078). The gate runs
+// Command reviewgate is the verdict engine of the in-session review gate (ADR 0080). The gate runs
 // `ocr review --format json` once per configured model; this tool merges those runs, picks the gate from the tier
 // policy for the files the diff touches, prints the findings the implementer must fix, and decides the verdict.
 //

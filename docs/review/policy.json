@@ -17,8 +17,16 @@
         "internal/admin/**",
         "internal/policy/**",
         "internal/sap/**",
-        "internal/store/admit*",
         "cmd/mashctl/**",
+        "internal/release/**",
+        "scripts/buildrelease/**",
+        "scripts/release-check",
+        "scripts/build-twice",
+        "docs/allowed_signers",
+        "ci/release.allowed_signers",
+        "internal/natsauth/**",
+        "internal/mint/**",
+        "internal/store/**",
         ".github/**",
         ".mergify.yml"
       ]
