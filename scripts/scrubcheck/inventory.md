@@ -6,7 +6,8 @@ it). The scrub itself comes in later pull requests; this one only starts the inv
 scrub is done when no row is `open`. This file is inside the tool's own directory, which the tool skips.
 
 Tracked files only: the release archives and the plugin package are scanned through `-archive` once a build exists, and
-any hit from there is added here. Regenerate the raw list with `go run ./scripts/scrubcheck`.
+any hit from there is added here. The last 8 rows are hits that the scrub plan
+(`docs/plans/2026-11-10-scrub-remainder.md`) itself adds by naming the words. Regenerate the raw list with `go run ./scripts/scrubcheck`.
 
 | Hit | Line text | Verdict |
 |---|---|---|
@@ -47,3 +48,11 @@ any hit from there is added here. Regenerate the raw list with `go run ./scripts
 | `scripts/adrlint/main_test.go:161:lanes` | `{"d: whole word only", with(good(), adr, edit(goodADR, "A driver.", "leading planes lanes_x")), nil},` | open |
 | `scripts/adrlint/main_test.go:186:lane` | `dir := tree(t, with(good(), "0001-use-one-way.md", edit(edit(goodADR, "status: accepted", "status: nope"), "A ` | open |
 | `scripts/adrlint/main_test.go:469:lane` | `{"built-in rule still applies", "zebra", "A lane.", true},` | open |
+| `docs/plans/2026-11-10-scrub-remainder.md:3:herd` | `Date: 2026-11-10. Scope: the work contract 'mash-shed-herd-idioms' (draft-4, ratified 2026-11-09) after its fi` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:23:coordinator` | `\| G1 shipped prose \| 'docs/security/threat-model.md' \| 1 \| the word "coordinator" in an open question; shi` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:29:rangehand` | `The scan finds no 'rangehand' or 'compat.json' in release scripts, their tests, workflows or 'docs/release.md'` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:56:herd` | `"owner" where it says a herd appears in mash as a zone, and REQ-009 covers translating an outside identifier i` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:75:homerange` | `- 'internal/portable/portable_test.go': its personal-name regexp must name 'homerange' and 'rangehand' to dete` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:75:rangehand` | `- 'internal/portable/portable_test.go': its personal-name regexp must name 'homerange' and 'rangehand' to dete` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:92:rangehand` | `'rangehand' and 'compat.json' over the release scripts, their tests, workflows and 'docs/release.md', and a re` | open (this plan names the words to plan their removal; see step 6) |
+| `docs/plans/2026-11-10-scrub-remainder.md:95:herd` | `herd; the requirement-to-evidence map; the review records (pre-merge review and adversarial review on another ` | open (this plan names the words to plan their removal; see step 6) |
