@@ -445,20 +445,34 @@ var validOrigin = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
 func validOriginName(s string) bool { return len(s) >= 1 && len(s) <= 48 && validOrigin.MatchString(s) }
 
+// validViaOrigin is the one rule for a via origin, used by SignVia and VerifyVia: a legacy endpoint name (validOriginName,
+// exactly as before), or the flat key of a new-form endpoint, agent_owner_name, in its canonical form (FromFlat accepts
+// it and EndpointIdentity.Flat gives back the same string, so no token is empty, upper-case, over length or the legacy
+// agent token, and no other spelling is accepted). The origin is signed as the string given. For a sender that is a
+// new-form endpoint that string is exactly what its sender name (Name in the SenderHeader, set from the endpoint's
+// directory key) is: its Flat form. The signed Sub of that sender is its mail subject, agents.mail.<agent>.<owner>.<name>.
+func validViaOrigin(s string) bool {
+	if validOriginName(s) {
+		return true
+	}
+	id, err := FromFlat(s)
+	return err == nil && id.Flat() == s
+}
+
 func viaInput(h SenderHeader, origin string, seq uint64) []byte {
 	return []byte("MASH-VIA-V1\n" + h.Account + "\n" + h.User + "\n" + h.Sub + "\n" +
 		h.TS + "\n" + h.Nonce + "\n" + origin + "\n" + strconv.FormatUint(seq, 10) + "\n")
 }
 
 // SignVia declares, under the key of the message h signs, that this message relays or quotes message seq of the
-// signer's own inbox, whose sender was origin (an endpoint name). The value is "<origin>#<seq>.<sig>", for the
+// signer's own inbox, whose sender was origin (a legacy endpoint name or the flat key of a new-form endpoint, see validViaOrigin). The value is "<origin>#<seq>.<sig>", for the
 // Mash-Via header.
 func (id Identity) SignVia(h SenderHeader, origin string, seq uint64) (string, error) {
 	if id.kp == nil {
 		return "", errors.New("sap: identity has no seed")
 	}
-	if !validOriginName(origin) {
-		return "", errors.New("sap: via origin is not an endpoint name")
+	if !validViaOrigin(origin) {
+		return "", errors.New("sap: via origin is not an endpoint name or flat key")
 	}
 	if seq == 0 {
 		return "", errors.New("sap: via sequence is 0")
@@ -484,7 +498,7 @@ func VerifyVia(h SenderHeader, value string) (string, uint64, bool) {
 	}
 	origin := value[:hash]
 	seq, ok := markSeq(rest[:dot])
-	if !ok || !validOriginName(origin) || !verifySig(h.User, viaInput(h, origin, seq), rest[dot+1:]) {
+	if !ok || !validViaOrigin(origin) || !verifySig(h.User, viaInput(h, origin, seq), rest[dot+1:]) {
 		return "", 0, false
 	}
 	return origin, seq, true

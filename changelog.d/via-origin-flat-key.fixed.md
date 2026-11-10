@@ -1,0 +1,1 @@
+`mash send --via` and the send tool's `via` now work when the relayed message came from an endpoint with an agent, owner and name: the signed `Mash-Via` origin may be a legacy endpoint name or that endpoint's `agent_owner_name` key, and a legacy origin signs exactly as before.
