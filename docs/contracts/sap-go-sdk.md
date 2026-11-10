@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-7 (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 recorded Randy's answers; draft-7 renames the repository and prepares the upstream landing on his draft-6 comments; Appendix A) |
+| Contract id and revision | sap-go-sdk, revision draft-7a (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 recorded Randy's answers; draft-7 renames the repository and prepares the upstream landing on his draft-6 comments; Appendix A) |
 | Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
@@ -343,7 +343,8 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   upstream, and not published or endorsed by Synadia.
 - MUST: interop tests that need dependencies beyond nats.go and nkeys live in a separate test module (`test/go.mod`),
   as `synadia-io/orbit.go` does with its `<module>/test` modules. This keeps the runtime dependencies to REQ-014's.
-- MUST: it does not depend on mash and does not import any bogworks package.
+- MUST: it does not depend on mash. It imports no package from any other bogworks module: imports within its own
+  module, `github.com/bogworks/synadia-agents.go/...`, are the SDK's own and are allowed.
 - Acceptance: AT-007, AT-009.
 
 ### REQ-016: A consumer can build on it without forking it
@@ -599,7 +600,8 @@ The review records are completion evidence.
   deviation are recorded. An accepted issue-stage decline stands in for the pull request.
 
 ### AT-009: No mash (runnable check, plus a review)
-- A CI check fails on any import of a bogworks module, and on the identifiers or subjects named in REQ-001 (`mail`
+- A CI check fails on any import of a `github.com/bogworks/` package outside the SDK's own module (its own
+  subpackages are allowed), and on the identifiers or subjects named in REQ-001 (`mail`
   verb, zone, `SignInstance`, `SignUrgent`, `SignInReplyTo`, `SignVia`) in code or docs.
 - The adversarial review of each release inspects the exported API (`go doc -all` output) for any concept not in SAP
   0.3, under any name. A finding blocks the release.
@@ -859,6 +861,14 @@ H-01, F-05, G-04 and G-03 partly resolved, answered below. It found no misstated
 | I-03: the runner's classification meant two things, a fixed group and a run result. | nonblocking | Accepted. Each obligation has a capability group, fixed in the catalog (checkable, needs configuration, not checkable). Each run gives a separate result (pass, fail, configuration missing) (REQ-013, AT-006). |
 
 The critic has not read draft-5.
+
+### Server-side review of draft-7 (codex-review, 2026-11-10)
+
+The repository's review watcher ran Codex CLI 0.166.0 with `-c daybreak=true` on ee491ff.
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| H1 (`docs/contracts/sap-go-sdk.md:346`): REQ-015 forbade importing any bogworks package, which would also forbid the SDK's own subpackages under `github.com/bogworks/synadia-agents.go`. AT-009 would then reject the planned layout. | high | Accepted. Fixed in draft-7a: imports within the SDK's own module are allowed, and only other bogworks modules are forbidden. AT-009's check says the same. |
 
 ### mash-lead's review of draft-2 (2026-11-10), applied in draft-3
 
