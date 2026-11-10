@@ -1,0 +1,656 @@
+# Work contract: the Synadia Agents Protocol Go SDK
+
+| | |
+|---|---|
+| Standard | contract@0.1.0 |
+| Contract id and revision | sap-go-sdk, revision draft-2 (draft-1 answered the critic's findings, Appendix A) |
+| Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
+| Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
+| Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
+| Writer | mash-sdk, delegated by mash-lead, who writes the team's contracts; model family Anthropic |
+| Critic | OpenAI (Codex CLI 0.166.0, gpt-6-sol, daybreak on); findings and dispositions in Appendix A |
+| Ratified by | not yet |
+| Charters and seam pages cited | none exist for the SDK; the names seam page 1.0.0 (planning repository, `seams/`) is cited for the token rule only (BND-004) |
+| Date | 2026-11-10 |
+| Sources | Card #129 (`cards/mash-sap-go-sdk.md`, its log of 2026-11-10); the naming-grammar contract draft-5, BND-005; SAP 0.3.0 `core-protocol.md` in `synadia-ai/synadia-agent-sdk-docs` at `c48cea5f07965cc8fd4054e120459f1833b3ed2b` (cited `SAP:Lnnn`); `synadia-ai/synadia-agents` at `ed9aefb` (the TypeScript and Python SDKs, `test-fixtures/`, `docs/protocol-mapping.md`); `henomis/phero` v2.3.0 `nats/`; `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`; `nats-io/nats.go` `CONTRIBUTING.md`; `synadia-io/orbit.go` `CONTRIBUTING.md`; bogworks/mash `internal/sap/` and ADRs 0003, 0004, 0005, 0017 (evidence only) |
+
+## 1. Intent
+
+### Problem
+
+SAP, the Synadia Agents Protocol, has official SDKs in TypeScript and Python only. No Go SDK exists. mash speaks SAP
+through its own `internal/sap` code, mixed with mash's extensions, so it is neither reusable nor checked against the
+protocol as a whole. Randy: "before final mash release, we need to build the SAP Go SDK with robust testing, PR it to
+Synadia, and rebuild mash around it." (card #129, 2026-11-08)
+
+### Desired outcome
+
+A public Go SDK for SAP 0.3 that implements the protocol and nothing else, modeled on Synadia's TypeScript and Python
+SDKs. It has a caller side and a host side, the optional sender identity extension (SAP §13), and a conformance suite
+that ties every requirement of the spec to a test and that others can run. It is offered to Synadia, and mash can
+consume it. Randy, on the scope: "Existing Synadia Agent Protocol SDKs that it can work from as a model." "But not Go."
+(card #129 log, 2026-11-10)
+
+### Motivation
+
+It gates the final mash release (card #129: "a gate on the final mash release"). It is also what mash shows Synadia
+(card mash-show-synadia), and it gives mash the SAP conformance evidence card #13 asked for.
+
+### Success measures
+
+- **Go programs can speak SAP.** A Go program can discover SAP agents, prompt them and read their streamed replies,
+  and can host an SAP agent that the official TypeScript and Python callers can use. The same holds the other way
+  round.
+- **The conformance catalog is complete.** Every MUST in SAP 0.3 maps to a passing Go test or to a stated reason it
+  does not apply, and CI fails when a MUST has neither.
+- **The identity vectors pass.** The Go SDK passes Synadia's language-neutral identity vectors.
+- **The offer to Synadia is made.** An issue, and then a pull request, offering the SDK to Synadia are open.
+- **mash can build on it.** mash could be rebuilt on the SDK's public API without forking it (AT-010).
+
+### Non-goals
+
+- A mash SDK. Nothing of mash goes in it: no `mail` verb, no zones, no mash signatures (`SignInstance`, `SignUrgent`,
+  `SignInReplyTo`, `SignVia`), no mash token rule, no JetStream inboxes.
+- Rebuilding mash on the SDK. That is a follow-on contract, and card #129's done-when needs it: "mash's main branch
+  uses the SDK". This contract only requires that mash can (REQ-016). The follow-on is tracked as Q11.
+- Changing SAP. The SDK implements 0.3 as written; spec defects go to Synadia as issues.
+- The deferred parts of SAP 0.3: end-to-end encryption, the `attachments` upload endpoint, and JetStream streaming
+  (SAP:L17-L22).
+- LLM tool wrappers like the TypeScript `AgentTools`, and the Agent Fabric layer.
+- Policy. The SDK offers admission hooks and decides no one's access (card #103 is mash's).
+
+## 2. Actors and journeys
+
+### Actors
+
+- **ACT-001, Randy.** Decision owner and ratifier. He owns the relationship with Synadia and signs what needs his
+  legal name.
+- **ACT-002, the mash team (`mash-lead`, with `mash-sdk` doing the work).** Writes and tests the SDK under this
+  contract.
+- **ACT-003, Synadia's SAP maintainers.** `CODEOWNERS` of `synadia-ai/synadia-agents` names
+  `@synadia-io/nats-ai-sdk-maintainers`. They decide whether to take the SDK.
+- **ACT-004, Go developers.** They write SAP callers or agents in Go.
+- **ACT-005, mash.** A later consumer, through the SDK's public API only.
+
+### Primary journeys
+
+- **JRN-001, caller.** A Go program connects to NATS and discovers agents. It prompts one with text and attachments,
+  reads ack, response and query chunks until the terminator, answers a query, and gets typed errors.
+- **JRN-002, host.** A Go program registers an agent with its agent, owner and name tokens. It serves prompts and
+  status, publishes heartbeats, and is found and prompted by the TypeScript and Python callers.
+- **JRN-003, conformance.** A developer of any SAP implementation runs the SDK's conformance runner against their agent
+  or caller over NATS and gets a per-requirement report.
+- **JRN-004, upstream.** Randy opens an issue on `synadia-ai/synadia-agents` offering the SDK. Then a pull request
+  follows, in whatever form Synadia asks for.
+
+### Exceptional journeys
+
+- **JRN-005, a malformed peer.** The peer sends a malformed envelope, bad base64, an oversize payload, a missing
+  terminator or an unknown chunk type. The SDK answers as the spec says: 400, the error stream, ignore, or time out.
+  It never hangs and never crashes.
+- **JRN-006, a bad signature.** A signed request fails §13 verification. The host refuses it with 401 or 403 as the
+  spec says, and an admission hook can refuse a verified sender.
+- **JRN-007, Synadia declines or asks for changes.** The SDK stays public under bogworks, and the contract is still
+  met (section 8).
+
+## 3. Behavioral requirements
+
+Source classes: Confirmed (Randy ruled it), Derived (from a cited document), Proposed (the writer's; open to the critic
+and to Randy).
+
+**How wire rules are cited.** The spec is the authority for wire behaviour. A requirement below cites the spec's section
+and lines and names the SDK's outcome. It does not restate the rule, and it never strengthens a SAP SHOULD or MAY into a
+MUST. Where the SDK makes a choice the spec leaves open, the requirement marks it as **SDK policy (Proposed)**. Every
+spec obligation is enumerated atomically in the conformance catalog (REQ-010), not in this page.
+
+### REQ-001: The protocol only, nothing of mash
+- Source: Confirmed. "it should just be building that not a mash SDK" (Randy, card #129 log, 2026-11-10).
+- MUST: the SDK implements SAP 0.3 and its optional §13 extension, and no other protocol.
+- MUST NOT: mash's `mail` verb, zone token, signature variants, token rule, directory or JetStream inboxes appear in
+  the SDK's code, API or docs.
+- Acceptance: AT-009.
+
+### REQ-002: One pinned protocol version
+- Source: Derived. SAP §11 (SAP:L637-L659). Callers MUST compare only the MAJOR.MINOR prefix (SAP:L643), and "callers
+  SHOULD pin to an exact MAJOR.MINOR until 1.0" (SAP:L651).
+- MUST: the SDK targets SAP 0.3.0 at `c48cea5f`, and the host declares `protocol_version` `0.3`. The caller compares
+  only the MAJOR.MINOR prefix (spec MUST).
+- SDK policy (Proposed), following the SHOULD at SAP:L651: by default, the caller refuses an agent whose MAJOR.MINOR is
+  not exactly `0.3`, with a typed error. The program can relax this to §11.2's same-MAJOR rule, and from 1.0 the
+  default becomes same-MAJOR.
+- MUST: the spec revision is pinned by commit and by the SHA-256 of `core-protocol.md`.
+- MUST: moving to a later spec revision is a deliberate change that re-runs the catalog extraction (REQ-010).
+- Acceptance: AT-001, AT-002.
+
+### REQ-003: Caller
+- Source: Derived. SAP §4 to §7 and §9; the TypeScript `Agents` and `Agent` API (`client-sdk/typescript/src/index.ts`).
+- **Discovery.** The caller MUST discover agents through `$SRV.PING.agents` and `$SRV.INFO.agents` (§4).
+- **Prompt subject.** It MUST publish a prompt to the subject from the discovery record and MUST NOT construct one
+  from identity (SAP:L76).
+- **Payload.** It MUST send plain text or the JSON envelope with attachments (§5).
+- **Local checks.** It MUST enforce `max_payload` and `attachments_ok` locally (§5.4).
+- **Reply stream.** It MUST stream reply chunks in order (`response`, `status`, `query`), ignore unknown chunk types
+  and status values, and end at the zero-byte terminator (§6). It MUST accept both the string and object forms of a
+  `response` chunk's `data` (SAP:L364).
+- **Queries.** It MUST let the program answer a mid-stream query exactly once (§7).
+- **Timeout.** It MUST apply a per-stream inactivity timeout (default 60 s, SAP:L402) and support cancellation by
+  dropping the subscription (SAP:L413).
+- **Errors.** It MUST inspect error headers on every message before the body (§9). When the error body is empty or
+  not valid JSON, it MUST fall back to the `Nats-Service-Error` header as the description (SAP:L593).
+- **Context.** Every blocking call takes a `context.Context`.
+- Acceptance: AT-001, AT-003, AT-004.
+
+### REQ-004: Host
+- Source: Derived. SAP §3, §5, §6, §8.7 and §9; the TypeScript `AgentService` (`agent-sdk/typescript/README.md`).
+- **Registration.** The host MUST register a NATS micro service named `agents` with `version`, `description` and the
+  metadata of §3.2 (`agent`, `owner`, `protocol_version`, `session` when session-aware). It MUST register the `prompt`
+  and `status` endpoints, both in queue group `agents`, set explicitly (SAP:L175, L547). It MUST support the endpoint
+  metadata `max_payload` and `attachments_ok` (§2.1).
+- **Reply stream.** On a prompt it MUST send exactly one `ack` status chunk first (SAP:L380), then the program's
+  chunks, then the zero-byte, header-less terminator (SAP:L388). It sends nothing after the terminator.
+- **Request errors.** It MUST answer malformed requests with 400 as §5 and §9 list them. It MUST tolerate and preserve
+  unknown envelope fields (SAP:L307).
+- **Status.** It MUST answer `status` with a freshly built heartbeat-shaped payload, or 500 if building it fails
+  (§8.7). It MUST ignore the reserved request body: a non-empty body is not an error (SAP:L548).
+- **Error codes.** It MUST use only the error codes in SAP §9's table (SAP:L607).
+- **Extra endpoints.** It MUST let the program add extra micro endpoints without the SDK knowing what they are. This
+  is the TypeScript `extraEndpoints` equivalent (REQ-016).
+- Acceptance: AT-001, AT-003, AT-004.
+
+### REQ-005: Heartbeat
+- Source: Derived. SAP §8 (SAP:L462-L537).
+- **Spec obligations (cited, enumerated in the catalog).** The host publishes heartbeats on the fixed subject with
+  the §8.3 required fields (SAP:L484-L519). The tracker subscribes before the first PING (§8.5). Optional fields
+  (`protocol_version`, `endpoints`), when declared, follow §8.3. A receiver ignores a malformed optional field and keeps
+  the heartbeat (SAP:L517).
+- **SDK policy (Proposed), from the spec's recommendations, not its MUSTs:**
+  - The default interval is 30 s (SAP:L478).
+  - An interval under 1 s is allowed only with an explicit opt-in. SAP says SHOULD NOT on shared infrastructure; it
+    does not forbid it.
+  - The host starts heartbeats after registration (a SHOULD, SAP:L482).
+  - The host declares `protocol_version` and `endpoints` by default.
+  - The tracker's offline threshold defaults to 3 × `interval_s` (a recommendation, SAP:L480), and the program can
+    configure it.
+- MUST: the SDK provides a heartbeat tracker.
+- Acceptance: AT-001, AT-003.
+
+### REQ-006: Attachments
+- Source: Derived. SAP §5.2 (SAP:L263-L274).
+- MUST: attachments are `{filename, content}`, with content in standard-alphabet padded base64 and no whitespace.
+- MUST: the SDK encodes attachments that way and refuses anything else as 400 on the host side and as a typed error on
+  the caller side.
+- Acceptance: AT-001, AT-004.
+
+### REQ-007: Errors
+- Source: Derived. SAP §9 (SAP:L566-L613); the typed errors of the TypeScript SDK.
+- MUST: errors are typed Go values, usable with `errors.Is` and `errors.As`, carrying the code, the header text and the
+  optional JSON body (`error`, `message` and extra fields).
+- MUST: a caller can tell a local refusal (payload too large, attachments not supported, empty prompt, query already
+  answered, version mismatch) from a remote error.
+- Acceptance: AT-001, AT-004.
+
+### REQ-008: Sender identity (§13), optional and additive
+- Source: Derived. SAP §13 (SAP:L717-L1072). The official SDKs implement it (prior-art report §2). Whether it is in
+  scope is Q3.
+- **Signing.** When given a seed, the SDK MUST sign heartbeats, and both `prompt` and `status` requests, with
+  `Agent-Sender` (§13.5; caller checklist SAP:L709). It MUST NOT sign a reply, `status` replies included (SAP:L1052).
+- **Payload limit.** The caller MUST count the `Agent-Sender` header bytes in its local `max_payload` check
+  (SAP:L887).
+- **Verifying.** It MUST verify live messages (30 s window, nonce replay set) and stored messages (§13.6, SAP:L973-L980).
+  It MUST classify senders as verified, claimed or absent.
+- **Registration and policy.** It MUST support `min_sender_trust`, and `user_nkey`, `account` and `id_sig` in
+  registration (§13.7, §13.8). A caller that reads an unknown `min_sender_trust` value MUST treat it as `signed`
+  (SAP:L1001).
+- **Status is always answerable.** The host MUST classify a `status` request's sender and MUST NOT refuse it on
+  identity grounds: a failed classification is logged and the reply is sent (SAP:L1003; agent checklist SAP:L688).
+- **Admission hook.** It MUST offer an admission hook that can refuse a verified sender with 403. It decides no policy
+  itself.
+- **Interop.** A peer without §13 MUST interoperate unchanged (SAP:L1061-L1070).
+- **Nothing extra.** It MUST carry no signature form beyond §13.
+- Acceptance: AT-005.
+
+### REQ-009: Tokens as SAP defines them
+- Source: Derived. SAP §2.2 (SAP:L94-L102); naming-grammar contract BND-005 ("agent and owner tokens set per endpoint,
+  not a constant `cc` and one owner per deployment").
+- MUST: the program sets the agent, owner and name tokens of the subject per service instance (SAP §2, §3.2:
+  `metadata.agent`, `metadata.owner`, `name` in the subject). The SDK enforces SAP's MUSTs on them: NATS subject rules,
+  and no leading `$` (SAP:L98). That per-instance setting is SAP's own model, not a mash concept. The naming-grammar
+  contract's BND-005 only relies on it.
+- MUST: the SDK reports SAP's SHOULDs (characters `a-z 0-9 - _`, 1 to 63 characters, subject under 256) as warnings
+  or an opt-in strict mode, not as refusals.
+- MUST NOT: it carries any deployment's stricter rule. A deployment's own naming grammar, for example, is applied by
+  the deployer, not the SDK (names seam page 1.0.0, sentence 3).
+- Acceptance: AT-001, AT-010.
+
+### REQ-010: A conformance catalog that ties every requirement to a test
+- Source: Proposed, from the method of `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`
+  (169 requirements, each with section, line and tests) and card #13's "SAP v0.3 conformance table".
+- MUST: a machine-readable catalog lists every MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in `core-protocol.md` at the
+  pinned revision, split into **atomic obligations**: one testable behaviour each. A sentence with two obligations is
+  two entries. Each entry has its id, section, line, a short paraphrase (not the spec's text), role (caller, host or
+  both), strength, and either the tests that cover it or a reason it does not apply.
+- MUST: each covering test names the obligation ids it asserts (for example in a test comment or table), and the check
+  verifies that link both ways. A test that names no obligation does not count, and a single test that claims more
+  than a small fixed number of obligations is flagged for review.
+- MUST: every "not applicable" reason, and every change to an existing entry, is reviewed in the pull request that
+  makes it. The adversarial review of that pull request covers the catalog diff.
+- MUST: a CI check fails when a MUST or MUST NOT has neither a test nor a reviewed reason, when a named test does not
+  exist or does not reference the obligation, or when the pinned spec's hash changes without the catalog being
+  regenerated.
+- MUST: the catalog cites the spec by URL, commit and line. It does not copy the spec's text, because the spec
+  repository states no licence (Q6).
+- Acceptance: AT-002.
+
+### REQ-011: Interoperability with the official SDKs
+- Source: Derived. The `synadia-agents` interop pattern (`client-sdk/python/tests/test_interop_e2e.py`), which runs the
+  TypeScript `ReferenceAgent` against another language's caller.
+- MUST: CI runs the Go caller against both official reference hosts: the TypeScript `ReferenceAgent` and the Python
+  reference agent (`agent-sdk/python/examples/_reference_agent.py`). It also runs the official TypeScript and Python
+  callers against a Go host. Every combination runs on a pinned `nats-server`; Synadia's CI pins 2.12.7.
+- MUST: the runs cover discovery, a text prompt, an envelope with attachments, a mid-stream query, an error stream,
+  status and heartbeat, and, with §13 in scope, a signed request in both directions.
+- Acceptance: AT-003.
+
+### REQ-012: Synadia's identity vectors pass
+- Source: Derived. `synadia-agents/test-fixtures/identity/` (`sender-vectors.json`, `id-sig-vectors.json`,
+  `agent-id-fixtures.json`, `keys.json`): "Known-answer vectors ... verified by every SDK".
+- MUST: with §13 in scope, the Go SDK passes every vector in those files, pinned by commit.
+- Acceptance: AT-005.
+
+### REQ-013: A conformance runner others can use
+- Source: Proposed. The contract asks for "a test harness others can run" (mash-lead, 2026-11-10).
+- MUST: a command-line runner, `sapconform` or similar, tests any SAP agent (host) over NATS as a black box. It
+  reports each host-role catalog obligation as pass, fail or not applicable, with the obligation id and the spec line.
+- Scope decided here: testing callers needs a driver for the caller under test, so it is out of this contract and
+  listed as a follow-on. The runner's report states that it covers host obligations only, so it never claims caller
+  conformance.
+- MUST: the runner needs nothing of the system under test beyond NATS access.
+- MUST: the runner's checks are the catalog's checks, not a second list.
+- Acceptance: AT-006.
+
+### REQ-014: Ready for Synadia to take
+- Source: Proposed. These are the writer's reading of what an upstreamable Go SDK needs. Randy's words ask only that it
+  be PR'd to Synadia. Evidence: `nats-io/nats.go` `CONTRIBUTING.md` (`Signed-off-by` in commits and PR, CNCF Code of Conduct, an
+  issue first, no non-essential dependencies); `synadia-io/orbit.go` `CONTRIBUTING.md` (per-directory modules, commit
+  subjects prefixed with the module); the Apache-2.0 licence of `synadia-ai/synadia-agents`.
+- **Licence.** Apache-2.0, with a `LICENSE`, a `NOTICE` if needed, and an SPDX header in each file.
+- **Dependencies.** Only `github.com/nats-io/nats.go` (including its `micro` package) and `github.com/nats-io/nkeys`
+  at run time. A further dependency needs a recorded reason.
+- **Repository files.** A `CONTRIBUTING.md`, a code of conduct and a security policy, written so Synadia could adopt
+  them unchanged.
+- **Mapping and examples.** A `protocol-mapping.md` that maps every public call to its spec section, the way the
+  TypeScript SDK does. Runnable examples for a caller and a host.
+- **Go versions.** It supports the two most recent Go releases.
+- **Commits.** Commits carry whatever sign-off Synadia requires (Q5).
+- Acceptance: AT-007.
+
+### REQ-015: Its own public repository, never inside mash
+- Source: Proposed for "never inside mash" (mash-lead's recommendation, 2026-11-10, following REQ-001). It needs
+  Randy's ruling with Q1. The module path is Q2.
+- MUST: the SDK lives in a repository of its own. It is public from its first release.
+- MUST: it does not depend on mash and does not import any bogworks package.
+- Acceptance: AT-007, AT-009.
+
+### REQ-016: mash can consume it
+- Source: Confirmed. "rebuild mash around it" (card #129). The rebuild itself is out of scope (non-goals).
+- MUST: the public API offers only generic, protocol-level extension points:
+  - per-instance agent, owner and name tokens (REQ-009);
+  - extra micro endpoints the SDK does not interpret (REQ-004);
+  - a §13 admission hook (REQ-008);
+  - read access to raw message headers;
+  - a hook to add headers to outgoing messages.
+
+  No extension point is named for, or shaped around, one consumer.
+- MUST: whatever mash needs beyond SAP lives in mash, on top of those points: its `mail` verb, zones and signature
+  variants.
+- MUST: a written mapping from mash's `internal/sap` to the SDK's API shows what mash would replace, what stays in
+  mash, and which extension point carries it.
+- Acceptance: AT-010.
+
+### REQ-017: Offered to Synadia
+- Source: Confirmed. "PR it to Synadia" (card #129).
+- MUST: an issue on `synadia-ai/synadia-agents` offers the SDK and asks how Synadia wants it: in their monorepo as a
+  subdirectory module, as a repository of theirs, or linked from theirs.
+- MUST: a pull request follows that contains the SDK, or the concrete upstream integration Synadia asks for, in the
+  form they name. A link-only pull request does not meet this.
+- MUST: if Synadia declines any pull request, the decline is recorded as a deviation for Randy to accept. It is not
+  completion by default.
+- MUST: Randy, or someone he names, opens both (Q4).
+- MUST: the contract is met when the issue and pull request are open and answered or waiting, or when a decline is
+  accepted by Randy. Synadia does not have to merge (section 8).
+- Acceptance: AT-008.
+
+### REQ-018: Versions
+- Source: Proposed.
+- MUST: the SDK's own version is semver and starts at 0.x. Its protocol version is a separate constant (REQ-002).
+- MUST: each release states the SAP revision and the conformance catalog result it was built against.
+- Acceptance: AT-007.
+
+## 4. System boundaries
+
+### BND-001: SAP is Synadia's
+- Owned by Synadia (`synadia-ai/synadia-agent-sdk-docs`).
+- Prohibited: changing the wire, adding verbs, reinterpreting a requirement.
+- A spec ambiguity is decided by the official SDKs' behaviour where they agree, and recorded in the catalog. Where they
+  disagree it goes to Synadia as an issue.
+
+### BND-002: The SDK knows nothing of mash
+- Prohibited: any mash concept or dependency (REQ-001, REQ-015).
+- mash's extensions live in mash, on the SDK's extension points (REQ-016).
+
+### BND-003: mash is unchanged by this contract
+- No mash code changes under it. The rebuild is a follow-on contract.
+
+### BND-004: Token meanings
+- The naming-grammar contract's BND-005 has the SDK carry per-endpoint agent and owner tokens. The SDK gives them no
+  meaning beyond SAP's (names seam page 1.0.0, sentences 1 and 3).
+
+### Existing behaviour to preserve
+
+- Not applicable: this is new code. Interop with the official SDKs is the behaviour to match.
+
+### Evidence from existing systems (not requirements)
+
+- **mash `internal/sap/`.** It has the only Go implementation of §13 (`sender.go`). It also has mash-only signatures, a
+  `mail` verb, zones (`subjects.go`) and a stricter token rule (`identity.go`). It has no generic caller and no
+  conformance table, and it pins the spec at `c48cea5f`.
+- **`henomis/phero` `nats/`** (Go, v2.3.0). It has a caller and a host and shows Go idioms for `micro`, error mapping
+  and the heartbeat tracker. It lacks §13, its client cannot answer a query, and it is coupled to Phero's types.
+- **The official TypeScript and Python SDKs.**
+  - TypeScript: `@synadia-ai/agents` and `@synadia-ai/agent-service` 0.6.0 (2026-10-02).
+  - Python: `synadia-ai-agents` 0.8.1 and `synadia-ai-agent-service` 0.5.0 (2026-10-14).
+  - Both have the caller and host split, full coverage including §13, and a `ReferenceAgent` test counterparty.
+  - `docs/protocol-mapping.md` is stale in two rows (L69 and L81). The code and the spec are authoritative.
+- **Conformance material.**
+  - Synadia publishes language-neutral fixtures only for §13 (`test-fixtures/identity/`). There are no core wire
+    fixtures.
+  - The spec's Appendix B examples (SAP:L1103-L1305) are prose, usable as test vectors once transcribed.
+- **SDK contract.** SAP:L30 cites an `sdk-contract.md` for SDKs, which is not public.
+
+## 5. Invariants and constraints
+
+### INV-001: Wire-compatible with the official SDKs
+Anything the Go SDK sends, the official TypeScript and Python SDKs accept. Anything they send, it accepts, within SAP
+0.3.
+
+### INV-002: No mash in the SDK
+REQ-001, REQ-015 and BND-002 hold for every release.
+
+### INV-003: The development-process standard is followed
+dev-process@0.1.0 applies:
+- tests before implementation;
+- a pre-merge review with `ocr`;
+- an adversarial review on another model family, with Daybreak for security-relevant changes (§13, parsing, error
+  handling);
+- Conventional Commits;
+- no secrets.
+
+The review records are completion evidence.
+
+### Security, reliability, compatibility, performance
+
+- **NFR-001 (security).** Seeds and credentials:
+  - are never logged, never in errors and never in test output;
+  - signature verification uses the nkeys library's verify;
+  - the replay nonce set is bounded in memory.
+
+  Parsers of untrusted input (envelopes, headers, chunks, `Agent-Sender`) are fuzzed.
+- **NFR-002 (reliability).**
+  - No goroutine outlives its context or its close.
+  - Every subscription the SDK makes is drained on close.
+  - A peer that never sends a terminator costs the caller one inactivity timeout, not a leak.
+  - Leak checks run in the tests.
+- **NFR-003 (compatibility).** The public API is documented and stable within a minor version from 0.1. Breaking
+  changes are listed in a changelog.
+- **NFR-004 (performance).** No regression budget is set; a prompt round-trip benchmark is recorded per release (Q9).
+
+## 6. Acceptance contract
+
+### AT-001: Unit and component tests (runnable check)
+- Every REQ-002 to REQ-009 behaviour has tests that run against an embedded or spawned `nats-server` at the pinned
+  version.
+- They include, for every 400 case in §5 and §9, every chunk type, and unknown-field preservation:
+  - the ack-first and terminator rules;
+  - the inactivity timeout;
+  - the heartbeat interval floor and offline threshold;
+  - version mismatch;
+  - base64 strictness.
+- Fuzz tests cover the envelope, chunk, header and `Agent-Sender` parsers.
+- Leak checks pass.
+
+### AT-002: The catalog is complete (runnable check)
+- The catalog lists every RFC 2119 keyword occurrence in `core-protocol.md` at the pinned commit. This is checked
+  against a regenerated extraction, so a missing keyword fails.
+- Every MUST and MUST NOT has a test that exists and passes, or a reason reviewed in the pull request.
+- Mutations fail the check:
+  - removing a test the catalog names;
+  - changing the spec hash;
+  - adding a MUST without coverage.
+
+### AT-003: Interop (runnable check)
+- In CI on bogworks self-hosted runners:
+  - the Go caller runs against the TypeScript `ReferenceAgent`;
+  - the official TypeScript and Python callers run against a Go host.
+- Each run covers REQ-011's list and records its messages, as Synadia's evidence recorder does.
+- A run that skips a scenario fails.
+
+### AT-004: Malformed-peer behaviour (runnable check)
+- A test peer sends each malformed input of JRN-005, and these too:
+  - a non-empty `status` request body, which is answered, not refused;
+  - a `response` chunk in each `data` form;
+  - an error with an empty body, and one with a non-JSON body, where the header text is used.
+- The SDK answers as the spec says.
+- No call blocks past its context or its inactivity timeout.
+
+### AT-005: Sender identity (runnable check, with §13 in scope)
+- Synadia's identity vectors pass, pinned by commit.
+- Live and stored verification is tested for every 400, 401 and 403 case of SAP:L927-L971.
+- A replayed nonce is refused.
+- A non-§13 peer interoperates.
+- A `status` request is signed by the caller, and a host answers it after a failed classification (logged, not
+  refused).
+- No reply is signed.
+- The caller counts header bytes against `max_payload`.
+- An unknown `min_sender_trust` is treated as `signed`.
+
+### AT-006: The runner (demonstrated state)
+- `sapconform` runs against the TypeScript `ReferenceAgent`, against a Go host, and against a deliberately broken host
+  that sends no ack.
+- It reports the first two as passing and the third as failing the ack-first requirement, citing its line.
+- Its report states that it covers host obligations only.
+
+### AT-007: Ready to offer (inspection, plus a runnable check)
+- A clean external Go module, outside the repository, runs `go get` on the public tag and then builds and runs a
+  caller and a host against it.
+- The repository has the REQ-014 files and only the allowed dependencies.
+- `protocol-mapping.md` covers every exported identifier.
+- The examples run.
+- A tagged 0.x release states its spec revision and catalog result.
+
+### AT-008: Offered (demonstrated state)
+- The REQ-017 issue and pull request exist, with their URLs and Synadia's response or the absence of one recorded.
+
+### AT-009: No mash (runnable check, plus a review)
+- A CI check fails on any import of a bogworks module, and on the identifiers or subjects named in REQ-001 (`mail`
+  verb, zone, `SignInstance`, `SignUrgent`, `SignInReplyTo`, `SignVia`) in code or docs.
+- The adversarial review of each release inspects the exported API (`go doc -all` output) for any concept not in SAP
+  0.3, under any name. A finding blocks the release.
+
+### AT-010: mash can consume it (demonstrated state)
+- The REQ-016 mapping document exists. It names an extension point for every item mash would keep.
+- An example program unrelated to mash, in the SDK's own examples, uses every REQ-016 extension point. This shows they
+  are generic.
+- A spike branch in mash, not merged, exercises every extension point the mapping names, without forking the SDK:
+  - mash's host registered through the SDK, with its own tokens;
+  - `mail` as an extra endpoint;
+  - mash's §13 admission hook;
+  - its extra signature headers through the outgoing-header hook;
+  - reading raw headers.
+
+  An item the spike cannot do without changing the SDK is a REQ-016 failure, or a narrowed claim recorded as a
+  deviation.
+
+### Verification (was the contract met?)
+
+| Requirements | Checked by |
+|---|---|
+| REQ-002 to REQ-009 | AT-001, AT-004 |
+| REQ-008, REQ-012 | AT-005 |
+| REQ-010 | AT-002 |
+| REQ-011 | AT-003 |
+| REQ-013 | AT-006 |
+| REQ-014, REQ-015, REQ-018 | AT-007 |
+| REQ-017 | AT-008 |
+| REQ-001, REQ-015, INV-002 | AT-009 |
+| REQ-016 | AT-010 |
+| INV-001 | AT-003 |
+| INV-003 | the review records |
+
+### Validation (does it meet the need?)
+
+- Randy reads the conformance report and can tell, for any SAP requirement, whether the Go SDK meets it.
+- A Synadia maintainer can run `sapconform` and the interop CI without asking us anything.
+
+## 7. Assumptions and open decisions
+
+### Confirmed assumptions
+
+- No SAP Go SDK exists. Synadia ships TypeScript and Python only (Randy, card #129 log, 2026-11-10; prior-art report).
+- The SDK is for the protocol, not for mash (Randy, 2026-11-10).
+- It is offered to Synadia, and mash is rebuilt on it later (Randy, card #129, 2026-11-08).
+
+### Open questions for Randy
+
+1. **Q1, where the repository lives [blocking].**
+   - Options:
+     - (a) a new public repository in the bogworks organisation, for example `bogworks/sap-go`;
+     - (b) the randybias account;
+     - (c) a subdirectory module offered straight to `synadia-ai/synadia-agents` from the start.
+   - Writer recommends (a): it is public, separate from mash, and movable to Synadia later. mash-lead recommends a
+     separate public bogworks repository.
+   - Owner: Randy.
+2. **Q2, the module path and package names [blocking with Q1].**
+   - Options: `github.com/bogworks/<repo>` now, renamed if Synadia takes it; or ask Synadia for the path first (Q4).
+   - Package split, mirroring the official caller and host split: `sap` (shared types), `sap/caller`, `sap/host`,
+     `sap/identity`.
+   - Owner: Randy, after Synadia's answer if asked first.
+3. **Q3, is §13 in scope [blocking].**
+   - Options: (a) yes, as the official SDKs have it; (b) core first, §13 in a second contract.
+   - Writer recommends (a): mash depends on §13 (mash ADR 0017), and the vectors exist.
+   - Owner: Randy.
+4. **Q4, ask Synadia before or after building [not blocking].**
+   - Options: (a) an issue now asking whether they want a Go SDK and in what form, before code; (b) build to 0.1 and
+     then offer it.
+   - Writer recommends (a): nats.go's norm is an issue first, no Go SDK request exists, and the answer may settle Q1
+     and Q2.
+   - Who speaks to Synadia: Randy.
+5. **Q5, sign-off [blocking for the upstream pull request].**
+   - nats.go requires `Signed-off-by` with a legal name, and `synadia-agents` states no policy.
+   - An agent cannot certify the Developer Certificate of Origin. Options: Randy signs off the commits offered
+     upstream; Synadia waives it; or another arrangement Randy chooses.
+   - Owner: Randy.
+6. **Q6, the spec's licence [not blocking].**
+   - `synadia-agent-sdk-docs` has no licence file.
+   - The catalog cites the spec by line and does not copy its text (REQ-010).
+   - Should Randy ask Synadia to license the spec, so that Appendix B's examples can be vendored as fixtures?
+7. **Q7, the runtime for interop CI [not blocking].**
+   - AT-003 needs Node or Bun, and Python, on the bogworks self-hosted runners, beside Go and `nats-server`.
+   - Is that acceptable? GitHub-hosted runners are excluded by standing order.
+   - Owner: x-lead for the hosts, Randy for any new spend.
+8. **Q8, done when Synadia has not answered [not blocking].**
+   - The writer proposes that the contract is met when the offer is made and the SDK meets AT-001 to AT-007, AT-009
+     and AT-010. Synadia's merge is not required (section 8).
+9. **Q9, a performance budget [not blocking].**
+   - None is set. Should one be set, for example a prompt round-trip on a local `nats-server` within a factor of the
+     TypeScript SDK?
+10. **Q10, the scope of the runner: decided in REQ-013.**
+    - `sapconform` tests agents (hosts) only, and testing callers is a follow-on. Randy may widen this at ratification.
+11. **Q11, the mash rebuild contract [not blocking for this contract; blocking for card #129's done-when].**
+    - The mash team writes the follow-on contract, "rebuild mash on the SAP Go SDK", once this one is READY.
+    - Card #129 is done only when that one is too.
+    - Owner: mash-lead.
+
+### Delegated to the team
+
+- The internal design, package layout within Q2's answer, test structure, catalog file format and runner command name.
+- The default behaviour of SHOULD-level token checks: warnings, or an opt-in strict mode (REQ-009).
+- Which Appendix B examples become fixtures, transcribed and cited by line, not copied, until Q6 is answered.
+
+### Changes that need approval
+
+- Any change to SAP's wire behaviour, or adding a verb to the SDK (BND-001; Randy, and Synadia upstream).
+- A runtime dependency beyond nats.go and nkeys (REQ-014; Randy).
+- The repository's location and visibility (Q1; Randy).
+- Anything said to Synadia, and the upstream pull request (Q4, REQ-017; Randy).
+- New spend for CI runners (Q7; Randy).
+
+## 8. Completion contract
+
+### Required evidence
+
+- The repository, its tagged 0.x release and its CI runs: unit, catalog, interop, identity vectors and the no-mash
+  check.
+- The conformance catalog and its report at the release.
+- The `sapconform` runs of AT-006.
+- The REQ-017 issue and pull request, with their state.
+- The REQ-016 mapping document and the AT-010 spike branch.
+- The review records under INV-003.
+- Deviations and residual risks, including spec ambiguities sent to Synadia.
+
+### Accept if
+
+- AT-001 to AT-007, AT-009 and AT-010 pass at the release.
+- AT-008 shows the offer made.
+
+### Reject if
+
+- A MUST has no test and no reason.
+- Interop with either official SDK fails.
+- Anything of mash is in the SDK.
+- The SDK depends on mash or bogworks code.
+- §13 is in scope and a Synadia identity vector fails.
+- Evidence is a plan rather than a result.
+
+### Deviations
+
+- A deviation that still passes this contract's tests is the owning lead's to approve and record (as in the
+  naming-grammar contract).
+- Any other deviation goes to the planner as a contract gap.
+
+## Readiness
+
+- Result: DRAFT. It goes to mash-lead, then the planner, then Randy.
+- **Blocking before READY:**
+  - Q1, Q2 and Q3;
+  - Q5 for the upstream pull request only;
+  - the critic's blocking findings. All nine are accepted and applied in draft-2 (Appendix A), but the critic has not
+    re-read draft-2, so Randy or the planner may ask for a second critic pass.
+- **Not blocking:** Q4, Q6 to Q9 and Q11. Q10 is decided in REQ-013.
+
+## What the standard got wrong
+
+Filled by the team when the work closes.
+
+## Appendix A: critic findings and dispositions
+
+The critic ran on draft-1: OpenAI Codex CLI 0.166.0, `codex exec -m gpt-6-sol -c daybreak=true`, read-only. Its inputs
+were the contract, the intent card, `core-protocol.md` at `c48cea5f`, and the writer's prior-art report as a claim to
+verify. The critic has not read draft-2.
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| F-01: REQ-002 made the SHOULD to pin an exact MAJOR.MINOR into a MUST. | blocking | Accepted. The caller compares MAJOR.MINOR (spec MUST, SAP:L643). Exact `0.3` pinning is marked SDK policy (Proposed) under the SHOULD at SAP:L651, and the program can relax it. |
+| F-02: REQ-005 presented recommended timings and optional fields as spec obligations. | blocking | Accepted. Spec obligations are cited and listed in the catalog. The 30 s default, the opt-in below 1 s, the default 3 × threshold and the default declaration of optional fields are SDK policy (Proposed). |
+| F-03: identity MUSTs were missing: sign `status` requests, count headers in `max_payload`, treat an unknown `min_sender_trust` as `signed`, always answer `status`, never sign replies. | blocking | Accepted. Each was checked against the spec (SAP:L709, L887, L1001, L1003, L688, L1052), added to REQ-008 and given AT-005 cases. |
+| F-04: core MUSTs were missing: both `response` data forms, ignoring the `status` request body, and the error-header fallback. | blocking | Accepted. Each was checked against the spec (SAP:L364, L548, L593), added to REQ-003 and REQ-004 and given AT-004 cases. |
+| F-05: keyword extraction proves indexing, not testing. One smoke test could cover every MUST. | blocking | Accepted. REQ-010 now asks for atomic obligations, test-to-obligation links checked both ways, a flag on tests that claim many obligations, and review of every exclusion and entry change. |
+| F-06: REQ-013 promised a caller runner while Q10 left it open. | blocking | Accepted. REQ-013 is narrowed to hosts, the report states it, and caller testing is a follow-on. Q10 is decided. Randy may widen it. |
+| F-07: interop tested the Go caller against the TypeScript host only. | blocking | Accepted. REQ-011 adds the Python reference agent as a host for the Go caller. |
+| F-08: per-endpoint tokens and mash-shaped extension points came from mash, and AT-009 matched strings only. | blocking | Accepted in part. Per-instance agent, owner and name tokens are SAP's own model (§2, §3.2), now cited as such. REQ-016 is reworded to generic, protocol-level extension points, none shaped around one consumer. AT-009 adds a review of the exported API for non-SAP concepts. AT-010 adds an unrelated example that uses every extension point. |
+| F-09: a link-only pull request could satisfy AT-008. | blocking | Accepted. The pull request must contain the SDK or the integration Synadia asks for. A decline is a deviation for Randy, not completion. |
+| F-10: scope beyond Randy's words was labelled Derived or Confirmed. The card's final gate (mash on the SDK) needs a tracked follow-on. | nonblocking | Accepted. REQ-014 and REQ-015 are relabelled Proposed. The mash rebuild is tracked as Q11. The governance files stay in, as Proposed: mash-lead asked for an upstream-ready structure, and Randy can cut them. |
+| F-11: the contract copied wire rules instead of citing them. | nonblocking | Accepted. A citation rule now opens section 3: cite the section and lines, never strengthen a SHOULD, mark SDK policy. Atomic obligations live in the catalog, not this page. REQ-003 to REQ-009 keep short summaries with citations, so the contract reads on its own. |
+| M-1: AT-007 passes while the tagged module can't be fetched or built externally. | mutation row | Accepted. AT-007 adds a clean external consumer module built from the public tag. |
+| M-2: AT-010's one-endpoint spike passes while other mash paths need private SDK changes. | mutation row | Accepted. The spike exercises every extension point the mapping names, and anything it can't do is a failure or a recorded narrowing. |
+
+Disputed: none.
