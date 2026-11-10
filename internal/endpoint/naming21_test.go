@@ -153,8 +153,8 @@ func TestNaming21_ThreeTokenEndpointEndToEnd(t *testing.T) {
 	if !strings.Contains(got[0], "from "+key+" [verified]") || !strings.Contains(got[0], "hello peer") {
 		t.Fatalf("reply event: %s", got[0])
 	}
-	if rm, err := b.Read(ctx, rseq); err != nil || rm.From != key || rm.Trust != sap.TrustVerified {
-		t.Fatalf("peer read: %+v %v", rm, err)
+	if rm, err := b.Read(ctx, rseq); err != nil || rm.From != key || rm.Trust != sap.TrustVerified || rm.ReplyTo != seq || string(rm.Body) != "hello peer" {
+		t.Fatalf("peer read (want from %s, verified, answers #%d, body %q): %+v %v", key, seq, "hello peer", rm, err)
 	}
 
 	// Prompt round trip on the five-token prompt subject.
@@ -190,8 +190,20 @@ func TestNaming21_ThreeTokenEndpointEndToEnd(t *testing.T) {
 	if hm.Subject != hbSubj || len(strings.Split(hm.Subject, ".")) != 5 {
 		t.Fatalf("heartbeat subject %q", hm.Subject)
 	}
-	if h, tr := sap.VerifyStored(hm.Header.Get(sap.HeaderName), hm.Subject, hm.Data); h.Name != key || tr == sap.TrustForged || tr == sap.TrustMalformed {
-		t.Fatalf("heartbeat header %+v %v", h, tr)
+	h, tr := sap.VerifyStored(hm.Header.Get(sap.HeaderName), hm.Subject, hm.Data)
+	if tr != sap.TrustVerified {
+		t.Fatalf("heartbeat trust %v, want %v (header %+v)", tr, sap.TrustVerified, h)
+	}
+	// The sender name is the flat key; its three tokens are byte-identical to the identity's, and so are the three
+	// tokens of the subject it was published on.
+	if h.Name != sdk.Flat() {
+		t.Fatalf("heartbeat sender %q, want %q", h.Name, sdk.Flat())
+	}
+	if tok := strings.Split(h.Name, "_"); len(tok) != 3 || tok[0] != sdk.Agent || tok[1] != sdk.Owner || tok[2] != sdk.Name {
+		t.Fatalf("heartbeat sender tokens %q, want %q %q %q", tok, sdk.Agent, sdk.Owner, sdk.Name)
+	}
+	if tok := strings.Split(hm.Subject, "."); tok[2] != sdk.Agent || tok[3] != sdk.Owner || tok[4] != sdk.Name {
+		t.Fatalf("heartbeat subject tokens %q", tok)
 	}
 }
 
@@ -319,14 +331,16 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	lcancel()
 	<-ldone
 	lep.Close()
+	var lastQueued uint64
 	for _, body := range []string{"queued-2", "queued-3"} {
-		if _, err := peer.Send(ctx, old, body, 0); err != nil {
+		if lastQueued, err = peer.Send(ctx, old, body, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// The rename: provision the three-token identity with the legacy identity as its alias.
 	id := f.provisionNF(t, "bogworks", "x", old, &store.Alias{Owner: f.e.Owner, Name: old})
+	legacy, renamed := "inbox-"+old, sap.InboxStream(id.Flat())
 	count := func(all []string, body string) int {
 		n := 0
 		for _, e := range all {
@@ -346,40 +360,90 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 		go func() { _ = ep.Run(rctx, ev.deliver); close(done) }()
 		return func() { rcancel(); <-done; ep.Close() }, ev
 	}
+	// idle polls (bounded) until each stream's consumer has nothing awaiting an ack and nothing left to deliver.
+	idle := func(streams ...string) {
+		t.Helper()
+		js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for _, stream := range streams {
+			for {
+				c, err := js.Consumer(ctx, stream, store.Consumer)
+				if err != nil {
+					t.Fatalf("consumer on %s: %v", stream, err)
+				}
+				info, err := c.Info(ctx)
+				if err == nil && info.NumAckPending == 0 && info.NumPending == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%s: consumer not idle (ack pending %d, pending %d)", stream, info.NumAckPending, info.NumPending)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+	}
+	// restart runs the renamed endpoint again once the previous one is stopped, waits until it is ready (Open
+	// returned, consumers idle), asserts nothing was redelivered, then proves it is live and ordered with a sentinel
+	// sent to the old name: only the sentinel arrives, exactly once, so any replay (which would precede it) is caught.
+	restart := func(sentinel string) (stop func()) {
+		t.Helper()
+		stop, ev := runRenamed()
+		idle(legacy, renamed)
+		if got := ev.all(); len(got) != 0 {
+			t.Fatalf("redelivered after restart: %q", got)
+		}
+		seq, err := peer.Send(ctx, old, sentinel, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev.waitFor(t, 1, 10*time.Second)
+		ackFloor(t, f, legacy, seq)
+		idle(legacy, renamed)
+		if got := ev.all(); len(got) != 1 || count(got, sentinel) != 1 || count(got, "queued-") != 0 || count(got, "before-1") != 0 || count(got, "after-") != 1 {
+			t.Fatalf("after restart, want only %s once, got %q", sentinel, got)
+		}
+		return stop
+	}
+
 	stop, ev := runRenamed()
-	all := ev.waitFor(t, 1, 10*time.Second)
-	time.Sleep(500 * time.Millisecond)
-	all = ev.all()
-	joined := strings.Join(all, "\n")
+	// Barrier: both queued messages delivered (an event may be a digest of several), then both acknowledged with
+	// nothing pending, before anything is counted.
+	deadline := time.Now().Add(10 * time.Second)
+	for count(ev.all(), "queued-2") == 0 || count(ev.all(), "queued-3") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("queued mail not delivered: %q", ev.all())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ackFloor(t, f, legacy, lastQueued)
+	idle(legacy, renamed)
+	all := ev.all()
 	if count(all, "queued-2") != 1 || count(all, "queued-3") != 1 || count(all, "before-1") != 0 {
-		t.Fatalf("queued mail delivered wrongly:\n%s", joined)
+		t.Fatalf("queued mail delivered wrongly:\n%s", strings.Join(all, "\n"))
 	}
-	if !strings.Contains(joined, "[verified]") || strings.Contains(joined, "[claimed]") || strings.Contains(joined, "[unknown-signer]") {
-		t.Fatalf("trust labels:\n%s", joined)
+	// Each queued message carries its own [verified] header, checked message by message.
+	for _, body := range []string{"queued-2", "queued-3"} {
+		var hdr string
+		for _, e := range all {
+			parts := strings.Split(e, "--- #")
+			for _, part := range parts[1:] {
+				if strings.Contains(part, "> "+body) {
+					hdr, _, _ = strings.Cut(part, "\n")
+				}
+			}
+		}
+		if !strings.Contains(hdr, " from ") || !strings.Contains(hdr, "[verified]") || strings.Contains(hdr, "[claimed]") || strings.Contains(hdr, "[unknown-signer]") {
+			t.Fatalf("%s header %q, want [verified]", body, hdr)
+		}
 	}
 	stop()
 
-	// A restart does not show it again.
-	stop, ev = runRenamed()
-	time.Sleep(700 * time.Millisecond)
-	if got := ev.all(); len(got) != 0 {
-		t.Fatalf("redelivered after restart: %q", got)
-	}
-
-	// Mail to the old name after the rename lands once.
-	if _, err := peer.Send(ctx, old, "after-4", 0); err != nil {
-		t.Fatal(err)
-	}
-	ev.waitFor(t, 1, 10*time.Second)
-	time.Sleep(500 * time.Millisecond)
-	if got := ev.all(); count(got, "after-4") != 1 || len(got) != 1 {
-		t.Fatalf("mail to the old name: %q", got)
-	}
+	// A restart does not show it again, and mail to the old name after the rename lands once.
+	stop = restart("after-4")
 	stop()
-	stop2, ev2 := runRenamed()
+	stop2 := restart("after-5")
 	defer stop2()
-	time.Sleep(700 * time.Millisecond)
-	if got := ev2.all(); len(got) != 0 {
-		t.Fatalf("redelivered after second restart: %q", got)
-	}
 }

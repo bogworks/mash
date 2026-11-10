@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -118,26 +119,37 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	}
 	assertShows(t, "wake", wake, peer)
 
-	// Message header and trust line, as the hook shows them.
+	// Message header and trust line, as the hook shows them. The header is the one line render.One formats as
+	// "--- #<seq> from <sender> [<trust>] at <time>"; it is selected by that format, never by searching the whole output.
 	hook := runHook(t, meEnv, "PostToolUse")
-	assertShows(t, "hook header", hook, peer)
-	for _, want := range []string{"[verified]", "> naming21 payload"} {
-		if !strings.Contains(hook, want) {
-			t.Fatalf("hook lacks %q:\n%s", want, hook)
+	var headers []string
+	for _, l := range strings.Split(hook, "\n") {
+		if strings.HasPrefix(l, "--- #") && strings.Contains(l, " from ") {
+			headers = append(headers, l)
 		}
 	}
+	if len(headers) != 1 {
+		t.Fatalf("want exactly one message header line, got %q in:\n%s", headers, hook)
+	}
+	header := headers[0]
+	assertShows(t, "hook header", header, peer)
+	if !strings.Contains(hook, "> naming21 payload") {
+		t.Fatalf("hook lacks the quoted body:\n%s", hook)
+	}
+	// The trust line: the label sits directly after the sender on that header line, and says verified.
+	trust := regexp.MustCompile(`^--- #\d+ from (\S+) \[([^\]]+)\] at `).FindStringSubmatch(header)
+	if trust == nil {
+		t.Fatalf("header %q does not match the message header format", header)
+	}
+	if trust[2] != "verified" {
+		t.Fatalf("trust label %q on header %q, want verified", trust[2], header)
+	}
+	assertShows(t, "trust line sender", trust[1], peer)
 	for _, bad := range []string{"[claimed]", "[unknown-signer]", "[absent]", "[stale]", "[forged]"} {
 		if strings.Contains(hook, bad) {
 			t.Fatalf("hook shows %s:\n%s", bad, hook)
 		}
 	}
-	var trustLine string
-	for _, l := range strings.Split(hook, "\n") {
-		if strings.Contains(l, "[verified]") {
-			trustLine = l
-		}
-	}
-	assertShows(t, "trust line", trustLine, peer)
 
 	// inbox: the sender and its trust label.
 	inbox := cliAs(t, meEnv, "inbox")
