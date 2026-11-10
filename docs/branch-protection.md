@@ -30,6 +30,14 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   pull request, so the required workflows' `pull_request` trigger already runs on queued merges. If GitHub's native
   merge queue is ever enabled instead, first add a `merge_group` trigger to every required workflow, or queued merges
   will wait for checks that never start.
+- **Queue entry** (`.mergify.yml`). A pull request enters the queue only with the maintainer's recorded approval
+  (`approved-reviews-by`) or the `lead-approved` label, which the lead applies at merge time. Authorship is not a
+  condition: the maintainer's login authors agent pull requests too, so it proves nothing. The `hold` label is the
+  brake on top: while it is set, the pull request is neither auto-queued nor allowed into the queue. Create the
+  `lead-approved` and `hold` labels (Settings > Labels). `.github/workflows/lead-approved-reset.yml` removes
+  `lead-approved` on every push (`pull_request_target`, `synchronize`; it holds `pull-requests: write` only and checks
+  out no code), so an approval never covers code pushed after it. It needs no setting, but takes effect only once it is
+  on `main`. See [ADR 0078](decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
 - **Require linear history** (squash or rebase merges only).
 - **Block force pushes and deletions** of `main`.
 - **Code owners review is not required** (no CODEOWNERS file).

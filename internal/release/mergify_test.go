@@ -3,6 +3,7 @@ package release
 import (
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -111,36 +112,73 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	}
 }
 
-// An outside contributor's pull request must not reach the queue (which runs its code in CI) on
-// green checks alone: a maintainer must have written or approved it.
-func TestMergify_outsidersNeedAMaintainer(t *testing.T) {
+// The maintainer's login authors agent pull requests too, so authorship proves nothing: entry to the queue needs a
+// recorded approval or the lead-approved label (which lead-approved-reset.yml removes on every push), and the hold label
+// stays the brake in both places.
+func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	m := loadMergify(t)
-	_, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	plain, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
 	if len(ors) != 1 {
 		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
 	}
-	if len(ors[0]) < 2 {
-		t.Fatalf("or group %v needs at least two members", ors[0])
-	}
-	authors, approvers := map[string]bool{}, map[string]bool{}
-	for _, c := range ors[0] {
-		switch {
-		case strings.HasPrefix(c, "author = "):
-			authors[strings.TrimPrefix(c, "author = ")] = true
-		case strings.HasPrefix(c, "approved-reviews-by = "):
-			approvers[strings.TrimPrefix(c, "approved-reviews-by = ")] = true
+	for _, c := range append(append([]string{}, plain...), ors[0]...) {
+		if strings.HasPrefix(c, "author = ") {
+			t.Errorf("queue_conditions contain %q: the maintainer's login authors agent pull requests, so authorship proves nothing", c)
 		}
+	}
+	for _, c := range ors[0] {
 		if strings.Contains(c, "check-success") {
 			t.Errorf("or member %q lets a bare check satisfy the group", c)
 		}
 	}
-	if len(authors) == 0 || len(approvers) == 0 {
-		t.Fatalf("or group %v needs an author and an approved-reviews-by member", ors[0])
+	got := append([]string{}, ors[0]...)
+	sort.Strings(got)
+	want := []string{"approved-reviews-by = randybias", "label = lead-approved"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("entry or group = %v, want exactly %v", got, want)
 	}
-	for a := range authors {
-		if !approvers[a] {
-			t.Errorf("%q may author but is not an approver", a)
+	if !strings.Contains(strings.Join(plain, "\n"), "label != hold") {
+		t.Error("queue_conditions must honour the hold label")
+	}
+	if !strings.Contains(strings.Join(m.Protections.AutoMerge, "\n"), "label != hold") {
+		t.Error("auto_merge_conditions must honour the hold label")
+	}
+}
+
+// The lead-approved label must not outlive the code it approved: a workflow removes it on every push. It runs on
+// pull_request_target (a token that can edit labels on any pull request), so it must hold only pull-requests: write and
+// never check out or run the pull request's code.
+func TestWorkflows_leadApprovedResetsOnPush(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/lead-approved-reset.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := load(t, "lead-approved-reset.yml")
+	on, ok := w.On.(map[string]any)
+	if !ok || len(on) != 1 {
+		t.Fatalf("on = %v, want only pull_request_target", w.On)
+	}
+	prt, ok := on["pull_request_target"].(map[string]any)
+	if !ok {
+		t.Fatalf("on = %v, want pull_request_target", w.On)
+	}
+	types, _ := prt["types"].([]any)
+	if len(types) != 1 || types[0] != "synchronize" {
+		t.Errorf("pull_request_target types = %v, want [synchronize]", types)
+	}
+	if len(w.Permissions) != 1 || w.Permissions["pull-requests"] != "write" {
+		t.Errorf("workflow permissions = %v, want pull-requests: write only", w.Permissions)
+	}
+	for id, j := range w.Jobs {
+		if j.Permissions != nil && (len(j.Permissions) != 1 || j.Permissions["pull-requests"] != "write") {
+			t.Errorf("job %s permissions = %v, want pull-requests: write only", id, j.Permissions)
 		}
+	}
+	if strings.Contains(string(raw), "actions/checkout") {
+		t.Error("lead-approved-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
+	}
+	if !strings.Contains(string(raw), "--remove-label lead-approved") {
+		t.Error("lead-approved-reset.yml does not remove the lead-approved label")
 	}
 }
 
@@ -154,12 +192,12 @@ func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	}
 	var logins []string
 	for _, c := range ors[0] {
-		if strings.HasPrefix(c, "author = ") {
-			logins = append(logins, strings.TrimPrefix(c, "author = "))
+		if strings.HasPrefix(c, "approved-reviews-by = ") {
+			logins = append(logins, strings.TrimPrefix(c, "approved-reviews-by = "))
 		}
 	}
 	if len(logins) == 0 {
-		t.Fatalf("or group %v has no author member", ors[0])
+		t.Fatalf("or group %v has no approved-reviews-by member", ors[0])
 	}
 	found := false
 	for _, r := range m.PullRequestRules {
