@@ -249,7 +249,7 @@ func TestPolicyAndConfig(t *testing.T) {
 		}
 		return ""
 	}
-	c, err := config.Load(env, "")
+	c, err := config.Load(config.LookupFromFunc(env), "")
 	if err != nil || c.AdminCreds != s.pl.Creds || c.Owner != "alice" {
 		t.Fatalf("config.Load: %+v %v", c, err)
 	}

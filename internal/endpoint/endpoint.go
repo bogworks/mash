@@ -253,11 +253,15 @@ func connect(ctx context.Context, url string, opts ...nats.Option) (*nats.Conn, 
 	}
 }
 
+// ErrAgentTokenUnsupported is the refusal for a configured agent_token: every mash path that would act on the legacy
+// identity returns it, so the text is written once.
+var ErrAgentTokenUnsupported = errors.New("mash: agent_token is set but this build cannot run a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")
+
 // refuseAgentToken fails closed: the endpoint still builds its subjects from the legacy identity, so a configured
 // three-token identity would silently operate the wrong endpoint. Remove this once the endpoint uses cfg.Identity().
 func refuseAgentToken(cfg config.Config) error {
 	if cfg.AgentToken != "" {
-		return errors.New("mash: agent_token is set but this build cannot run a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")
+		return ErrAgentTokenUnsupported
 	}
 	return nil
 }

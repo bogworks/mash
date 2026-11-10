@@ -66,7 +66,7 @@ func newAdopter(t *testing.T, src *applyEnv) *adopter {
 func (a *adopter) run(args ...string) (string, string, int) {
 	a.t.Helper()
 	var out, errb bytes.Buffer
-	code := run(args, func(k string) string { return a.env[k] }, &out, &errb)
+	code := runEnv(args, func(k string) string { return a.env[k] }, &out, &errb)
 	if anySeed.MatchString(out.String() + errb.String()) {
 		a.t.Fatalf("a seed appears in the output:\n%s\n%s", out.String(), errb.String())
 	}

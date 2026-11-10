@@ -37,7 +37,7 @@ const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
 // (system account credentials, as retire), then points the record at the new key, then replaces the file. The new creds are
 // first staged in <creds>.next, so a rotation interrupted after the revocation is finished by running the reissue again.
 // The new creds are staged in <creds>.next before anything irreversible, so an interrupted rotation is finished by running the reissue again.
-func runReissue(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runReissue(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var names []string
 	var file string
 	changed := false
@@ -62,7 +62,7 @@ func runReissue(args []string, env func(string) string, stdout, stderr io.Writer
 		fmt.Fprint(stderr, reissueUsage)
 		return 2
 	}
-	cfg, err := loadCtlConfig(env, false)
+	cfg, err := loadCtlConfig(env, lookup, false)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

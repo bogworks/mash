@@ -13,7 +13,7 @@ func loadIdentity(t *testing.T, fileBody string, env map[string]string) (Config,
 	if fileBody != "" {
 		writeFile(t, home, fileBody)
 	}
-	return Load(envOf(env), home)
+	return load(envOf(env), home)
 }
 
 const idFile = `{"url":"tls://x:4222","owner":"o"`
@@ -81,8 +81,8 @@ func TestAgentTokenSetButEmptyInFileIsInvalid(t *testing.T) {
 	}
 }
 
-// Load reads the environment through func(string) string, which cannot tell MASH_AGENT_TOKEN="" from unset; an empty
-// environment value therefore reads as unset (the legacy identity).
+// Through the plain-func adapter (load), an empty value is absent. A real set-but-empty variable is an error: see
+// TestEmptyAgentTokenEnvIsInvalidWhenNamed.
 func TestAgentTokenEmptyEnvReadsAsUnset(t *testing.T) {
 	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_AGENT_TOKEN": ""})
 	if err != nil {
@@ -107,7 +107,7 @@ func TestInvalidIdentityTokens(t *testing.T) {
 	} {
 		home := t.TempDir()
 		writeFile(t, home, `{"url":"tls://x:4222","owner":"`+tc.owner+`"}`)
-		_, err := Load(envOf(map[string]string{"MASH_NAME": tc.name, "MASH_AGENT_TOKEN": tc.agent}), home)
+		_, err := load(envOf(map[string]string{"MASH_NAME": tc.name, "MASH_AGENT_TOKEN": tc.agent}), home)
 		if err == nil || !strings.HasPrefix(err.Error(), "mash: ") || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%+v: got %v", tc, err)
 		}

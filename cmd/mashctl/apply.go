@@ -143,14 +143,14 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 }
 
 // runPolicyApply is `mashctl policy apply` and `mashctl policy diff`.
-func runPolicyApply(verb string, args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runPolicyApply(verb string, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
 	o, err := parseApplyArgs(verb, args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, applyUsage(verb))
 		return 2
 	}
-	return runPolicyApplyOpts(verb, o, nil, env, stdout, stderr)
+	return runPolicyApplyOpts(verb, o, nil, env, lookup, stdout, stderr)
 }
 
 // policySnapshot is a policy file read, parsed and compiled once: `policy repair` hands the same snapshot to every
@@ -184,7 +184,7 @@ func refuseFailedTests(failed []string, total int, path, what string, stdout io.
 
 // runPolicyApplyOpts is runPolicyApply after argument parsing. With a nil snap it reads the policy file itself; with a
 // snapshot it uses that and never reads the file again (the file's tests still run, against the snapshot).
-func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func(string) string, stdout, stderr io.Writer) int {
+func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
 	var err error
 	servers := 0
@@ -198,7 +198,7 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 			return 2
 		}
 	}
-	cfg, err := config.Load(env, env("HOME"))
+	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
 		fmt.Fprintln(stderr, err)
 		return 1

@@ -566,7 +566,7 @@ func (f *fakeHost) Waker(n func(string, map[string]string) error) func(string, m
 func TestHookLoopWithAFakeAdapter(t *testing.T) {
 	setup := func(t *testing.T) (config.Config, spool.Spool) {
 		env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
-		cfg, err := config.Load(envFrom(env), env["HOME"])
+		cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), env["HOME"])
 		if err != nil {
 			t.Fatal(err)
 		}

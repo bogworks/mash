@@ -131,8 +131,11 @@ func (c Config) Inert() bool { return c.Name == "" }
 // ErrNoURL and ErrNoOwner are what Load returns once the whole configuration is resolved and a required field is
 // still empty; any other error stopped loading before the environment was fully applied.
 var (
-	ErrNoURL   = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
-	ErrNoOwner = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
+	// ErrAgentTokenEmpty is Load's error for MASH_AGENT_TOKEN present but empty. Callers that must not treat a config
+	// error as a no-op (hook) test for it with errors.Is.
+	ErrAgentTokenEmpty = errors.New("mash: MASH_AGENT_TOKEN is set but empty: give an agent token, or unset it for the legacy identity")
+	ErrNoURL           = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
+	ErrNoOwner         = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
 )
 
 // ValidateFile reports whether raw is a config.json that Load would accept as far as the file itself goes: it must
@@ -273,9 +276,21 @@ func ExpandHome(p, home string) string {
 	return p
 }
 
-// Load resolves the configuration. env is os.Getenv in production; home is $HOME, or the OS's idea of the user's home
-// when that is unset ("" when unknown).
-func Load(env func(string) string, home string) (Config, error) {
+// Lookup reads one variable and reports whether it is present, as os.LookupEnv does. A variable set to "" is present.
+type Lookup func(string) (string, bool)
+
+// LookupFromFunc adapts a plain env func: a variable is present iff its value is not empty. For callers (tests) that
+// have no way to say a variable is set but empty.
+func LookupFromFunc(env func(string) string) Lookup {
+	return func(k string) (string, bool) { v := env(k); return v, v != "" }
+}
+
+// Load resolves the configuration. lookup is os.LookupEnv in production; home is $HOME, or the OS's idea of the user's
+// home when that is unset ("" when unknown). Only MASH_AGENT_TOKEN distinguishes set-but-empty from unset (the former
+// is an error once a name is set); an empty value of any other variable reads as unset.
+func Load(lookup Lookup, home string) (Config, error) {
+	env := func(k string) string { v, _ := lookup(k); return v }
+	_, agentEnvSet := lookup("MASH_AGENT_TOKEN")
 	if _, err := explicitDir(env, "MASH_CONFIG_DIR"); err != nil {
 		return Config{}, err
 	}
@@ -368,7 +383,6 @@ func Load(env func(string) string, home string) (Config, error) {
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
 	str(&c.AgentToken, "MASH_AGENT_TOKEN")
-	// An empty MASH_AGENT_TOKEN reads as unset: env is a func(string) string and cannot report presence.
 	if f.AgentToken != nil {
 		if env("MASH_AGENT_TOKEN") == "" {
 			c.AgentToken = agentTokenOf(f.AgentToken)
@@ -465,8 +479,11 @@ func Load(env func(string) string, home string) (Config, error) {
 	if c.Name == "" {
 		return c, nil
 	}
-	// A key that is present in config.json but empty is invalid, not absent. (Load reads the environment through a
-	// func(string) string, which cannot tell a variable set to "" from an unset one, so that case reads as unset.)
+	// A key that is present but empty is invalid, not absent: in config.json (unless the environment overrides it) and
+	// as MASH_AGENT_TOKEN itself, which must not fall back to the file or to the legacy identity.
+	if agentEnvSet && env("MASH_AGENT_TOKEN") == "" {
+		return c, ErrAgentTokenEmpty
+	}
 	if fileAgentSet && c.AgentToken == "" {
 		return c, errors.New("mash: config.json \"agent_token\" must be a non-empty string: give an agent token, or remove the key for the legacy identity")
 	}

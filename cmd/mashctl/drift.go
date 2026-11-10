@@ -155,8 +155,8 @@ type loaded struct {
 }
 
 // loadPolicy reads, checks and compiles the policy file and opens the key store. It prints its own errors.
-func loadPolicy(pfx, file string, env func(string) string, stderr io.Writer) (*loaded, bool) {
-	cfg, err := config.Load(env, env("HOME"))
+func loadPolicy(pfx, file string, env func(string) string, lookup config.Lookup, stderr io.Writer) (*loaded, bool) {
+	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
 		fmt.Fprintln(stderr, err)
 		return nil, false
@@ -501,14 +501,14 @@ func printState(out io.Writer, name string, s stateReport) {
 }
 
 // runPolicyDrift is `mashctl policy drift`: it compares the policy file with the four states and fixes nothing.
-func runPolicyDrift(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy drift: "
 	o, err := parseDriftArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, driftUsage())
 		return 2
 	}
-	l, ok := loadPolicy(pfx, o.file, env, stderr)
+	l, ok := loadPolicy(pfx, o.file, env, lookup, stderr)
 	if !ok {
 		return 1
 	}
@@ -561,7 +561,7 @@ var repairHook = func(stage string) {}
 // runPolicyRepair is `mashctl policy repair`: in four steps, additive except that it clears the labels the file does not
 // name on an endpoint the file declares; never a revoke or a delete of a credential, key file or record. With --dry-run it
 // writes nothing and prints what a real run would do. It is not a transaction: each step is safe to repeat and a failed one leaves the earlier ones done.
-func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runPolicyRepair(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy repair: "
 	o, err := parseApplyArgs("repair", args)
 	if err != nil {
@@ -582,7 +582,7 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 			return 2
 		}
 	}
-	l, ok := loadPolicy(pfx, o.file, env, stderr)
+	l, ok := loadPolicy(pfx, o.file, env, lookup, stderr)
 	if !ok {
 		return 1
 	}
@@ -605,7 +605,7 @@ func runPolicyRepair(args []string, env func(string) string, stdout, stderr io.W
 	}
 	var applyOut bytes.Buffer
 	repairHook("snapshot")
-	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c}, env, &applyOut, stderr)
+	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c}, env, lookup, &applyOut, stderr)
 	repairHook("applied")
 	after, _ := l.keys.Zones()
 	var created []string

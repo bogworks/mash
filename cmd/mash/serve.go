@@ -169,6 +169,12 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
+	// With agent_token set the legacy identity must not be touched at all: no spool, no state, before endpoint.Open
+	// refuses.
+	if cfg.AgentToken != "" {
+		fmt.Fprintln(stderr, endpoint.ErrAgentTokenUnsupported)
+		return degraded(endpoint.ErrorInstructions(cfg.Name, endpoint.ErrAgentTokenUnsupported), true)
+	}
 	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
 	var policy []byte

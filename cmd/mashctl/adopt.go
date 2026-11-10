@@ -100,7 +100,7 @@ type adoptState struct {
 }
 
 // runAdopt is `mashctl adopt`: the counterpart of `init --local` for a server you already run.
-func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	const pfx = "mashctl: adopt: "
 	o, err := parseAdoptArgs(args)
 	if err != nil {
@@ -131,7 +131,7 @@ func runAdopt(args []string, env func(string) string, stdout, stderr io.Writer) 
 	}
 	fail := func(format string, a ...any) int { fmt.Fprintf(stderr, pfx+format+"\n", a...); return 1 }
 
-	cfg, err := config.Load(env, env("HOME"))
+	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
 		fmt.Fprintln(stderr, err)
 		return 1

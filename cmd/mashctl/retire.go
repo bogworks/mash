@@ -57,7 +57,7 @@ const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
-func runRetire(args []string, env func(string) string, stdout, stderr io.Writer) int {
+func runRetire(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var name, file string
 	var deleteCreds, force, noRevoke bool
 	for i := 0; i < len(args); i++ {
@@ -107,7 +107,7 @@ func runRetire(args []string, env func(string) string, stdout, stderr io.Writer)
 		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "retire")
 		return 2
 	}
-	cfg, err := loadCtlConfig(env, true)
+	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
