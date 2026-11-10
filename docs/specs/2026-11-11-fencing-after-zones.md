@@ -16,8 +16,10 @@ changes no code. The six zone command-line items stay frozen until it is ruled o
   select. Only `mashctl`, at compile time, reads a label; the server never does.
 - **"ACL"** is not a mash concept; the nearest thing is the publish permission list in the user JWT.
 - **Live today:** per x-lead, 0 zoned records of 68, no policy file deployed; removing the zone costs nothing to migrate.
-- **Recommendation (F):** the owner and agent tokens are the fence, with a bounded set of deny and cross-owner
-  exceptions as tags. **It gives up** `default: deny` inside an owner and broad label-based allow rules.
+- **Recommendation:** A now (remove the zone addressing). Add F1, a key per owner with bounded deny and cross-owner
+  exceptions as tags, when a within-owner requirement appears. F2, one key with agent and owner as signed tags, only if
+  the measured owner count or account-JWT size forces it, after its live test and an accepted ruling on its wider
+  signing authority. F1 gives up `default: deny` inside an owner and broad label-based allows.
 
 ## 1. Who this is for, and the vocabulary
 
@@ -339,22 +341,27 @@ On the recommendation the two rounds differ: round 1 said F; round 2 says A now 
 within-owner requirement appears. The maintainer's review asked me to prefer F2 pending its test. Section 6 states
 both and sets out the order: A first, and the choice between F1 and F2 on the test and on the authority question.
 
-## 6. Recommendation
+## 6. Recommendation: A now; F1 when a within-owner requirement appears; F2 only if measurement forces it
 
-**Adopt F: the agent and owner tokens are the fence, and the policy file is an exception tool, not a mesh partition.**
+**Remove the zone addressing and make the agent and owner tokens the fence (A). When an administrator needs finer
+control inside an owner, add F1: a scoped key per owner, with the policy file as an exception tool (bounded deny and
+cross-owner exceptions as tags), not a mesh partition. Take F2 (one key, agent and owner as signed tags) only if the
+measured owner count or account-JWT size forces it, after its live-server test and an accepted ruling on its wider
+signing authority (whoever holds that one key can mint for every owner).** This order follows the second Codex round
+and supersedes the "preferred" mark on F2 in section 4F.
 
 Reasons:
 
-1. Like A, B and C it needs no new subject token, so mail keeps SAP's five tokens, the six-token departure
-   (section 2.1) goes away, and the compiler can serve three-token endpoints (section 2.2, point 4). What sets F apart
-   is in the next reasons.
-2. It keeps a server-side fence, which ADR 0053 required and C does not give. A, the floor of F, already exists in code.
-3. It stays small: nothing to size per pair (the reason B fails), no per-group account (D). Zones are unused live
+1. A delivers these now. Like B and C it needs no new subject token, so mail keeps SAP's five tokens, the six-token
+   departure (section 2.1) goes away, and the compiler can serve three-token endpoints (section 2.2, point 4).
+2. A keeps a server-side fence, which ADR 0053 required and C does not give, and it already exists in code
+   (`NewFormPermissions`).
+3. A stays small: nothing to size per pair (the reason B fails), no per-group account (D). Zones are unused live
    (0 of 68), so the migration is deleting unused paths.
-4. It still lets an administrator narrow inside an owner and widen across owners, which is the realistic need of a
-   solo developer or a small team.
+4. F1 adds, only when needed, the ability to narrow inside an owner and widen across owners, the realistic need of a
+   solo developer or a small team, while keeping the authority to mint limited to one owner per key.
 
-What F must say out loud, because the policy file's current promise is larger:
+What F1 must say out loud, because the policy file's current promise is larger:
 
 - The rules the compiler accepts: `deny` rules between named endpoints or small label groups, and cross-owner
   allows. It refuses `default: deny` for an owner and any rule whose compiled tags would exceed the per-user budget,
@@ -365,18 +372,13 @@ What F must say out loud, because the policy file's current promise is larger:
   re-signed, their credentials re-delivered and the endpoints reconnected. A change that narrows (adding a `deny:`
   tag, removing an `allow:` tag) must also rotate the user's key and revoke the old one, as ADR 0067 requires, because
   user JWTs carry no expiry and the old, wider JWT stays valid for anyone holding it; revocation must be confirmed on
-  every server before the policy counts as applied. A policy counts as applied only after a live
-  check that a denied publish is refused. The existing `drift` and `apply` verification do this for zones and would be
-  reused.
-- Before building: a live-server test of F2 (agent and owner as administrator-signed tags in the key's templates)
-  including template expansion and the missing-tag case, and a test that compiled five-token permissions cannot publish
-  to any six-token inbox subscription left in a zoned stream. The section 2.2 seam is already covered by the existing
-  test it cites; the open part is the sender's message and an `apply` warning.
-
-Order: ship A and remove the unused zone addressing first. Add F when a within-owner requirement exists. Prefer F2
-(one key, agent and owner as signed tags) if its live-server test passes and the wider signing authority is accepted;
-otherwise F1 (a key per owner). Codex's second round would start with F1 and consider F2 only if measured owner count
-or account-JWT size forces it.
+  every server before the policy counts as applied. A policy counts as applied only after a live check that a denied
+  publish is refused, on each server and with the old credential. The existing `drift` and `apply` verification do
+  this for zones and would be reused.
+- Before building F2: a live-server test of template expansion and the missing-tag case, with the expected result
+  written down. Before building either: a test that compiled five-token permissions cannot publish to any six-token
+  inbox subscription left in a zoned stream. The section 2.2 seam is already covered by the existing test it cites;
+  the open part is the sender's message and an `apply` warning.
 
 Next steps if ruled: an ADR that supersedes 0053 and 0054 for the subject (and amends 0055's framing), then the code
 change as small pull requests. Nothing here is ruled.
