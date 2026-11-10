@@ -41,8 +41,10 @@ queue_rules:
       # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
       # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's
       # pull request and the queue, and that failed once. The lead applies `lead-approved` at merge time, and
-      # .github/workflows/label-reset.yml removes it on every push, so an approval never covers later code
-      # (docs/decisions/0078-*.md). The queue run executes the pull request's code in CI, and codex-review reads
+      # .github/workflows/label-reset.yml removes it on every push, so the label never covers later code
+      # (docs/decisions/0078-*.md). A recorded approval is not reset the same way: the dismiss-approvals rule below
+      # skips pull requests authored by the maintainer's login (agents push as it), so on those a push does not
+      # dismiss an approval through Mergify; it dismisses one only on an outside author's pull request. The queue run executes the pull request's code in CI, and codex-review reads
       # attacker-controlled text, so neither a green check nor the review is enough on its own
       # (docs/security/threat-model.md). The approver's login is listed explicitly, not "any approval": Mergify's docs
       # do not say that `approved-reviews-by` counts only reviewers with write access (they say it of other review
@@ -89,11 +91,14 @@ priority_rules:
 # conditions on the pull request's current state, not on events, and no condition says "the head changed since the
 # label was set". That belongs to the review watcher, which sees each head.
 
-# A maintainer's approval must not carry over to code pushed after it: the first rule below has Mergify dismiss
-# approvals when an outside author pushes a new commit (`when: synchronize`), so `approved-reviews-by` in the queue
-# conditions turns false until a maintainer approves the new head. GitHub's own "Dismiss stale pull request approvals
-# when new commits are pushed" setting does the same (docs/branch-protection.md); the rule keeps it true even if that
-# setting is off.
+# A maintainer's approval on an OUTSIDE author's pull request must not carry over to code pushed after it: the first rule
+# below has Mergify dismiss approvals when that author pushes a new commit (`when: synchronize`), so
+# `approved-reviews-by` in the queue conditions turns false until a maintainer approves the new head. The rule excludes
+# pull requests authored by the maintainer's login (`-author = randybias`), which is the login agents push as, so on
+# those Mergify dismisses nothing; there the label path is the gate that is reset on every push (label-reset.yml), and
+# GitHub does not let an author approve their own pull request. GitHub's own "Dismiss stale pull request approvals
+# when new commits are pushed" setting would do the same for every author, but it is a target in
+# docs/branch-protection.md, not set today (the ruleset has no pull-request rule).
 # Labels and notices, so a session sets only `critical` by hand (Workflow Automation, a dashboard setting).
 pull_request_rules:
   - name: dismiss approvals when an outside author pushes

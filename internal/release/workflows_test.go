@@ -1093,6 +1093,7 @@ func TestWorkflows_noSelfHostedRunners(t *testing.T) {
 			}
 			r := strings.TrimSpace(j.RunsOn)
 			switch {
+			case name == "label-reset.yml" && r == "${{ vars.RUNNER_LINUX }}": // no hosted runner; see TestLabelReset_noHostedRunner
 			case r == "ubuntu-latest" || r == "macos-latest":
 			case strings.HasPrefix(r, "${{"):
 				if !strings.Contains(r, "'ubuntu-latest'") {
@@ -1104,6 +1105,64 @@ func TestWorkflows_noSelfHostedRunners(t *testing.T) {
 		}
 	}
 }
+
+// A synchronize, reopened or opened run must not honour decision-confirmed (label-reset removes it, in a run that
+// triggers nothing new), so the label counts only from a labeled run on the current head. The workflow runs on labeled and
+// unlabeled, passes the event action to the checker, and reads the labels live, failing on an API error.
+func TestADRLint_confirmationNeedsALabeledRun(t *testing.T) {
+	wf := load(t, "adr-lint.yml")
+	on, _ := wf.On.(map[string]any)
+	prt, _ := on["pull_request_target"].(map[string]any)
+	types := fmt.Sprint(prt["types"])
+	for _, want := range []string{"labeled", "unlabeled", "synchronize", "reopened", "opened"} {
+		if !strings.Contains(types, want) {
+			t.Errorf("adr-lint must trigger on pull_request_target %s, got %s", want, types)
+		}
+	}
+	var st *step
+	for i, s := range wf.Jobs["adr-lint"].Steps {
+		if strings.Contains(s.Run, "adrlint\" pr ") {
+			st = &wf.Jobs["adr-lint"].Steps[i]
+		}
+	}
+	if st == nil {
+		t.Fatal("no step runs adrlint pr")
+	}
+	if st.Env["PR_ACTION"] != "${{ github.event.action }}" {
+		t.Errorf("the event action must reach the checker as PR_ACTION, got %q", st.Env["PR_ACTION"])
+	}
+	if !strings.Contains(st.Run, "gh pr view") || !strings.Contains(st.Run, "--json labels") || !strings.Contains(st.Run, "PR_LABELS=") {
+		t.Errorf("the labels must be read live with gh pr view --json labels:\n%s", st.Run)
+	}
+	if strings.Contains(fmt.Sprint(st.Env), "pull_request.labels") {
+		t.Errorf("the labels must not come from the event payload snapshot: %v", st.Env)
+	}
+	if !strings.Contains(st.Run, "set -euo pipefail") {
+		t.Error("an API error must fail the step")
+	}
+}
+
+// label-reset runs from the base branch and executes nothing from the pull request, so it may use the maintainer's
+// runner; no GitHub-hosted runner is added: its runs-on is exactly the RUNNER_LINUX variable.
+func TestLabelReset_noHostedRunner(t *testing.T) {
+	raw, err := os.ReadFile("../../.github/workflows/label-reset.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if hostedRunnerRE.MatchString(line) {
+			t.Errorf("label-reset.yml:%d names a GitHub-hosted runner: %s", n+1, line)
+		}
+	}
+	if r := strings.TrimSpace(load(t, "label-reset.yml").Jobs["label-reset"].RunsOn); r != "${{ vars.RUNNER_LINUX }}" {
+		t.Errorf("label-reset runs-on = %q, want ${{ vars.RUNNER_LINUX }}", r)
+	}
+}
+
+var hostedRunnerRE = regexp.MustCompile(`(ubuntu|macos|windows)-`)
 
 // Every Linux job takes its runner from the repository variable RUNNER_LINUX with ubuntu-latest as the default, so a
 // maintainer can move mash's Linux CI by setting one variable. A fork pull request always gets ubuntu-latest, never
@@ -1721,5 +1780,34 @@ func TestRelease_everyJobBelowBuildHasAStatusFunction(t *testing.T) {
 				t.Errorf("job %s needs %s but its if does not require %s", jn, n, ref)
 			}
 		}
+	}
+}
+
+// git diff drops the source of a rename unless told not to: `git mv .mergify.yml elsewhere` would list only "elsewhere" and
+// escape adr-lint's protected-path check (and a code file renamed into docs/ would skip CI). Every changed-path list a
+// workflow computes passes --no-renames, so the old path is listed too.
+func TestWorkflows_changedFileListsKeepRenameSources(t *testing.T) {
+	files, _ := filepath.Glob("../../.github/workflows/*.yml")
+	seen := 0
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") || !strings.Contains(line, "git") || !strings.Contains(line, " diff ") {
+				continue
+			}
+			if !strings.Contains(line, "--name-only") && !strings.Contains(line, "--name-status") {
+				continue
+			}
+			seen++
+			if !strings.Contains(line, "--no-renames") {
+				t.Errorf("%s:%d lists changed files without --no-renames (a rename's old path would be missing): %s", filepath.Base(f), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if seen < 2 {
+		t.Errorf("found %d changed-file lists in the workflows, want adr-lint.yml's and ci.yml's", seen)
 	}
 }

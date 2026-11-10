@@ -2,6 +2,7 @@ package release
 
 import (
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -75,11 +76,20 @@ func loadMergify(t *testing.T) mergify {
 // Every check the queue waits for is one ci.yml runs (or codex-review, the review watcher's status): a name CI never
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
-	jobs := load(t, "ci.yml").Jobs
-	for _, f := range []string{"adr-lint.yml", "label-reset.yml"} { // their jobs are checks the queue waits for too
-		for name, j := range load(t, f).Jobs {
-			jobs[name] = j
+	// A check's name is the job's name: when set, else its key (a matrix job's name is not one a queue condition names).
+	names := map[string]string{}                                              // check name -> the workflow file that runs it
+	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} { // the checks the queue waits for
+		for key, j := range load(t, f).Jobs {
+			n := j.Name
+			if n == "" {
+				n = key
+			}
+			names[n] = f
 		}
+	}
+	// The queue reads a check only if its workflow runs for the pull request: label-reset is a pull_request_target one.
+	if on, _ := load(t, "label-reset.yml").On.(map[string]any); on["pull_request_target"] == nil {
+		t.Error("label-reset.yml must trigger on pull_request_target")
 	}
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	m := loadMergify(t)
@@ -93,8 +103,13 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 		if mm == nil || mm[1] == "codex-review" {
 			continue
 		}
-		if _, ok := jobs[mm[1]]; !ok {
-			t.Errorf(".mergify.yml waits for %q, which no workflow the queue reads (ci.yml, adr-lint.yml, label-reset.yml) runs", mm[1])
+		if _, ok := names[mm[1]]; !ok {
+			t.Errorf(".mergify.yml waits for %q, which no job (by its name:, or its key when it has none) in ci.yml, adr-lint.yml or label-reset.yml is called", mm[1])
+		}
+	}
+	for _, c := range []struct{ check, file string }{{"adr-lint", "adr-lint.yml"}, {"label-reset", "label-reset.yml"}, {"pr-check", "ci.yml"}} {
+		if names[c.check] != c.file {
+			t.Errorf("check %q is run by %q, want %q", c.check, names[c.check], c.file)
 		}
 	}
 	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "check-success = label-reset", "label != hold", "-draft", "-conflict"} {
@@ -148,8 +163,8 @@ func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 }
 
 // The lead-approved and decision-confirmed labels must not outlive the code they covered: a workflow removes both on
-// every push (and runs on open and reopen, so the label-reset check exists on every head). It runs on
-// pull_request_target (a token that can edit labels on any pull request), so it must hold only pull-requests: write and
+// every push, on open (labels preset at open do not count) and on reopen. It runs on
+// pull_request_target (a token that can edit labels on any pull request), so it must hold only pull-requests: write and contents: read and
 // never check out or run the pull request's code, and a failure must fail the job (no swallowed errors).
 func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 	if _, err := os.Stat("../../.github/workflows/lead-approved-reset.yml"); err == nil {
@@ -176,18 +191,24 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 	if strings.Join(types, ",") != "opened,reopened,synchronize" {
 		t.Errorf("pull_request_target types = %v, want [opened reopened synchronize]", types)
 	}
-	if len(w.Permissions) != 1 || w.Permissions["pull-requests"] != "write" {
-		t.Errorf("workflow permissions = %v, want pull-requests: write only", w.Permissions)
+	// contents: read is for gh pr view (it may need it on this repository); both are read or label-edit scopes, no write to code.
+	wantPerms := map[string]string{"pull-requests": "write", "contents": "read"}
+	if !reflect.DeepEqual(w.Permissions, wantPerms) {
+		t.Errorf("workflow permissions = %v, want exactly %v", w.Permissions, wantPerms)
 	}
 	if len(w.Jobs) != 1 || w.Jobs["label-reset"].Name != "label-reset" {
 		t.Errorf("jobs = %v, want the single job label-reset named label-reset (the check name)", w.Jobs)
 	}
 	for id, j := range w.Jobs {
-		if j.Permissions != nil && (len(j.Permissions) != 1 || j.Permissions["pull-requests"] != "write") {
-			t.Errorf("job %s permissions = %v, want pull-requests: write only", id, j.Permissions)
+		if j.Permissions != nil && !reflect.DeepEqual(j.Permissions, wantPerms) {
+			t.Errorf("job %s permissions = %v, want exactly %v", id, j.Permissions, wantPerms)
 		}
 	}
 	text := string(raw)
+	// opened resets too: labels preset at open must not count, so there is no early exit for it.
+	if strings.Contains(text, `"opened"`) || strings.Contains(text, "exit 0") || strings.Contains(text, "ACTION") {
+		t.Error("label-reset.yml special-cases opened or exits early: labels preset at open must be removed like any other")
+	}
 	if strings.Contains(text, "actions/checkout") {
 		t.Error("label-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
 	}
