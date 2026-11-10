@@ -283,18 +283,11 @@ func legacyCheck(key string, r Record) error {
 	return nil
 }
 
-// looksNewForm reports whether r, read under key, was meant as a new-form record: an agent token other than the
-// legacy "cc" that is a valid new-form token, and either a flat-looking key or the new-form mail subject. A legacy
-// record that is merely broken does not look new-form, so its error text is unchanged.
-func looksNewForm(key string, r Record) bool {
-	if r.AgentToken == "" || r.AgentToken == sap.AgentToken {
-		return false
-	}
-	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
-	if err != nil {
-		return strings.Contains(key, "_")
-	}
-	return strings.Contains(key, "_") || r.MailSubject == id.Subjects().Mail
+// looksNewForm reports whether r, read under key, was meant as a new-form record: only when key contains an
+// underscore, which a legacy key never has (the legacy name rule forbids it). Every other record keeps its legacy
+// error text.
+func looksNewForm(key string) bool {
+	return strings.Contains(key, "_")
 }
 
 // newFormCheck applies the new-form record rules to r as the record for key and returns its identity.
@@ -331,7 +324,7 @@ func ParseRecord(key string, value []byte) (Record, error) {
 		return r, nil
 	}
 	if _, nerr := newFormCheck(key, r); nerr != nil {
-		if looksNewForm(key, r) {
+		if looksNewForm(key) {
 			return Record{}, nerr
 		}
 		return Record{}, lerr
@@ -340,7 +333,8 @@ func ParseRecord(key string, value []byte) (Record, error) {
 }
 
 // Identity is the endpoint identity r names: the legacy identity when r satisfies the legacy checks (keyed by its
-// name), else the new-form identity of (agent_token, owner, name).
+// name) and its owner and name are valid legacy tokens, else the new-form identity of (agent_token, owner, name).
+// An odd legacy record that ParseRecord accepts can have no identity here.
 func (r Record) Identity() (sap.EndpointIdentity, error) {
 	if legacyCheck(r.Name, r) == nil {
 		if id, err := sap.Legacy(r.Owner, r.Name); err == nil {
@@ -354,9 +348,13 @@ func (r Record) Identity() (sap.EndpointIdentity, error) {
 	return newFormCheck(id.Flat(), r)
 }
 
-// Key is the directory key of r: the flat identity for a new-form record, the name for a legacy one. It is empty
-// when r names no valid identity.
+// Key is the directory key of r: the name for a record that passes the legacy checks (even when its owner or name
+// is not a valid legacy token, so Identity errors), the flat identity for a new-form record. It is empty when r is
+// neither. Key is the writer's key for every record ParseRecord accepts.
 func (r Record) Key() string {
+	if legacyCheck(r.Name, r) == nil {
+		return r.Name
+	}
 	id, err := r.Identity()
 	if err != nil {
 		return ""

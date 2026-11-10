@@ -123,7 +123,7 @@ func TestNewFormRecordsRejected(t *testing.T) {
 		label, key, want string
 		rec              Record
 	}{
-		{"key is the name", "ops1", "flat identity", good},
+		{"key is the name", "ops1", "is not \"agents.mail.cc.team1.ops1\"", good},
 		{"key wrong tokens", "acme_team2_ops1", "flat identity", good},
 		{"subject mismatch", flat, "new-form mail subject", mod(func(r *Record) { r.MailSubject = "agents.mail.acme.team1.other" })},
 		{"zone set", flat, "must not have a zone", mod(func(r *Record) { r.Zone = "east" })},
@@ -142,16 +142,41 @@ func TestNewFormRecordsRejected(t *testing.T) {
 	}
 }
 
-func TestCCNewFormAccepted(t *testing.T) {
+func TestCCNewFormRejected(t *testing.T) {
 	r := Record{Name: "ops1", Owner: "acme", Agent: "claude", AgentToken: "cc", User: "U", MailSubject: "agents.mail.cc.acme.ops1"}
 	got, err := ParseRecord("cc_acme_ops1", recJSON(t, r))
+	if err == nil || !strings.Contains(err.Error(), "legacy") || !strings.Contains(err.Error(), `"cc"`) {
+		t.Fatalf("err %v, want cc named as the legacy agent token", err)
+	}
+	if got.Key() != "" {
+		t.Fatalf("rejected record has key %q", got.Key())
+	}
+	if _, err := got.Identity(); err == nil {
+		t.Fatal("rejected record has an identity")
+	}
+}
+
+func TestOddLegacyRecordKeepsKey(t *testing.T) {
+	r := Record{Name: "a", Owner: "", Agent: "cc", AgentToken: "cc", User: "U", MailSubject: "agents.mail.cc..a"}
+	got, err := ParseRecord("a", recJSON(t, r))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A cc record has the same name, owner and subject as a legacy one, so from the record alone (no key)
-	// Identity cannot tell them apart and reports the legacy identity. The name rule, not the reader, refuses cc.
-	if id, err := got.Identity(); err != nil || !id.IsLegacy() {
-		t.Fatalf("identity %+v %v", id, err)
+	if got.Key() != "a" {
+		t.Fatalf("key %q", got.Key())
+	}
+	if _, err := got.Identity(); err == nil {
+		t.Fatal("odd legacy record has an identity")
+	}
+}
+
+func TestNoUnderscoreKeepsLegacyError(t *testing.T) {
+	r := Record{Name: "a", Owner: "o", AgentToken: "t", User: "U", MailSubject: "agents.mail.t.o.a"}
+	b := recJSON(t, r)
+	_, want := legacyOnlyParse("a", b)
+	_, got := ParseRecord("a", b)
+	if want == nil || got == nil || want.Error() != got.Error() || !strings.Contains(got.Error(), "mail subject") {
+		t.Fatalf("old %v, new %v", want, got)
 	}
 }
 
