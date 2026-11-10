@@ -42,7 +42,9 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
   test:
-    # No name: the matrix os values (linux, macos) make the check names test (linux) and test (macos).
+    # The name is explicit: with an include-only matrix GitHub would append every matrix value, the runs-on array included,
+    # to the job id. The check names are exactly test (linux) and test (macos) (release.RequiredChecks).
+    name: test (${{ matrix.os }})
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.code == 'true'
     timeout-minutes: 30

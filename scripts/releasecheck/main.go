@@ -47,11 +47,9 @@ type Options struct {
 	X       string
 	Version string // N.N.N, without the leading v
 	GH      string // the gh command; default $RELEASE_CHECK_GH, else gh
-	// SLSAVerifier is the slsa-verifier command; default slsa-verifier on PATH. Not finding it is a refusal; no flag skips it.
-	SLSAVerifier string
-	GHRepo       string // the release repository (owner/name): default $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash
-	Remote       string // the release repository, for main and the tag; default https://github.com/<GHRepo>.git
-	NoFetch      bool   // do not fetch main first (tests that supply their own origin/main)
+	GHRepo  string // the release repository (owner/name): default $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash
+	Remote  string // the release repository, for main and the tag; default https://github.com/<GHRepo>.git
+	NoFetch bool   // do not fetch main first (tests that supply their own origin/main)
 	// Signers is the allowed_signers file a release tag must verify against: default docs/allowed_signers of Repo,
 	// the checkout running the check. Never the machine's own git config, so the gate is the same for anyone who
 	// runs it, and a key a machine happens to trust cannot pass a release.
@@ -152,9 +150,6 @@ func withArgs(o Options, x, version string) Options {
 }
 
 func mainRun(args []string, out io.Writer) int {
-	if len(args) > 0 && args[0] == "provenance-signer" {
-		return provenanceSignerCommand(args[1:], out)
-	}
 	o, assets, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -711,12 +706,12 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	if buildOK && scriptHash != "" {
 		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
-			// Attestations, SBOMs and SLSA provenance are verified first, so no maintainer signature is ever made over
+			// Attestations, SBOMs and the build provenance are verified first, so no maintainer signature is ever made over
 			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
 			// saw, including one that already carries a verifying SHA256SUMS.sig.
 			r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
 			if r.ok() {
-				r.step("every binary has an attested CycloneDX SBOM and SLSA provenance that verifies", verifySupplyChain(o, tag))
+				r.step("every binary has an attested CycloneDX SBOM and build provenance that verifies", verifySupplyChain(o, tag))
 			}
 			// The signature is made (or an attached one verified) only after all of the above passed.
 			if r.ok() {

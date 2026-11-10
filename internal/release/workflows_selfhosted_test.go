@@ -15,7 +15,9 @@ import (
 // every workflow file and fails on a job-level runs-on that is anything else than [self-hosted, rh-linux] or
 // [self-hosted, rh-macos] (a reusable-workflow caller job has none), on a runs-on with a fallback (||), on a matrix-driven
 // runs-on (${{ matrix.<key> }}) unless every value that matrix supplies is one of those two lists, on a GitHub-hosted
-// label (ubuntu-*, macos-*, windows-*) anywhere outside a comment, and on a host name.
+// label (ubuntu-*, macos-*, windows-*) anywhere outside a comment, on a host name, and on a job-level `uses:` of a reusable
+// workflow outside this repository (its jobs would run on runners this repository does not pick). A local
+// ./.github/workflows/... caller is fine; step-level `uses:` of actions is not covered.
 
 // linuxLabels and macosLabels are fmt.Sprint forms of the only two allowed runs-on lists.
 const (
@@ -29,6 +31,9 @@ var hostedLabel = regexp.MustCompile(`(^|[^A-Za-z0-9_-])(ubuntu|macos|windows)-[
 
 // hostNames are machine names no workflow may carry.
 var hostNames = []string{"bf1", "hermes1"}
+
+// thisRepository is the only owner/repo whose reusable workflows a job may call by name.
+const thisRepository = "bogworks/mash"
 
 var matrixRunsOn = regexp.MustCompile(`^\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}$`)
 
@@ -84,8 +89,13 @@ func selfHostedViolations(name, text string) []string {
 		return append(out, fmt.Sprintf("%s: not valid YAML: %v", name, err))
 	}
 	for id, j := range w.Jobs {
-		if j.Uses != "" && j.RunsOn == nil {
-			continue // a reusable-workflow caller job: the called workflow picks its runners
+		if j.Uses != "" {
+			if !localReusableWorkflow(j.Uses) {
+				out = append(out, fmt.Sprintf("%s job %s: calls the reusable workflow %q outside this repository, whose jobs run on runners we do not pick", name, id, j.Uses))
+			}
+			if j.RunsOn == nil {
+				continue // a reusable-workflow caller job: the called workflow picks its runners
+			}
 		}
 		switch r := j.RunsOn.(type) {
 		case []any:
@@ -107,6 +117,16 @@ func selfHostedViolations(name, text string) []string {
 		}
 	}
 	return out
+}
+
+// localReusableWorkflow reports whether a job-level uses: names a workflow of this repository: ./.github/workflows/x.yml, or
+// bogworks/mash/.github/workflows/x.yml@ref. Anything else is another owner or repository.
+func localReusableWorkflow(uses string) bool {
+	if strings.HasPrefix(uses, "./") {
+		return true
+	}
+	path, _, _ := strings.Cut(uses, "@")
+	return strings.HasPrefix(path, thisRepository+"/.github/workflows/")
 }
 
 // matrixValueViolations checks every value the matrix supplies for key: the axis list itself and each include entry.
@@ -178,32 +198,38 @@ func TestSelfHostedGuard_catchesEachViolation(t *testing.T) {
           - {os: linux, runs-on: [self-hosted, rh-linux]}
           - {os: macos, runs-on: [self-hosted, rh-macos]}
   c:
-    uses: o/r/.github/workflows/w.yml@v1
+    uses: ./.github/workflows/w.yml
+  d:
+    uses: bogworks/mash/.github/workflows/w.yml@main
 `
 	if v := selfHostedViolations("ok.yml", ok); len(v) != 0 {
 		t.Fatalf("a compliant workflow was refused: %v", v)
 	}
 	const lin = "jobs:\n  a:\n    runs-on: [self-hosted, rh-linux]\n"
 	for name, c := range map[string]struct{ text, want string }{
-		"a hosted runs-on":          {"jobs:\n  a:\n    runs-on: ubuntu-latest\n", "ubuntu-latest"},
-		"a macos runs-on":           {"jobs:\n  a:\n    runs-on: macos-14\n", "macos-14"},
-		"a windows runs-on":         {"jobs:\n  a:\n    runs-on: windows-2022\n", "windows-2022"},
-		"a fallback":                {"jobs:\n  a:\n    runs-on: ${{ vars.X || 'y' }}\n", "fallback"},
-		"a variable":                {"jobs:\n  a:\n    runs-on: ${{ vars.RUNNER_LINUX }}\n", "not a list"},
-		"a bare self-hosted":        {"jobs:\n  a:\n    runs-on: self-hosted\n", "not a list"},
-		"a wrong list":              {"jobs:\n  a:\n    runs-on: [self-hosted, linux]\n", "is not"},
-		"an extra label":            {"jobs:\n  a:\n    runs-on: [self-hosted, rh-linux, gpu]\n", "is not"},
-		"the macOS OS label":        {"jobs:\n  a:\n    runs-on: [self-hosted, macOS, rh-macos]\n", "is not"},
-		"a reordered list":          {"jobs:\n  a:\n    runs-on: [rh-linux, self-hosted]\n", "is not"},
-		"a group mapping":           {"jobs:\n  a:\n    runs-on: {group: g}\n", "want"},
-		"no runs-on":                {"jobs:\n  a:\n    steps: []\n", "want"},
-		"a matrix key never set":    {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        os: [linux]\n", "supplies no r"},
-		"a matrix hosted value":     {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        include:\n          - {r: [self-hosted, rh-linux]}\n          - {r: ubuntu-latest}\n", "is not"},
-		"a matrix axis wrong value": {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        r: [[self-hosted, rh-linux], [self-hosted, other]]\n", "is not"},
-		"a matrix entry missing it": {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        include:\n          - {r: [self-hosted, rh-linux]}\n          - {os: x}\n", "has no r"},
-		"a matrix expression":       {"jobs:\n  a:\n    runs-on: ${{ matrix.r || 'x' }}\n", "fallback"},
-		"a label outside a comment": {lin + "    steps:\n      - run: echo ubuntu-22.04\n", "ubuntu-22.04"},
-		"a host name":               {lin + "    steps:\n      - run: ssh bf1\n", "bf1"},
+		"a hosted runs-on":                 {"jobs:\n  a:\n    runs-on: ubuntu-latest\n", "ubuntu-latest"},
+		"a macos runs-on":                  {"jobs:\n  a:\n    runs-on: macos-14\n", "macos-14"},
+		"a windows runs-on":                {"jobs:\n  a:\n    runs-on: windows-2022\n", "windows-2022"},
+		"a fallback":                       {"jobs:\n  a:\n    runs-on: ${{ vars.X || 'y' }}\n", "fallback"},
+		"a variable":                       {"jobs:\n  a:\n    runs-on: ${{ vars.RUNNER_LINUX }}\n", "not a list"},
+		"a bare self-hosted":               {"jobs:\n  a:\n    runs-on: self-hosted\n", "not a list"},
+		"a wrong list":                     {"jobs:\n  a:\n    runs-on: [self-hosted, linux]\n", "is not"},
+		"an extra label":                   {"jobs:\n  a:\n    runs-on: [self-hosted, rh-linux, gpu]\n", "is not"},
+		"the macOS OS label":               {"jobs:\n  a:\n    runs-on: [self-hosted, macOS, rh-macos]\n", "is not"},
+		"a reordered list":                 {"jobs:\n  a:\n    runs-on: [rh-linux, self-hosted]\n", "is not"},
+		"a group mapping":                  {"jobs:\n  a:\n    runs-on: {group: g}\n", "want"},
+		"no runs-on":                       {"jobs:\n  a:\n    steps: []\n", "want"},
+		"a matrix key never set":           {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        os: [linux]\n", "supplies no r"},
+		"a matrix hosted value":            {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        include:\n          - {r: [self-hosted, rh-linux]}\n          - {r: ubuntu-latest}\n", "is not"},
+		"a matrix axis wrong value":        {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        r: [[self-hosted, rh-linux], [self-hosted, other]]\n", "is not"},
+		"a matrix entry missing it":        {"jobs:\n  a:\n    runs-on: ${{ matrix.r }}\n    strategy:\n      matrix:\n        include:\n          - {r: [self-hosted, rh-linux]}\n          - {os: x}\n", "has no r"},
+		"a matrix expression":              {"jobs:\n  a:\n    runs-on: ${{ matrix.r || 'x' }}\n", "fallback"},
+		"a label outside a comment":        {lin + "    steps:\n      - run: echo ubuntu-22.04\n", "ubuntu-22.04"},
+		"a host name":                      {lin + "    steps:\n      - run: ssh bf1\n", "bf1"},
+		"an outside reusable":              {"jobs:\n  a:\n    uses: o/r/.github/workflows/w.yml@v1\n", "outside this repository"},
+		"an outside reusable by sha":       {"jobs:\n  a:\n    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@0123456789012345678901234567890123456789\n    with: {}\n", "outside this repository"},
+		"a lookalike repository":           {"jobs:\n  a:\n    uses: bogworks/mash-evil/.github/workflows/w.yml@v1\n", "outside this repository"},
+		"an outside reusable with runs-on": {"jobs:\n  a:\n    runs-on: [self-hosted, rh-linux]\n    uses: o/r/.github/workflows/w.yml@v1\n", "outside this repository"},
 	} {
 		v := selfHostedViolations("bad.yml", c.text)
 		if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), c.want) {

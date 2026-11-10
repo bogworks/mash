@@ -72,7 +72,6 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
 	write(t, repo, "scripts/"+release.ScriptName, "#!/bin/sh\necho quickstart\n")
-	write(t, repo, releaseWorkflowPath, testReleaseYML)
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
 	gitT(t, repo, "add", "-A")
 	gitT(t, repo, "commit", "-q", "-m", "candidate")
@@ -94,11 +93,12 @@ case "$1" in
       if [ -f "ROOT/files/$n" ]; then cat "ROOT/files/$n"; else echo "no assets match the file pattern" >&2; exit 1; fi ;;
     upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
     *) cat "ROOT/assets.json" ;; esac ;;
-  attestation) b=$(basename "$3"); sbom=
-    for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; done
-    if [ -n "$sbom" ]; then [ -f "ROOT/noattest-sbom/$b" ] && { echo "no attestations found" >&2; exit 1; }
+  attestation) b=$(basename "$3"); sbom=; bundle=
+    for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; [ "$a" = --bundle ] && bundle=1; done
+    if [ -n "$bundle" ]; then [ -f "ROOT/noprov/$b" ] && { echo "verification failed: no matching provenance" >&2; exit 1; }
+    elif [ -n "$sbom" ]; then [ -f "ROOT/noattest-sbom/$b" ] && { echo "no attestations found" >&2; exit 1; }
     else [ -f "ROOT/noattest/$b" ] && { echo "no attestations found" >&2; exit 1; }; fi
-    if [ -n "$sbom" ]; then
+    if [ -n "$sbom" ] && [ -z "$bundle" ]; then
       h=$( (sha256sum "$3" 2>/dev/null || shasum -a 256 "$3") | cut -d' ' -f1)
       [ -f "ROOT/badsubject/$b" ] && h=0000
       if [ -f "ROOT/predicate/$b" ]; then pred=$(cat "ROOT/predicate/$b"); else pred=$(cat "$(dirname "$3")/$b.cdx.json"); fi
@@ -108,19 +108,10 @@ case "$1" in
 esac
 `
 	write(t, root, "gh", strings.ReplaceAll(ghScript, "ROOT", root))
-	// slsa-verifier: logs its arguments; fails for a binary named in noslsa/.
-	write(t, root, "slsa-verifier", strings.ReplaceAll(`#!/bin/sh
-echo "slsa-verifier $*" >> "ROOT/gh.log"
-[ -f "ROOT/noslsa/$(basename "$2")" ] && { echo "FAILED: no matching provenance" >&2; exit 1; }
-exit 0
-`, "ROOT", root))
-	if err := os.Chmod(filepath.Join(root, "slsa-verifier"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Chmod(gh, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{}, SLSAVerifier: filepath.Join(root, "slsa-verifier"),
+	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
 		Signers: filepath.Join(root, "allowed_signers")}
 	t.Setenv("RELEASE_SIGNING_KEY", sumsKey.priv)
 	f.setCI(release.RequiredChecks...)
@@ -223,7 +214,7 @@ func (f *fixture) ourBuilds() map[release.Target]string {
 	return h
 }
 
-// dsseLine is one line of an .intoto.jsonl file in the shape slsa-github-generator v2 writes: a Sigstore bundle whose
+// dsseLine is one line of an .intoto.jsonl file in the shape actions/attest-build-provenance writes: a Sigstore bundle whose
 // dsseEnvelope.payload is the given in-toto statement.
 func dsseLine(statement string) string {
 	return `{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.2","verificationMaterial":{},"dsseEnvelope":{"payload":"` + base64.StdEncoding.EncodeToString([]byte(statement)) + `","payloadType":"application/vnd.in-toto+json","signatures":[]}}` + "\n"
@@ -238,7 +229,7 @@ func bareDSSELine(statement string) string {
 // line naming release.yml).
 func goodCIAsset(name string) string {
 	if name == release.ProvenanceName {
-		return bundleLineWithCert(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert())
+		return dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`)
 	}
 	return `{"bomFormat":"CycloneDX","specVersion":"1.5","metadata":{"component":{"name":"` + name + `"}},"components":[{"type":"library","name":"x"}]}` + "\n"
 }
@@ -1594,9 +1585,4 @@ func TestAssets_aScriptMissingAtXIsAClearError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "script is missing at") {
 		t.Fatalf("%v", err)
 	}
-}
-
-// goodSignerCert is a certificate made by the recorded generator commit at the recorded tag, as Fulcio would record it.
-func goodSignerCert() []byte {
-	return goodCertDER(nil)
 }
