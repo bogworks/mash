@@ -83,7 +83,8 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   `main`.
   adr-lint ignores `decision-confirmed` on `synchronize`, `reopened` and `opened` runs (the event action is passed to it), because
   it runs beside label-reset and could read the label before the removal, which starts no new run; the label counts only
-  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. label-reset runs on the
+  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. adr-lint runs on the self-hosted runners labelled `self-hosted, rh-linux`, fork pull requests included once a person
+  approves the run. label-reset runs on the
   runner named by the repository variable `RUNNER_LINUX` (no GitHub-hosted runner; safe because it runs from the base
   branch and executes nothing from the pull request); set that variable, or the check never appears and the queue keeps the
   pull request out (fail closed).

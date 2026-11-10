@@ -407,4 +407,6 @@ and tick it off in the repository's setup issue.
 
 - [ ] GitHub-hosted runners only: no self-hosted runner on a public repository, because it would run fork code on the
       maintainers' machines. Set the `RUNNER_LINUX` repository variable only to a runner the maintainers control, never
-      for fork pull requests (the workflows already route forks to `ubuntu-latest`).
+      for fork pull requests (the workflows already route forks to `ubuntu-latest`). The one exception is `adr-lint.yml`,
+      which runs on the self-hosted runners labelled `self-hosted, rh-linux`, including fork pull requests once a person
+      approves them, because it runs from the base branch and executes nothing from the pull request.

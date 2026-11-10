@@ -14,8 +14,9 @@ name: adr-lint
 # sourced or run, no secret is used, and the token is contents: read. A pull request that changes this workflow or
 # scripts/adrlint is judged by the base branch's versions; its change takes effect once it has merged. (The first pull
 # request that adds scripts/adrlint has no checker at its base and cannot pass this workflow until a maintainer merges it.)
-# A pull request from a fork runs on ubuntu-latest, never on a self-hosted runner. The body and the labels reach the tool
-# through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
+# This job runs on the repository's self-hosted runners (labels self-hosted, rh-linux); a pull request from a fork is not
+# skipped, it runs there once a person approves the run, and that is safe because nothing from the pull request is run.
+# The body and the labels reach the tool through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
 # is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
 on:
   pull_request_target:
@@ -29,7 +30,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
-    runs-on: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: [self-hosted, rh-linux]
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)
@@ -53,7 +54,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          # --no-renames: a rename is listed as a delete plus an add, so the old path (say a protected one) is in the list.
           git -C pr fetch --no-tags "$GITHUB_WORKSPACE/trusted" "+$BASE_SHA:refs/remotes/origin/$BASE_REF"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -96,5 +96,6 @@ jobs:
           # The current labels, not the event payload's snapshot; an API error fails the step (set -e on the assignment).
           labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
           export PR_LABELS="$labels"
+          # --no-renames: a rename is listed as a delete plus an add, so the old path (say a protected one) is in the list.
           git -C "$GITHUB_WORKSPACE/pr" diff --no-renames --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/files"
           "$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr" --files "$RUNNER_TEMP/files"
