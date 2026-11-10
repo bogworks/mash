@@ -41,11 +41,6 @@ func TestGoldenSubjectsLegacy(t *testing.T) {
 		if o, z, n, ok := SplitMail(c.mail); !ok || o != c.owner || z != "" || n != c.name {
 			t.Errorf("SplitMail(%q) = %q %q %q %v", c.mail, o, z, n, ok)
 		}
-		for _, subj := range []string{c.prompt, c.status, c.hb, c.mail} {
-			if n, ok := NameFromSubject(subj); !ok || n != c.name {
-				t.Errorf("NameFromSubject(%q) = %q %v", subj, n, ok)
-			}
-		}
 	}
 }
 
@@ -76,10 +71,6 @@ func TestGoldenSubjectsZoned(t *testing.T) {
 		if z, ok := ZoneOfMailFilter(c.filter, c.owner, c.name); !ok || z != c.zone {
 			t.Errorf("ZoneOfMailFilter(%q) = %q %v", c.filter, z, ok)
 		}
-		// a zoned mail subject is six tokens, so NameFromSubject (five-token only) refuses it
-		if n, ok := NameFromSubject(c.mail); ok || n != "" {
-			t.Errorf("NameFromSubject(zoned %q) = %q %v", c.mail, n, ok)
-		}
 		// the legacy filter is not an exact-zone filter
 		if _, ok := ZoneOfMailFilter(MailFilter(c.owner, c.name), c.owner, c.name); ok {
 			t.Errorf("legacy filter parsed as zoned")
@@ -94,11 +85,6 @@ func TestGoldenSplitMailRefusals(t *testing.T) {
 	} {
 		if _, _, _, ok := SplitMail(s); ok {
 			t.Errorf("SplitMail(%q) accepted", s)
-		}
-	}
-	for _, s := range []string{"", "agents.mail.cc.o", "agents.mail.cc.o.a.b", "x.mail.cc.o.a", "agents.mail.cc.o."} {
-		if _, ok := NameFromSubject(s); ok {
-			t.Errorf("NameFromSubject(%q) accepted", s)
 		}
 	}
 	if _, ok := ZoneOfMailFilter("agents.mail.*.o.Z.a", "o", "a"); ok {

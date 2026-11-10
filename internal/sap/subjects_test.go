@@ -27,26 +27,6 @@ func TestFor(t *testing.T) {
 	}
 }
 
-func TestNameFromSubject(t *testing.T) {
-	cases := map[string]struct {
-		name string
-		ok   bool
-	}{
-		"agents.hb.cc.acme.x":        {"x", true},
-		"agents.mail.cc.acme.mash-a": {"mash-a", true},
-		"agents.hb.cc.acme":          {"", false},
-		"agents.hb.cc.acme.x.y":      {"", false},
-		"other.hb.cc.acme.x":         {"", false},
-		"":                           {"", false},
-	}
-	for subj, w := range cases {
-		n, ok := NameFromSubject(subj)
-		if n != w.name || ok != w.ok {
-			t.Errorf("%q: got (%q,%v) want (%q,%v)", subj, n, ok, w.name, w.ok)
-		}
-	}
-}
-
 func TestForZone(t *testing.T) {
 	s := ForZone("acme", "default", "p-ops2")
 	want := Subjects{

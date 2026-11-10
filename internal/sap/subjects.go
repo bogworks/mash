@@ -111,16 +111,6 @@ func InboxPrefix(name string) string { return "_INBOX." + name }
 // InboxStream is the JetStream stream that holds name's mail.
 func InboxStream(name string) string { return "inbox-" + name }
 
-// NameFromSubject returns the instance name (5th token) of a 5-token
-// agents.* subject.
-func NameFromSubject(subj string) (string, bool) {
-	t := strings.Split(subj, ".")
-	if len(t) != 5 || t[0] != "agents" || t[4] == "" {
-		return "", false
-	}
-	return t[4], true
-}
-
 // KeyFromSubject returns the directory key of the endpoint a five-token
 // agents.<verb>.<agent>.<owner>.<name> subject addresses. A subject whose agent
 // token is AgentToken is legacy and its key is the bare name token, as

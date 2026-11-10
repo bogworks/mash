@@ -86,3 +86,10 @@ func SetAfterAdmissionLock(f func()) (prev func()) {
 	prev, afterAdmissionLock = afterAdmissionLock, f
 	return
 }
+
+// SetAfterDirectoryGet installs a hook that runs before each per-record directory read of admission; it returns the
+// previous one.
+func SetAfterDirectoryGet(f func(key string)) (prev func(key string)) {
+	prev, afterDirectoryGet = afterDirectoryGet, f
+	return
+}
