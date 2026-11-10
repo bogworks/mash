@@ -20,7 +20,11 @@ the credential re-issue; Phase 3 is held.
    grant does not know whether it is "legacy": it matches tokens.
    - **Alias subjects are exact.** A new-form endpoint takes its legacy alias (the legacy name, AT-004) as exact
      subjects with the literal agent token `cc` (`agents.<verb>.cc.<legacy-owner>.<legacy-name>`), never a wildcard in the
-     agent position, and publishes its heartbeat on both its new subject and its alias. A new-form sender's window grant
+     agent position, and publishes its heartbeat on both its new subject and its alias. Its user also gets exact **subscribe** grants for
+     the alias's `prompt` and `status` subjects (`agents.prompt.cc.<legacy-owner>.<legacy-name>` and
+     `agents.status.cc.<legacy-owner>.<legacy-name>`; mail reaches it through the legacy stream, so no mail
+     subscription is needed), tested with provisioned credentials for both verbs: a legacy peer's prompt and status
+     request to the alias is received and answered, and nothing else under `cc` is subscribable. A new-form sender's window grant
      to reach legacy endpoints is `agents.<verb>.cc.<legacy-owner>.*` for the verbs `mail`, `prompt` and `status` only
      (a wildcard only in the name position); heartbeat publication is granted on the endpoint's own exact subjects
      (new and alias) and never on a legacy endpoint's. Neither
@@ -337,7 +341,12 @@ enumerate directory records and inbox streams. The pull request:
   under the agent token `cc`, a plain name inside a range, and a grant on `agents.mail.*.homerange.*`, each through a
   direct mash client and, where homerange's path exists, through it. They run
   in CI on every change from then on and are never removed or skipped.
-- **3.2 Remove the compatibility.** **Drain before revoking:** the transition grant on a legacy stream stays until
+- **3.2 Remove the compatibility.** **Break order (no race between the drain check and revocation):** (1) stop alias
+  publication first: revoke the senders' window grants and the aliases' publish lines; (2) confirm that took effect on
+  every server in the cluster (a publish to an alias from a legacy sender is refused everywhere); (3) only then run the
+  final drain check; (4) only then revoke the read grant. Steps are in the break procedure and the 3.2 test runs them
+  in that order and fails if the read grant is revoked while an alias can still be published to.
+  **Drain before revoking:** the transition grant on a legacy stream stays until
   that stream's durable consumer has zero pending and zero unacknowledged messages; 1.9's enumeration reports it per
   identity, the break procedure checks it, and 3.2 refuses to remove a grant whose legacy consumer is not drained (a
   test proves it). Then: old-form acceptance in mash's name rule, the legacy subjects and their grants, the
