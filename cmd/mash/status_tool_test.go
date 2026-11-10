@@ -677,3 +677,26 @@ func TestStatusAuthLine(t *testing.T) {
 		}
 	}
 }
+
+func TestNameLineWithAgentToken(t *testing.T) {
+	long := strings.Repeat("a", 32)
+	cfg := config.Config{Name: long, Owner: "o", AgentToken: "ag"}
+	if l := nameLine(cfg); !strings.HasPrefix(l, "name: OK") {
+		t.Fatalf("a 32-character name is valid in the new form: %q", l)
+	}
+	if l := identityLine(cfg); l != "identity: ag.o."+long+" (three tokens)" {
+		t.Fatalf("got %q", l)
+	}
+	cfg.Name = long + "a"
+	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") {
+		t.Fatalf("a 33-character name is too long: %q", l)
+	}
+	cfg.Name = "a"
+	cfg.AgentToken = "Bad Token"
+	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") {
+		t.Fatalf("got %q", l)
+	}
+	if l := identityLine(config.Config{Name: "a", Owner: "o"}); l != "" {
+		t.Fatalf("legacy prints nothing: %q", l)
+	}
+}

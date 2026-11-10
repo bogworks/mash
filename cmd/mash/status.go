@@ -106,9 +106,13 @@ func statusTool(src *statusSource) mcp.Tool {
 // It never prints the contents of the creds file, and strips a password from the url.
 func statusText(src *statusSource) string {
 	cfg := src.cfg
-	lines := []string{nameLine(cfg), configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src)}
+	lines := []string{nameLine(cfg)}
+	if l := identityLine(cfg); l != "" {
+		lines = append(lines, l)
+	}
+	lines = append(lines, configLine(cfg, src.cfgErr), credsLine(cfg), tlsLine(cfg), connectionLine(src))
 	if l := authLine(cfg); l != "" {
-		lines = slices.Insert(lines, 4, l)
+		lines = slices.Insert(lines, len(lines)-1, l)
 	}
 	lines = append(lines, clockLine(clockSkewOf(src)))
 	lines = append(lines, allowlistLine(src))
@@ -131,10 +135,26 @@ func nameLine(cfg config.Config) string {
 	switch {
 	case cfg.Name == "":
 		return "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>"
+	case cfg.AgentToken != "":
+		if _, err := cfg.Identity(); err != nil {
+			return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_AGENT_TOKEN, owner or MASH_NAME", err)
+		}
 	case !config.ValidName(cfg.Name):
 		return fmt.Sprintf("name: FAILED - %q is not a valid endpoint name. Next: start Claude Code with MASH_NAME=<endpoint>, using 1-48 lower-case letters, digits and single hyphens, starting with a letter", cfg.Name)
 	}
 	return "name: OK - " + cfg.Name
+}
+
+// identityLine names the identity form when a three-token identity is configured, and is empty otherwise.
+func identityLine(cfg config.Config) string {
+	if cfg.AgentToken == "" {
+		return ""
+	}
+	id, err := cfg.Identity()
+	if err != nil {
+		return ""
+	}
+	return "identity: " + id.String() + " (three tokens)"
 }
 
 func configLine(cfg config.Config, cfgErr error) string {

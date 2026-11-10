@@ -1,0 +1,1 @@
+A new optional setting, `agent_token` in config.json or `MASH_AGENT_TOKEN`, selects a three-token identity for the endpoint; unset keeps today's behaviour. Nothing provisions such endpoints yet. An empty MASH_AGENT_TOKEN reads as unset, because the environment cannot report whether a variable is present.
