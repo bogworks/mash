@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Per-job Go caches from a read-only seed (ADR 0084), for a job that runs PR code on a self-hosted runner whose
+# environment sets MASH_CI_WARM=1.
+#   ci-go-caches <kind>   kind is the seed's name for what the job compiles: race, check.
+# Adapted from the sibling project's scripts/ci-go-caches.
+# The seed is $MASH_GO_SEED/<kind> (default /run/go-seed/<kind>: a tmpfs dir owned by another user and built by a
+# main-only job, with go-build/, go-mod/ and optionally golangci/). It is copied into this job's RUNNER_TEMP, made
+# writable there, and GOCACHE, GOMODCACHE and GOLANGCI_LINT_CACHE are pointed at the copy through $GITHUB_ENV, so
+# nothing this job writes reaches another job. The seed is never used in place, and is refused if this user can write
+# it (then it proves nothing). Cold caches can blow a job's timeout, so any refusal falls back to what the runner
+# already has and says so on stdout: the job is not isolated. A runner without MASH_CI_WARM=1: nothing happens.
+# This script never fails the job.
+set -euo pipefail
+
+kind=${1:?usage: ci-go-caches <kind>}
+[ "${MASH_CI_WARM:-0}" = 1 ] || exit 0
+seed=${MASH_GO_SEED:-/run/go-seed}/$kind
+tmp=${RUNNER_TEMP:?}
+dest=$tmp/go-seed-$kind
+
+shared() {
+  echo "go caches: SHARED ($1): the runner's own caches are in use for this job (ADR 0084)"
+  exit 0
+}
+
+[ -d "$seed/go-build" ] && [ -d "$seed/go-mod" ] || shared "no seed at $seed"
+# A symlink is refused too: cp -a keeps it, and one pointing at a writable shared cache would make the "private" copy
+# write outside RUNNER_TEMP.
+if [ -n "$(find "$seed" -type l -print -quit)" ]; then
+  shared "the seed at $seed contains a symlink, so it is not trusted"
+fi
+# Trusted only if nothing in it, at any depth, is writable by this user and this user owns none of it (an owner could
+# chmod its way in). MASH_GO_SEED_SKIP_OWNER_CHECK=1 is for the script's own test, whose seed is its own.
+# `find -writable` is GNU only (BSD find rejects it), so the check asks test -w per entry: it is access(2), the
+# effective write access (mode bits, groups and ACLs alike), and root passes it for everything.
+writable_by_me() {
+  find "$seed" -exec test -w {} \; -print -quit
+}
+if [ -n "$(writable_by_me)" ]; then
+  shared "the seed at $seed has content writable by $(id -un), so it is not trusted"
+fi
+if [ "${MASH_GO_SEED_SKIP_OWNER_CHECK:-0}" != 1 ] && [ -n "$(find "$seed" -user "$(id -u)" -print -quit)" ]; then
+  shared "the seed at $seed has content owned by $(id -un), so it is not trusted"
+fi
+
+start=$(date +%s)
+rm -rf "$dest"
+mkdir -p "$dest"
+if ! cp -a "$seed/go-build" "$dest/go-build" || ! cp -a "$seed/go-mod" "$dest/go-mod"; then
+  rm -rf "$dest"
+  shared "copying the seed at $seed failed"
+fi
+mkdir -p "$dest/golangci"
+if [ -d "$seed/golangci" ]; then cp -a "$seed/golangci/." "$dest/golangci/" || true; fi
+chmod -R u+w "$dest"
+{
+  echo "GOCACHE=$dest/go-build"
+  echo "GOMODCACHE=$dest/go-mod"
+  echo "GOLANGCI_LINT_CACHE=$dest/golangci"
+  echo "GOFLAGS=${GOFLAGS:+$GOFLAGS }-modcacherw"
+} >> "${GITHUB_ENV:?}"
+echo "go caches: per-job copy of the seed at $seed in $dest ($(du -sm "$dest" | cut -f1) MB, $(( $(date +%s) - start )) s)"
