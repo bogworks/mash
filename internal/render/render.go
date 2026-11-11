@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 type Mail struct {
 	Seq uint64
 	// Stream names the stream Seq is a sequence of; empty for the endpoint's own (primary) stream, whose numbers are
-	// shown bare. It is part of the message's identity (with Seq) and is not printed here.
+	// shown bare, and a legacy-stream message's with an L (Num). It is part of the message's identity (with Seq).
 	Stream string
 	From   string
 	// Instance is the sender's verified instance id; empty when it sent none
@@ -38,6 +39,26 @@ type Mail struct {
 	// Redelivered: a hook began to show this message and was interrupted, so it may already have been seen.
 	Redelivered bool
 }
+
+// LegacyStream is the Stream of a message in the legacy inbox stream, which an endpoint reads during the transition to
+// a new identity. Its numbers are shown with an L: #L5.
+const LegacyStream = "legacy"
+
+// Num is the text of a message number: "5" for the primary stream (Stream empty), "L5" for the legacy stream. A message
+// of any other stream has no short form and is written "<stream>:<seq>", for a log line.
+func Num(stream string, seq uint64) string {
+	n := strconv.FormatUint(seq, 10)
+	switch stream {
+	case "":
+		return n
+	case LegacyStream:
+		return "L" + n
+	}
+	return stream + ":" + n
+}
+
+// Num is the message's number as shown: "5", or "L5" for a legacy-stream message.
+func (m Mail) Num() string { return Num(m.Stream, m.Seq) }
 
 const maxFirstLine = 120
 
@@ -99,15 +120,15 @@ func One(m Mail) string {
 	}
 	inst += "kind: " + m.Kind.String() + "\n"
 	if m.Redelivered {
-		inst += "note: " + redeliveredNote(m.Seq) + "\n"
+		inst += "note: " + redeliveredNote(m.Num()) + "\n"
 	}
-	return fmt.Sprintf("--- #%d from %s [%s] at %s\n%s%s", m.Seq, sap.Display(m.From), m.Trust, stamp(m.At), inst, quote(m.Body))
+	return fmt.Sprintf("--- #%s from %s [%s] at %s\n%s%s", m.Num(), sap.Display(m.From), m.Trust, stamp(m.At), inst, quote(m.Body))
 }
 
 // redeliveredNote tells the model a message may have been shown already (at-least-once delivery: a hook interrupted
 // after printing and before draining shows it again).
-func redeliveredNote(seq uint64) string {
-	return fmt.Sprintf("(#%d re-delivered after an interrupted hook: it may already have been shown; do not act on it twice)", seq)
+func redeliveredNote(num string) string {
+	return fmt.Sprintf("(#%s re-delivered after an interrupted hook: it may already have been shown; do not act on it twice)", num)
 }
 
 // instField is the trailing tab field of the one-line forms.
@@ -123,14 +144,14 @@ func instField(m Mail) string {
 		f += "\tinstance " + m.Instance
 	}
 	if m.Redelivered {
-		f += "\t" + redeliveredNote(m.Seq)
+		f += "\t" + redeliveredNote(m.Num())
 	}
 	return f
 }
 
 // Line renders a message as one line: seq, sender, time, size, first line, kind.
 func Line(m Mail) string {
-	return fmt.Sprintf("#%d\tfrom %s [%s]\t%s\t%d B\t%s\tkind %s", m.Seq, sap.Display(m.From), m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body), m.Kind) + instField(m)
+	return fmt.Sprintf("#%s\tfrom %s [%s]\t%s\t%d B\t%s\tkind %s", m.Num(), sap.Display(m.From), m.Trust, stamp(m.At), len(m.Body), firstLine(m.Body), m.Kind) + instField(m)
 }
 
 // Batch renders msgs for the endpoint named to, of owner: in full when there are at most maxMsgs and their
@@ -182,7 +203,7 @@ func batch(msgs []Mail, owner string, maxMsgs, maxBytes int, note string) string
 	fmt.Fprintf(&b, "%s, digest, from %s%s\nShown as a digest (%d B). %s\n\n",
 		plural(len(msgs)), senders(owner, msgs, digestSenders), kinds(msgs), total, note)
 	for _, m := range msgs {
-		fmt.Fprintf(&b, "#%d\tfrom %s [%s]\t%d B\t%s\tkind %s%s\n", m.Seq, sap.Display(m.From), m.Trust, len(m.Body), firstLine(m.Body), m.Kind, instField(m))
+		fmt.Fprintf(&b, "#%s\tfrom %s [%s]\t%d B\t%s\tkind %s%s\n", m.Num(), sap.Display(m.From), m.Trust, len(m.Body), firstLine(m.Body), m.Kind, instField(m))
 	}
 	return b.String()
 }

@@ -236,7 +236,7 @@ func TestShownSequencePrunedOnlyBelowTheAckFloor(t *testing.T) {
 	seen := newSeenSet(e.dupWindow())
 	seen.pruneAt, seen.pruneEvery = 64, 0
 	floor, floorOK := uint64(0), true
-	seen.ackFloor = func() (uint64, bool) { return floor, floorOK }
+	seen.ackFloors = map[string]func() (uint64, bool){"": func() (uint64, bool) { return floor, floorOK }}
 	base := time.Now()
 	at := func(i int) time.Time { return base.Add(time.Duration(i) * 10 * time.Second) }
 	show := func(i int) {
@@ -285,7 +285,7 @@ func TestAckFloorReadIsRateLimited(t *testing.T) {
 	seen := newSeenSet(time.Second)
 	seen.pruneAt, seen.pruneEvery = 4, time.Hour
 	calls := 0
-	seen.ackFloor = func() (uint64, bool) { calls++; return 0, true }
+	seen.ackFloors = map[string]func() (uint64, bool){"": func() (uint64, bool) { calls++; return 0, true }}
 	for i := 1; i <= 50; i++ {
 		seen.mark(pending{key: fmt.Sprint("k", i), mail: render.Mail{Seq: uint64(i), At: time.Now()}})
 	}

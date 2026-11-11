@@ -147,10 +147,10 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		if e.Listed {
 			// Listed in a digest, not read: waiting and unacked until the model reads it (ADR 0046).
 			if err := sp.Listed(e.Ref()); err != nil {
-				fmt.Fprintf(stderr, "mash hook: marking #%d listed: %v\n", e.Seq, err)
+				fmt.Fprintf(stderr, "mash hook: marking #%s listed: %v\n", endpoint.FormatMsgRef(e.Ref()), err)
 			}
 		} else if err := sp.Drained(e.Ref()); err != nil {
-			fmt.Fprintf(stderr, "mash hook: marking #%d drained: %v\n", e.Seq, err)
+			fmt.Fprintf(stderr, "mash hook: marking #%s drained: %v\n", endpoint.FormatMsgRef(e.Ref()), err)
 		}
 		if i == 0 {
 			failpoint(env, stderr, "after-first-drained")

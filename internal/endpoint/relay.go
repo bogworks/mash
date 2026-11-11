@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ type RelayCounters struct {
 
 type relayRecv struct {
 	seq  uint64
+	num  string // seq as shown: "5", or "L5" for a legacy-stream message
 	from string
 	at   time.Time
 }
@@ -94,6 +96,11 @@ func (t *relayTracker) prune(now time.Time) {
 
 // inbound records one received mail from a sender named from; viaDeclared bumps the inbound-with-via counter.
 func (t *relayTracker) inbound(seq uint64, from string, viaDeclared bool) {
+	t.inboundNum(strconv.FormatUint(seq, 10), seq, from, viaDeclared)
+}
+
+// inboundNum is inbound for a message whose shown number is num.
+func (t *relayTracker) inboundNum(num string, seq uint64, from string, viaDeclared bool) {
 	if t == nil {
 		return
 	}
@@ -103,7 +110,7 @@ func (t *relayTracker) inbound(seq uint64, from string, viaDeclared bool) {
 	if len(t.ring) >= relayRing {
 		t.ring = append(t.ring[:0], t.ring[len(t.ring)-relayRing+1:]...)
 	}
-	t.ring = append(t.ring, relayRecv{seq: seq, from: from, at: now})
+	t.ring = append(t.ring, relayRecv{seq: seq, num: num, from: from, at: now})
 	if viaDeclared {
 		t.c.InboundVia++
 	}
@@ -344,14 +351,20 @@ func (e *Endpoint) RelayCounters() RelayCounters { return e.relay.counters() }
 // relayInbound records a mail the serve path received. Only a verified or stale sender has a name worth recording;
 // via is the verified declaration "<origin> #<seq>" (empty when none). Nothing here reads the body.
 func (e *Endpoint) relayInbound(seq uint64, from string, trust sap.Trust, via string) {
+	e.relayInboundRef(MsgRef{Seq: seq}, from, trust, via)
+}
+
+// relayInboundRef is relayInbound for a message of any stream.
+func (e *Endpoint) relayInboundRef(ref MsgRef, from string, trust sap.Trust, via string) {
+	seq, num := ref.Seq, FormatMsgRef(ref)
 	defer func() { _ = recover() }() // tracing never affects delivery
 	if e.relay == nil || (trust != sap.TrustVerified && trust != sap.TrustStale) {
 		return
 	}
-	e.relay.inbound(seq, from, via != "")
+	e.relay.inboundNum(num, seq, from, via != "")
 	if via != "" {
 		origin, n, _ := strings.Cut(via, " #")
-		e.log.Printf("trace relay: mail #%d from %s declares a relay of #%s from %s", seq, sap.Display(from), n, sap.Display(origin))
+		e.log.Printf("trace relay: mail #%s from %s declares a relay of #%s from %s", num, sap.Display(from), n, sap.Display(origin))
 	}
 }
 
@@ -371,6 +384,6 @@ func (e *Endpoint) relaySent(to string, via uint64, origin string) {
 		if via != 0 {
 			declared = "yes"
 		}
-		e.log.Printf("trace relay: sent to %s %d s after mail #%d from %s (declared: %s)", sap.Display(to), int(age/time.Second), r.seq, sap.Display(r.from), declared)
+		e.log.Printf("trace relay: sent to %s %d s after mail #%s from %s (declared: %s)", sap.Display(to), int(age/time.Second), r.num, sap.Display(r.from), declared)
 	}
 }

@@ -161,7 +161,7 @@ func (e *Endpoint) MarkRead(seq MsgRef) bool {
 	// Under the spool lock, as a hook's drain is: the message is either waiting or already drained.
 	unlock, err := sp.Lock()
 	if err != nil {
-		e.log.Printf("read #%d: %v", seq.Seq, err)
+		e.log.Printf("read #%s: %v", FormatMsgRef(seq), err)
 		return false
 	}
 	defer unlock()
@@ -169,7 +169,7 @@ func (e *Endpoint) MarkRead(seq MsgRef) bool {
 		return false
 	}
 	if err := sp.Drained(seq); err != nil {
-		e.log.Printf("read #%d: marking it drained: %v", seq.Seq, err)
+		e.log.Printf("read #%s: marking it drained: %v", FormatMsgRef(seq), err)
 		return false
 	}
 	return true

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -492,8 +493,8 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 	return append([]mcp.Tool{
 		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
 			Schema: schema(map[string]any{"to": str("endpoint name"), "text": str("message body (markdown)"),
-				"in_reply_to": num("optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
-				"via": num("optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; " +
+				"in_reply_to": sendRefProp(src.cfg, "optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
+				"via": sendRefProp(src.cfg, "optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; "+
 					"recipients see 'relayed from <sender> #N' when the declaration verifies; omit it for ordinary mail"),
 				"urgent": flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
 				"kind":   kindProp(),
@@ -502,13 +503,13 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					"after the window a repeated id is a new message")}, "to", "text"),
 			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
 				var a struct {
-					To        string `json:"to"`
-					Text      string `json:"text"`
-					InReplyTo uint64 `json:"in_reply_to"`
-					Via       uint64 `json:"via"`
-					Urgent    bool   `json:"urgent"`
-					Kind      string `json:"kind"`
-					ID        string `json:"id"`
+					To        string    `json:"to"`
+					Text      string    `json:"text"`
+					InReplyTo msgNumber `json:"in_reply_to"`
+					Via       msgNumber `json:"via"`
+					Urgent    bool      `json:"urgent"`
+					Kind      string    `json:"kind"`
+					ID        string    `json:"id"`
 				}
 				if err := json.Unmarshal(raw, &a); err != nil {
 					return "", err
@@ -516,12 +517,20 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				if a.Text == "" {
 					return "", sendArgsError(raw)
 				}
+				inReplyTo, err := declaredSeq(ep, "in_reply_to", a.InReplyTo)
+				if err != nil {
+					return "", err
+				}
+				via, err := declaredSeq(ep, "via", a.Via)
+				if err != nil {
+					return "", err
+				}
 				k, err := kind.Parse(a.Kind)
 				if err != nil {
 					return "", err
 				}
-				k, tagged := kind.Tag(k, a.InReplyTo, a.Text)
-				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: a.InReplyTo, Via: a.Via, Urgent: a.Urgent, Kind: k, ID: a.ID})
+				k, tagged := kind.Tag(k, inReplyTo, a.Text)
+				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: inReplyTo, Via: via, Urgent: a.Urgent, Kind: k, ID: a.ID})
 				if err != nil {
 					return "", err
 				}
@@ -534,29 +543,35 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To))), nil
 			})},
-		{Name: "read", Description: "Read one message from your inbox by #seq.",
+		{Name: "read", Description: readDescription(src.cfg),
 			// Only after the result is written to the client has the model the body. That counts as seen, so serve
 			// acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one waiting in a
 			// session proven hookless (no hook will show it). Everywhere else the message stays held for a hook.
 			AfterWrite: func(raw json.RawMessage) {
 				var a struct {
-					Seq uint64 `json:"seq"`
+					Seq msgNumber `json:"seq"`
 				}
 				if json.Unmarshal(raw, &a) == nil {
 					if ep, err := state.Load().usable(name); err == nil {
-						ep.MarkRead(endpoint.MsgRef{Seq: a.Seq})
+						if ref, err := ep.ResolveRef(string(a.Seq)); err == nil {
+							ep.MarkRead(ref)
+						}
 					}
 				}
 			},
-			Schema: schema(map[string]any{"seq": num("message #seq")}, "seq"),
+			Schema: readSchema(src.cfg),
 			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
 				var a struct {
-					Seq uint64 `json:"seq"`
+					Seq msgNumber `json:"seq"`
 				}
 				if err := json.Unmarshal(raw, &a); err != nil {
 					return "", err
 				}
-				m, err := ep.Read(ctx, a.Seq)
+				ref, err := ep.ResolveRef(string(a.Seq))
+				if err != nil {
+					return "", err
+				}
+				m, err := ep.ReadRef(ctx, ref)
 				if err != nil {
 					return "", err
 				}
@@ -681,6 +696,71 @@ func pluginLine(root string) string {
 		return unknown("plugin.json has no version")
 	}
 	return fmt.Sprintf("plugin %s (%s)", m.Version, root)
+}
+
+// msgNumber is a message number as the read tool takes it: a JSON integer (5) or a string ("5", "#5", "L5", "#L5"),
+// kept as text for Endpoint.ResolveRef. The qualified L form names a message of the legacy inbox stream an endpoint
+// with an alias reads during the transition.
+type msgNumber string
+
+func (n *msgNumber) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*n = msgNumber(s)
+		return nil
+	}
+	var u uint64
+	if err := json.Unmarshal(b, &u); err != nil {
+		return fmt.Errorf("seq must be a message number such as 5 or \"L5\"")
+	}
+	*n = msgNumber(strconv.FormatUint(u, 10))
+	return nil
+}
+
+// readDescription is the read tool's description. A legacy-only endpoint (no agent_token) gets the text it always had;
+// a three-token one also learns the qualified number form.
+func readDescription(cfg config.Config) string {
+	if cfg.AgentToken == "" {
+		return "Read one message from your inbox by #seq."
+	}
+	return "Read one message from your inbox by #seq. A message of your legacy inbox (shown as #L5) is read with seq \"L5\"."
+}
+
+// readSchema is the read tool's schema: the seq is an integer for a legacy-only endpoint, an integer or a string
+// (for #L5) for a three-token one.
+func readSchema(cfg config.Config) map[string]any {
+	if cfg.AgentToken == "" {
+		return schema(map[string]any{"seq": num("message #seq")}, "seq")
+	}
+	return schema(map[string]any{"seq": map[string]any{"type": []string{"integer", "string"},
+		"description": "message #seq: 5, or \"L5\" for a message of your legacy inbox"}}, "seq")
+}
+
+// sendRefProp is a send argument that names a message of your own inbox (in_reply_to, via). A legacy-only endpoint
+// (no agent_token) keeps the integer schema it always had; a three-token one takes an integer or a string too, so a
+// user can type the number as displayed (#5, #L5).
+func sendRefProp(cfg config.Config, desc string) map[string]any {
+	if cfg.AgentToken == "" {
+		return num(desc)
+	}
+	return map[string]any{"type": []string{"integer", "string"},
+		"description": desc + ". Give the number as shown (5 or #5); a legacy-stream message (#L5) cannot be named yet"}
+}
+
+// declaredSeq resolves a send argument to the bare number a signed declaration carries. A declaration cannot say which
+// stream a number is of, so a legacy-stream reference is refused rather than read as the primary message of that number.
+func declaredSeq(ep *endpoint.Endpoint, field string, n msgNumber) (uint64, error) {
+	if n == "" {
+		return 0, nil
+	}
+	ref, err := ep.ResolveRef(string(n))
+	if err != nil {
+		return 0, err
+	}
+	if ref.Stream != "" {
+		return 0, fmt.Errorf("%s cannot name a legacy-stream message (#L%d) yet", "in_reply_to/via", ref.Seq)
+	}
+	return ref.Seq, nil
 }
 
 func clampLimit(n int) int {

@@ -89,7 +89,7 @@ func TestSeenSetKeysByStream(t *testing.T) {
 func TestSeenSetPruneLeavesOtherStreams(t *testing.T) {
 	s := newSeenSet(time.Minute)
 	s.pruneAt, s.pruneEvery = 1, 0
-	s.ackFloor = func() (uint64, bool) { return 10, true }
+	s.ackFloors = map[string]func() (uint64, bool){"": func() (uint64, bool) { return 10, true }}
 	s.mark(pending{key: "u\x00a", mail: gMail(3, "")})
 	s.mark(pending{key: "u\x00b", mail: legacyMail(3)})
 	if _, ok := s.seqs[spool.Ref{Seq: 3}]; ok {
