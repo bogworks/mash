@@ -66,12 +66,15 @@ type auditCompare struct {
 	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
 	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
 	// The retired-identity markers (ADR 0088: a final one is never deleted). RetiredCompared is false when the earlier
-	// report has no `retired` section (made before it existed): that is "no retired data", nothing is checked and the
+	// report has no `retired` section (made before it existed): see RetiredUnverified; nothing is checked and the
 	// three lists are empty. RetiredAdded: markers present now and not before (fine). RetiredFinalLost: a marker that
 	// was final before and is absent now or no longer final: fails --strict, a marker was deleted or went back to
 	// pending. RetiredPendingGone: a marker that was pending before and is absent now (a final marker at its key would
 	// be in neither list): shown only, since deprovision deletes a pending marker when the retirement did not happen.
-	RetiredCompared    bool     `json:"retired_compared"`
+	RetiredCompared bool `json:"retired_compared"`
+	// RetiredUnverified: the earlier report has no (or a null) `retired` section, so it cannot show that no final
+	// marker was deleted since. Shown always; with --strict it refuses the comparison (exit 3, nothing on stdout).
+	RetiredUnverified  bool     `json:"retired_unverified"`
 	RetiredAdded       []string `json:"retired_added"`
 	RetiredFinalLost   []string `json:"retired_final_lost"`
 	RetiredPendingGone []string `json:"retired_pending_gone"`
@@ -79,6 +82,10 @@ type auditCompare struct {
 	// deployment. Shown always; fails --strict, like missing creation times.
 	AccountUnverified bool `json:"account_unverified"`
 }
+
+// retiredUnverifiedMsg is the sentence for an earlier report with no retired section: the warning line and, with
+// --strict, the refusal.
+const retiredUnverifiedMsg = "retired comparison unverified: the earlier report has no retired section"
 
 // earlierWhen says when an earlier inbox must carry a field.
 type earlierWhen int
@@ -426,7 +433,11 @@ func compareAudits(before, now auditReport) *auditCompare {
 // current report whose bucket is absent has no markers, so every earlier final marker is lost.
 func compareRetired(c *auditCompare, before, now *auditRetired) {
 	c.RetiredAdded, c.RetiredFinalLost, c.RetiredPendingGone = []string{}, []string{}, []string{}
-	if before == nil || now == nil {
+	if before == nil {
+		c.RetiredUnverified = true
+		return
+	}
+	if now == nil {
 		return
 	}
 	c.RetiredCompared = true
@@ -484,8 +495,11 @@ func writeCompareText(w io.Writer, c *auditCompare) {
 	for _, k := range c.Added {
 		fmt.Fprintf(w, "compare identity added %s\n", cl(k))
 	}
+	if c.RetiredUnverified {
+		fmt.Fprintln(w, "WARNING "+retiredUnverifiedMsg+" (made before the retired section existed): retired markers not compared, and a deleted final marker would not show; regenerate it with this mashctl")
+		return
+	}
 	if !c.RetiredCompared {
-		fmt.Fprintln(w, "compare retired: the earlier audit has no retired data (made before the retired section existed): retired markers not compared")
 		return
 	}
 	for _, k := range c.RetiredFinalLost {

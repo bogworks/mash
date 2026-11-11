@@ -616,6 +616,11 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	if earlier != nil {
 		rep.Compare = compareAudits(*earlier, rep)
 		rep.Compare.AccountUnverified = earlier.Account == ""
+		if o.strict && rep.Compare.RetiredUnverified {
+			// Like a report that lacks a required field: it cannot prove no final marker was deleted. Nothing on stdout.
+			fmt.Fprintf(stderr, "mashctl: audit: --compare: %s: regenerate it with this mashctl and compare again\n", retiredUnverifiedMsg)
+			return exitAuditIncomplete
+		}
 	}
 
 	if o.json {

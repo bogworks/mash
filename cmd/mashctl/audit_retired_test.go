@@ -44,6 +44,7 @@ type retiredOut struct {
 	} `json:"summary"`
 	Compare *struct {
 		RetiredCompared    bool     `json:"retired_compared"`
+		RetiredUnverified  bool     `json:"retired_unverified"`
 		RetiredAdded       []string `json:"retired_added"`
 		RetiredFinalLost   []string `json:"retired_final_lost"`
 		RetiredPendingGone []string `json:"retired_pending_gone"`
@@ -346,18 +347,45 @@ func TestAuditCompareRetiredPendingGoneIsReported(t *testing.T) {
 	}
 }
 
-// An earlier report from before the retired section is accepted as "no retired data": no retired check is made.
+// An earlier report from before the retired section cannot show that a final marker was not deleted since. Without
+// --strict it stays readable and says so; with --strict it is refused like any earlier report that cannot prove it.
 func TestAuditCompareEarlierWithoutRetiredSection(t *testing.T) {
 	f := newAuditEnv(t)
 	first := f.auditTo(t, "first.json")
 	old := writeEdited(t, first, func(m map[string]any) { delete(m, "retired") })
 	f.putMarker(t, f.retiredKV(t), "claude", "team1", "a", "UA", store.RetiredFinal)
-	r, errb, code := f.compareRetired(t, old)
-	if code != 0 || r.Compare == nil || r.Compare.RetiredCompared || len(r.Compare.RetiredAdded) != 0 {
-		t.Fatalf("earlier without retired: exit %d %+v err=%q", code, r.Compare, errb)
+	const msg = "retired comparison unverified: the earlier report has no retired section"
+
+	out, errb, code := f.run(t, "--strict", "--compare", old)
+	if code != 3 || out != "" || !strings.Contains(errb, msg) {
+		t.Fatalf("strict: exit %d out=%q err=%q", code, out, errb)
 	}
-	if txt, _, _ := f.run(t, "--compare", old); !strings.Contains(txt, "no retired data") {
-		t.Errorf("text form must say the earlier audit has no retired data:\n%s", txt)
+
+	var r retiredOut
+	jout, errb, code := f.run(t, "--json", "--compare", old)
+	if code != 0 {
+		t.Fatalf("non-strict json: exit %d err=%q", code, errb)
+	}
+	if err := json.Unmarshal([]byte(jout), &r); err != nil || r.Compare == nil || r.Compare.RetiredCompared || !r.Compare.RetiredUnverified || len(r.Compare.RetiredAdded) != 0 {
+		t.Fatalf("non-strict json compare: %v %+v", err, r.Compare)
+	}
+	txt, _, code := f.run(t, "--compare", old)
+	if code != 0 || !strings.Contains(txt, "WARNING "+msg) {
+		t.Errorf("text form must warn (exit %d):\n%s", code, txt)
+	}
+	// a comparison against a report that has the section is not unverified
+	if r2, _, _ := f.compareRetired(t, first); r2.Compare.RetiredUnverified {
+		t.Errorf("a whole earlier report must not be unverified: %+v", r2.Compare)
+	}
+}
+
+// The unverified failure does not depend on the current report: the bucket may be the thing that was deleted.
+func TestAuditCompareEarlierWithoutRetiredSectionStrictEmptyNow(t *testing.T) {
+	f := newAuditEnv(t)
+	old := writeEdited(t, f.auditTo(t, "first.json"), func(m map[string]any) { delete(m, "retired") })
+	out, errb, code := f.run(t, "--strict", "--compare", old)
+	if code != 3 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
+		t.Fatalf("exit %d out=%q err=%q", code, out, errb)
 	}
 }
 
@@ -385,10 +413,13 @@ func TestAuditCompareEarlierIncompleteRetiredSectionIsRefused(t *testing.T) {
 			t.Errorf("%s: exit %d out=%q err=%q", name, code, out, errb)
 		}
 	}
-	// a null section is "no retired data"
+	// a null section is no section: unverified, exit 3 under --strict, readable without it
 	null := writeEdited(t, first, func(m map[string]any) { m["retired"] = nil })
-	if _, errb, code := f.run(t, "--strict", "--compare", null); code != 0 {
-		t.Errorf("null retired: exit %d %q", code, errb)
+	if out, errb, code := f.run(t, "--strict", "--compare", null); code != 3 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
+		t.Errorf("null retired strict: exit %d out=%q err=%q", code, out, errb)
+	}
+	if txt, errb, code := f.run(t, "--compare", null); code != 0 || !strings.Contains(txt, "WARNING retired comparison unverified") {
+		t.Errorf("null retired non-strict: exit %d err=%q\n%s", code, errb, txt)
 	}
 }
 
