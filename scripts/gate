@@ -188,7 +188,7 @@ if [ "$prepr" = 1 ]; then # the fast pre-PR guards; see the header. Exits here: 
 			echo "${f:-see $out/gofmt.log}" ;;
 		vet) echo "the compiler or vet message names file:line (the tag in brackets says which run; $out/vet.log)" ;;
 		staticcheck) echo "staticcheck could not run ($out/staticcheck.log); it needs the module cache or the network" ;;
-		adrlint) echo "the lint names the file and rule ($out/adrlint.log); a stale or duplicate number: take the one in docs/decisions/NEXT and bump it" ;;
+		adrlint) echo "the lint names the file and rule ($out/adrlint.log); a stale or duplicate number: take a number greater than the highest on main (docs/decisions/NEXT is retired)" ;;
 		shellcheck) echo "fix what shellcheck names at file:line in $out/shellcheck.log" ;;
 		actionlint) echo "fix what actionlint names at file:line in $out/actionlint.log" ;;
 		esac

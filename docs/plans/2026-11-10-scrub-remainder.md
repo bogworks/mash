@@ -139,7 +139,7 @@ Each row: what, contract refs, tests-first note, and the evidence it adds to the
 Steps 1 to 3 are independent and may run in parallel; 4 to 6 depend only on 1 (the sentence) not changing the same
 files; 7 is last, and re-checks every earlier inventory against the final tree, since parallel steps can change code
 after another step's document was reviewed. Each pull request is one concern, docs-only ones skip CI, and each carries
-"Decision: none" or its ADR (an ADR takes `docs/decisions/NEXT` and bumps it).
+"Decision: none" or its ADR (an ADR takes any number greater than the highest on main; `NEXT` is retired).
 
 **Every pull request, before it merges (INV-003, NFR-003).** The configured pre-merge code review, and an adversarial
 review on a model of another family (Codex), both on the pull request's own diff; the pull request names both. Tests

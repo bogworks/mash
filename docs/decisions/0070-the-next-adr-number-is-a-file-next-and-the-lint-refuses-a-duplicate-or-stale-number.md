@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0089
 date: 2026-11-03
 decision-makers: Randy Bias (mash maintainer)
 ---
 
 # The next ADR number is a file, `NEXT`, and the lint refuses a duplicate or stale number
+Superseded by [0089](0089-an-adr-takes-any-number-above-the-highest-on-the-base-branch-and-there-is-no-next-file.md).
 
 ## Context and Problem Statement
 
