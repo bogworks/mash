@@ -199,6 +199,21 @@ func TestAuditRetiredAlarmAtHalfTheCap(t *testing.T) {
 	}
 }
 
+func TestAuditRetiredUncappedBucketIsAProblemNotAnAlarm(t *testing.T) {
+	f := newAuditEnv(t)
+	kv := f.recreateRetired(t, func(c *jetstream.KeyValueConfig) { c.MaxBytes = 0 })
+	f.putMarker(t, kv, "claude", "team1", "m", "UKEY", store.RetiredFinal)
+	r, errb, code := f.retiredAudit(t, "--strict")
+	if code != 1 || r.Retired.Alarm || r.Retired.MaxBytes != 0 || r.Retired.PercentUsed != 0 || r.Retired.Bytes == 0 ||
+		len(r.Problems) != 1 || r.Problems[0].What != "retired" || r.Problems[0].Item != store.RetiredBucket ||
+		!strings.Contains(r.Problems[0].Error, "no size cap") || strings.Contains(r.Problems[0].Error, "ALARM") {
+		t.Fatalf("uncapped: exit %d %+v %+v err=%q", code, r.Retired, r.Problems, errb)
+	}
+	if txt, _, _ := f.run(t); strings.Contains(txt, "ALARM") || !strings.Contains(txt, ", no cap") {
+		t.Errorf("text form must say no cap and not alarm:\n%s", txt)
+	}
+}
+
 func TestAuditRetiredAlarmBoundary(t *testing.T) {
 	cases := []struct {
 		used  uint64

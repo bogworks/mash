@@ -173,10 +173,14 @@ func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
 	}
 	ar.Bytes, ar.MaxBytes = snap.Bytes, snap.MaxBytes
 	if ar.MaxBytes <= 0 {
-		ar.MaxBytes = store.RetiredMaxBytes
+		// No size cap (0 or -1 on the stream). Do not invent one: the percent is 0 and it never alarms.
+		ar.MaxBytes = 0
+		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket,
+			Error: "the bucket has no size cap: ADR 0088 gives it 64 MiB so a full bucket refuses new markers, and an uncapped one never alarms; recreate it with the cap, copying its markers"})
+	} else {
+		ar.PercentUsed = math.Round(float64(ar.Bytes)*10000/float64(ar.MaxBytes)) / 100
+		ar.Alarm = retiredAlarm(ar.Bytes, ar.MaxBytes)
 	}
-	ar.PercentUsed = math.Round(float64(ar.Bytes)*10000/float64(ar.MaxBytes)) / 100
-	ar.Alarm = retiredAlarm(ar.Bytes, ar.MaxBytes)
 	if snap.ConfigError != "" {
 		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket, Error: snap.ConfigError})
 	}
@@ -718,7 +722,11 @@ func writeAuditText(w io.Writer, r auditReport) {
 		if !rt.Present {
 			fmt.Fprintf(w, "no retired bucket (%s): no retirement has been recorded\n", store.RetiredBucket)
 		} else {
-			fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d of %d\tused %.2f%%\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes, rt.MaxBytes, rt.PercentUsed)
+			if rt.MaxBytes <= 0 {
+				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d, no cap\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes)
+			} else {
+				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d of %d\tused %.2f%%\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes, rt.MaxBytes, rt.PercentUsed)
+			}
 			if rt.Alarm {
 				fmt.Fprintf(w, "retired bucket ALARM: at or over %d%% of its cap\n", retiredAlarmPercent)
 			}

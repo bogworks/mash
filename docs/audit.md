@@ -124,7 +124,7 @@ The retired-identity bucket `mash-retired` ([ADR 0088](decisions/0088-a-retired-
 | `present` | `false` when there is no bucket: no retirement was ever recorded. Not an error; the other fields are 0 and `markers` is empty. The text form says `no retired bucket` |
 | `final` / `pending` | the number of markers in each state. A marker with no state (written before the two states existed) counts as `final` |
 | `bytes` | bytes the bucket's stream stores |
-| `max_bytes` | the bucket's cap: `67108864` (64 MiB, `store.RetiredMaxBytes`) for a bucket mash made. The audit reads the cap from the bucket, so one recreated with a larger cap is measured against its own |
+| `max_bytes` | the bucket's cap: `67108864` (64 MiB, `store.RetiredMaxBytes`) for a bucket mash made. The audit reads the cap from the bucket, so one recreated with a larger cap is measured against its own. A bucket with no cap (`MaxBytes` 0 or -1) reports `max_bytes` 0, `percent_used` 0 and `alarm` false: the audit does not invent a cap |
 | `percent_used` | `bytes` over `max_bytes`, 0 to 100, two decimals |
 | `alarm` | `true` when `bytes` is at or over 50% of `max_bytes` |
 | `markers` | one per marker, sorted by `key`: `key` (the flat identity), `agent`, `owner`, `name`, `user` (the retired user public key; a public key, never a seed; left out when the marker has none), `state` (`final` or `pending`) and `retired_at` (RFC 3339 UTC, as the marker holds it) |
@@ -133,6 +133,7 @@ Findings, all in `problems` with `what` `retired` (so `--strict` exits 1):
 
 - the alarm: `item` is `mash-retired` and `error` starts `ALARM`. A full bucket makes provisioning refuse new identities for good and mash never changes an existing bucket, so recreate it with a larger cap and its markers copied before it fills;
 - a `pending` marker: `item` is its key and the error says to rerun `deprovision` for it (the retirement was started and not finished; the name stays refused meanwhile);
+- a bucket with no size cap: `item` is `mash-retired` and `error` says it has no size cap. ADR 0088 gives it 64 MiB so a full bucket refuses new markers, and an uncapped one never alarms; recreate it with the cap, copying its markers. Bytes are still reported, and the text form says `bytes N, no cap`;
 - a bucket whose configuration fails the fail-closed check (a TTL, another history, memory storage, an evicting stream; `item` is `mash-retired`) and a marker whose value cannot be read (`item` is its key). The audit reports them and goes on; it does not crash.
 
 The text form prints `retired markers N (final F, pending P)` with the bucket, bytes, cap and percent, an `ALARM` line when it applies, and one `retired marker` line per marker. `summary` gains `retired_final` and `retired_pending`. The additions are additive, so `version` stays 1.
