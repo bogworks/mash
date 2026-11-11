@@ -27,3 +27,4 @@ scripts/adrlint/main_test.go	"a \x6cane"	a test row that exercises the vocabular
 scripts/adrlint/main_test.go	"A \x6cane."	a test row that exercises the vocabulary rule
 internal/portable/portable_test.go	\x68omerange|\x72angehand	the personal-name detector must name the words it detects
 internal/portable/portable_test.go	"\x68omerange", "\x72angehand-x"	the personal-name detector must name the words it detects
+docs/decisions/0084-ci-warms-go-caches-from-a-read-only-seed.md	`randybias/\x72angehand`	the ADR cites the sibling project's repository by name as the source of the adopted script

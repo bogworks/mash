@@ -51,6 +51,8 @@ jobs:
     runs-on: [self-hosted, rh-linux]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Go caches
+        run: if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches race; fi
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
@@ -154,6 +156,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      - name: Go caches
+        run: if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches check; fi
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
