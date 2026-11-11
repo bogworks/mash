@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -215,7 +216,7 @@ func fakeGit(files map[string]string) gitFunc {
 				return []byte(c), nil
 			}
 			return nil, errors.New("not in base")
-		case "ls-tree":
+		case "diff": // the pull request touches every file the base has
 			var out []string
 			for p := range files {
 				out = append(out, p)
@@ -223,6 +224,104 @@ func fakeGit(files map[string]string) gitFunc {
 			return []byte(strings.Join(out, "\n")), nil
 		}
 		return nil, errors.New("unexpected git " + args[0])
+	}
+}
+
+// fakeGitMB serves several revisions: trees maps a revision (a ref or a SHA) to its files. merge-base prints mb, or
+// fails when mb is empty. Only "good" and the revisions in trees verify. diff --name-only against the comparison point
+// (mb, or "good" when merge-base fails) prints touched; against any other revision it fails.
+func fakeGitMB(trees map[string]map[string]string, mb string, touched []string) gitFunc {
+	return func(args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			if strings.HasPrefix(args[len(args)-1], "good^") {
+				return []byte("abc\n"), nil
+			}
+			return nil, errors.New("unknown revision")
+		case "merge-base":
+			if mb == "" {
+				return nil, errors.New("no merge base")
+			}
+			return []byte(mb + "\n"), nil
+		case "show":
+			rev, p, _ := strings.Cut(args[1], ":./")
+			if c, ok := trees[rev][p]; ok {
+				return []byte(c), nil
+			}
+			return nil, errors.New("not in revision")
+		case "diff":
+			point := mb
+			if point == "" {
+				point = "good"
+			}
+			if !slices.Equal(args[1:], []string{"--name-only", "--no-renames", point, "HEAD", "--", "./docs/decisions/"}) {
+				return nil, errors.New("unexpected diff " + strings.Join(args, " "))
+			}
+			return []byte(strings.Join(touched, "\n")), nil
+		}
+		return nil, errors.New("unexpected git " + args[0])
+	}
+}
+
+func TestDocs_mergeBase(t *testing.T) {
+	const p = "docs/decisions/0001-use-one-way.md"
+	const mbSHA = "1234567"
+	rewritten := edit(goodADR, "Chosen option", "Changed option")
+	draft := edit(goodADR, "status: accepted", "status: proposed")
+	draftEdited := edit(draft, "A driver.", "Another driver.")
+	one := []string{p}
+	tests := []struct {
+		name    string
+		tree    string // the PR's 0001 ("" for absent)
+		tip     map[string]string
+		mbT     map[string]string
+		mb      string
+		touched []string // what the PR's own diff touches
+		want    string   // "" is a pass (exit 0)
+	}{
+		{"branched before the ADR merged, PR does not touch it", "", map[string]string{p: goodADR}, map[string]string{}, mbSHA, nil, ""},
+		{"deleted an ADR present at the merge-base", "", map[string]string{p: goodADR}, map[string]string{p: goodADR}, mbSHA, one, "accepted ADR (at good) was deleted"},
+		{"rewrote an ADR present at the merge-base", rewritten, map[string]string{p: goodADR}, map[string]string{p: goodADR}, mbSHA, one, "immutable"},
+		{"merge-base fails: falls back to the base ref", "", map[string]string{p: goodADR}, nil, "", one, "accepted ADR (at good) was deleted"},
+		{"proposed at the merge-base, accepted at the tip, PR edits it", draftEdited, map[string]string{p: goodADR}, map[string]string{p: draft}, mbSHA, one, "immutable"},
+		{"proposed at the merge-base, accepted at the tip, PR accepts it itself", goodADR, map[string]string{p: goodADR}, map[string]string{p: draft}, mbSHA, one, "already accepted"},
+		{"proposed at the merge-base, accepted at the tip, PR does not touch it", draft, map[string]string{p: goodADR}, map[string]string{p: draft}, mbSHA, nil, ""},
+		{"proposed at the merge-base, accepted at the tip, PR deletes it", "", map[string]string{p: goodADR}, map[string]string{p: draft}, mbSHA, one, "deleted"},
+		{"PR adds a new ADR absent at the merge-base", goodADR, map[string]string{p: goodADR}, map[string]string{}, mbSHA, one, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd, _ := os.Getwd()
+			root := t.TempDir()
+			dir := filepath.Join(root, "docs", "decisions")
+			os.MkdirAll(dir, 0o755)
+			files := good()
+			delete(files, "0001-use-one-way.md")
+			delete(files, "README.md")
+			os.WriteFile(filepath.Join(dir, "README.md"), []byte("# x\n"), 0o644)
+			if tc.tree != "" {
+				files["0001-use-one-way.md"] = tc.tree
+			}
+			for n, c := range files {
+				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+			}
+			os.Chdir(root)
+			defer os.Chdir(wd)
+			g := fakeGitMB(map[string]map[string]string{"good": tc.tip, mbSHA: tc.mbT}, tc.mb, tc.touched)
+			code, out, errs := runCLI(t, g, nil, "docs", "--base", "good", "docs/decisions")
+			if code == 2 {
+				t.Fatalf("usage or input error: %q", errs)
+			}
+			if tc.want == "" {
+				if strings.Contains(out, "immutable") || strings.Contains(out, "deleted") || strings.Contains(out, "already accepted") {
+					t.Fatalf("want no immutability violation, got %d %q %q", code, out, errs)
+				}
+				return
+			}
+			if code != 1 || !strings.Contains(out, tc.want) {
+				t.Fatalf("want exit 1 with %q, got %d %q %q", tc.want, code, out, errs)
+			}
+		})
 	}
 }
 

@@ -21,8 +21,13 @@
 //	   docs/decisions/NEXT holds the next free number (highest + 1, four digits and a newline): a pull request that adds
 //	   an ADR takes it and bumps NEXT (ADR 0070)
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
-//	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
-//	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
+//	e  with --base: only the ADR files the pull request's own diff touches (merge-base of <ref> and HEAD to HEAD) are
+//	   judged; one the pull request does not touch is never flagged, so a branch behind <ref> is not blamed for what
+//	   merged there. A touched ADR that is accepted at the merge-base or at the tip of <ref> is immutable: compared
+//	   with its merge-base text it may change only its status line (to superseded by ADR-NNNN) and add or change a
+//	   "Superseded by [..](..)" line, whose link must resolve to an existing ADR file, and may not be deleted. A file
+//	   absent at the merge-base (the pull request added it) is free. When git cannot find a merge-base, <ref> itself
+//	   is the comparison point (stricter)
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
 // --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
@@ -212,7 +217,14 @@ func runDocs(args []string, e env) int {
 			fmt.Fprintf(e.stderr, "adrlint: base %q is not a commit: %v\n", *base, err)
 			return 2
 		}
-		iv, err := lintImmutable(fsDir, rel, *base, git)
+		// Compare with the branch point, not the tip: an ADR merged to base after this branch was cut is not ours.
+		point := *base
+		if out, err := git("merge-base", *base, "HEAD"); err == nil {
+			if sha := strings.TrimSpace(string(out)); sha != "" {
+				point = sha
+			}
+		}
+		iv, err := lintImmutableAt(fsDir, rel, point, *base, git)
 		if err != nil {
 			fmt.Fprintln(e.stderr, "adrlint:", err)
 			return 2
@@ -584,56 +596,72 @@ type numbered struct {
 	line int
 }
 
-// lintImmutable is rule e: every ADR that was accepted at base is compared with the working file. dir is the
-// directory on disk, rel the same directory as git names it (slash path relative to the repository root).
+// lintImmutable is rule e with the base ref as its own comparison point. dir is the directory on disk, rel the same
+// directory as git names it (slash path relative to the repository root).
 func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
-	files, _, err := adrFiles(dir)
+	return lintImmutableAt(dir, rel, base, base, git)
+}
+
+// lintImmutableAt judges the ADR files the pull request's own diff (point..HEAD) touches. An ADR accepted at point
+// (the merge-base) or at base (the tip of the ref the user gave, which names it in messages) is immutable: the
+// working file is compared with its text at point. A file the pull request does not touch is never judged, so a
+// branch that is behind base is not flagged for what merged there.
+func lintImmutableAt(dir, rel, point, base string, git gitFunc) ([]string, error) {
+	out, err := git("diff", "--name-only", "--no-renames", point, "HEAD", "--", "./"+rel+"/")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git diff %s..HEAD: %w", point, err)
 	}
-	// The names to check are the ones in the working tree plus the ones at base, so a deleted accepted ADR is seen.
-	names := map[string]bool{}
-	for _, n := range files {
-		names[n] = true
-	}
-	if out, err := git("ls-tree", "--name-only", base, "./"+rel+"/"); err == nil {
-		for _, p := range strings.Fields(string(out)) {
-			if n := filepath.Base(p); nameRE.MatchString(n) {
-				names[n] = true
-			}
+	var names []string
+	for _, p := range strings.Split(string(out), "\n") {
+		if n := filepath.Base(strings.TrimSpace(p)); strings.TrimSpace(p) != "" && nameRE.MatchString(n) {
+			names = append(names, n)
 		}
 	}
-	sorted := make([]string, 0, len(names))
-	for n := range names {
-		sorted = append(sorted, n)
+	sort.Strings(names)
+	names = slices.Compact(names)
+
+	acceptedAt := func(rev, n string) bool {
+		txt, err := git("show", rev+":./"+rel+"/"+n)
+		if err != nil {
+			return false
+		}
+		fm := parseFrontMatter(splitLines(txt))
+		kw, _, _ := parseStatus(fm.keys["status"].val)
+		return fm.ok && kw == "accepted"
 	}
-	sort.Strings(sorted)
 
 	var vs []string
-	for _, n := range sorted {
+	for _, n := range names {
 		path := filepath.Join(dir, n)
-		old, err := git("show", base+":./"+rel+"/"+n)
+		old, err := git("show", point+":./"+rel+"/"+n)
 		if err != nil {
-			continue // not at base: a new file is free
+			continue // not at the merge-base: the pull request added it, a new file is free
 		}
 		oldLines := splitLines(old)
 		ofm := parseFrontMatter(oldLines)
-		if kw, _, _ := parseStatus(ofm.keys["status"].val); !ofm.ok || kw != "accepted" {
-			continue // not accepted at base: free
+		kw, _, _ := parseStatus(ofm.keys["status"].val)
+		atPoint := ofm.ok && kw == "accepted"
+		if !atPoint && !acceptedAt(base, n) {
+			continue // accepted at neither: free
 		}
 		cur, err := os.ReadFile(path)
 		if err != nil {
 			vs = append(vs, viol(path, 1, "accepted ADR (at %s) was deleted; supersede it instead", base))
 			continue
 		}
-		vs = append(vs, compareAccepted(path, base, oldLines, ofm, splitLines(cur))...)
+		if !ofm.ok {
+			continue // no readable front matter at the merge-base: nothing to compare against
+		}
+		vs = append(vs, compareAccepted(path, base, oldLines, ofm, atPoint, splitLines(cur))...)
 	}
 	return vs, nil
 }
 
 // compareAccepted reports every change to an accepted ADR other than its status keyword (to superseded-by or
 // deprecated, note unchanged only if the keyword stays) and one exact "Superseded by [..](..)." body line. Only the first body difference is reported: later lines shift with it.
-func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curLines []string) []string {
+// oldAccepted is false when the old text is not accepted but main accepted the record since: its status line must then stay as it was (a
+// proposed to accepted change by the pull request is not allowed), and the rest is judged as for an accepted record.
+func compareAccepted(path, base string, oldLines []string, ofm frontMatter, oldAccepted bool, curLines []string) []string {
 	cfm := parseFrontMatter(curLines)
 	if !cfm.ok {
 		return []string{viol(path, 1, "accepted ADR (at %s) lost its front matter", base)}
@@ -646,6 +674,10 @@ func compareAccepted(path, base string, oldLines []string, ofm frontMatter, curL
 		kw, _, ok := parseStatus(cs.val)
 		newKw = kw
 		switch {
+		case !oldAccepted && curLines[cs.line-1] == oldLines[ofm.keys["status"].line-1]:
+			// unchanged while main has accepted it: fine
+		case !oldAccepted && kw == "accepted":
+			vs = append(vs, viol(path, cs.line, "ADR (at %s) is already accepted there: the pull request may not set its status to accepted", base))
 		case !ok || (kw != "accepted" && kw != "deprecated" && !strings.HasPrefix(kw, "superseded by")):
 			vs = append(vs, viol(path, cs.line, "accepted ADR (at %s): status may only change to \"superseded by ADR-NNNN\" or \"deprecated\", not %q", base, cs.val))
 		case kw == "accepted" && curLines[cs.line-1] != oldLines[ofm.keys["status"].line-1]:
