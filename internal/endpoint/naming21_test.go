@@ -23,7 +23,7 @@ import (
 // wake) is in cmd/mash/naming21_cli_test.go.
 
 // naming21AliasPRsMerged gates the rename test, which needs the two-stream read and the alias lease grant.
-const naming21AliasPRsMerged = false // flip when #346 and #363 are on main
+const naming21AliasPRsMerged = true // #346 and #363 are on main
 
 // provisionNF provisions agent.owner.name through ProvisionIdentity (alias optional) with the permissions the admin
 // layer computes for it, and registers its credentials with the fixture.
@@ -330,7 +330,7 @@ func TestNaming21_TwoLeadsCoexist(t *testing.T) {
 // a restart, and mail sent to the old name afterwards also lands once.
 func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	if !naming21AliasPRsMerged {
-		t.Skip("needs #346 (two-stream read) and #356 (alias lease grant): flip naming21AliasPRsMerged when they are on main")
+		t.Skip("needs #346 (two-stream read) and #363 (same-session takeover): flip naming21AliasPRsMerged when they are on main")
 	}
 	const old = "sap-go-sdk"
 	f := newFixture(t, old, "peer") // legacy endpoints under f.e.Owner
@@ -384,11 +384,20 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	}
 	checkVerified := func(ep *Endpoint, seq uint64, body string) {
 		t.Helper()
-		m, err := ep.Read(ctx, seq)
-		if err != nil || string(m.Body) != body || m.Trust != sap.TrustVerified {
-			t.Fatalf("read #%d (%s): %+v %v", seq, body, m, err)
+		// Alias mail is numbered in the legacy stream: a user reads it by its L-qualified number.
+		text := "#" + FormatMsgRef(MsgRef{Stream: LegacyStream, Seq: seq})
+		ref, err := ep.ResolveRef(text)
+		if err != nil {
+			t.Fatalf("resolve %s (%s): %v", text, body, err)
+		}
+		m, err := ep.ReadRef(ctx, ref)
+		if err != nil || string(m.Body) != body || m.Trust != sap.TrustVerified || m.Stream != LegacyStream || m.Seq != seq {
+			t.Fatalf("read %s (%s): %+v %v", text, body, m, err)
 		}
 		one := render.One(m)
+		if !strings.Contains(one, "--- "+text+" from ") {
+			t.Fatalf("%s rendered %q, want its qualified number %s", body, one, text)
+		}
 		if !strings.Contains(one, "from "+m.From+" [verified]") || !strings.Contains(one, "> "+body) || strings.Contains(one, "[claimed]") || strings.Contains(one, "[unknown-signer]") {
 			t.Fatalf("%s rendered %q, want [verified] with its body", body, one)
 		}
