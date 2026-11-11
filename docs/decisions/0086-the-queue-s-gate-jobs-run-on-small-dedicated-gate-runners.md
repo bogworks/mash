@@ -38,6 +38,11 @@ third list; its other rules (a literal list, no fallback, no hosted label, no ho
 The guard test (`internal/release/workflows_selfhosted_test.go`) allows the third list and
 `TestGateJobsUseGateRunners` pins it: exactly the four gate jobs use `rh-gate`, and no other job does.
 
+### Confirmation
+
+`TestGateJobsUseGateRunners` and the self-hosted guard run in CI; either fails if a gate job leaves `rh-gate` or any other
+job uses it.
+
 ### Consequences
 
 * Good, because the gate checks no longer queue behind test jobs.
