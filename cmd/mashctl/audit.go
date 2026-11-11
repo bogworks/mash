@@ -200,11 +200,26 @@ func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
 			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: "pending retired marker: a retirement was started and not finished (the name stays refused); rerun deprovision for it"})
 		} else {
 			ar.Final++
+			if m.Marker.State != "" && m.Marker.State != store.RetiredFinal {
+				// Not a state mash writes: a tampered or future-format marker. The name stays refused, so it counts as
+				// final and the report keeps "final" (self-comparable), but it is not a clean completed retirement.
+				probs = append(probs, auditProblem{What: "retired", Item: m.Key,
+					Error: fmt.Sprintf("retired marker has an unrecognized state %q (treated as final: the name stays refused); investigate", capState(m.Marker.State))})
+			}
 		}
 		ar.Markers = append(ar.Markers, auditRetiredMarker{Key: m.Key, Agent: m.Marker.Agent, Owner: m.Marker.Owner, Name: m.Marker.Name,
 			User: m.Marker.User, State: state, RetiredAt: m.Marker.RetiredAt})
 	}
 	return ar, probs
+}
+
+// capState shortens a marker's state for a message, so a hostile value cannot flood the output.
+func capState(s string) string {
+	const max = 40
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "..."
+	}
+	return s
 }
 
 type auditProblem struct {

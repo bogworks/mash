@@ -133,6 +133,7 @@ Findings, all in `problems` with `what` `retired` (so `--strict` exits 1):
 
 - the alarm: `item` is `mash-retired` and `error` starts `ALARM`. A full bucket makes provisioning refuse new identities for good and mash never changes an existing bucket, so recreate it with a larger cap and its markers copied before it fills;
 - a `pending` marker: `item` is its key and the error says to rerun `deprovision` for it (the retirement was started and not finished; the name stays refused meanwhile);
+- a marker whose `state` is neither `pending`, `final` nor empty (a tampered or future-format marker): `item` is its key and `error` says it has an unrecognized state, shown quoted and cut at 40 characters. It counts as `final` (the name stays refused) and the report keeps `state` `final`, so reports stay comparable; the finding is what stops it passing as a completed retirement. An empty `state` is `final`, with no finding;
 - a bucket with no size cap: `item` is `mash-retired` and `error` says it has no size cap. ADR 0088 gives it 64 MiB so a full bucket refuses new markers, and an uncapped one never alarms; recreate it with the cap, copying its markers. Bytes are still reported, and the text form says `bytes N, no cap`;
 - a bucket whose configuration fails the fail-closed check (a TTL, another history, memory storage, an evicting stream; `item` is `mash-retired`) and a marker whose value cannot be read (`item` is its key). The audit reports them and goes on; it does not crash.
 

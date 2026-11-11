@@ -251,6 +251,36 @@ func TestAuditRetiredUnreadableMarkerIsAProblem(t *testing.T) {
 	}
 }
 
+func TestAuditRetiredUnrecognizedStateIsAProblem(t *testing.T) {
+	f := newAuditEnv(t)
+	kv := f.retiredKV(t)
+	f.putMarker(t, kv, "claude", "team1", "odd", "", "done")
+	long := strings.Repeat("x", 500)
+	f.putMarker(t, kv, "claude", "team1", "hostile", "", long)
+	f.putMarker(t, kv, "claude", "team1", "plain", "", "")
+	r, _, code := f.retiredAudit(t, "--strict")
+	if code != 1 || len(r.Problems) != 2 {
+		t.Fatalf("unrecognized state: exit %d %+v", code, r.Problems)
+	}
+	for _, p := range r.Problems {
+		if p.What != "retired" || !strings.Contains(p.Error, "unrecognized state") || len(p.Error) > 300 {
+			t.Errorf("problem %+v", p)
+		}
+	}
+	if r.Problems[0].Item != "claude_team1_hostile" || r.Problems[1].Item != "claude_team1_odd" ||
+		!strings.Contains(r.Problems[1].Error, `"done"`) || strings.Contains(r.Problems[0].Error, long) {
+		t.Fatalf("problems %+v", r.Problems)
+	}
+	if r.Retired.Final != 3 || r.Retired.Pending != 0 {
+		t.Fatalf("counts %+v", r.Retired)
+	}
+	for _, m := range r.Retired.Markers {
+		if m.State != "final" {
+			t.Errorf("marker %s state %q, want final", m.Key, m.State)
+		}
+	}
+}
+
 // --compare
 
 func (f *auditFixture) compareRetired(t *testing.T, earlier string) (retiredOut, string, int) {
