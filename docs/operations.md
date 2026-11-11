@@ -495,6 +495,8 @@ name rule: none set
 
 The digest is the first 12 hex digits of the SHA-256 of the file's bytes, so a check can confirm every endpoint loaded the same file. A refusal names the rule and carries its message, for example `mash: send: the recipient: name rule "no-cc" refuses cc.acme.peer: the agent token cc is retired`. It is returned to whoever asked, at provision, start, send, reply, prompt, lookup and the compatibility alias, and always before the directory is read. A receiving endpoint applies the rule again to a prompt's asker, answering `403` with the same text and not showing the prompt, because a peer on an older client may not have checked. A relay declaration (`relayed from`) whose origin the rule refuses is not honoured: the mail is still delivered, shown without the declaration, and the serve log says why.
 
+The tests named `TestConfigA...` (in `internal/endpoint`, `internal/admin`, `cmd/mashctl` and `cmd/mash`) pin the configuration that refuses the old forms: a rule file with `no-cc` and `no-mash`, which each refuse their agent token. They cover each old form and the plain name at every entry point above, and a deployment that requires a rule and supplies none. They run in CI permanently, before and after the break to three-token identities, and must not be skipped or weakened.
+
 ## Fixed protocol constants
 
 These timings are not configurable: peers and the server must agree on them, so one operator's value would break another's session or weaken a check.
