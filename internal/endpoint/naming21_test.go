@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -125,19 +126,23 @@ func TestNaming21_ThreeTokenEndpointEndToEnd(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Receive: mail from the peer wakes the endpoint (the delivery event is what serve turns into the channel wake),
-	// is [verified], and reads back.
+	// Receive: mail from the peer wakes the endpoint (the delivery event is what serve turns into the channel wake: a
+	// one-line count naming the sender canonically, ADR 0081), is [verified], and reads back. The stored sender stays the
+	// flat key; the trust label and body are on the rendered message, which shows the canonical form.
 	seq, err := b.Send(ctx, key, "hello sdk", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := aev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from bogworks_x_peer [verified]") || !strings.Contains(got[0], "hello sdk") {
+	if !strings.HasPrefix(got[0], "1 message from bogworks.x.peer (") || strings.Contains(got[0], "bogworks_x_peer") {
 		t.Fatalf("wake event: %s", got[0])
 	}
 	m, err := a.Read(ctx, seq)
 	if err != nil || m.From != "bogworks_x_peer" || m.Trust != sap.TrustVerified || string(m.Body) != "hello sdk" {
 		t.Fatalf("read: %+v %v", m, err)
+	}
+	if one := render.One(m); !strings.Contains(one, "from bogworks.x.peer [verified]") || !strings.Contains(one, "> hello sdk") || strings.Contains(one, "bogworks_x_peer") {
+		t.Fatalf("rendered message: %s", one)
 	}
 	if ms, err := a.Inbox(ctx, 20); err != nil || len(ms) != 1 || ms[0].Seq != seq {
 		t.Fatalf("inbox: %+v %v", ms, err)
@@ -150,11 +155,13 @@ func TestNaming21_ThreeTokenEndpointEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = bev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from "+key+" [verified]") || !strings.Contains(got[0], "hello peer") {
+	if !strings.HasPrefix(got[0], "1 message from bogworks.x.sap-go-sdk (") || strings.Contains(got[0], key) {
 		t.Fatalf("reply event: %s", got[0])
 	}
 	if rm, err := b.Read(ctx, rseq); err != nil || rm.From != key || rm.Trust != sap.TrustVerified || rm.ReplyTo != seq || string(rm.Body) != "hello peer" {
 		t.Fatalf("peer read (want from %s, verified, answers #%d, body %q): %+v %v", key, seq, "hello peer", rm, err)
+	} else if one := render.One(rm); !strings.Contains(one, "from bogworks.x.sap-go-sdk [verified]") || !strings.Contains(one, "> hello peer") {
+		t.Fatalf("rendered reply: %s", one)
 	}
 
 	// Prompt round trip on the five-token prompt subject.
