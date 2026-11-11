@@ -45,6 +45,13 @@ func SetAfterDeprovisionPurge(f func()) (prev func()) {
 	return
 }
 
+// SetDirectoryPurgeFault installs a hook that runs after a directory-record purge the server accepted; a non-nil
+// error it returns replaces the purge's result (a timeout after the server did the work). It returns the previous one.
+func SetDirectoryPurgeFault(f func() error) (prev func() error) {
+	prev, directoryPurgeFault = directoryPurgeFault, f
+	return
+}
+
 // SetLockSafety sets how long before its deadline a held lock stops being used; it returns a func that restores it.
 func SetLockSafety(dur time.Duration) (restore func()) {
 	old := lockSafety

@@ -29,6 +29,12 @@ func TestParseRecordWithAndWithoutMeta(t *testing.T) {
 	}
 }
 
+func TestRetiredBucketCapIs64MiB(t *testing.T) {
+	if RetiredMaxBytes != 64<<20 || RetiredConfig().MaxBytes != RetiredMaxBytes {
+		t.Fatalf("retired bucket cap %d, config %d; want %d", RetiredMaxBytes, RetiredConfig().MaxBytes, 64<<20)
+	}
+}
+
 func TestValidMeta(t *testing.T) {
 	for _, ok := range []string{"", "reviewer", "my laptop", "héron", strings.Repeat("x", 64)} {
 		if err := ValidMeta("role", ok); err != nil {

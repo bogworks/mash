@@ -112,7 +112,7 @@ func launch(dir string, o Options) (*Env, error) {
 		ac.Name = name
 		ac.SigningKeys.Add(skPub)
 		if js {
-			ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: 256 << 20, Streams: 50, Consumer: 100,
+			ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: 256 << 20, MemoryStorage: 64 << 20, Streams: 50, Consumer: 100,
 				MaxBytesRequired: o.RequireMaxBytes}
 		}
 		tok := must(ac.Encode(opKP))

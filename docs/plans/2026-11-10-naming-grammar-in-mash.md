@@ -303,8 +303,24 @@ writers, and nothing writes a new-form record until every reader in the range ca
   default, un-policied permission set and refuses every policy-compiled user (amendment 2), with a clear error.
 - **1.6 Provisioning and display.** `mash` and `mashctl` provision, start and address an endpoint by its three tokens as
   well as by a legacy name, still behind the setting; `who`, `inbox`, message headers and trust lines show each token
-  byte-identical (REQ-006). Provisioning refuses a name that was retired (ADR 0015's tombstone) so a retired old-form
-  name is never reassigned (INV-002). The interface is open (see the gaps).
+  byte-identical (REQ-006). Provisioning refuses a retired new-form identity, so a retired name is never reassigned (INV-002). The plan first said
+  to rely on ADR 0015's tombstone; that tombstone lives in the lease bucket and expires after the lease TTL (90 seconds),
+  so the refusal would lapse. For new-form identities mash therefore writes a durable retired marker instead (the
+  no-TTL bucket `mash-retired`, one key per flat identity, with two states). Both deprovision paths, the plain one and
+  the user-key-guarded one, run the same order: the marker is written `pending` first, before the user is revoked or
+  anything is purged (a full or failing bucket fails the call before it changes anything), then the user is revoked and
+  the record purged (guarded by revision for the user-key path), then the marker is made `final`. A pending marker blocks
+  provisioning like a final one (INV-002). The pending marker is deleted only on a definitive refusal (a check before the purge, or the server refusing the
+  revision-guarded purge, even after the revoke), revision-guarded and only while the call still holds its locks; a purge
+  with an unknown outcome, a crash or a lost lock leaves it pending, and running the command again finishes it (a marker that vanished while being made final is rewritten final; a
+  record-less call with no marker at all changes nothing and never invents one). A pending marker for another user key than a live record is superseded and deleted; a final
+  one with such a record refuses (INV-002). The bucket is opened fail-closed (a TTL, another history, or an evicting
+  stream, meaning discard other than new, a max age or a max message count, is refused, never modified), and provisioning
+  refuses a bucket with no room for one more marker. Provisioning checks the marker under the admission lock; there is
+  no release path. `mashctl audit` listing pending and final markers is a follow-up on the audit branch. A legacy deprovision of a name
+  that a new-form record names as its alias is refused, so no alias is left dangling. Legacy names stay reusable:
+  INV-002's scope is the new-form identity, and the break's name rule, which refuses `cc`, ends old-form use. This still
+  passes the contract's tests (AT-002 and INV-002 for new-form names). The interface is open (see the gaps).
 - **1.7 The name-acceptance rule.** DEC-014 chose (c): homerange retires old identities and credentials, and mash applies
   a range-level rule that homerange supplies as configuration (it can match the agent, owner and name tokens) at every
   entry point (provision, start, send, reply, live prompt, directory lookup, the compatibility alias). This pull request builds the mechanism, with no default rule (SEAM-001), tests first:
