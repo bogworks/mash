@@ -322,20 +322,53 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			// channel (#16).
 			ep.SpoolFromStart()
 		}
-		if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
-			text := fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
-				sap.Display(p.From), p.Trust, p.RequestID, p.Text)
-			_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
-		}); err != nil {
-			fmt.Fprintln(stderr, err)
-			_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
+		startSvc := func() {
+			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
+				text := fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
+					sap.Display(p.From), p.Trust, p.RequestID, p.Text)
+				_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
+			}); err != nil {
+				fmt.Fprintln(stderr, err)
+				_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
+			}
+		}
+		// After a takeover from a live serve of this session the SAP service is registered only once the grace has
+		// passed and the lease is confirmed held, so the earlier serve and this one never answer prompts together.
+		// stopSvc stops the service and bars a later start; a start in flight finishes first (svcMu).
+		var svcMu sync.Mutex
+		svcStopped := false
+		svcCtx, svcCancel := context.WithCancel(ctx)
+		svcDone := make(chan struct{})
+		stopSvc := func() {
+			svcMu.Lock()
+			svcStopped = true
+			svcCancel()
+			ep.StopService()
+			svcMu.Unlock()
+		}
+		defer func() { stopSvc(); <-svcDone }() // runs before closeEP
+		if ep.TakeoverPending() {
+			go func() {
+				defer close(svcDone)
+				if ep.AwaitTakeover(svcCtx) != nil {
+					return // Run reports a lease loss; nothing is registered
+				}
+				svcMu.Lock()
+				defer svcMu.Unlock()
+				if !svcStopped {
+					startSvc()
+				}
+			}()
+		} else {
+			close(svcDone)
+			startSvc()
 		}
 		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
 			var lostTo *endpoint.LeaseLostError
 			if errors.As(err, &lostTo) && lostTo.SameSession {
 				// A newer serve of this same session holds the lease (ADR 0082): this one has stopped consuming and
 				// refreshing. It stays up, inactive and labelled, until its client closes it or its parent changes.
-				ep.StopService()
+				stopSvc()
 				state.Store(&sessionState{superseded: lostTo})
 				closeEP()
 				fmt.Fprintf(stderr, "%v; superseded by a newer mash serve of this session (pid %s); this server is inactive\n", err, lostTo.PID)
@@ -367,7 +400,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			// one, then tell Claude, but never let a blocked stdout hold up
 			// the shutdown. Lease loss after a start stays terminal.
 			lost.Store(true)
-			ep.StopService()
+			stopSvc()
 			fmt.Fprintln(stderr, err)
 			told := make(chan struct{})
 			go func() {

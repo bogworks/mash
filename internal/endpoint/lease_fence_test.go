@@ -1,7 +1,9 @@
 package endpoint
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -268,5 +270,114 @@ func TestNoTakeoverGraceOnFreeOrDeadHolder(t *testing.T) {
 	defer dead.Close()
 	if !dead.graceUntil.IsZero() {
 		t.Fatalf("grace on a dead holder: %v", dead.graceUntil)
+	}
+}
+
+// takeoverPair opens a live same-session first endpoint and a second that takes over from it, with the grace set to
+// grace; it returns both and the time the second was opened.
+func takeoverPair(t *testing.T, f *fixture, name string, grace time.Duration) (first, second *Endpoint, opened time.Time) {
+	t.Helper()
+	bigRefresh(t)
+	setVar(t, &takeoverGrace, func() time.Duration { return grace })
+	setSession(t, ours(t))
+	stubHolderGone(t, func(string, string) bool { return false })
+	first, err := Open(context.Background(), f.cfg(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(first.Close)
+	second, err = Open(context.Background(), f.cfg(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(second.Close)
+	return first, second, time.Now()
+}
+
+// AwaitTakeover returns nothing before the grace and nil after it.
+func TestAwaitTakeoverWaitsOutGrace(t *testing.T) {
+	f := newFixture(t, "a")
+	_, second, opened := takeoverPair(t, f, "a", 400*time.Millisecond)
+	if !second.TakeoverPending() {
+		t.Fatal("no takeover pending")
+	}
+	short, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if err := second.AwaitTakeover(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("inside the grace: %v", err)
+	}
+	if err := second.AwaitTakeover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(opened); d < 380*time.Millisecond {
+		t.Fatalf("returned %v after the takeover, want at least the grace", d)
+	}
+}
+
+// With no takeover there is nothing to wait for.
+func TestAwaitTakeoverNoGrace(t *testing.T) {
+	f := newFixture(t, "a")
+	ep, err := Open(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	if ep.TakeoverPending() {
+		t.Fatal("takeover pending on a free lease")
+	}
+	if err := ep.AwaitTakeover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A lease taken by a third before the grace ends is a *LeaseLostError, not nil.
+func TestAwaitTakeoverLeaseLost(t *testing.T) {
+	f := newFixture(t, "a")
+	_, second, _ := takeoverPair(t, f, "a", 400*time.Millisecond)
+	putLease(t, f, "a", leaseValue{Instance: "third", Host: "elsewhere", PID: "1", Since: "x"})
+	err := second.AwaitTakeover(context.Background())
+	var lost *LeaseLostError
+	if !errors.As(err, &lost) {
+		t.Fatalf("got %v, want a LeaseLostError", err)
+	}
+}
+
+// The sequence serve.go follows after a takeover: the SAP service is registered after AwaitTakeover, so a live prompt
+// sent inside the grace has no responder and one sent after it reaches onPrompt.
+func TestPromptDuringTakeoverGraceNotDelivered(t *testing.T) {
+	f := newFixture(t, "a", "snd")
+	_, second, _ := takeoverPair(t, f, "a", 600*time.Millisecond)
+	got := make(chan PromptEvent, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	go func() {
+		defer close(started)
+		if second.AwaitTakeover(ctx) == nil {
+			_ = second.StartService(ctx, func(p PromptEvent) {
+				got <- p
+				_ = second.Reply(p.RequestID, "ok", true)
+			})
+		}
+	}()
+	snd := f.client(t, "snd")
+	var out bytes.Buffer
+	short, c2 := context.WithTimeout(ctx, 2*time.Second)
+	defer c2()
+	if err := Prompt(short, snd.Conn(), snd.Identity(), "snd", "agents.prompt.cc.o.a", "early", &out); err == nil {
+		t.Fatal("a prompt inside the grace was answered")
+	}
+	select {
+	case p := <-got:
+		t.Fatalf("delivered inside the grace: %+v", p)
+	default:
+	}
+	<-started
+	out.Reset()
+	if err := Prompt(ctx, snd.Conn(), snd.Identity(), "snd", "agents.prompt.cc.o.a", "late", &out); err != nil {
+		t.Fatal(err)
+	}
+	if p := <-got; p.Text != "late" {
+		t.Fatalf("got %+v", p)
 	}
 }

@@ -135,3 +135,60 @@ func (e *Endpoint) startGrace() {
 		e.graceUntil = u
 	}
 }
+
+// TakeoverPending reports whether this endpoint took its lease from a live holder of its own session, so that
+// AwaitTakeover has something to wait for.
+func (e *Endpoint) TakeoverPending() bool {
+	e.graceMu.Lock()
+	defer e.graceMu.Unlock()
+	return !e.graceUntil.IsZero()
+}
+
+// AwaitTakeover returns nil at once when the lease was not taken over from a live serve of this session. Otherwise it
+// waits until the takeover grace has passed (the earlier serve has stopped), then reads the own lease key afresh, not
+// from a cached confirmation, and returns nil only when the lease is still held. A serve registers its SAP service
+// after this, so the earlier serve and the new one never answer live prompts for one endpoint together. It returns
+// ctx.Err() when ctx ends first and a *LeaseLostError when the lease was taken from this endpoint in the meantime.
+func (e *Endpoint) AwaitTakeover(ctx context.Context) error {
+	e.graceMu.Lock()
+	until := e.graceUntil
+	e.graceMu.Unlock()
+	if until.IsZero() {
+		return nil
+	}
+	if d := time.Until(until); d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	for {
+		if e.leaseGone.Load() {
+			return &LeaseLostError{Key: e.key}
+		}
+		var lostErr error
+		lose := func(err error) {
+			lostErr = err
+			if e.loseOwn != nil {
+				e.loseOwn(err)
+			}
+		}
+		switch e.readKey(e.key, lose) {
+		case verdictHeld:
+			return nil
+		case verdictLost:
+			if lostErr == nil {
+				lostErr = &LeaseLostError{Key: e.key}
+			}
+			return lostErr
+		}
+		select { // unknown: the read failed; try again
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
