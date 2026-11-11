@@ -116,6 +116,8 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 		return err
 	}
 	e.spool, e.since = &s, time.Now()
+	e.epochSpool.Store(&s)
+	e.noteLegacyEpochLocked() // under the lock SetSpool holds: the file names the hold in force, or none
 	e.hl.bind(s, e.since)
 	return nil
 }
@@ -185,7 +187,14 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			_ = p.msg.NakWithDelay(spoolFullDelay)
 			continue
 		default:
-			if err := e.spool.Put(EntryOf(p.mail)); err != nil {
+			wrote, err := e.putEntry(p)
+			if !wrote {
+				// The legacy lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
+				// so the new holder is redelivered it at once.
+				_ = p.msg.Nak()
+				continue
+			}
+			if err != nil {
 				if !h.failed {
 					h.failed = true
 					e.log.Printf("spool #%s: %v (retried, then delivered by the channel)", FormatMsgRef(seq), err)
@@ -216,6 +225,35 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 	} else if len(fallback) > 0 {
 		e.deliverBatch(deliver, fallback, seen)
 	}
+}
+
+// putEntry writes p's entry to the spool. An own-stream entry is written as it always was. A legacy-stream entry is
+// written in one critical section of the spool lock, after a check of the legacy lease made inside it, and stamped with
+// the epoch of the hold (legacyEpochNow): a lease lost after the check records epoch "none" under the same lock
+// afterwards, which hides the entry from every hook read. held is false when nothing was written because the legacy
+// lease is not held.
+func (e *Endpoint) putEntry(p pending) (held bool, err error) {
+	ent := EntryOf(p.mail)
+	if p.mail.Stream != LegacyStream || !e.hasLegacyStream() {
+		return true, e.spool.Put(ent)
+	}
+	unlock, err := e.spool.Lock()
+	if err != nil {
+		return true, err
+	}
+	defer unlock()
+	if testLegacyCheckSeam != nil {
+		testLegacyCheckSeam()
+	}
+	if !e.legacyReading() {
+		e.noteLegacyEpochLocked() // the loss is recorded here too, should its own writer not have yet
+		return false, nil
+	}
+	ent.Epoch = e.legacy.epoch.Load()
+	if testLegacyPutSeam != nil {
+		testLegacyPutSeam()
+	}
+	return true, e.spool.Put(ent)
 }
 
 // settleHeld acks what a hook has drained, keeps the rest from being redelivered, and wakes an idle session.

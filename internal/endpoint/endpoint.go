@@ -106,7 +106,9 @@ type Endpoint struct {
 	// The hook hand-over (hook.go): nil until SetSpool; since is when this session began, so only a hook run in this
 	// session switches delivery to the spool.
 	spool *spool.Spool
-	since time.Time
+	// epochSpool is spool as the legacy-lease loss path reads it (that runs on another goroutine, from Open on); set by SetSpool.
+	epochSpool atomic.Pointer[spool.Spool]
+	since      time.Time
 	// fromStart: the session counts as hooked from the start (SpoolFromStart).
 	fromStart bool
 	// noChannel: the host takes no channel delivery, so mail is held, never channel-delivered (NoChannel).

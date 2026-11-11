@@ -47,6 +47,7 @@ type legacyLease struct {
 	state  atomic.Int32 // legacyState
 	why    string       // the detail of a state other than none and read; written before state
 	rev    atomic.Uint64
+	epoch  atomic.Uint64 // the revision the lease was taken at: fixed for this hold, another hold has another
 	cancel context.CancelFunc
 	done   chan struct{}
 	lost   chan error // buffered; a loss is sent once
@@ -104,7 +105,9 @@ func (e *Endpoint) takeLegacyLease(ctx context.Context) {
 
 func (e *Endpoint) legacyTaken(rev uint64) {
 	e.legacy.rev.Store(rev)
+	e.legacy.epoch.Store(rev)
 	e.setLegacy(legacyRead, "")
+	e.noteLegacyEpoch() // a spool already set (a later hold): its epoch file now names this hold
 	e.log.Printf("legacy inbox: read as %s", e.legacyKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	e.legacy.cancel, e.legacy.done, e.legacy.lost = cancel, make(chan struct{}), make(chan error, 1)
@@ -121,12 +124,63 @@ func (e *Endpoint) legacyTaken(rev uint64) {
 					e.setLegacy(legacyLostNow, fmt.Sprintf("the lease of %s was lost", e.legacyKey))
 					e.log.Printf("legacy inbox: no longer read (%v)", err)
 					e.legacy.lost <- err
+					e.noteLegacyEpoch() // the instant the loss is learned, before dropHeld discards anything: a hook shows no legacy entry from here on
 					return
 				}
 			}
 		}
 	}()
 }
+
+// The legacy epoch (a legacy message must not be shown by the old session and redelivered to the new holder). A hold of
+// the legacy lease has an epoch, the revision it was taken at; the spool's .legacy-epoch file names the epoch of the hold
+// in force, or "none". It is written under the spool lock when the lease is taken and the moment its loss is learned,
+// before dropHeld runs; every legacy entry is written under that lock after a check of the lease flag and stamped with
+// the epoch read there; and a hook (which holds the same lock) shows a stamped entry only while the file still names its
+// epoch. A loss between the check and the write therefore cannot show: the loss records "none" under the lock, after
+// the write, and the entry is then skipped by every hook read.
+//
+// Lock order: the spool lock is taken here by the refresh goroutine and by the deliver loop, and neither holds another
+// mutex while it waits (the lease flags are atomics), so no spool-lock holder can wait on them.
+
+// legacyEpoch is the epoch to record now: that of the hold while the lease is held, else 0 for none.
+func (e *Endpoint) legacyEpoch() uint64 {
+	if e.legacyReading() {
+		return e.legacy.epoch.Load()
+	}
+	return 0
+}
+
+// noteLegacyEpochLocked records the epoch in force, the caller holding the spool lock. Without a spool, or an alias,
+// there is nothing to record.
+func (e *Endpoint) noteLegacyEpochLocked() {
+	sp := e.epochSpool.Load()
+	if sp == nil || !e.hasLegacyStream() {
+		return
+	}
+	if err := sp.NoteEpoch(e.legacyEpoch()); err != nil {
+		e.log.Printf("spool: legacy epoch: %v", err)
+	}
+}
+
+// noteLegacyEpoch takes the spool lock and records the epoch in force.
+func (e *Endpoint) noteLegacyEpoch() {
+	sp := e.epochSpool.Load()
+	if sp == nil || !e.hasLegacyStream() {
+		return
+	}
+	unlock, err := sp.Lock()
+	if err != nil {
+		e.log.Printf("spool: legacy epoch: %v", err)
+		return // the spool write and dropHeldLegacy record it again
+	}
+	defer unlock()
+	e.noteLegacyEpochLocked()
+}
+
+// testLegacyCheckSeam and testLegacyPutSeam are test hooks, both run inside the spool lock of a legacy spool write: the
+// first just before the check of the lease, the second between that check and the write.
+var testLegacyCheckSeam, testLegacyPutSeam func()
 
 // releaseLegacyLease stops the refresh and gives the lease back (called by Close, before the own lease is released).
 func (e *Endpoint) releaseLegacyLease() {
@@ -196,6 +250,7 @@ func (e *Endpoint) dropHeldLegacy(h *held) {
 		}
 		unlock = u
 		defer unlock()
+		e.noteLegacyEpochLocked() // before anything is discarded: a hook already shows none of it
 	}
 	n := 0
 	for seq, p := range h.msgs {

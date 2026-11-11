@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -344,5 +346,197 @@ func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
 	}
 	if strings.Contains(joined(ev), "legacy-") {
 		t.Fatalf("the old holder showed legacy mail:\n%s", joined(ev))
+	}
+}
+
+// openSpooled opens a new-form endpoint with an alias, spooling from the start with no channel, over a fresh spool.
+func openSpooled(t *testing.T, f *fixture, id sap.EndpointIdentity) (*Endpoint, *events, spool.Spool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, f.cfgNF(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep.NoChannel()
+	ep.SpoolFromStart()
+	sp := spool.Spool{Dir: t.TempDir() + "/spool"}
+	if err := ep.SetSpool(sp, ""); err != nil {
+		t.Fatal(err)
+	}
+	ev := &events{}
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, ev.deliver); close(done) }()
+	t.Cleanup(func() { cancel(); <-done; ep.Close() })
+	return ep, ev, sp
+}
+
+// takeLegacyOver makes another session the legacy lease's holder, as a takeover would.
+func takeLegacyOver(t *testing.T, f *fixture) jetstream.KeyValue {
+	t.Helper()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, err := js.KeyValue(context.Background(), store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := json.Marshal(leaseValue{Instance: "someone-else", Host: "h", PID: "1", Since: time.Now().UTC().Format(time.RFC3339)})
+	if _, err := kv.Put(context.Background(), "old", other); err != nil {
+		t.Fatal(err)
+	}
+	return kv
+}
+
+func hasLegacy(w []spool.Entry) bool {
+	for _, e := range w {
+		if e.Stream == LegacyStream {
+			return true
+		}
+	}
+	return false
+}
+
+// loseAt installs seam so that, the first time it runs, the legacy lease is taken over and the call returns once this
+// endpoint has noticed the loss. It returns the lease bucket and a channel closed when the seam has fired.
+func loseAt(t *testing.T, f *fixture, ep *Endpoint, seam *func()) (*jetstream.KeyValue, chan struct{}) {
+	t.Helper()
+	var kv jetstream.KeyValue
+	var once sync.Once
+	fired := make(chan struct{})
+	*seam = func() {
+		once.Do(func() {
+			kv = takeLegacyOver(t, f)
+			for deadline := time.Now().Add(5 * time.Second); ep.legacyReading() && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			}
+			close(fired)
+		})
+	}
+	t.Cleanup(func() { *seam = nil })
+	return &kv, fired
+}
+
+// The lease epoch is recorded when the lease is taken and as "none" the moment the loss is learned; a legacy entry is
+// stamped with the epoch of its write.
+func TestLegacyLeaseEpochRecordedAndStamped(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, sp := openSpooled(t, f, id)
+	if n, ok := sp.Epoch(); !ok || n == 0 || n != ep.legacy.epoch.Load() {
+		t.Fatalf("epoch after SetSpool: %d %v (hold %d)", n, ok, ep.legacy.epoch.Load())
+	}
+	f.sendTo(t, snd, "old", "stamped")
+	until(t, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
+	if w := waiting(t, sp); w[0].Epoch != ep.legacy.epoch.Load() {
+		t.Fatalf("entry epoch %d, hold %d", w[0].Epoch, ep.legacy.epoch.Load())
+	}
+	takeLegacyOver(t, f)
+	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	until(t, "epoch none", func() bool { n, ok := sp.Epoch(); return ok && n == 0 })
+}
+
+// The lease is lost after dropUnleased passed the message and before the spool write: the live check inside the write's
+// critical section sees the loss, so nothing is written, the message is nak'd (not acked, not marked seen), and the new
+// holder is redelivered it and shows it once; the old endpoint shows nothing.
+func TestLegacyLeaseEpochLostBeforeSpoolWriteWritesNothing(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, ev, sp := openSpooled(t, f, id)
+	kv, fired := loseAt(t, f, ep, &testLegacyCheckSeam)
+	f.sendTo(t, snd, "old", "raced")
+	<-fired
+	if ep.legacyReading() {
+		t.Fatal("the lease loss was not noticed")
+	}
+	time.Sleep(3 * SpoolCheck)
+	if hasLegacy(waiting(t, sp)) || sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) {
+		t.Fatal("a legacy entry was written after the lease was lost")
+	}
+	if i := legacyConsumerInfo(t, f, "inbox-old"); i.AckFloor.Stream != 0 {
+		t.Fatalf("legacy consumer acked: %+v", i)
+	}
+	if err := (*kv).Delete(context.Background(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	_, lev := f.run(t, "old")
+	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced") })
+	time.Sleep(300 * time.Millisecond)
+	if n := strings.Count(joined(lev), "> raced"); n != 1 {
+		t.Fatalf("the next holder showed it %d times", n)
+	}
+	if strings.Contains(joined(ev), "raced") {
+		t.Fatalf("the old holder showed it:\n%s", joined(ev))
+	}
+}
+
+// The lease is lost between the live check and the write itself, inside the critical section: the entry may reach the
+// disk, but the loss records epoch "none" under the same lock right after, so no hook read shows it, it is dropped and
+// nak'd, and the new holder shows the message once.
+func TestLegacyLeaseEpochLostBetweenCheckAndWriteIsHidden(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, ev, sp := openSpooled(t, f, id)
+	kv, fired := loseAt(t, f, ep, &testLegacyPutSeam)
+	f.sendTo(t, snd, "old", "raced-late")
+	<-fired
+	// A hook read, made under the spool lock as a hook does, never shows the entry: the entry's write and the loss's epoch
+	// write are each one critical section, the write first.
+	for end := time.Now().Add(3 * SpoolCheck); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		unlock, err := sp.Lock() // a hook reads under the spool lock, as the loss's epoch write and the entry's write do
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown := hasLegacy(waiting(t, sp))
+		unlock()
+		if shown {
+			t.Fatal("a hook read showed a legacy entry written under a lost lease")
+		}
+	}
+	if n, ok := sp.Epoch(); !ok || n != 0 {
+		t.Fatalf("epoch %d %v, want none", n, ok)
+	}
+	until(t, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
+	if err := (*kv).Delete(context.Background(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	_, lev := f.run(t, "old")
+	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-late") })
+	time.Sleep(300 * time.Millisecond)
+	if n := strings.Count(joined(lev), "> raced-late"); n != 1 {
+		t.Fatalf("the next holder showed it %d times", n)
+	}
+	if strings.Contains(joined(ev), "raced-late") {
+		t.Fatalf("the old holder showed it:\n%s", joined(ev))
+	}
+}
+
+// A legacy entry written under an old epoch is skipped by the hook read once the epoch has changed.
+func TestLegacyLeaseEpochOldEntrySkippedAfterChange(t *testing.T) {
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, sp := openSpooled(t, f, id)
+	f.sendTo(t, snd, "old", "under the old epoch")
+	until(t, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
+	unlock, err := sp.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sp.NoteEpoch(ep.legacy.epoch.Load() + 1000) // another hold took the epoch
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLegacy(waiting(t, sp)) {
+		t.Fatal("a legacy entry of an earlier epoch is still listed")
 	}
 }

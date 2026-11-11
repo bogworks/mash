@@ -44,6 +44,9 @@ type Entry struct {
 	Via      string    `json:"via,omitempty"`      // the verified relay declaration, "<origin> #<seq>"
 	At       time.Time `json:"at"`
 	Body     []byte    `json:"body"`
+	// Epoch is the legacy-lease epoch current when a legacy-stream entry was written (see epoch.go); absent for an
+	// own-stream entry and in files written before it existed.
+	Epoch uint64 `json:"epoch,omitempty"`
 	// Redelivered is set by Waiting, never persisted: a hook had begun to show this entry and did not finish
 	// draining it, so the session may already have seen it.
 	Redelivered bool `json:"-"`
@@ -320,12 +323,14 @@ func (s Spool) Put(e Entry) error {
 
 // Waiting lists the spooled messages, oldest first (the primary stream, then each other stream in name order, each by
 // sequence). An unreadable file is skipped, not fatal: one bad entry must not stop the rest.
+// A legacy entry stamped with an epoch other than the current one (epoch.go) is skipped too: not shown, so not drained.
 func (s Spool) Waiting() ([]Entry, error) {
 	des, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return nil, err
 	}
 	var out []Entry
+	cur, curOK := s.Epoch()
 	for _, d := range des {
 		ref, ok := refOf(d.Name())
 		if !ok || !d.Type().IsRegular() {
@@ -336,7 +341,7 @@ func (s Spool) Waiting() ([]Entry, error) {
 			continue
 		}
 		var e Entry
-		if json.Unmarshal(b, &e) == nil && e.Ref() == ref {
+		if json.Unmarshal(b, &e) == nil && e.Ref() == ref && e.visible(cur, curOK) {
 			out = append(out, e)
 		}
 	}
