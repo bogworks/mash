@@ -58,6 +58,9 @@ jobs:
           path: pr
           fetch-depth: 0
           persist-credentials: false
+          # checkout v7 refuses a fork's code in a pull_request_target run unless told. This is the deliberate case: the
+          # pull request is data for the checker run from trusted/, and nothing from pr/ is ever executed.
+          allow-unsafe-pr-checkout: true
       - name: Bring the base branch into pr/ (from trusted/, locally)
         env:
           BASE_REF: ${{ github.base_ref }}
