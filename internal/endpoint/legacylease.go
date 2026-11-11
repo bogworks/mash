@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,7 +35,7 @@ import (
 //     stream; the consume loop starts reading the legacy stream the moment the lease is held (legacyManager).
 //   - lost during the session: the legacy consume loop stops, and from then on nothing of that stream is acknowledged
 //     by this endpoint, whatever its state: mail still queued or in the deliver loop's batch is dropped (dropUnleased),
-//     mail held for a hook (struct held) is forgotten with its waiting spool file (dropHeldLegacy), and every ack path
+//     mail held for a hook (struct held) is forgotten with its waiting spool file (dropHeld), and every ack path
 //     (ack, the duplicate ack of dedupe, deliverBatch, the sender-header drop) is gated on mayAck. JetStream redelivers
 //     all of it to the new holder. Mail already shown before the loss gets no ack either: the next holder may show it
 //     once more (a repeat is the safe side; an ack the holder never earned would be mail loss). Its spool tombstone, if a
@@ -77,7 +76,8 @@ type legacyLease struct {
 	mu     sync.Mutex // guards cancel, done and lost: each hold has its own, never reused
 	cancel context.CancelFunc
 	done   chan struct{}
-	lost   chan error // buffered; a loss is sent once
+	lost   chan error  // buffered; a loss is sent once
+	lose   func(error) // records the loss of this hold (the refresh, the watch and the ack-time check); bound to the hold
 
 	wake    chan struct{}                         // capacity 1: the state changed (the consume loop re-checks)
 	changed chan struct{}                         // capacity 1: the state changed (the retry loop re-checks)
@@ -123,6 +123,14 @@ func (e *Endpoint) legacyPoke() {
 		default:
 		}
 	}
+}
+
+// legacyLoser is the loss recorder of the current hold (nil before the first hold). A caller reads it before it looks at
+// the lease key, so a loss it finds is attributed to the hold it looked for: the recorder ignores a hold that is over.
+func (e *Endpoint) legacyLoser() func(error) {
+	e.legacy.mu.Lock()
+	defer e.legacy.mu.Unlock()
+	return e.legacy.lose
 }
 
 // legacyHold is the current hold's lost channel and epoch.
@@ -218,11 +226,15 @@ func (e *Endpoint) takeLegacyLease(ctx context.Context) {
 	}
 	if cur, gerr := e.leaseKV.Get(ctx, e.legacyKey); gerr == nil && !fenced(cur.Value()) {
 		var lv leaseValue
-		// A holder on this machine whose process is gone is taken over, as for the own lease (G270).
+		// A holder on this machine whose process is gone, or an earlier serve of this session, is taken over, as for the
+		// own lease (G270, ADR 0092).
 		if json.Unmarshal(cur.Value(), &lv) == nil {
-			if me := ourMachine(); me != "" && lv.Machine == me && lv.PID != fmt.Sprint(os.Getpid()) && holderGone(lv.PID, lv.Start) {
+			if reason := e.takeoverReason(lv); reason != "" {
 				if rev, uerr := e.leaseKV.Update(ctx, e.legacyKey, val, cur.Revision()); uerr == nil {
-					e.log.Printf("lease: took over %s from dead holder %s (pid %s)", e.legacyKey, lv.Instance, lv.PID)
+					e.log.Print(e.tookOverLine(e.legacyKey, reason, lv))
+					if reason == "same" {
+						e.startGrace()
+					}
 					e.legacyTaken(rev)
 					return
 				}
@@ -256,8 +268,49 @@ func (e *Endpoint) legacyTaken(rev uint64) {
 		return
 	}
 	e.log.Printf("legacy inbox: read as %s", e.legacyKey)
+	var watching sync.WaitGroup
+	// record marks this hold lost, once, whoever sees it first: the refresh, the watch of the lease or the live check at
+	// ack time. It is bound to this hold: a stale callback that fires after the lease was taken again (another epoch) or
+	// after the hold was given up (failLegacyHold) marks nothing. It reports whether it recorded the loss.
+	var once sync.Once
+	record := func(err error) bool {
+		won := false
+		once.Do(func() {
+			if e.legacy.epoch.Load() != rev {
+				return // a later hold is current
+			}
+			if !e.legacy.state.CompareAndSwap(int32(legacyRead), int32(legacyLostNow)) {
+				return // given up meanwhile (failLegacyHold)
+			}
+			why := fmt.Sprintf("the lease of %s was lost", e.legacyKey)
+			e.legacy.why.Store(&why)
+			e.log.Printf("legacy inbox: no longer read (%v)", err)
+			lost <- err
+			cancel() // stops this hold's refresh and watch
+			e.legacyPoke()
+			won = true
+		})
+		return won
+	}
+	// lose is for the watch and the live check: the epoch note is written off this goroutine, because they may hold a
+	// mutex that a holder of the spool lock waits for. The refresh path records it synchronously.
+	lose := func(err error) {
+		if record(err) {
+			go e.noteLegacyEpoch()
+		}
+	}
+	e.legacy.mu.Lock()
+	e.legacy.lose = lose
+	e.legacy.mu.Unlock()
+	watching.Add(1)
+	go func() {
+		defer watching.Done()
+		e.watchLease(ctx, e.legacyKey, lose)
+	}()
 	go func() {
 		defer close(done)
+		defer watching.Wait()
+		defer cancel()
 		t := time.NewTicker(LeaseRefresh)
 		defer t.Stop()
 		for {
@@ -266,15 +319,9 @@ func (e *Endpoint) legacyTaken(rev uint64) {
 				return
 			case <-t.C:
 				if err := e.refreshKey(ctx, e.legacyKey, &e.legacy.rev); err != nil {
-					if !e.legacy.state.CompareAndSwap(int32(legacyRead), int32(legacyLostNow)) {
-						return // given up meanwhile (failLegacyHold)
+					if record(err) {
+						e.noteLegacyEpoch() // the instant the loss is learned, before dropHeld discards anything: a hook shows no legacy entry from here on
 					}
-					why := fmt.Sprintf("the lease of %s was lost", e.legacyKey)
-					e.legacy.why.Store(&why)
-					e.log.Printf("legacy inbox: no longer read (%v)", err)
-					lost <- err
-					e.noteLegacyEpoch() // the instant the loss is learned, before dropHeld discards anything: a hook shows no legacy entry from here on
-					e.legacyPoke()
 					return
 				}
 			}
@@ -456,22 +503,51 @@ func (e *Endpoint) LegacyInboxLine() (line string, ok bool) {
 	return "", false
 }
 
-// dropUnleased removes the mail of the legacy stream from batch once the lease is gone, without acknowledging it (it is
-// nak'd, which redelivers it to the holder's consumer). It returns batch itself when nothing is removed.
-func (e *Endpoint) dropUnleased(batch []pending) []pending {
-	if !e.hasLegacyStream() || e.legacyReading() {
-		return batch
+// leaseHeldFor reports whether this endpoint holds the lease that lets it deliver and acknowledge mail of stream: its
+// own lease for every stream, and for the legacy stream the legacy identity's as well. Once the own lease is lost nothing
+// of any stream is delivered or acknowledged (a new holder has the consumer); the check is made at each ack, so a loss
+// between delivery and ack withholds the ack.
+func (e *Endpoint) leaseHeldFor(stream string) bool {
+	if e.leaseGone.Load() {
+		return false
 	}
-	kept := batch[:0:0]
-	for _, p := range batch {
-		if p.mail.Stream != LegacyStream {
-			kept = append(kept, p)
-		} else {
-			if p.msg != nil {
-				_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+	return stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading()
+}
+
+// anyLeaseGone reports whether some lease this endpoint needs for a stream is gone.
+func (e *Endpoint) anyLeaseGone() bool {
+	return e.leaseGone.Load() || (e.hasLegacyStream() && !e.legacyReading())
+}
+
+// dropUnleased removes from batch the mail that may not be delivered, without acknowledging it: that of a stream whose
+// lease is gone (nak'd, which redelivers it to the holder's consumer at once) and, when the lease cannot be confirmed
+// just now, that too (nak'd with a delay). The lease is read live (lease_fence.go), so a takeover the watch has not yet
+// noticed is noticed here, before anything is delivered; the read is reused for leaseConfirmFor, so a batch costs one.
+// It returns batch itself when nothing is removed.
+func (e *Endpoint) dropUnleased(batch []pending) []pending {
+	var kept []pending
+	for i, p := range batch {
+		v := e.verdictFor(p.mail.Stream)
+		if v == verdictHeld {
+			if kept != nil {
+				kept = append(kept, p)
 			}
-			e.waking.done(refOf(p.mail)) // no longer ours to count
+			continue
 		}
+		if kept == nil {
+			kept = append(make([]pending, 0, len(batch)), batch[:i]...)
+		}
+		if p.msg != nil {
+			if v == verdictLost {
+				_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+			} else {
+				_ = p.msg.NakWithDelay(time.Second) // not confirmed: not delivered, not acked
+			}
+		}
+		e.waking.done(refOf(p.mail)) // no longer ours to count
+	}
+	if kept == nil {
+		return batch
 	}
 	return kept
 }
@@ -484,25 +560,23 @@ func (e *Endpoint) fenceLegacy(show []pending) []pending {
 	return e.dropUnleased(show)
 }
 
-// mayAck reports whether this endpoint may acknowledge p: own-stream mail always; legacy mail only while the legacy
-// lease is held. The check is made at each ack, so a loss between delivery and ack withholds the ack.
-func (e *Endpoint) mayAck(p pending) bool {
-	return p.mail.Stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading()
-}
+// mayAck reports whether this endpoint may acknowledge p: it holds the lease for p's stream, confirmed live (an
+// unconfirmed lease is not enough: the ack is withheld and the mail redelivered).
+func (e *Endpoint) mayAck(p pending) bool { return e.verdictFor(p.mail.Stream) == verdictHeld }
 
-// dropHeldLegacy forgets the legacy mail held for a hook that this endpoint no longer holds the lease for, acking none of
-// it: mail held while the lease is not held at all, and mail spooled under an earlier hold than the current one (the lease
+// dropHeld forgets the mail held for a hook that this endpoint no longer holds the lease for, acking none of it: mail of
+// a stream whose lease is gone (the own lease for every stream, the legacy identity's for the legacy stream), and mail spooled under an earlier hold than the current one (the lease
 // was lost and taken again before the delivery worker ran: the new epoch hides those spool files, and a redelivery would
 // be taken for mail already held, so it would never be shown). Its waiting spool file is removed (so a hook cannot show
 // what the holder will deliver again), it leaves the held counts and the seen set, and it is nak'd so the current hold's
 // consumer is redelivered it at once. A message a hook has already drained keeps its tombstone and is simply no longer
 // tracked. Mail spooled under the current epoch is untouched.
-func (e *Endpoint) dropHeldLegacy(h *held) {
-	if !e.hasLegacyStream() || len(h.msgs) == 0 {
+func (e *Endpoint) dropHeld(h *held) {
+	if len(h.msgs) == 0 {
 		return
 	}
 	stale := func(seq spool.Ref) bool {
-		return seq.Stream == LegacyStream && (!e.legacyReading() || h.epochs[seq] != e.legacy.epoch.Load())
+		return !e.leaseHeldFor(seq.Stream) || (seq.Stream == LegacyStream && e.hasLegacyStream() && h.epochs[seq] != e.legacy.epoch.Load())
 	}
 	any := false
 	for seq := range h.msgs {
@@ -521,7 +595,7 @@ func (e *Endpoint) dropHeldLegacy(h *held) {
 			return // retried at the next tick
 		}
 		defer u()
-		if !e.legacyReading() {
+		if e.hasLegacyStream() && !e.legacyReading() {
 			e.noteLegacyEpochLocked() // before anything is discarded: a hook already shows none of it
 		}
 	}
@@ -551,6 +625,6 @@ func (e *Endpoint) dropHeldLegacy(h *held) {
 		n++
 	}
 	if n > 0 {
-		e.log.Printf("legacy inbox: dropped %d held message(s) unacked (the lease was lost); the holder is redelivered them", n)
+		e.log.Printf("dropped %d held message(s) unacked (the lease was lost); the next holder is redelivered them", n)
 	}
 }

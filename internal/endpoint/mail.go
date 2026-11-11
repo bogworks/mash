@@ -359,6 +359,9 @@ func (e *Endpoint) sources() []inboxSource {
 // it the stream is left to its holder (the consumer is not even created here), and when the lease is lost mid-session
 // its consume loop is stopped while the own stream's keeps running.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
+	if !e.graceWait(ctx) { // a takeover from a live serve of this session: let it stop first
+		return func() {}, nil
+	}
 	srcs := e.sources()
 	if !e.legacyReading() {
 		kept := srcs[:0]
@@ -437,6 +440,10 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				return
 			}
 			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
+			if !e.leaseHeldFor(stream) {
+				_ = m.Nak() // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+				return
+			}
 			defer e.waking.received(ref)
 			// The sender's signature binds the subject the message was stored under, so classify checks it against the
 			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
@@ -444,7 +451,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			if !ok {
 				e.dropped.Add(1)
 				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
-				if stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading() {
+				if e.verdictFor(stream) == verdictHeld {
 					_ = m.Ack()
 				}
 				return
@@ -473,8 +480,16 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 	var ccs []jetstream.ConsumeContext
 	var watched sync.WaitGroup
 	stopAll := func() {
+		// A serve that has lost its lease drains instead of stopping: Stop discards what the client already pulled into its
+		// buffer, and mail discarded unacked is not redelivered to the new holder until the consumer's AckWait (30 s). Drain
+		// hands each buffered message to the handler, which nak's it (the lease is gone) so the new holder gets it at once.
+		lost := e.anyLeaseGone()
 		for _, cc := range ccs {
-			cc.Stop()
+			if lost {
+				cc.Drain()
+			} else {
+				cc.Stop()
+			}
 		}
 		for _, cc := range ccs {
 			select {
@@ -592,6 +607,15 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 		}
 		if cur == nil && e.legacyReading() {
 			l, ep := e.legacyHold()
+			// A hold taken from a live serve of this session waits out the takeover grace first (as the own stream
+			// does), so the earlier serve has stopped before this one pulls from the shared consumer.
+			ready, ended := e.legacyGraceWait(ctx, quit, l, ep)
+			if ended {
+				return
+			}
+			if !ready { // the hold ended or changed while waiting: the next pass looks at the new state
+				goto wait
+			}
 			nb := new(atomic.Int32)
 			cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 			if err != nil {
@@ -610,6 +634,7 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 				}
 			}
 		}
+	wait:
 		select {
 		case <-quit:
 			return
@@ -618,6 +643,40 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 		case <-tick.C:
 		}
 	}
+}
+
+// legacyGraceWait waits until the takeover grace has passed for the hold (l, epoch). ready is true when the grace is over
+// and the legacy lease is still held live under that epoch; false when the hold was lost or replaced meanwhile (or the
+// lease could not be confirmed), so nothing starts. ended is true when the endpoint ended while waiting. With no grace
+// owed (a free lease) it does not wait.
+func (e *Endpoint) legacyGraceWait(ctx context.Context, quit <-chan struct{}, l chan error, epoch uint64) (ready, ended bool) {
+	if d := e.graceLeft(); d > 0 {
+		e.log.Printf("legacy inbox: taken over from a live serve of this session; reading in %s, when it has stopped", d.Round(time.Millisecond))
+		t := time.NewTimer(d)
+		defer t.Stop()
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
+		for waiting := true; waiting; {
+			select {
+			case <-t.C:
+				waiting = false
+			case <-quit:
+				return false, true
+			case <-ctx.Done():
+				return false, true
+			case <-l: // the hold was lost
+				return false, false
+			case <-poll.C:
+				if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
+					return false, false
+				}
+			}
+		}
+	}
+	if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
+		return false, false
+	}
+	return e.verdictFor(LegacyStream) == verdictHeld, false
 }
 
 // deliverLoop is the single writer of channel events (see consume).
@@ -633,7 +692,8 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		var batch []pending
 		select {
 		case <-quit:
-			return // held messages stay unacked: redelivered to the next session
+			e.releaseOnQuit(h, nil, queue) // held messages stay unacked: redelivered to the next session
+			return
 		case <-tick.C:
 			e.settleHeld(deliver, h)
 			continue
@@ -644,14 +704,15 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		for len(batch) < maxPending {
 			select {
 			case <-quit:
-				return // unacked: redelivered to the next session
+				e.releaseOnQuit(h, batch, queue) // unacked: redelivered to the next session
+				return
 			case p := <-queue:
 				batch = append(batch, p)
 			case <-time.After(settle):
 				break gather
 			}
 		}
-		e.dropHeldLegacy(h)
+		e.dropHeld(h)
 		if batch = e.dropUnleased(batch); len(batch) == 0 {
 			continue
 		}
@@ -681,6 +742,25 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 			continue
 		}
 		e.deliverBatch(deliver, show, seen)
+	}
+}
+
+// releaseOnQuit is the end of the deliver loop. When the lease is gone, what the loop still holds (the gathered batch,
+// the queue, mail held for a hook) is nak'd at once, so the new holder is redelivered it now rather than after the
+// ack wait; none of it is acked. With the lease held it does nothing: that mail waits out the ack wait, as it always did.
+func (e *Endpoint) releaseOnQuit(h *held, batch []pending, queue <-chan pending) {
+	if !e.anyLeaseGone() {
+		return
+	}
+	e.dropUnleased(batch)
+	for {
+		select {
+		case p := <-queue:
+			e.dropUnleased([]pending{p})
+		default:
+			e.dropHeld(h)
+			return
+		}
 	}
 }
 
@@ -1225,7 +1305,7 @@ func seqsUp(from, to uint64) []uint64 {
 // deliverBatch is the channel path: show goes out as one event, then is acked (a failed write naks it for redelivery).
 func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet) {
 	if show = e.fenceLegacy(show); len(show) == 0 {
-		return
+		return // the lease is gone: nothing is delivered or acked
 	}
 	mails := make([]render.Mail, len(show))
 	seqs := make([]string, len(show))

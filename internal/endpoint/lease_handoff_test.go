@@ -329,3 +329,14 @@ func TestProcStart(t *testing.T) {
 		t.Error("want an error for a missing pid")
 	}
 }
+
+// putLeaseKV is the lease bucket, read as the admin.
+func putLeaseKV(t *testing.T, f *fixture) jetstream.KeyValue {
+	t.Helper()
+	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	kv, err := js.KeyValue(context.Background(), store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kv
+}

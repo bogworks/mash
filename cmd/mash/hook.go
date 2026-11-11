@@ -59,6 +59,9 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	for _, w := range sp.Waiters() {
 		id.Waiters = append(id.Waiters, w.PID)
 	}
+	// Told at most once per waitNoticeEvery while this session's serve waits for the lease, in a run that would print
+	// nothing else: two documents on stdout are not one hook output.
+	noteWait := func() { waitNotice(sp, cfg, trig.Event, id, stdout, stderr) }
 	ok, why := adapter.Match(sp.Owner(), id)
 	if getenv(env, "MASH_HOOK_TRACE") == "1" {
 		fmt.Fprintf(stderr, "mash hook: trace pid=%d ancestors=%v hook-session=%q match=%v (%s)\n",
@@ -71,6 +74,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			fmt.Fprintf(stderr, "mash hook: recording the refusal: %v\n", err)
 		}
 		fmt.Fprintf(stderr, "mash hook: not this session's spool (%s); mail left for its owner\n", why)
+		told := false
 		if host.IsOtherLaunch(why) {
 			// Once per (session id, launch token): tell the model in-session, since status is pull-only (ADR 0043).
 			who := id.LaunchToken
@@ -83,11 +87,15 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
 					host.OwnerPID(sp.Owner()), cfg.DisplayName())
 				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
+					told = true
 					if err := sp.NoteTold(key); err != nil {
 						fmt.Fprintf(stderr, "mash hook: recording the notice: %v\n", err)
 					}
 				}
 			}
+		}
+		if !told {
+			noteWait()
 		}
 		return 0
 	}
@@ -105,6 +113,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	}
 	waiting, err := sp.Waiting()
 	if err != nil || len(waiting) == 0 {
+		noteWait()
 		return 0
 	}
 	// A message an earlier digest listed is not shown again in a digest (the model was told to read it, and a repeat on
@@ -119,6 +128,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 	}
 	if len(fresh) == 0 {
+		noteWait()
 		return 0
 	}
 	pres := host.Presentation{Name: cfg.DisplayName(), Owner: cfg.Owner, Event: trig.Event, BatchMsgs: cfg.BatchMsgs, BatchBytes: cfg.BatchBytes}
@@ -157,6 +167,45 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 	}
 	return 0
+}
+
+// waitNoticeEvery is how often the hook repeats the lease-wait notice while the wait persists.
+const waitNoticeEvery = 10 * time.Minute
+
+// waitNotice tells the session its mail is off while its own serve waits for the endpoint's lease (the spool's
+// lease-wait state, ADR 0092): once on the first run after the state appears, then at most every waitNoticeEvery. It is
+// for the session of the waiting serve only: the hook's session id is the serve's, or the serve's parent is among the
+// hook's ancestors; the hook of the session that holds the lease is told nothing. A missing state, or one whose serve is
+// gone, prints nothing (and a stale one is removed). Call it under the spool lock.
+func waitNotice(sp spool.Spool, cfg config.Config, event string, id host.HookIdentity, stdout, stderr io.Writer) {
+	ws, ok := sp.LiveWaitState()
+	if !ok {
+		if err := sp.ClearStaleWaitState(); err != nil {
+			fmt.Fprintf(stderr, "mash hook: clearing a stale lease-wait state: %v\n", err)
+		}
+		return
+	}
+	mine := ws.Session != "" && ws.Session == id.SessionID
+	if !mine && ws.ParentPID > 1 {
+		for pid := range host.Ancestors {
+			if pid == ws.ParentPID {
+				mine = true
+				break
+			}
+		}
+	}
+	now := time.Now()
+	if !mine || !sp.WaitNoticeDue(now, waitNoticeEvery) {
+		return
+	}
+	text := fmt.Sprintf("mash: this session does not hold endpoint %s (held by pid %s on %s); mail is off until it recovers",
+		cfg.Name, ws.HolderPID, ws.HolderHost)
+	if _, err := stdout.Write(host.Notice(event, text)); err != nil {
+		return
+	}
+	if err := sp.NoteWaitNotice(now); err != nil {
+		fmt.Fprintf(stderr, "mash hook: recording the notice: %v\n", err)
+	}
 }
 
 // anyListed reports whether any entry was rendered as a digest line.

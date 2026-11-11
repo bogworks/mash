@@ -83,6 +83,17 @@ type Endpoint struct {
 	leaseCancel context.CancelFunc
 	leaseDone   chan struct{}
 	leaseLost   chan error
+	// leaseGone: this endpoint's own lease is lost (a failed refresh, or the watch saw another holder). From then on no
+	// message of any stream is delivered or acknowledged by it (mayAck, dropUnleased, dropHeld): JetStream redelivers
+	// it all to the new holder.
+	leaseGone atomic.Bool
+	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
+	loseOwn func(error)
+	// live is the cache of the ack-time lease check (lease_fence.go).
+	live liveLease
+	// graceUntil: set when the lease was taken from a live same-session holder; consume waits for it (lease_fence.go).
+	graceMu    sync.Mutex
+	graceUntil time.Time
 
 	// legacy is the state of the legacy identity's lease, which the endpoint holds while it consumes the legacy inbox
 	// stream (legacylease.go).
@@ -125,6 +136,10 @@ type Endpoint struct {
 // LeaseHeldError reports that another live session holds this endpoint name.
 type LeaseHeldError struct {
 	Name, Host, PID, Since string
+	// SameSession: the holder is an earlier serve of this process's own session (same machine, and the same session
+	// id or the same parent process); it was not taken over only because the compare-and-set lost to a write made
+	// since it was read, so a retry is due at once (ADR 0092).
+	SameSession bool
 }
 
 func (e *LeaseHeldError) Error() string {
@@ -140,6 +155,12 @@ type leaseValue struct {
 	// Start is the serving process's start time (procStart), so a pid reused by another process is told from the
 	// holder; absent before this field, or where the OS gives none.
 	Start string `json:"start,omitempty"`
+	// PPID, PStart and Session identify the session the serving process belongs to (SessionIdent): its parent pid, that
+	// parent's start time and CLAUDE_CODE_SESSION_ID. A new serve of the same session takes the lease from this one;
+	// each is absent when unknown, and then no takeover is made on it (ADR 0092).
+	PPID    string `json:"ppid,omitempty"`
+	PStart  string `json:"pstart,omitempty"`
+	Session string `json:"session,omitempty"`
 	// Machine is machineID: the boot and pid namespace the holder runs in. Only a holder with the same Machine as the
 	// taker can be judged gone by its pid; absent before this field, or where the OS gives none.
 	Machine string `json:"machine,omitempty"`
@@ -183,7 +204,9 @@ var ourMachine = sync.OnceValue(func() string { m, _ := machineID(); return m })
 func (e *Endpoint) lease() []byte {
 	host, _ := os.Hostname()
 	start, _ := procStart(os.Getpid())
+	id := OurSession()
 	lv := leaseValue{Instance: e.instance, Host: host, PID: fmt.Sprint(os.Getpid()), Start: start, Machine: ourMachine(),
+		PPID: id.PPID, PStart: id.PStart, Session: id.Session,
 		Since: time.Now().UTC().Format(time.RFC3339), LaunchToken: e.cfg.LaunchToken,
 		Version: CurrentVersion(), Commit: CurrentCommit(), MCPSeen: unixRFC3339(e.mcpSeen.Load())}
 	if n, ok := e.waking.snapshot(); ok {
@@ -486,16 +509,21 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 					fmt.Fprintln(os.Stderr, "mash: MASH_LAUNCH_TOKEN is shared with the session holding the lease; hooks cannot tell the two sessions apart (use a fresh value per launch)")
 				}
 				held.Host, held.PID, held.Since = lv.Host, lv.PID, lv.Since
+				held.SameSession = e.sameSession(lv)
 				// G270: a restarted session need not wait out the TTL for its dead predecessor. Only a holder on this
 				// machine whose process is gone (holderGone: no such pid, or a pid whose start time is not the one
 				// the lease recorded) is taken over. "This machine" is the lease's Machine equal to ours (boot and
 				// pid namespace), not the hostname: hosts and containers can share a hostname, and a live remote
 				// holder's pid is absent here (codex H1 on #44). A lease with no Machine, or a taker with none, is
-				// never judged and expires normally. The compare-and-set loses to any write made since the lease was
+				// never judged and expires normally. The same applies to an earlier serve of this same session, which
+				// is alive but superseded (ADR 0092). The compare-and-set loses to any write made since the lease was
 				// read.
-				if me := ourMachine(); me != "" && lv.Machine == me && lv.PID != fmt.Sprint(os.Getpid()) && holderGone(lv.PID, lv.Start) {
+				if reason := e.takeoverReason(lv); reason != "" {
 					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
-						e.log.Printf("lease: took over from dead holder %s (pid %s)", lv.Instance, lv.PID)
+						e.log.Print(e.tookOverLine(e.key, reason, lv))
+						if reason == "same" {
+							e.startGrace()
+						}
 						e.leaseRev.Store(rev)
 						e.keepLease()
 						return nil
@@ -522,8 +550,28 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 func (e *Endpoint) keepLease() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.leaseCancel, e.leaseDone, e.leaseLost = cancel, make(chan struct{}), make(chan error, 1)
+	var watching sync.WaitGroup
+	// lose marks the lease lost once, whoever saw it first: no more delivery or acks from this instant, the refresh and
+	// the watch stop, and Run is told.
+	lose := func(err error) {
+		e.legacy.ownLost.Store(true) // the legacy retry loop ends with the endpoint
+		e.leaseGone.Store(true)
+		select {
+		case e.leaseLost <- err:
+		default:
+		}
+		cancel()
+	}
+	e.loseOwn = lose
+	watching.Add(1)
+	go func() {
+		defer watching.Done()
+		e.watchLease(ctx, e.key, lose)
+	}()
 	go func() {
 		defer close(e.leaseDone)
+		defer watching.Wait()
+		defer cancel()
 		t := time.NewTicker(LeaseRefresh)
 		defer t.Stop()
 		lastWrite := wakingClock() // the lease was just written
@@ -541,8 +589,7 @@ func (e *Endpoint) keepLease() {
 			lastWrite = wakingClock()
 			if err := e.refreshLease(ctx); err != nil {
 				e.log.Print(err)
-				e.legacy.ownLost.Store(true)
-				e.leaseLost <- err
+				lose(err)
 				return false
 			}
 			return true
@@ -568,6 +615,49 @@ func (e *Endpoint) keepLease() {
 			}
 		}
 	}()
+}
+
+// leaseWatchEvery is how often the lease key is read to see whether another session now holds it (watchLease).
+var leaseWatchEvery = time.Second
+
+// watchLease reads the lease named key every leaseWatchEvery until ctx ends. An entry that is another instance's, or a
+// deprovision's tombstone, means the lease is lost: lost is called once with the error a failed refresh would give (a
+// LeaseLostError naming the new holder), and the watch ends. So a takeover is known within about a second, not at the
+// next refresh (up to LeaseRefresh later), during which this endpoint would keep pulling the shared consumer and could
+// acknowledge mail written to a client that no longer processes it.
+//
+// This is a read, not a JetStream KV Watch: a Watch creates an ordered consumer on the lease bucket's stream, which no
+// endpoint's credentials allow (fixedPubKeyed grants a direct get of the endpoint's own lease key only). A key that is
+// absent or deleted is not a loss: the refresh re-takes a free lease, or finds who took it. A failed read is retried at
+// the next look.
+func (e *Endpoint) watchLease(ctx context.Context, key string, lost func(error)) {
+	t := time.NewTicker(leaseWatchEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		gctx, cancel := context.WithTimeout(ctx, leaseWatchEvery*3)
+		cur, err := e.leaseKV.Get(gctx, key)
+		cancel()
+		if err != nil {
+			continue
+		}
+		if fenced(cur.Value()) {
+			lost(fmt.Errorf("%w: %s", ErrDeprovisioned, key))
+			return
+		}
+		var lv leaseValue
+		if json.Unmarshal(cur.Value(), &lv) != nil || lv.Instance == e.instance {
+			continue
+		}
+		l := &LeaseLostError{Key: key, Host: lv.Host, PID: lv.PID, Since: lv.Since, SameSession: e.sameSession(lv)}
+		e.log.Printf("lease: %s is now held by another session (host %s, pid %s)", key, lv.Host, lv.PID)
+		lost(l)
+		return
+	}
 }
 
 // refreshLease renews the lease. A conflict means another session took the
@@ -621,14 +711,18 @@ func (e *Endpoint) refreshKey(ctx context.Context, key string, revp *atomic.Uint
 		e.log.Printf("lease re-take: %v (will retry)", cerr) // e.g. a lost reply: next tick adopts it
 		return nil
 	}
+	lost := &LeaseLostError{Key: key}
 	if cur, gerr := e.leaseKV.Get(ctx, key); gerr == nil {
 		var lv leaseValue
-		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
-			revp.Store(cur.Revision())
-			return nil
+		if json.Unmarshal(cur.Value(), &lv) == nil {
+			if lv.Instance == e.instance {
+				revp.Store(cur.Revision())
+				return nil
+			}
+			lost.Host, lost.PID, lost.Since, lost.SameSession = lv.Host, lv.PID, lv.Since, e.sameSession(lv)
 		}
 	}
-	return fmt.Errorf("mash: lost the lease on %s to another session", e.Display())
+	return lost
 }
 
 // Run consumes mail and keeps the directory and lease current (presence is asked for on demand, ADR 0066)

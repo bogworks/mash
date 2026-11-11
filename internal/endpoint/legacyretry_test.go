@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -310,4 +311,81 @@ func TestLegacyEpochNoneWithoutLockRemovesTheFile(t *testing.T) {
 	takeLegacyOver(t, f)
 	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
 	until(t, "epoch file removed", func() bool { _, ok := sp.Epoch(); return !ok })
+}
+
+// A retry that takes the legacy lease from a live serve of the same session reads nothing until the takeover grace has
+// passed: the earlier serve may still be pulling from the shared consumer. The mail queued meanwhile is then delivered
+// once.
+func TestLegacyRetryTakeoverWaitsOutGrace(t *testing.T) {
+	needMachine(t)
+	bigRefresh(t)
+	grace := 600 * time.Millisecond
+	setVar(t, &takeoverGrace, func() time.Duration { return grace })
+	setVar(t, &LegacyRetryMin, 20*time.Millisecond)
+	setVar(t, &LegacyRetryMax, 100*time.Millisecond)
+	setSession(t, ours(t))
+	stubHolderGone(t, func(string, string) bool { return false })
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	// The lease value of a live serve of this session, kept to put back later.
+	earlier, err := Open(context.Background(), f.cfg("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv := putLeaseKV(t, f)
+	same := readLease(t, kv, "old")
+	earlier.Close()
+	host, _ := os.Hostname()
+	putLease(t, f, "old", leaseValue{Instance: "stranger", Host: host, Machine: "elsewhere", PID: "1", Since: "x"})
+	f.sendTo(t, snd, "old", "g1", "g2", "g3")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, ev, _ := f.runNF(t, id)
+	if ep.legacyReading() {
+		t.Fatal("took a lease held by a stranger")
+	}
+	putLease(t, f, "old", same) // the same session's earlier serve holds it now
+	flipped := time.Now()
+	until(t, "the retry takes the lease over", func() bool { return ep.legacyReading() })
+	if ep.graceLeft() <= 0 {
+		t.Fatal("no grace recorded for a takeover from a live serve of this session")
+	}
+	time.Sleep(grace / 2)
+	if got := joined(ev); strings.Contains(got, "> g1") {
+		t.Fatalf("legacy mail delivered inside the grace:\n%s", got)
+	}
+	if floor, pend, ackp := consumerState(t, ep, "old"); floor != 0 || pend != 3 || ackp != 0 {
+		t.Fatalf("inside the grace: ack floor %d, pending %d, ack pending %d; want 0, 3, 0", floor, pend, ackp)
+	}
+	waitText(t, ev, "> g1", "> g2", "> g3")
+	if d := time.Since(flipped); d < grace {
+		t.Fatalf("first legacy delivery %v after the takeover, want at least the grace %v", d, grace)
+	}
+	time.Sleep(200 * time.Millisecond)
+	got := joined(ev)
+	for _, b := range []string{"> g1", "> g2", "> g3"} {
+		if c := strings.Count(got, b); c != 1 {
+			t.Fatalf("%s shown %d times:\n%s", b, c, got)
+		}
+	}
+	ackFloor(t, f, "inbox-old", 3)
+}
+
+// A hold lost while the grace is running starts nothing.
+func TestLegacyGraceWaitHoldLostStartsNothing(t *testing.T) {
+	f := newFixture(t, "old")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, _ := f.runNF(t, id)
+	until(t, "legacy read", func() bool { return ep.legacyReading() })
+	l, epoch := ep.legacyHold()
+	setVar(t, &takeoverGrace, func() time.Duration { return time.Hour })
+	ep.startGrace()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		takeLegacyOver(t, f)
+	}()
+	quit := make(chan struct{})
+	ready, ended := ep.legacyGraceWait(context.Background(), quit, l, epoch)
+	if ready || ended {
+		t.Fatalf("ready %v ended %v after the hold was lost", ready, ended)
+	}
 }
