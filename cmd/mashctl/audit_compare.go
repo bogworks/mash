@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // auditCompareStream is one legacy inbox stream across two audits. A stream "moved" when it is present now and its
@@ -64,6 +65,16 @@ type auditCompare struct {
 	Recreated        int                  `json:"recreated"`          // legacy streams or deliver consumers present in both audits with a different creation time: fails --strict
 	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
 	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
+	// The retired-identity markers (ADR 0088: a final one is never deleted). RetiredCompared is false when the earlier
+	// report has no `retired` section (made before it existed): that is "no retired data", nothing is checked and the
+	// three lists are empty. RetiredAdded: markers present now and not before (fine). RetiredFinalLost: a marker that
+	// was final before and is absent now or no longer final: fails --strict, a marker was deleted or went back to
+	// pending. RetiredPendingGone: a marker that was pending before and is absent now (a final marker at its key would
+	// be in neither list): shown only, since deprovision deletes a pending marker when the retirement did not happen.
+	RetiredCompared    bool     `json:"retired_compared"`
+	RetiredAdded       []string `json:"retired_added"`
+	RetiredFinalLost   []string `json:"retired_final_lost"`
+	RetiredPendingGone []string `json:"retired_pending_gone"`
 	// AccountUnverified: the earlier audit has no `account` (made before it existed), so it cannot be tied to this
 	// deployment. Shown always; fails --strict, like missing creation times.
 	AccountUnverified bool `json:"account_unverified"`
@@ -223,6 +234,43 @@ func validateEarlier(raw []byte) error {
 			return err
 		}
 	}
+	return checkEarlierRetired(raw)
+}
+
+// checkEarlierRetired validates the retired section of an earlier report, when it has one. A report with no section
+// (or a null one) was made before the section existed: it is accepted as "no retired data" and the retired markers
+// are not compared. A section that is there must be whole, or a stripped one (no markers) would pass for a baseline
+// with none and hide a deleted final marker.
+func checkEarlierRetired(raw []byte) error {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return nil
+	}
+	rt, ok := earlierLookup(top, "retired")
+	if !ok {
+		return nil
+	}
+	var sec map[string]json.RawMessage
+	if json.Unmarshal(rt, &sec) != nil || sec == nil {
+		return errors.New("mashctl: audit: --compare: the file is not a complete audit report: retired is not an object")
+	}
+	for _, f := range []string{"present", "markers"} {
+		if _, ok := earlierLookup(sec, f); !ok {
+			return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: it lacks retired.%s", f)
+		}
+	}
+	var ms []map[string]json.RawMessage
+	if json.Unmarshal(sec["markers"], &ms) != nil {
+		return errors.New("mashctl: audit: --compare: the file is not a complete audit report: retired.markers is not an array")
+	}
+	for i, m := range ms {
+		for _, f := range []string{"key", "state"} {
+			var s string
+			if v, ok := earlierLookup(m, f); !ok || json.Unmarshal(v, &s) != nil || s == "" {
+				return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: it lacks retired.markers[%d].%s", i, f)
+			}
+		}
+	}
 	return nil
 }
 
@@ -356,7 +404,40 @@ func compareAudits(before, now auditReport) *auditCompare {
 	}
 	slices.Sort(c.Added)
 	slices.Sort(c.Removed)
+	compareRetired(c, before.Retired, now.Retired)
 	return c
+}
+
+// compareRetired fills the retired fields of c. An earlier report with no retired section is no retired data. A
+// current report whose bucket is absent has no markers, so every earlier final marker is lost.
+func compareRetired(c *auditCompare, before, now *auditRetired) {
+	c.RetiredAdded, c.RetiredFinalLost, c.RetiredPendingGone = []string{}, []string{}, []string{}
+	if before == nil || now == nil {
+		return
+	}
+	c.RetiredCompared = true
+	was, is := map[string]string{}, map[string]string{}
+	for _, m := range before.Markers {
+		was[m.Key] = m.State
+	}
+	for _, m := range now.Markers {
+		is[m.Key] = m.State
+		if _, ok := was[m.Key]; !ok {
+			c.RetiredAdded = append(c.RetiredAdded, m.Key)
+		}
+	}
+	for k, st := range was {
+		now, ok := is[k]
+		switch {
+		case st == store.RetiredFinal && now != store.RetiredFinal:
+			c.RetiredFinalLost = append(c.RetiredFinalLost, k)
+		case st == store.RetiredPending && !ok:
+			c.RetiredPendingGone = append(c.RetiredPendingGone, k)
+		}
+	}
+	slices.Sort(c.RetiredAdded)
+	slices.Sort(c.RetiredFinalLost)
+	slices.Sort(c.RetiredPendingGone)
 }
 
 func writeCompareText(w io.Writer, c *auditCompare) {
@@ -388,5 +469,18 @@ func writeCompareText(w io.Writer, c *auditCompare) {
 	}
 	for _, k := range c.Added {
 		fmt.Fprintf(w, "compare identity added %s\n", cl(k))
+	}
+	if !c.RetiredCompared {
+		fmt.Fprintln(w, "compare retired: the earlier audit has no retired data (made before the retired section existed): retired markers not compared")
+		return
+	}
+	for _, k := range c.RetiredFinalLost {
+		fmt.Fprintf(w, "compare retired marker FINAL LOST %s (a final marker is never deleted)\n", cl(k))
+	}
+	for _, k := range c.RetiredPendingGone {
+		fmt.Fprintf(w, "compare retired marker pending gone %s (no final marker replaced it)\n", cl(k))
+	}
+	for _, k := range c.RetiredAdded {
+		fmt.Fprintf(w, "compare retired marker added %s\n", cl(k))
 	}
 }

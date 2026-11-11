@@ -67,6 +67,24 @@ type AuditSnapshot struct {
 	BadRecords []AuditBadRecord
 	Streams    []AuditStream // every inbox-* stream, sorted by name
 	Leases     []AuditLease  // every lease key except the admin locks, sorted by key
+	Retired    AuditRetired  // the retired-name bucket
+}
+
+// AuditRetiredMarker is one key of the retired-name bucket: the marker, or why its value could not be read.
+type AuditRetiredMarker struct {
+	Key    string
+	Marker store.Retired
+	Error  string // set when the value does not parse; Marker is then empty
+}
+
+// AuditRetired is the retired-name bucket as the server holds it. Present is false when there is no bucket (no
+// retirement ever happened, or the deployment predates it); the audit never creates it.
+type AuditRetired struct {
+	Present     bool
+	Markers     []AuditRetiredMarker // sorted by key
+	Bytes       uint64               // bytes the bucket's stream stores
+	MaxBytes    int64                // the bucket's configured cap; 0 when it reports none
+	ConfigError string               // store.VerifyRetiredStatus's refusal, empty when the bucket is as mash makes it
 }
 
 // Audit reads the directory, the inbox streams and the lease keys and changes nothing. A value that does not parse
@@ -101,6 +119,10 @@ func (a *Admin) Audit(ctx context.Context) (AuditSnapshot, error) {
 			continue
 		}
 		snap.Records = append(snap.Records, r)
+	}
+
+	if snap.Retired, err = a.auditRetired(ctx); err != nil {
+		return snap, err
 	}
 
 	names := a.js.StreamNames(ctx)
@@ -206,4 +228,50 @@ func deliverPolicyName(p jetstream.DeliverPolicy) string {
 		return "last_per_subject"
 	}
 	return fmt.Sprintf("unknown(%d)", int(p))
+}
+
+// auditRetired reads the retired-name bucket and changes nothing: unlike the provisioning path it never creates a
+// missing bucket. A bucket whose configuration fails store.VerifyRetiredStatus is still read; the refusal is returned
+// in ConfigError so the audit reports it instead of failing.
+func (a *Admin) auditRetired(ctx context.Context) (AuditRetired, error) {
+	var out AuditRetired
+	kv, err := a.js.KeyValue(ctx, store.RetiredBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return out, fmt.Errorf("mash: retired-name bucket %s: %w", store.RetiredBucket, err)
+	}
+	st, err := kv.Status(ctx)
+	if err != nil {
+		return out, fmt.Errorf("mash: retired-name bucket %s: %w", store.RetiredBucket, err)
+	}
+	out.Present, out.Bytes = true, st.Bytes()
+	if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok {
+		out.MaxBytes = bs.StreamInfo().Config.MaxBytes
+	}
+	if err := store.VerifyRetiredStatus(st); err != nil {
+		out.ConfigError = err.Error()
+	}
+	keys, err := kv.Keys(ctx)
+	if err != nil && !errors.Is(err, jetstream.ErrNoKeysFound) {
+		return out, fmt.Errorf("mash: retired-name bucket %s: %w", store.RetiredBucket, err)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		e, err := kv.Get(ctx, k)
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			continue
+		}
+		if err != nil {
+			return out, fmt.Errorf("mash: retired marker %s: %w", k, err)
+		}
+		m, err := parseMarker(k, e.Value())
+		if err != nil {
+			out.Markers = append(out.Markers, AuditRetiredMarker{Key: k, Error: err.Error()})
+			continue
+		}
+		out.Markers = append(out.Markers, AuditRetiredMarker{Key: k, Marker: m})
+	}
+	return out, nil
 }
