@@ -81,6 +81,41 @@ func TestRetiredBucketInMemoryIsRefused(t *testing.T) {
 	recordIntact(t, js, id, user)
 }
 
+// An existing retired bucket that passes verification is never altered: Init must not update its stream (ADR 0088), even
+// where the stored cap or description differs from what RetiredConfig would set.
+func TestInitLeavesAVerifiedRetiredBucketUntouched(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	provNewForm(t, e, a, "acme", "team1", "ops1")
+	if err := js.DeleteKeyValue(ctx, store.RetiredBucket); err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.RetiredConfig()
+	cfg.MaxBytes = 32 << 20
+	cfg.Description = "operator-tuned retired bucket"
+	kv, err := js.CreateKeyValue(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Put(ctx, "marker-key", []byte("keep")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Init(ctx); err != nil {
+		t.Fatalf("Init must accept a verified bucket, got %v", err)
+	}
+	s, err := js.Stream(ctx, "KV_"+store.RetiredBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := s.CachedInfo().Config; c.MaxBytes != 32<<20 || c.Description != "operator-tuned retired bucket" {
+		t.Fatalf("Init altered the retired bucket: max bytes %d, description %q", c.MaxBytes, c.Description)
+	}
+	got, err := kv.Get(ctx, "marker-key")
+	if err != nil || string(got.Value()) != "keep" {
+		t.Fatalf("marker lost: %v", err)
+	}
+}
+
 // A purge the server carried out whose reply was lost leaves the marker pending; a re-run finalizes it.
 func TestAmbiguousPurgeLeavesMarkerPendingAndRerunFinalizes(t *testing.T) {
 	for _, path := range bothPaths {

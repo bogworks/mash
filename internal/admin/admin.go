@@ -150,6 +150,7 @@ func (a *Admin) Init(ctx context.Context) error {
 				if err := store.VerifyRetiredStatus(st); err != nil { // fail closed; never modified here
 					return err
 				}
+				continue // an existing retired bucket is never altered (ADR 0088)
 			}
 			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok && bs.StreamInfo().Config.MaxBytes > cfg.MaxBytes {
 				cfg.MaxBytes = bs.StreamInfo().Config.MaxBytes
