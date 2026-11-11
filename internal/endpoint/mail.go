@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -184,6 +185,27 @@ func (s *seenSet) dup(p pending) bool {
 	// Past the window: the same signed timestamp is a copy of the signed bytes, a new one a genuine re-send.
 	_, copied := en.tss[p.ts]
 	return p.ts != "" && copied
+}
+
+// forget undoes mark for p, a message that was recorded but not shown (a held legacy message dropped unacked): its
+// redelivery must be shown, not taken for a repeat.
+func (s *seenSet) forget(p pending) {
+	if s == nil || p.key == "" {
+		return
+	}
+	ref := refOf(p.mail)
+	delete(s.seqs, ref)
+	en, ok := s.m[p.key]
+	if !ok || en.ref != ref {
+		return
+	}
+	delete(en.tss, p.ts)
+	if len(en.tss) == 0 {
+		delete(s.m, p.key)
+		return
+	}
+	en.ref, en.at = spool.Ref{}, time.Time{} // timestamps of other shown messages stay remembered
+	s.m[p.key] = en
 }
 
 // retention is how long after its store time an entry is kept: until it is past the duplicate window and its
@@ -388,8 +410,26 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 	workerDone := make(chan struct{})
 	go e.deliverLoop(deliver, queue, quit, workerDone, floors)
 
-	handler := func(stream string) func(m jetstream.Msg) {
+	// handler is the message callback of one consume loop. A legacy loop is bound to the epoch of the hold it started
+	// under: once the hold has changed it queues nothing (the mail is nak'd to the current hold's loop).
+	handler := func(stream string, epoch uint64, busy *atomic.Int32) func(m jetstream.Msg) {
 		return func(m jetstream.Msg) {
+			if busy != nil { // a legacy loop is not finished while a callback of it runs, whatever its Closed says
+				busy.Add(1)
+				defer busy.Add(-1)
+			}
+			if stream == LegacyStream {
+				if testLegacyHandlerGate != nil {
+					testLegacyHandlerGate()
+				}
+				if !e.legacyReading() {
+					return // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+				}
+				if e.legacy.epoch.Load() != epoch {
+					_ = m.Nak() // a loop of an earlier hold: the current hold's loop is redelivered it
+					return
+				}
+			}
 			meta, err := m.Metadata()
 			if err != nil {
 				e.log.Printf("message without metadata: %v", err)
@@ -397,9 +437,6 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				return
 			}
 			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
-			if stream == LegacyStream && !e.legacyReading() {
-				return // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
-			}
 			defer e.waking.received(ref)
 			// The sender's signature binds the subject the message was stored under, so classify checks it against the
 			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
@@ -447,8 +484,16 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		}
 	}
 	var initial jetstream.ConsumeContext // the legacy consume loop already started, if the lease was held at start
+	var initialEpoch uint64
+	initialBusy := new(atomic.Int32)
 	for _, src := range srcs {
-		cc, err := src.cons.Consume(handler(src.ref), jetstream.PullMaxMessages(100))
+		var ep uint64
+		var busy *atomic.Int32
+		if src.ref == LegacyStream {
+			_, ep = e.legacyHold()
+			busy = initialBusy
+		}
+		cc, err := src.cons.Consume(handler(src.ref, ep, busy), jetstream.PullMaxMessages(100))
 		if err != nil {
 			stopAll()
 			close(quit)
@@ -457,14 +502,15 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		}
 		ccs = append(ccs, cc)
 		if src.ref == LegacyStream {
-			initial = cc
+			initial, initialEpoch = cc, ep
+			e.legacy.loops.Add(1)
 		}
 	}
 	if e.hasLegacyStream() {
 		watched.Add(1)
 		go func() {
 			defer watched.Done()
-			e.legacyManager(ctx, quit, handler(LegacyStream), initial)
+			e.legacyManager(ctx, quit, func(epoch uint64, busy *atomic.Int32) func(jetstream.Msg) { return handler(LegacyStream, epoch, busy) }, initial, initialEpoch, initialBusy)
 		}()
 	}
 	return func() {
@@ -479,24 +525,49 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 // the lease is lost or given up, and (re)starts it, through the durable consumer the stream already has, whenever a
 // hold begins (the retry loop took the lease after Open, or after a loss). The own stream's loop is never touched.
 // The same message redelivered across holds is de-duplicated by the deliver loop as always (by stream and sequence).
-// initial is the loop consume started while the lease was held, or nil.
-func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, handler func(jetstream.Msg), initial jetstream.ConsumeContext) {
+// initial is the loop consume started while the lease was held (under initialEpoch), or nil. A new loop is never
+// started while the previous one is alive: the manager waits for the stopped loop's callback to return (a callback may be
+// blocked on a full delivery queue), however long that takes, until the endpoint ends.
+func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHandler func(epoch uint64, busy *atomic.Int32) func(jetstream.Msg), initial jetstream.ConsumeContext, initialEpoch uint64, initialBusy *atomic.Int32) {
 	var cur jetstream.ConsumeContext
+	var busy *atomic.Int32 // callbacks of the running loop in flight
 	var lost <-chan error
 	var curEpoch uint64
-	stopCur := func() {
+	// stopCur stops the running loop and waits until it has closed and none of its callbacks is still running (Closed
+	// can fire while a callback is blocked); false means the endpoint ended first.
+	stopCur := func() bool {
 		cc := cur
-		cur, lost = nil, nil
 		cc.Stop()
-		select {
-		case <-cc.Closed():
-		case <-time.After(5 * time.Second):
+		warn := time.NewTimer(legacyStopWarn)
+		defer warn.Stop()
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
+		closed := cc.Closed()
+		for warned := false; ; {
+			if closed == nil && busy.Load() == 0 {
+				cur, lost, busy = nil, nil, nil
+				e.legacy.loops.Add(-1)
+				return true
+			}
+			select {
+			case <-closed:
+				closed = nil
+			case <-poll.C:
+			case <-quit:
+				return false
+			case <-ctx.Done():
+				return false
+			case <-warn.C:
+				if !warned {
+					warned = true
+					e.log.Printf("legacy inbox: still waiting for the previous read of %s to finish before reading again", e.legacyKey)
+				}
+			}
 		}
 	}
 	if initial != nil {
-		cur = initial
-		l, ep := e.legacyHold()
-		lost, curEpoch = l, ep
+		cur, curEpoch, busy = initial, initialEpoch, initialBusy
+		lost, _ = e.legacyHold()
 	}
 	defer func() {
 		if cur != nil {
@@ -514,11 +585,14 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, hand
 		default:
 		}
 		if cur != nil && (!e.legacyReading() || e.legacy.epoch.Load() != curEpoch) {
-			stopCur()
+			if !stopCur() {
+				return
+			}
 			e.log.Printf("legacy inbox: stopped reading %s (the lease was lost); the own inbox is still read", e.legacyKey)
 		}
 		if cur == nil && e.legacyReading() {
 			l, ep := e.legacyHold()
+			nb := new(atomic.Int32)
 			cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 			if err != nil {
 				e.log.Printf("mash: legacy inbox consumer: %v (will retry)", err)
@@ -527,10 +601,11 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, hand
 				e.waking.addStream(LegacyStream, streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}, e.wakingProbe(cons, stream))
 				fl := e.consumerAckFloor(cons)
 				e.legacy.floor.Store(&fl)
-				if cc, err := cons.Consume(handler, jetstream.PullMaxMessages(100)); err != nil {
+				if cc, err := cons.Consume(mkHandler(ep, nb), jetstream.PullMaxMessages(100)); err != nil {
 					e.log.Printf("mash: legacy inbox consume: %v (will retry)", err)
 				} else {
-					cur, lost, curEpoch = cc, l, ep
+					cur, lost, curEpoch, busy = cc, l, ep, nb
+					e.legacy.loops.Add(1)
 					e.log.Printf("legacy inbox: reading %s", e.legacyKey)
 				}
 			}
@@ -551,7 +626,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 	settle := time.Duration(e.cfg.SettleMS) * time.Millisecond
 	seen := newSeenSet(e.dupWindow()) // signed mail already shown, see seenSet
 	seen.ackFloors = ackFloors
-	h := &held{msgs: map[spool.Ref]pending{}, at: map[spool.Ref]time.Time{}, rung: map[spool.Ref]bool{}, fails: map[spool.Ref]int{}}
+	h := &held{msgs: map[spool.Ref]pending{}, at: map[spool.Ref]time.Time{}, rung: map[spool.Ref]bool{}, fails: map[spool.Ref]int{}, seen: seen}
 	tick := time.NewTicker(SpoolCheck)
 	defer tick.Stop()
 	for {

@@ -61,6 +61,12 @@ var legacyEpochTries = 3
 // legacyNoteEpoch writes the epoch file; replaceable in tests.
 var legacyNoteEpoch = func(sp *spool.Spool, epoch uint64) error { return sp.NoteEpoch(epoch) }
 
+// legacyLockSpool takes the spool lock to record the epoch; replaceable in tests.
+var legacyLockSpool = func(sp *spool.Spool) (func(), error) { return sp.Lock() }
+
+// legacyStopWarn is how long the manager waits for a stopped consume loop to close before it says it is still waiting.
+var legacyStopWarn = 5 * time.Second
+
 // legacyLease is the endpoint's hold on the legacy identity's lease.
 type legacyLease struct {
 	state atomic.Int32           // legacyState
@@ -76,6 +82,7 @@ type legacyLease struct {
 	wake    chan struct{}                         // capacity 1: the state changed (the consume loop re-checks)
 	changed chan struct{}                         // capacity 1: the state changed (the retry loop re-checks)
 	floor   atomic.Pointer[func() (uint64, bool)] // the legacy consumer's ack floor, once it exists
+	loops   atomic.Int32                          // consume loops of the legacy stream not yet closed: never more than one
 
 	retryCtx    context.Context
 	retryCancel context.CancelFunc
@@ -358,14 +365,27 @@ func (e *Endpoint) noteLegacyEpoch() error {
 	if sp == nil || !e.hasLegacyStream() {
 		return nil
 	}
-	unlock, err := sp.Lock()
-	if err != nil {
-		e.log.Printf("spool: legacy epoch: %v", err)
-		return nil // the spool write and dropHeldLegacy record it again
+	tries := 1
+	if e.legacyEpoch() != 0 {
+		tries = legacyEpochTries
 	}
-	defer unlock()
-	return e.noteLegacyEpochLocked()
+	var err error
+	for i := 0; i < tries; i++ {
+		var unlock func()
+		if unlock, err = legacyLockSpool(sp); err == nil {
+			defer unlock()
+			return e.noteLegacyEpochLocked()
+		}
+		e.log.Printf("spool: legacy epoch: %v", err)
+	}
+	if tries == 1 {
+		return nil // recording "none": the spool write and dropHeldLegacy record it again
+	}
+	return err // the epoch of a hold could not be recorded: the caller gives the hold up
 }
+
+// testLegacyHandlerGate is a test hook run at the top of every legacy-stream message callback.
+var testLegacyHandlerGate func()
 
 // testLegacyCheckSeam and testLegacyPutSeam are test hooks, both run inside the spool lock of a legacy spool write: the
 // first just before the check of the lease, the second between that check and the write.
@@ -458,27 +478,44 @@ func (e *Endpoint) mayAck(p pending) bool {
 	return p.mail.Stream != LegacyStream || !e.hasLegacyStream() || e.legacyReading()
 }
 
-// dropHeldLegacy forgets the legacy mail held for a hook once the lease is gone, acking none of it: its waiting spool
-// file is removed (so a hook cannot show what the next holder will deliver again) and it leaves the held counts. A
-// message a hook has already drained keeps its tombstone and is simply no longer tracked.
+// dropHeldLegacy forgets the legacy mail held for a hook that this endpoint no longer holds the lease for, acking none of
+// it: mail held while the lease is not held at all, and mail spooled under an earlier hold than the current one (the lease
+// was lost and taken again before the delivery worker ran: the new epoch hides those spool files, and a redelivery would
+// be taken for mail already held, so it would never be shown). Its waiting spool file is removed (so a hook cannot show
+// what the holder will deliver again), it leaves the held counts and the seen set, and it is nak'd so the current hold's
+// consumer is redelivered it at once. A message a hook has already drained keeps its tombstone and is simply no longer
+// tracked. Mail spooled under the current epoch is untouched.
 func (e *Endpoint) dropHeldLegacy(h *held) {
-	if !e.hasLegacyStream() || e.legacyReading() || len(h.msgs) == 0 {
+	if !e.hasLegacyStream() || len(h.msgs) == 0 {
 		return
 	}
-	var unlock func()
+	stale := func(seq spool.Ref) bool {
+		return seq.Stream == LegacyStream && (!e.legacyReading() || h.epochs[seq] != e.legacy.epoch.Load())
+	}
+	any := false
+	for seq := range h.msgs {
+		if stale(seq) {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return
+	}
 	if e.spool != nil {
 		u, err := e.spool.Lock()
 		if err != nil {
 			e.log.Printf("spool: %v", err)
 			return // retried at the next tick
 		}
-		unlock = u
-		defer unlock()
-		e.noteLegacyEpochLocked() // before anything is discarded: a hook already shows none of it
+		defer u()
+		if !e.legacyReading() {
+			e.noteLegacyEpochLocked() // before anything is discarded: a hook already shows none of it
+		}
 	}
 	n := 0
 	for seq, p := range h.msgs {
-		if seq.Stream != LegacyStream {
+		if !stale(seq) {
 			continue
 		}
 		if e.spool != nil {
@@ -487,7 +524,7 @@ func (e *Endpoint) dropHeldLegacy(h *held) {
 				continue
 			}
 		}
-		_ = p.msg.Nak() // not an ack: redelivered to the next holder at once, not after the ack wait
+		_ = p.msg.Nak() // not an ack: redelivered to the holder at once, not after the ack wait
 		h.bytes -= len(p.mail.Body)
 		h.stored -= storedSize(p)
 		delete(h.msgs, seq)
@@ -495,11 +532,13 @@ func (e *Endpoint) dropHeldLegacy(h *held) {
 		delete(h.rung, seq)
 		delete(h.listed, seq)
 		delete(h.fails, seq)
+		delete(h.epochs, seq)
+		h.seen.forget(p)
 		h.full = false
 		e.waking.done(seq)
 		n++
 	}
 	if n > 0 {
-		e.log.Printf("legacy inbox: dropped %d held message(s) unacked (the lease was lost); the next holder is redelivered them", n)
+		e.log.Printf("legacy inbox: dropped %d held message(s) unacked (the lease was lost); the holder is redelivered them", n)
 	}
 }
