@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; amended by ADR-0091 (the zone is removed)
 date: 2026-11-02
 decision-makers: Randy Bias (mash maintainer)
 ---
