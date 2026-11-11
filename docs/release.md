@@ -101,7 +101,7 @@ The numbered steps are what the command does in each state, and the manual path 
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --deny-self-hosted-runners` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
 
@@ -234,7 +234,7 @@ The `attest` job attests each `dist/mash-*` binary with `actions/attest-build-pr
 and only that job, holds `id-token: write` and `attestations: write`). Consumers verify a downloaded binary with:
 
     gh attestation verify mash-linux-amd64 -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
-      --source-ref refs/tags/v<version> --deny-self-hosted-runners
+      --source-ref refs/tags/v<version>
 
 Attestations require a public repository (a private one needs GitHub Enterprise Cloud); this repository is public, so the
 attestation is recorded in the public Sigstore transparency log. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
@@ -268,7 +268,7 @@ The SBOM and attestation jobs only run for a real release, so a change to the pi
 A `workflow_dispatch` run on `main` builds the four binaries twice and compares them, makes the SBOMs, attests the binaries and
 the SBOMs, and keeps the provenance bundle, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
 a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
-`--signer-workflow`, `--source-ref refs/heads/main` and `--deny-self-hosted-runners`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
+`--signer-workflow` and `--source-ref refs/heads/main`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
 `release-check --assets` does. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
 ref builds nothing.
 
@@ -298,20 +298,25 @@ tagged commit and compared it byte for byte. It does not show who built the file
 **2. Build provenance.**
 
     gh attestation verify mash-linux-amd64 -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
-      --source-ref refs/tags/v<version> --deny-self-hosted-runners
+      --source-ref refs/tags/v<version>
 
 This proves the release workflow (`release.yml`) of the `bogworks/mash` repository, run at the tag `v<version>` on a
-runner of the repository, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any workflow of
-the repository on any ref, so the signer workflow, the source ref and the runner flag are what make the check mean
-something. The release jobs now run on self-hosted runners ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)),
-which `--deny-self-hosted-runners` refuses: the flag stays until the maintainer decides what replaces it, and until then the
-verification refuses attestations produced on these runners. It does not prove the workflow's steps were not tampered with: that attestation is made by a step inside that
-workflow (SLSA v1.0 Build Level 2).
+runner the maintainers operate, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any
+workflow of the repository on any ref, so the signer workflow and the source ref are what make the check mean something.
+
+It does not prove the runner was uncompromised or ephemeral. The release jobs run on self-hosted runners
+([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)) that also run pull request jobs, so the
+signature comes from a machine the maintainers operate, and you decide whether to trust the maintainers' runners. The
+`--deny-self-hosted-runners` flag is not used because it would refuse every release we can make; it was dropped by decision
+([ADR 0087](decisions/0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md)): for
+now we attest that we did it, and people can decide if they trust us. A trusted-build mechanism is on the backlog. It also does
+not prove the workflow's steps were not tampered with: that attestation is made by a step inside that workflow (SLSA v1.0
+Build Level 2).
 
 **3. SBOM.**
 
     gh attestation verify mash-linux-amd64 -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
-      --source-ref refs/tags/v<version> --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom
+      --source-ref refs/tags/v<version> --predicate-type https://cyclonedx.org/bom
     jq '.components | length' mash-linux-amd64.cdx.json
 
 The first command proves the SBOM was attested for these exact bytes by the same release workflow at the same tag. The second counts the
@@ -322,7 +327,7 @@ and attested by mash's own workflow (Build L2-grade), and it says nothing about 
 **4. The attached provenance.** Verify each binary against the one provenance file, offline:
 
     gh attestation verify mash-linux-amd64 -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
-      --source-ref refs/tags/v<version> --deny-self-hosted-runners --bundle mash.intoto.jsonl
+      --source-ref refs/tags/v<version> --bundle mash.intoto.jsonl
 
 This proves `mash.intoto.jsonl` is the Sigstore bundle of an attestation by the release workflow at that tag, with this binary
 among its subjects. Also check that the provenance names `release.yml` as its workflow entry point:
@@ -332,8 +337,9 @@ among its subjects. Also check that the provenance names `release.yml` as its wo
 The level met is SLSA v1.0 **Build L2**, not L3. The attestation is made by a step in mash's own workflow, so a compromised
 build step would still get a genuine signature. The control beyond L2 is the two-clone reproducibility check in CI plus the
 maintainer's independent rebuild before signing `SHA256SUMS`. The trust roots are GitHub's OIDC and Sigstore and the
-maintainer's key. The release provenance now comes from a self-hosted runner, so `--deny-self-hosted-runners` refuses it too, like
-the attestations of step 2: the flag stays until the maintainer rules on the attestation question (ADR 0079).
+maintainer's key. The release provenance comes from a self-hosted runner that also runs pull request jobs, so the attestation says the
+maintainers' own runner built these bytes, not that a hosted or isolated builder did; `--deny-self-hosted-runners` is not
+used (ADR 0087), and a trusted-build mechanism is on the backlog.
 
 ## Versions
 

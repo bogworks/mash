@@ -631,7 +631,10 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				continue
 			}
 			calls++
-			for _, want := range []string{"--signer-workflow " + f.o.GHRepo + "/.github/workflows/release.yml", "--source-ref refs/tags/v0.1.0", "--deny-self-hosted-runners"} {
+			if strings.Contains(ln, "--deny-self-hosted-runners") {
+				t.Errorf("gh call denies self-hosted runners: %s", ln)
+			}
+			for _, want := range []string{"--signer-workflow " + f.o.GHRepo + "/.github/workflows/release.yml", "--source-ref refs/tags/v0.1.0"} {
 				if !strings.Contains(ln, want) {
 					t.Errorf("gh call lacks %q: %s", want, ln)
 				}
@@ -744,7 +747,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 			if !strings.Contains(log, "/"+n+" -R bogworks/mash ") || !strings.Contains(log, "--predicate-type https://cyclonedx.org/bom") {
 				t.Errorf("the SBOM attestation of %s was not verified:\n%s", n, log)
 			}
-			if !strings.Contains(log, "/"+n+" -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners --bundle ") {
+			if !strings.Contains(log, "/"+n+" -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --bundle ") {
 				t.Errorf("the provenance bundle was not verified for %s against the release workflow, tag and runners:\n%s", n, log)
 			}
 		}
@@ -770,6 +773,27 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 			t.Fatalf("err = %v (exit %d), want a refusal naming %q", err, exitCode(err), want)
 		}
 	}
+	t.Run("an attestation made on a self-hosted runner passes and the flag is never passed", func(t *testing.T) {
+		f := signedFixture(t, nil) // the fake gh refuses --deny-self-hosted-runners, as the real one does for this runner
+		if err := checkAssets(context.Background(), f.o); err != nil {
+			t.Fatalf("a self-hosted attestation was refused: %v", err)
+		}
+		if log := f.ghLog(); strings.Contains(log, "--deny-self-hosted-runners") || !strings.Contains(log, "attestation verify") {
+			t.Errorf("gh log carries the flag or no verification ran:\n%s", log)
+		}
+		if err := exec.Command(f.o.GH, "attestation", "verify", "x", "--deny-self-hosted-runners").Run(); err == nil {
+			t.Error("the fake gh accepted the flag; the test above proves nothing")
+		}
+	})
+	t.Run("a wrong signer workflow is refused and named", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		write(t, f.ghDir(), "signer", "bogworks/mash/.github/workflows/release.yml") // the only signer the fake accepts
+		f.o.GHRepo = "someone/else"                                                  // so the check passes another repository's workflow
+		err := checkAssets(context.Background(), f.o)
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "signer workflow") {
+			t.Fatalf("err = %v (exit %d), want a refusal naming the signer workflow", err, exitCode(err))
+		}
+	})
 	t.Run("a missing SBOM", func(t *testing.T) {
 		f := signedFixture(t, func(h map[string]string) { delete(h, "mash-linux-arm64.cdx.json") })
 		refused(t, f, "mash-linux-arm64.cdx.json")

@@ -94,7 +94,12 @@ case "$1" in
     upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
     *) cat "ROOT/assets.json" ;; esac ;;
   attestation) b=$(basename "$3"); sbom=; bundle=
-    for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; [ "$a" = --bundle ] && bundle=1; done
+    sw=; prev=
+    for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; [ "$a" = --bundle ] && bundle=1
+      # the fixture's runner is self-hosted, like the real one: the real gh refuses it under this flag
+      [ "$a" = --deny-self-hosted-runners ] && { echo "verification failed: attestation was made on a self-hosted runner" >&2; exit 1; }
+      [ "$prev" = --signer-workflow ] && sw=$a; prev=$a; done
+    if [ -f "ROOT/signer" ] && [ "$sw" != "$(cat ROOT/signer)" ]; then echo "verification failed: signer workflow mismatch" >&2; exit 1; fi
     if [ -n "$bundle" ]; then [ -f "ROOT/noprov/$b" ] && { echo "verification failed: no matching provenance" >&2; exit 1; }
     elif [ -n "$sbom" ]; then [ -f "ROOT/noattest-sbom/$b" ] && { echo "no attestations found" >&2; exit 1; }
     else [ -f "ROOT/noattest/$b" ] && { echo "no attestations found" >&2; exit 1; }; fi

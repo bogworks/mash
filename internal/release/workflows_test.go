@@ -1607,8 +1607,8 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 		}
 	}
 	for _, must := range []string{
-		`gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners`,
-		`gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners`,
+		`gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main`,
+		`gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main`,
 		"(.dsseEnvelope.payload // .payload)",
 		".predicate.invocation.configSource.entryPoint",
 		".predicate.buildDefinition.externalParameters.workflow.path",
@@ -1621,8 +1621,11 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 			t.Errorf("dry-run-verify lacks %q:\n%s", must, run)
 		}
 	}
-	if strings.Count(run, "--signer-workflow") != 3 || strings.Count(run, "--source-ref refs/heads/main") != 3 || strings.Count(run, "--deny-self-hosted-runners") != 3 {
-		t.Errorf("all three gh attestation verify calls (the bundle, build provenance and SBOM) need the signer, ref and runner flags:\n%s", run)
+	if strings.Count(run, "--signer-workflow") != 3 || strings.Count(run, "--source-ref refs/heads/main") != 3 {
+		t.Errorf("all three gh attestation verify calls (the bundle, build provenance and SBOM) need the signer and ref flags:\n%s", run)
+	}
+	if strings.Contains(run, "--deny-self-hosted-runners") {
+		t.Errorf("the dry run must not deny self-hosted runners: our releases are built on them by design (ADR 0087):\n%s", run)
 	}
 	if strings.Contains(run, "--source-tag") {
 		t.Error("the dry run's provenance comes from a branch: --source-tag cannot apply")
