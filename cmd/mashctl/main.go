@@ -35,6 +35,8 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runPolicy(args[1:], env, lookup, stdout, stderr)
 	case "adopt": // takes over a server you already run: the config and the key store, not a server
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
+	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
+		return runAudit(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the policy file; the server only with --sync
