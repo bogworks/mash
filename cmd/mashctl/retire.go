@@ -202,6 +202,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
+				if msg, ok := ctl.AliasedRefusal(err, name); ok {
+					return fail("%s", msg)
+				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					return fail("%v: nothing was changed (--no-revoke retires without revoking)", err)
 				}
