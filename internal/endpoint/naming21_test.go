@@ -3,6 +3,8 @@ package endpoint
 import (
 	"context"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -339,23 +341,44 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	<-ldone
 	lep.Close()
 	var lastQueued uint64
+	queued := map[string]uint64{} // body -> sequence number in the old inbox
 	for _, body := range []string{"queued-2", "queued-3"} {
 		if lastQueued, err = peer.Send(ctx, old, body, 0); err != nil {
 			t.Fatal(err)
 		}
+		queued[body] = lastQueued
 	}
 
 	// The rename: provision the three-token identity with the legacy identity as its alias.
 	id := f.provisionNF(t, "bogworks", "x", old, &store.Alias{Owner: f.e.Owner, Name: old})
 	legacy, renamed := "inbox-"+old, sap.InboxStream(id.Flat())
-	count := func(all []string, body string) int {
+	// Wake events are one-line counts ("N message(s) from <sender> (<kind>)") with no body, so exactly-once is the sum
+	// of the counts; the bodies, senders and trust are checked on the messages themselves (Read + render.One).
+	countRE := regexp.MustCompile(`(\d+) messages? from `)
+	delivered := func(all []string) int {
 		n := 0
 		for _, e := range all {
-			n += strings.Count(e, body)
+			m := countRE.FindStringSubmatch(e)
+			if m == nil {
+				t.Fatalf("wake event is not a count line: %q", e)
+			}
+			c, _ := strconv.Atoi(m[1])
+			n += c
 		}
 		return n
 	}
-	runRenamed := func() (cancel func(), ev *events) {
+	checkVerified := func(ep *Endpoint, seq uint64, body string) {
+		t.Helper()
+		m, err := ep.Read(ctx, seq)
+		if err != nil || string(m.Body) != body || m.Trust != sap.TrustVerified {
+			t.Fatalf("read #%d (%s): %+v %v", seq, body, m, err)
+		}
+		one := render.One(m)
+		if !strings.Contains(one, "from "+m.From+" [verified]") || !strings.Contains(one, "> "+body) || strings.Contains(one, "[claimed]") || strings.Contains(one, "[unknown-signer]") {
+			t.Fatalf("%s rendered %q, want [verified] with its body", body, one)
+		}
+	}
+	runRenamed := func() (cancel func(), ev *events, ep *Endpoint) {
 		rctx, rcancel := context.WithCancel(ctx)
 		ep, err := Open(rctx, f.cfgNF(id))
 		if err != nil {
@@ -365,7 +388,7 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 		ev = &events{}
 		done := make(chan struct{})
 		go func() { _ = ep.Run(rctx, ev.deliver); close(done) }()
-		return func() { rcancel(); <-done; ep.Close() }, ev
+		return func() { rcancel(); <-done; ep.Close() }, ev, ep
 	}
 	// idle polls (bounded) until each stream's consumer has nothing awaiting an ack and nothing left to deliver.
 	idle := func(streams ...string) {
@@ -397,7 +420,7 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	// sent to the old name: only the sentinel arrives, exactly once, so any replay (which would precede it) is caught.
 	restart := func(sentinel string) (stop func()) {
 		t.Helper()
-		stop, ev := runRenamed()
+		stop, ev, ep := runRenamed()
 		idle(legacy, renamed)
 		if got := ev.all(); len(got) != 0 {
 			t.Fatalf("redelivered after restart: %q", got)
@@ -409,17 +432,18 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 		ev.waitFor(t, 1, 10*time.Second)
 		ackFloor(t, f, legacy, seq)
 		idle(legacy, renamed)
-		if got := ev.all(); len(got) != 1 || count(got, sentinel) != 1 || count(got, "queued-") != 0 || count(got, "before-1") != 0 || count(got, "after-") != 1 {
+		if got := ev.all(); len(got) != 1 || delivered(got) != 1 {
 			t.Fatalf("after restart, want only %s once, got %q", sentinel, got)
 		}
+		checkVerified(ep, seq, sentinel)
 		return stop
 	}
 
-	stop, ev := runRenamed()
+	stop, ev, ep := runRenamed()
 	// Barrier: both queued messages delivered (an event may be a digest of several), then both acknowledged with
 	// nothing pending, before anything is counted.
 	deadline := time.Now().Add(10 * time.Second)
-	for count(ev.all(), "queued-2") == 0 || count(ev.all(), "queued-3") == 0 {
+	for delivered(ev.all()) < len(queued) {
 		if time.Now().After(deadline) {
 			t.Fatalf("queued mail not delivered: %q", ev.all())
 		}
@@ -427,24 +451,13 @@ func TestNaming21_RenameDeliversQueuedMailOnce(t *testing.T) {
 	}
 	ackFloor(t, f, legacy, lastQueued)
 	idle(legacy, renamed)
-	all := ev.all()
-	if count(all, "queued-2") != 1 || count(all, "queued-3") != 1 || count(all, "before-1") != 0 {
-		t.Fatalf("queued mail delivered wrongly:\n%s", strings.Join(all, "\n"))
+	if all := ev.all(); delivered(all) != len(queued) {
+		t.Fatalf("queued mail delivered wrongly (want %d in total):\n%s", len(queued), strings.Join(all, "\n"))
 	}
-	// Each queued message carries its own [verified] header, checked message by message.
-	for _, body := range []string{"queued-2", "queued-3"} {
-		var hdr string
-		for _, e := range all {
-			parts := strings.Split(e, "--- #")
-			for _, part := range parts[1:] {
-				if strings.Contains(part, "> "+body) {
-					hdr, _, _ = strings.Cut(part, "\n")
-				}
-			}
-		}
-		if !strings.Contains(hdr, " from ") || !strings.Contains(hdr, "[verified]") || strings.Contains(hdr, "[claimed]") || strings.Contains(hdr, "[unknown-signer]") {
-			t.Fatalf("%s header %q, want [verified]", body, hdr)
-		}
+	// Each queued message is [verified] with its own body, read message by message; the pre-rename message
+	// (acknowledged before the rename) is not among the deliveries.
+	for body, seq := range queued {
+		checkVerified(ep, seq, body)
 	}
 	stop()
 
