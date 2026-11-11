@@ -1,9 +1,23 @@
 # What fences mail once the zone token leaves the subject
 
-**Status:** proposal, for the maintainer's ruling. `Decision: none`: this document proposes, it decides nothing and
-changes no code. The six zone command-line items stay frozen until it is ruled on.
+**Status:** final. The maintainer ruled on 2026-11-11 (D188, planner record
+`decisions/2026-11-11-messaging-policy-labels-model-rulings.md`): there are no zones. This document is the analysis
+behind the ruling and the specification for removing zones; see "Ruling" below. `Decision: none` for this document;
+the removal's pull requests each name their ADR, which is new or this document's section 6 turned into one. The six
+zone command-line items, frozen on 2026-11-10, are unfrozen.
 
 **Date:** 2026-11-11. **Facts as of:** `main` at `6dbb9ca`.
+
+## Ruling (D188, 2026-11-11)
+
+The maintainer: "There's no zones. I see no reason for them. The natural boundaries in homerange are the range, herd,
+and lane." This is the direction section 6 recommends: remove zones, keep the mail subject at SAP's five tokens, and
+let the existing address (the herd part of it) be the fence (alternative A).
+
+What the ruling settles: the zone token, `set-zone`, `provision --zone`, the six-token lines and `subject_label` go.
+What it does not settle, and this document does not decide: the label policy model (F1, F2 and the policy file's
+future). The planner is rewriting that document, and it comes later as contract input. Section 6's F1 and F2 text
+is analysis kept for that work, not a decision.
 
 ## Summary for the maintainer
 
@@ -380,4 +394,4 @@ What F1 must say out loud, because the policy file's current promise is larger:
   the open part is the sender's message and an `apply` warning.
 
 Next steps if ruled: an ADR that supersedes 0053 and 0054 for the subject (and amends 0055's framing), then the code
-change as small pull requests. Nothing here is ruled.
+change as small pull requests. The zone removal is ruled (see "Ruling"); F1 and F2 are not.
