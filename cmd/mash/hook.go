@@ -173,7 +173,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 const waitNoticeEvery = 10 * time.Minute
 
 // waitNotice tells the session its mail is off while its own serve waits for the endpoint's lease (the spool's
-// lease-wait state, ADR 0090): once on the first run after the state appears, then at most every waitNoticeEvery. It is
+// lease-wait state, ADR 0092): once on the first run after the state appears, then at most every waitNoticeEvery. It is
 // for the session of the waiting serve only: the hook's session id is the serve's, or the serve's parent is among the
 // hook's ancestors; the hook of the session that holds the lease is told nothing. A missing state, or one whose serve is
 // gone, prints nothing (and a stale one is removed). Call it under the spool lock.

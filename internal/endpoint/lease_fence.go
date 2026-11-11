@@ -10,7 +10,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// The ack-time fence and the takeover grace (ADR 0090).
+// The ack-time fence and the takeover grace (ADR 0092).
 //
 // watchLease notices a takeover within leaseWatchEvery, and until it does the earlier serve would keep delivering to its
 // client and acking mail the new holder never sees. So before delivering a batch and before any ack the endpoint reads

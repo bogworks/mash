@@ -138,7 +138,7 @@ type LeaseHeldError struct {
 	Name, Host, PID, Since string
 	// SameSession: the holder is an earlier serve of this process's own session (same machine, and the same session
 	// id or the same parent process); it was not taken over only because the compare-and-set lost to a write made
-	// since it was read, so a retry is due at once (ADR 0090).
+	// since it was read, so a retry is due at once (ADR 0092).
 	SameSession bool
 }
 
@@ -157,7 +157,7 @@ type leaseValue struct {
 	Start string `json:"start,omitempty"`
 	// PPID, PStart and Session identify the session the serving process belongs to (SessionIdent): its parent pid, that
 	// parent's start time and CLAUDE_CODE_SESSION_ID. A new serve of the same session takes the lease from this one;
-	// each is absent when unknown, and then no takeover is made on it (ADR 0090).
+	// each is absent when unknown, and then no takeover is made on it (ADR 0092).
 	PPID    string `json:"ppid,omitempty"`
 	PStart  string `json:"pstart,omitempty"`
 	Session string `json:"session,omitempty"`
@@ -516,7 +516,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 				// pid namespace), not the hostname: hosts and containers can share a hostname, and a live remote
 				// holder's pid is absent here (codex H1 on #44). A lease with no Machine, or a taker with none, is
 				// never judged and expires normally. The same applies to an earlier serve of this same session, which
-				// is alive but superseded (ADR 0090). The compare-and-set loses to any write made since the lease was
+				// is alive but superseded (ADR 0092). The compare-and-set loses to any write made since the lease was
 				// read.
 				if reason := e.takeoverReason(lv); reason != "" {
 					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {

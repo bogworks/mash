@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// The lease-wait state (ADR 0090): while a serve waits for its endpoint's lease it records who holds it, in
+// The lease-wait state (ADR 0092): while a serve waits for its endpoint's lease it records who holds it, in
 // .lease-wait next to the waiter records, so `mash hook` can tell the session that its mail is off. The hook keeps its
 // rate limit for that notice in .lease-wait-told. serve removes both when it takes the lease or exits, but only a state that still names it (several serves of an
 // endpoint can wait at once and the later writer's state stands); a state whose

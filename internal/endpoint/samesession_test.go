@@ -213,7 +213,7 @@ func TestLeaseLostToOtherSessionIsNotSameSession(t *testing.T) {
 	}
 }
 
-// The legacy identity's lease is taken over by the same rule (ADR 0090), so a new serve of the session reads the legacy
+// The legacy identity's lease is taken over by the same rule (ADR 0092), so a new serve of the session reads the legacy
 // stream at once; a legacy lease of another session is still not taken.
 func TestSameSessionTakesLegacyLease(t *testing.T) {
 	id := ours(t)

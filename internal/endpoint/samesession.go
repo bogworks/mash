@@ -11,7 +11,7 @@ import (
 // SessionIdent is who this serve process is, as far as a later serve of the same Claude Code session can tell: its
 // parent pid, that parent's start time (so a reused pid is told from the parent) and CLAUDE_CODE_SESSION_ID. Each part
 // is "" when unknown. It goes into the lease (leaseValue.PPID, PStart, Session) so a new serve of the same session can
-// take the lease over from the earlier one (ADR 0090).
+// take the lease over from the earlier one (ADR 0092).
 type SessionIdent struct {
 	PPID, PStart, Session string
 }
