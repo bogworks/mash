@@ -26,7 +26,7 @@ concurrency:
 jobs:
   label-reset:
     name: label-reset
-    runs-on: [self-hosted, rh-linux]
+    runs-on: [self-hosted, rh-gate]
     timeout-minutes: 5
     steps:
       - name: Remove lead-approved and decision-confirmed

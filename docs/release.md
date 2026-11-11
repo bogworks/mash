@@ -396,6 +396,6 @@ and tick it off in the repository's setup issue.
 **CI:**
 
 - [ ] Self-hosted runners only ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)): every
-      job runs on `[self-hosted, rh-linux]` or `[self-hosted, rh-macos]`, with no GitHub-hosted fallback. Register runners
+      job runs on `[self-hosted, rh-linux]`, `[self-hosted, rh-macos]` or, for the gate jobs, `[self-hosted, rh-gate]`, with no GitHub-hosted fallback. Register runners
       with those labels only on machines the maintainers control. Pull requests from forks run on them too, so keep the
       Actions setting that holds an outside contributor's run for a person's approval (the item above).

@@ -1101,12 +1101,12 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 }
 
 // adr-lint runs from the base branch (pull_request_target) and executes nothing from the pull request, so it runs on the
-// repository's self-hosted runners, labelled self-hosted and rh-linux. Fork pull requests are not skipped: they run there
+// repository's self-hosted runners, labelled self-hosted and rh-gate. Fork pull requests are not skipped: they run there
 // once a person approves them. Its runs-on is exactly that list and the trigger is pull_request_target.
 func TestADRLint_selfHostedRunner(t *testing.T) {
 	wf := load(t, "adr-lint.yml")
-	if r := string(wf.Jobs["adr-lint"].RunsOn); r != "[self-hosted, rh-linux]" {
-		t.Errorf("adr-lint runs-on = %q, want [self-hosted, rh-linux]", r)
+	if r := string(wf.Jobs["adr-lint"].RunsOn); r != "[self-hosted, rh-gate]" {
+		t.Errorf("adr-lint runs-on = %q, want [self-hosted, rh-gate]", r)
 	}
 	on, _ := wf.On.(map[string]any)
 	prt, ok := on["pull_request_target"].(map[string]any)
@@ -1167,7 +1167,7 @@ func TestADRLint_confirmationNeedsALabeledRun(t *testing.T) {
 }
 
 // label-reset runs from the base branch and executes nothing from the pull request; like every job it runs on the
-// self-hosted labels (ADR 0079) and names no GitHub-hosted runner: its runs-on is exactly [self-hosted, rh-linux].
+// self-hosted labels (ADR 0079) and names no GitHub-hosted runner: its runs-on is exactly [self-hosted, rh-gate].
 func TestLabelReset_noHostedRunner(t *testing.T) {
 	raw, err := os.ReadFile("../../.github/workflows/label-reset.yml")
 	if err != nil {
@@ -1181,8 +1181,8 @@ func TestLabelReset_noHostedRunner(t *testing.T) {
 			t.Errorf("label-reset.yml:%d names a GitHub-hosted runner: %s", n+1, line)
 		}
 	}
-	if r := strings.TrimSpace(string(load(t, "label-reset.yml").Jobs["label-reset"].RunsOn)); r != "[self-hosted, rh-linux]" {
-		t.Errorf("label-reset runs-on = %q, want [self-hosted, rh-linux]", r)
+	if r := strings.TrimSpace(string(load(t, "label-reset.yml").Jobs["label-reset"].RunsOn)); r != "[self-hosted, rh-gate]" {
+		t.Errorf("label-reset runs-on = %q, want [self-hosted, rh-gate]", r)
 	}
 }
 
