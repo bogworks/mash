@@ -9,6 +9,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // ValidateGrant checks one subject grant against REQ-027: a grant that applies to the agents. subject space must not
@@ -125,6 +126,11 @@ func NewFormPermissions(id sap.EndpointIdentity, extra []string) (jwt.Permission
 // it, and read the stream by direct get. No wildcard stream or consumer name, and no create, update, delete or purge
 // subject, is granted. The user's own reply prefix already covers the replies, so no subscribe grant is added.
 //
+// It also adds the alias's own lease key lines, the two fixedPubKeyed gives a legacy endpoint for its lease (publish to
+// $KV.<lease bucket>.<alias name>: create, update, delete, purge; and direct get of that one key), because during the
+// window the new-form endpoint holds the legacy lease key while it reads the legacy stream. The stream info line for the
+// lease bucket is already in the user's own lease lines. No wildcard key, bucket-level subject or other key is granted.
+//
 // It refuses an id that shares the alias's owner (admission's rule: the legacy wildcard filter would reach it) or
 // overlaps it.
 //
@@ -158,6 +164,7 @@ func WindowBridge(id, alias sap.EndpointIdentity) (jwt.Permissions, error) {
 	}
 	p.Pub.Allow.Add(as.HB)
 	p.Pub.Allow.Add(legacyInboxGrants(alias)...)
+	p.Pub.Allow.Add(legacyLeaseGrants(alias)...)
 	p.Sub.Allow.Add(as.Prompt, as.Status)
 	return p, nil
 }
@@ -169,6 +176,20 @@ func legacyInboxGrants(alias sap.EndpointIdentity) []string {
 	var out []string
 	for _, g := range fixedPubKeyed(alias.Subjects().HB, alias.Name) {
 		if strings.HasSuffix(g, "."+inbox) || strings.Contains(g, "."+inbox+".") {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// legacyLeaseGrants is the part of fixedPubKeyed that names the legacy alias's own lease key: the KV publish subject
+// and the direct get of that key. The bucket's stream info line is left out (NewFormPermissions has it).
+func legacyLeaseGrants(alias sap.EndpointIdentity) []string {
+	key := "." + store.LeaseBucket + "." + alias.Name
+	var out []string
+	for _, g := range fixedPubKeyed(alias.Subjects().HB, alias.Name) {
+		if strings.HasPrefix(g, "$KV.") && strings.HasSuffix(g, key) ||
+			strings.HasPrefix(g, "$JS.API.DIRECT.GET.KV_"+store.LeaseBucket+".") && strings.HasSuffix(g, key) {
 			out = append(out, g)
 		}
 	}
