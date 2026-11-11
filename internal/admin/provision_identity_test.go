@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -797,6 +798,75 @@ func TestProvisionIdentityWaitsAliasNameLock(t *testing.T) {
 	for _, n := range []string{id.Flat(), admin.AdmissionLockName} {
 		if _, err := kv.Get(ctx, admin.LockKey(n)); !errors.Is(err, jetstream.ErrKeyNotFound) {
 			t.Fatalf("lock %s left behind: %v", n, err)
+		}
+	}
+}
+
+// Two new-form identities claim the same legacy alias at once. Exactly one wins, the other is refused as already
+// claimed, and one directory record holds the alias.
+func TestProvisionIdentityConcurrentSameAliasExactlyOneWins(t *testing.T) {
+	quickLocks(t, longWait)
+	e, a, js := setup(t)
+	ctx := context.Background()
+	lim := store.DefaultLimits()
+	lim.InboxMaxBytes = 2 << 20 // 24 inboxes are made; the default cap would exhaust the test server's storage
+	if err := a.SetLimits(lim); err != nil {
+		t.Fatal(err)
+	}
+	const rounds = 8
+	for r := 0; r < rounds; r++ {
+		legacy := fmt.Sprintf("ghost%d", r)
+		provLegacy(t, e, a, legacy, admin.Meta{})
+		alias := store.Alias{Owner: "o", Name: legacy}
+		ids := []sap.EndpointIdentity{
+			newID(t, "acme", "team1", fmt.Sprintf("opsa%d", r)),
+			newID(t, "acme", "team1", fmt.Sprintf("opsb%d", r)),
+		}
+		users := make([]string, len(ids))
+		for i := range ids {
+			_, users[i] = e.Mint(t, fmt.Sprintf("mint%d-%d", r, i))
+		}
+		errs := make([]error, len(ids))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range ids {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, errs[i] = a.ProvisionIdentity(ctx, ids[i], &alias, users[i], e.Account, "", admin.Meta{})
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		var won, refused int
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				won++
+			case strings.Contains(err.Error(), "already claimed"):
+				refused++
+			default:
+				t.Fatalf("round %d: unexpected error %v", r, err)
+			}
+		}
+		if won != 1 || refused != 1 {
+			t.Fatalf("round %d: want exactly one winner and one refusal, got errors %v", r, errs)
+		}
+		kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+		claims := 0
+		for _, k := range dirKeys(t, js) {
+			rec, err := store.GetRecord(ctx, kv, k)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Alias != nil && *rec.Alias == alias {
+				claims++
+			}
+		}
+		if claims != 1 {
+			t.Fatalf("round %d: %d directory records claim %s, want 1", r, claims, legacy)
 		}
 	}
 }

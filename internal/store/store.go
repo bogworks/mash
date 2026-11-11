@@ -28,8 +28,10 @@ const (
 const (
 	DirectoryMaxBytes = 16 << 20
 	LeaseMaxBytes     = 4 << 20
-	// RetiredMaxBytes caps the retired-name bucket: one small marker per retired new-form identity, kept for good.
-	RetiredMaxBytes = 4 << 20
+	// RetiredMaxBytes caps the retired-name bucket. The bucket keeps one small marker per retired new-form identity
+	// for good and mash never deletes one. A full bucket makes the stream discard new markers, so
+	// VerifyRetiredStatus and provisioning then refuse. 64 MiB holds many markers.
+	RetiredMaxBytes = 64 << 20
 )
 
 // LeaseTombstone is what Deprovision writes to an endpoint's lease key: it fences the name, so a live or
