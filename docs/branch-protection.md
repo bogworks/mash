@@ -19,19 +19,27 @@ protection is blocking. On PR #349 (labelled `hold`) its conclusion is `success`
 protections blocking"; on pull requests it does not apply to it is `neutral`. The ruleset accepts it either way
 (check-neutral and check-success), so the ruleset does not enforce the queue-entry gate; only the queue does.
 
-**Residual risk.** Because no check is required by GitHub itself except `Mergify Merge Protections`, nothing in GitHub
-pins `codex-review`, `pr-check`, `adr-lint` or `label-reset`. They are conditions only in the queue rule of
+**Pinned checks (D195).** `pr-check` and `label-reset` are pinned in the ruleset with GitHub Actions as the expected
+source (`integration_id`), so a check of that name posted by anything else does not satisfy the ruleset. `adr-lint`
+follows once this change is on `main` and a queue draft shows it SKIPPED: a Mergify queue draft is skipped by a
+job-level `if` in `adr-lint.yml` that requires the head ref prefix `mergify/merge-queue/`, a same-repository head and
+the Mergify bot as author, and a skipped job is accepted by Mergify and the ruleset. The paragraph above predates this
+and lists only `Mergify Merge Protections`.
+
+**Residual risk.** Apart from `Mergify Merge Protections`, `pr-check` and `label-reset`, nothing in GitHub pins
+`codex-review` or `adr-lint` (`adr-lint` follows, see above). Those are conditions only in the queue rule of
 `.mergify.yml`, and Mergify's `check-success = <name>` matches a check run or commit status of that name whoever posted
-it. A pull request that adds or edits a workflow can post a check (or, with a token, a status) named `codex-review` or
-`pr-check`, so those checks prove nothing against a pull request author who controls workflows. What holds instead:
+it. A pull request that adds or edits a workflow can post a check (or, with a token, a status) named `codex-review`,
+so that check proves nothing against a pull request author who controls workflows. What holds instead:
 changes to `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `scripts/adrlint/`, `internal/release/` and this file
 are protected paths (judged on `git diff --no-renames`, so a rename out of one counts), so `Decision: none` on them
 needs the reviewer's `decision-confirmed` label and otherwise an ADR is required; `label-reset` runs from the base
 branch (`pull_request_target`), not from the pull request; and the lead's approval or `lead-approved` label is still
 required for entry.
 
-**What would close it:** require the checks in the ruleset with an expected source, that is `required_status_checks`
-entries with an `integration_id` (the GitHub App that must post each one), and add a required-reviews rule. That is a
+**What would close it:** require the remaining checks (`adr-lint` once it follows, and `codex-review`) in the ruleset
+with an expected source, that is `required_status_checks` entries with an `integration_id` (the GitHub App that must
+post each one), as is already done for `pr-check` and `label-reset`, and add a required-reviews rule. That is a
 repository-settings change for the maintainer; it is not part of any pull request. See
 [ADR 0078](decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
 

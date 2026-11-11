@@ -1713,3 +1713,63 @@ func TestWorkflows_changedFileListsKeepRenameSources(t *testing.T) {
 		t.Errorf("found %d changed-file lists in the workflows, want adr-lint.yml's and ci.yml's", seen)
 	}
 }
+
+// skipExpected is the intended semantic: only a Mergify merge-queue draft is skipped. All three must hold, because a pull
+// request author controls the branch name.
+func skipExpected(ref, headRepo, author, repo string) bool {
+	return strings.HasPrefix(ref, "mergify/merge-queue/") && headRepo == repo && author == "mergify[bot]"
+}
+
+// The adr-lint job is skipped (reported SKIPPED, which Mergify and the ruleset accept) on a Mergify queue draft and on
+// nothing else. The condition is pinned to one exact string; the table checks the intended semantic on that shape.
+func TestADRLint_skipsOnlyMergifyQueueDrafts(t *testing.T) {
+	j := load(t, "adr-lint.yml").Jobs["adr-lint"]
+	if j.If == "" {
+		t.Fatal("adr-lint job has no if: a queue draft would fail it")
+	}
+	const want = "${{ !(startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/') && " +
+		"github.event.pull_request.head.repo.full_name == github.repository && " +
+		"github.event.pull_request.user.login == 'mergify[bot]') }}"
+	if strings.TrimSpace(j.If) != want {
+		t.Fatalf("adr-lint job if = %q, want %q", j.If, want)
+	}
+	for _, clause := range []string{
+		"startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')",
+		"github.event.pull_request.head.repo.full_name == github.repository",
+		"github.event.pull_request.user.login == 'mergify[bot]'",
+	} {
+		if !strings.Contains(j.If, clause) {
+			t.Errorf("adr-lint if lacks clause %q", clause)
+		}
+	}
+	if r := string(j.RunsOn); r != "[self-hosted, rh-gate]" {
+		t.Errorf("adr-lint runs-on = %q, want [self-hosted, rh-gate]", r)
+	}
+	// The job runs unless the exact expression shape (!(A && B && C)) is true of the event.
+	runs := func(ref, headRepo, author, repo string) bool {
+		a := strings.HasPrefix(ref, "mergify/merge-queue/")
+		b := headRepo == repo
+		c := author == "mergify[bot]"
+		return !(a && b && c)
+	}
+	const repo = "bogworks/mash"
+	for _, c := range []struct {
+		name                  string
+		ref, headRepo, author string
+		skip                  bool
+	}{
+		{"queue draft", "mergify/merge-queue/abc", repo, "mergify[bot]", true},
+		{"ordinary branch, human", "feature/x", repo, "randyb", false},
+		{"fork on a queue ref", "mergify/merge-queue/abc", "evil/mash", "mergify[bot]", false},
+		{"human on a queue ref", "mergify/merge-queue/abc", repo, "randyb", false},
+		{"no trailing slash", "mergify/merge-queue", repo, "mergify[bot]", false},
+		{"bot on an ordinary ref", "feature/x", repo, "mergify[bot]", false},
+	} {
+		if got := skipExpected(c.ref, c.headRepo, c.author, repo); got != c.skip {
+			t.Errorf("%s: skipExpected = %v, want %v", c.name, got, c.skip)
+		}
+		if got := !runs(c.ref, c.headRepo, c.author, repo); got != c.skip {
+			t.Errorf("%s: expression skips = %v, want %v", c.name, got, c.skip)
+		}
+	}
+}
