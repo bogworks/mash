@@ -286,3 +286,28 @@ func TestLegacyOneConsumeLoopWhileOldCallbackBlocked(t *testing.T) {
 		t.Fatalf("held %v, loops %d", m, ep.legacy.loops.Load())
 	}
 }
+
+// The loss of the lease is learned while the spool lock cannot be taken: "none" cannot be recorded, so the epoch file
+// of the former hold is removed without the lock (stamped entries are hidden) instead of staying readable.
+func TestLegacyEpochNoneWithoutLockRemovesTheFile(t *testing.T) {
+	tinyRetry(t)
+	var fail atomic.Bool
+	old := legacyLockSpool
+	legacyLockSpool = func(sp *spool.Spool) (func(), error) {
+		if fail.Load() {
+			return nil, errors.New("injected lock failure")
+		}
+		return sp.Lock()
+	}
+	t.Cleanup(func() { legacyLockSpool = old })
+	f := newFixture(t, "old", "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, sp := openSpooled(t, f, id)
+	if n, ok := sp.Epoch(); !ok || n != ep.legacy.epoch.Load() {
+		t.Fatalf("epoch of the hold not recorded: %d %v", n, ok)
+	}
+	fail.Store(true)
+	takeLegacyOver(t, f)
+	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	until(t, "epoch file removed", func() bool { _, ok := sp.Epoch(); return !ok })
+}

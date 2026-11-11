@@ -102,3 +102,32 @@ func TestNoteOrRemoveOnFailedWrite(t *testing.T) {
 		t.Fatalf("with no file: %v", err)
 	}
 }
+
+// RemoveEpoch drops the epoch file without the lock: stamped entries are hidden, own-stream entries stay, and a missing
+// file is not an error.
+func TestRemoveEpochHidesStampedEntries(t *testing.T) {
+	s := newSpool(t)
+	for _, e := range []Entry{epochEntry("", 1, 0), epochEntry("legacy", 2, 5)} {
+		if err := s.Put(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.NoteEpoch(5); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := s.Waiting(); len(w) != 2 {
+		t.Fatalf("before: %d entries", len(w))
+	}
+	if err := s.RemoveEpoch(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Epoch(); ok {
+		t.Fatal("epoch still readable")
+	}
+	if w, _ := s.Waiting(); len(w) != 1 || w[0].Stream != "" {
+		t.Fatalf("after: %v", w)
+	}
+	if err := s.RemoveEpoch(); err != nil {
+		t.Fatalf("missing file: %v", err)
+	}
+}

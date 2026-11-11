@@ -39,6 +39,16 @@ func noteOrRemove(dir, v string, write func(string) error) error {
 	return werr
 }
 
+// RemoveEpoch removes the epoch file without the spool lock, for when the lock cannot be taken to record "none": a
+// missing file fails closed for every stamped entry, so the epoch of a hold given up is no longer readable. A file
+// already missing is not an error.
+func (s Spool) RemoveEpoch() error {
+	if err := os.Remove(filepath.Join(s.Dir, epochFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // Epoch is the recorded epoch. ok is false when there is no readable record; epoch is 0 for "none".
 func (s Spool) Epoch() (epoch uint64, ok bool) {
 	b, err := os.ReadFile(filepath.Join(s.Dir, epochFile))

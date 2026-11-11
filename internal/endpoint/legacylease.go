@@ -379,9 +379,20 @@ func (e *Endpoint) noteLegacyEpoch() error {
 		e.log.Printf("spool: legacy epoch: %v", err)
 	}
 	if tries == 1 {
-		return nil // recording "none": the spool write and dropHeldLegacy record it again
+		// recording "none" without the lock: take the old epoch away instead (a missing file hides every stamped entry)
+		e.removeLegacyEpoch(sp)
+		return nil
 	}
 	return err // the epoch of a hold could not be recorded: the caller gives the hold up
+}
+
+// removeLegacyEpoch removes the epoch file without the spool lock, failing closed when "none" cannot be recorded.
+func (e *Endpoint) removeLegacyEpoch(sp *spool.Spool) {
+	if err := sp.RemoveEpoch(); err != nil {
+		e.log.Printf("spool: legacy epoch: removing %v", err)
+		return
+	}
+	e.log.Printf("spool: legacy epoch: removed without the spool lock, stamped legacy entries are hidden")
 }
 
 // testLegacyHandlerGate is a test hook run at the top of every legacy-stream message callback.
@@ -421,10 +432,11 @@ func (e *Endpoint) noteLegacyReleased() {
 		e.setLegacy(legacyLostNow, "released")
 		return
 	}
-	unlock, err := sp.Lock()
+	unlock, err := legacyLockSpool(sp)
 	if err != nil {
 		e.log.Printf("spool: legacy epoch: %v", err)
 		e.setLegacy(legacyLostNow, "released")
+		e.removeLegacyEpoch(sp)
 		return
 	}
 	defer unlock()
