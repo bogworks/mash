@@ -44,15 +44,22 @@ boundary the server can enforce.
   inbox stream, and the zone-matching check of `mashctl drift`.
 * **The address is the fence.** An endpoint's publish permission is its own agent and owner tokens, as
   `NewFormPermissions` already gives it; reaching another owner is an explicit extra grant.
-* **Existing records are refused, not ignored.** A zoned address can only be formed from a zoned record, and no record
-  has ever been zoned (0 of 68; `set-zone` was never run), so no zoned address is cached anywhere in this deployment.
-  For other deployments the removal is guarded so that mail is never silently dropped: `mashctl audit` and `mashctl
-  drift` report any directory record that carries a zone as an error; the release that removes zones refuses to start
-  `serve` and `mashctl apply` while a zoned record exists, with a message that names `mashctl unzone`; and the changelog
-  carries an upgrade note. The way out ships in the same release: `mashctl unzone <endpoint>` rewrites a zoned record to
-  the five-token form, moves its inbox stream's subjects to the five-token subject without losing stored mail, and
-  reissues its permissions; it is idempotent and safe to re-run. The operator runs it for each zoned record, then
-  upgrades. The upgrade stops instead of dropping mail. Nothing writes a zone.
+* **A zoned record or an applied zone policy refuses the upgrade; there is no migration for policy users.** A zoned
+  address can only be formed from a zoned record, and no record has ever been zoned (0 of 68; `set-zone` was never
+  run); no policy file is deployed anywhere. For another deployment the removal is guarded so that mail is never
+  silently dropped and no restriction is silently lost:
+  * *An applied zone policy* (any compiled zone policy: zone keys, `subject_label`, or six-token grants in place):
+    the zone-removal release refuses `serve`, `mashctl apply` and `mashctl unzone`, and says to stay on the last zoned
+    release until the label policy model ships. mash builds no migration for a policy deployment: its within-owner
+    denies and its six-token sender limits have no replacement until that model exists.
+  * *A zoned record and no applied policy:* `mashctl audit` and `mashctl drift` report the record as an error;
+    `serve` and `mashctl apply` refuse, with a message that names `mashctl unzone`. `mashctl unzone <endpoint>` ships in
+    the same release: it rewrites the record to the five-token form, moves its inbox stream's subjects to the
+    five-token subject without losing stored mail, and reissues its permissions; it is idempotent and safe to re-run.
+    With no policy, every sender's default grant already covers the five-token subject and there is no denial to lose.
+  * The changelog carries an upgrade note saying both: run `mashctl unzone` for each zoned record, then upgrade; with an
+    applied zone policy, stay on the last zoned release.
+  The upgrade stops instead of dropping mail or a restriction. Nothing writes a zone.
 * **What this does not decide.** The label policy model (what replaces `docs/policy-file.md`, whether a bounded deny or a
   cross-owner grant is offered, and how) is the planner's to write and comes later as contract input. The analysis's
   F1 and F2 stay as input to it, not as decisions. Prompt and status stay outside the fence, as
@@ -77,7 +84,7 @@ The removal lands as pull requests by package; each names this record.
 * Bad, because a within-owner fence has no mechanism until the label model is ruled; inside an owner every endpoint may
   mail every other, as it already may for the live deployments.
 * Bad, because an outside deployment with a zoned record must run `mashctl unzone` for it before the upgrade will
-  start; the upgrade refuses to run until it does.
+  start, and one with an applied zone policy cannot upgrade until the label policy model ships.
 * Bad, because ADR 0053's policy file loses its zone-wildcard groups and is smaller until it is rewritten.
 
 ## Pros and Cons of the Options
