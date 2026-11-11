@@ -21,7 +21,7 @@ jobs:
   # Does this pull request touch code? A push always counts as code: the release gate reads main's test runs.
   changes:
     timeout-minutes: 5
-    runs-on: [self-hosted, rh-linux]
+    runs-on: [self-hosted, rh-gate]
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
@@ -195,7 +195,7 @@ jobs:
     needs: [changes, test, reproducible, adr-numbers]
     if: always()
     timeout-minutes: 5
-    runs-on: [self-hosted, rh-linux]
+    runs-on: [self-hosted, rh-gate]
     steps:
       - name: Every required job passed
         env:

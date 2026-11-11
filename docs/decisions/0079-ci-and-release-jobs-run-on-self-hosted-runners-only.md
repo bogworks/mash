@@ -95,6 +95,14 @@ a negative fixture for each violation type, outside reusable workflows included.
 * Good, because the runner can move without a commit.
 * Bad, because an unset or edited variable is invisible in review and the guard cannot check its value.
 
+## Gate runners
+
+The gate jobs (`label-reset`, `adr-lint`, and the `changes` and `pr-check` jobs of ci.yml) run on `[self-hosted, rh-gate]`.
+That label is carried only by small dedicated runners (1 CPU, 4 GB) that carry no `rh-linux` label, so heavy test jobs
+cannot occupy them and the queue's gate checks no longer wait behind them. The reason: gate jobs waited over 25 minutes
+behind test jobs. Heavy jobs stay on `[self-hosted, rh-linux]`. The same rules hold: a literal list, no fallback, no
+hosted label. The guard test allows this third list and `TestGateJobsUseGateRunners` pins it to exactly those four jobs.
+
 ## More Information
 
 * Guard: `internal/release/workflows_selfhosted_test.go`.

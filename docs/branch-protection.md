@@ -85,8 +85,8 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   `main`.
   adr-lint ignores `decision-confirmed` on `synchronize`, `reopened` and `opened` runs (the event action is passed to it), because
   it runs beside label-reset and could read the label before the removal, which starts no new run; the label counts only
-  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. Every job, adr-lint and label-reset included, runs on the self-hosted labels `[self-hosted, rh-linux]` or
-  `[self-hosted, rh-macos]` ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)), fork pull requests
+  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. Every job, adr-lint and label-reset included, runs on the self-hosted labels `[self-hosted, rh-linux]`,
+  `[self-hosted, rh-macos]` or, for the gate jobs (adr-lint and label-reset among them), `[self-hosted, rh-gate]` ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)), fork pull requests
   included once a person approves the run; both gate workflows are safe there because they run from the base branch and execute nothing
   from the pull request. If no runner with the label is online, label-reset never starts and the check never appears, so the queue keeps the
   pull request out (fail closed).

@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
-    runs-on: [self-hosted, rh-linux]
+    runs-on: [self-hosted, rh-gate]
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)
