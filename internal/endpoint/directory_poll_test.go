@@ -165,6 +165,12 @@ func TestDirectoryPollSeesRecreatedStream(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A poll that ran while the stream was being recreated may have reloaded a partial directory, so a raised
+	// gets count alone does not mean the final state was loaded. Every state request counted after s1 was sent
+	// after the last Put, so it sees the final stream and reloads fully. Polls are sequential, so when state
+	// request s1+2 arrives, the reload that followed request s1+1 has finished.
+	s1 := d.state.Load()
+	waitFor(t, "a poll after the records were put back has finished reloading", 5*time.Second, func() bool { return d.state.Load() >= s1+2 })
 	waitFor(t, "a reload after the stream was recreated", 3*time.Second, func() bool { return d.gets.Load() > g0 })
 	if !hasName(a.Who(), "b") {
 		t.Fatal("b must still be known")
