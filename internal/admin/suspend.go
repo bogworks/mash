@@ -67,13 +67,22 @@ func suspendState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 	return st, nil
 }
 
+// ValidKey reports whether key names an endpoint the suspend, resume and drained-removal verbs accept: a legacy name
+// (config.ValidName) or a new-form flat key (agent_owner_name).
+func ValidKey(key string) bool {
+	if _, ok := newFormKey(key); ok {
+		return true
+	}
+	return config.ValidName(key)
+}
+
 // Suspend parks name's inbox stream: it saves the stream's subjects in its metadata and replaces them with the one
 // subject mash.suspended.<name>, so a sender's publish finds no stream. Only the subjects and metadata change and
 // nothing is purged. It also stores a fresh random suspension id. It is idempotent: a suspended inbox is reported as it is, with its existing id. The state's LastSeq is read after the
 // update and settled, so it is the final one.
 func (a *Admin) Suspend(ctx context.Context, name string) (_ SuspendState, err error) {
-	if !config.ValidName(name) {
-		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	if !ValidKey(name) {
+		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
 	}
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
@@ -159,8 +168,8 @@ func settledState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 // suspended is left as it is. Stale metadata on live subjects is cleared and the subjects kept; parked subjects with
 // no usable saved list are an error, never a guess.
 func (a *Admin) Resume(ctx context.Context, name string) (err error) {
-	if !config.ValidName(name) {
-		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	if !ValidKey(name) {
+		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
 	}
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
@@ -215,8 +224,8 @@ func (a *Admin) Resume(ctx context.Context, name string) (err error) {
 
 // Suspended reads whether name's inbox is suspended, since when, and the stream's message count and last sequence.
 func (a *Admin) Suspended(ctx context.Context, name string) (SuspendState, error) {
-	if !config.ValidName(name) {
-		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	if !ValidKey(name) {
+		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
 	}
 	s, err := a.inboxForSuspend(ctx, name)
 	if err != nil {

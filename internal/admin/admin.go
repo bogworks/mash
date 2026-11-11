@@ -1328,7 +1328,7 @@ func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lk *streamLock, lease j
 // revoke and purge -> final exactly as in Deprovision (see beginRetire), and a re-run after a stop that followed the
 // purge finishes it. A legacy name is refused while a new-form record names it as its alias (guardLegacyAlias).
 func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) (err error) {
-	if _, flat := newFormKey(name); !flat && !config.ValidName(name) {
+	if !ValidKey(name) {
 		return fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name (the value is not shown)")
 	}
 	lk, err := a.lockStream(ctx, name)
