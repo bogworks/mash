@@ -5,7 +5,6 @@ decision-makers: Randy Bias (mash maintainer)
 ---
 
 # Mail subjects carry a zone token, and the legacy subjects stay valid
-
 Superseded by [0091](0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md).
 
 ## Context and Problem Statement
