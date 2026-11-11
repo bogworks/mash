@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 const whoUsage = "usage: mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]"
@@ -92,6 +93,7 @@ type whoLease struct {
 
 type whoEntry struct {
 	Name        string            `json:"name"`
+	Identity    string            `json:"identity,omitempty"` // additive (ADR 0081): the canonical agent.owner.name, for a three-token endpoint only
 	Owner       string            `json:"owner"`
 	Online      bool              `json:"online"`
 	LastSeen    string            `json:"last_seen,omitempty"`
@@ -119,6 +121,9 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	for _, p := range ps {
 		r := p.Record
 		e := whoEntry{Name: r.KeyOrName(), Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description, Zone: r.Zone}
+		if d := sap.Display(r.KeyOrName()); d != e.Name {
+			e.Identity = d // a legacy entry has none: its name is already what people read
+		}
 		if len(r.Caps) > 0 {
 			e.Caps = r.Caps
 		}

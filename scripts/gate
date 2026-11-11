@@ -1,0 +1,522 @@
+#!/usr/bin/env bash
+# The merge gate, runnable by any contributor's session, in parallel with other gates:
+#   bash scripts/gate <ref> [--base <ref>] [--no-free] [--ocr] [--no-codex]
+#   bash scripts/gate <ref> --review [--base <ref>] [--model provider:model]... [--round-cap-ignore]
+#   bash scripts/gate <ref> --pre-pr [--base <ref>]
+# Adopted from the review process of a sibling project (ADR 0080); see docs/review/in-session-loop.md.
+# On a private worktree of <base> (default origin/main) merged with <ref>, it runs, each to its own log and
+# stopping at the first failing check: a Codex review of merge-base..<ref> (subscription; its output kept, findings
+# counted; Claude through `claude -p` when Codex is at its usage limit, see GATE_REVIEWER), ocr on the free OpenRouter model as an advisory second opinion (--no-free skips it), ocr on GLM and
+# DeepSeek only with --ocr (metered OpenRouter; coverage counted against ocr's own preview), vet, the tests, the race
+# tests, the darwin build, and a stress run of every test the branch adds or changes (20x, -race, -cpu 1,2). It prints
+# one summary and leaves every log under the printed directory. At most GATE_SLOTS gates (default 7) run on the host at
+# once; the rest wait.
+# Every state and data directory honours XDG_STATE_HOME or XDG_DATA_HOME (default ~/.local/state and ~/.local/share),
+# and the GATE_* variables (GATE_SLOT_DIR, GATE_ROUNDS_DIR, GATE_REVIEW_STORE, GATE_FINDINGS_LOG) override each one.
+# Verifying ocr's findings is judgment, not this script's: read each medium-or-higher comment against the code.
+# --review is the in-session review loop of ADR 0080, run by the author on their own diff after conformance and before
+# the push. On the same merged worktree it runs only: go build, go vet and gofmt over the changed .go files (skipped when
+# the diff touches no .go, go.mod or go.sum), then one `ocr review --format json` per model in parallel (the repeated
+# --model flags, else "models" in docs/review/policy.json, else one run with ocr's own default), then the verdict
+# engine scripts/reviewgate: it picks the tier for the changed files from the policy, merges the runs, prints the
+# findings to fix, and decides. None of the reviewers, tests, race runs or the receipt note run. Exit codes:
+# 0 pass (the review is recorded for the server-side codex-review), 1 blocked (fix the findings and rerun), 2 error
+# (including too few complete OCR runs: it fails closed), 3 the tier's round cap reached with blocking findings left.
+# A round is a head (patch-id) with blocking findings; rerunning the same head does not advance it. --round-cap-ignore
+# judges the head as round 1 and keeps the counter as it was (the cap never fires). Env knobs: GATE_REVIEWGATE (a
+# prebuilt reviewgate binary; default: built from ./scripts/reviewgate in the checkout), GATE_ROUNDS_DIR (round
+# counters, default ~/.local/state/mash/review-loop), GATE_REVIEW_STORE (pass records, default
+# ${XDG_DATA_HOME:-~/.local/share}/<the review watcher's directory>/reviews/inloop-v1, with the questions suffix: the path
+# the watcher reads with no env set), GATE_FINDINGS_LOG (the per-finding NDJSON log, default
+# ~/.local/share/mash/reviews/findings-v1/<owner_name>.ndjson).
+# --pre-pr is the fast guard before opening a PR: on the same merged worktree it runs, in parallel and each to its own
+# log, the deterministic guards CI's conformance and adr-numbers jobs run: gofmt and go mod tidy, go build and go vet,
+# staticcheck (advisory, as in CI), the ADR lint (go run ./scripts/adrlint docs), and shellcheck (and actionlint) on the
+# changed scripts (workflows). A check whose inputs did not change prints SKIP with the reason; one whose tool is
+# missing FAILs (the gate never passes without running a CI check). It collects EVERY failure (it does not stop
+# at the first), prints `PASS|FAIL <name> (<N>s)` per check, then the wall time and one `FIX <name>: <text>` line per
+# failure. It takes no GATE_SLOTS slot and runs no reviewer, no tests and no race run; it writes no receipt (no git note)
+# and no log outside the printed directory. Exit codes: 0 all passed or skipped, 1 a check failed, 2 usage error (it
+# cannot be combined with --review or --ocr).
+# A passing gate writes its receipt as a git note on the gated commit (refs/notes/gate), a local record of what ran.
+# mash's merge queue (Mergify) does not read it: the queue's conditions are the codex-review and pr-check statuses.
+set -euo pipefail
+# -trimpath makes the build cache key independent of the worktree path, so gates in different worktrees share it.
+export GOFLAGS="${GOFLAGS:+$GOFLAGS }-trimpath"
+# An inherited GIT_DIR (a hook, a worktree) would point every git below at the wrong repository.
+# Only the variables that redirect git are cleared; GIT_SSH_COMMAND and the like still reach the fetch.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX
+
+[ $# -ge 1 ] || { echo "usage: bash scripts/gate <ref> [--base <ref>] [--ocr] [--no-codex]
+       bash scripts/gate <ref> --review [--base <ref>] [--model provider:model]... [--round-cap-ignore]
+       bash scripts/gate <ref> --pre-pr [--base <ref>]" >&2; exit 2; }
+ref=$1; shift
+refname=$ref
+base=origin/main ocr=0 codex=1 free=1 review=0 capignore=0 prepr=0
+models=()
+FREE_MODEL=${GATE_FREE_MODEL:-nvidia/nemotron-3.5-super-vl:free}
+while [ $# -gt 0 ]; do
+	case $1 in
+	--base) base=$2; shift 2 ;;
+	--ocr) ocr=1; shift ;;
+	--no-ocr) ocr=0; shift ;; # the default now; kept so older instructions still parse
+	--no-codex) codex=0; shift ;;
+	--no-free) free=0; shift ;;
+	--review) review=1; shift ;;
+	--pre-pr) prepr=1; shift ;;
+	--model) [ $# -ge 2 ] || { echo "gate: --model needs provider:model" >&2; exit 2; }; models+=("$2"); shift 2 ;;
+	--round-cap-ignore) capignore=1; shift ;;
+	*) echo "unknown flag $1" >&2; exit 2 ;;
+	esac
+done
+[ "$review" = 1 ] || [ ${#models[@]} -eq 0 ] || { echo "gate: --model is only valid with --review" >&2; exit 2; }
+[ "$review" = 1 ] || [ "$capignore" = 0 ] || { echo "gate: --round-cap-ignore is only valid with --review" >&2; exit 2; }
+[ "$prepr" = 0 ] || [ "$review" = 0 ] || { echo "gate: --pre-pr cannot be combined with --review" >&2; exit 2; }
+[ "$prepr" = 0 ] || [ "$ocr" = 0 ] || { echo "gate: --pre-pr cannot be combined with --ocr" >&2; exit 2; }
+
+repo=$(git rev-parse --show-toplevel)
+out=$(mktemp -d "${TMPDIR:-/tmp}/gate.XXXXXX")
+wt=$out/worktree
+summary=$out/SUMMARY
+freepid=
+# On any exit, stop the background free-model review first (it reads the worktree), then remove the worktree.
+trap '[ -z "$freepid" ] || { pkill -P "$freepid" 2>/dev/null; kill "$freepid" 2>/dev/null; wait "$freepid" 2>/dev/null; }; git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true' EXIT
+
+say() { echo "$*" | tee -a "$summary"; }
+check() { # name, then the command; a failure ends the gate
+	local name=$1; shift
+	if (cd "$wt" && "$@") >"$out/$name.log" 2>&1; then say "PASS $name"; else
+		say "FAIL $name (log: $out/$name.log)"; tail -25 "$out/$name.log"; exit 1
+	fi
+}
+
+# Parallel gates fetch into the same repository and can lose the race for a remote-tracking ref ("cannot lock
+# ref"); a retry sees the other fetch's result.
+for i in 1 2 3; do git -C "$repo" fetch -q origin 2>"$out/fetch.log" && break; [ "$i" = 3 ] && { cat "$out/fetch.log" >&2; exit 1; }; sleep "$i"; done
+# Resolve the ref here: inside the worktree a relative ref (HEAD, a branch of this checkout) means something else.
+ref=$(git -C "$repo" rev-parse --verify "$ref^{commit}") || { echo "gate: $ref is not a commit" >&2; exit 2; }
+git -C "$repo" worktree add -q --detach "$wt" "$base"
+mb=$(git -C "$wt" merge-base HEAD "$ref")
+# A base that already contains the ref (a --base naming the branch itself) makes an empty merge: nothing would
+# be judged, yet the gate would pass and write a receipt.
+if [ "$mb" = "$ref" ]; then echo "gate: $ref is already in $base: nothing to gate" >&2; exit 2; fi
+say "gate: $ref ($(git -C "$repo" rev-parse --short "$ref")) on $base ($(git -C "$wt" rev-parse --short HEAD)), merge-base $(git -C "$wt" rev-parse --short "$mb")"
+git -C "$wt" merge --no-ff -q --no-edit "$ref" >"$out/merge.log" 2>&1 || { say "FAIL merge (conflict): $out/merge.log"; exit 1; }
+say "merge result $(git -C "$wt" rev-parse --short HEAD)"
+
+if [ "$prepr" = 1 ]; then # the fast pre-PR guards; see the header. Exits here: no slot, no reviewer, no tests, no receipt.
+	t0=$(date +%s)
+	git -C "$wt" diff --name-only "$mb" "$ref" >"$out/changed.txt"
+	gochg=0; grep -qE '\.go$|(^|/)go\.(mod|sum)$' "$out/changed.txt" && gochg=1
+	pp_names=()
+	pp_skip() { echo "$2" >"$out/$1.skip"; pp_names+=("$1"); }
+	# A check that applies but whose tool is missing is a FAIL, never a SKIP: a gate that passes without running a CI check proves nothing.
+	pp_unavail() { echo "$2" >"$out/$1.unavail"; echo "$2" >"$out/$1.log"; echo "FAIL 0" >"$out/$1.res"; pp_names+=("$1"); }
+	pp_run() { # name, function: runs the function in the worktree in the background, to $out/<name>.log
+		local name=$1 fn=$2; pp_names+=("$name")
+		( s=$(date +%s); r=PASS
+		  (cd "$wt" && "$fn") >"$out/$name.log" 2>&1 || r=FAIL
+		  echo "$r $(( $(date +%s) - s ))" >"$out/$name.res" ) &
+	}
+	pp_gofmt() {
+		local rc=0 bad
+		bad=$(git ls-files -z '*.go' | xargs -0 -r gofmt -l) || rc=1
+		if [ -n "$bad" ]; then echo "gofmt needed:"; echo "$bad"; echo "$bad" >"$out/gofmt.files"; rc=1; fi
+		go mod tidy -diff || { echo "go mod tidy -diff reported changes"; : >"$out/gomodtidy.bad"; rc=1; }
+		return $rc
+	}
+	pp_vet() {
+		local pids=() rc=0 p
+		( go build ./... 2>&1 | sed 's/^/[build] /'; exit "${PIPESTATUS[0]}" ) & pids+=($!)
+		( go vet ./... 2>&1 | sed 's/^/[vet] /'; exit "${PIPESTATUS[0]}" ) & pids+=($!)
+		for p in "${pids[@]}"; do wait "$p" || rc=1; done
+		return $rc
+	}
+	# CI runs staticcheck with continue-on-error (existing findings are listed, not failed), so findings are printed and the
+	# check passes; a staticcheck that cannot be built or run is not a finding and still fails. `go run` exits 1 for both
+	# findings and a failed download or build, so the tool is built first and only its own exit 1 is "findings".
+	pp_staticcheck() {
+		local rc=0 bin=$out/staticcheck
+		GOBIN=$out go install honnef.co/go/tools/cmd/staticcheck@v0.8.2 || { echo "staticcheck could not be built" >&2; return 1; }
+		"$bin" ./... || rc=$?
+		[ "$rc" -le 1 ] || return "$rc" # 1 is "findings"; anything else is the tool failing
+		[ "$rc" = 0 ] || echo "(staticcheck findings are advisory in CI: continue-on-error)"
+		return 0
+	}
+	pp_adrlint() { go run ./scripts/adrlint docs; }
+	pp_shellcheck() { xargs -r shellcheck --severity=error <"$out/changed-shell.txt"; }
+	pp_actionlint() { SHELLCHECK_OPTS=--severity=error actionlint; }  # as CI runs it: shellcheck errors only, no style or info notes
+
+	if [ "$gochg" = 1 ]; then
+		pp_run gofmt pp_gofmt
+		pp_run vet pp_vet
+		pp_run staticcheck pp_staticcheck
+	else
+		pp_skip gofmt "the diff touches no .go, go.mod or go.sum file"
+		pp_skip vet "the diff touches no .go, go.mod or go.sum file"
+		pp_skip staticcheck "the diff touches no .go, go.mod or go.sum file"
+	fi
+	if [ -d "$wt/scripts/adrlint" ]; then pp_run adrlint pp_adrlint; else pp_skip adrlint "no scripts/adrlint directory in this checkout"; fi
+	: >"$out/changed-shell.txt"
+	while IFS= read -r f; do
+		[ -f "$wt/$f" ] || continue
+		case $f in scripts/*) ;; *) continue ;; esac
+		if [[ $f == *.sh ]] || head -n1 "$wt/$f" | grep -qE '^#!.*\b(ba|da|k)?sh\b'; then echo "$f" >>"$out/changed-shell.txt"; fi
+	done <"$out/changed.txt"
+	if [ ! -s "$out/changed-shell.txt" ]; then pp_skip shellcheck "no changed shell scripts under scripts/"
+	elif command -v shellcheck >/dev/null; then pp_run shellcheck pp_shellcheck
+	else pp_unavail shellcheck "shellcheck is not on PATH"; fi
+	if ! grep -q '^\.github/' "$out/changed.txt"; then pp_skip actionlint "the diff touches nothing under .github/"
+	elif command -v actionlint >/dev/null; then pp_run actionlint pp_actionlint
+	else pp_unavail actionlint "actionlint is not on PATH"; fi
+	wait
+
+	failed=()
+	for n in "${pp_names[@]}"; do
+		if [ -f "$out/$n.skip" ]; then say "SKIP $n: $(cat "$out/$n.skip")"; continue; fi
+		read -r r secs <"$out/$n.res"
+		say "$r $n (${secs}s)"
+		[ "$r" = PASS ] || failed+=("$n")
+	done
+	pp_fix() { # name: the exact fix for a failed check
+		if [ -f "$out/$1.unavail" ]; then echo "$(cat "$out/$1.unavail"): install it and rerun; the gate does not pass without running it"; return; fi
+		case $1 in
+		gofmt)
+			local f=
+			[ ! -f "$out/gofmt.files" ] || f="gofmt -w $(paste -sd' ' "$out/gofmt.files")"
+			[ ! -f "$out/gomodtidy.bad" ] || f="${f:+$f; }go mod tidy"
+			echo "${f:-see $out/gofmt.log}" ;;
+		vet) echo "the compiler or vet message names file:line (the tag in brackets says which run; $out/vet.log)" ;;
+		staticcheck) echo "staticcheck could not run ($out/staticcheck.log); it needs the module cache or the network" ;;
+		adrlint) echo "the lint names the file and rule ($out/adrlint.log); a stale or duplicate number: take the one in docs/decisions/NEXT and bump it" ;;
+		shellcheck) echo "fix what shellcheck names at file:line in $out/shellcheck.log" ;;
+		actionlint) echo "fix what actionlint names at file:line in $out/actionlint.log" ;;
+		esac
+	}
+	for n in ${failed[@]+"${failed[@]}"}; do # the failure detail, before the summary
+		echo "--- $n failed:"
+		tail -25 "$out/$n.log"
+	done
+	say "pre-pr: ${#failed[@]} failed of ${#pp_names[@]} checks, $(( $(date +%s) - t0 ))s wall"
+	for n in ${failed[@]+"${failed[@]}"}; do
+		say "FIX $n: $(pp_fix "$n")"
+	done
+	say "logs: $out"
+	[ ${#failed[@]} -eq 0 ] || exit 1
+	exit 0
+fi
+
+# The policy's standing questions, from the BASE ref (trusted, not the branch under review). $base_policy is that policy
+# (empty when the base has none); $standing is the questions as prompt text, empty when there are none.
+base_policy=$out/base-policy.json
+git -C "$repo" show "$base:docs/review/policy.json" >"$base_policy" 2>/dev/null || : >"$base_policy"
+standing=$(jq -r '.questions[]? | "Also answer: \(.text) A yes is a \(.severity) finding."' "$base_policy" 2>/dev/null | paste -sd' ' - || true)
+# A review made under other standing questions is not this one: the receipt store is keyed by them (empty questions: the old store).
+qtag=; [ -z "$standing" ] || qtag=-q$(printf %s "$standing" | sha256sum | cut -c1-12)
+
+if [ "$review" = 1 ]; then # the in-session review loop (ADR 0080); see the header
+	policy=$repo/docs/review/policy.json
+	[ -f "$policy" ] || { echo "gate: --review needs $policy, and this checkout has none" >&2; exit 2; }
+
+	# Conformance, fast: build, vet and gofmt of the changed files. No tests, no race.
+	git -C "$wt" diff --name-only "$mb" "$ref" >"$out/changed.txt"
+	if grep -qE '\.go$|(^|/)go\.(mod|sum)$' "$out/changed.txt"; then
+		check build go build ./...
+		check vet go vet ./...
+		# shellcheck disable=SC2016 # the script is for the inner sh: its $0 and $1 are the arguments after it
+		check gofmt sh -c 'bad=$(git diff --name-only --diff-filter=d "$0" "$1" -- "*.go" | xargs -r gofmt -l); [ -z "$bad" ] || { echo "gofmt -l lists:"; echo "$bad"; exit 1; }' "$mb" "$ref"
+	else
+		say "SKIP go build, vet, gofmt: the diff touches no .go, go.mod or go.sum file"
+	fi
+
+	# Coverage: ocr leaves tests and Markdown out, so a docs-only or test-only diff can have no file reviewed and still
+	# look clean. Ask ocr what it will review; zero files means no record, so the server-side review reviews the diff.
+	# A preview that fails or has no header is unreadable: fail closed, never zero and never full coverage.
+	preview=$(ocr review --repo "$wt" --from "$mb" --to "$ref" --preview 2>"$out/ocr-preview.log") ||
+		{ echo "gate: ocr preview failed (log: $out/ocr-preview.log); coverage unknown, failing closed" >&2; tail -5 "$out/ocr-preview.log" >&2; exit 2; }
+	total=$(sed -n 's/^Preview: \([0-9][0-9]*\) file.*/\1/p' <<<"$preview" | head -1)
+	[ -n "$total" ] || { echo "gate: ocr preview has no 'Preview: N file(s) changed' header; coverage unknown, failing closed" >&2; exit 2; }
+	covered=$(sed -n 's/^Will review (\([0-9][0-9]*\)).*/\1/p' <<<"$preview" | head -1)
+	covered=${covered:-0} # a header with no "Will review" list: ocr will review none
+	# The names: the lines after "Will review (N):", up to the next blank line, each "  [A]  path". The record keeps them, so the
+	# server can tell which files the in-session review left out.
+	awk '/^Will review \([0-9]+\)/ {on=1; next} on && /^[[:space:]]*$/ {exit} on {sub(/^[[:space:]]*\[[^]]*\][[:space:]]+/, ""); sub(/[[:space:]]+\+[0-9]+[[:space:]]+-[0-9]+[[:space:]]*$/, ""); print}' <<<"$preview" >"$out/covered-files.txt"
+	[ "$(grep -c . "$out/covered-files.txt")" -eq "$covered" ] ||
+		{ echo "gate: ocr preview lists $(grep -c . "$out/covered-files.txt") file name(s) under 'Will review ($covered)'; coverage unknown, failing closed" >&2; exit 2; }
+	if [ "$covered" -eq 0 ]; then
+		echo "REVIEW SKIPPED: OCR covers none of the $total changed files (tests and Markdown are excluded); no record is written, so the server-side review will review this diff"
+		exit 0
+	fi
+	say "ocr covers $covered of $total changed files"
+
+	# The models: --model flags, else the policy's, else ocr's own default (one run).
+	if [ ${#models[@]} -eq 0 ]; then
+		while IFS= read -r m; do [ -z "$m" ] || models+=("$m"); done < <(jq -r '.models[]? | "\(.provider):\(.model)"' "$policy")
+	fi
+	[ ${#models[@]} -gt 0 ] || models=("")
+	# The standing questions ride in OCR's background, so its built-in rules (security checks included) still apply.
+	bg="In-session review of $(git -C "$wt" log --format=%s "$mb..$ref" | head -20 | paste -sd';' -). In-session review: report real defects only: correctness, concurrency, data loss, spec divergence, bypassable gates${standing:+. $standing}"
+	pids=() names=()
+	for i in "${!models[@]}"; do
+		m=${models[$i]} sel=()
+		if [ -n "$m" ]; then
+			case $m in
+			*:*) sel=(--provider "${m%%:*}" --model "${m#*:}") ;;
+			*) sel=(--model "$m") ;;
+			esac
+		fi
+		ocr review --repo "$wt" --from "$mb" --to "$ref" --audience agent --format json --max-tokens-budget 0 --timeout 0 \
+			-b "$bg" ${sel[@]+"${sel[@]}"} -o "$out/ocr-$i.json" >"$out/ocr-$i.log" 2>&1 &
+		pids+=($!) names+=("${m:-ocr default}")
+	done
+	ocrargs=() evargs=()
+	for i in "${!pids[@]}"; do
+		rc=0; wait "${pids[$i]}" || rc=$?
+		say "ocr ${names[$i]}: exit $rc (log: $out/ocr-$i.log)"
+		ocrargs+=(-ocr "$out/ocr-$i.json")
+		[ ! -f "$out/ocr-$i.json" ] || evargs+=(-evidence "$out/ocr-$i.json")
+	done
+	modellist=$(IFS=,; echo "${names[*]}")
+
+	# The verdict engine, from the author's checkout (the base worktree lacks it) unless a prebuilt one is named.
+	rg=${GATE_REVIEWGATE:-}
+	if [ -z "$rg" ]; then
+		rg=$out/reviewgate
+		(cd "$repo" && go build -o "$rg" ./scripts/reviewgate) >"$out/reviewgate-build.log" 2>&1 ||
+			{ echo "gate: building scripts/reviewgate failed:" >&2; tail -25 "$out/reviewgate-build.log" >&2; exit 2; }
+	fi
+	patchid=$(git -C "$wt" diff "$mb" "$ref" | git patch-id --verbatim | cut -d' ' -f1)
+	[ -n "$patchid" ] || { echo "gate: no patch-id for $mb..$ref" >&2; exit 2; }
+	url=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
+	url=${url%/}; url=${url%.git}
+	name=${url##*[/:]}; rest=${url%[/:]*}; owner=${rest##*[/:]}
+	[ -n "$name" ] && [ -n "$owner" ] || { echo "gate: cannot derive owner/name from the origin url '$url'" >&2; exit 2; }
+	slug=$owner/$name
+	if git -C "$repo" show-ref --verify -q "refs/heads/$refname"; then short=$refname; else short=$(echo "$ref" | cut -c1-12); fi
+	rounds=${GATE_ROUNDS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mash/review-loop}/${slug//\//_}/${short//\//_}.rounds
+	round=$("$rg" rounds -file "$rounds" -patchid "$patchid") || exit 2
+	[ "$capignore" = 0 ] || round=1
+	vrc=0
+	"$rg" verdict -policy "$policy" -changed "$out/changed.txt" -round "$round" -title "$ref" ${ocrargs[@]+"${ocrargs[@]}"} \
+		>"$out/verdict.txt" 2>"$out/verdict.err" || vrc=$?
+	cat "$out/verdict.txt"; cat "$out/verdict.err" >&2
+	tier=$(sed -n 's/^tier: \([^ ]*\) .*/\1/p' "$out/verdict.txt" | head -1)
+	# The default is the review watcher's own default store (it names its own directory, not mash's), so the two agree with no env set.
+	store=${GATE_REVIEW_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/rangehand/reviews/inloop-v1${qtag}}
+	# The findings log (docs/review/in-session-loop.md): one NDJSON line per OCR comment of every complete run, for the
+	# research re-score (which fills in "confirmed"). Best effort: a failed write never fails the gate.
+	flog=${GATE_FINDINGS_LOG:-${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews/findings-v1/${slug//\//_}.ndjson}
+	{
+		mkdir -p "$(dirname "$flog")"
+		fts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+		for i in "${!names[@]}"; do
+			[ -f "$out/ocr-$i.json" ] || continue
+			jq -c --arg ts "$fts" --arg slug "$slug" --arg ref "$short" --arg patchid "$patchid" --argjson round "$round" \
+				--arg tier "$tier" --arg dflt "${names[$i]}" '
+				select(.status == "complete")
+				| (if (.llm.model // "") != "" then "\(.llm.provider // ""):\(.llm.model)" else $dflt end) as $m
+				| (.comments // [])[]
+				| {ts: $ts, slug: $slug, ref: $ref, patchid: $patchid, round: $round, tier: $tier, model: $m,
+				   file: .path, line: .start_line, severity: .severity, category: .category,
+				   title: ((.content // "") | split("\n")[0] | .[:200]), confirmed: null, source: "inloop"}' \
+				"$out/ocr-$i.json" >>"$flog"
+		done
+	} 2>/dev/null || true
+	case $vrc in
+	0)
+		"$rg" record -store "$store" -slug "$slug" -patchid "$patchid" -verdict pass -tier "$tier" -round "$round" -models "$modellist" -covered "$covered" -total "$total" -covered-files "$out/covered-files.txt" ${evargs[@]+"${evargs[@]}"} >/dev/null || exit 2
+		echo "covered $covered of $total files"
+		[ "$covered" -ge "$total" ] || echo "the server-side review covers the other $((total - covered)) files"
+		echo "REVIEW PASSED: $ref patch-id $patchid; the server-side codex-review verifies this patch"
+		exit 0 ;;
+	1 | 3)
+		[ "$capignore" = 1 ] || "$rg" rounds -file "$rounds" -patchid "$patchid" -bump >/dev/null || exit 2
+		if [ "$vrc" = 3 ]; then
+			"$rg" record -store "$store" -slug "$slug" -patchid "$patchid" -verdict cap -tier "$tier" -round "$round" -models "$modellist" -covered "$covered" -total "$total" -covered-files "$out/covered-files.txt" ${evargs[@]+"${evargs[@]}"} >/dev/null || exit 2
+		fi
+		exit "$vrc" ;;
+	*) exit 2 ;;
+	esac
+fi
+
+if [ "$free" = 1 ]; then # started first, in the background: it runs alongside the Codex review
+	ocr review --repo "$wt" --model "$FREE_MODEL" --audience agent --max-tokens-budget 0 --timeout 0 \
+		-b "Merge gate for $ref. Report real defects only: correctness, concurrency, data loss, spec divergence." \
+		--from "$mb" --to "$ref" >"$out/ocr-free.txt" 2>&1 &
+	freepid=$!
+fi
+
+if [ "$codex" = 1 ]; then
+	# The required review, on a subscription (no metered tokens): adversarial, read-only, the whole branch range. A run
+	# that fails or prints no verdict fails the gate; the findings are judged by the author, as ocr's were.
+	# Reviewer: GATE_REVIEWER=codex|claude|auto (default auto: Codex on GATE_CODEX_MODEL, default gpt-6-sol, and Claude Opus via `claude -p` only when Codex
+	# reports its usage limit; the summary says which reviewed). The verdict is read from the final message only: a
+	# transcript can quote an earlier or example line.
+	ask="Merge gate review of git diff $mb..$(git -C "$wt" rev-parse "$ref") (this checkout is the merge result). Read the full diff and enough surrounding code to judge it. Report only real defects: correctness, concurrency, data loss, spec divergence, tests that can pass while the behaviour is broken, bypassable gates. For each: severity (blocker/high/medium/low), file:line, the failure, the smallest fix. No style. ${standing:+$standing }Does this PR make, reverse or quietly depart from a decision recorded in docs/decisions/ (index: INDEX.md) without an ADR in the PR? If so, report it as a medium finding naming the decision. End with one line exactly: COUNTS blocker=N high=N medium=N low=N"
+	reviewer=${GATE_REVIEWER:-auto}
+	case $reviewer in codex|claude|auto) ;; *) echo "GATE_REVIEWER must be codex, claude or auto" >&2; exit 2 ;; esac
+	rc=0 log=$out/codex.txt
+	if [ "$reviewer" != claude ]; then
+		# The model is pinned (the CLI default changes under us); GATE_CODEX_EFFORT sets reasoning effort when given.
+		effort=(); [ -z "${GATE_CODEX_EFFORT:-}" ] || effort=(-c "model_reasoning_effort=$GATE_CODEX_EFFORT")
+		codex exec -C "$wt" --sandbox read-only -m "${GATE_CODEX_MODEL:-gpt-6-sol}" "${effort[@]}" "$ask" \
+			-o "$out/codex-final.txt" </dev/null >"$out/codex.txt" 2>&1 || rc=$?
+		# Fall back only on a failed run whose own error line names the limit: a successful review can quote the phrase.
+		if [ "$reviewer" = auto ] && [ "$rc" != 0 ] && grep -qE '^ERROR: You.ve hit your usage limit' "$out/codex.txt"; then
+			say "codex: usage limit reached (log: $out/codex.txt); the required review falls back to claude (${GATE_CLAUDE_MODEL:-sonnet})"
+			reviewer=claude
+		else reviewer=codex
+		fi
+	fi
+	if [ "$reviewer" = claude ]; then
+		# Read-only by construction, as Codex's sandbox is: the only tools are Read, Grep and Glob (no Bash, no edits),
+		# no user or project settings (their allow rules, hooks and modes), no MCP servers (Claude's auto-memory for the
+		# project may still load: it can shape the review, not write anything). The diff is handed over as a file outside
+		# the worktree. The prompt goes on stdin. Afterwards the worktree must be as it was before the review: the free
+		# ocr pass runs on the same worktree in the background, so compare with a snapshot, not with clean.
+		rc=0 log=$out/claude.txt
+		git -C "$wt" diff "$mb" "$ref" >"$out/review.diff"
+		git -C "$wt" log --format='%h %s' "$mb..$ref" >"$out/review.log"
+		git -C "$wt" status --porcelain >"$out/wt-before.txt"
+		( cd "$wt" && claude -p --model "${GATE_CLAUDE_MODEL:-sonnet}" --output-format text \
+			--tools "Read,Grep,Glob" --setting-sources "" --strict-mcp-config --add-dir "$out" \
+			<<<"$ask The diff is in $out/review.diff and the commit list in $out/review.log; read them with the Read tool, then read the code in this checkout." ) \
+			>"$out/codex-final.txt" 2>"$log" || rc=$?
+		[ "$(git -C "$wt" status --porcelain)" = "$(cat "$out/wt-before.txt")" ] ||
+			{ say "FAIL claude review changed the worktree"; git -C "$wt" status --porcelain | head; exit 1; }
+	fi
+	if [ "$rc" = 0 ] &&
+		counts=$(grep -oE '^COUNTS blocker=[0-9]+ high=[0-9]+ medium=[0-9]+ low=[0-9]+$' "$out/codex-final.txt" | tail -1) && [ -n "$counts" ]; then
+		say "$reviewer: ${counts#COUNTS } (verify every blocker/high/medium against the code): $out/codex-final.txt"
+	else
+		say "FAIL $reviewer review (no verdict; log: $log)"; tail -n 5 "$log" "$out/codex-final.txt" 2>/dev/null; exit 1
+	fi
+fi
+
+if [ "$free" = 1 ]; then
+	# Free endpoints rate-limit and come and go, so this pass is advisory: its result is reported, never a failure.
+	wait "$freepid" && frc=0 || frc=$?
+	freepid=
+	fsum=$(grep -oE 'Summary: [0-9]+ file' "$out/ocr-free.txt" | grep -oE '[0-9]+' | tail -1 || true)
+	ffail=$(grep -oE '[0-9]+ of [0-9]+ selected item\(s\) failed' "$out/ocr-free.txt" | grep -oE '^[0-9]+' | tail -1 || true)
+	fhi=$(grep -cE '^\[[a-z]+ · (critical|high|medium)\]' "$out/ocr-free.txt" || true)
+	say "ocr free ($FREE_MODEL, advisory): exit $frc, $(( ${fsum:-0} - ${ffail:-0} )) files reviewed, ${ffail:-0} failed, $fhi medium-or-higher to verify: $out/ocr-free.txt"
+fi
+
+if [ "$ocr" = 1 ]; then
+	# ocr's own count of the files it will review ("Will review (N):"), so excluded test files aren't counted
+	preview=$(ocr review --repo "$wt" --from "$mb" --to "$ref" --preview 2>"$out/ocr-preview.log") ||
+		{ say "FAIL ocr preview (log: $out/ocr-preview.log)"; tail -5 "$out/ocr-preview.log"; exit 1; }
+	want=$(sed -n 's/^Will review (\([0-9]*\)).*/\1/p' <<<"$preview" | head -1)
+	# A preview that lists files but none to review (a test-only diff: ocr excludes tests) is 0; one that lists
+	# nothing at all failed, and is never reported as a complete review.
+	if [ -z "$want" ]; then
+		grep -q '^Preview: ' <<<"$preview" || { say "FAIL ocr preview (no file list)"; exit 1; }
+		want=0
+	fi
+	bg="Merge gate for $ref. Report real defects only: correctness, concurrency, data loss, spec divergence."
+	ocr review --repo "$wt" --provider openrouter-glm --model z-ai/glm-5.3-flashx --audience agent --max-tokens-budget 0 --timeout 0 -b "$bg" --from "$mb" --to "$ref" >"$out/ocr-glm.txt" 2>&1 &
+	glm=$!
+	ocr review --repo "$wt" --audience agent --max-tokens-budget 0 --timeout 0 -b "$bg" --from "$mb" --to "$ref" >"$out/ocr-ds.txt" 2>&1 &
+	ds=$!
+	declare -A rc=()
+	wait "$glm" && rc[glm]=0 || rc[glm]=$?
+	wait "$ds" && rc[ds]=0 || rc[ds]=$?
+	for m in glm ds; do
+		# ocr's Summary counts failed items too ("N of M selected item(s) failed"): reviewed = summary - failed.
+		# No Summary line means the run didn't finish: unknown, never complete.
+		sum=$(grep -oE 'Summary: [0-9]+ file' "$out/ocr-$m.txt" | grep -oE '[0-9]+' | tail -1 || true)
+		failed=$(grep -oE '[0-9]+ of [0-9]+ selected item\(s\) failed' "$out/ocr-$m.txt" | grep -oE '^[0-9]+' | tail -1 || true)
+		got=$(( ${sum:-0} - ${failed:-0} ))
+		n=$(grep -cE '^───' "$out/ocr-$m.txt" || true)
+		hi=$(grep -cE '^\[[a-z]+ · (critical|high|medium)\]' "$out/ocr-$m.txt" || true)
+		if [ -z "$sum" ] || [ "${rc[$m]}" -ne 0 ]; then cov="UNKNOWN (exit ${rc[$m]}, no complete summary)"
+		elif [ "$got" -ge "$want" ]; then cov=complete; else cov="PARTIAL ($got of $want files, ${failed:-0} failed)"; fi
+		say "ocr $m: $got/$want files ($cov), $n comments, $hi medium-or-higher to verify: $out/ocr-$m.txt"
+		[ "$cov" = complete ] || ocrbad="${ocrbad:-} $m"
+	done
+	# A review that failed or covered less than ocr selected is not a review: the gate fails (rerun, or --no-ocr
+	# with the reason in the merge mail).
+	[ -z "${ocrbad:-}" ] || { say "FAIL ocr incomplete on:$ocrbad"; exit 1; }
+fi
+
+# A host-wide limit on concurrent gates. Each gate runs race and stress tests across every core; more than a few at once
+# overloaded a host until timing tests failed. GATE_SLOTS slots (default 7), one
+# flock each, held until this script exits; a gate with no free slot waits and says so once. The slot is taken here,
+# after the reviews: a Codex or Claude review waits on the network, not the CPU, and holding a slot through it left
+# the host idle with every slot busy and gates waiting.
+# The slot directory is one fixed path under the user's state home, not $XDG_RUNTIME_DIR (it differs between a terminal multiplexer pane and
+# an ssh shell, which would give each its own slots) and not /tmp (shared with other users); opened for append.
+slots=${GATE_SLOTS:-7} slotdir=${GATE_SLOT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mash/gate-slots} waited=0
+[[ $slots =~ ^[1-9][0-9]*$ ]] || { echo "GATE_SLOTS must be a positive integer, not '$slots'" >&2; exit 2; }
+mkdir -p -m 700 "$slotdir"
+while :; do
+	for i in $(seq 1 "$slots"); do
+		exec {slotfd}>>"$slotdir/slot.$i"
+		flock -n "$slotfd" && break 2
+		exec {slotfd}>&-
+	done
+	[ "$waited" = 1 ] || { echo "gate: all $slots gate slots are busy; waiting for one"; waited=1; }
+	sleep 5
+done
+[ "$waited" = 0 ] || echo "gate: got gate slot $i"
+
+check vet go vet ./...
+# -timeout 20m as in CI: scripts/releasecheck alone takes minutes under -race and outlasts go test's 10-minute default.
+check test go test -count=1 -timeout 20m ./...
+check race env CGO_ENABLED=1 go test -race -count=1 -timeout 20m ./...
+check darwin env GOOS=darwin GOARCH=arm64 go build ./...
+
+# Every test function the branch adds or changes, per package, run 20 times under -race at two parallelisms:
+# races that hide at the default parallelism show up here (two select races got past CI on 2-vCPU runners).
+stress=0
+while read -r pkg names; do
+	[ -n "$pkg" ] || continue
+	stress=1
+	# 40 passes (20 at each -cpu) of a package of process-driven tests outlast go test's 10-minute default
+	check "stress-$(echo "$pkg" | tr / _)" env CGO_ENABLED=1 go test -race -count=20 -cpu 1,2 -timeout 60m -run "^(${names})\$" "./$pkg"
+done < <(git -C "$wt" diff -U0 "$mb" "$ref" -- '*_test.go' | awk '
+	/^\+\+\+ b\// { f = substr($2, 3); n = split(f, p, "/"); d = p[1]; for (i = 2; i < n; i++) d = d "/" p[i] }
+	/^[+ ]func (Test[A-Za-z0-9_]+)\(/ { match($0, /Test[A-Za-z0-9_]+/); t[d] = t[d] (t[d] ? "|" : "") substr($0, RSTART, RLENGTH) }
+	/^@@/ { if (match($0, /func (Test[A-Za-z0-9_]+)\(/)) { s = substr($0, RSTART + 5); sub(/\(.*/, "", s); t[d] = t[d] (t[d] ? "|" : "") s } }
+	END { for (d in t) print d, t[d] }')
+[ "$stress" = 1 ] || say "stress: no changed unit tests"
+
+# The receipt: a JSON git note on the gated commit, written only now that every check passed. A later passing
+# gate of the same commit replaces it. `git notes add` moves the notes ref without checking its old value, so two
+# gates writing at once could lose one note: writes are serialised under a lock in the shared git directory, and
+# the note is read back before the gate passes.
+reviewed=none counts='"blocker":-1,"high":-1,"medium":-1,"low":-1'
+if v=$(grep -m1 -oE '^(codex|claude): blocker=[0-9]+ high=[0-9]+ medium=[0-9]+ low=[0-9]+' "$summary"); then
+	reviewed=${v%%:*}
+	counts=$(sed -E 's/^[a-z]+: blocker=([0-9]+) high=([0-9]+) medium=([0-9]+) low=([0-9]+)$/"blocker":\1,"high":\2,"medium":\3,"low":\4/' <<<"$v")
+fi
+jstr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; } # a JSON string: backslash and quote escaped
+passed=$(grep -oE '^PASS [A-Za-z0-9_.-]+' "$summary" | cut -d' ' -f2 | sed 's/.*/"&"/' | paste -sd, -)
+notebase=$(git -C "$wt" rev-parse HEAD^1)
+note=$(printf '{"schema":1,"sha":"%s","base":"%s","merge_result":"%s","reviewer":"%s","counts":{%s},"checks":[%s],"logs":%s,"finished":"%s"}' \
+	"$ref" "$notebase" "$(git -C "$wt" rev-parse HEAD)" "$reviewed" "$counts" \
+	"$passed" "$(jstr "$out")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+exec {notefd}>>"$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/gate-notes.lock"
+flock -w 120 "$notefd" || { say "FAIL gate note (lock busy for 2 minutes)"; exit 1; }
+# A note from a gate on a newer base is kept: a gate that ran on an older main never replaces it.
+oldbase=$(git -C "$repo" notes --ref=gate show "$ref" 2>/dev/null | grep -oE '"base":"[0-9a-f]+"' | head -1 | cut -d'"' -f4 || true)
+# On the same base, a run that reviewed less doesn't replace a note from one that did.
+oldnote=$(git -C "$repo" notes --ref=gate show "$ref" 2>/dev/null || true)
+weaker=0
+if [ -n "$oldbase" ] && [ "$oldbase" = "$notebase" ]; then
+	grep -q '"reviewer":"none"' <<<"$oldnote" || [ "$reviewed" != none ] || weaker=1
+fi
+if [ "$weaker" = 1 ]; then
+	say "gate note: kept the existing note on $(git -C "$repo" rev-parse --short "$ref"): this run reviewed less on the same main"
+elif [ -n "$oldbase" ] && [ "$oldbase" != "$notebase" ] && git -C "$repo" merge-base --is-ancestor "$notebase" "$oldbase" 2>/dev/null; then
+	say "gate note: kept the existing note on $(git -C "$repo" rev-parse --short "$ref"), from a gate on a newer main ($(git -C "$repo" rev-parse --short "$oldbase"))"
+else
+	git -C "$repo" notes --ref=gate add -f -m "$note" "$ref" 2>"$out/gate-note.log" &&
+		[ "$(git -C "$repo" notes --ref=gate show "$ref" 2>>"$out/gate-note.log")" = "$note" ] ||
+		{ say "FAIL gate note (log: $out/gate-note.log)"; exit 1; }
+fi
+exec {notefd}>&-
+[ "$weaker" = 1 ] || { [ -n "$oldbase" ] && [ "$oldbase" != "$notebase" ] && git -C "$repo" merge-base --is-ancestor "$notebase" "$oldbase" 2>/dev/null; } ||
+say "gate note: refs/notes/gate on $(git -C "$repo" rev-parse --short "$ref") (reviewer $reviewed)"
+say "GATE PASSED: $ref, merge result $(git -C "$wt" rev-parse --short HEAD); logs $out"

@@ -109,6 +109,7 @@ func Usage(prog string) string {
 	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
+		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan or an undrained inbox")
 		adoptLines(line)
 		mintLines(line)
 		retireLines(line)
@@ -267,7 +268,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(rec.KeyOrName()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), metaSuffix(rec))
+		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), metaSuffix(rec))
 	case "limits":
 		for _, n := range args[1:] {
 			if !config.ValidName(n) {
@@ -293,7 +294,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(rec.KeyOrName()), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
+		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
 	case "set-zone":
 		if len(args) != 3 || !config.ValidName(args[1]) {
 			return usage(errors.New(setZoneUsage(prog)))
@@ -308,7 +309,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(rec.KeyOrName()), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
+		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !config.ValidName(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))

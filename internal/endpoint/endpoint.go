@@ -129,7 +129,7 @@ type LeaseHeldError struct {
 
 func (e *LeaseHeldError) Error() string {
 	return fmt.Sprintf("mash: endpoint %s is already in use by another session (host %s, pid %s, since %s)",
-		e.Name, e.Host, e.PID, e.Since)
+		sap.Display(e.Name), e.Host, e.PID, e.Since)
 }
 
 type leaseValue struct {
@@ -226,7 +226,7 @@ func checkCredsFor(path, name string) error {
 	if len(allow) == 0 || allow.Contains(sap.InboxPrefix(name)+".>") {
 		return nil
 	}
-	return fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, name)
+	return fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))
 }
 
 func readIdentity(path string) (sap.Identity, error) {
@@ -358,7 +358,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	}
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
-		log: log.New(os.Stderr, "mash["+cfg.Name+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
+		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
 		dir:           map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
 	if opts.Presence {
@@ -389,14 +389,14 @@ func (e *Endpoint) AdoptLaunchInstance(ctx context.Context) error {
 		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but the lease bucket can't be read: %w", err)
 	}
 	if err != nil {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease can't be read (is its serve running?): %w", e.key, err)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease can't be read (is its serve running?): %w", e.Display(), err)
 	}
 	var lv leaseValue
 	if err := json.Unmarshal(val, &lv); err != nil || lv.Instance == "" {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease names no instance", e.key)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN is set but %s's lease names no instance", e.Display())
 	}
 	if lv.LaunchToken != e.cfg.LaunchToken {
-		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN does not match the launch holding %s's lease: this shell is not that session's", e.key)
+		return fmt.Errorf("mash: MASH_LAUNCH_TOKEN does not match the launch holding %s's lease: this shell is not that session's", e.Display())
 	}
 	e.instance = lv.Instance
 	return nil
@@ -421,7 +421,7 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	if err != nil {
 		e.Close() // gives the lease back
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.key)
+			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.Display())
 		}
 		return nil, fmt.Errorf("mash: directory: %w", err)
 	}
@@ -477,7 +477,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 		held := &LeaseHeldError{Name: e.key, Host: "?", PID: "?", Since: "?"}
 		if cur, gerr := kv.Get(ctx, e.key); gerr == nil {
 			if fenced(cur.Value()) {
-				return fmt.Errorf("%w: %s", ErrDeprovisioned, e.key)
+				return fmt.Errorf("%w: %s", ErrDeprovisioned, e.Display())
 			}
 			var lv leaseValue
 			if json.Unmarshal(cur.Value(), &lv) == nil {
@@ -596,7 +596,7 @@ func (e *Endpoint) refreshKey(ctx context.Context, key string, revp *atomic.Uint
 	// outage (re-take it if free), or another session holds the name.
 	if cur, gerr := e.leaseKV.Get(ctx, key); gerr == nil {
 		if fenced(cur.Value()) {
-			return fmt.Errorf("%w: %s", ErrDeprovisioned, key)
+			return fmt.Errorf("%w: %s", ErrDeprovisioned, e.Display())
 		}
 		var lv leaseValue
 		if json.Unmarshal(cur.Value(), &lv) == nil && lv.Instance == e.instance {
@@ -628,7 +628,7 @@ func (e *Endpoint) refreshKey(ctx context.Context, key string, revp *atomic.Uint
 			return nil
 		}
 	}
-	return fmt.Errorf("mash: lost the lease on %s to another session", key)
+	return fmt.Errorf("mash: lost the lease on %s to another session", e.Display())
 }
 
 // Run consumes mail and keeps the directory and lease current (presence is asked for on demand, ADR 0066)
@@ -730,6 +730,10 @@ func (e *Endpoint) Name() string { return e.cfg.Name }
 // a three-token one. It is what the endpoint signs as, what its stream, lease and directory record are keyed by, and
 // what who and the mail labels show.
 func (e *Endpoint) Key() string { return e.key }
+
+// Display is this endpoint as people read it: agent.owner.name for a three-token endpoint, the bare name for a legacy
+// one (ADR 0081). Key stays the storage and signing form.
+func (e *Endpoint) Display() string { return e.ident.String() }
 
 // EndpointIdentity is this endpoint's identity (agent, owner and name tokens).
 func (e *Endpoint) EndpointIdentity() sap.EndpointIdentity { return e.ident }

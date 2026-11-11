@@ -81,7 +81,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			key := hex.EncodeToString(sum[:])[:16]
 			if !sp.Told(key) {
 				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
-					host.OwnerPID(sp.Owner()), cfg.Name)
+					host.OwnerPID(sp.Owner()), cfg.DisplayName())
 				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
 					if err := sp.NoteTold(key); err != nil {
 						fmt.Fprintf(stderr, "mash hook: recording the notice: %v\n", err)
@@ -121,7 +121,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if len(fresh) == 0 {
 		return 0
 	}
-	pres := host.Presentation{Name: cfg.Name, Owner: cfg.Owner, Event: trig.Event, BatchMsgs: cfg.BatchMsgs, BatchBytes: cfg.BatchBytes}
+	pres := host.Presentation{Name: cfg.DisplayName(), Owner: cfg.Owner, Event: trig.Event, BatchMsgs: cfg.BatchMsgs, BatchBytes: cfg.BatchBytes}
 	out, shown := adapter.Present(pres, slices.Clone(fresh))
 	if len(listed) > 0 && !anyListed(shown) {
 		// New mail fits in full: see whether the listed mail fits with it. Only a batch with no digest line is taken.

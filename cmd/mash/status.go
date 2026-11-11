@@ -86,7 +86,7 @@ func versionTool(src *statusSource) mcp.Tool {
 	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's name and owner.",
 		Schema: schema(map[string]any{}),
 		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
-			out := versionText(src.cfg.Name, src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
+			out := versionText(src.cfg.DisplayName(), src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
 			if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
 				out += "\n" + l
 			}
@@ -150,7 +150,7 @@ func nameLine(cfg config.Config) string {
 	case !config.ValidName(cfg.Name):
 		return fmt.Sprintf("name: FAILED - %q is not a valid endpoint name. Next: start Claude Code with MASH_NAME=<endpoint>, using 1-48 lower-case letters, digits and single hyphens, starting with a letter", cfg.Name)
 	}
-	return "name: OK - " + cfg.Name
+	return "name: OK - " + cfg.DisplayName()
 }
 
 // identityLine names the identity form when a three-token identity is configured, and is empty otherwise.
@@ -292,18 +292,18 @@ func connectionLine(src *statusSource) string {
 	st := src.state.Load()
 	switch {
 	case st == nil:
-		return "connection: STARTING - mash is opening endpoint " + cfg.Name
+		return "connection: STARTING - mash is opening endpoint " + cfg.DisplayName()
 	case st.ep != nil:
-		return fmt.Sprintf("connection: OK - endpoint %s is running", cfg.Name)
+		return fmt.Sprintf("connection: OK - endpoint %s is running", cfg.DisplayName())
 	case st.failed != nil:
 		return fmt.Sprintf("connection: FAILED - %s. Next: fix the cause (see the creds and config lines) and restart Claude Code", redactText(st.failed.Error()))
 	case st.retrying != nil:
 		return fmt.Sprintf("connection: RETRYING - could not reach the server, last error: %s. mash retries on its own", redactText(st.retrying.Error()))
 	case st.waiting != nil:
 		return fmt.Sprintf("connection: WAITING - the lease for endpoint %s is held by another session (host %s, pid %s, since %s). mash retries on its own. Next: end that session, or start this one with a different MASH_NAME",
-			cfg.Name, redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
+			cfg.DisplayName(), redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
 	}
-	return "connection: STARTING - mash is opening endpoint " + cfg.Name
+	return "connection: STARTING - mash is opening endpoint " + cfg.DisplayName()
 }
 
 // clockWarn is the skew past which status warns, well inside sap.LiveSkew so there is time to fix it.

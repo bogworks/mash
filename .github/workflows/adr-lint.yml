@@ -20,6 +20,13 @@ name: adr-lint
 # from the pull request is run. The body and the labels reach the tool through env, never through the text of the shell
 # script. A fork checkout may lack the base commit, so the base commit
 # is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
+#
+# Mergify's merge-queue drafts are skipped (the job reports SKIPPED, which Mergify and the ruleset accept): they carry no
+# Decision line, and the pull request they batch was judged on its own head. The skip is a job-level if that needs ALL of:
+# the head ref starts with mergify/merge-queue/, the head is in this same repository, and the pull request's author is the
+# Mergify bot (mergify[bot]). A pull request author controls the branch name, so the prefix alone would let anyone who can
+# push a branch bypass the check; a fork pull request, or a human's pull request on such a branch name, is still judged.
+# The fields are base-repository-trusted event fields (this runs on pull_request_target).
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
@@ -32,18 +39,19 @@ concurrency:
   cancel-in-progress: true
 jobs:
   adr-lint:
+    if: ${{ !(startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'mergify[bot]') }}
     runs-on: [self-hosted, rh-gate]
     timeout-minutes: 10
     steps:
       - name: Check out the base branch (the trusted checker)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
           fetch-depth: 0
           persist-credentials: false
       - name: Check out the pull request (data only, never run)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -57,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           git -C pr fetch --no-tags "$GITHUB_WORKSPACE/trusted" "+$BASE_SHA:refs/remotes/origin/$BASE_REF"
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: trusted/go.mod
           cache: false

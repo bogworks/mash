@@ -26,6 +26,7 @@ import (
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/mcp"
 	"github.com/bogworks/mash/internal/render"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
 
@@ -165,7 +166,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	if cfgErr != nil {
 		fmt.Fprintln(stderr, cfgErr)
-		return degraded(endpoint.ErrorInstructions(cfg.Name, cfgErr), true)
+		return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), cfgErr), true)
 	}
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
@@ -180,7 +181,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			perr = fmt.Errorf("mash: reading %s: %w", path, perr)
 			src.cfgErr = perr
 			fmt.Fprintln(stderr, perr)
-			return degraded(endpoint.ErrorInstructions(cfg.Name, perr), true)
+			return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), perr), true)
 		}
 	}
 	// The first Open runs before the MCP server exists, as it always has: it is bounded by openTimeout, and a
@@ -203,14 +204,14 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			fmt.Fprintln(stderr, err)
 			src.state = &atomic.Pointer[sessionState]{}
 			src.state.Store(&sessionState{failed: err})
-			return degraded(endpoint.ErrorInstructions(cfg.Name, err), true)
+			return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), err), true)
 		}
 		startErr = err
 		fmt.Fprintf(stderr, "%v; retrying (a transient error does not end the wait)\n", err)
 	}
 	var state atomic.Pointer[sessionState]
 	instr := ""
-	instr = endpoint.Instructions(cfg.Name, cfg.Owner, string(policy))
+	instr = endpoint.Instructions(cfg.DisplayName(), cfg.Owner, string(policy))
 	switch {
 	case ep != nil:
 		state.Store(&sessionState{ep: ep})
@@ -257,7 +258,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			return
 		}
 		if waited {
-			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.Name))
+			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
 		go pingClient(ctx, srv, ep)
 		// Hook delivery: once the plugin's hook has run in this session, mail goes through the spool (endpoint/hook.go).
@@ -293,11 +294,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
 			text := fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
-				p.From, p.Trust, p.RequestID, p.Text)
+				sap.Display(p.From), p.Trust, p.RequestID, p.Text)
 			_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
 		}); err != nil {
 			fmt.Fprintln(stderr, err)
-			_ = srv.Notify(endpoint.ErrorInstructions(cfg.Name, err), map[string]string{"error": "true"})
+			_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
 		}
 		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
 			// The lease is gone (another session holds the name): stop the SAP
@@ -309,7 +310,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			fmt.Fprintln(stderr, err)
 			told := make(chan struct{})
 			go func() {
-				_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.Name, err),
+				_ = srv.Notify(fmt.Sprintf("mash: endpoint %s stopped: %v. Mail is off for this session.", cfg.DisplayName(), err),
 					map[string]string{"error": "true"})
 				close(told)
 			}()
@@ -390,7 +391,7 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			failed = r.err
 			state.Store(&sessionState{failed: r.err})
 			if ready == nil { // Claude is already listening: say so now
-				notify(endpoint.ErrorInstructions(cfg.Name, r.err))
+				notify(endpoint.ErrorInstructions(cfg.DisplayName(), r.err))
 				return nil, true
 			}
 		}
@@ -410,7 +411,7 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			default:
 			}
 			if failed != nil {
-				notify(endpoint.ErrorInstructions(cfg.Name, failed))
+				notify(endpoint.ErrorInstructions(cfg.DisplayName(), failed))
 				return nil, false
 			}
 			if !heldSent {
@@ -419,7 +420,7 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 					notify(held.Error() + "; mail is off for this session. mash is retrying every " + leaseRetry.String() + ".")
 				} else {
 					notify(fmt.Sprintf("mash: endpoint %s could not reach its server (%v); mail is off for this session. mash is retrying.",
-						cfg.Name, lastTransient))
+						cfg.DisplayName(), lastTransient))
 				}
 			}
 		case <-timer.C:
@@ -474,7 +475,7 @@ func kindProp() map[string]any {
 }
 
 func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
-	name := src.cfg.Name
+	name := src.cfg.DisplayName()
 	callTimeout := src.cfg.CallTimeout
 	// Each handler loads the state once and uses the endpoint it finds, so the tools are registered once and
 	// work on whichever endpoint the session ends up with.
@@ -535,12 +536,12 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				seq := res.Seq
 				if res.Duplicate {
-					return fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, a.To, a.ID), nil
+					return fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID), nil
 				}
 				if tagged {
-					return fmt.Sprintf("sent #%d to %s %s", seq, a.To, kind.TaggedNote), nil
+					return fmt.Sprintf("sent #%d to %s %s", seq, sap.Display(sap.KeyOf(a.To)), kind.TaggedNote), nil
 				}
-				return fmt.Sprintf("sent #%d to %s", seq, a.To), nil
+				return fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To))), nil
 			})},
 		{Name: "read", Description: readDescription(src.cfg),
 			// Only after the result is written to the client has the model the body. That counts as seen, so serve
@@ -805,7 +806,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if p.Online {
 			state = "online"
 		}
-		fmt.Fprintf(&b, "%s\t%s", p.Record.KeyOrName(), state)
+		fmt.Fprintf(&b, "%s\t%s", sap.Display(p.Record.KeyOrName()), state)
 		if !p.LastSeen.IsZero() {
 			fmt.Fprintf(&b, "\tseen %s ago", time.Since(p.LastSeen).Round(time.Second))
 		}

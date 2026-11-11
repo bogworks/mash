@@ -1,0 +1,1 @@
+Release verification (`release-check`, the dry-run job and the documented consumer commands) no longer passes `--deny-self-hosted-runners`, so attestations made on our own self-hosted runners verify; they still pin the signer workflow, repository and ref, and they claim only that the maintainers' runner built the bytes (ADR 0087).

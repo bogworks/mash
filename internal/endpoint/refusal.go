@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // RefusedError is a send the server refused by permissions: the sender's NATS user may not publish to the
@@ -21,7 +23,7 @@ type RefusedError struct {
 }
 
 func (e *RefusedError) Error() string {
-	return "refused by policy: you may not mail " + e.To + "." +
+	return "refused by policy: you may not mail " + sap.Display(e.To) + "." +
 		" If the policy file allows this pair, or lists the recipient at all (mashctl policy explain)," +
 		" your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue." + e.retryClause()
 }

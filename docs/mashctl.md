@@ -100,6 +100,10 @@ After the save the policy is compiled before and after, and each consequence is 
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
+## Auditing the population
+
+`mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, undrained legacy inboxes, unreadable items, movement found by `--compare`), 2 usage, 3 the audit could not complete (server unreachable, unreadable required input, bad `--compare` file). See [audit.md](audit.md).
+
 ## Retiring an endpoint
 
 ```sh
@@ -131,7 +135,7 @@ Because revocation is by key and time, a reissue (`mashctl reissue`, `mashctl ad
 
 ## Exit codes and arguments
 
-`policy diff` and `policy apply --dry-run` exit 1 when they refuse (a conflict, an unknown signing key, a zone outside the policy nobody acknowledged, a replaced zone key, an issuer that does not verify, or servers that hold different account JWTs that cannot be told apart), so a CI gate built on `diff` fails on a refusal; they exit 0 when they only report differences or nothing. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended". An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get their permissions from the policy file's zone key (see `mashctl policy explain`).
+`policy diff` and `policy apply --dry-run` exit 1 when they refuse (a conflict, an unknown signing key, a zone outside the policy nobody acknowledged, a replaced zone key, an issuer that does not verify, or servers that hold different account JWTs that cannot be told apart), so a CI gate built on `diff` fails on a refusal; they exit 0 when they only report differences or nothing. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get their permissions from the policy file's zone key (see `mashctl policy explain`).
 
 ## Checking and repairing drift
 

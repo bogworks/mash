@@ -199,6 +199,28 @@ func credsUserKey(p string) (string, error) {
 	return uc.Subject, nil
 }
 
+// credsAccountKey is the public key of the account a creds file's user belongs to: the account the user JWT names as
+// its issuing account (a signing key issues on behalf of it), else its issuer.
+func credsAccountKey(p string) (string, error) {
+	raw, err := readCreds(p)
+	if err != nil {
+		return "", err
+	}
+	defer clear(raw)
+	token, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	}
+	uc, err := jwt.DecodeUserClaims(token)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	}
+	if uc.IssuerAccount != "" {
+		return uc.IssuerAccount, nil
+	}
+	return uc.Issuer, nil
+}
+
 // readCreds reads name's creds file at path, refusing one other users can read.
 func readCreds(path string) ([]byte, error) {
 	if err := config.CheckCredsMode(path); err != nil {

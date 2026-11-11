@@ -24,19 +24,21 @@ const sbomPredicateType = "https://cyclonedx.org/bom"
 const releaseWorkflowPath = ".github/workflows/release.yml"
 
 // attestFlags are the gh attestation verify flags that pin WHO made an attestation: the release workflow of the release
-// repository, at the release tag. --deny-self-hosted-runners stays until the maintainer rules on the attestation question (ADR 0079). -R alone would accept any workflow of the repository on any ref.
+// repository, at the release tag. There is deliberately no --deny-self-hosted-runners: the release is built and attested
+// on our own self-hosted runners, and verification accepts them by design (ADR 0087). -R alone would accept any workflow
+// of the repository on any ref.
 func attestFlags(o Options, tag string) []string {
-	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag, "--deny-self-hosted-runners"}
+	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag}
 }
 
 // verifySupplyChain holds the release's SBOMs and build provenance to what release.yml promises, on every binary; any
 // failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each binary it requires that
 //   - the attached mash-<os>-<arch>.cdx.json is CycloneDX JSON with components and a described main component or tool;
 //   - `gh attestation verify <binary> -R <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref
-//     refs/tags/v<version> --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom` passes and a verified
+//     refs/tags/v<version> --predicate-type https://cyclonedx.org/bom` passes and a verified
 //     statement names the binary's own sha256 as its subject and carries the attached SBOM as its predicate (an SBOM
 //     attested for some other file, or a different SBOM file, is refused);
-//   - `gh attestation verify <binary> --bundle mash.intoto.jsonl` with the same signer, ref and runner flags passes: the
+//   - `gh attestation verify <binary> --bundle mash.intoto.jsonl` with the same signer and ref flags passes: the
 //     attached provenance is the Sigstore bundle of the in-job attestation (actions/attest-build-provenance) and names the
 //     binary as a subject;
 //   - the provenance's workflow entry point is .github/workflows/release.yml (checkProvenanceEntryPoint).

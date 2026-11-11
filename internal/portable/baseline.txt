@@ -12,3 +12,6 @@ R2-home-and-tmp scripts/releasecheck/sums.go 1
 R4-long-timeout internal/config/config.go 1
 R4-long-timeout internal/config/limits.go 3
 R4-long-timeout scripts/releasecheck/latency.go 1
+
+# the in-session review gate's default receipt store must equal the review watcher's default path, which names the watcher's own directory (ADR 0080)
+R5-shell scripts/gate 1

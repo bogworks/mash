@@ -23,6 +23,7 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/policy"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -347,8 +348,8 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 	}
 	for _, r := range recs {
 		if !declared[r.KeyOrName()] {
-			out = append(out, apply.Finding{Kind: kindRecordExtra, Subject: r.KeyOrName(),
-				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record): " + orphanText(r.KeyOrName())})
+			out = append(out, apply.Finding{Kind: kindRecordExtra, Subject: r.KeyOrName(), Identity: shownIdentity(r.KeyOrName()),
+				Detail: "a directory record the policy file does not declare (reported only: repair never deletes a record): " + orphanTextShown(sap.Display(r.KeyOrName()), r.KeyOrName())})
 		}
 	}
 	sortFindings(out)
@@ -486,7 +487,11 @@ func printState(out io.Writer, name string, s stateReport) {
 		fmt.Fprintf(out, "%s: DRIFT (%d)\n", name, len(s.Findings))
 		for _, f := range s.Findings {
 			if f.Subject != "" {
-				fmt.Fprintf(out, "  %s %s: %s\n", f.Kind, config.Escape(f.Subject), config.Escape(f.Detail))
+				shown := f.Subject
+				if f.Identity != "" {
+					shown = f.Identity // the text is for people (ADR 0081); the JSON keeps the flat subject
+				}
+				fmt.Fprintf(out, "  %s %s: %s\n", f.Kind, config.Escape(shown), config.Escape(f.Detail))
 			} else {
 				fmt.Fprintf(out, "  %s: %s\n", f.Kind, config.Escape(f.Detail))
 			}
@@ -751,4 +756,12 @@ func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryR
 		}
 	}
 	return rc
+}
+
+// shownIdentity is the canonical agent.owner.name of a three-token directory key, and "" for anything else.
+func shownIdentity(key string) string {
+	if d := sap.Display(key); d != key {
+		return d
+	}
+	return ""
 }

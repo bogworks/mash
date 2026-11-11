@@ -20,10 +20,11 @@ import (
 // "account"). Subject is the zone; Lines are the permission lines added ("+") and removed ("-") going from the server's
 // template to the file's.
 type Finding struct {
-	Kind    string   `json:"kind"`
-	Subject string   `json:"subject,omitempty"`
-	Detail  string   `json:"detail"`
-	Lines   []string `json:"lines,omitempty"`
+	Kind     string   `json:"kind"`
+	Subject  string   `json:"subject,omitempty"`
+	Identity string   `json:"identity,omitempty"` // additive (ADR 0081): the canonical agent.owner.name of a three-token Subject, omitted otherwise
+	Detail   string   `json:"detail"`
+	Lines    []string `json:"lines,omitempty"`
 }
 
 // Finding kinds of AccountFindings.

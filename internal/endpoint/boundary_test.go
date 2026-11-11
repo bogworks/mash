@@ -205,6 +205,11 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 		t.Fatalf("SpoolWakeCount is %d: this test is written for the default 500", SpoolWakeCount)
 	}
 	const fyi, total = 600, 601
+	// The drain is judged against the stream's headroom, which the endpoint reads live (ADR 0069) and counts as none when
+	// the read fails or times out. A loaded runner can time out that read mid-drain and wake a third time. This test is
+	// about the wake count, so it fixes the headroom as ample; the unreadable and full cases have their own tests
+	// (wake_bound_test.go).
+	fakeStreamBytes(t, 0, 1<<40, nil)
 	f := newFixture(t, "a", "b")
 	f.idle = 20 * time.Second
 	a, ev, sp := f.runSpooled(t, "a")
