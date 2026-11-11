@@ -8,6 +8,7 @@ mash's architecture decision records (ADRs), in [MADR 4.0](https://adr.github.io
 says how they work: one decision per file, never rewritten once accepted, superseded by a new ADR instead. A pull
 request that makes or reverses a decision carries its ADR. A pull request that adds an ADR takes the number in [`NEXT`](NEXT) and bumps `NEXT` in the same pull request
 ([0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md)).
+The lint judges immutability against the merge-base of the base branch and the pull request, so an ADR that merged after the branch point is not the pull request's to judge.
 
 0003 to 0037 were backfilled on 2026-10-31 from the design spec, pull requests, issues and maintainer discussions.
 Each gives the date the decision was made and its sources. Where the options weighed were not written down at the

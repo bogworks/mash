@@ -21,8 +21,10 @@
 //	   docs/decisions/NEXT holds the next free number (highest + 1, four digits and a newline): a pull request that adds
 //	   an ADR takes it and bumps NEXT (ADR 0070)
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
-//	e  with --base: an ADR that was accepted at <ref> may change only its status line (to superseded by ADR-NNNN) and
-//	   add or change a "Superseded by [..](..)" line, whose link must resolve to an existing ADR file
+//	e  with --base: an ADR that was accepted at the merge-base of <ref> and HEAD is immutable: it may change only its
+//	   status line (to superseded by ADR-NNNN) and add or change a "Superseded by [..](..)" line, whose link must
+//	   resolve to an existing ADR file. An ADR that merged to <ref> after the branch point is not the pull request's
+//	   to judge. When git cannot find a merge-base, <ref> itself is the comparison point (stricter)
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
 // --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
@@ -212,7 +214,14 @@ func runDocs(args []string, e env) int {
 			fmt.Fprintf(e.stderr, "adrlint: base %q is not a commit: %v\n", *base, err)
 			return 2
 		}
-		iv, err := lintImmutable(fsDir, rel, *base, git)
+		// Compare with the branch point, not the tip: an ADR merged to base after this branch was cut is not ours.
+		point := *base
+		if out, err := git("merge-base", *base, "HEAD"); err == nil {
+			if sha := strings.TrimSpace(string(out)); sha != "" {
+				point = sha
+			}
+		}
+		iv, err := lintImmutableAt(fsDir, rel, point, *base, git)
 		if err != nil {
 			fmt.Fprintln(e.stderr, "adrlint:", err)
 			return 2
@@ -587,6 +596,11 @@ type numbered struct {
 // lintImmutable is rule e: every ADR that was accepted at base is compared with the working file. dir is the
 // directory on disk, rel the same directory as git names it (slash path relative to the repository root).
 func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
+	return lintImmutableAt(dir, rel, base, base, git)
+}
+
+// lintImmutableAt reads the accepted ADRs at the git revision point and names label (the ref the user gave) in messages.
+func lintImmutableAt(dir, rel, point, label string, git gitFunc) ([]string, error) {
 	files, _, err := adrFiles(dir)
 	if err != nil {
 		return nil, err
@@ -596,7 +610,7 @@ func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 	for _, n := range files {
 		names[n] = true
 	}
-	if out, err := git("ls-tree", "--name-only", base, "./"+rel+"/"); err == nil {
+	if out, err := git("ls-tree", "--name-only", point, "./"+rel+"/"); err == nil {
 		for _, p := range strings.Fields(string(out)) {
 			if n := filepath.Base(p); nameRE.MatchString(n) {
 				names[n] = true
@@ -612,7 +626,7 @@ func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 	var vs []string
 	for _, n := range sorted {
 		path := filepath.Join(dir, n)
-		old, err := git("show", base+":./"+rel+"/"+n)
+		old, err := git("show", point+":./"+rel+"/"+n)
 		if err != nil {
 			continue // not at base: a new file is free
 		}
@@ -623,10 +637,10 @@ func lintImmutable(dir, rel, base string, git gitFunc) ([]string, error) {
 		}
 		cur, err := os.ReadFile(path)
 		if err != nil {
-			vs = append(vs, viol(path, 1, "accepted ADR (at %s) was deleted; supersede it instead", base))
+			vs = append(vs, viol(path, 1, "accepted ADR (at %s) was deleted; supersede it instead", label))
 			continue
 		}
-		vs = append(vs, compareAccepted(path, base, oldLines, ofm, splitLines(cur))...)
+		vs = append(vs, compareAccepted(path, label, oldLines, ofm, splitLines(cur))...)
 	}
 	return vs, nil
 }
