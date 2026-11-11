@@ -426,7 +426,10 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 					testLegacyHandlerGate()
 				}
 				if !e.legacyReading() {
-					return // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+					// the lease is gone: not queued, not acked, and not left pending until the ack wait (a retake by this
+					// endpoint would not get it for that long); nak'd with a delay, so a loop that is still pulling does not spin
+					_ = m.NakWithDelay(time.Second)
+					return
 				}
 				if e.legacy.epoch.Load() != epoch {
 					_ = m.Nak() // a loop of an earlier hold: the current hold's loop is redelivered it
@@ -441,7 +444,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
 			if !e.leaseHeldFor(stream) {
-				_ = m.Nak() // the lease is gone: not queued, not acked; the holder's consumer is redelivered it
+				_ = m.NakWithDelay(time.Second) // the lease is gone: not queued, not acked; redelivered after a second, not in a loop
 				return
 			}
 			defer e.waking.received(ref)
