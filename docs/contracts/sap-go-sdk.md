@@ -254,7 +254,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - Acceptance: AT-001.
 
 ### REQ-010: A conformance catalog that ties every requirement to a test
-- Source: Confirmed ("full SAP conformance", 2026-11-11); method from of `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`
+- Source: Confirmed ("full SAP conformance", 2026-11-11); method from `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`
   (169 requirements, each with section, line and tests) and card #13's "SAP v0.3 conformance table".
 - MUST: a machine-readable catalog lists every MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in `core-protocol.md` at the
   pinned revision, split into **atomic obligations**: one testable behaviour each. A sentence with two obligations is
