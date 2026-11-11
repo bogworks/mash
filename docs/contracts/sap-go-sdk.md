@@ -413,8 +413,12 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 
 ### REQ-019: Concurrency
 - Source: Confirmed in scope at ratification (2026-11-11); from mash-lead's review, 2026-11-10.
-- MUST: a caller value is safe for concurrent use. Many prompts may run at once on one connection, each with its own
-  reply subscription and stream.
+- MUST: a caller value is safe for concurrent use. Many prompts may run at once on one connection.
+- MUST: one reply subscription per client, multiplexed; each prompt's replies are isolated by its reply token, and a
+  late or unknown reply is dropped and counted. This is how both official SDKs do it (amended 2026-11-11, mash-lead,
+  approved within the contract: matching upstream outranks the earlier per-prompt wording).
+- MUST: tests show cross-prompt isolation (concurrent prompts never see each other's chunks) and a late reply arriving
+  after its prompt timed out (dropped, counted, never delivered to another prompt).
 - MUST: a host serves concurrent prompts. Its handler runs once per request, with a documented concurrency limit that
   the program can set.
 - MUST: shared state is safe under the race detector: the heartbeat tracker and the replay set. Tests run with `-race`.
