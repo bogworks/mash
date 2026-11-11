@@ -306,9 +306,9 @@ jobs:
             echo "== $n"
             # The provenance was made from a branch ref (main), not a tag, so no source tag applies: the signer workflow and
             # source ref pin it. The attached bundle must verify offline for this binary, as must the attestation GitHub holds.
-            gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners
-            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners
-            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom --format json > "$RUNNER_TEMP/$n.sbom-verify.json"
+            gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --predicate-type https://cyclonedx.org/bom --format json > "$RUNNER_TEMP/$n.sbom-verify.json"
             # actions/attest-sbom stores the SBOM verbatim as the predicate: a verified statement about THIS binary must
             # carry exactly the attached .cdx.json (`jq -S` sorts keys, so only content is compared).
             sum="$(sha256sum "$n" | cut -d' ' -f1)"

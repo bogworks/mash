@@ -84,3 +84,4 @@
 | [0083](0083-a-via-origin-is-an-endpoint-name-or-a-canonical-flat-key-amends-0063.md) | A via origin is a legacy endpoint name or a canonical flat key (amends 0063) | accepted | 2026-11-10 |
 | [0084](0084-ci-warms-go-caches-from-a-read-only-seed.md) | CI warms its Go caches from a read-only seed copied per job | accepted | 2026-11-11 |
 | [0086](0086-the-queue-s-gate-jobs-run-on-small-dedicated-gate-runners.md) | The queue's gate jobs run on small dedicated gate runners | accepted | 2026-11-11 |
+| [0087](0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md) | Release attestations from our own runners are accepted and say only that we built them | accepted | 2026-11-11 |
