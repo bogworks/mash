@@ -10,7 +10,7 @@ import (
 	"github.com/bogworks/mash/internal/spool"
 )
 
-// Tests for the notice `mash hook` prints while its session's serve waits for the endpoint's lease (ADR 0082).
+// Tests for the notice `mash hook` prints while its session's serve waits for the endpoint's lease (ADR 0090).
 
 const waitNoticeText = "mash: this session does not hold endpoint a (held by pid 4242 on holderhost); mail is off until it recovers"
 

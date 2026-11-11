@@ -15,7 +15,7 @@ import (
 	"github.com/bogworks/mash/internal/spool"
 )
 
-// Tests for the same-session takeover of the endpoint lease (ADR 0082).
+// Tests for the same-session takeover of the endpoint lease (ADR 0090).
 
 // asSession makes every serve in this process look like a serve of one Claude Code session: the same parent, and the
 // same session id. The other tests of this package run with no session identity (see TestMain).

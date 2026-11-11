@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 		return
 	}
 	// In-process serves share a parent and a session id: without this each would take the lease from the one before as
-	// an earlier serve of the same session (ADR 0082). A test that wants that calls asSession.
+	// an earlier serve of the same session (ADR 0090). A test that wants that calls asSession.
 	endpoint.OurSession = func() endpoint.SessionIdent { return endpoint.SessionIdent{} }
 	code := m.Run()
 	if binDir != "" {

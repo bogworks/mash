@@ -80,7 +80,7 @@ var (
 	mcpPingEvery = 30 * time.Second
 	mcpPingWait  = 10 * time.Second
 
-	// A held lease whose holder is an earlier serve of this same session (ADR 0082) that was not taken over (the
+	// A held lease whose holder is an earlier serve of this same session (ADR 0090) that was not taken over (the
 	// compare-and-set lost to a write made since) is retried after sameSessionRetry, up to sameSessionTries times in a
 	// row, then every leaseRetry.
 	sameSessionRetry = time.Second
@@ -366,7 +366,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
 			var lostTo *endpoint.LeaseLostError
 			if errors.As(err, &lostTo) && lostTo.SameSession {
-				// A newer serve of this same session holds the lease (ADR 0082): this one has stopped consuming and
+				// A newer serve of this same session holds the lease (ADR 0090): this one has stopped consuming and
 				// refreshing. It stays up, inactive and labelled, until its client closes it or its parent changes.
 				stopSvc()
 				state.Store(&sessionState{superseded: lostTo})
@@ -1006,7 +1006,7 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // noteWaiting records this serve in its endpoint's spool as waiting for the lease (spool.NoteWaiter), so a hook of the
 // same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
 // removes the record, and the function that records who holds the lease (the spool's lease-wait state, which a hook of
-// this session turns into a notice, ADR 0082); the removal removes that state too. A spool that cannot be written costs
+// this session turns into a notice, ADR 0090); the removal removes that state too. A spool that cannot be written costs
 // only these.
 func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
 	dir, err := endpoint.SpoolDir(cfg)

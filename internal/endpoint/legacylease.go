@@ -227,7 +227,7 @@ func (e *Endpoint) takeLegacyLease(ctx context.Context) {
 	if cur, gerr := e.leaseKV.Get(ctx, e.legacyKey); gerr == nil && !fenced(cur.Value()) {
 		var lv leaseValue
 		// A holder on this machine whose process is gone, or an earlier serve of this session, is taken over, as for the
-		// own lease (G270, ADR 0082).
+		// own lease (G270, ADR 0090).
 		if json.Unmarshal(cur.Value(), &lv) == nil {
 			if reason := e.takeoverReason(lv); reason != "" {
 				if rev, uerr := e.leaseKV.Update(ctx, e.legacyKey, val, cur.Revision()); uerr == nil {
