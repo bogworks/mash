@@ -640,11 +640,13 @@ The contract is accepted on these five lines. The checks below are how each is s
   (Q11).
 
 ### AT-011: Parity, feature by feature (demonstrated state, plus a runnable check)
-- A parity matrix in the SDK repository (`docs/parity.md`) lists every public feature of the official TypeScript
-  (`client-sdk/typescript`) and Python (`agent-sdk/python`) SDKs at the commit the release names: each exported call,
-  option, event, error type and helper, one row each.
-- Each row names the Go counterpart and the Go test that exercises it, or the reason it is not ported. A row without
-  a counterpart is a deviation for Randy to accept (section 8), never a silent gap.
+- A parity matrix in the SDK repository (`docs/parity.md`) covers all four official packages in
+  `synadia-ai/synadia-agents`, at the commit the release names: the caller (client) SDKs in TypeScript
+  (`client-sdk/typescript`) and Python (`client-sdk/python`), and the host (agent) SDKs in TypeScript
+  (`agent-sdk/typescript`) and Python (`agent-sdk/python`). Every exported call, option, event, error type and helper
+  of each of the four has a row, and each row marks which of the four packages carry it.
+- Every row names the Go counterpart and a Go test that exercises it, or a deviation Randy has accepted (section 8).
+  A row with neither fails the check; there is no silent gap in any of the four packages.
 - A check fails when a row names a Go identifier or test that does not exist.
 
 ### AT-012: Code-quality audits (review record)
