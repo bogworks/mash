@@ -76,6 +76,13 @@ func good() map[string]string {
 	return map[string]string{"README.md": goodReadme, "0001-use-one-way.md": goodADR, "guide.md": "guide\n", "NEXT": next(2)}
 }
 
+func without(m map[string]string, keys ...string) map[string]string {
+	for _, k := range keys {
+		delete(m, k)
+	}
+	return m
+}
+
 func with(m map[string]string, kv ...string) map[string]string {
 	out := map[string]string{}
 	for k, v := range m {
@@ -139,7 +146,9 @@ func TestDocs(t *testing.T) {
 		{"c: README link dead", with(good(), "README.md", goodReadme+"- [0002](0002-gone.md)\n"), []string{"README.md:4: link to 0002-gone.md does not resolve"}},
 		{"c: ADR link dead", with(good(), adr, edit(goodADR, "guide.md", "nope.md")), []string{`link "nope.md" does not resolve`}},
 		{"c: duplicate number", with(good(), "0001-other.md", goodADR, "README.md", goodReadme+"- [x](0001-other.md)\n"), []string{"number 0001 is used by more than one"}},
-		{"n: NEXT missing", with(good(), "NEXT", "\x00"), []string{"NEXT:1: NEXT is missing", "bump NEXT in the same PR"}},
+		{"n: NEXT absent passes", without(with(good(), "0002-new.md", goodADR), "NEXT"), nil},
+		{"n: NEXT absent, no ADRs", map[string]string{"README.md": "# Decisions\n"}, nil},
+		{"n: NEXT absent, duplicate number still fails", without(with(good(), "0001-other.md", goodADR), "NEXT"), []string{"number 0001 is used by more than one"}},
 		{"n: NEXT stale (the highest number, not one more)", with(good(), "NEXT", next(1)), []string{"NEXT:1:", "NEXT holds 0001", "next free number is 0002", "take the number NEXT names and bump NEXT in the same PR"}},
 		{"n: NEXT too high", with(good(), "NEXT", next(3)), []string{"NEXT holds 0003", "next free number is 0002"}},
 		{"n: NEXT malformed, no newline", with(good(), "NEXT", "0002"), []string{"NEXT must be exactly 4 digits and a newline"}},
@@ -216,6 +225,12 @@ func fakeGit(files map[string]string) gitFunc {
 				return []byte(c), nil
 			}
 			return nil, errors.New("not in base")
+		case "ls-tree":
+			var out []string
+			for p := range files {
+				out = append(out, p)
+			}
+			return []byte(strings.Join(out, "\n")), nil
 		case "diff": // the pull request touches every file the base has
 			var out []string
 			for p := range files {
@@ -249,6 +264,15 @@ func fakeGitMB(trees map[string]map[string]string, mb string, touched []string) 
 				return []byte(c), nil
 			}
 			return nil, errors.New("not in revision")
+		case "ls-tree":
+			if len(args) != 4 || args[1] != "--name-only" || args[3] != "./docs/decisions/" {
+				return nil, errors.New("unexpected ls-tree " + strings.Join(args, " "))
+			}
+			var out []string
+			for p := range trees[args[2]] {
+				out = append(out, p)
+			}
+			return []byte(strings.Join(out, "\n")), nil
 		case "diff":
 			point := mb
 			if point == "" {
@@ -715,5 +739,80 @@ func TestIndex_usage(t *testing.T) {
 	}
 	if code, _, _ := runCLI(t, nil, nil, "index", "--root", filepath.Join(root, "nope")); code != 2 {
 		t.Errorf("missing directory: %d, want 2", code)
+	}
+}
+
+// TestDocs_newNumber covers rule f: an ADR the pull request adds takes a number greater than the highest at the base tip.
+func TestDocs_newNumber(t *testing.T) {
+	const mbSHA = "1234567"
+	pth := func(n string) string { return "docs/decisions/" + n }
+	tip := map[string]string{pth("0001-use-one-way.md"): goodADR, pth("0088-top.md"): goodADR}
+	tests := []struct {
+		name   string
+		added  string // the file the PR adds ("" for none)
+		extra  map[string]string
+		hasNxt bool // a NEXT file is present
+		want   []string
+	}{
+		{"a: adds 0090, highest 0088", "0090-new.md", nil, false, nil},
+		{"b: adds 0088, taken at the tip", "0088-mine.md", nil, false, []string{"0088-mine.md", "number 0088", "highest at good is 0088", "take any number greater than 0088"}},
+		{"c: adds 0087, lower than the tip's highest", "0087-mine.md", nil, false, []string{"number 0087", "take any number greater than 0088"}},
+		{"d: adds 0089, consecutive", "0089-new.md", nil, false, nil},
+		{"e: adds nothing", "", nil, false, nil},
+		{"f: applies with a correct NEXT present", "0087-mine.md", nil, true, []string{"number 0087"}},
+		{"g: correct NEXT present, number above the tip", "0089-new.md", nil, true, nil},
+		{"h: duplicate numbers still fail", "0090-new.md", map[string]string{"0090-other.md": goodADR}, false, []string{"number 0090 is used by more than one"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd, _ := os.Getwd()
+			root := t.TempDir()
+			dir := filepath.Join(root, "docs", "decisions")
+			os.MkdirAll(dir, 0o755)
+			files := map[string]string{"guide.md": "g\n", "README.md": "# x\n", "0001-use-one-way.md": goodADR, "0088-top.md": goodADR}
+			var touched []string
+			if tc.added != "" {
+				files[tc.added] = goodADR
+				touched = append(touched, pth(tc.added))
+			}
+			for n, c := range tc.extra {
+				files[n] = c
+			}
+			if tc.hasNxt {
+				highest := 88
+				for n := range files {
+					if len(n) > 4 && n[0] >= '0' && n[0] <= '9' {
+						var v int
+						fmt.Sscanf(n[:4], "%d", &v)
+						highest = max(highest, v)
+					}
+				}
+				files["NEXT"] = next(highest + 1)
+			}
+			for n, c := range files {
+				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+			}
+			os.Chdir(root)
+			defer os.Chdir(wd)
+			g := fakeGitMB(map[string]map[string]string{"good": tip, mbSHA: {pth("0001-use-one-way.md"): goodADR}}, mbSHA, touched)
+			code, out, errs := runCLI(t, g, nil, "docs", "--base", "good", "docs/decisions")
+			if code == 2 {
+				t.Fatalf("usage or input error: %q", errs)
+			}
+			if len(tc.want) == 0 {
+				if code != 0 || out != "" {
+					t.Fatalf("want pass, got %d %q", code, out)
+				}
+				return
+			}
+			if code != 1 {
+				t.Fatalf("want exit 1, got %d %q", code, out)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output lacks %q:\n%s", w, out)
+				}
+			}
+		})
 	}
 }

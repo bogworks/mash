@@ -18,8 +18,9 @@
 //	c  every README link to an ADR resolves; every relative link in an ADR resolves; numbers are unique (gaps are
 //	   allowed: a number may be reserved by an in-flight PR). A record need not be listed in README.md: existing in the
 //	   directory is the rule (ADR 0068; the README's table is frozen at 0066 and INDEX.md lists every record)
-//	   docs/decisions/NEXT holds the next free number (highest + 1, four digits and a newline): a pull request that adds
-//	   an ADR takes it and bumps NEXT (ADR 0070)
+//	   docs/decisions/NEXT is optional (ADR 0089 will retire it): when the file exists it must hold the next free number
+//	   (highest + 1, four digits and a newline) and a pull request that adds an ADR bumps it (ADR 0070); when absent
+//	   there is no NEXT check
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: only the ADR files the pull request's own diff touches (merge-base of <ref> and HEAD to HEAD) are
 //	   judged; one the pull request does not touch is never flagged, so a branch behind <ref> is not blamed for what
@@ -28,6 +29,8 @@
 //	   "Superseded by [..](..)" line, whose link must resolve to an existing ADR file, and may not be deleted. A file
 //	   absent at the merge-base (the pull request added it) is free. When git cannot find a merge-base, <ref> itself
 //	   is the comparison point (stricter)
+//	f  with --base: an ADR file the pull request adds (in its diff, absent at the merge-base) must have a number
+//	   greater than the highest ADR number at the tip of <ref> (ADR 0089); this applies whether or not NEXT exists
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
 // --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
@@ -350,12 +353,14 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		}
 	}
 
-	// c: NEXT names the next free number, so two pull requests do not both pick the same one (ADR 0070).
-	highest := 0
-	if len(nums) > 0 {
-		highest = nums[len(nums)-1]
+	// c: NEXT, when present, names the next free number (ADR 0070). It is optional: ADR 0089 retires it.
+	if _, err := os.Stat(filepath.Join(dir, "NEXT")); err == nil {
+		highest := 0
+		if len(nums) > 0 {
+			highest = nums[len(nums)-1]
+		}
+		vs = append(vs, lintNext(dir, highest)...)
 	}
-	vs = append(vs, lintNext(dir, highest)...)
 
 	// c: README links.
 	inFence := false
@@ -631,11 +636,13 @@ func lintImmutableAt(dir, rel, point, base string, git gitFunc) ([]string, error
 	}
 
 	var vs []string
+	var added []string
 	for _, n := range names {
 		path := filepath.Join(dir, n)
 		old, err := git("show", point+":./"+rel+"/"+n)
 		if err != nil {
-			continue // not at the merge-base: the pull request added it, a new file is free
+			added = append(added, n) // not at the merge-base: the pull request added it, free of rule e
+			continue
 		}
 		oldLines := splitLines(old)
 		ofm := parseFrontMatter(oldLines)
@@ -653,6 +660,36 @@ func lintImmutableAt(dir, rel, point, base string, git gitFunc) ([]string, error
 			continue // no readable front matter at the merge-base: nothing to compare against
 		}
 		vs = append(vs, compareAccepted(path, base, oldLines, ofm, atPoint, splitLines(cur))...)
+	}
+	nv, err := lintNewNumbers(dir, rel, base, added, git)
+	if err != nil {
+		return nil, err
+	}
+	return append(vs, nv...), nil
+}
+
+// lintNewNumbers is rule f: each added ADR file's number must be greater than the highest ADR number at base.
+func lintNewNumbers(dir, rel, base string, added []string, git gitFunc) ([]string, error) {
+	if len(added) == 0 {
+		return nil, nil
+	}
+	out, err := git("ls-tree", "--name-only", base, "./"+rel+"/")
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %w", base, err)
+	}
+	highest := 0
+	for _, p := range strings.Split(string(out), "\n") {
+		if n := filepath.Base(strings.TrimSpace(p)); nameRE.MatchString(n) {
+			if num, err := strconv.Atoi(n[:4]); err == nil {
+				highest = max(highest, num)
+			}
+		}
+	}
+	var vs []string
+	for _, n := range added {
+		if num, _ := strconv.Atoi(n[:4]); num <= highest {
+			vs = append(vs, viol(filepath.Join(dir, n), 1, "new ADR %s has number %04d but the highest at %s is %04d: renumber it, take any number greater than %04d", n, num, base, highest, highest))
+		}
 	}
 	return vs, nil
 }
