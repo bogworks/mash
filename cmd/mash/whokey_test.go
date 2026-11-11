@@ -38,14 +38,14 @@ func TestWhoKeepsNewFormAndLegacySameNameApart(t *testing.T) {
 	if err := json.Unmarshal([]byte(whoJSON(ps, true, live)), &arr); err != nil {
 		t.Fatal(err)
 	}
-	if arr[0]["name"] != nf.Key() || arr[1]["name"] != "ops1" {
+	if arr[0]["name"] != nf.Key() || arr[1]["name"] != "ops1" || arr[0]["identity"] != "acme.team1.ops1" {
 		t.Fatalf("json names %v %v", arr[0]["name"], arr[1]["name"])
 	}
 	if arr[0]["lease"] != nil || arr[1]["lease"] == nil {
 		t.Fatalf("the legacy lease was joined to the new-form record: %v", arr)
 	}
 	lines := strings.Split(whoText(ps, true, live), "\n")
-	if !strings.HasPrefix(lines[0], nf.Key()+"\t") || strings.Contains(lines[0], "lease host") ||
+	if !strings.HasPrefix(lines[0], "acme.team1.ops1\t") || strings.Contains(lines[0], "lease host") ||
 		!strings.HasPrefix(lines[1], "ops1\t") || !strings.Contains(lines[1], "lease host legacy-host") {
 		t.Fatalf("text:\n%s", strings.Join(lines, "\n"))
 	}

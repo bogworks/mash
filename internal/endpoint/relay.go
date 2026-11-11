@@ -351,7 +351,7 @@ func (e *Endpoint) relayInbound(seq uint64, from string, trust sap.Trust, via st
 	e.relay.inbound(seq, from, via != "")
 	if via != "" {
 		origin, n, _ := strings.Cut(via, " #")
-		e.log.Printf("trace relay: mail #%d from %s declares a relay of #%s from %s", seq, from, n, origin)
+		e.log.Printf("trace relay: mail #%d from %s declares a relay of #%s from %s", seq, sap.Display(from), n, sap.Display(origin))
 	}
 }
 
@@ -364,13 +364,13 @@ func (e *Endpoint) relaySent(to string, via uint64, origin string) {
 	}
 	r, age, found := e.relay.send(e.key, to, via != 0)
 	if via != 0 {
-		e.log.Printf("trace relay: sent to %s declaring a relay of #%d from %s", to, via, origin)
+		e.log.Printf("trace relay: sent to %s declaring a relay of #%d from %s", sap.Display(to), via, sap.Display(origin))
 	}
 	if found {
 		declared := "no"
 		if via != 0 {
 			declared = "yes"
 		}
-		e.log.Printf("trace relay: sent to %s %d s after mail #%d from %s (declared: %s)", to, int(age/time.Second), r.seq, r.from, declared)
+		e.log.Printf("trace relay: sent to %s %d s after mail #%d from %s (declared: %s)", sap.Display(to), int(age/time.Second), r.seq, sap.Display(r.from), declared)
 	}
 }

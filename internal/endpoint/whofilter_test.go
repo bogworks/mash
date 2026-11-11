@@ -104,3 +104,27 @@ func TestWhoFilterCapsAndDescription(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestWhoFilterMatchIdentityIsUnionWithSubstring(t *testing.T) {
+	ps := []Presence{
+		{Online: true, Record: store.Record{Name: "acme_team1_x"}},
+		{Online: true, Record: store.Record{Name: "legacy", Description: "bridge for acme_team1_x traffic"}},
+		{Online: true, Record: store.Record{Name: "other"}},
+	}
+	for _, q := range []string{"acme_team1_x", "acme.team1.x"} {
+		got := presenceNames(WhoFilter{Match: q}.Apply(ps))
+		if q == "acme.team1.x" {
+			// the dotted form does not occur in the legacy description, so only the identity's own entry matches
+			if !reflect.DeepEqual(got, []string{"acme_team1_x"}) {
+				t.Fatalf("%s: got %v", q, got)
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, []string{"acme_team1_x", "legacy"}) {
+			t.Fatalf("%s: got %v", q, got)
+		}
+	}
+	if got := presenceNames(WhoFilter{Name: "acme_team1_x"}.Apply(ps)); !reflect.DeepEqual(got, []string{"acme_team1_x"}) {
+		t.Fatalf("--name stays exact: got %v", got)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // cli runs the one-shot commands as MASH_NAME, without taking its lease.
@@ -126,10 +127,10 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return fail(err)
 		}
 		if res.Duplicate {
-			fmt.Fprintf(stdout, "sent #%d from %s to %s (duplicate of --id %s: already delivered, nothing new stored)\n", res.Seq, ep.Key(), args[1], sendID)
+			fmt.Fprintf(stdout, "sent #%d from %s to %s (duplicate of --id %s: already delivered, nothing new stored)\n", res.Seq, ep.Display(), sap.Display(sap.KeyOf(args[1])), sendID)
 			return 0
 		}
-		fmt.Fprintf(stdout, "sent #%d from %s to %s\n", res.Seq, ep.Key(), args[1])
+		fmt.Fprintf(stdout, "sent #%d from %s to %s\n", res.Seq, ep.Display(), sap.Display(sap.KeyOf(args[1])))
 	case "read":
 		if len(args) != 2 {
 			return fail(fmt.Errorf("usage: mash read <seq>"))
@@ -202,7 +203,7 @@ func clientNeeds(cfg config.Config, args []string) endpoint.ClientOptions {
 	case "send":
 		o := endpoint.ClientOptions{Lease: cfg.LaunchToken != ""}
 		if len(args) > 1 {
-			o.Records = []string{args[1]}
+			o.Records = []string{sap.KeyOf(args[1])}
 		}
 		return o
 	case "read", "inbox":

@@ -134,7 +134,7 @@ func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
 		eventually(t, 5*time.Second, "serve made the spool "+d, func() bool { _, err := os.Stat(d); return err == nil })
 	}
 	eventually(t, 5*time.Second, "both online", func() bool {
-		return strings.Contains(cliAsQuiet(legSender, "who"), "ops1\tonline") && strings.Contains(cliAsQuiet(nfSender, "who"), "acme_team1_ops1\tonline")
+		return strings.Contains(cliAsQuiet(legSender, "who"), "ops1\tonline") && strings.Contains(cliAsQuiet(nfSender, "who"), "acme.team1.ops1\tonline")
 	})
 	// Nothing else lives under the spool root: exactly the two distinct directories.
 	for _, root := range []string{filepath.Join(state, "spool", "legowner"), filepath.Join(state, "spool", "team1")} {
@@ -160,7 +160,7 @@ func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
 	if ev := content(ls.await(t, 15*time.Second, isChannel)); ev != "1 message from lsender (task)" {
 		t.Fatalf("legacy wake %q", ev)
 	}
-	if ev := content(ns.await(t, 15*time.Second, isChannel)); ev != "1 message from acme_team1_nsender (task)" {
+	if ev := content(ns.await(t, 15*time.Second, isChannel)); ev != "1 message from acme.team1.nsender (task)" {
 		t.Fatalf("new-form wake %q", ev)
 	}
 
@@ -171,7 +171,7 @@ func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
 			t.Fatalf("legacy hook lacks %q:\n%s", want, legOut)
 		}
 	}
-	for _, want := range []string{"1 message from acme_team1_nsender", "[verified]", "> " + nfMsg} {
+	for _, want := range []string{"1 message from acme.team1.nsender", "mash mail for acme.team1.ops1", "[verified]", "> " + nfMsg} {
 		if !strings.Contains(nfOut, want) {
 			t.Fatalf("new-form hook lacks %q:\n%s", want, nfOut)
 		}
