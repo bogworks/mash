@@ -480,8 +480,16 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 	var ccs []jetstream.ConsumeContext
 	var watched sync.WaitGroup
 	stopAll := func() {
+		// A serve that has lost its lease drains instead of stopping: Stop discards what the client already pulled into its
+		// buffer, and mail discarded unacked is not redelivered to the new holder until the consumer's AckWait (30 s). Drain
+		// hands each buffered message to the handler, which nak's it (the lease is gone) so the new holder gets it at once.
+		lost := e.anyLeaseGone()
 		for _, cc := range ccs {
-			cc.Stop()
+			if lost {
+				cc.Drain()
+			} else {
+				cc.Stop()
+			}
 		}
 		for _, cc := range ccs {
 			select {
