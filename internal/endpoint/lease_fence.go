@@ -127,6 +127,14 @@ func (e *Endpoint) graceWait(ctx context.Context) bool {
 	}
 }
 
+// graceLeft is the time left of the takeover grace, or zero when none is owed.
+func (e *Endpoint) graceLeft() time.Duration {
+	e.graceMu.Lock()
+	until := e.graceUntil
+	e.graceMu.Unlock()
+	return max(time.Until(until), 0)
+}
+
 // startGrace records that the lease was taken over from a live holder of this session.
 func (e *Endpoint) startGrace() {
 	e.graceMu.Lock()

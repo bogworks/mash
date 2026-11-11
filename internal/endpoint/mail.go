@@ -607,6 +607,15 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 		}
 		if cur == nil && e.legacyReading() {
 			l, ep := e.legacyHold()
+			// A hold taken from a live serve of this session waits out the takeover grace first (as the own stream
+			// does), so the earlier serve has stopped before this one pulls from the shared consumer.
+			ready, ended := e.legacyGraceWait(ctx, quit, l, ep)
+			if ended {
+				return
+			}
+			if !ready { // the hold ended or changed while waiting: the next pass looks at the new state
+				goto wait
+			}
 			nb := new(atomic.Int32)
 			cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 			if err != nil {
@@ -625,6 +634,7 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 				}
 			}
 		}
+	wait:
 		select {
 		case <-quit:
 			return
@@ -633,6 +643,40 @@ func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHa
 		case <-tick.C:
 		}
 	}
+}
+
+// legacyGraceWait waits until the takeover grace has passed for the hold (l, epoch). ready is true when the grace is over
+// and the legacy lease is still held live under that epoch; false when the hold was lost or replaced meanwhile (or the
+// lease could not be confirmed), so nothing starts. ended is true when the endpoint ended while waiting. With no grace
+// owed (a free lease) it does not wait.
+func (e *Endpoint) legacyGraceWait(ctx context.Context, quit <-chan struct{}, l chan error, epoch uint64) (ready, ended bool) {
+	if d := e.graceLeft(); d > 0 {
+		e.log.Printf("legacy inbox: taken over from a live serve of this session; reading in %s, when it has stopped", d.Round(time.Millisecond))
+		t := time.NewTimer(d)
+		defer t.Stop()
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
+		for waiting := true; waiting; {
+			select {
+			case <-t.C:
+				waiting = false
+			case <-quit:
+				return false, true
+			case <-ctx.Done():
+				return false, true
+			case <-l: // the hold was lost
+				return false, false
+			case <-poll.C:
+				if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
+					return false, false
+				}
+			}
+		}
+	}
+	if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
+		return false, false
+	}
+	return e.verdictFor(LegacyStream) == verdictHeld, false
 }
 
 // deliverLoop is the single writer of channel events (see consume).

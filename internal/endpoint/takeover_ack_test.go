@@ -148,3 +148,14 @@ func TestLegacyLeaseLossLearnedAtOnce(t *testing.T) {
 }
 
 var _ = spool.Spool{}
+
+// A spool write of an own-stream entry is refused once the own lease is gone (flag check only).
+func TestPutEntryOwnStreamRefusedOnceLeaseGone(t *testing.T) {
+	f := newFixture(t, "a")
+	ep, _ := f.run(t, "a")
+	p := pending{}
+	ep.leaseGone.Store(true)
+	if wrote, _, err := ep.putEntry(p); wrote || err != nil {
+		t.Fatalf("wrote %v, err %v after the own lease was lost", wrote, err)
+	}
+}

@@ -193,7 +193,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 		default:
 			wrote, ep, err := e.putEntry(p)
 			if !wrote {
-				// The legacy lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
+				// The lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
 				// so the new holder is redelivered it at once.
 				_ = p.msg.NakWithDelay(time.Second) // a second, not at once: an unconfirmed lease would otherwise redeliver in a loop
 				e.waking.done(seq)
@@ -246,6 +246,9 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 func (e *Endpoint) putEntry(p pending) (held bool, epoch uint64, err error) {
 	ent := EntryOf(p.mail)
 	if p.mail.Stream != LegacyStream || !e.hasLegacyStream() {
+		if !e.leaseHeldFor(p.mail.Stream) { // the own lease is gone (flag only): nothing is written
+			return false, 0, nil
+		}
 		return true, 0, e.spool.Put(ent)
 	}
 	unlock, err := e.spool.Lock()
