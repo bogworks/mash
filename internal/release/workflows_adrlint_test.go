@@ -21,15 +21,54 @@ const adrLintWorkflow = "adr-lint.yml"
 // prHeadRef is the ref expression that names the pull request's head commit.
 const prHeadRef = "${{ github.event.pull_request.head.sha }}"
 
-// execFromPR finds a command that runs something from pr/ (a script, a binary, a Go package, a directory change into
-// it, a sourced file), or a command word that is a path under pr/. Passing pr/ as data (git -C pr, --root .../pr) is fine.
-var execFromPR = regexp.MustCompile(
-	`\./pr(/|\s|$)` +
-		`|\b(bash|sh|zsh|source|exec|python3?|node)\s+"?(\$\{?GITHUB_WORKSPACE\}?/)?pr/` +
-		`|(^|[;&|(]\s*)\.\s+"?(\$\{?GITHUB_WORKSPACE\}?/)?pr/` +
-		`|\bgo\s+(run|build|test|generate|install|vet)\b[^\n]*\s\./pr\b` +
-		`|\bcd\s+"?(\$\{?GITHUB_WORKSPACE\}?/)?pr(/|"|\s|$)` +
-		`|^\s*"?\$\{?GITHUB_WORKSPACE\}?/pr/`)
+// A run line may mention the pull request's checkout directory pr/ only as data, in one of the explicit forms below.
+// This is an allow-list: each allowed form is cut out of the line, and if what is left still mentions pr as a path
+// component, the line fails. So `git -C pr fetch && pr/bin/tool` and `make -C pr` are refused, not just known-bad words.
+
+// prDir is the pull request checkout as a path: pr, "pr", $GITHUB_WORKSPACE/pr, "$GITHUB_WORKSPACE/pr" (no trailing path).
+const prDir = `(?:"?\$\{?GITHUB_WORKSPACE\}?/pr"?|"?pr"?)`
+
+var (
+	// mentionsPR finds pr as a path component anywhere: pr/x, ./pr, /pr, cd pr, -C pr, PATH=pr/bin, "pr", (cd pr; ...).
+	mentionsPR = regexp.MustCompile(`(^|[\s"'=:(;&|/])pr($|[\s"'/;&|):])`)
+
+	// allowedPRUses are the data-only uses; the matched text is removed before mentionsPR is applied to the rest.
+	allowedPRUses = []*regexp.Regexp{
+		// gh pr <subcommand>: the GitHub CLI's pull-request command, whose word pr is not the directory.
+		regexp.MustCompile(`\bgh\s+pr\s+(view|list|diff|checks|status)\b`),
+		// git -C pr <read-only subcommand>: git only reads or fetches there; never checkout, apply, hook, submodule, config.
+		regexp.MustCompile(`\bgit\s+-C\s+` + prDir + `\s+(fetch|diff|log|rev-parse|show)\b`),
+		// the trusted checker (built from trusted/) given the checkout as its --root argument: data to the checker.
+		regexp.MustCompile(`^\s*"?\$RUNNER_TEMP/adrlint"?\s+(docs|pr)\s+--root\s+` + prDir + `(\s|$)`),
+	}
+)
+
+// execFromPRLine reports whether one run line (comment stripped) mentions pr/ other than by an allowed data-only use.
+func execFromPRLine(code string) bool {
+	for _, re := range allowedPRUses {
+		code = re.ReplaceAllString(code, " ")
+	}
+	return mentionsPR.MatchString(code)
+}
+
+// runLines splits a run script into logical lines: comments stripped, backslash continuations joined.
+func runLines(run string) []string {
+	var out []string
+	cur := ""
+	for _, line := range strings.Split(run, "\n") {
+		code := stripComment(line)
+		if strings.HasSuffix(strings.TrimRight(code, " \t"), "\\") {
+			cur += strings.TrimSuffix(strings.TrimRight(code, " \t"), "\\") + " "
+			continue
+		}
+		out = append(out, cur+code)
+		cur = ""
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
 
 func isTrue(v any) bool {
 	switch b := v.(type) {
@@ -100,22 +139,24 @@ func execFromPRViolations(name, text string) []string {
 		return []string{fmt.Sprintf("%s: not valid YAML: %v", name, err)}
 	}
 	var out []string
+	// A working-directory anywhere in the file (a job's defaults.run included, which the structs do not model) under pr/.
+	for n, line := range strings.Split(text, "\n") {
+		if code := stripComment(line); strings.Contains(code, "working-directory") && mentionsPR.MatchString(code[strings.Index(code, "working-directory")+len("working-directory"):]) {
+			out = append(out, fmt.Sprintf("%s:%d: working-directory in pr/", name, n+1))
+		}
+	}
 	for id, j := range w.Jobs {
 		for i, s := range j.Steps {
 			where := fmt.Sprintf("%s job %s step %d", name, id, i+1)
 			if strings.HasPrefix(s.Uses, "./pr") {
 				out = append(out, where+": uses a local action from pr/")
 			}
-			if s.Run == "" {
-				continue
+			if wd := strings.TrimSuffix(s.WorkingDirectory, "/"); mentionsPR.MatchString(wd) || wd == "pr" || strings.HasPrefix(wd, "pr/") {
+				out = append(out, where+": working-directory in pr/")
 			}
-			if wd := strings.TrimSuffix(s.WorkingDirectory, "/"); wd == "pr" || strings.HasPrefix(wd, "pr/") ||
-				strings.HasSuffix(wd, "/pr") || strings.Contains(wd, "/pr/") {
-				out = append(out, where+": runs a script with working-directory in pr/")
-			}
-			for _, line := range strings.Split(s.Run, "\n") {
-				if code := stripComment(line); execFromPR.MatchString(code) {
-					out = append(out, fmt.Sprintf("%s: run line executes from pr/: %s", where, strings.TrimSpace(code)))
+			for _, line := range runLines(s.Run) {
+				if execFromPRLine(line) {
+					out = append(out, fmt.Sprintf("%s: run line uses pr/ other than as data: %s", where, strings.TrimSpace(line)))
 				}
 			}
 		}
@@ -201,6 +242,9 @@ func TestADRLint_execGuardRefusesRunningFromPR(t *testing.T) {
 		`git -C pr fetch --no-tags "$GITHUB_WORKSPACE/trusted" x`,
 		`"$RUNNER_TEMP/adrlint" docs --root "$GITHUB_WORKSPACE/pr" --base origin/main`,
 		`git -C "$GITHUB_WORKSPACE/pr" diff --name-only a...HEAD > "$RUNNER_TEMP/files"`,
+		`git -C pr log -1 --format=%H`, `git -C pr rev-parse HEAD`, `git -C pr show HEAD:README.md`,
+		`"$RUNNER_TEMP/adrlint" pr --root "$GITHUB_WORKSPACE/pr" --files "$RUNNER_TEMP/files"`,
+		`labels=$(gh pr view "$PR" --json labels)`,
 		`# ./pr/run.sh is never run`,
 	} {
 		if v := execFromPRViolations("x.yml", run(ok)); len(v) > 0 {
@@ -210,13 +254,27 @@ func TestADRLint_execGuardRefusesRunningFromPR(t *testing.T) {
 	for _, bad := range []string{
 		`./pr/scripts/x.sh`, `bash pr/x.sh`, `sh pr/x.sh`, `source pr/env`, `. pr/env`, `go run ./pr/cmd/x`,
 		`cd pr`, `cd "$GITHUB_WORKSPACE/pr" && make`, `"$GITHUB_WORKSPACE/pr/bin/x"`, `bash "$GITHUB_WORKSPACE/pr/x.sh"`,
+		`pr/bin/tool`, `pr/bin/tool --flag`, `PATH=pr/bin:$PATH tool`, `PATH="$GITHUB_WORKSPACE/pr/bin:$PATH" tool`,
+		`make -C pr`, `make -C "$GITHUB_WORKSPACE/pr" test`, `bash -c 'cd pr && ./x'`, `(cd pr; ./x)`,
+		`git -C pr checkout main`, `git -C pr apply x.patch`, `git -C pr submodule update`, `git -C pr config alias.x '!pr/x'`,
+		`git -C pr hook run pre-commit`, `git -C pr fetch origin && pr/bin/tool`, `git -C pr -c alias.s='!./x' s`,
+		`"$RUNNER_TEMP/adrlint" docs --root pr && pr/bin/tool`, `./adrlint --root pr`, `"$RUNNER_TEMP/other" --root "$GITHUB_WORKSPACE/pr"`,
+		"git -C pr \\\n  fetch x && make -C pr",
 	} {
 		if v := execFromPRViolations("x.yml", run(bad)); len(v) == 0 {
 			t.Errorf("%q not refused", bad)
 		}
 	}
-	wd := "jobs:\n  a:\n    steps:\n      - working-directory: pr\n        run: make\n"
-	if v := execFromPRViolations("x.yml", wd); len(v) == 0 {
-		t.Error("working-directory pr not refused")
+	for _, bad := range []string{
+		"jobs:\n  a:\n    defaults:\n      run:\n        working-directory: pr\n    steps:\n      - run: make\n",
+		"jobs:\n  a:\n    steps:\n      - working-directory: pr\n        run: make\n",
+		"jobs:\n  a:\n    steps:\n      - working-directory: pr/sub\n        run: make\n",
+		"jobs:\n  a:\n    steps:\n      - working-directory: ${{ github.workspace }}/pr\n        run: make\n",
+		"jobs:\n  a:\n    steps:\n      - uses: ./pr/.github/actions/x\n",
+		"jobs:\n  a:\n    steps:\n      - uses: ./pr\n",
+	} {
+		if v := execFromPRViolations("x.yml", bad); len(v) == 0 {
+			t.Errorf("%q not refused", bad)
+		}
 	}
 }
