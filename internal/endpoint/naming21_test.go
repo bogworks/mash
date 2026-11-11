@@ -263,6 +263,17 @@ func TestNaming21_TwoLeadsCoexist(t *testing.T) {
 	xg, yg := xev.waitFor(t, 1, 5*time.Second), yev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
 	xg, yg = xev.all(), yev.all()
+	// The delivery text is the full batch, body included: serveNF's endpoint has no spool, so it is not hooked
+	// (hook.go:123) and deliverBatch (mail.go:906) renders render.Batch, which shows every message in full while
+	// there are at most BatchMsgs (10) and BatchBytes (16384) of them (render.go:139,165, cfgNF). The wake-only form
+	// belongs to the hooked path. So each lead's text leads with its count line naming its own peer and carries only
+	// its own body.
+	if len(xg) != 1 || !strings.HasPrefix(xg[0], "1 message from bogworks.x.sender (") || strings.Contains(xg[0], "bogworks.y.sender") {
+		t.Fatalf("x lead count line: %q", xg)
+	}
+	if len(yg) != 1 || !strings.HasPrefix(yg[0], "1 message from bogworks.y.sender (") || strings.Contains(yg[0], "bogworks.x.sender") {
+		t.Fatalf("y lead count line: %q", yg)
+	}
 	if len(xg) != 1 || !strings.Contains(xg[0], "for x lead") || strings.Contains(xg[0], "for y lead") {
 		t.Fatalf("x lead got %q", xg)
 	}
@@ -276,9 +287,13 @@ func TestNaming21_TwoLeadsCoexist(t *testing.T) {
 	}
 	if m, err := ex.Read(ctx, sx); err != nil || string(m.Body) != "for x lead" || m.Trust != sap.TrustVerified {
 		t.Fatalf("x read: %+v %v", m, err)
+	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for x lead") || strings.Contains(one, "for y lead") {
+		t.Fatalf("x rendered: %s", one)
 	}
 	if m, err := ey.Read(ctx, sy); err != nil || string(m.Body) != "for y lead" || m.Trust != sap.TrustVerified {
 		t.Fatalf("y read: %+v %v", m, err)
+	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for y lead") || strings.Contains(one, "for x lead") {
+		t.Fatalf("y rendered: %s", one)
 	}
 	// Leases are two keys; a second open of one identity conflicts without touching the other.
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
