@@ -299,6 +299,19 @@ Deprovisioning fences the name, then removes the directory record and the inbox 
 
 `mashctl retire NAME` renames `NAME.creds` to `NAME.creds.retired-<UTC timestamp>` (or deletes it with `--delete-creds`), so the name can be added again at once; the retired file still holds the old seed. An add killed mid-run can leave a record or creds file with no policy entry; `mashctl policy drift` reports it as `record-extra` with the fix, `mashctl retire NAME --force --delete-creds` then `mashctl add NAME` ([mashctl.md](mashctl.md#a-killed-add)). A leftover `policy.yaml.lock` file is harmless: the lock is released when its holder exits.
 
+### Provisioning and deprovisioning by the three tokens
+
+`provision` and `deprovision` (in `mashctl` and `mash admin`) address a new-form endpoint by its agent, owner and name tokens ([ADR 0074](decisions/0074-an-endpoint-is-three-sap-tokens-and-keys-its-storage-on-their-flat-form.md)). It needs the `agent_token` setting (`agent_token` in `config.json` or `MASH_AGENT_TOKEN`; the value is only the switch, the verb names its own target). With the setting unset the three-token form is refused (exit 1, nothing changed); with it set, the legacy form of these two verbs is refused as before, and every other verb still refuses.
+
+```bash
+mashctl provision recv --agent acme --owner team1 --user "$user" --account "$account"   # acme.team1.recv
+mashctl provision recv --agent acme --user "$user" --account "$account"                 # --owner defaults to the configured owner
+mashctl provision recv --agent acme --owner team1 --alias oldowner/oldname --user "$user" --account "$account"
+mashctl deprovision acme.team1.recv      # or: deprovision recv --agent acme --owner team1; the flat acme_team1_recv works too
+```
+
+`--alias OWNER/NAME` names the legacy endpoint the new one answers to during the transition ([ADR 0076](decisions/0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md)); the admin layer verifies it (the legacy endpoint must exist, be unzoned and not already be claimed). Provisioning prints `provisioned acme.team1.recv: ...` with each token as typed. A bad token is a usage error (exit 2); a refusal (the name rule, an alias, an identity already provisioned, a retired identity, the setting off) exits 1 with the reason, nothing changed. A retired identity is refused with `endpoint acme.team1.recv is retired ... never reassigned (INV-002)`. `deprovision` of a new-form identity runs the retired-marker path described below, with the same `--user`, `--drained-to` and `--no-revoke` options as for a legacy name. `set-meta`, `set-zone`, `suspend`, `resume` and `suspended` still take a legacy name only.
+
 ### A retired agent/owner/name is never reassigned
 
 Deprovisioning an endpoint that has a new-form identity (an agent, an owner and a name) also burns a retired marker for it: one key, the identity's flat form `agent_owner_name`, in the `mash-retired` bucket. The marker has two states, and both deprovision paths (`deprovision NAME` and the user-key-guarded `--user`) use the same order:

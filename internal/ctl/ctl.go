@@ -65,8 +65,11 @@ func limitsUsage(prog string) string {
 }
 
 func provisionUsage(prog string) string {
-	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]"
+	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]" + newFormUsage
 }
+
+// newFormUsage is the three-token tail of the provision usage line.
+const newFormUsage = "\n  three tokens (needs the agent_token setting): <name> --agent A [--owner O] [--alias OWNER/NAME], or agent.owner.name; --owner defaults to the configured owner"
 
 func setZoneUsage(prog string) string {
 	return "usage: " + prog + " set-zone <name> <zone>   (moves an existing endpoint into the zone: its inbox also takes the zone mail subject, mail to the old subject still arrives; a zone is 1-32 lower-case letters, digits and hyphens)"
@@ -239,14 +242,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	}
 	defer closeAdmin()
 
-	opt := func(name string) string {
-		for i := 2; i+1 < len(args); i++ {
-			if args[i] == name {
-				return args[i+1]
-			}
-		}
-		return ""
-	}
 	switch args[0] {
 	case "init":
 		if err := a.Init(ctx); err != nil {
@@ -257,9 +252,32 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if len(args) < 2 {
 			return usage(errors.New(provisionUsage(prog)))
 		}
+		args, nf, err := parseNewForm(cfg, args)
+		if err != nil {
+			if isUsage(err) {
+				return usage(fmt.Errorf("%s\n%s: provision: %w", provisionUsage(prog), pfx, err))
+			}
+			return fail(err)
+		}
+		opt := optOf(args)
 		meta, err := provisionMeta(prog, args, opt)
 		if err != nil {
 			return usage(err)
+		}
+		if nf != nil {
+			if err := provisionKeyArgs(prog, opt("--user"), opt("--account"), meta.Zone); err != nil {
+				return usage(err)
+			}
+			rec, err := a.ProvisionIdentity(ctx, nf.id, nf.alias, opt("--user"), opt("--account"), opt("--note"), meta)
+			if err != nil {
+				return fail(err)
+			}
+			alias := ""
+			if rec.Alias != nil {
+				alias = ", alias " + config.Clean(rec.Alias.Owner) + "/" + config.Clean(rec.Alias.Name)
+			}
+			fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s%s\n", config.Clean(nf.id.String()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), alias, metaSuffix(rec))
+			return 0
 		}
 		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account"), meta.Zone); err != nil {
 			return usage(err)
@@ -347,7 +365,23 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": " + err.Error()))
 			}
 		}
-		if len(args) < 2 || !madmin.ValidKey(args[1]) {
+		if len(args) < 2 {
+			return usage(errors.New(deprovisionUsage))
+		}
+		// shown is the name in messages: the canonical agent.owner.name for a three-token target, whose directory key
+		// (args[1] from here on) is the flat key.
+		shown := args[1]
+		args, nf, err := parseNewForm(cfg, args)
+		if err != nil {
+			if isUsage(err) {
+				return usage(fmt.Errorf("%s\n%s: deprovision: %w", deprovisionUsage, pfx, err))
+			}
+			return fail(err)
+		}
+		if nf != nil {
+			shown = nf.id.String()
+			args = append([]string{args[0], nf.id.Flat()}, args[2:]...)
+		} else if !madmin.ValidKey(args[1]) {
 			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": <name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)"))
 		}
 		var rest []string
@@ -398,7 +432,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		// noRevokeWarn prints the --no-revoke warning for user; the user key is informational.
 		noRevokeWarn := func(user string) {
 			if noRevoke && user != "" && RevokeUsers != nil {
-				fmt.Fprint(stderr, NoRevokeWarning(args[1], user))
+				fmt.Fprint(stderr, NoRevokeWarning(shown, user))
 			}
 		}
 		recordUser := func() string {
@@ -441,7 +475,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if err := adm.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
 				return failRemoval(err)
 			}
-			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; %s)\n", args[1], id, seq, note())
+			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; %s)\n", shown, id, seq, note())
 			noRevokeWarn(warnUser)
 			return 0
 		}
@@ -458,7 +492,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if err := adm.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
 				return failRemoval(err)
 			}
-			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; %s)\n", args[1], ShortKey(args[3]), strings.Replace(note(), "user key "+ShortKey(args[3])+"... ", "", 1))
+			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; %s)\n", shown, ShortKey(args[3]), strings.Replace(note(), "user key "+ShortKey(args[3])+"... ", "", 1))
 			noRevokeWarn(args[3])
 			return 0
 		}
@@ -466,7 +500,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if ok, err := a.Exists(ctx, args[1]); err != nil {
 			return fail(err)
 		} else if !ok {
-			fmt.Fprintf(stderr, "no endpoint named %s\n", args[1])
+			fmt.Fprintf(stderr, "no endpoint named %s\n", shown)
 			return 1
 		}
 		warnUser := ""
@@ -477,7 +511,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err := adm.Deprovision(ctx, args[1]); err != nil {
 			return failRemoval(err)
 		}
-		fmt.Fprintf(stdout, "deprovisioned %s (%s)\n", args[1], note())
+		fmt.Fprintf(stdout, "deprovisioned %s (%s)\n", shown, note())
 		noRevokeWarn(warnUser)
 	case "list":
 		recs, err := a.List(ctx)
@@ -496,6 +530,18 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return 2
 	}
 	return 0
+}
+
+// optOf returns the lookup of a single-valued flag in args (from the third argument on).
+func optOf(args []string) func(string) string {
+	return func(name string) string {
+		for i := 2; i+1 < len(args); i++ {
+			if args[i] == name {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
 }
 
 // zoneSuffix is a list line's tail for the zone: a tab and zone=<z>, empty for an endpoint with the legacy subject.
@@ -556,10 +602,16 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 // provisionArgs checks the arguments provision needs before anything touches the server. An invalid one is named,
 // never printed: a seed pasted into --user must not come back on the screen.
 func provisionArgs(prog, name, user, account, zone string) error {
+	if !config.ValidName(name) {
+		return errors.New(provisionUsage(prog) + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+	}
+	return provisionKeyArgs(prog, user, account, zone)
+}
+
+// provisionKeyArgs is provisionArgs without the legacy name: the keys and the zone, for the three-token form too.
+func provisionKeyArgs(prog, user, account, zone string) error {
 	use := provisionUsage(prog)
 	switch {
-	case !config.ValidName(name):
-		return errors.New(use + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	case user == "":
 		return errors.New(use + "\n--user is required")
 	case !nkeys.IsValidPublicUserKey(user):

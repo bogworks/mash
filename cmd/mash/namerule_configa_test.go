@@ -195,7 +195,9 @@ func TestConfigAMashSendAndPrompt(t *testing.T) {
 }
 
 // provision through `mash admin`: the same configuration, the rule first, nothing created. A three-token identity is
-// refused by mash admin itself (errAdminAgentToken, its fail-closed refusal) before the rule is reached.
+// refused by mash admin itself (errAdminAgentToken, its fail-closed refusal) before the rule is reached, except the
+// three-token form of provision and deprovision (naming plan 1.6), which is refused for the unset setting or its
+// token, before the rule too.
 func TestConfigAMashAdminProvision(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	admEnv := func(extra map[string]string) map[string]string {
@@ -219,7 +221,7 @@ func TestConfigAMashAdminProvision(t *testing.T) {
 	for _, name := range []string{"cc_acme_gone", "mash_acme_gone", "cc.acme.gone"} {
 		_, user := w.e.Mint(t, "x"+strings.NewReplacer("_", "", ".", "").Replace(name))
 		out, code := configARun(admEnv(nil), "admin", "provision", name, "--user", user, "--account", w.e.Account)
-		if code == 0 || strings.Contains(out, "name rule") || !strings.Contains(out, "endpoint name") {
+		if code == 0 || strings.Contains(out, "name rule") || !(strings.Contains(out, "endpoint name") || strings.Contains(out, "agent_token setting") || strings.Contains(out, "legacy form's agent token")) {
 			t.Errorf("admin provision %q: %d %s", name, code, out)
 		}
 	}
