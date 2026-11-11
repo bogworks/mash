@@ -23,7 +23,7 @@ import (
 // wake) is in cmd/mash/naming21_cli_test.go.
 
 // naming21AliasPRsMerged gates the rename test, which needs the two-stream read and the alias lease grant.
-const naming21AliasPRsMerged = false // flip when #346 and #356 are on main
+const naming21AliasPRsMerged = false // flip when #346 and #363 are on main
 
 // provisionNF provisions agent.owner.name through ProvisionIdentity (alias optional) with the permissions the admin
 // layer computes for it, and registers its credentials with the fixture.
