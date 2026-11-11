@@ -37,9 +37,6 @@ func naming21Provision(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, ow
 		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20", "MASH_IDLE_WAKE": "5s"}
 }
 
-// naming21CanonicalDisplay gates the display assertions below.
-const naming21CanonicalDisplay = false // flip when the canonical-display PR (three-token identities shown as agent.owner.name) is on main
-
 // shownIdentities returns every identity printed in out in the canonical dotted form agent.owner.name. Ruling
 // (coordinator, 2026-11-10): the flat key (agent_owner_name) is a storage encoding (ADR 0074), not a display form; people
 // see the canonical form, tokens visibly separate, so the flat key is deliberately NOT recognised here.
@@ -71,9 +68,6 @@ func assertShows(t *testing.T, what, out string, want sap.EndpointIdentity) {
 // (b) who, inbox, the message header and the trust line show the identity with its three tokens intact and [verified],
 // and mail wakes the serving session.
 func TestNaming21_TokensShownByteIdentical(t *testing.T) {
-	if !naming21CanonicalDisplay {
-		t.Skip("pending: flip when the canonical-display PR (three-token identities shown as agent.owner.name) is on main")
-	}
 	e := testenv.Start(t)
 	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
 	if err != nil {
