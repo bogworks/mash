@@ -55,9 +55,24 @@ different OS; the script needs GNU `find`, and that job keeps job-local caches).
 The design and the script are adopted from the maintainer's sibling project, `randybias/rangehand`: its `scripts/ci-go-caches` and its gap record G305 (`docs/plan/gaps/G305.md`). <!-- adrlint:allow vocabulary -->
 mash renames the environment variables and the kinds and drops what only that project's hosts need.
 
+### The runners (ruling, 2026-11-11)
+
+The maintainer's operations owner ruled on cache isolation between jobs (mail #147, 2026-11-11):
+
+* **Now.** Pull request jobs keep a persistent per-runner tmpfs. Pull requests from this repository's own branches all
+  come from the maintainer's own automated sessions, under one user and one host credential, so a cache that persists
+  between them adds no new trust boundary. Approving a fork's pull request admits its code to the runner pool, and the
+  approver must treat it that way.
+* **Release.** Release jobs run only on the separate, ephemeral `rh-linux-release` runners, never on the pull request
+  pool.
+* **Later.** Once operations builds the read-only seed, the pull request runners become ephemeral too, and this script
+  restores the seed in each job.
+
 ### Consequences
 
-* Good, because a job's writes cannot reach another job, and a refused or missing seed degrades to a cold build.
+* Good, because with a seed, a job's writes cannot reach another job.
+* Bad, because without a seed (refused or missing) a job uses the runner's own caches, which persist between that
+  runner's jobs. That is the runner's behaviour today, and the runner ruling below accepts it until the seed exists.
 * Good, because the change ships and tests without the seed.
 * Bad, because there is no speed gain until operations builds a seed, and each job logs `SHARED` until then.
 * Bad, because the script is part of the pull request's own checkout, so a pull request can edit it. Never call it from
