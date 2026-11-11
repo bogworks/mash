@@ -652,3 +652,31 @@ func TestAddAndReissueRefuseAFileThatDoesNotCheck(t *testing.T) {
 		t.Error("creds rewritten")
 	}
 }
+
+// (f) mashctl add applies the name rule first: a refused name creates no creds file, no record and no policy edit.
+func TestAddAppliesTheNameRule(t *testing.T) {
+	fakeKeyRevoked(t, false, nil)
+	h := newAddEnv(t, addPolicy)
+	rule := filepath.Join(h.dir, "name-rule.json")
+	if err := os.WriteFile(rule, []byte(`{"version":1,"rules":[{"id":"no-g","match":{"name":{"is":"g"}},"message":"g is retired"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.env["MASH_NAME_RULE_FILE"] = rule
+	before, _ := os.ReadFile(h.policy)
+	_, errb, code := h.run("add", "g", "--zone", "green")
+	if code != 1 || !strings.Contains(errb, `name rule "no-g"`) || !strings.Contains(errb, "g is retired") {
+		t.Fatalf("refused add: %d %q", code, errb)
+	}
+	if _, err := os.Stat(h.creds("g")); err == nil {
+		t.Error("a refused add wrote creds")
+	}
+	if recs := h.records(); len(recs) != 0 {
+		t.Errorf("a refused add wrote records: %v", recs)
+	}
+	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
+		t.Error("a refused add changed the policy")
+	}
+	if out, errb, code := h.run("add", "h", "--zone", "green"); code != 0 {
+		t.Fatalf("allowed add: %d %q %q", code, out, errb)
+	}
+}

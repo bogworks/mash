@@ -180,7 +180,7 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return fail(fmt.Errorf("usage: mash prompt <to> <text...>"))
 		}
 		c, cc := short()
-		subj, err := endpoint.DiscoverRecipient(c, ep.Conn(), cfg.Owner, args[1])
+		subj, err := ep.DiscoverRecipient(c, args[1])
 		cc()
 		if err != nil {
 			return fail(err)

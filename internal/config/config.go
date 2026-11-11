@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -68,6 +69,11 @@ type Config struct {
 	Legacy           string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 
+	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
+	// fails Load. NameRule is nil, and accepts everything, when no file is named.
+	NameRule     *namerule.Rule // MASH_NAME_RULE_FILE / "name_rule_file": the loaded rule
+	NameRulePath string         // the absolute path it was loaded from ("" = none)
+
 	// Provenance of the settings that decide which server a command acts on, for a command to say what it is about to
 	// act on (it informs; it changes no precedence). Keys: SourceKeys.
 	File       string            // the config.json that was read ("" when there is none)
@@ -114,6 +120,9 @@ type file struct {
 	InsecureLoopback *bool `json:"insecure_loopback"`
 
 	Limits json.RawMessage `json:"limits"`
+
+	NameRuleFile     json.RawMessage `json:"name_rule_file"`     // kept raw: null, "" and non-strings are present but invalid
+	NameRuleRequired json.RawMessage `json:"name_rule_required"` // kept raw: only true and false are valid
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -134,8 +143,10 @@ var (
 	// ErrAgentTokenEmpty is Load's error for MASH_AGENT_TOKEN present but empty. Callers that must not treat a config
 	// error as a no-op (hook) test for it with errors.Is.
 	ErrAgentTokenEmpty = errors.New("mash: MASH_AGENT_TOKEN is set but empty: give an agent token, or unset it for the legacy identity")
-	ErrNoURL           = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
-	ErrNoOwner         = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
+	// ErrNameRuleRequired is Load's error for a required name rule with no file loaded.
+	ErrNameRuleRequired = errors.New("mash: a name rule is required (name_rule_required or MASH_NAME_RULE_REQUIRED is true) but no rule file is set: set name_rule_file (MASH_NAME_RULE_FILE) to a name-rule file")
+	ErrNoURL            = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
+	ErrNoOwner          = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
 )
 
 // ValidateFile reports whether raw is a config.json that Load would accept as far as the file itself goes: it must
@@ -157,6 +168,12 @@ func ValidateFile(raw []byte) error {
 		}
 	}
 	if _, err := ParseLimits(f.Limits); err != nil {
+		return err
+	}
+	if _, _, err := nameRuleFileKey(f.NameRuleFile); err != nil {
+		return err
+	}
+	if _, err := nameRuleRequiredKey(f.NameRuleRequired); err != nil {
 		return err
 	}
 	return nil
@@ -476,6 +493,10 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if !validLaunchToken(c.LaunchToken) {
 		return c, fmt.Errorf("mash: MASH_LAUNCH_TOKEN: use at most 128 letters, digits, '.', '_' or '-'")
 	}
+	// The name rule is loaded for every invocation, with or without an endpoint name: mashctl has none.
+	if err := c.loadNameRule(lookup, f, dir, home); err != nil {
+		return c, err
+	}
 	if c.Name == "" {
 		return c, nil
 	}
@@ -680,4 +701,83 @@ func agentTokenOf(raw json.RawMessage) string {
 		return ""
 	}
 	return v
+}
+
+// nameRuleFileKey is the value of a present name_rule_file key: set is false when the key is absent. A key that is
+// present must be a non-empty string.
+func nameRuleFileKey(raw json.RawMessage) (path string, set bool, err error) {
+	if raw == nil {
+		return "", false, nil
+	}
+	var v string
+	if json.Unmarshal(raw, &v) != nil || v == "" {
+		return "", true, errors.New("mash: config.json \"name_rule_file\" must be a non-empty string: give the path of a name-rule file, or remove the key for no rule")
+	}
+	return v, true, nil
+}
+
+// nameRuleRequiredKey is the value of a present name_rule_required key (false when absent): only the JSON booleans.
+func nameRuleRequiredKey(raw json.RawMessage) (bool, error) {
+	switch strings.TrimSpace(string(raw)) {
+	case "":
+		return false, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, errors.New("mash: config.json \"name_rule_required\" must be true or false")
+}
+
+// loadNameRule resolves name_rule_file and name_rule_required (the environment wins over the file key for each, and a
+// value that is set but empty is invalid, not absent), loads the rule file and applies the requirement.
+func (c *Config) loadNameRule(lookup Lookup, f file, dir, home string) error {
+	path := ""
+	if v, set := lookup("MASH_NAME_RULE_FILE"); set {
+		if v == "" {
+			return errors.New("mash: MASH_NAME_RULE_FILE is set but empty: give the path of a name-rule file, or unset it for no rule")
+		}
+		path = ExpandHome(v, home)
+	} else {
+		v, set, err := nameRuleFileKey(f.NameRuleFile)
+		if err != nil {
+			return err
+		}
+		if set {
+			path = inDir(dir, ExpandHome(v, home))
+		}
+	}
+	required := false
+	if v, set := lookup("MASH_NAME_RULE_REQUIRED"); set {
+		switch v {
+		case "true":
+			required = true
+		case "false":
+		default:
+			return fmt.Errorf("mash: MASH_NAME_RULE_REQUIRED=%q is not true or false", v)
+		}
+	} else {
+		var err error
+		if required, err = nameRuleRequiredKey(f.NameRuleRequired); err != nil {
+			return err
+		}
+	}
+	if path == "" {
+		if required {
+			return ErrNameRuleRequired
+		}
+		return nil
+	}
+	// Both forms end as one absolute path, so two endpoints that print the same path loaded the same file: the
+	// environment's relative path is taken from the current directory, the file key's from the config directory.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("mash: name rule file %s: %w", path, err)
+	}
+	r, err := namerule.Load(abs)
+	if err != nil {
+		return err
+	}
+	c.NameRule, c.NameRulePath = r, abs
+	return nil
 }

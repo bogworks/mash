@@ -177,6 +177,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		nc.Close()
 		return nil, nil, nil, err
 	}
+	a = a.WithNameRule(cfg.NameRule)
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err

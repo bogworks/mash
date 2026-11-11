@@ -334,6 +334,10 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			key = h.User + "\x00" + h.Nonce
 		}
 		replyTo, via := senderMarks(m.Headers(), trust, h)
+		if v, err := e.viaAllowed(via); err != nil {
+			e.log.Printf("#%d: relay declaration not honoured: %v", meta.Sequence.Stream, err)
+			via = v
+		}
 		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: meta.Sequence.Stream, From: from, Trust: trust,
 			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
 			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
@@ -557,6 +561,13 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 // or a random one; the message's nonce and Nats-Msg-Id derive from it, so a retry with the key is dropped by the
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
+	// The name rule comes first: before the inbox or the directory is read, and nothing is dropped silently.
+	if err := e.checkSelf(pointSendSender); err != nil {
+		return SendResult{}, err
+	}
+	if err := e.checkKey(pointSendRecipient, to); err != nil {
+		return SendResult{}, err
+	}
 	inReplyTo := o.InReplyTo
 	var viaOrigin string
 	if o.Via > 0 {
@@ -731,6 +742,9 @@ func (e *Endpoint) ownerOf(name string) string {
 
 // lookup resolves a name through the directory (the live copy, else a read).
 func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error) {
+	if err := e.checkKey(pointLookup, name); err != nil { // before the directory is read: a gone record gets the rule, not "not found"
+		return store.Record{}, err
+	}
 	if !validDirectoryKey(name) {
 		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the key as who shows it (agent_owner_name)", name)
 	}
@@ -766,6 +780,7 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
 	replyTo, via := senderMarks(raw.Header, trust, h)
+	via, _ = e.viaAllowed(via) // dropped here too; the serve path logs it
 	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data, ReplyTo: replyTo, Via: via,
 		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
 }
