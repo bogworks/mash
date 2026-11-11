@@ -22,7 +22,7 @@ written first and never cleaned up would burn a name that was never retired.
 
 ## Decision Drivers
 
-* A retired new-form name must stay refused for good, across restarts and lease expiry (INV-002).
+* A retired new-form name must stay refused for good, across server restarts and lease expiry (INV-002).
 * A crash at any step must leave the name refused, and running the same command again must finish the job.
 * A mistyped name, or a refused removal, must not burn a name.
 * An endpoint must not be able to read, write or delete a marker.
@@ -39,7 +39,7 @@ written first and never cleaned up would burn a name that was never retired.
 Chosen option: the `mash-retired` bucket with two-phase markers, because it is the only option that is durable, shows a
 half-finished retirement and keeps endpoint users out of it.
 
-* One key per retired identity, its flat form, in the bucket `mash-retired`: no TTL, history 1, file storage, and a
+* One key per retired identity, its flat form, in the bucket `mash-retired`: no TTL, history 1, file storage (a memory-backed bucket is refused), and a
   size cap that refuses new markers when full rather than evicting old ones. Its value is the three tokens, the retired
   user public key, the time and the state, never a seed.
 * **Two phases.** Deprovision writes the marker `pending` before it touches anything, purges, then makes it `final`
@@ -52,7 +52,7 @@ half-finished retirement and keeps endpoint users out of it.
   need a maintainer ruling and an audit record; neither exists, so none is offered.
 * **Where it is checked.** Provisioning reads the marker while it holds the directory-wide admission lock, before
   writing anything. The bucket is verified wherever it is opened and refuses a TTL, another history, an evicting stream,
-  or no room for one more marker.
+  memory storage (a server restart would erase every marker and free every retired name), or no room for one more marker.
 * **Scope.** The invariant covers new-form names. A deprovisioned legacy name can still be provisioned again; no marker
   is written for it.
 * **Trust boundary of an alias.** A new-form record may name a legacy identity as its alias. mash verifies the alias by
@@ -74,7 +74,7 @@ half-finished retirement and keeps endpoint users out of it.
   verified under the alias name's lock; two provisions of the same alias at once leave exactly one winner; an endpoint
   user cannot reach the bucket.
 * `internal/store` tests: the bucket's configuration, and the fail-closed check for a TTL, another history, an evicting
-  stream or a full bucket.
+  stream, memory storage or a full bucket.
 
 ### Consequences
 

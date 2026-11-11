@@ -804,6 +804,10 @@ func TestProvisionIdentityWaitsAliasNameLock(t *testing.T) {
 
 // Two new-form identities claim the same legacy alias at once. Exactly one wins, the other is refused as already
 // claimed, and one directory record holds the alias.
+// This test fails only when BOTH the alias legacy-name lock and the admission lock are removed, because either one
+// alone serialises the alias-claim check. The alias lock's own job (holding the legacy record in place against a legacy
+// Deprovision between verification and record creation) is covered by TestProvisionIdentityWaitsAliasNameLock and
+// TestProvisionIdentityAliasTargetDeprovisionRace.
 func TestProvisionIdentityConcurrentSameAliasExactlyOneWins(t *testing.T) {
 	quickLocks(t, longWait)
 	e, a, js := setup(t)

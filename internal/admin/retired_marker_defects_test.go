@@ -53,6 +53,34 @@ func TestRetiredBucketWithEvictionIsRefused(t *testing.T) {
 	}
 }
 
+// A retired bucket held in memory would lose every marker on a server restart and let a retired name be reassigned. A
+// stream's storage cannot be changed by an update, so the bucket is deleted and recreated memory-backed.
+func TestRetiredBucketInMemoryIsRefused(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	if err := js.DeleteKeyValue(ctx, store.RetiredBucket); err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.RetiredConfig()
+	cfg.Storage = jetstream.MemoryStorage
+	if _, err := js.CreateKeyValue(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	wantMem := func(what string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), store.RetiredBucket) || !strings.Contains(err.Error(), "memory") {
+			t.Fatalf("%s must refuse a memory-backed bucket, got %v", what, err)
+		}
+	}
+	wantMem("Init", a.Init(ctx))
+	_, err := a.ProvisionIdentity(ctx, newID(t, "acme", "team1", "ops2"), nil, user, e.Account, "", admin.Meta{})
+	wantMem("open", err)
+	rev := a.WithRevoker(func(context.Context, string) error { t.Error("revoked"); return nil })
+	wantMem("deprovision", rev.Deprovision(ctx, id.Flat()))
+	recordIntact(t, js, id, user)
+}
+
 // A purge the server carried out whose reply was lost leaves the marker pending; a re-run finalizes it.
 func TestAmbiguousPurgeLeavesMarkerPendingAndRerunFinalizes(t *testing.T) {
 	for _, path := range bothPaths {

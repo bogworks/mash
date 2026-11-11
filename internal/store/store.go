@@ -209,7 +209,8 @@ const (
 func (r Retired) IsPending() bool { return r.State == RetiredPending }
 
 // VerifyRetiredStatus is the fail-closed check of the retired-name bucket's configuration: a TTL would expire markers,
-// and a history other than RetiredConfig's is not a bucket mash made. It never changes the bucket; the error tells the
+// a history other than RetiredConfig's is not a bucket mash made, and memory storage would lose every marker on a
+// server restart. It never changes the bucket; the error tells the
 // admin to fix or recreate it.
 func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
 	want := RetiredConfig()
@@ -224,6 +225,8 @@ func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
 	if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok {
 		c := bs.StreamInfo().Config
 		switch {
+		case c.Storage != jetstream.FileStorage:
+			return fmt.Errorf("mash: bucket %s is stored in memory (storage %s, not file): a server restart would erase the retired markers and let a retired name be reassigned (INV-002); fix or recreate the bucket with file storage (mash does not change it)", RetiredBucket, c.Storage)
 		case c.Discard != jetstream.DiscardNew:
 			return fmt.Errorf("mash: bucket %s evicts its oldest messages when full (discard policy %s, not new): that could drop a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.Discard)
 		case c.MaxAge != 0:
