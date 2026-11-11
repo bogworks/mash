@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -538,5 +541,65 @@ func TestLegacyLeaseEpochOldEntrySkippedAfterChange(t *testing.T) {
 	}
 	if hasLegacy(waiting(t, sp)) {
 		t.Fatal("a legacy entry of an earlier epoch is still listed")
+	}
+}
+
+// healHeld rewrites a legacy entry only through the lease-checked, epoch-stamped path: stamped while the lease is held,
+// not written once it is lost (a rewrite with no epoch would stay visible after the loss).
+func TestLegacyLeaseHealHeldStampsAndSkipsAfterLoss(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, sp := openSpooled(t, f, id)
+	ref := spool.Ref{Stream: LegacyStream, Seq: 5}
+
+	h := gHeld()
+	h.msgs[ref] = pending{mail: legacyMail(5), msg: &dblAck{}}
+	ep.healHeld(h)
+	if !sp.Has(ref) {
+		t.Fatal("a held legacy message was not rewritten while the lease is held")
+	}
+	if w := waiting(t, sp); len(w) != 1 || w[0].Epoch == 0 || w[0].Epoch != ep.legacy.epoch.Load() {
+		t.Fatalf("rewritten entry not stamped with the epoch of the hold: %+v", w)
+	}
+
+	// Lost: the entry is gone, and a heal writes nothing.
+	takeLegacyOver(t, f)
+	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	if err := os.Remove(filepath.Join(sp.Dir, "legacy@5.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	ep.healHeld(h)
+	if sp.Has(ref) || hasLegacy(waiting(t, sp)) {
+		t.Fatal("a legacy entry was rewritten after the lease was lost")
+	}
+}
+
+// A duplicate legacy delivery is acked only while the lease is held; after the loss it is nak'd, never acked.
+func TestLegacyLeaseDedupeAckGatedByLease(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, _ := openSpooled(t, f, id)
+
+	dup := func() *ackCounter {
+		a, b := &ackCounter{}, &ackCounter{}
+		got := ep.dedupe([]pending{{mail: legacyMail(7), msg: a, key: "k"}, {mail: legacyMail(7), msg: b, key: "k"}}, newSeenSet(0), gHeld())
+		if len(got) != 1 {
+			t.Fatalf("shown %d", len(got))
+		}
+		return b
+	}
+	if b := dup(); b.acks != 1 || b.naks != 0 {
+		t.Fatalf("held: acks=%d naks=%d", b.acks, b.naks)
+	}
+	takeLegacyOver(t, f)
+	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	if b := dup(); b.acks != 0 || b.naks != 1 {
+		t.Fatalf("lost: acks=%d naks=%d", b.acks, b.naks)
 	}
 }

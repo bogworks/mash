@@ -192,11 +192,31 @@ func (e *Endpoint) releaseLegacyLease() {
 	if legacyState(e.legacy.state.Load()) != legacyRead {
 		return // lost: the lease is not ours to release
 	}
+	e.noteLegacyReleased() // before the release: a hook of this session shows no legacy mail the next holder will get
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()
 	if err := e.releaseKey(ctx, e.legacyKey, &e.legacy.rev); err != nil {
 		e.log.Printf("lease release (%s): %v; a legacy session waits up to %s for it to expire", e.legacyKey, err, store.LeaseTTL)
 	}
+}
+
+// noteLegacyReleased records epoch none under the spool lock and marks the lease no longer read, so no later spool write
+// stamps the epoch of a hold that is about to be given back.
+func (e *Endpoint) noteLegacyReleased() {
+	sp := e.epochSpool.Load()
+	if sp == nil {
+		e.setLegacy(legacyLostNow, "released")
+		return
+	}
+	unlock, err := sp.Lock()
+	if err != nil {
+		e.log.Printf("spool: legacy epoch: %v", err)
+		e.setLegacy(legacyLostNow, "released")
+		return
+	}
+	defer unlock()
+	e.setLegacy(legacyLostNow, "released")
+	e.noteLegacyEpochLocked() // not read now, so this writes none
 }
 
 // LegacyInboxLine is the legacy inbox line of status: what this endpoint does with its legacy stream. ok is false for

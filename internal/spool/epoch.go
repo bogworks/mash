@@ -1,6 +1,8 @@
 package spool
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,7 +22,21 @@ func (s Spool) NoteEpoch(epoch uint64) error {
 	if epoch != 0 {
 		v = strconv.FormatUint(epoch, 10)
 	}
-	return s.writeOrRemove(epochFile, v)
+	return noteOrRemove(s.Dir, v, func(v string) error { return s.writeOrRemove(epochFile, v) })
+}
+
+// noteOrRemove writes v with write; should that fail it removes the epoch file instead, so the previous epoch cannot
+// stay readable (a missing file fails closed for every stamped entry). The write error is returned, joined with the
+// removal's when that fails too.
+func noteOrRemove(dir, v string, write func(string) error) error {
+	werr := write(v)
+	if werr == nil {
+		return nil
+	}
+	if rerr := os.Remove(filepath.Join(dir, epochFile)); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+		return errors.Join(werr, rerr)
+	}
+	return werr
 }
 
 // Epoch is the recorded epoch. ok is false when there is no readable record; epoch is 0 for "none".

@@ -541,7 +541,11 @@ func (e *Endpoint) dedupe(batch []pending, seen *seenSet, h *held) []pending {
 			continue
 		}
 		if seen.dup(p) || inBatch.dup(p) {
-			_ = p.msg.Ack()
+			if e.mayAck(p) {
+				_ = p.msg.Ack()
+			} else {
+				_ = p.msg.Nak() // the legacy lease is gone: the holder's consumer is redelivered it, nothing is acked here
+			}
 			e.waking.done(refOf(p.mail))
 			continue
 		}

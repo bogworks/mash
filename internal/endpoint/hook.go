@@ -242,6 +242,12 @@ func (e *Endpoint) putEntry(p pending) (held bool, err error) {
 		return true, err
 	}
 	defer unlock()
+	return e.putLegacyLocked(ent)
+}
+
+// putLegacyLocked is the legacy-stream half of putEntry, the caller holding the spool lock: the lease check, then the
+// stamped write. held is false when nothing was written because the legacy lease is not held.
+func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, err error) {
 	if testLegacyCheckSeam != nil {
 		testLegacyCheckSeam()
 	}
@@ -535,7 +541,15 @@ func (e *Endpoint) healHeld(h *held) {
 		if e.spool.IsDrained(seq) || e.spool.Has(seq) {
 			continue
 		}
-		if err := e.spool.Put(EntryOf(h.msgs[seq].mail)); err != nil {
+		ent := EntryOf(h.msgs[seq].mail)
+		var err error
+		if ent.Stream == LegacyStream && e.hasLegacyStream() {
+			// Through the lease-checked, epoch-stamped path of putEntry: a lost lease writes nothing.
+			_, err = e.putLegacyLocked(ent)
+		} else {
+			err = e.spool.Put(ent)
+		}
+		if err != nil {
 			e.log.Printf("spool #%s: rewrite: %v", FormatMsgRef(seq), err)
 		}
 	}

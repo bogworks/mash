@@ -1,6 +1,7 @@
 package spool
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,4 +82,23 @@ func TestWaitingSkipsLegacyEntryOfAnotherEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	want("none", "1", "legacy@1")
+}
+
+// A failed write of the epoch removes the file, so the previous epoch cannot stay readable.
+func TestNoteOrRemoveOnFailedWrite(t *testing.T) {
+	s := newSpool(t)
+	if err := s.NoteEpoch(7); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("disk full")
+	err := noteOrRemove(s.Dir, "none", func(string) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := s.Epoch(); ok {
+		t.Fatal("the previous epoch is still readable after a failed write")
+	}
+	if err := noteOrRemove(s.Dir, "none", func(string) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("with no file: %v", err)
+	}
 }
