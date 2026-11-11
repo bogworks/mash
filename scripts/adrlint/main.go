@@ -18,9 +18,7 @@
 //	c  every README link to an ADR resolves; every relative link in an ADR resolves; numbers are unique (gaps are
 //	   allowed: a number may be reserved by an in-flight PR). A record need not be listed in README.md: existing in the
 //	   directory is the rule (ADR 0068; the README's table is frozen at 0066 and INDEX.md lists every record)
-//	   docs/decisions/NEXT is optional (ADR 0089 will retire it): when the file exists it must hold the next free number
-//	   (highest + 1, four digits and a newline) and a pull request that adds an ADR bumps it (ADR 0070); when absent
-//	   there is no NEXT check
+//	   docs/decisions/NEXT is retired (ADR 0089): there is no counter file, and one that exists is a violation
 //	d  no consumer vocabulary (see vocabRE; the front matter block is not checked); a line carrying <!-- adrlint:allow vocabulary --> is exempt
 //	e  with --base: only the ADR files the pull request's own diff touches (merge-base of <ref> and HEAD to HEAD) are
 //	   judged; one the pull request does not touch is never flagged, so a branch behind <ref> is not blamed for what
@@ -30,7 +28,8 @@
 //	   absent at the merge-base (the pull request added it) is free. When git cannot find a merge-base, <ref> itself
 //	   is the comparison point (stricter)
 //	f  with --base: an ADR file the pull request adds (in its diff, absent at the merge-base) must have a number
-//	   greater than the highest ADR number at the tip of <ref> (ADR 0089); this applies whether or not NEXT exists
+//	   greater than the highest ADR number at the tip of <ref> (ADR 0089); there is no counter file, and two pull
+//	   requests that took the same number are caught by the duplicate check of rule c on the queue's combined tree
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
 // --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
@@ -353,13 +352,9 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		}
 	}
 
-	// c: NEXT, when present, names the next free number (ADR 0070). It is optional: ADR 0089 retires it.
+	// The counter file NEXT is retired (ADR 0089): a file by that name is a violation.
 	if _, err := os.Stat(filepath.Join(dir, "NEXT")); err == nil {
-		highest := 0
-		if len(nums) > 0 {
-			highest = nums[len(nums)-1]
-		}
-		vs = append(vs, lintNext(dir, highest)...)
+		vs = append(vs, viol(filepath.Join(dir, "NEXT"), 1, "docs/decisions/NEXT is retired (ADR 0089): delete it; a new ADR takes any number greater than the highest at <base>"))
 	}
 
 	// c: README links.
@@ -398,25 +393,6 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 		})...)
 	}
 	return vs, nil
-}
-
-var nextRE = regexp.MustCompile(`^[0-9]{4}\n$`)
-
-// lintNext checks <dir>/NEXT: exactly four digits and a newline, and one more than the highest ADR number (0001 with none).
-func lintNext(dir string, highest int) []string {
-	path := filepath.Join(dir, "NEXT")
-	want := fmt.Sprintf("%04d", highest+1)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return []string{viol(path, 1, "NEXT is missing or unreadable (%v): it must hold %s and a newline; take the number NEXT names and bump NEXT in the same PR", err, want)}
-	}
-	if !nextRE.Match(b) {
-		return []string{viol(path, 1, "NEXT must be exactly 4 digits and a newline, found %q; expected %q", string(b), want+"\n")}
-	}
-	if got := string(b[:4]); got != want {
-		return []string{viol(path, 1, "NEXT holds %s but the next free number is %s (highest ADR is %04d): take the number NEXT names and bump NEXT in the same PR", got, want, highest)}
-	}
-	return nil
 }
 
 // linkTarget returns the file part of a markdown link target, or "" for an external link or a bare anchor.

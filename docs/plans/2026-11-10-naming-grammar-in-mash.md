@@ -235,7 +235,7 @@ invalid before the approved break (REQ-014, NFR-003).
 
 Every pull request is small, off `main`, one concern, with tests written before the code they cover, Conventional
 Commits, no secrets or Claude session links, and, before it merges, the configured code review and an adversarial review
-on a model of another family (INV-005). An ADR takes `docs/decisions/NEXT` and bumps it. Behaviour that new-form
+on a model of another family (INV-005). An ADR takes any number greater than the highest on main (`NEXT` is retired). Behaviour that new-form
 identities enable stays behind one off-by-default setting until Phase 2 turns it on, so no intermediate pull request
 exposes a half-built path (NFR-003: the break is deliberate, never accidental). The setting is removed in Phase 3.
 

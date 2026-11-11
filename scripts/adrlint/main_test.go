@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -69,11 +68,8 @@ func tree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// next is the content of a correct NEXT file when the next free number is n.
-func next(n int) string { return fmt.Sprintf("%04d\n", n) }
-
 func good() map[string]string {
-	return map[string]string{"README.md": goodReadme, "0001-use-one-way.md": goodADR, "guide.md": "guide\n", "NEXT": next(2)}
+	return map[string]string{"README.md": goodReadme, "0001-use-one-way.md": goodADR, "guide.md": "guide\n"}
 }
 
 func without(m map[string]string, keys ...string) map[string]string {
@@ -123,14 +119,14 @@ func TestDocs(t *testing.T) {
 		{"a: no front matter", with(good(), adr, strings.Join(strings.Split(goodADR, "\n")[5:], "\n")), []string{adr + ":1: front matter"}},
 		{"a: missing key", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)\n", "")), []string{"has no decision-makers key"}},
 		{"a: bad status", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe")), []string{adr + ":2: status \"maybe\""}},
-		{"a: superseded status ok", with(good(), "NEXT", next(3), adr, edit(goodADR, "status: accepted", "status: Superseded by ADR-0002"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
+		{"a: superseded status ok", with(good(), adr, edit(goodADR, "status: accepted", "status: Superseded by ADR-0002"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
 		{"a: superseded by a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-9999")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
-		{"a: superseded by an unlisted ADR is fine", with(good(), "NEXT", next(3), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), nil},
+		{"a: superseded by an unlisted ADR is fine", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by ADR-0002"), "0002-new.md", goodADR), nil},
 		{"a: bad superseded", with(good(), adr, edit(goodADR, "status: accepted", "status: superseded by 2")), []string{"status \"superseded by 2\""}},
-		{"a: status with a note", with(good(), "NEXT", next(3), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002 (the read tool acks)"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
+		{"a: status with a note", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002 (the read tool acks)"), "0002-new.md", goodADR, "README.md", goodReadme+"- [x](0002-new.md)\n"), nil},
 		{"a: status with a note and no ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; the clause is moved")), nil},
 		{"a: status note names a missing ADR", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-9999 (x)")), []string{adr + ":2:", "ADR-9999 has no file 9999-*.md"}},
-		{"a: status note names an unlisted ADR is fine", with(good(), "NEXT", next(3), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002"), "0002-new.md", goodADR), nil},
+		{"a: status note names an unlisted ADR is fine", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted; amended by ADR-0002"), "0002-new.md", goodADR), nil},
 		{"a: note after a bad keyword", with(good(), adr, edit(goodADR, "status: accepted", "status: maybe; accepted")), []string{`status "maybe; accepted"`}},
 		{"d: front matter is not checked", with(good(), adr, edit(goodADR, "decision-makers: Someone (owner)", "decision-makers: A lead, B")), nil},
 		{"d: body occurrence of lead still fails", with(good(), adr, edit(goodADR, "A driver.", "The lead decides.")), []string{`forbidden vocabulary "lead"`}},
@@ -142,25 +138,15 @@ func TestDocs(t *testing.T) {
 		{"b: confirmation outside outcome", with(good(), adr, edit(edit(goodADR, "### Confirmation\n\nA test confirms it.\n", ""), "### One\n", "### Confirmation\n")), []string{`no "### Confirmation"`}},
 		{"b: title not first", with(good(), adr, edit(goodADR, "# Use one way to do the thing", "## Use one way")), []string{"first heading"}},
 		{"c: an ADR not listed in README is accepted", with(good(), "README.md", "# Decisions\n"), nil},
-		{"c: an unlisted new ADR is accepted", with(good(), "NEXT", next(3), "0002-new.md", goodADR), nil},
+		{"c: an unlisted new ADR is accepted", with(good(), "0002-new.md", goodADR), nil},
 		{"c: README link dead", with(good(), "README.md", goodReadme+"- [0002](0002-gone.md)\n"), []string{"README.md:4: link to 0002-gone.md does not resolve"}},
 		{"c: ADR link dead", with(good(), adr, edit(goodADR, "guide.md", "nope.md")), []string{`link "nope.md" does not resolve`}},
 		{"c: duplicate number", with(good(), "0001-other.md", goodADR, "README.md", goodReadme+"- [x](0001-other.md)\n"), []string{"number 0001 is used by more than one"}},
-		{"n: NEXT absent passes", without(with(good(), "0002-new.md", goodADR), "NEXT"), nil},
-		{"n: NEXT absent, no ADRs", map[string]string{"README.md": "# Decisions\n"}, nil},
-		{"n: NEXT absent, duplicate number still fails", without(with(good(), "0001-other.md", goodADR), "NEXT"), []string{"number 0001 is used by more than one"}},
-		{"n: NEXT stale (the highest number, not one more)", with(good(), "NEXT", next(1)), []string{"NEXT:1:", "NEXT holds 0001", "next free number is 0002", "take the number NEXT names and bump NEXT in the same PR"}},
-		{"n: NEXT too high", with(good(), "NEXT", next(3)), []string{"NEXT holds 0003", "next free number is 0002"}},
-		{"n: NEXT malformed, no newline", with(good(), "NEXT", "0002"), []string{"NEXT must be exactly 4 digits and a newline"}},
-		{"n: NEXT malformed, three digits", with(good(), "NEXT", "002\n"), []string{"NEXT must be exactly 4 digits and a newline"}},
-		{"n: NEXT malformed, two lines", with(good(), "NEXT", "0002\n\n"), []string{"NEXT must be exactly 4 digits and a newline"}},
-		{"n: NEXT malformed, text", with(good(), "NEXT", "next\n"), []string{"NEXT must be exactly 4 digits and a newline"}},
-		{"n: NEXT with a gap in the numbers", with(good(), "0005-five.md", goodADR, "NEXT", next(6)), nil},
-		{"n: NEXT after a gap must still be highest + 1", with(good(), "0005-five.md", goodADR, "NEXT", next(2)), []string{"NEXT holds 0002", "next free number is 0006"}},
-		{"n: no ADRs, NEXT is 0001", map[string]string{"README.md": "# Decisions\n", "NEXT": next(1)}, nil},
-		{"n: no ADRs, NEXT not 0001", map[string]string{"README.md": "# Decisions\n", "NEXT": next(2)}, []string{"next free number is 0001"}},
-		{"n: two PRs both take 0002 and bump NEXT alike, refused as a duplicate", with(good(), "0002-first.md", goodADR, "0002-second.md", goodADR, "NEXT", next(3)), []string{"number 0002 is used by more than one"}},
-		{"c: gap allowed", with(good(), "NEXT", next(4), "0003-three.md", goodADR, "README.md", goodReadme+"- [x](0003-three.md)\n"), nil},
+		{"c: two PRs that took the same number are refused as a duplicate", with(good(), "0002-first.md", goodADR, "0002-second.md", goodADR), []string{"number 0002 is used by more than one"}},
+		{"n: no NEXT file and consistent numbers", with(good(), "0002-new.md", goodADR), nil},
+		{"n: no ADRs and no NEXT", map[string]string{"README.md": "# Decisions\n"}, nil},
+		{"n: a NEXT file is retired", with(good(), "NEXT", "0002\n"), []string{"NEXT:1: docs/decisions/NEXT is retired (ADR 0089)", "greater than the highest at"}},
+		{"c: gap allowed", with(good(), "0003-three.md", goodADR, "README.md", goodReadme+"- [x](0003-three.md)\n"), nil},
 		{"a: extra front matter key ok", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted\nrecorded: 2026-10-31")), nil},
 		{"b: heading with parenthetical suffix", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options (reconstructed 2026-10-31; not recorded at the time)")), nil},
 		{"b: heading with another word after the name", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options Extra")), []string{`missing section "## Considered Options"`}},
@@ -748,19 +734,19 @@ func TestDocs_newNumber(t *testing.T) {
 	pth := func(n string) string { return "docs/decisions/" + n }
 	tip := map[string]string{pth("0001-use-one-way.md"): goodADR, pth("0088-top.md"): goodADR}
 	tests := []struct {
-		name   string
-		added  string // the file the PR adds ("" for none)
-		extra  map[string]string
-		hasNxt bool // a NEXT file is present
-		want   []string
+		name    string
+		added   string // the file the PR adds ("" for none)
+		extra   map[string]string
+		retired bool // the NEXT file is present
+		want    []string
 	}{
 		{"a: adds 0090, highest 0088", "0090-new.md", nil, false, nil},
 		{"b: adds 0088, taken at the tip", "0088-mine.md", nil, false, []string{"0088-mine.md", "number 0088", "highest at good is 0088", "take any number greater than 0088"}},
 		{"c: adds 0087, lower than the tip's highest", "0087-mine.md", nil, false, []string{"number 0087", "take any number greater than 0088"}},
 		{"d: adds 0089, consecutive", "0089-new.md", nil, false, nil},
 		{"e: adds nothing", "", nil, false, nil},
-		{"f: applies with a correct NEXT present", "0087-mine.md", nil, true, []string{"number 0087"}},
-		{"g: correct NEXT present, number above the tip", "0089-new.md", nil, true, nil},
+		{"f: NEXT present with --base", "0090-new.md", nil, true, []string{"NEXT is retired"}},
+		{"g: no NEXT, consistent", "0089-new.md", nil, false, nil},
 		{"h: duplicate numbers still fail", "0090-new.md", map[string]string{"0090-other.md": goodADR}, false, []string{"number 0090 is used by more than one"}},
 	}
 	for _, tc := range tests {
@@ -778,16 +764,8 @@ func TestDocs_newNumber(t *testing.T) {
 			for n, c := range tc.extra {
 				files[n] = c
 			}
-			if tc.hasNxt {
-				highest := 88
-				for n := range files {
-					if len(n) > 4 && n[0] >= '0' && n[0] <= '9' {
-						var v int
-						fmt.Sscanf(n[:4], "%d", &v)
-						highest = max(highest, v)
-					}
-				}
-				files["NEXT"] = next(highest + 1)
+			if tc.retired {
+				files["NEXT"] = "0089\n"
 			}
 			for n, c := range files {
 				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
@@ -814,5 +792,30 @@ func TestDocs_newNumber(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDocs_mergeBaseFallbackAdds(t *testing.T) {
+	// merge-base fails: the base ref is the comparison point, and a file absent there is added.
+	wd, _ := os.Getwd()
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "decisions")
+	os.MkdirAll(dir, 0o755)
+	for n, c := range map[string]string{"guide.md": "g\n", "README.md": "# x\n", "0001-a.md": goodADR, "0002-b.md": goodADR} {
+		os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+	}
+	os.Chdir(root)
+	defer os.Chdir(wd)
+	tip := map[string]string{"docs/decisions/0001-a.md": goodADR}
+	g := fakeGitMB(map[string]map[string]string{"good": tip}, "", []string{"docs/decisions/0002-b.md"})
+	if code, out, _ := runCLI(t, g, nil, "docs", "--base", "good", "docs/decisions"); code != 0 || out != "" {
+		t.Fatalf("got %d %q", code, out)
+	}
+}
+
+func TestDocs_nextRetiredWithoutBase(t *testing.T) {
+	dir := tree(t, with(good(), "NEXT", "0002\n"))
+	if code, out, _ := runCLI(t, nil, nil, "docs", dir); code != 1 || !strings.Contains(out, "NEXT is retired") {
+		t.Fatalf("got %d %q", code, out)
 	}
 }

@@ -174,11 +174,11 @@ jobs:
       - name: staticcheck
         continue-on-error: true
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
-  # ADR numbers: docs/decisions/NEXT names the next free number and no two records share one (ADR 0070). It runs on every
-  # event and on the checked-out tree, which for Mergify's queue run is the combined commit (a pull_request run on the
-  # queue's merge of the pull requests ahead). Two pull requests that take the same number bump NEXT to the same value,
-  # git merges that cleanly, and neither pull request's own run sees the other's record: only a check on the combined
-  # commit catches the duplicate. merge_group is also a trigger so a GitHub merge queue gets the same check.
+  # ADR numbers: no two records share a number on the checked-out tree, which for Mergify's queue run is the combined
+  # commit (a pull_request run on the queue's merge of the pull requests ahead); there is no counter file (ADR 0089). It
+  # runs on every event. Two pull requests that take the same number each pass alone, git merges them cleanly, and
+  # only the combined commit shows the duplicate. merge_group is also a trigger so a GitHub merge queue gets the same
+  # check.
   adr-numbers:
     timeout-minutes: 5
     runs-on: [self-hosted, rh-linux]
