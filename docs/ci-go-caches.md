@@ -29,6 +29,9 @@ The release jobs, `reproducible`, `adr-lint`, `publish-check`, `codeql` and `tes
 ```
 
 * Owned by a user other than the runner user. Directories 0555, files 0444. No symlinks.
+* The path to it must be stable too. `MASH_GO_SEED` and every directory above it must not be writable by the runner
+  user, so a job cannot rename or replace the seed, or a parent, between the script's checks and its copy. The script
+  checks the seed's contents, not its parents: a read-only mount, or a root-owned path, gives that guarantee.
 * Nothing in it, at any depth, may be writable by the runner user (mode, group or ACL). Root passes every write test,
   so the runner must not run as root.
 * Built only by a job that runs no pull request code (a main-only workflow, on a runner pull requests cannot select),

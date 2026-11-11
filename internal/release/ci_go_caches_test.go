@@ -170,8 +170,9 @@ const goCacheCall = "if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches %
 
 // goCacheJobs lists every job that warms its Go caches, with its seed kind. Every other job in every workflow must
 // not run the script: the release jobs and reproducible build cold (a release is built from their output), adr-lint
-// runs under pull_request_target, publish-check and codeql do not need it, and test-macos is a different OS (the
-// script needs GNU find) with its own job-local caches.
+// runs under pull_request_target, publish-check and codeql do not need it, and test-macos has no seed planned (operations,
+// 2026-11-11). This pins workflow steps only: the script's own unit tests above run under `go test ./...` on every
+// platform CI tests, macOS included, and the script avoids GNU-only find options for that reason.
 var goCacheJobs = map[string]string{
 	"ci.yml/test":              "race",
 	"ci.yml/conformance":       "check",
