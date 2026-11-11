@@ -392,6 +392,42 @@ func TestAuditCompareEarlierIncompleteRetiredSectionIsRefused(t *testing.T) {
 	}
 }
 
+// A marker state compareRetired does not know would let a deleted final marker escape --strict, and a duplicate key
+// would let the last entry win and hide a lost final: both are refused.
+func TestAuditCompareEarlierBadRetiredMarkersAreRefused(t *testing.T) {
+	f := newAuditEnv(t)
+	f.putMarker(t, f.retiredKV(t), "claude", "team1", "a", "UA", store.RetiredFinal)
+	first := f.auditTo(t, "first.json")
+	setState := func(st string) func(m map[string]any) {
+		return func(m map[string]any) {
+			m["retired"].(map[string]any)["markers"].([]any)[0].(map[string]any)["state"] = st
+		}
+	}
+	cases := map[string]struct {
+		edit func(m map[string]any)
+		want string
+	}{
+		"state Final": {setState("Final"), "retired.markers[0].state"},
+		"state done":  {setState("done"), "retired.markers[0].state"},
+		"duplicate key": {func(m map[string]any) {
+			r := m["retired"].(map[string]any)
+			ms := r["markers"].([]any)
+			dup := map[string]any{}
+			for k, v := range ms[0].(map[string]any) {
+				dup[k] = v
+			}
+			dup["state"] = store.RetiredPending
+			r["markers"] = append(ms, dup)
+		}, "retired.markers[1].key"},
+	}
+	for name, tc := range cases {
+		out, errb, code := f.run(t, "--strict", "--compare", writeEdited(t, first, tc.edit))
+		if code != 3 || out != "" || !strings.Contains(errb, tc.want) {
+			t.Errorf("%s: exit %d out=%q err=%q", name, code, out, errb)
+		}
+	}
+}
+
 func TestAuditDocsDescribeRetired(t *testing.T) {
 	raw, err := os.ReadFile("../../docs/audit.md")
 	if err != nil {

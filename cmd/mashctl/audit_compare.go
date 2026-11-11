@@ -263,13 +263,27 @@ func checkEarlierRetired(raw []byte) error {
 	if json.Unmarshal(sec["markers"], &ms) != nil {
 		return errors.New("mashctl: audit: --compare: the file is not a complete audit report: retired.markers is not an array")
 	}
+	seen := map[string]bool{}
 	for i, m := range ms {
+		var key, state string
 		for _, f := range []string{"key", "state"} {
 			var s string
 			if v, ok := earlierLookup(m, f); !ok || json.Unmarshal(v, &s) != nil || s == "" {
 				return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: it lacks retired.markers[%d].%s", i, f)
 			}
+			if f == "key" {
+				key = s
+			} else {
+				state = s
+			}
 		}
+		if state != store.RetiredFinal && state != store.RetiredPending {
+			return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: retired.markers[%d].state is not final or pending", i)
+		}
+		if seen[key] {
+			return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: retired.markers[%d].key repeats an earlier marker", i)
+		}
+		seen[key] = true
 	}
 	return nil
 }
