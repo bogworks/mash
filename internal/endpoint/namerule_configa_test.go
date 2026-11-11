@@ -564,6 +564,10 @@ func TestConfigAAlias(t *testing.T) {
 		}
 		ep.Close()
 	}
+	// The alias owner must differ from the endpoint's own (ADR 0076: ParseRecord refuses a same-owner alias before the rule runs).
+	if w.me.Owner == w.f.e.Owner {
+		t.Fatalf("the endpoint and its alias share the owner %q: the record would be refused before the rule", w.me.Owner)
+	}
 	setAlias(w.me, &store.Alias{Owner: w.f.e.Owner, Name: "me"}) // the legacy identity (cc, owner, me)
 	for opener, open := range opens {
 		ep, err := open()
