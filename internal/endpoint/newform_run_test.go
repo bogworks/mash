@@ -210,6 +210,10 @@ func TestNewFormMailBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The server must know the subscription before a publishes, or the heartbeat is missed (a flake on a slow runner).
+	if err := b.Conn().Flush(); err != nil {
+		t.Fatal(err)
+	}
 	a.publishHeartbeat()
 	hm, err := sub.NextMsg(5 * time.Second)
 	if err != nil {
