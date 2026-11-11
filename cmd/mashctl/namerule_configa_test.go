@@ -147,9 +147,10 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 		}
 	}
 	// A path that is set but empty, or that cannot be read, is an error and not "no rule".
+	absent := filepath.Join(t.TempDir(), "absent", "name-rule.json") // under a fresh temp dir, never created
 	for name, c := range map[string]struct{ val, want string }{
 		"empty":   {"", "MASH_NAME_RULE_FILE is set but empty"},
-		"missing": {"/nonexistent/name-rule.json", "/nonexistent/name-rule.json"},
+		"missing": {absent, absent},
 	} {
 		env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o"}
 		lookup := func(k string) (string, bool) {
