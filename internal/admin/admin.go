@@ -1649,7 +1649,7 @@ func (a *Admin) guardLegacyAlias(ctx context.Context, kv jetstream.KeyValue, nam
 		if r.Alias != nil && r.Alias.Name == name && (!ownerKnown || r.Alias.Owner == owner) {
 			g.release(ctx)
 			holder := r.KeyOrName()
-			return nil, &refusedError{name: name, why: ErrAliased,
+			return nil, &refusedError{name: name, why: ErrAliased, holder: holder,
 				text: fmt.Sprintf("the new-form endpoint %s still names it as its alias; retire or re-point %s first (nothing was removed)", holder, holder)}
 		}
 	}
@@ -1686,6 +1686,18 @@ type refusedError struct {
 	name string
 	why  error
 	text string // overrides why's text when set
+	// holder is the new-form endpoint that names name as its alias (ErrAliased only).
+	holder string
+}
+
+// AliasHolder returns the new-form endpoint (its flat name) that blocks a deprovision with ErrAliased, or "" when err
+// is not that refusal.
+func AliasHolder(err error) string {
+	var r *refusedError
+	if errors.As(err, &r) && errors.Is(r.why, ErrAliased) {
+		return r.holder
+	}
+	return ""
 }
 
 func (r *refusedError) Error() string {

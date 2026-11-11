@@ -374,6 +374,10 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		// failRemoval reports a failed removal; a failed revocation also names the way around it.
 		failRemoval := func(err error) int {
+			if msg, ok := AliasedRefusal(err, args[1]); ok {
+				fmt.Fprintln(stderr, msg)
+				return 1
+			}
 			if revokeErr != nil && errors.Is(err, revokeErr) {
 				return fail(fmt.Errorf("%w (--no-revoke deprovisions without revoking)", err))
 			}
@@ -665,4 +669,20 @@ func validUserKeyShape(k string) bool {
 		}
 	}
 	return true
+}
+
+// AliasedRefusal words admin.ErrAliased, the refusal to remove a legacy endpoint that a new-form endpoint names as its
+// alias (ADR 0076, ADR 0088), as one line that names both endpoints, says nothing was changed and says what to do. ok is
+// false for any other error.
+func AliasedRefusal(err error, name string) (msg string, ok bool) {
+	if !errors.Is(err, madmin.ErrAliased) {
+		return "", false
+	}
+	by := "a new-form endpoint"
+	fix := "retire or re-point that endpoint first"
+	if h := madmin.AliasHolder(err); h != "" {
+		by = "the new-form endpoint " + h
+		fix = "retire or re-point " + h + " first"
+	}
+	return "mash: refusing to deprovision " + name + ": " + by + " names it as its alias; nothing was changed. To proceed, " + fix + ", then run this again", true
 }
