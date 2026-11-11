@@ -1,8 +1,8 @@
 package endpoint
 
 import (
-	"github.com/bogworks/mash/internal/sap"
 	"fmt"
+	"github.com/bogworks/mash/internal/sap"
 	"os"
 	"strconv"
 	"sync"
