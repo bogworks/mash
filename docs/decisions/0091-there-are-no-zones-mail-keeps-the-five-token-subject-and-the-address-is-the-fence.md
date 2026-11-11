@@ -48,9 +48,11 @@ boundary the server can enforce.
   has ever been zoned (0 of 68; `set-zone` was never run), so no zoned address is cached anywhere in this deployment.
   For other deployments the removal is guarded so that mail is never silently dropped: `mashctl audit` and `mashctl
   drift` report any directory record that carries a zone as an error; the release that removes zones refuses to start
-  `serve` and `mashctl apply` while a zoned record exists, with a message telling the operator to remove the zone first
-  using the last release that has `set-zone`; and the changelog carries an upgrade note. The upgrade stops instead of
-  dropping mail. Nothing writes a zone.
+  `serve` and `mashctl apply` while a zoned record exists, with a message that names `mashctl unzone`; and the changelog
+  carries an upgrade note. The way out ships in the same release: `mashctl unzone <endpoint>` rewrites a zoned record to
+  the five-token form, moves its inbox stream's subjects to the five-token subject without losing stored mail, and
+  reissues its permissions; it is idempotent and safe to re-run. The operator runs it for each zoned record, then
+  upgrades. The upgrade stops instead of dropping mail. Nothing writes a zone.
 * **What this does not decide.** The label policy model (what replaces `docs/policy-file.md`, whether a bounded deny or a
   cross-owner grant is offered, and how) is the planner's to write and comes later as contract input. The analysis's
   F1 and F2 stay as input to it, not as decisions. Prompt and status stay outside the fence, as
@@ -74,8 +76,8 @@ The removal lands as pull requests by package; each names this record.
 * Good, because nothing live uses a zone, so there is no migration.
 * Bad, because a within-owner fence has no mechanism until the label model is ruled; inside an owner every endpoint may
   mail every other, as it already may for the live deployments.
-* Bad, because an outside deployment with a zoned record must un-zone it with the last release that has `set-zone`
-  before it can upgrade; the upgrade refuses to run until it does.
+* Bad, because an outside deployment with a zoned record must run `mashctl unzone` for it before the upgrade will
+  start; the upgrade refuses to run until it does.
 * Bad, because ADR 0053's policy file loses its zone-wildcard groups and is smaller until it is rewritten.
 
 ## Pros and Cons of the Options
