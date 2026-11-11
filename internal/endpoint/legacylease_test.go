@@ -463,6 +463,9 @@ func TestLegacyLeaseEpochLostBeforeSpoolWriteWritesNothing(t *testing.T) {
 	if i := legacyConsumerInfo(t, f, "inbox-old"); i.AckFloor.Stream != 0 {
 		t.Fatalf("legacy consumer acked: %+v", i)
 	}
+	// A different endpoint takes over: the old one must not take the lease again when the key is deleted (its retry loop
+	// would, on a slow runner, before the next holder starts; TestLegacyLeaseEpochLostBeforeSpoolWriteRetaken... covers that).
+	ep.stopLegacyRetry()
 	if err := (*kv).Delete(context.Background(), "old"); err != nil {
 		t.Fatal(err)
 	}
@@ -508,6 +511,7 @@ func TestLegacyLeaseEpochLostBetweenCheckAndWriteIsHidden(t *testing.T) {
 		t.Fatalf("epoch %d %v, want none", n, ok)
 	}
 	until(t, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
+	ep.stopLegacyRetry() // a different endpoint takes over: the old one must not take the lease again
 	if err := (*kv).Delete(context.Background(), "old"); err != nil {
 		t.Fatal(err)
 	}
