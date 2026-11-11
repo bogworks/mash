@@ -223,7 +223,7 @@ func TestLegacyQueuedMailIsShownOnceAsL(t *testing.T) {
 	pe := f.clientNF(t, peer)
 	_, ev2, _ := f.runNF(t, id)
 	f.sendTo(t, pe, id.Flat(), "own after restart")
-	got = waitText(t, ev2, "--- #1 from ag_team_peer [verified]", "> own after restart")
+	got = waitText(t, ev2, "--- #1 from ag.team.peer [verified]", "> own after restart")
 	time.Sleep(400 * time.Millisecond)
 	got = joined(ev2)
 	if strings.Contains(got, "legacy") || strings.Contains(got, "#L") {
@@ -248,7 +248,7 @@ func TestTwoStreamsInterleaved(t *testing.T) {
 	}
 	var wants []string
 	for i := 1; i <= 3; i++ {
-		wants = append(wants, fmt.Sprintf("--- #L%d from snd [verified]", i), fmt.Sprintf("--- #%d from ag_team_peer [verified]", i),
+		wants = append(wants, fmt.Sprintf("--- #L%d from snd [verified]", i), fmt.Sprintf("--- #%d from ag.team.peer [verified]", i),
 			fmt.Sprintf("> legacy-%d", i), fmt.Sprintf("> own-%d", i))
 	}
 	got := waitText(t, ev, wants...)
