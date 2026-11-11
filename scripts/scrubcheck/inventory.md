@@ -13,16 +13,16 @@ any hit from there is added here. The rows for `docs/plans/` are hits that the s
 
 | Hit | Verdict |
 |---|---|
-| CHANGELOG.md:146:W1 | open |
-| CHANGELOG.md:146:W1 | open |
+| CHANGELOG.md:146:W1 | excepted (exceptions.tsv, D186) |
+| CHANGELOG.md:146:W1 | excepted (exceptions.tsv, D186) |
 | cmd/mash/standalone_test.go:22:W6 | excepted (exceptions.tsv) |
 | cmd/mash/standalone_test.go:63:W6 | excepted (exceptions.tsv) |
 | cmd/mash/standalone_test.go:269:W6 | excepted (exceptions.tsv) |
-| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:13:W2 | open |
-| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:30:W2 | open |
-| docs/evidence/2026-11-02-heartbeat-fanout/README.md:97:W2 | open |
-| docs/plans/2026-11-03-next-tranche.md:18:W3 | open |
-| docs/plans/2026-11-03-next-tranche.md:48:W3 | open |
+| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:13:W2 | excepted (exceptions.tsv, D186) |
+| docs/evidence/2026-10-31-init-synadia-live/RECEIPT.md:30:W2 | excepted (exceptions.tsv, D186) |
+| docs/evidence/2026-11-02-heartbeat-fanout/README.md:97:W2 | excepted (exceptions.tsv, D186) |
+| docs/plans/2026-11-03-next-tranche.md:18:W3 | excepted (exceptions.tsv, D186) |
+| docs/plans/2026-11-03-next-tranche.md:48:W3 | excepted (exceptions.tsv, D186) |
 | docs/plans/2026-11-10-naming-grammar-in-mash.md:5:W5 | open |
 | docs/plans/2026-11-10-naming-grammar-in-mash.md:5:W2 | open |
 | docs/plans/2026-11-10-naming-grammar-in-mash.md:18:W1 | open |
