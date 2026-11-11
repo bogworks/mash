@@ -117,7 +117,9 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	}
 	e.spool, e.since = &s, time.Now()
 	e.epochSpool.Store(&s)
-	e.noteLegacyEpochLocked() // under the lock SetSpool holds: the file names the hold in force, or none
+	if err := e.noteLegacyEpochLocked(); err != nil && e.legacyReading() { // under the lock SetSpool holds: the file names the hold in force, or none
+		e.failLegacyHold(err, true) // the hold's entries would be hidden and never drained: give it up
+	}
 	e.hl.bind(s, e.since)
 	return nil
 }
@@ -192,6 +194,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 				// The legacy lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
 				// so the new holder is redelivered it at once.
 				_ = p.msg.Nak()
+				e.waking.done(seq)
 				continue
 			}
 			if err != nil {

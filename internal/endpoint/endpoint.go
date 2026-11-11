@@ -437,7 +437,7 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 		}
 		if ok {
 			e.alias, e.legacyKey = &alias, alias.Flat()
-			e.takeLegacyLease(ctx)
+			e.startLegacy(ctx)
 		}
 	}
 	return e, nil
@@ -541,6 +541,7 @@ func (e *Endpoint) keepLease() {
 			lastWrite = wakingClock()
 			if err := e.refreshLease(ctx); err != nil {
 				e.log.Print(err)
+				e.legacy.ownLost.Store(true)
 				e.leaseLost <- err
 				return false
 			}
@@ -659,6 +660,7 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 
 // Close releases the lease and closes the connection.
 func (e *Endpoint) Close() {
+	e.stopLegacyRetry()
 	if svc := e.svc(); svc != nil {
 		svc.stop()
 	}

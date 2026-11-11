@@ -369,6 +369,19 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		starts[src.ref] = streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}
 		probes[src.ref] = e.wakingProbe(src.cons, src.stream)
 		floors[src.ref] = e.consumerAckFloor(src.cons)
+		if src.ref == LegacyStream {
+			fl := floors[src.ref]
+			e.legacy.floor.Store(&fl)
+		}
+	}
+	if e.hasLegacyStream() {
+		// The legacy consumer may start later (legacyManager): its floor reads from what it publishes then.
+		floors[LegacyStream] = func() (uint64, bool) {
+			if f := e.legacy.floor.Load(); f != nil {
+				return (*f)()
+			}
+			return 0, false
+		}
 	}
 	e.waking.startStreams(starts, true, probes)
 	quit := make(chan struct{})
@@ -433,6 +446,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 		}
 	}
+	var initial jetstream.ConsumeContext // the legacy consume loop already started, if the lease was held at start
 	for _, src := range srcs {
 		cc, err := src.cons.Consume(handler(src.ref), jetstream.PullMaxMessages(100))
 		if err != nil {
@@ -443,18 +457,15 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		}
 		ccs = append(ccs, cc)
 		if src.ref == LegacyStream {
-			// A lease lost mid-session stops this consumer only.
-			watched.Add(1)
-			go func() {
-				defer watched.Done()
-				select {
-				case <-e.legacy.lost:
-					cc.Stop()
-					e.log.Printf("legacy inbox: stopped reading %s (the lease was lost); the own inbox is still read", e.legacyKey)
-				case <-quit:
-				}
-			}()
+			initial = cc
 		}
+	}
+	if e.hasLegacyStream() {
+		watched.Add(1)
+		go func() {
+			defer watched.Done()
+			e.legacyManager(ctx, quit, handler(LegacyStream), initial)
+		}()
 	}
 	return func() {
 		stopAll()
@@ -462,6 +473,76 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		<-workerDone
 		watched.Wait()
 	}, nil
+}
+
+// legacyManager runs the legacy stream's consume loop for as long as the legacy lease is held: it stops the loop when
+// the lease is lost or given up, and (re)starts it, through the durable consumer the stream already has, whenever a
+// hold begins (the retry loop took the lease after Open, or after a loss). The own stream's loop is never touched.
+// The same message redelivered across holds is de-duplicated by the deliver loop as always (by stream and sequence).
+// initial is the loop consume started while the lease was held, or nil.
+func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, handler func(jetstream.Msg), initial jetstream.ConsumeContext) {
+	var cur jetstream.ConsumeContext
+	var lost <-chan error
+	var curEpoch uint64
+	stopCur := func() {
+		cc := cur
+		cur, lost = nil, nil
+		cc.Stop()
+		select {
+		case <-cc.Closed():
+		case <-time.After(5 * time.Second):
+		}
+	}
+	if initial != nil {
+		cur = initial
+		l, ep := e.legacyHold()
+		lost, curEpoch = l, ep
+	}
+	defer func() {
+		if cur != nil {
+			stopCur()
+		}
+	}()
+	// The ticker is a safety net for a missed wake (and the retry of a consumer that could not be started).
+	tick := time.NewTicker(max(LegacyRetryMin, 10*time.Millisecond))
+	defer tick.Stop()
+	stream := sap.InboxStream(e.legacyKey)
+	for {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+		if cur != nil && (!e.legacyReading() || e.legacy.epoch.Load() != curEpoch) {
+			stopCur()
+			e.log.Printf("legacy inbox: stopped reading %s (the lease was lost); the own inbox is still read", e.legacyKey)
+		}
+		if cur == nil && e.legacyReading() {
+			l, ep := e.legacyHold()
+			cons, err := e.js.Consumer(ctx, stream, store.Consumer)
+			if err != nil {
+				e.log.Printf("mash: legacy inbox consumer: %v (will retry)", err)
+			} else {
+				ci := cons.CachedInfo()
+				e.waking.addStream(LegacyStream, streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}, e.wakingProbe(cons, stream))
+				fl := e.consumerAckFloor(cons)
+				e.legacy.floor.Store(&fl)
+				if cc, err := cons.Consume(handler, jetstream.PullMaxMessages(100)); err != nil {
+					e.log.Printf("mash: legacy inbox consume: %v (will retry)", err)
+				} else {
+					cur, lost, curEpoch = cc, l, ep
+					e.log.Printf("legacy inbox: reading %s", e.legacyKey)
+				}
+			}
+		}
+		select {
+		case <-quit:
+			return
+		case <-lost: // nil when no loop runs
+		case <-e.legacy.wake:
+		case <-tick.C:
+		}
+	}
 }
 
 // deliverLoop is the single writer of channel events (see consume).

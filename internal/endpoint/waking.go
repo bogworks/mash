@@ -105,6 +105,31 @@ func (w *wakingTracker) startStreams(streams map[string]streamStart, haveLast bo
 	w.poke()
 }
 
+// addStream registers a stream whose consumer starts after the others did (the legacy stream, once its lease is taken
+// by a retry). A stream already registered is left as it is. Until its backlog is accounted for the count is unknown.
+func (w *wakingTracker) addStream(name string, st streamStart, probe wakingProbe) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	if !w.started {
+		w.mu.Unlock()
+		return
+	}
+	if _, ok := w.expect[name]; ok {
+		w.mu.Unlock()
+		return
+	}
+	w.expect[name], w.last[name], w.sReady[name] = st.Backlog, st.Last, st.Backlog <= 0
+	if w.probes == nil {
+		w.probes = map[string]wakingProbe{}
+	}
+	w.probes[name] = probe
+	w.ready = w.allReady()
+	w.mu.Unlock()
+	w.poke()
+}
+
 // allReady reports whether every stream's startup backlog is accounted for. Hold w.mu.
 func (w *wakingTracker) allReady() bool {
 	for _, ok := range w.sReady {
