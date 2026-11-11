@@ -273,6 +273,10 @@ func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, epoch uint64, er
 	return true, ent.Epoch, e.spool.Put(ent)
 }
 
+// testSettleSeam is a test seam: called in settleHeld after the per-entry loop, before the drain is acted on. Nil in
+// production.
+var testSettleSeam func()
+
 // settleHeld acks what a hook has drained, keeps the rest from being redelivered, and wakes an idle session.
 func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 	defer func() { h.added = 0 }()
@@ -311,11 +315,15 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			h.hookAt = time.Now()
 		}
 	}
+	if testSettleSeam != nil {
+		testSettleSeam()
+	}
 	if ran {
 		// A drain shows a bounded batch: an urgent message it left held was not shown, so it may ring again
-		// (codex H1 on #23).
+		// (codex H1 on #23). Judged live: an entry
+		// the hook drained after the loop above read it was shown.
 		for seq, p := range h.msgs {
-			if p.mail.Urgent {
+			if p.mail.Urgent && !e.spool.IsDrained(seq) {
 				delete(h.rung, seq)
 			}
 		}
@@ -358,7 +366,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		if h.listed[seq] {
 			continue
 		}
-		if (p.mail.Urgent || (prehook && p.mail.Kind.Wakes())) && !h.rung[seq] {
+		if (p.mail.Urgent || (prehook && p.mail.Kind.Wakes())) && !h.rung[seq] && !e.spool.IsDrained(seq) {
 			ring = append(ring, seq)
 		}
 		if t := h.at[seq]; (crowded || p.mail.Urgent || p.mail.Kind.Wakes()) && (oldest.IsZero() || t.Before(oldest)) {
