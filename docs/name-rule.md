@@ -52,7 +52,8 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
 
 ## Where it applies
 
-The rule applies at every entry point, with no per-rule list: provision, start, send, reply, prompt, lookup and the
+The rule applies at every entry point, with no per-rule list: provision (legacy `Provision` and the new-form `ProvisionIdentity`, which applies it first, to the
+three tokens of the new identity), start, send, reply, prompt, lookup and the
 compatibility alias. For `send` and `prompt` both the addressed identity and the sender's own identity are checked;
 `reply` checks the identity being answered; `lookup` of a refused identity fails with the named-rule error and never
 omits it silently. The requested identity is checked before the directory is read, so a refused identity whose record is

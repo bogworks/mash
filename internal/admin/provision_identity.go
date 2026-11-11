@@ -93,7 +93,8 @@ func (a *Admin) directoryRecords(ctx context.Context, kv jetstream.KeyValue) ([]
 	return recs, nil
 }
 
-// ProvisionIdentity provisions the new-form endpoint id (ADR 0074): the directory record keyed by id's flat identity,
+// ProvisionIdentity provisions the new-form endpoint id (ADR 0074). The configured name rule is applied first, to all
+// three tokens of id (not to alias), before the keys are validated and before anything is read or written. It creates the directory record keyed by id's flat identity,
 // the inbox stream inbox-<flat> filtered on id's exact mail subject, and the durable consumer. alias, when set, is
 // the legacy identity the endpoint answers to during the transition window (ADR 0076); it is verified by VerifyAlias
 // before anything is written. A new-form identity is never zoned, so meta.Zone must be empty.
@@ -115,6 +116,11 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 	}
 	if id.IsLegacy() {
 		return store.Record{}, fmt.Errorf("mash: provision identity: %s is a legacy identity: use Provision", id)
+	}
+	if a.rule != nil {
+		if err := a.rule.Check(id); err != nil {
+			return store.Record{}, fmt.Errorf("mash: provision identity: %w", err)
+		}
 	}
 	if !nkeys.IsValidPublicUserKey(user) {
 		return store.Record{}, errors.New("mash: the user is not a user public key (U, then 55 base32 characters; the value is not shown)")
