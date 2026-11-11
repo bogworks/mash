@@ -81,9 +81,6 @@
 | [0077](0077-the-name-rule-file-is-versioned-and-mash-reads-two-versions-for-one-window.md) | The name-rule file is versioned, and mash reads two versions for one window | accepted | 2026-11-10 |
 | [0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md) | Queue entry needs an approval or an approval label, and a push removes the label | accepted | 2026-11-10 |
 | [0079](0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md) | CI and release jobs run on self-hosted runners only | accepted | 2026-11-10 |
-| [0080](0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md) | Review is a gate in the implementer's loop, adopted from a sibling project | accepted | 2026-11-10 |
-| [0081](0081-three-token-identities-are-shown-in-canonical-form.md) | Three-token identities are shown in canonical form; scripts keep the flat key | accepted | 2026-11-10 |
-| [0082](0082-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md) | A new serve of the same session takes over the endpoint lease | accepted | 2026-11-10 |
 | [0083](0083-a-via-origin-is-an-endpoint-name-or-a-canonical-flat-key-amends-0063.md) | A via origin is a legacy endpoint name or a canonical flat key (amends 0063) | accepted | 2026-11-10 |
 | [0084](0084-ci-warms-go-caches-from-a-read-only-seed.md) | CI warms its Go caches from a read-only seed copied per job | accepted | 2026-11-11 |
 | [0086](0086-the-queue-s-gate-jobs-run-on-small-dedicated-gate-runners.md) | The queue's gate jobs run on small dedicated gate runners | accepted | 2026-11-11 |
