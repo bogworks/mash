@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/bogworks/mash/internal/config"
 )
@@ -63,16 +65,96 @@ type auditCompare struct {
 	AccountUnverified bool `json:"account_unverified"`
 }
 
-// earlierInbox and the types around it decode an earlier report with pointers, so a missing field is told from zero.
-type earlierInbox struct {
-	Stream  *string `json:"stream"`
-	Present *bool   `json:"present"`
-	LastSeq *uint64 `json:"last_seq"`
-	Deliver *struct {
-		Present   *bool   `json:"present"`
-		Delivered *uint64 `json:"delivered"`
-		AckFloor  *uint64 `json:"ack_floor"`
-	} `json:"deliver"`
+// earlierWhen says when an earlier inbox must carry a field.
+type earlierWhen int
+
+const (
+	whenAlways         earlierWhen = iota // every inbox the report lists
+	whenInboxPresent                      // the inbox is present (`present` is true)
+	whenDeliverPresent                    // the inbox is present and its `deliver` consumer is present
+)
+
+// earlierInboxFields is the ONE table of what an earlier report must carry for each legacy inbox it lists (a record
+// of form legacy: `inbox`; a rename: `legacy_inbox`). Each is a field the comparison or the drain rule reads, so a
+// report without it could make a vanished inbox read as drained (a missing `msgs` is 0) or hide a recreation. A field
+// counts as present when its key is there and is not null, so `msgs: 0` is present and a missing `msgs` is not. The
+// validator, docs/audit.md and the tests all iterate this table. Fields the writer omits when empty or unknown and
+// that nothing reads (`last_time`, `subjects`, `start_time`, `delivered_last`, ...) are not listed.
+var earlierInboxFields = []struct {
+	Path string // relative to the inbox, with dots for the nested `deliver` object
+	When earlierWhen
+	Why  string
+}{
+	{"stream", whenAlways, "names the stream the inbox is compared by"},
+	{"present", whenAlways, "whether the stream existed"},
+	{"msgs", whenInboxPresent, "stored message count: 0 makes the inbox drained"},
+	{"first_seq", whenInboxPresent, "drain rule: a start sequence at or below it"},
+	{"last_seq", whenInboxPresent, "movement; the ack floor must reach it"},
+	{"created", whenInboxPresent, "recreation check for the stream"},
+	{"suspended", whenInboxPresent, "state of the stream the earlier audit recorded"},
+	{"deliver", whenInboxPresent, "the `deliver` consumer object"},
+	{"deliver.present", whenInboxPresent, "whether the consumer existed"},
+	{"deliver.pending", whenDeliverPresent, "drain rule: nothing pending"},
+	{"deliver.ack_pending", whenDeliverPresent, "drain rule: nothing unacknowledged"},
+	{"deliver.delivered", whenDeliverPresent, "movement of the delivered stream sequence"},
+	{"deliver.ack_floor", whenDeliverPresent, "drain rule: reaches last_seq"},
+	{"deliver.created", whenDeliverPresent, "recreation check for the consumer"},
+	{"deliver.deliver_policy", whenDeliverPresent, "drain rule: all or a start sequence"},
+	{"deliver.start_seq", whenDeliverPresent, "drain rule: with by_start_sequence"},
+	{"deliver.filter_subjects", whenDeliverPresent, "drain rule: any filter disqualifies"},
+}
+
+// earlierLookup finds a dotted path in a decoded JSON object. ok is false when a key is missing or null.
+func earlierLookup(m map[string]json.RawMessage, path string) (raw json.RawMessage, ok bool) {
+	head, rest, nested := strings.Cut(path, ".")
+	v, found := m[head]
+	if !found || string(bytes.TrimSpace(v)) == "null" {
+		return nil, false
+	}
+	if !nested {
+		return v, true
+	}
+	var sub map[string]json.RawMessage
+	if json.Unmarshal(v, &sub) != nil || sub == nil {
+		return nil, false
+	}
+	return earlierLookup(sub, rest)
+}
+
+// earlierTrue is whether a boolean field is present and true.
+func earlierTrue(m map[string]json.RawMessage, path string) bool {
+	raw, ok := earlierLookup(m, path)
+	var b bool
+	return ok && json.Unmarshal(raw, &b) == nil && b
+}
+
+// checkEarlierInbox names the first table field the inbox lacks, as a JSON path under where.
+func checkEarlierInbox(where string, in map[string]json.RawMessage) error {
+	for _, f := range earlierInboxFields {
+		switch f.When {
+		case whenInboxPresent:
+			if !earlierTrue(in, "present") {
+				continue
+			}
+		case whenDeliverPresent:
+			if !earlierTrue(in, "present") || !earlierTrue(in, "deliver.present") {
+				continue
+			}
+		}
+		raw, ok := earlierLookup(in, f.Path)
+		if f.Path == "stream" {
+			var name string
+			ok = ok && json.Unmarshal(raw, &name) == nil && name != ""
+		}
+		if !ok {
+			note := ""
+			if f.Path == "created" || f.Path == "deliver.created" {
+				note = " (an audit made before creation times existed: regenerate it with this mashctl)"
+			}
+			return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: it lacks %s.%s%s", where, f.Path, note)
+		}
+	}
+	return nil
 }
 
 type earlierReport struct {
@@ -81,32 +163,6 @@ type earlierReport struct {
 	Owner     *string          `json:"owner"`
 	Records   *json.RawMessage `json:"records"`
 	Renames   *json.RawMessage `json:"renames"`
-}
-
-// check names the first field of an inbox the comparison needs and the report lacks.
-func (in earlierInbox) check(where string) error {
-	miss := func(f string) error {
-		return fmt.Errorf("mashctl: audit: --compare: the file is not a complete audit report: %s lacks %s", where, f)
-	}
-	switch {
-	case in.Stream == nil || *in.Stream == "":
-		return miss("stream")
-	case in.Present == nil:
-		return miss("present")
-	case !*in.Present:
-		return nil
-	case in.LastSeq == nil:
-		return miss("last_seq")
-	case in.Deliver == nil || in.Deliver.Present == nil:
-		return miss("deliver.present")
-	case !*in.Deliver.Present:
-		return nil
-	case in.Deliver.Delivered == nil:
-		return miss("deliver.delivered")
-	case in.Deliver.AckFloor == nil:
-		return miss("deliver.ack_floor")
-	}
-	return nil
 }
 
 // validateEarlier refuses a file that is not a complete audit report: the fields the comparison reads must be there,
@@ -136,13 +192,13 @@ func validateEarlier(raw []byte) error {
 		return miss("records and renames")
 	}
 	var recs []struct {
-		Key   string       `json:"key"`
-		Form  string       `json:"form"`
-		Inbox earlierInbox `json:"inbox"`
+		Key   string                     `json:"key"`
+		Form  string                     `json:"form"`
+		Inbox map[string]json.RawMessage `json:"inbox"`
 	}
 	var rens []struct {
-		Flat        string       `json:"flat"`
-		LegacyInbox earlierInbox `json:"legacy_inbox"`
+		Flat        string                     `json:"flat"`
+		LegacyInbox map[string]json.RawMessage `json:"legacy_inbox"`
 	}
 	if err := json.Unmarshal(*e.Records, &recs); err != nil || recs == nil {
 		return miss("records (an array)")
@@ -150,15 +206,15 @@ func validateEarlier(raw []byte) error {
 	if err := json.Unmarshal(*e.Renames, &rens); err != nil || rens == nil {
 		return miss("renames (an array)")
 	}
-	for _, r := range recs {
+	for i, r := range recs {
 		if r.Form == "legacy" {
-			if err := r.Inbox.check("record " + config.Clean(r.Key)); err != nil {
+			if err := checkEarlierInbox(fmt.Sprintf("records[%d].inbox", i), r.Inbox); err != nil {
 				return err
 			}
 		}
 	}
-	for _, r := range rens {
-		if err := r.LegacyInbox.check("rename " + config.Clean(r.Flat) + " legacy_inbox"); err != nil {
+	for i, r := range rens {
+		if err := checkEarlierInbox(fmt.Sprintf("renames[%d].legacy_inbox", i), r.LegacyInbox); err != nil {
 			return err
 		}
 	}

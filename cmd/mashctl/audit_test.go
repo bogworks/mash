@@ -1200,60 +1200,140 @@ func TestAuditCompareNothingRecreatedPasses(t *testing.T) {
 	}
 }
 
-// An earlier audit made before the `created` fields cannot prove the stream was not recreated.
-func TestAuditCompareEarlierWithoutCreationTimes(t *testing.T) {
+// deleteJSONPath removes a dotted path from a decoded JSON object.
+func deleteJSONPath(m map[string]any, path string) {
+	head, rest, nested := strings.Cut(path, ".")
+	if !nested {
+		delete(m, head)
+		return
+	}
+	deleteJSONPath(m[head].(map[string]any), rest)
+}
+
+// Every field in earlierInboxFields is required of an earlier report: with just that field removed, for a plain
+// legacy record or for a renamed identity's legacy inbox, the report is refused (exit 3, nothing on stdout) and the
+// message names the JSON path. The test iterates the table, so a later field cannot be missed.
+func TestAuditCompareEarlierMissingAnyTableFieldIsRefused(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	raw, err := os.ReadFile(first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	removed := 0
-	var strip func(v any)
-	strip = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if _, ok := x["created"]; ok {
-				delete(x, "created")
-				removed++
-			}
-			for _, e := range x {
-				strip(e)
-			}
-		case []any:
-			for _, e := range x {
-				strip(e)
+	for _, fld := range earlierInboxFields {
+		for _, where := range []string{"records[0].inbox", "renames[0].legacy_inbox"} {
+			p := writeEdited(t, first, func(m map[string]any) {
+				inbox := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
+				if strings.HasPrefix(where, "renames") {
+					raw, _ := json.Marshal(inbox)
+					var cp map[string]any
+					_ = json.Unmarshal(raw, &cp)
+					m["renames"] = []any{map[string]any{"flat": "alpha", "legacy_inbox": cp}}
+					inbox = cp
+				}
+				deleteJSONPath(inbox, fld.Path)
+			})
+			out, errb, code := f.run(t, "--strict", "--compare", p)
+			want := where + "." + fld.Path
+			if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, "lacks "+want) {
+				t.Errorf("%s without %s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", where, fld.Path, code, out, errb, want)
 			}
 		}
 	}
-	strip(doc)
-	if removed != 2 {
-		t.Fatalf("removed %d created fields, want 2 (stream and deliver)", removed)
+}
+
+// A null is not a value: a count of null is as missing as an absent key.
+func TestAuditCompareEarlierNullFieldIsRefused(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	p := writeEdited(t, first, func(m map[string]any) {
+		m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)["msgs"] = nil
+	})
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 3 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") {
+		t.Errorf("null msgs: %d %q %q", code, out, errb)
 	}
-	stripped, err := json.Marshal(doc)
+}
+
+// The table stays the single source: the docs list every field in it.
+func TestAuditDocsListEveryEarlierField(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "audit.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := filepath.Join(t.TempDir(), "old.json")
-	if err := os.WriteFile(old, stripped, 0o600); err != nil {
-		t.Fatal(err)
+	for _, fld := range earlierInboxFields {
+		if !strings.Contains(string(raw), "| `"+fld.Path+"` |") {
+			t.Errorf("docs/audit.md lacks the table row for %s", fld.Path)
+		}
 	}
-	c, errb, code := f.recreatedJSON(t, old)
-	if code != 1 || c.Compare.CreationUnknown != 1 || !c.Compare.Streams[0].CreationUnknown || c.Compare.Recreated != 0 {
-		t.Fatalf("earlier audit without creation times, strict: exit %d %+v", code, c.Compare)
+}
+
+// The fields below `present` are required only of a present inbox, and below `deliver.present` only of a present
+// consumer: an earlier inbox that was absent needs just its stream and present.
+func TestAuditCompareEarlierAbsentInboxNeedsOnlyStreamAndPresent(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	p := writeEdited(t, first, func(m map[string]any) {
+		in := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
+		stream := in["stream"]
+		clear(in)
+		in["stream"], in["present"] = stream, false
+	})
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code == 3 {
+		t.Errorf("absent earlier inbox with only stream and present: %d %q %q", code, out, errb)
 	}
-	if !strings.Contains(errb, "lacks creation times") || !strings.Contains(errb, "regenerate") {
-		t.Errorf("strict note missing: %q", errb)
+	p = writeEdited(t, first, func(m map[string]any) {
+		in := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
+		in["deliver"] = map[string]any{"present": false}
+	})
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code == 3 {
+		t.Errorf("earlier inbox without a consumer: %d %q %q", code, out, errb)
 	}
-	out, errb, code := f.run(t, "--json", "--compare", old)
-	if code != 0 || !strings.Contains(out, `"creation_unknown": true`) {
-		t.Errorf("non-strict shows it and exits 0: %d %q\n%s", code, errb, out)
+}
+
+// An earlier inbox without msgs that later vanishes with its record must not read as a safe retirement: the missing
+// count would be 0, which counts as drained. The report is refused instead.
+func TestAuditCompareVanishedWithMsgsAbsentIsRefused(t *testing.T) {
+	f, first := vanishFixture(t, false)
+	p := writeEdited(t, first, func(m map[string]any) {
+		delete(m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any), "msgs")
+	})
+	f.deprovisionAndForget(t, "alpha")
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", p)
+	if code != 3 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") || strings.Contains(out, "retired") {
+		t.Fatalf("msgs absent, inbox and record gone: exit %d out=%q err=%q", code, out, errb)
 	}
-	if txt, _, _ := f.run(t, "--compare", old); !strings.Contains(txt, "UNKNOWN") {
-		t.Errorf("text form must show UNKNOWN:\n%s", txt)
+}
+
+// msgs 0 is present, so an empty inbox that vanishes with its record is still a retirement.
+func TestAuditCompareMsgsZeroPresentIsRetired(t *testing.T) {
+	f := newAuditEnv(t)
+	f.legacy(t, "alpha")
+	first := f.auditTo(t, "first.json")
+	var rep struct {
+		Records []struct {
+			Inbox struct {
+				Msgs *uint64 `json:"msgs"`
+			} `json:"inbox"`
+		} `json:"records"`
+	}
+	raw, _ := os.ReadFile(first)
+	if err := json.Unmarshal(raw, &rep); err != nil || rep.Records[0].Inbox.Msgs == nil || *rep.Records[0].Inbox.Msgs != 0 {
+		t.Fatalf("fixture must write msgs 0 explicitly: %v %s", err, raw)
+	}
+	f.deprovisionAndForget(t, "alpha")
+	c, code := f.compareJSON(t, first)
+	if code != 0 || c.Compare.Retired != 1 || c.Compare.Vanished != 0 {
+		t.Fatalf("empty inbox with msgs 0 present: exit %d %+v", code, c.Compare)
+	}
+}
+
+// An earlier audit made before the `created` fields cannot prove the stream was not recreated: it is refused and
+// the message says to regenerate it.
+func TestAuditCompareEarlierWithoutCreationTimesIsRefused(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	p := writeEdited(t, first, func(m map[string]any) {
+		in := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
+		delete(in, "created")
+		delete(in["deliver"].(map[string]any), "created")
+	})
+	for _, args := range [][]string{{"--compare", p}, {"--strict", "--json", "--compare", p}} {
+		out, errb, code := f.run(t, args...)
+		if code != 3 || out != "" || !strings.Contains(errb, "created") || !strings.Contains(errb, "regenerate") {
+			t.Errorf("%v: exit %d out=%q err=%q", args, code, out, errb)
+		}
 	}
 }
 

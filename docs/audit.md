@@ -144,13 +144,42 @@ the one this mashctl writes; a file that is not JSON, is another version, or can
 
 The earlier file must also be a complete audit of this deployment, or a stub such as `{"version":1}` would pass for a
 baseline with no legacy streams. It needs a non-empty `generated` and `owner`, the `records` and `renames` arrays (empty
-is fine, absent or `null` is not) and, for each legacy inbox, the `stream` name, `present`, and when present the
-`last_seq` and the `deliver` consumer's `present`, `delivered` and `ack_floor`. Its `owner` must equal the current owner and,
+is fine, absent or `null` is not) and, for each legacy inbox it lists, every field in the table below. A field counts
+as present when its key is there and not `null`, so `"msgs": 0` is present and a missing `msgs` is not (a missing
+count would otherwise read as 0 and make an inbox that later vanished look drained). Its `owner` must equal the current owner and,
 when it has an `account`, that must equal the current account. Anything else is refused with exit 3, a message on
 standard error naming what is wrong, and nothing on standard output. An earlier audit made before `account` existed
 is accepted but cannot be tied to this deployment: `compare.account_unverified` is `true` and the text form says
 `account not verified`. Without `--strict` it is only shown. With `--strict` it fails (exit 1) and standard error says
-to regenerate the earlier audit with this mashctl, as for missing creation times.
+to regenerate the earlier audit with this mashctl.
+
+<a id="earlier-fields"></a>
+Fields an earlier report must carry for each legacy inbox (`records[].inbox` of form `legacy`, and
+`renames[].legacy_inbox`). The refusal message names the JSON path of the first one missing, for example
+`records[0].inbox.msgs`.
+
+| Field | Required when | Read for |
+| --- | --- | --- |
+| `stream` | always | names the stream the inbox is compared by |
+| `present` | always | whether the stream existed |
+| `msgs` | the inbox is present | stored message count: 0 makes the inbox drained |
+| `first_seq` | the inbox is present | drain rule: a start sequence at or below it |
+| `last_seq` | the inbox is present | movement; the ack floor must reach it |
+| `created` | the inbox is present | recreation check for the stream |
+| `suspended` | the inbox is present | state of the stream the earlier audit recorded |
+| `deliver` | the inbox is present | the `deliver` consumer object |
+| `deliver.present` | the inbox is present | whether the consumer existed |
+| `deliver.pending` | the consumer is present | drain rule: nothing pending |
+| `deliver.ack_pending` | the consumer is present | drain rule: nothing unacknowledged |
+| `deliver.delivered` | the consumer is present | movement of the delivered stream sequence |
+| `deliver.ack_floor` | the consumer is present | drain rule: reaches last_seq |
+| `deliver.created` | the consumer is present | recreation check for the consumer |
+| `deliver.deliver_policy` | the consumer is present | drain rule: all or a start sequence |
+| `deliver.start_seq` | the consumer is present | drain rule: with by_start_sequence |
+| `deliver.filter_subjects` | the consumer is present | drain rule: any filter disqualifies |
+
+Other fields the writer omits when empty or unknown, and that the comparison does not read (`last_time`, `subjects`,
+`start_time`, `delivered_last`), are not required.
 
 `compare` holds `against_generated`, `moved`, `identities_removed` and `identities_added` (directory keys present
 before and not now, and the reverse) and `streams`: one entry per legacy inbox stream in either audit (the inbox of an
@@ -186,11 +215,11 @@ When a stream is present in both audits and its `created`, or its `deliver` cons
 `deliver_created_now` shown), `compare.recreated` counts it, the text form prints `RECREATED`, and `--strict --compare`
 exits 1 whatever the sequences say.
 
-An earlier audit made before these fields existed cannot prove anything. When a creation time is missing in either
-audit for a stream present in both, the entry has `creation_unknown: true`, `compare.creation_unknown` counts it and the
-text form prints `UNKNOWN`. Without `--strict` it is only shown. With `--strict` it fails (exit 1) and standard error
-says the earlier audit lacks creation times and must be regenerated: run `mashctl audit --json` again with this
-mashctl, and compare a later audit against that file.
+An earlier audit made before these fields existed cannot prove anything, so it is refused (exit 3) with the path of
+the missing field and a note to regenerate it: run `mashctl audit --json` again with this mashctl, and compare a later
+audit against that file. When the server gives no creation time in the current audit for a stream present in both, the
+entry has `creation_unknown: true`, `compare.creation_unknown` counts it and the text form prints `UNKNOWN`; without
+`--strict` it is only shown and with `--strict` it fails (exit 1).
 
 The `created` fields are additive, so the report `version` stays 1.
 
@@ -219,9 +248,9 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks creation times or the account. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
 | 2 | a usage error |
-| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete, or from another owner or account. Nothing is printed on standard output |
+| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account. Nothing is printed on standard output |
 
 ## The drain check before a break
 
