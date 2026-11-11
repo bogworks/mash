@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // exitAuditIncomplete is the exit code of an audit that could not complete: no server, unreadable required input, a
@@ -129,8 +131,99 @@ type auditOrphans struct {
 	Creds   []auditOrphanCreds  `json:"creds"`
 }
 
+// auditRetiredMarker is one retired-identity marker. It carries the retired user public key (the audit shows the other
+// users' public keys too) and never a seed.
+type auditRetiredMarker struct {
+	Key       string `json:"key"` // the flat identity
+	Agent     string `json:"agent"`
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	User      string `json:"user,omitempty"`
+	State     string `json:"state"`      // pending or final (a marker with no state counts as final)
+	RetiredAt string `json:"retired_at"` // as the marker holds it, RFC 3339 UTC
+}
+
+// auditRetired is the retired-identity bucket `mash-retired` (ADR 0088).
+type auditRetired struct {
+	Present     bool                 `json:"present"` // false: no bucket, so no retirement ever happened
+	Final       int                  `json:"final"`
+	Pending     int                  `json:"pending"`
+	Bytes       uint64               `json:"bytes"`        // bytes the bucket stores
+	MaxBytes    int64                `json:"max_bytes"`    // the bucket's cap (store.RetiredMaxBytes for a bucket mash made)
+	PercentUsed float64              `json:"percent_used"` // bytes / max_bytes, 0 to 100, two decimals
+	Alarm       bool                 `json:"alarm"`        // bytes are at or over retiredAlarmPercent of the cap
+	Markers     []auditRetiredMarker `json:"markers"`      // sorted by key
+}
+
+// retiredAlarmPercent is the share of the bucket's cap at which the audit alarms (ADR 0088).
+const retiredAlarmPercent = 50
+
+// retiredAlarm reports whether used bytes are at or over the alarm share of max. A bucket with no cap never alarms.
+func retiredAlarm(used uint64, max int64) bool {
+	return max > 0 && used*100 >= uint64(max)*retiredAlarmPercent
+}
+
+// buildRetired is the retired section and the findings it carries: a bucket that fails its configuration check, a
+// marker that cannot be read, a pending marker (an unfinished retirement) and the alarm.
+func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
+	ar := auditRetired{Present: snap.Present, Markers: []auditRetiredMarker{}}
+	var probs []auditProblem
+	if !snap.Present {
+		return ar, probs
+	}
+	ar.Bytes, ar.MaxBytes = snap.Bytes, snap.MaxBytes
+	if ar.MaxBytes <= 0 {
+		// No size cap (0 or -1 on the stream). Do not invent one: the percent is 0 and it never alarms.
+		ar.MaxBytes = 0
+		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket,
+			Error: "the bucket has no size cap: ADR 0088 gives it 64 MiB so a full bucket refuses new markers, and an uncapped one never alarms; recreate it with the cap, copying its markers"})
+	} else {
+		ar.PercentUsed = math.Round(float64(ar.Bytes)*10000/float64(ar.MaxBytes)) / 100
+		ar.Alarm = retiredAlarm(ar.Bytes, ar.MaxBytes)
+	}
+	if snap.ConfigError != "" {
+		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket, Error: snap.ConfigError})
+	}
+	if ar.Alarm {
+		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket,
+			Error: fmt.Sprintf("ALARM: the bucket stores %d of %d bytes (%.2f%%), at or over %d%% of its cap: a full bucket makes provisioning refuse new identities for good, and mash never changes an existing bucket, so recreate it with a larger cap and its markers copied before it fills (ADR 0088)", ar.Bytes, ar.MaxBytes, ar.PercentUsed, retiredAlarmPercent)})
+	}
+	for _, m := range snap.Markers {
+		if m.Error != "" {
+			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: m.Error})
+			continue
+		}
+		state := store.RetiredFinal
+		if m.Marker.IsPending() {
+			state = store.RetiredPending
+			ar.Pending++
+			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: "pending retired marker: a retirement was started and not finished (the name stays refused); rerun deprovision for it"})
+		} else {
+			ar.Final++
+			if m.Marker.State != "" && m.Marker.State != store.RetiredFinal {
+				// Not a state mash writes: a tampered or future-format marker. The name stays refused, so it counts as
+				// final and the report keeps "final" (self-comparable), but it is not a clean completed retirement.
+				probs = append(probs, auditProblem{What: "retired", Item: m.Key,
+					Error: fmt.Sprintf("retired marker has an unrecognized state %q (treated as final: the name stays refused); investigate", capState(m.Marker.State))})
+			}
+		}
+		ar.Markers = append(ar.Markers, auditRetiredMarker{Key: m.Key, Agent: m.Marker.Agent, Owner: m.Marker.Owner, Name: m.Marker.Name,
+			User: m.Marker.User, State: state, RetiredAt: m.Marker.RetiredAt})
+	}
+	return ar, probs
+}
+
+// capState shortens a marker's state for a message, so a hostile value cannot flood the output.
+func capState(s string) string {
+	const max = 40
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "..."
+	}
+	return s
+}
+
 type auditProblem struct {
-	What  string `json:"what"` // record or creds
+	What  string `json:"what"` // record, creds or retired
 	Item  string `json:"item"` // the directory key or the file
 	Error string `json:"error"`
 }
@@ -146,6 +239,10 @@ type auditSummary struct {
 	OrphanLeases  int `json:"orphan_leases"`
 	OrphanCreds   int `json:"orphan_creds"`
 	Problems      int `json:"problems"`
+	// RetiredFinal and RetiredPending count the retired-identity markers by state. Both are in `problems` only as far as
+	// a pending marker, the alarm or an unreadable bucket is a finding there.
+	RetiredFinal   int `json:"retired_final"`
+	RetiredPending int `json:"retired_pending"`
 }
 
 // auditReport is what `mashctl audit --json` prints.
@@ -159,6 +256,7 @@ type auditReport struct {
 	Renames     []auditRename  `json:"renames"`
 	Orphans     auditOrphans   `json:"orphans"`
 	FencedLease []string       `json:"fenced_leases"` // lease keys holding a deprovision tombstone and no record: expected, they expire
+	Retired     *auditRetired  `json:"retired"`       // always set in a report this mashctl writes; nil in an earlier report from before it
 	Problems    []auditProblem `json:"problems"`
 	Notes       []string       `json:"notes"` // sorted; things skipped or absent that are not findings
 	Summary     auditSummary   `json:"summary"`
@@ -171,7 +269,7 @@ func (r auditReport) findings() int {
 	s := r.Summary
 	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
 	if r.Compare != nil {
-		n += r.Compare.Moved + r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown
+		n += r.Compare.Moved + r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown + len(r.Compare.RetiredFinalLost)
 		if r.Compare.AccountUnverified {
 			n++
 		}
@@ -333,8 +431,11 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		}
 	}
 	slices.SortFunc(rep.Orphans.Creds, func(a, b auditOrphanCreds) int { return strings.Compare(a.File, b.File) })
+	retired, retiredProbs := buildRetired(snap.Retired)
+	rep.Retired = &retired
+	rep.Problems = append(rep.Problems, retiredProbs...)
 	slices.SortFunc(rep.Problems, func(a, b auditProblem) int {
-		return strings.Compare(a.What+"\x00"+a.Item, b.What+"\x00"+b.Item)
+		return strings.Compare(a.What+"\x00"+a.Item+"\x00"+a.Error, b.What+"\x00"+b.Item+"\x00"+b.Error)
 	})
 
 	s := &rep.Summary
@@ -354,6 +455,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			s.Undrained++
 		}
 	}
+	s.RetiredFinal, s.RetiredPending = retired.Final, retired.Pending
 	s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Problems = len(rep.Orphans.Streams), len(rep.Orphans.Leases), len(rep.Orphans.Creds), len(rep.Problems)
 	return rep
 }
@@ -529,6 +631,11 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	if earlier != nil {
 		rep.Compare = compareAudits(*earlier, rep)
 		rep.Compare.AccountUnverified = earlier.Account == ""
+		if o.strict && rep.Compare.RetiredUnverified {
+			// Like a report that lacks a required field: it cannot prove no final marker was deleted. Nothing on stdout.
+			fmt.Fprintf(stderr, "mashctl: audit: --compare: %s: regenerate it with this mashctl and compare again\n", retiredUnverifiedMsg)
+			return exitAuditIncomplete
+		}
 	}
 
 	if o.json {
@@ -543,12 +650,12 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if o.strict && rep.findings() > 0 {
 		s := rep.Summary
-		moved, vanished, recreated, unknown := 0, 0, 0, 0
+		moved, vanished, recreated, unknown, lost := 0, 0, 0, 0, 0
 		if rep.Compare != nil {
-			moved, vanished, recreated, unknown = rep.Compare.Moved, rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown
+			moved, vanished, recreated, unknown, lost = rep.Compare.Moved, rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown, len(rep.Compare.RetiredFinalLost)
 		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated)
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable or retired-marker finding(s), %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
+			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated, lost)
 		if unknown > 0 {
 			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d legacy stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
 		}
@@ -630,6 +737,31 @@ func writeAuditText(w io.Writer, r auditReport) {
 	}
 	for _, p := range r.Problems {
 		fmt.Fprintf(w, "not readable %s %s: %s\n", p.What, c(p.Item), c(p.Error))
+	}
+	if rt := r.Retired; rt != nil {
+		if !rt.Present {
+			fmt.Fprintf(w, "no retired bucket (%s): no retirement has been recorded\n", store.RetiredBucket)
+		} else {
+			if rt.MaxBytes <= 0 {
+				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d, no cap\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes)
+			} else {
+				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d of %d\tused %.2f%%\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes, rt.MaxBytes, rt.PercentUsed)
+			}
+			if rt.Alarm {
+				fmt.Fprintf(w, "retired bucket ALARM: at or over %d%% of its cap\n", retiredAlarmPercent)
+			}
+			for _, m := range rt.Markers {
+				state := m.State
+				if m.State == store.RetiredPending {
+					state = "PENDING"
+				}
+				user := ""
+				if m.User != "" {
+					user = "\tuser " + c(m.User)
+				}
+				fmt.Fprintf(w, "retired marker %s\t%s\tretired_at %s%s\n", c(m.Key), state, c(m.RetiredAt), user)
+			}
+		}
 	}
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "note: %s\n", c(n))

@@ -27,7 +27,7 @@ The output is the evidence for an audit, so it is deterministic: records, rename
 Top level: `version` (always 1; it changes only when a field is removed or changes meaning), `generated` (RFC 3339,
 UTC; the only timestamp, and the one a comparison ignores), `owner`, `account` (the account's public key, taken from the admin credentials' user JWT; a public key only, never a seed
 or token; it ties a `--compare` file to one deployment), `creds_dirs` (the directories scanned),
-`records`, `renames`, `orphans`, `fenced_leases`, `problems`, `notes`, `summary` and, only with `--compare`, `compare`.
+`records`, `renames`, `orphans`, `fenced_leases`, `retired`, `problems`, `notes`, `summary` and, only with `--compare`, `compare`.
 
 ### `records`: one per directory record, sorted by `key`
 
@@ -115,9 +115,33 @@ The counts alone are not the rule: a consumer deleted and recreated to skip the 
 `fenced_leases` lists lease keys that hold only a deprovision tombstone and have no record. That is what a
 deprovision leaves for up to 90 seconds, so it is not an orphan.
 
+### `retired`
+
+The retired-identity bucket `mash-retired` ([ADR 0088](decisions/0088-a-retired-new-form-name-is-burned-in-a-durable-bucket-by-a-two-phase-marker-that-is-never-deleted.md)): one marker per new-form identity that was deprovisioned, never deleted once `final`. The audit only reads it; it never creates the bucket. Always present in the report:
+
+| field | meaning |
+| --- | --- |
+| `present` | `false` when there is no bucket: no retirement was ever recorded. Not an error; the other fields are 0 and `markers` is empty. The text form says `no retired bucket` |
+| `final` / `pending` | the number of markers in each state. A marker with no state (written before the two states existed) counts as `final` |
+| `bytes` | bytes the bucket's stream stores |
+| `max_bytes` | the bucket's cap: `67108864` (64 MiB, `store.RetiredMaxBytes`) for a bucket mash made. The audit reads the cap from the bucket, so one recreated with a larger cap is measured against its own. A bucket with no cap (`MaxBytes` 0 or -1) reports `max_bytes` 0, `percent_used` 0 and `alarm` false: the audit does not invent a cap |
+| `percent_used` | `bytes` over `max_bytes`, 0 to 100, two decimals |
+| `alarm` | `true` when `bytes` is at or over 50% of `max_bytes` |
+| `markers` | one per marker, sorted by `key`: `key` (the flat identity), `agent`, `owner`, `name`, `user` (the retired user public key; a public key, never a seed; left out when the marker has none), `state` (`final` or `pending`) and `retired_at` (RFC 3339 UTC, as the marker holds it) |
+
+Findings, all in `problems` with `what` `retired` (so `--strict` exits 1):
+
+- the alarm: `item` is `mash-retired` and `error` starts `ALARM`. A full bucket makes provisioning refuse new identities for good and mash never changes an existing bucket, so recreate it with a larger cap and its markers copied before it fills;
+- a `pending` marker: `item` is its key and the error says to rerun `deprovision` for it (the retirement was started and not finished; the name stays refused meanwhile);
+- a marker whose `state` is neither `pending`, `final` nor empty (a tampered or future-format marker): `item` is its key and `error` says it has an unrecognized state, shown quoted and cut at 40 characters. It counts as `final` (the name stays refused) and the report keeps `state` `final`, so reports stay comparable; the finding is what stops it passing as a completed retirement. An empty `state` is `final`, with no finding;
+- a bucket with no size cap: `item` is `mash-retired` and `error` says it has no size cap. ADR 0088 gives it 64 MiB so a full bucket refuses new markers, and an uncapped one never alarms; recreate it with the cap, copying its markers. Bytes are still reported, and the text form says `bytes N, no cap`;
+- a bucket whose configuration fails the fail-closed check (a TTL, another history, memory storage, an evicting stream; `item` is `mash-retired`) and a marker whose value cannot be read (`item` is its key). The audit reports them and goes on; it does not crash.
+
+The text form prints `retired markers N (final F, pending P)` with the bucket, bytes, cap and percent, an `ALARM` line when it applies, and one `retired marker` line per marker. `summary` gains `retired_final` and `retired_pending`. The additions are additive, so `version` stays 1.
+
 ### `problems`
 
-Things the audit could not read, each with `what` (`record` or `creds`), `item` and `error`: a directory value that
+Things the audit could not read, each with `what` (`record`, `creds` or `retired`), `item` and `error`: a directory value that
 does not parse as a record, a record that names no identity, a record whose alias names no legacy identity (the record stays in `records`, and the inbox the alias's name would give is not reported as an orphan), a creds file or staged creds file that cannot be read (for example one that
 other users can read). A problem is not a verdict on the item: fix it and run again. A directory entry that does not
 parse still exists, so the audit claims by its key the inbox stream and the lease it would own, and by its raw `user`
@@ -133,7 +157,7 @@ are also printed as `note:` lines.
 ### `summary`
 
 Counts: `records`, `legacy`, `new`, `running`, `renamed`, `undrained`, `orphan_streams`, `orphan_leases`,
-`orphan_creds`, `problems`.
+`orphan_creds`, `problems`, `retired_final`, `retired_pending`.
 
 <a id="compare"></a>
 ## `--compare`: what moved between two audits
@@ -205,6 +229,16 @@ A legacy inbox that was present in the earlier audit and is absent now has eithe
 
 A stream that is present now and was absent before is not a vanished one; its record shows in `identities_added`.
 
+### Retired markers in a comparison
+
+The `retired` set of the two reports is compared too (ADR 0088: a `final` marker is never deleted). `compare` gains
+`retired_compared`, `retired_added`, `retired_final_lost` and `retired_pending_gone` (lists of flat identities, sorted):
+
+- `retired_added`: a marker present now and not before. Fine; shown only.
+- `retired_final_lost`: a marker that was `final` before and is absent now (or the whole bucket is gone), or is no longer `final`. Markers are never deleted, so this fails `--strict` (exit 1) and standard error counts it.
+- `retired_pending_gone`: a marker that was `pending` before and is absent now, with no marker at its key. Shown only: `deprovision` deletes a pending marker when the retirement did not happen. A pending marker that became `final` is in none of the lists.
+- `retired_compared` is `false` and `retired_unverified` is `true` when the earlier report has no `retired` section (made before it existed, or `null`): it cannot show that no final marker was deleted since, so nothing is compared and the three lists are empty. Without `--strict` the comparison stays readable and the text form prints `WARNING retired comparison unverified: the earlier report has no retired section`. With `--strict` the file is refused like one that lacks a required field: exit 3, `retired comparison unverified: the earlier report has no retired section` on standard error and nothing on standard output; regenerate the earlier audit with this mashctl. This applies whatever the current report holds (an absent bucket now may be a deleted one). `retired_unverified` is `false` otherwise. The earlier-report fields table below is about legacy inboxes and does not change. A `retired` section that is present must be whole: `present`, a `markers` array and a `key` and `state` in each marker, or the file is refused with exit 3 naming the missing path (a stripped section would hide a deleted final marker). A marker whose `state` is not exactly `final` or `pending` (for example `Final` or `done`), or whose `key` repeats an earlier marker's, is refused the same way (exit 3, naming the path): the comparison knows only those two states, and with a duplicate the last entry would win and could hide a lost `final` marker.
+
 ### Recreated streams
 
 Equal sequences do not prove a stream is the same stream: a legacy stream deleted and made again can be refilled to
@@ -250,9 +284,9 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq`, `delivered` or `delivered_consumer_seq` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq`, `delivered` or `delivered_consumer_seq` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, a final retired marker that is gone since the earlier audit, a retired-bucket finding (the 50% alarm, a pending marker, a bucket or marker that cannot be read), or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
 | 2 | a usage error |
-| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account. Nothing is printed on standard output |
+| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account, or, with `--strict`, one with no `retired` section. Nothing is printed on standard output |
 
 ## The drain check before a break
 

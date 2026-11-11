@@ -264,6 +264,16 @@
     ]
   },
   "fenced_leases": [],
+  "retired": {
+    "present": true,
+    "final": 0,
+    "pending": 0,
+    "bytes": 0,
+    "max_bytes": 67108864,
+    "percent_used": 0,
+    "alarm": false,
+    "markers": []
+  },
   "problems": [],
   "notes": [],
   "summary": {
@@ -276,6 +286,8 @@
     "orphan_streams": 1,
     "orphan_leases": 1,
     "orphan_creds": 1,
-    "problems": 0
+    "problems": 0,
+    "retired_final": 0,
+    "retired_pending": 0
   }
 }
