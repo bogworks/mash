@@ -195,7 +195,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			if !wrote {
 				// The legacy lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
 				// so the new holder is redelivered it at once.
-				_ = p.msg.Nak()
+				_ = p.msg.NakWithDelay(time.Second) // a second, not at once: an unconfirmed lease would otherwise redeliver in a loop
 				e.waking.done(seq)
 				continue
 			}
@@ -262,7 +262,9 @@ func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, epoch uint64, er
 	if testLegacyCheckSeam != nil {
 		testLegacyCheckSeam()
 	}
-	if !e.legacyReading() {
+	// The live lease read (lease_fence.go), not just the watch's state: a takeover the watch has not yet noticed is noticed
+	// here, before anything is written. Not held, lost or unconfirmed alike, writes nothing.
+	if e.verdictFor(LegacyStream) != verdictHeld {
 		e.noteLegacyEpochLocked() // the loss is recorded here too, should its own writer not have yet
 		return false, 0, nil
 	}
