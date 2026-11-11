@@ -1065,6 +1065,9 @@ func seqsUp(from, to uint64) []uint64 {
 
 // deliverBatch is the channel path: show goes out as one event, then is acked (a failed write naks it for redelivery).
 func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet) {
+	if show = e.fenceLegacy(show); len(show) == 0 {
+		return
+	}
 	mails := make([]render.Mail, len(show))
 	seqs := make([]string, len(show))
 	for i, p := range show {

@@ -248,6 +248,14 @@ func (e *Endpoint) dropUnleased(batch []pending) []pending {
 	return kept
 }
 
+// fenceLegacy is the last check before a batch is written to the channel: the lease may have been lost since
+// dropUnleased looked, and mail of the legacy stream must not be shown by a session that no longer holds it. Such mail
+// is dropped unacked and nak'd (the new holder's consumer is redelivered it at once); a duplicate around a takeover is
+// acceptable, a loss is not. Own-stream mail and mail under a held lease pass through unchanged.
+func (e *Endpoint) fenceLegacy(show []pending) []pending {
+	return e.dropUnleased(show)
+}
+
 // mayAck reports whether this endpoint may acknowledge p: own-stream mail always; legacy mail only while the legacy
 // lease is held. The check is made at each ack, so a loss between delivery and ack withholds the ack.
 func (e *Endpoint) mayAck(p pending) bool {

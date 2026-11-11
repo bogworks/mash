@@ -603,3 +603,45 @@ func TestLegacyLeaseDedupeAckGatedByLease(t *testing.T) {
 		t.Fatalf("lost: acks=%d naks=%d", b.acks, b.naks)
 	}
 }
+
+// The lease lost between dropUnleased and deliverBatch: the channel path fences the legacy mail at the write, so the
+// old session shows none of it, acks none of it, and nak's it for the new holder; own-stream mail is still delivered.
+func TestLegacyLeaseLostBeforeChannelDeliveryFencesLegacyMail(t *testing.T) {
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	f := newFixture(t, "old", "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	ep, _, _ := openSpooled(t, f, id)
+
+	var calls int
+	var meta map[string]string
+	deliver := func(_ string, m map[string]string) error { calls++; meta = m; return nil }
+
+	// Held: delivered and acked as before.
+	held := &ackCounter{}
+	ep.deliverBatch(deliver, []pending{{mail: legacyMail(7), msg: held}}, newSeenSet(0))
+	if calls != 1 || held.acks != 1 || held.naks != 0 {
+		t.Fatalf("held: calls=%d acks=%d naks=%d", calls, held.acks, held.naks)
+	}
+
+	// A new holder takes the lease over; the batch was already past dropUnleased.
+	takeLegacyOver(t, f)
+	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	calls = 0
+	lost := &ackCounter{}
+	ep.deliverBatch(deliver, []pending{{mail: legacyMail(8), msg: lost}}, newSeenSet(0))
+	if calls != 0 || lost.acks != 0 || lost.naks != 1 {
+		t.Fatalf("lost: calls=%d acks=%d naks=%d", calls, lost.acks, lost.naks)
+	}
+
+	// A mixed batch: only the own-stream message is shown.
+	own, lost2 := &ackCounter{}, &ackCounter{}
+	ep.deliverBatch(deliver, []pending{{mail: gMail(3, "own"), msg: own}, {mail: legacyMail(9), msg: lost2}}, newSeenSet(0))
+	if calls != 1 || meta["count"] != "1" || meta["seqs"] != "3" {
+		t.Fatalf("mixed: calls=%d meta=%v", calls, meta)
+	}
+	if own.acks != 1 || own.naks != 0 || lost2.acks != 0 || lost2.naks != 1 {
+		t.Fatalf("mixed: own acks=%d naks=%d, legacy acks=%d naks=%d", own.acks, own.naks, lost2.acks, lost2.naks)
+	}
+}
