@@ -27,8 +27,10 @@ type CheckRun struct {
 // which is refused as a spoof.
 const CIApp = "github-actions"
 
-// RequiredChecks are the check runs ci.yml produces that a candidate must have passed.
-var RequiredChecks = []string{"test (ubuntu-latest)", "test (macos-latest)", "reproducible"}
+// RequiredChecks are the check runs ci.yml produces that a candidate must have passed. test (macos) is advisory (ADR 0079):
+// it is produced and visible but not required here. TODO(macos-gate): require it again, with pr-check's needs, when x-lead
+// confirms the macOS runner no longer pauses running jobs.
+var RequiredChecks = []string{"test (linux)", "reproducible"}
 
 func joined(problems []string) error {
 	if len(problems) == 0 {

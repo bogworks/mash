@@ -26,7 +26,7 @@ Then do step 7 (record the version and commit, optional).
 ## Signing
 
 The `--assets` gate signs `SHA256SUMS`, and `publish` always runs it. There is no flag to skip it. The signature is made
-last: the build provenance attestations, the SBOMs and the SLSA provenance are verified first, and if any of them fails
+last: the build provenance attestations, the SBOMs and the attached build provenance are verified first, and if any of them fails
 nothing is signed or uploaded (a draft that already carries a `SHA256SUMS.sig` still has them verified). Then it checks
 every line of `SHA256SUMS`. Each `mash-<os>-<arch>` line must equal a fresh, reproducible build of X made on the maintainer's
 machine with the release recipe, and the `quickstart-synadia.sh` line must equal the script at X, so the signature covers the script too. A malformed line, a duplicate, a name that is not attached, or an attached `mash-*`
@@ -48,8 +48,9 @@ The reasoning is in [decision 0042](decisions/0042-sign-sha256sums-with-sshsig.m
 
 The numbered steps are what the command does in each state, and the manual path when it cannot run.
 
-1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (ubuntu-latest)`,
-   `test (macos-latest)` and `reproducible` (all from GitHub Actions) on X itself.
+1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (linux)`
+   and `reproducible` (both from GitHub Actions, run on the maintainers' self-hosted runners) on X itself. `test (macos)` runs
+   on every push to `main` but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
    shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
    ```sh
@@ -93,14 +94,14 @@ The numbered steps are what the command does in each state, and the manual path 
 5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
    targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
    attests build provenance for the four binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
-   CycloneDX SBOM per binary and attests it, and calls the SLSA generic generator for `mash.intoto.jsonl` (see "SBOM and
-   SLSA provenance"). Only after all of these succeed does it create a **draft** release with the four binaries, the four
+   CycloneDX SBOM per binary and attests it, and keeps the Sigstore bundle of its build provenance attestation as `mash.intoto.jsonl` (see "SBOM and
+   build provenance"). Only after all of these succeed does it create a **draft** release with the four binaries, the four
    `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`),
    `SHA256SUMS` (which lists the binaries, the SBOMs, `mash.intoto.jsonl` and the script) and a changelog.
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --deny-self-hosted-runners` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and `slsa-verifier verify-artifact` passes on each binary against `mash.intoto.jsonl` (with `--builder-id` for the pinned generator, and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; so is a missing `slsa-verifier`; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --deny-self-hosted-runners` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
 
@@ -239,40 +240,35 @@ Attestations require a public repository (a private one needs GitHub Enterprise 
 attestation is recorded in the public Sigstore transparency log. The `draft` job needs `attest`, so a draft exists only once provenance does: publishing can never precede
 or outlive a failed attestation, and a failed attestation leaves no draft (rerun the workflow).
 
-## SBOM and SLSA provenance
+## SBOM and build provenance
 
-From 0.3.2 each release adds, beside build provenance, a CycloneDX 1.5 SBOM per binary and SLSA provenance. The SBOM
+From 0.3.2 each release adds, beside build provenance, a CycloneDX 1.5 SBOM per binary and the provenance bundle. The SBOM
 (`mash-<os>-<arch>.cdx.json`) is generated from the built binary by `cyclonedx-gomod bin`, which reads the module build
 information embedded in the binary, so it lists what is inside the artifact. It is attached, listed in the signed
-`SHA256SUMS`, and attested with `actions/attest-sbom` (predicate type `https://cyclonedx.org/bom`). The SLSA provenance
-(`mash.intoto.jsonl`) comes from `slsa-framework/slsa-github-generator`'s generic generator
-(`generator_generic_slsa3.yml`, pinned to a release tag), given the sha256 of the four binaries the build job produced; it
-does not rebuild them. mash meets SLSA v1.0 Build L2, not L3: the generator adds a signer identity mash's steps cannot use
-and a fixed provenance format, but the digests it attests come from mash's own workflow. A tag can move, so a
-`generator-pin` job (which `provenance` needs) fails the run unless the generator's tag still resolves to the commit recorded
-in `SLSA_GENERATOR_SHA` in `release.yml`. That job reads the mutable tag in a different job from the one that runs the generator, so a tag
-moved away and restored around the run would pass it. The publish gate and the dry run therefore also read the Fulcio
-certificate that signed each line of `mash.intoto.jsonl` and require its Build Signer Digest extension
-(`1.3.6.1.4.1.57264.1.10` in the Sigstore OID registry) to equal `SLSA_GENERATOR_SHA` and its Build Signer URI (`.1.9`) to name
-the generic generator at `SLSA_GENERATOR_TAG`. This proves which generator commit actually signed this provenance: a tag moved and restored
-cannot sign a different commit's provenance undetected. The pin is read from `release.yml` (at the release commit, by the
-gate), so changing it there changes the check; `go run ./scripts/releasecheck provenance-signer <file> .github/workflows/release.yml`
-runs the same check by hand. It reads what the certificate says; slsa-verifier still verifies the signature. The generator job holds `contents: write` in the release workflow's run; it is isolated and its upload job is disabled by `upload-assets: false`. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
+`SHA256SUMS`, and attested with `actions/attest-sbom` (predicate type `https://cyclonedx.org/bom`). The provenance
+(`mash.intoto.jsonl`) is the Sigstore bundle of the one `actions/attest-build-provenance` attestation the `attest` job
+makes in-job, on the self-hosted runner, with the four binaries as its subjects; the job uploads it as the `provenance`
+artifact and the draft job attaches it. No reusable workflow of another repository runs: a test fails on any job-level
+`uses:` outside this repository, because such a job would run on a runner this repository does not pick
+([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)). mash meets SLSA v1.0 Build L2, not L3: the
+attestation is made by a step inside mash's own workflow, with the signer identity of `release.yml`. The `attest` job holds
+`id-token: write`, `attestations: write` and `contents: read`, and no other job but `attest-sbom` holds the signing
+permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
 `quickstart-synadia.sh`, `SHA256SUMS` and `SHA256SUMS.sig`. The reasoning, and what is not yet true, is in
-[decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md).
+[decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) (whose isolated generator ADR 0079 replaces
+with the in-job attestation).
 
 ## Dry run
 
-The SBOM and SLSA jobs only run for a real release, so a change to the pipeline can be tried without tagging one:
+The SBOM and attestation jobs only run for a real release, so a change to the pipeline can be tried without tagging one:
 
     gh workflow run release.yml --ref main
     gh run watch
 
 A `workflow_dispatch` run on `main` builds the four binaries twice and compares them, makes the SBOMs, attests the binaries and
-the SBOMs, and makes the SLSA provenance, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
-`slsa-verifier` (`--source-branch main`, since the provenance comes from a branch, not a tag; `--builder-id` for the pinned
-generator), a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
-`--signer-workflow`, `--source-ref refs/heads/main` and `--deny-self-hosted-runners`) for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
+the SBOMs, and keeps the provenance bundle, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
+a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
+`--signer-workflow`, `--source-ref refs/heads/main` and `--deny-self-hosted-runners`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
 `release-check --assets` does. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
 ref builds nothing.
 
@@ -305,9 +301,11 @@ tagged commit and compared it byte for byte. It does not show who built the file
       --source-ref refs/tags/v<version> --deny-self-hosted-runners
 
 This proves the release workflow (`release.yml`) of the `bogworks/mash` repository, run at the tag `v<version>` on a
-GitHub-hosted runner, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any workflow of
+runner of the repository, built and attested these exact bytes, recorded in Sigstore. `-R` alone would accept any workflow of
 the repository on any ref, so the signer workflow, the source ref and the runner flag are what make the check mean
-something. It does not prove the workflow's steps were not tampered with: that attestation is made by a step inside that
+something. The release jobs now run on self-hosted runners ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)),
+which `--deny-self-hosted-runners` refuses: the flag stays until the maintainer decides what replaces it, and until then the
+verification refuses attestations produced on these runners. It does not prove the workflow's steps were not tampered with: that attestation is made by a step inside that
 workflow (SLSA v1.0 Build Level 2).
 
 **3. SBOM.**
@@ -321,29 +319,21 @@ modules listed. Any scanner that reads CycloneDX can take the file as input, for
 or `osv-scanner --sbom mash-linux-amd64.cdx.json`. The SBOM lists Go modules as recorded in the binary; it is generated
 and attested by mash's own workflow (Build L2-grade), and it says nothing about vulnerabilities by itself.
 
-**4. SLSA provenance.** Install the verifier once, then verify each binary against the one provenance file:
+**4. The attached provenance.** Verify each binary against the one provenance file, offline:
 
-    go install github.com/slsa-framework/slsa-verifier/v2/cli/slsa-verifier@v2.7.1
-    slsa-verifier verify-artifact mash-linux-amd64 --provenance-path mash.intoto.jsonl \
-      --source-uri github.com/bogworks/mash --source-tag v<version> \
-      --builder-id https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0
+    gh attestation verify mash-linux-amd64 -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
+      --source-ref refs/tags/v<version> --deny-self-hosted-runners --bundle mash.intoto.jsonl
 
-This proves the provenance was signed by the SLSA generator's own reusable workflow at that version (`--builder-id` refuses
-another generator version), not by a step of mash's workflow, for this digest, from this repository at this tag. Also
-check that the provenance names `release.yml` as its workflow entry point; for a provenance file made like ours:
+This proves `mash.intoto.jsonl` is the Sigstore bundle of an attestation by the release workflow at that tag, with this binary
+among its subjects. Also check that the provenance names `release.yml` as its workflow entry point:
 
-    jq -r .payload mash.intoto.jsonl | base64 -d | jq '.predicate.invocation.configSource.entryPoint // .predicate.buildDefinition.externalParameters.workflow.path'
+    jq -r '.dsseEnvelope.payload // .payload' mash.intoto.jsonl | base64 -d | jq '.predicate.buildDefinition.externalParameters.workflow.path'
 
-The generator is referenced by a tag, which can move, so also prove which commit signed. The signing certificate in each
-line carries the generator's commit as the Build Signer Digest; from a checkout of the release tag run
-`go run ./scripts/releasecheck provenance-signer mash.intoto.jsonl .github/workflows/release.yml`, which requires every
-line's certificate to name the commit `release.yml` records as `SLSA_GENERATOR_SHA` and the generic generator at `SLSA_GENERATOR_TAG`.
-
-The level met is SLSA v1.0 **Build L2**, not L3. The generator's signature is one mash's steps cannot forge, but the
-digests it attests are supplied by mash's own workflow, so a compromised build step would still get a genuine signature. The
-control beyond L2 is the two-clone reproducibility check in CI plus the maintainer's independent rebuild before signing
-`SHA256SUMS`. The generator is pinned by tag, not commit; the `generator-pin` job checks the tag against the recorded commit
-on every run, and the gate proves from the signing certificate which commit signed. The trust roots are GitHub's OIDC and Sigstore and the maintainer's key.
+The level met is SLSA v1.0 **Build L2**, not L3. The attestation is made by a step in mash's own workflow, so a compromised
+build step would still get a genuine signature. The control beyond L2 is the two-clone reproducibility check in CI plus the
+maintainer's independent rebuild before signing `SHA256SUMS`. The trust roots are GitHub's OIDC and Sigstore and the
+maintainer's key. The release provenance now comes from a self-hosted runner, so `--deny-self-hosted-runners` refuses it too, like
+the attestations of step 2: the flag stays until the maintainer rules on the attestation question (ADR 0079).
 
 ## Versions
 
@@ -352,7 +342,7 @@ on every run, and the gate proves from the signing certificate which commit sign
 
 ## Not covered
 
-Public publication is `release-check publish` (or its steps by hand) and follows the gate. Every `uses:` in the workflows is pinned to a full commit SHA (a test enforces it), with one exception: from 0.3.2 the SLSA generic generator's reusable workflow is the only tag reference (it requires a tag ref); the `generator-pin` job holds that tag to a recorded commit, and the test allows exactly that one entry. See decision 0051.
+Public publication is `release-check publish` (or its steps by hand) and follows the gate. Every `uses:` of an action in the workflows is pinned to a full commit SHA (a test enforces it), and no job calls a reusable workflow of another repository (a test enforces that too). See decisions 0051 and 0079.
 
 ## Daily publish check
 
@@ -378,7 +368,7 @@ and tick it off in the repository's setup issue.
       read-only.
 - [ ] Ruleset for `main`, as specified in [branch-protection.md](branch-protection.md) (follow that file; the points
       that are easy to miss): require a pull request, with the Mergify app as the bypass actor for its tested
-      fast-forward merges; require the status checks `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible`,
+      fast-forward merges; require the status checks `test (linux)`, `reproducible`,
       `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
       Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
@@ -405,8 +395,7 @@ and tick it off in the repository's setup issue.
 
 **CI:**
 
-- [ ] GitHub-hosted runners only: no self-hosted runner on a public repository, because it would run fork code on the
-      maintainers' machines. Set the `RUNNER_LINUX` repository variable only to a runner the maintainers control, never
-      for fork pull requests (the workflows already route forks to `ubuntu-latest`). The one exception is `adr-lint.yml`,
-      which runs on the self-hosted runners labelled `self-hosted, rh-linux`, including fork pull requests once a person
-      approves them, because it runs from the base branch and executes nothing from the pull request.
+- [ ] Self-hosted runners only ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)): every
+      job runs on `[self-hosted, rh-linux]` or `[self-hosted, rh-macos]`, with no GitHub-hosted fallback. Register runners
+      with those labels only on machines the maintainers control. Pull requests from forks run on them too, so keep the
+      Actions setting that holds an outside contributor's run for a person's approval (the item above).

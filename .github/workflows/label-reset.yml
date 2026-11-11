@@ -8,10 +8,10 @@ name: label-reset
 # Trust: pull_request_target gives a token that can edit labels on a pull request from a fork, and runs THIS file from
 # the base branch. So there is no checkout and nothing from the pull request is built, sourced or run; the only inputs
 # are the pull request number from the event, passed through env, never through the text of the script.
-# No GitHub-hosted runner is used: runs-on is the repository variable RUNNER_LINUX, which must be set or the job never
-# starts, the label-reset check never appears and the queue condition keeps the pull request out (fail closed). That is
-# safe on a self-hosted runner because the job runs from the base branch (pull_request_target) and checks out and
-# executes nothing from the pull request.
+# It runs on the self-hosted labels like every job (ADR 0079), and no GitHub-hosted runner is used. That is safe because
+# the job runs from the base branch (pull_request_target) and checks out and executes nothing from the pull request. If
+# no runner with those labels is online the job never starts, the label-reset check never appears and the queue condition
+# keeps the pull request out (fail closed).
 # The token holds pull-requests: write (edit labels) and contents: read (read-only; gh pr view may need it) and nothing
 # else. Nothing here swallows an error: a failed API call fails the job.
 on:
@@ -26,7 +26,7 @@ concurrency:
 jobs:
   label-reset:
     name: label-reset
-    runs-on: ${{ vars.RUNNER_LINUX }}
+    runs-on: [self-hosted, rh-linux]
     timeout-minutes: 5
     steps:
       - name: Remove lead-approved and decision-confirmed

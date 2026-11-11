@@ -624,7 +624,7 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
 			}
 		}
-		// every gh attestation verify call (build provenance and SBOM) is pinned to the release workflow, tag and runners
+		// every gh attestation verify call (build provenance, bundle and SBOM) is pinned to the release workflow, tag and runners
 		calls := 0
 		for _, ln := range strings.Split(log, "\n") {
 			if !strings.HasPrefix(ln, "attestation verify") {
@@ -637,8 +637,8 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				}
 			}
 		}
-		if calls != 8 {
-			t.Errorf("%d gh attestation verify calls, want 8 (4 build provenance, 4 SBOM)", calls)
+		if calls != 12 {
+			t.Errorf("%d gh attestation verify calls, want 12 (4 build provenance, 4 attached provenance bundles, 4 SBOM)", calls)
 		}
 	})
 	t.Run("one missing is refused naming it, and publishing does not happen", func(t *testing.T) {
@@ -732,7 +732,7 @@ func (f *fixture) replaceCIAsset(t *testing.T, name, body string) {
 	f.setSums(t, strings.Join(out, "\n")+"\n")
 }
 
-func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
+func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 	t.Run("a correct release passes and every check ran against the release repository", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		if err := checkAssets(context.Background(), f.o); err != nil {
@@ -744,22 +744,23 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 			if !strings.Contains(log, "/"+n+" -R bogworks/mash ") || !strings.Contains(log, "--predicate-type https://cyclonedx.org/bom") {
 				t.Errorf("the SBOM attestation of %s was not verified:\n%s", n, log)
 			}
-			if !strings.Contains(log, "verify-artifact") || !strings.Contains(log, "--provenance-path") || !strings.Contains(log, "/"+n+" ") {
-				t.Errorf("%s was not verified with slsa-verifier:\n%s", n, log)
+			if !strings.Contains(log, "/"+n+" -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners --bundle ") {
+				t.Errorf("the provenance bundle was not verified for %s against the release workflow, tag and runners:\n%s", n, log)
 			}
 		}
-		for _, want := range []string{"--source-uri github.com/bogworks/mash", "--source-tag v0.1.0", "--builder-id " + slsaBuilderID, "mash.intoto.jsonl"} {
-			if !strings.Contains(log, want) {
-				t.Errorf("slsa-verifier was not called with %q:\n%s", want, log)
-			}
+		if !strings.Contains(log, "mash.intoto.jsonl") {
+			t.Errorf("the attached provenance was not the bundle verified:\n%s", log)
+		}
+		if strings.Contains(log, "slsa-verifier") || strings.Contains(log, "verify-artifact") {
+			t.Errorf("the gate still calls slsa-verifier:\n%s", log)
 		}
 	})
-	t.Run("the source uri follows the release repository", func(t *testing.T) {
+	t.Run("the repository follows the release repository", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		f.o.GHRepo = "someone/else"
 		_ = checkAssets(context.Background(), f.o) // the fake serves any repository; only the arguments matter
-		if !strings.Contains(f.ghLog(), "--source-uri github.com/someone/else ") {
-			t.Errorf("source-uri is not derived from GHRepo:\n%s", f.ghLog())
+		if !strings.Contains(f.ghLog(), "-R someone/else --signer-workflow someone/else/.github/workflows/release.yml") || !strings.Contains(f.ghLog(), "--bundle") {
+			t.Errorf("the provenance verification is not derived from GHRepo:\n%s", f.ghLog())
 		}
 	})
 	refused := func(t *testing.T, f *fixture, want string) {
@@ -833,14 +834,6 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 			t.Fatalf("an equal predicate was refused: %v", err)
 		}
 	})
-	t.Run("slsa-verifier absent", func(t *testing.T) {
-		f := signedFixture(t, nil)
-		f.o.SLSAVerifier = filepath.Join(f.ghDir(), "no-such-slsa-verifier")
-		err := checkAssets(context.Background(), f.o)
-		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "go install github.com/slsa-framework/slsa-verifier/v2/cli/slsa-verifier@v2.7.1") {
-			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
-		}
-	})
 	t.Run("a provenance whose workflow entry point is not release.yml, or is missing, or is correct", func(t *testing.T) {
 		for name, tc := range map[string]struct{ body, want string }{
 			"wrong v0.2":      {dsseLine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/other.yml"}}}}`), "other.yml"},
@@ -861,9 +854,9 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 			})
 		}
 		for name, body := range map[string]string{
-			"v1":        bundleLineWithCert(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`, goodSignerCert()),
-			"bare":      bareLineWithCertStatement(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert()),
-			"mixed":     goodCIAsset(release.ProvenanceName) + bareLineWithCertStatement(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`, goodSignerCert()),
+			"v1":        dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`),
+			"bare":      bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
+			"mixed":     goodCIAsset(release.ProvenanceName) + bareDSSELine(`{"predicate":{"invocation":{"configSource":{"entryPoint":".github/workflows/release.yml"}}}}`),
 			"two lines": goodCIAsset(release.ProvenanceName) + goodCIAsset(release.ProvenanceName),
 		} {
 			f := signedFixture(t, nil)
@@ -883,14 +876,14 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 			t.Run(name, func(t *testing.T) { refused(t, f, "duplicate key") })
 		}
 	})
-	t.Run("slsa-verifier failing", func(t *testing.T) {
+	t.Run("a provenance bundle that does not verify for a binary", func(t *testing.T) {
 		f := signedFixture(t, nil)
-		f.markerFor(t, "noslsa", "mash-linux-arm64")
+		f.markerFor(t, "noprov", "mash-linux-arm64")
 		refused(t, f, "mash-linux-arm64")
 	})
 	t.Run("publish refuses the same way and does not publish", func(t *testing.T) {
 		f := signedDraft(t)
-		f.markerFor(t, "noslsa", "mash-darwin-amd64")
+		f.markerFor(t, "noprov", "mash-darwin-amd64")
 		err := f.publish()
 		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-darwin-amd64") {
 			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
@@ -898,24 +891,19 @@ func TestAssets_verifiesSBOMAndSLSAProvenanceOfEveryBinary(t *testing.T) {
 		if strings.Contains(f.ghLog(), "release edit") {
 			t.Error("published without verifying provenance")
 		}
-		g := signedDraft(t)
-		g.o.SLSAVerifier = filepath.Join(g.ghDir(), "no-such-slsa-verifier")
-		if err := g.publish(); err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "slsa-verifier") {
-			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
-		}
 	})
 	t.Run("not run when an earlier check refused", func(t *testing.T) {
 		f := signedFixture(t, func(h map[string]string) { h["mash-linux-amd64"] = "sha256:" + strings.Repeat("0", 64) })
 		if err := checkAssets(context.Background(), f.o); err == nil {
 			t.Fatal("a wrong binary passed")
 		}
-		if strings.Contains(f.ghLog(), "verify-artifact") || strings.Contains(f.ghLog(), "--predicate-type") {
+		if strings.Contains(f.ghLog(), "--bundle") || strings.Contains(f.ghLog(), "--predicate-type") {
 			t.Errorf("the supply chain was checked after a refusal:\n%s", f.ghLog())
 		}
 	})
 }
 
-// H1: the maintainer's signature is made only after attestations, SBOMs and SLSA provenance verified, so a draft that
+// H1: the maintainer's signature is made only after attestations, SBOMs and build provenance verified, so a draft that
 // fails any of them is never signed: no SHA256SUMS.sig is uploaded and the signing key is never even looked up.
 func TestAssets_neverSignsWhatVerificationRejected(t *testing.T) {
 	cases := map[string]func(t *testing.T, f *fixture){
@@ -924,7 +912,7 @@ func TestAssets_neverSignsWhatVerificationRejected(t *testing.T) {
 		"an SBOM that is not CycloneDX": func(t *testing.T, f *fixture) {
 			f.replaceCIAsset(t, "mash-darwin-arm64.cdx.json", "not json")
 		},
-		"SLSA provenance that is not valid": func(t *testing.T, f *fixture) {
+		"a build provenance that is not valid": func(t *testing.T, f *fixture) {
 			f.replaceCIAsset(t, "mash.intoto.jsonl", "not a bundle")
 		},
 	}

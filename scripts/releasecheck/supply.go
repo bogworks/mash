@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,46 +20,29 @@ import (
 // sbomPredicateType is the in-toto predicate type actions/attest-sbom writes for a CycloneDX SBOM.
 const sbomPredicateType = "https://cyclonedx.org/bom"
 
-// slsaBuilderID is the one generator workflow whose provenance the gate accepts (slsa-verifier --builder-id): another
-// generator version is refused. It moves with SLSA_GENERATOR_TAG in release.yml.
-const slsaBuilderID = "https://github.com/" + "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0"
-
 // releaseWorkflowPath is the workflow that builds and attests a release, and the entry point its provenance must name.
 const releaseWorkflowPath = ".github/workflows/release.yml"
 
 // attestFlags are the gh attestation verify flags that pin WHO made an attestation: the release workflow of the release
-// repository, at the release tag, on a GitHub-hosted runner. -R alone would accept any workflow of the repository on any ref.
+// repository, at the release tag. --deny-self-hosted-runners stays until the maintainer rules on the attestation question (ADR 0079). -R alone would accept any workflow of the repository on any ref.
 func attestFlags(o Options, tag string) []string {
 	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag, "--deny-self-hosted-runners"}
 }
 
-// slsaVerifierInstall is how the gate tells a maintainer to get slsa-verifier. There is no flag to skip the check.
-//
-// The module path is written in two pieces on purpose: it names a third-party tool the maintainer installs, not a
-// repository mash depends on, and internal/portable keeps foreign-org URLs out of string literals.
-const slsaVerifierInstall = "go install github.com/" + "slsa-framework/slsa-verifier/v2/cli/slsa-verifier@v2.7.1"
-
-// verifySupplyChain holds the release's SBOMs and SLSA provenance to what release.yml promises, on every binary; any
+// verifySupplyChain holds the release's SBOMs and build provenance to what release.yml promises, on every binary; any
 // failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each binary it requires that
 //   - the attached mash-<os>-<arch>.cdx.json is CycloneDX JSON with components and a described main component or tool;
 //   - `gh attestation verify <binary> -R <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref
 //     refs/tags/v<version> --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom` passes and a verified
 //     statement names the binary's own sha256 as its subject and carries the attached SBOM as its predicate (an SBOM
 //     attested for some other file, or a different SBOM file, is refused);
-//   - `slsa-verifier verify-artifact <binary> --provenance-path mash.intoto.jsonl --source-uri github.com/<repo>
-//     --source-tag v<version> --builder-id <the generic generator at its pinned tag>` passes;
-//   - every line of the provenance carries the Fulcio certificate whose Build Signer Digest is SLSA_GENERATOR_SHA and whose
-//     Build Signer URI names the generic generator at SLSA_GENERATOR_TAG, both read from release.yml at X
-//     (checkProvenanceSignerDigest), which proves which generator commit signed it;
+//   - `gh attestation verify <binary> --bundle mash.intoto.jsonl` with the same signer, ref and runner flags passes: the
+//     attached provenance is the Sigstore bundle of the in-job attestation (actions/attest-build-provenance) and names the
+//     binary as a subject;
 //   - the provenance's workflow entry point is .github/workflows/release.yml (checkProvenanceEntryPoint).
 //
-// slsa-verifier must be installed: without it the gate refuses and says how to install it. It runs only for a release
-// that passed every earlier check, like verifyAttestations.
+// It runs only for a release that passed every earlier check, like verifyAttestations.
 func verifySupplyChain(o Options, tag string) error {
-	verifier, err := exec.LookPath(o.slsaVerifier())
-	if err != nil {
-		return fmt.Errorf("slsa-verifier is not installed, so the SLSA provenance cannot be verified and the release is not accepted; install it with `%s`", slsaVerifierInstall)
-	}
 	dir, err := os.MkdirTemp("", "release-check-supply-")
 	if err != nil {
 		return op(err)
@@ -82,11 +64,6 @@ func verifySupplyChain(o Options, tag string) error {
 		return err
 	}
 	var bad []string
-	// Which generator commit signed the provenance: the pin is release.yml at the release commit, so changing it there
-	// changes the gate. A pin that cannot be read is a refusal.
-	if err := checkSignerAtRelease(o, prov); err != nil {
-		bad = append(bad, fmt.Sprintf("%s: %v", release.ProvenanceName, err))
-	}
 	for _, t := range release.Targets {
 		name := t.AssetName()
 		bin, binBytes, err := fetch(name)
@@ -103,27 +80,18 @@ func verifySupplyChain(o Options, tag string) error {
 		if err := verifySBOMAttestation(o, tag, bin, binBytes, t.SBOMName(), sbom); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
 		}
-		cmd := exec.Command(verifier, "verify-artifact", bin, "--provenance-path", prov, "--source-uri", "github.com/"+o.GHRepo, "--source-tag", tag, "--builder-id", slsaBuilderID)
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &stdout, &stderr
-		if err := cmd.Run(); err != nil {
-			bad = append(bad, fmt.Sprintf("%s: no verifying SLSA provenance in %s: %v: %s %s", name, release.ProvenanceName, err, strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())))
+		args := append([]string{"attestation", "verify", bin}, attestFlags(o, tag)...)
+		if _, err := gh(o, append(args, "--bundle", prov)...); err != nil {
+			bad = append(bad, fmt.Sprintf("%s: no verifying build provenance in %s: %v", name, release.ProvenanceName, err))
 		}
 	}
 	if err := checkProvenanceEntryPoint(provBytes); err != nil {
 		bad = append(bad, fmt.Sprintf("%s: %v", release.ProvenanceName, err))
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("SBOM or SLSA provenance does not verify for %s", strings.Join(bad, "; "))
+		return fmt.Errorf("SBOM or build provenance does not verify for %s", strings.Join(bad, "; "))
 	}
 	return nil
-}
-
-func (o Options) slsaVerifier() string {
-	if o.SLSAVerifier != "" {
-		return o.SLSAVerifier
-	}
-	return "slsa-verifier"
 }
 
 // verifySBOMAttestation runs gh attestation verify with the CycloneDX predicate type on the binary and checks that a
@@ -197,7 +165,7 @@ func checkProvenanceEntryPoint(b []byte) error {
 		if err := json.Unmarshal([]byte(ln), &env); err != nil {
 			return fmt.Errorf("a line is not a DSSE envelope: %w", err)
 		}
-		payload := env.Bundle.Payload // slsa-github-generator v2 writes Sigstore-bundle lines
+		payload := env.Bundle.Payload // actions/attest-build-provenance writes a Sigstore bundle
 		if payload == "" {
 			payload = env.Payload // a bare DSSE envelope
 		}
@@ -323,29 +291,4 @@ func checkSBOM(b []byte) error {
 		return errors.New("metadata names neither a main component nor a tool")
 	}
 	return nil
-}
-
-// checkSignerAtRelease reads the generator pin from release.yml as the release commit carries it (never the working
-// tree) and holds the provenance file to it. It also refuses when slsaBuilderID, the --builder-id given to
-// slsa-verifier, names another tag than the pin.
-func checkSignerAtRelease(o Options, provPath string) error {
-	x, err := git(o.Repo, "rev-parse", "--verify", o.X+"^{commit}")
-	if err != nil {
-		return fmt.Errorf("resolving %s to read the generator pin: %w", o.X, err)
-	}
-	wf, ok, err := fileAt(o.Repo, x, releaseWorkflowPath)
-	if err != nil {
-		return fmt.Errorf("reading the generator pin: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("%s is not at %s, so the generator pin cannot be read", releaseWorkflowPath, x)
-	}
-	tag, _, err := generatorPin([]byte(wf))
-	if err != nil {
-		return fmt.Errorf("at %s: %w", x, err)
-	}
-	if slsaBuilderID != generatorWorkflowURI+tag {
-		return fmt.Errorf("the gate's --builder-id %q does not name SLSA_GENERATOR_TAG %s of %s at %s", slsaBuilderID, tag, releaseWorkflowPath, x)
-	}
-	return checkProvenanceSignerWorkflow(provPath, []byte(wf))
 }

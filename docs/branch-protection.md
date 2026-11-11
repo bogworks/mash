@@ -47,8 +47,10 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   a maintainer's approval, push more code, and still satisfy the queue's `approved-reviews-by` condition; `.mergify.yml`
   also dismisses approvals on an outside author's push.
 - **Require status checks to pass**, with branches up to date:
-  - `test (ubuntu-latest)`, `test (macos-latest)`, `reproducible` (from `ci.yml`; the release gate in
-    `scripts/release-check` requires exactly these names, so never rename them),
+  - `test (linux)`, `reproducible` (from `ci.yml`; the release gate in
+    `scripts/release-check` requires exactly these names, so never rename them). `test (macos)` is advisory
+    (ADR 0079): do not require it until x-lead confirms the macOS runner no longer pauses running jobs,
+    then add it here, to `pr-check`'s needs and to `release.RequiredChecks`,
   - `lint` (from `lint.yml`),
   - `adr-lint` (from `adr-lint.yml`; it checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify
     queue condition, so add it as required once the workflow is on `main`),
@@ -83,10 +85,10 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   `main`.
   adr-lint ignores `decision-confirmed` on `synchronize`, `reopened` and `opened` runs (the event action is passed to it), because
   it runs beside label-reset and could read the label before the removal, which starts no new run; the label counts only
-  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. adr-lint runs on the self-hosted runners labelled `self-hosted, rh-linux`, fork pull requests included once a person
-  approves the run. label-reset runs on the
-  runner named by the repository variable `RUNNER_LINUX` (no GitHub-hosted runner; safe because it runs from the base
-  branch and executes nothing from the pull request); set that variable, or the check never appears and the queue keeps the
+  from a `labeled` run on the current head, and adr-lint reads labels live with `gh pr view`. Every job, adr-lint and label-reset included, runs on the self-hosted labels `[self-hosted, rh-linux]` or
+  `[self-hosted, rh-macos]` ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)), fork pull requests
+  included once a person approves the run; both gate workflows are safe there because they run from the base branch and execute nothing
+  from the pull request. If no runner with the label is online, label-reset never starts and the check never appears, so the queue keeps the
   pull request out (fail closed).
   See [ADR 0078](decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
 - **Require linear history** (squash or rebase merges only).

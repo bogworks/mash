@@ -41,7 +41,7 @@ func TestCheckCI_failureNamesTheRun(t *testing.T) {
 		{Name: "reproducible", Status: "completed", Conclusion: "skipped"},
 		{Name: "reproducible", Status: "completed", Conclusion: "cancelled"},
 	} {
-		rs := runs("test (ubuntu-latest)", "test (macos-latest)")
+		rs := runs("test (linux)")
 		bad.ID, bad.HeadSHA = 99, candidate
 		bad.App.Slug = CIApp
 		if err := CheckCI(append(rs, bad), candidate); err == nil || !strings.Contains(err.Error(), "reproducible") {
@@ -80,7 +80,7 @@ func TestCheckCI_conflictingDuplicatesOfOneIDAreRefusedWhateverTheOrder(t *testi
 	good := withApp(CheckRun{ID: 5, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"})
 	bad := good
 	bad.Conclusion = "failure"
-	rest := runs("test (ubuntu-latest)", "test (macos-latest)")
+	rest := runs("test (linux)")
 	for _, rs := range [][]CheckRun{append(append([]CheckRun{}, rest...), good, bad), append(append([]CheckRun{}, rest...), bad, good)} {
 		if err := CheckCI(rs, candidate); err == nil || !strings.Contains(err.Error(), "reported twice") {
 			t.Fatalf("two results with one run id: %v", err)
@@ -208,7 +208,7 @@ func TestCheckCI_anotherAppsOwnCheckIsIgnored(t *testing.T) {
 
 // A check run written by another integration under a required name is refused, not counted.
 func TestCheckCI_aSpoofedNameFromAnotherAppIsRefused(t *testing.T) {
-	rs := runs("test (ubuntu-latest)", "test (macos-latest)")
+	rs := runs("test (linux)")
 	spoof := CheckRun{ID: 90, HeadSHA: candidate, Name: "reproducible", Status: "completed", Conclusion: "success"}
 	spoof.App.Slug = "some-other-app"
 	if err := CheckCI(append(rs, spoof), candidate); err == nil || !strings.Contains(err.Error(), "some-other-app") {
@@ -217,5 +217,17 @@ func TestCheckCI_aSpoofedNameFromAnotherAppIsRefused(t *testing.T) {
 	spoof.App.Slug = "" // no app at all
 	if err := CheckCI(append(rs, spoof), candidate); err == nil {
 		t.Fatal("a check with no app passed")
+	}
+}
+
+// test (macos) is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
+func TestCheckCI_theAdvisoryMacOSCheckNeitherPassesNorBlocks(t *testing.T) {
+	rs := runs(RequiredChecks...)
+	if err := CheckCI(rs, candidate); err != nil {
+		t.Fatalf("a candidate without test (macos) must pass: %v", err)
+	}
+	failed := withApp(CheckRun{ID: 98, HeadSHA: candidate, Name: "test (macos)", Status: "completed", Conclusion: "failure"})
+	if err := CheckCI(append(rs, failed), candidate); err != nil {
+		t.Fatalf("a failed advisory test (macos) must not refuse a candidate: %v", err)
 	}
 }

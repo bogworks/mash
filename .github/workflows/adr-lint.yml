@@ -14,9 +14,11 @@ name: adr-lint
 # sourced or run, no secret is used, and the token is contents: read. A pull request that changes this workflow or
 # scripts/adrlint is judged by the base branch's versions; its change takes effect once it has merged. (The first pull
 # request that adds scripts/adrlint has no checker at its base and cannot pass this workflow until a maintainer merges it.)
-# This job runs on the repository's self-hosted runners (labels self-hosted, rh-linux); a pull request from a fork is not
-# skipped, it runs there once a person approves the run, and that is safe because nothing from the pull request is run.
-# The body and the labels reach the tool through env, never through the text of the shell script. A fork checkout may lack the base commit, so the base commit
+# This job runs on the repository's self-hosted runners (labels self-hosted, rh-linux), like every job (ADR 0079); a pull
+# request from a fork is not skipped, it runs there once a person approves the run. Its fork safety does not depend on the
+# runner: the trust logic above (base-branch checker, pull request as data only) is the same wherever it runs, and nothing
+# from the pull request is run. The body and the labels reach the tool through env, never through the text of the shell
+# script. A fork checkout may lack the base commit, so the base commit
 # is fetched into pr/ from the trusted/ checkout (a local fetch, no network or credentials) as origin/<base>.
 on:
   pull_request_target:

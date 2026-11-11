@@ -6,7 +6,7 @@ import (
 )
 
 // publish-check runs on a schedule and on dispatch only, with the token scopes it needs (read the code, write the
-// issue) and no more, on the Linux runner variable, and never runs the test suite.
+// issue) and no more, on the self-hosted Linux runner, and never runs the test suite.
 func TestWorkflows_publishCheckIsAScheduledAudit(t *testing.T) {
 	t.Parallel()
 	w := load(t, "publish-check.yml")
@@ -26,8 +26,8 @@ func TestWorkflows_publishCheckIsAScheduledAudit(t *testing.T) {
 	if !ok || len(w.Jobs) != 1 {
 		t.Fatalf("publish-check.yml jobs = %d; want the one job check", len(w.Jobs))
 	}
-	if j.RunsOn != "${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}" {
-		t.Errorf("check runs on %q; want ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}", j.RunsOn)
+	if got := runsOnKey(j.RunsOn); got != linuxLabels {
+		t.Errorf("check runs on %s; want %s", got, linuxLabels)
 	}
 	if len(j.Permissions) != 2 || j.Permissions["contents"] != "write" || j.Permissions["issues"] != "write" {
 		t.Errorf("check permissions = %v; want contents: write (lists its own drafts) and issues: write only", j.Permissions)
