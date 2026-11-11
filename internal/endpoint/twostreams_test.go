@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -21,11 +22,9 @@ import (
 // Tests for naming plan 1.4b: a three-token endpoint whose own directory record carries an alias reads its own stream
 // and the legacy inbox stream through the legacy stream's existing durable consumer.
 //
-// The endpoints here run with unrestricted credentials (an empty permission set), not the provisioned user of
-// admin.NewFormPermissions plus admin.WindowBridge: the window bridge does not yet carry the transition grant for the
-// legacy inbox stream (naming plan 1.4c adds it), so a provisioned user cannot read that stream yet. Delivery with the
-// provisioned credentials is 1.4c's test. What these tests prove is the endpoint's own behaviour: what it reads, how it
-// numbers it and what it never shows twice.
+// The endpoints here run with the credentials a provisioned user really has: admin.NewFormPermissions, and for an
+// endpoint with an alias also admin.WindowBridge for the legacy identity (cc, aliasOwner, aliasName), merged by union
+// of the publish and subscribe allow lists (aliasPerms). A permission the bridge lacks shows up as a failing test.
 
 // aliasOpts says what addNewFormAlias breaks.
 type aliasOpts struct {
@@ -33,14 +32,15 @@ type aliasOpts struct {
 }
 
 // addNewFormAlias provisions a three-token endpoint like addNewForm, with an alias to the legacy endpoint
-// aliasOwner/aliasName in its directory record and an unrestricted user.
+// aliasOwner/aliasName in its directory record and the provisioned user (NewFormPermissions, plus WindowBridge when
+// aliasName is set).
 func (f *fixture) addNewFormAlias(t *testing.T, agent, owner, name, aliasOwner, aliasName string, o aliasOpts) sap.EndpointIdentity {
 	t.Helper()
 	id, err := sap.New(agent, owner, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	creds, user := f.e.MintRaw(t, id.Flat(), jwt.Permissions{})
+	creds, user := f.e.MintRaw(t, id.Flat(), aliasPerms(t, id, aliasOwner, aliasName))
 	ctx := context.Background()
 	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	if err != nil {
@@ -71,6 +71,30 @@ func (f *fixture) addNewFormAlias(t *testing.T, agent, owner, name, aliasOwner, 
 	}
 	f.creds[id.Flat()], f.users[id.Flat()] = creds, user
 	return id
+}
+
+// aliasPerms is the permission set of a provisioned user for id: NewFormPermissions, united with WindowBridge for the
+// legacy alias aliasOwner/aliasName when aliasName is set.
+func aliasPerms(t *testing.T, id sap.EndpointIdentity, aliasOwner, aliasName string) jwt.Permissions {
+	t.Helper()
+	perms, err := admin.NewFormPermissions(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aliasName == "" {
+		return perms
+	}
+	alias, err := sap.Legacy(aliasOwner, aliasName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := admin.WindowBridge(id, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms.Pub.Allow.Add(bridge.Pub.Allow...)
+	perms.Sub.Allow.Add(bridge.Sub.Allow...)
+	return perms
 }
 
 // setRecord overwrites the directory record of id with raw (admin credentials).

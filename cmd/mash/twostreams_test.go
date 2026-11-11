@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
 // provisionAliased provisions a three-token endpoint whose directory record carries an alias to the legacy endpoint
-// aliasOwner/aliasName, with an unrestricted user: the window bridge does not carry the legacy-inbox grant yet (naming
-// plan 1.4c), so delivery with provisioned credentials is not testable here. It returns the environment its mash
+// aliasOwner/aliasName, with the provisioned user (admin.NewFormPermissions united with admin.WindowBridge for the
+// legacy alias). It returns the environment its mash
 // commands run with.
 func provisionAliased(t *testing.T, w *world, agent, owner, name, aliasOwner, aliasName string) map[string]string {
 	t.Helper()
@@ -24,7 +24,21 @@ func provisionAliased(t *testing.T, w *world, agent, owner, name, aliasOwner, al
 	if err != nil {
 		t.Fatal(err)
 	}
-	creds, user := w.e.MintRaw(t, id.Flat(), jwt.Permissions{})
+	alias, err := sap.Legacy(aliasOwner, aliasName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms, err := admin.NewFormPermissions(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := admin.WindowBridge(id, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms.Pub.Allow.Add(bridge.Pub.Allow...)
+	perms.Sub.Allow.Add(bridge.Sub.Allow...)
+	creds, user := w.e.MintRaw(t, id.Flat(), perms)
 	ctx := context.Background()
 	js, err := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
 	if err != nil {
