@@ -1323,9 +1323,13 @@ func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lk *streamLock, lease j
 // refuses, touching nothing, unless the inbox is still suspended, carries a suspension id equal to id (an empty id never
 // matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
 // check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
+//
+// name is a legacy name or a new-form flat key (agent_owner_name). A new-form identity's retired marker goes pending ->
+// revoke and purge -> final exactly as in Deprovision (see beginRetire), and a re-run after a stop that followed the
+// purge finishes it. A legacy name is refused while a new-form record names it as its alias (guardLegacyAlias).
 func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) (err error) {
-	if !config.ValidName(name) {
-		return fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+	if !ValidKey(name) {
+		return fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name (the value is not shown)")
 	}
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
@@ -1362,8 +1366,17 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if err != nil {
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
+	savedUser := info.Config.Metadata[store.MetaSuspendedUser]
 	e, err := kv.Get(ctx, name)
 	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+		if _, flat := newFormKey(name); flat && savedUser != "" {
+			// A new-form removal that stopped after the purge: its retired marker, if any, is finished (see
+			// finishAfterPurge); with none this refuses and changes nothing.
+			if err := a.finishAfterPurge(ctx, lk, lease, name, savedUser); err != nil {
+				return fmt.Errorf("mash: endpoint %s has no directory record, so nothing proves it is the endpoint that was drained: %w", name, err)
+			}
+			return nil
+		}
 		return fmt.Errorf("mash: endpoint %s has no directory record, so nothing proves it is the endpoint that was drained; run plain `deprovision` if it is a leftover", name)
 	} else if err != nil {
 		return fmt.Errorf("mash: directory %s: %w", name, err)
@@ -1372,7 +1385,6 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if err != nil {
 		return fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves it is the endpoint that was drained (left in place): %w", name, err)
 	}
-	savedUser := info.Config.Metadata[store.MetaSuspendedUser]
 	switch {
 	case savedUser == "":
 		return fmt.Errorf("mash: endpoint %s was suspended without a record; use plain `deprovision`", name)
@@ -1390,18 +1402,34 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	if err := lk.check(ctx); err != nil {
 		return err
 	}
-	revoked, err := a.revokeLocked(ctx, lk, name, rec.User)
+	// First phase: a new-form identity's marker is written pending before the user is revoked or the record purged.
+	pm, err := a.beginRetire(ctx, lk, name, rec.User)
 	if err != nil {
 		return err
 	}
-	if err := adm.check(ctx); err != nil {
-		return partialIf(revoked, name, rec.User, err)
+	revoked, err := a.revokeLocked(ctx, lk, name, rec.User)
+	if err == nil {
+		err = adm.check(ctx)
 	}
-	if err := kv.Purge(ctx, name, jetstream.LastRevision(e.Revision())); err != nil {
+	if err != nil {
+		// Nothing was purged: the marker this call wrote goes.
+		return a.abortRetire(ctx, lk, adm, pm, partialIf(revoked, name, rec.User, err), false)
+	}
+	if err := purgeDirectory(ctx, kv, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
-			return partialIf(revoked, name, rec.User, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name))
+			// The server refused the guarded purge: the retirement did not happen, so the pending marker goes.
+			err = partialIf(revoked, name, rec.User, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name))
+			return a.abortRetire(ctx, lk, adm, pm, err, true)
 		}
-		return partialIf(revoked, name, rec.User, fmt.Errorf("mash: directory record: %w", err))
+		// The answer does not say whether the server purged it: the marker stays pending.
+		return partialIf(revoked, name, rec.User, unfinishedPurge(name, pm, err))
+	}
+	if afterDeprovisionPurge != nil {
+		afterDeprovisionPurge()
+	}
+	// Second phase: the marker becomes final after the purge, never before it.
+	if err := a.finalizeRetire(ctx, lk, pm, rec.User); err != nil {
+		return partialIf(revoked, name, rec.User, err)
 	}
 	return partialIf(revoked, name, rec.User, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }

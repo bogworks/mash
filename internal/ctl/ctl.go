@@ -311,7 +311,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
-		if len(args) != 2 || !config.ValidName(args[1]) {
+		if len(args) != 2 || !madmin.ValidKey(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))
 		}
 		switch args[0] {
@@ -347,7 +347,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": " + err.Error()))
 			}
 		}
-		if len(args) < 2 || !config.ValidName(args[1]) {
+		if len(args) < 2 || !madmin.ValidKey(args[1]) {
 			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": <name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)"))
 		}
 		var rest []string

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -187,5 +188,38 @@ func TestMashctlDeprovisionDrainedTo(t *testing.T) {
 	}
 	if out, errb, code := ctlRun(t, e, "deprovision", "c", "--suspension", id, "--drained-to", "0"); code != 0 || !strings.Contains(out, "deprovisioned c") {
 		t.Fatalf("drained: %d %q %q", code, out, errb)
+	}
+}
+
+// The suspend and drained-removal verbs take a new-form flat key end to end, and still refuse a malformed one.
+func TestMashctlSuspendDeprovisionDrainedFlatKey(t *testing.T) {
+	e := testenv.Start(t)
+	ctlRun(t, e, "init")
+	a, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ident, err := sap.New("acme", "team1", "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, u := e.Mint(t, "ops1")
+	if _, err := a.ProvisionIdentity(context.Background(), ident, nil, u, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	key := ident.Flat()
+	out, errb, code := ctlRun(t, e, "suspend", key)
+	m := regexp.MustCompile(`id ([0-9a-f]{32}), last_seq (\d+),`).FindStringSubmatch(out)
+	if code != 0 || m == nil {
+		t.Fatalf("suspend: %d %q %q", code, out, errb)
+	}
+	if out, _, code := ctlRun(t, e, "suspended", key); code != 0 || !strings.HasPrefix(out, "suspended "+key+" since ") {
+		t.Fatalf("suspended: %d %q", code, out)
+	}
+	if out, errb, code := ctlRun(t, e, "deprovision", key, "--drained-to", m[2], "--suspension", m[1]); code != 0 || !strings.Contains(out, "deprovisioned "+key) {
+		t.Fatalf("deprovision: %d %q %q", code, out, errb)
+	}
+	if _, errb, code := ctlRun(t, e, "suspend", "Acme_team1_ops1"); code == 0 || !strings.Contains(errb, "usage: mashctl suspend <name>") {
+		t.Fatalf("a malformed key must be refused: %d %q", code, errb)
 	}
 }
