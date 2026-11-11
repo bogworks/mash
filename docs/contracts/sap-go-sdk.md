@@ -3,18 +3,25 @@
 | | |
 |---|---|
 | Standard | contract@0.1.0 |
-| Contract id and revision | sap-go-sdk, revision draft-7a (draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 recorded Randy's answers; draft-7 renames the repository and prepares the upstream landing on his draft-6 comments; Appendix A) |
-| Status | DRAFT, for Randy to ratify. Not READY: no work starts under it until it is. |
+| Contract id and revision | sap-go-sdk, revision 7 READY (ratified 2026-11-11; earlier: draft-2 to draft-5 answered four critic passes and mash-lead's review; draft-6 recorded Randy's answers; draft-7 renames the repository and prepares the upstream landing on his draft-6 comments; Appendix A) |
+| Status | READY. Ratified by Randy on 2026-11-11 (planner #161, relayed by mash-lead #43). Work starts under it. |
 | Team | The mash team's SDK workstream, endpoint `mash-sdk`, builds it (Randy, board note on card #129, 2026-11-09) |
 | Board card | #129 mash-sap-go-sdk (p1); related #13 mash-sap-conformance (parked), #103 mash-sap-security-overlay (backlog) |
 | Writer | mash-sdk, delegated by mash-lead, who writes the team's contracts; model family Anthropic |
 | Critic | OpenAI (Codex CLI 0.166.0, gpt-6-sol, daybreak on); findings and dispositions in Appendix A |
-| Ratified by | not yet |
+| Ratified by | Randy Bias, 2026-11-11, in the words quoted at the top of section 1 |
 | Charters and seam pages cited | none exist for the SDK, and none are needed: the SDK's only boundary is the SAP specification |
-| Date | 2026-11-10 |
+| Date | 2026-11-11 (ratified); drafted 2026-11-10 |
 | Sources | Card #129 (`cards/mash-sap-go-sdk.md`, its log of 2026-11-10); SAP 0.3.0 `core-protocol.md` in `synadia-ai/synadia-agent-sdk-docs` at `c48cea5f07965cc8fd4054e120459f1833b3ed2b` (cited `SAP:Lnnn`); `synadia-ai/synadia-agents` at `ed9aefb` (the TypeScript and Python SDKs, `test-fixtures/`, `docs/protocol-mapping.md`); `henomis/phero` v2.3.0 `nats/`; `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`; `nats-io/nats.go` `CONTRIBUTING.md`; `synadia-io/orbit.go` `CONTRIBUTING.md`; bogworks/mash `internal/sap/` and ADRs 0003, 0004, 0005, 0017 (evidence only) |
 
 ## 1. Intent
+
+### Randy's intent, ratified (verbatim, 2026-11-11)
+
+> "Full parity with existing SAP SDKs, full test suite coverage to confirm it, full SAP conformance, detailed code audits for quality, full codex daybreak detailed analysis for security flaws. TL;DR -> make it a usable SAP Go SDK that they will accept upstream."
+
+This is the contract's governing intent. Where anything below reads narrower than it, this wins, and the gap is
+recorded as a deviation for Randy (section 8). Section 6 opens with his five acceptance lines.
 
 ### Problem
 
@@ -44,6 +51,8 @@ It gates the final mash release (card #129: "a gate on the final mash release").
 - **The conformance catalog is complete.** Every MUST in SAP 0.3 maps to a passing Go test or to a stated reason it
   does not apply, and CI fails when a MUST has neither.
 - **The identity vectors pass.** The Go SDK passes Synadia's language-neutral identity vectors.
+- **Parity with the official SDKs.** Every feature of the TypeScript and Python SDKs has a Go counterpart, shown
+  feature by feature in a parity matrix (AT-011).
 - **The offer to Synadia is made.** An issue, and then a pull request, offering the SDK to Synadia are open.
 - **mash can build on it.** mash could be rebuilt on the SDK's public API without forking it (AT-010).
 
@@ -56,7 +65,9 @@ It gates the final mash release (card #129: "a gate on the final mash release").
 - Changing SAP. The SDK implements 0.3 as written; spec defects go to Synadia as issues.
 - The deferred parts of SAP 0.3: end-to-end encryption, the `attachments` upload endpoint, and JetStream streaming
   (SAP:L17-L22).
-- LLM tool wrappers like the TypeScript `AgentTools`, and the Agent Fabric layer.
+- Not a non-goal any more: LLM tool wrappers like the TypeScript `AgentTools`, and the Agent Fabric layer. Randy's
+  "full parity" (2026-11-11) brings every feature of the official SDKs into the parity matrix (AT-011). A feature
+  the team judges outside the protocol is still listed there, with its reason, as a deviation for Randy to accept.
 - Policy. The SDK offers admission hooks and decides no one's access (card #103 is mash's).
 
 ## 2. Actors and journeys
@@ -98,7 +109,9 @@ It gates the final mash release (card #129: "a gate on the final mash release").
 ## 3. Behavioral requirements
 
 Source classes: Confirmed (Randy ruled it), Derived (from a cited document), Proposed (the writer's; open to the critic
-and to Randy).
+and to Randy). At ratification (2026-11-11) every requirement below is in scope. Items still marked
+**SDK policy (Proposed)** are the SDK's choices where the spec leaves one open; they are in, as the team's delegated
+design, and can change without a new ratification as long as no MUST of SAP changes.
 
 **How wire rules are cited.** The spec is the authority for wire behaviour. A requirement below cites the spec's section
 and lines and names the SDK's outcome. It does not restate the rule, and it never strengthens a SAP SHOULD or MAY into a
@@ -241,7 +254,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - Acceptance: AT-001.
 
 ### REQ-010: A conformance catalog that ties every requirement to a test
-- Source: Proposed, from the method of `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`
+- Source: Confirmed ("full SAP conformance", 2026-11-11); method from of `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`
   (169 requirements, each with section, line and tests) and card #13's "SAP v0.3 conformance table".
 - MUST: a machine-readable catalog lists every MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in `core-protocol.md` at the
   pinned revision, split into **atomic obligations**: one testable behaviour each. A sentence with two obligations is
@@ -356,8 +369,8 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   - an admission hook for verified senders (SAP §13.7, the 403 for a refused verified sender; REQ-008);
   - read access to the headers of received messages (SAP §9 has callers inspect headers on every message, and §13
     carries `Agent-Sender` as a header).
-- SDK policy (Proposed): a hook to add application headers to outgoing requests. SAP neither requires nor forbids it.
-  Randy may cut it at ratification (Q12).
+- MUST (Confirmed in scope at ratification, 2026-11-11): a hook to add application headers to outgoing requests.
+  SAP neither requires nor forbids it, so it is SDK policy; it may not set or override any header SAP defines.
 - MUST: no extension point is named for, or shaped around, one consumer.
 - MUST: a written mapping from mash's `internal/sap` to the SDK's API shows which SDK call replaces each SAP piece,
   and lists each mash-only piece (the `mail` verb, zones, the mash signature variants, the stricter token rule) as
@@ -386,20 +399,20 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   recorded with Synadia's reply as evidence. It is a deviation for Randy to accept, not completion by default. If Randy
   accepts an issue-stage decline, no pull request is needed.
 - MUST: Synadia is not asked first. The SDK is built, then offered: "Do not ask Synadia." (Randy, 2026-11-10; Q4).
-  The issue and pull request come after the 0.x release that meets AT-001 to AT-007, AT-009 and AT-010.
+  The issue and pull request come after the 0.x release that meets AT-001 to AT-007 and AT-009 to AT-013.
 - MUST: Randy, or someone he names, opens both. Any sign-off is in the name Randy Bias (Q5).
 - MUST: the contract is met when the issue and pull request are open and answered or waiting, or when a decline is
   accepted by Randy. Synadia does not have to merge (section 8).
 - Acceptance: AT-008.
 
 ### REQ-018: Versions
-- Source: Proposed.
+- Source: Confirmed in scope at ratification (2026-11-11).
 - MUST: the SDK's own version is semver and starts at 0.x. Its protocol version is a separate constant (REQ-002).
 - MUST: each release states the SAP revision and the conformance catalog result it was built against.
 - Acceptance: AT-007.
 
 ### REQ-019: Concurrency
-- Source: Proposed (mash-lead's review, 2026-11-10).
+- Source: Confirmed in scope at ratification (2026-11-11); from mash-lead's review, 2026-11-10.
 - MUST: a caller value is safe for concurrent use. Many prompts may run at once on one connection, each with its own
   reply subscription and stream.
 - MUST: a host serves concurrent prompts. Its handler runs once per request, with a documented concurrency limit that
@@ -408,7 +421,8 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 - Acceptance: AT-001.
 
 ### REQ-020: Go version, logging and documentation
-- Source: Proposed (mash-lead's review, 2026-11-10; the `nats-io/nats.go` norm of supporting recent Go releases).
+- Source: Confirmed in scope at ratification (2026-11-11); from mash-lead's review, 2026-11-10, and the `nats-io/nats.go`
+  norm of supporting recent Go releases.
 - **Go version.** The `go` directive is the older of the two most recent Go releases at the first tag, and CI builds
   and tests on both.
 - **Logging.** The SDK never writes to stdout, stderr or a global logger. It accepts an optional `*slog.Logger`, and
@@ -493,11 +507,22 @@ The review records are completion evidence.
   - Leak checks run in the tests.
 - **NFR-003 (compatibility).** The public API is documented and stable within a minor version from 0.1. Breaking
   changes are listed in a changelog.
-- **NFR-004 (performance).** Proposed budget: on a local `nats-server`, the median round-trip of a short prompt
-  through a Go caller and a Go host is no more than twice that of the official TypeScript SDK pair, measured by the
-  same benchmark. A release that misses the budget records why (Q9 confirms the figure).
+- **NFR-004 (performance): OUT for now** (ratification, 2026-11-11). No budget is set and no release is held on
+  speed. A benchmark may be kept as information; a budget needs a later decision.
 
 ## 6. Acceptance contract
+
+### Randy's five acceptance lines (ratified 2026-11-11)
+
+The contract is accepted on these five lines. The checks below are how each is shown.
+
+| # | Randy's line | Shown by |
+|---|---|---|
+| 1 | Parity with the TypeScript and Python SDKs, shown feature by feature | AT-011 |
+| 2 | A test suite that confirms it | AT-001, AT-004, AT-005, and AT-011's per-row tests |
+| 3 | Conformance: every MUST mapped to a test, the identity vectors passing, interop both ways with the official hosts | AT-002, AT-005, AT-003, AT-006 |
+| 4 | Detailed code-quality audits | AT-012 |
+| 5 | A detailed Codex security analysis with `-c daybreak=true` | AT-013 |
 
 ### AT-001: Unit and component tests (runnable check)
 - Every REQ-002 to REQ-009 behaviour has tests that run against an embedded or spawned `nats-server` at the pinned
@@ -614,6 +639,30 @@ The review records are completion evidence.
 - A spike that rebuilds mash on the SDK is not part of this contract. It belongs to the follow-on rebuild contract
   (Q11).
 
+### AT-011: Parity, feature by feature (demonstrated state, plus a runnable check)
+- A parity matrix in the SDK repository (`docs/parity.md`) lists every public feature of the official TypeScript
+  (`client-sdk/typescript`) and Python (`agent-sdk/python`) SDKs at the commit the release names: each exported call,
+  option, event, error type and helper, one row each.
+- Each row names the Go counterpart and the Go test that exercises it, or the reason it is not ported. A row without
+  a counterpart is a deviation for Randy to accept (section 8), never a silent gap.
+- A check fails when a row names a Go identifier or test that does not exist.
+
+### AT-012: Code-quality audits (review record)
+- When each package lands, and again at the release, a detailed quality audit reads it: correctness, API shape
+  against `nats.go` idiom, error handling, concurrency, leaks, test quality and documentation.
+- At least one audit per package is by a model family other than the writer's. Findings and dispositions are
+  recorded in the repository (`docs/audits/`). A blocking finding blocks the release until fixed or accepted by
+  Randy.
+
+### AT-013: Codex security analysis (review record)
+- A detailed security analysis of the whole SDK runs with OpenAI's Codex CLI, read-only, passing `-c daybreak=true`.
+  It runs once each package lands and again on the release candidate.
+- The record states exactly what was passed: the Codex CLI version, the full command line (model, `-c daybreak=true`,
+  sandbox mode), the commit, and the prompt. It also states that the CLI cannot confirm Daybreak is active on the
+  account: the flag was passed, and whether the service honoured it is not observable from the CLI.
+- Findings and dispositions are recorded in `docs/audits/`. A blocking finding blocks the release until fixed or
+  accepted by Randy.
+
 ### Verification (was the contract met?)
 
 | Requirements | Checked by |
@@ -629,6 +678,9 @@ The review records are completion evidence.
 | REQ-016 | AT-010 |
 | REQ-019 | AT-001 |
 | REQ-020 | AT-007 |
+| Parity (intent, line 1) | AT-011 |
+| Quality audits (intent, line 4) | AT-012 |
+| Security analysis (intent, line 5) | AT-013 |
 | INV-001 | AT-003 |
 | INV-003 | the review records |
 
@@ -702,9 +754,7 @@ The review records are completion evidence.
 8. **Q8, done when Synadia has not answered [not blocking].**
    - The writer proposes that the contract is met when the offer is made and the SDK meets AT-001 to AT-007, AT-009
      and AT-010. Synadia's merge is not required (section 8).
-9. **Q9, a performance budget [not blocking].**
-   - None is set. Should one be set, for example a prompt round-trip on a local `nats-server` within a factor of the
-     TypeScript SDK?
+9. **Q9, a performance budget: answered.** Out for now (ratification, 2026-11-11; NFR-004).
 10. **Q10, the scope of the runner: decided in REQ-013.**
     - `sapconform` tests agents (hosts) only, and testing callers is a follow-on. Randy may widen this at ratification.
 11. **Q11, the mash rebuild contract [not blocking for this contract; blocking for card #129's done-when].**
@@ -712,13 +762,12 @@ The review records are completion evidence.
       acceptance step is a spike of mash on the SDK.
     - Card #129 is done only when that one is too.
     - Owner: mash-lead.
-12. **Q12, ratify the Proposed scope explicitly [blocking].**
+12. **Q12, ratify the Proposed scope: answered (2026-11-11).**
     - Decided: the `sapconform` runner is in ("yes sapconform", Randy, 2026-11-10; REQ-013). The upstream-ready files
       and dependency limits (REQ-014) are in, because Randy is "prepping to submit it upstream" (on draft-6).
-    - Still Proposed, each for Randy to keep or cut at ratification:
-      - concurrency, Go version, logging and documentation (REQ-019, REQ-020);
-      - the outgoing-header hook (REQ-016);
-      - the NFR-004 performance budget. The planner recommends dropping it.
+    - In at ratification: concurrency, Go version, logging and documentation (REQ-019, REQ-020); the outgoing-header
+      hook (REQ-016); versions (REQ-018).
+    - Out for now: the NFR-004 performance budget.
 
 ### Delegated to the team
 
@@ -744,12 +793,12 @@ The review records are completion evidence.
 - The `sapconform` runs of AT-006.
 - The REQ-017 issue and pull request, with their state.
 - The REQ-016 mapping document and the AT-010 example.
-- The review records under INV-003.
+- The review records under INV-003, the parity matrix (AT-011), and the audit and security records (AT-012, AT-013).
 - Deviations and residual risks, including spec ambiguities sent to Synadia.
 
 ### Accept if
 
-- AT-001 to AT-007, AT-009 and AT-010 pass at the release.
+- AT-001 to AT-007 and AT-009 to AT-013 pass at the release.
 - AT-008 shows the offer made.
 
 ### Reject if
@@ -760,6 +809,8 @@ The review records are completion evidence.
 - The SDK depends on mash or bogworks code.
 - §13 is in scope and a Synadia identity vector fails.
 - Evidence is a plan rather than a result.
+- A parity row has no Go counterpart and no deviation Randy accepted.
+- A blocking audit or security finding is open.
 
 ### Deviations
 
@@ -769,7 +820,12 @@ The review records are completion evidence.
 
 ## Readiness
 
-- Result: DRAFT. It goes to mash-lead, then the planner, then Randy. Randy's comments on draft-6, verbatim: Randy, 2026-11-10, on draft-6, via the planner: "I don't think that makes it clear it's meant as part of SAP. 'agents' is too generic. I guess we could move it later, but we should be prepping to submit it upstream. public is fine."
+- Result: **READY** (2026-11-11). Randy's ratification, verbatim, via the planner (#161) and mash-lead (#43): "Full parity with existing SAP SDKs, full test suite coverage to confirm it, full SAP conformance, detailed code audits for quality, full codex daybreak detailed analysis for security flaws. TL;DR -> make it a usable SAP Go SDK that they will accept upstream."
+- mash-lead, relaying the ratification: the Proposed scope moves to IN (REQ-014, REQ-016's outgoing-header hook,
+  REQ-018 to REQ-020); NFR-004 is OUT for now; acceptance is Randy's five lines (section 6). The repository name
+  `synadia-agents.go`, module `github.com/bogworks/synadia-agents.go`, package `agents`, shaped to land upstream as
+  `go/`, stands (x-lead is creating the repository).
+- History: drafts went to mash-lead, then the planner, then Randy. Randy's comments on draft-6, verbatim: Randy, 2026-11-10, on draft-6, via the planner: "I don't think that makes it clear it's meant as part of SAP. 'agents' is too generic. I guess we could move it later, but we should be prepping to submit it upstream. public is fine."
 - Randy's answers to Q1 to Q5 and to the runner in Q12, verbatim: Randy, 2026-11-10, via the planner: "Do not ask Synadia. Put it in a new repo. Presumably a fork of upstream? Signing is in scope. We need it. yes sapconform. Randy Bias. USe go module path standards that conform to what NATS already does."
 - **Answered by Randy (2026-11-10):**
   - Q1: a new repository, public. The writer answered his fork question (standalone) and chose the name
@@ -777,7 +833,7 @@ The review records are completion evidence.
   - Q2: the path follows NATS's conventions.
   - Q3, Q4 and Q5.
   - In Q12: the runner, and the upstream-ready files.
-- **Blocking before READY:**
+- **Was blocking before READY, now resolved by the ratification:**
   - Randy's confirmation of the name `synadia-agents.go`, of the standalone answer and of the folder landing
     (REQ-017);
   - the rest of Q12;
