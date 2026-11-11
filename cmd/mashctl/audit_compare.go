@@ -15,7 +15,7 @@ import (
 
 // auditCompareStream is one legacy inbox stream across two audits. A stream "moved" when it is present now and its
 // last sequence differs from the earlier one (a new message was stored) or its `deliver` consumer's delivered stream
-// sequence differs (a message was read). The ack floor is reported but does not by itself fail --strict.
+// sequence or its delivered consumer sequence differs (a message was read, or read again). The ack floor is reported but does not by itself fail --strict.
 type auditCompareStream struct {
 	Stream        string `json:"stream"`
 	PresentBefore bool   `json:"present_before"`
@@ -27,9 +27,13 @@ type auditCompareStream struct {
 	DeliveredBefore uint64 `json:"delivered_before"`
 	DeliveredNow    uint64 `json:"delivered_now"`
 	DeliveredMoved  bool   `json:"delivered_moved"`
-	AckFloorBefore  uint64 `json:"ack_floor_before"`
-	AckFloorNow     uint64 `json:"ack_floor_now"`
-	AckFloorMoved   bool   `json:"ack_floor_moved"`
+	// The consumer sequence moves on every delivery, including a redelivery, which leaves the stream sequence alone.
+	ConsumerSeqBefore uint64 `json:"consumer_seq_before"`
+	ConsumerSeqNow    uint64 `json:"consumer_seq_now"`
+	ConsumerSeqMoved  bool   `json:"consumer_seq_moved"`
+	AckFloorBefore    uint64 `json:"ack_floor_before"`
+	AckFloorNow       uint64 `json:"ack_floor_now"`
+	AckFloorMoved     bool   `json:"ack_floor_moved"`
 
 	// Vanished: present in the earlier audit and absent now, and not retired. The mail in it may have been lost.
 	// Retired: present and drained in the earlier audit, and its directory record is gone now too (deprovisioned).
@@ -55,7 +59,7 @@ type auditCompare struct {
 	Streams          []auditCompareStream `json:"streams"`
 	Removed          []string             `json:"identities_removed"` // record keys present before and absent now
 	Added            []string             `json:"identities_added"`   // record keys absent before and present now
-	Moved            int                  `json:"moved"`              // legacy streams whose last_seq or delivered sequence moved
+	Moved            int                  `json:"moved"`              // legacy streams whose last_seq, delivered or consumer sequence moved
 	Vanished         int                  `json:"vanished"`           // legacy inboxes present before, absent now, not retired: fails --strict
 	Recreated        int                  `json:"recreated"`          // legacy streams or deliver consumers present in both audits with a different creation time: fails --strict
 	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
@@ -97,6 +101,7 @@ var earlierInboxFields = []struct {
 	{"deliver.pending", whenDeliverPresent, "drain rule: nothing pending"},
 	{"deliver.ack_pending", whenDeliverPresent, "drain rule: nothing unacknowledged"},
 	{"deliver.delivered", whenDeliverPresent, "movement of the delivered stream sequence"},
+	{"deliver.delivered_consumer_seq", whenDeliverPresent, "movement of the delivered consumer sequence (a redelivery)"},
 	{"deliver.ack_floor", whenDeliverPresent, "drain rule: reaches last_seq"},
 	{"deliver.created", whenDeliverPresent, "recreation check for the consumer"},
 	{"deliver.deliver_policy", whenDeliverPresent, "drain rule: all or a start sequence"},
@@ -295,13 +300,15 @@ func compareAudits(before, now auditReport) *auditCompare {
 		bi, ni := b[name], n[name]
 		s := auditCompareStream{Stream: name, PresentBefore: bi.Present, PresentNow: ni.Present,
 			LastSeqBefore: bi.LastSeq, LastSeqNow: ni.LastSeq, DeliveredBefore: bi.Deliver.Delivered, DeliveredNow: ni.Deliver.Delivered,
+			ConsumerSeqBefore: bi.Deliver.DeliveredConsumerSeq, ConsumerSeqNow: ni.Deliver.DeliveredConsumerSeq,
 			AckFloorBefore: bi.Deliver.AckFloor, AckFloorNow: ni.Deliver.AckFloor}
 		if ni.Present {
 			s.LastSeqMoved = s.LastSeqNow != s.LastSeqBefore
 			s.DeliveredMoved = s.DeliveredNow != s.DeliveredBefore
+			s.ConsumerSeqMoved = s.ConsumerSeqNow != s.ConsumerSeqBefore
 			s.AckFloorMoved = s.AckFloorNow != s.AckFloorBefore
 		}
-		if s.LastSeqMoved || s.DeliveredMoved {
+		if s.LastSeqMoved || s.DeliveredMoved || s.ConsumerSeqMoved {
 			c.Moved++
 		}
 		if bi.Present && ni.Present {
@@ -360,7 +367,7 @@ func writeCompareText(w io.Writer, c *auditCompare) {
 	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired, %d recreated, %d creation unknown\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired, c.Recreated, c.CreationUnknown)
 	for _, s := range c.Streams {
 		state := "unchanged"
-		if s.LastSeqMoved || s.DeliveredMoved {
+		if s.LastSeqMoved || s.DeliveredMoved || s.ConsumerSeqMoved {
 			state = "MOVED"
 		}
 		if s.Recreated {
@@ -373,8 +380,8 @@ func writeCompareText(w io.Writer, c *auditCompare) {
 		} else if s.Retired {
 			state = "RETIRED"
 		}
-		fmt.Fprintf(w, "compare stream %s\t%s\tlast_seq %d->%d\tdelivered %d->%d\tack_floor %d->%d\tpresent %t->%t\n", cl(s.Stream), state,
-			s.LastSeqBefore, s.LastSeqNow, s.DeliveredBefore, s.DeliveredNow, s.AckFloorBefore, s.AckFloorNow, s.PresentBefore, s.PresentNow)
+		fmt.Fprintf(w, "compare stream %s\t%s\tlast_seq %d->%d\tdelivered %d->%d\tconsumer_seq %d->%d\tack_floor %d->%d\tpresent %t->%t\n", cl(s.Stream), state,
+			s.LastSeqBefore, s.LastSeqNow, s.DeliveredBefore, s.DeliveredNow, s.ConsumerSeqBefore, s.ConsumerSeqNow, s.AckFloorBefore, s.AckFloorNow, s.PresentBefore, s.PresentNow)
 	}
 	for _, k := range c.Removed {
 		fmt.Fprintf(w, "compare identity removed %s\n", cl(k))

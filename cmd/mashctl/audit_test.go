@@ -1488,3 +1488,73 @@ func TestAuditCompareEarlierWithoutAccount(t *testing.T) {
 		t.Errorf("text form must say the account is not verified:\n%s", txt)
 	}
 }
+
+// A redelivery leaves the delivered stream sequence alone and advances the consumer sequence: --strict --compare
+// must still see the mail was read again. No movement at all passes.
+func TestAuditCompareRedeliveryMovesConsumerSeq(t *testing.T) {
+	f := cleanLegacyAccount(t)
+	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 1)
+	fetchOne := func(nak bool) {
+		t.Helper()
+		c, err := f.js.Consumer(context.Background(), sap.InboxStream("alpha"), store.Consumer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := c.Fetch(1, jetstream.FetchMaxWait(3*time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for m := range b.Messages() {
+			n++
+			if nak {
+				_ = m.Nak()
+			}
+		}
+		if n != 1 {
+			t.Fatalf("fetched %d messages, want 1", n)
+		}
+	}
+	fetchOne(true) // delivered, then negatively acknowledged
+	first := f.auditTo(t, "first.json")
+	if out, errb, code := f.run(t, "--strict", "--json", "--compare", first); code != 0 {
+		t.Fatalf("nothing moved: %d %q\n%s", code, errb, out)
+	}
+	fetchOne(false) // redelivered: stream sequence unchanged, consumer sequence advances
+	out, errb, code := f.run(t, "--strict", "--json", "--compare", first)
+	if code != 1 || errb == "" {
+		t.Fatalf("a redelivery must fail --strict --compare: %d %q", code, errb)
+	}
+	var c struct {
+		Compare struct {
+			Moved   int `json:"moved"`
+			Streams []struct {
+				DeliveredMoved    bool   `json:"delivered_moved"`
+				ConsumerSeqBefore uint64 `json:"consumer_seq_before"`
+				ConsumerSeqNow    uint64 `json:"consumer_seq_now"`
+				ConsumerSeqMoved  bool   `json:"consumer_seq_moved"`
+			} `json:"streams"`
+		} `json:"compare"`
+	}
+	if err := json.Unmarshal([]byte(out), &c); err != nil || c.Compare.Moved != 1 || len(c.Compare.Streams) != 1 {
+		t.Fatalf("compare: %v %s", err, out)
+	}
+	s := c.Compare.Streams[0]
+	if s.DeliveredMoved || !s.ConsumerSeqMoved || s.ConsumerSeqNow <= s.ConsumerSeqBefore {
+		t.Errorf("want consumer sequence moved and stream sequence not: %+v", s)
+	}
+	if txt, _, _ := f.run(t, "--compare", first); !strings.Contains(txt, "MOVED") || !strings.Contains(txt, "consumer_seq") {
+		t.Errorf("text form:\n%s", txt)
+	}
+}
+
+// A null consumer sequence is as missing as an absent key.
+func TestAuditCompareEarlierNullConsumerSeqIsRefused(t *testing.T) {
+	f, first := vanishFixture(t, true)
+	p := writeEdited(t, first, func(m map[string]any) {
+		m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)["deliver"].(map[string]any)["delivered_consumer_seq"] = nil
+	})
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 3 || out != "" || !strings.Contains(errb, "deliver.delivered_consumer_seq") {
+		t.Errorf("null delivered_consumer_seq: %d %q %q", code, out, errb)
+	}
+}

@@ -172,6 +172,7 @@ Fields an earlier report must carry for each legacy inbox (`records[].inbox` of 
 | `deliver.pending` | the consumer is present | drain rule: nothing pending |
 | `deliver.ack_pending` | the consumer is present | drain rule: nothing unacknowledged |
 | `deliver.delivered` | the consumer is present | movement of the delivered stream sequence |
+| `deliver.delivered_consumer_seq` | the consumer is present | movement of the delivered consumer sequence (a redelivery) |
 | `deliver.ack_floor` | the consumer is present | drain rule: reaches last_seq |
 | `deliver.created` | the consumer is present | recreation check for the consumer |
 | `deliver.deliver_policy` | the consumer is present | drain rule: all or a start sequence |
@@ -184,9 +185,10 @@ Other fields the writer omits when empty or unknown, and that the comparison doe
 `compare` holds `against_generated`, `moved`, `identities_removed` and `identities_added` (directory keys present
 before and not now, and the reverse) and `streams`: one entry per legacy inbox stream in either audit (the inbox of an
 old-form record and the legacy inbox of a renamed identity), sorted, each with `present_before`, `present_now` and a
-before, now and moved triple for `last_seq`, for the `deliver` consumer's `delivered` (stream sequence) and for its
-`ack_floor`, and two flags, `vanished` and `retired`. A stream has moved when it is present now and its `last_seq` or
-its `delivered` differs: mail was stored or mail was read. The ack floor is shown but does not count by itself.
+before, now and moved triple for `last_seq`, for the `deliver` consumer's `delivered` (stream sequence), for its
+`delivered_consumer_seq` (`consumer_seq` in the compare) and for its `ack_floor`, and two flags, `vanished` and `retired`. A stream has moved when it is present now and its `last_seq` or
+its `delivered` or `delivered_consumer_seq` differs: mail was stored, read, or read again (a redelivery advances
+the consumer sequence and leaves the stream sequence alone). The ack floor is shown but does not count by itself.
 `moved` is the number of streams that moved.
 
 A legacy inbox that was present in the earlier audit and is absent now has either `vanished` or `retired`. The
@@ -248,7 +250,7 @@ cannot see.
 | code | meaning |
 | --- | --- |
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
-| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq` or `delivered` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
+| 1 | `--strict` and a finding: an orphan of any kind, an alias whose legacy inbox is not drained, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a legacy stream whose `last_seq`, `delivered` or `delivered_consumer_seq` moved, a legacy inbox that vanished, a legacy stream or its `deliver` consumer that was recreated, or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
 | 2 | a usage error |
 | 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account. Nothing is printed on standard output |
 
