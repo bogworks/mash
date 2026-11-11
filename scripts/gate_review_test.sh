@@ -97,6 +97,26 @@ pid=$(pidof b1)
 if [ -f "$(record "$pid")" ]; then ok "1 clean: record file for the patch-id"; else bad "1 record file for $pid"; fi
 if grep -q '^verdict: pass' "$(record "$pid")"; then ok "1 record says pass"; else bad "1 record verdict"; fi
 
+# 1b. verify accepts the record only for the checkout it was reviewed in: the same range and source hash pass; the same
+# patch rebased onto a new base (the same patch-id, a new base and head) does not. The stub's source hash is "feed".
+rg=$GATE_REVIEWGATE; recdir=$(basename "$(dirname "$(record "$pid")")"); vslug=${recdir%_*}/${recdir##*_}
+git diff --name-only main b1 >"$T/changed-1b.txt"
+# The repo policy never lets a receipt waive review, so the scenarios that need a verified result use a test-only copy
+# that sets receipts_waive_review with the attestation placeholder loadPolicy demands.
+jq '. + {receipts_waive_review: true, attestation: {verifier: "test-only"}}' "$repo/docs/review/policy.json" >"$T/waive-policy.json"
+vfy() { rc=0; out=$("$rg" verify -store "$T/store" -slug "$vslug" -patchid "$pid" -base "$1" -head "$2" -source-sha feed -policy "${vpolicy:-$T/waive-policy.json}" -changed "$T/changed-1b.txt" 2>&1) || rc=$?; }
+b1base=$(git merge-base main b1); b1head=$(git rev-parse b1)
+vfy "$b1base" "$b1head"; eq "1b verify, the reviewed checkout: exit 0" 0 "$rc"
+vpolicy="$repo/docs/review/policy.json" vfy "$b1base" "$b1head"
+eq "1b verify under the repo policy: exit 1" 1 "$rc"; expect "1b repo policy: receipts do not waive review" "receipts do not waive review" "$out"
+git checkout -q -B m2 main; printf 'moved\n' >moved.txt; git add -A; git commit -qm "main moves"
+git checkout -q -B b1r b1; git rebase -q m2
+eq "1b rebased: same patch-id" "$pid" "$(git diff m2 b1r | git patch-id --verbatim | cut -d' ' -f1)"
+vfy "$(git rev-parse m2)" "$(git rev-parse b1r)"
+eq "1b verify, rebased onto a new base: exit 1" 1 "$rc"; expect "1b rebased: a different range" "reviewed a different range" "$out"
+vfy "$b1base" "$b1head"; eq "1b verify, the reviewed checkout again: exit 0" 0 "$rc"
+git checkout -q main; git branch -q -D m2 b1r
+
 # 2. clean + bad blocks, names the finding and the models count; no record
 newrun; branch b2 extra.go $'package main\n\nfunc extra() {}'
 gate b2 --review --model stub:clean --model stub:bad

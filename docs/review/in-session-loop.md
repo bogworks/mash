@@ -53,12 +53,13 @@ and, per file, `run-<i>: <sha256> <exact_range> <source_artifact_sha256>` (the l
 it has none). The evidence files are written before the record, which is the commit point: a reader that finds the
 record finds its evidence.
 
-Until the source project fixes two known weaknesses in receipts (a receipt is checked against hashes held in the same writable
-store, and OCR's recorded range and source hash are never compared), a receipt is evidence of a local review, not a substitute
-for the server-side `codex-review` run. See ADR 0080, "Known weaknesses inherited from the source".
+A receipt does not waive the server-side `codex-review` run. It is checked against hashes held in the same writable
+store, so a forged receipt passes those checks. Until a trusted attestation exists, `docs/review/policy.json` sets
+`receipts_waive_review: false` (the default when absent) and `reviewgate verify` never reports verified: it runs every
+check, then exits 1 saying the receipt checks out but does not waive review. The policy loader rejects `true` unless an
+`attestation` object names a non-empty `verifier`. See ADR 0080, "Known weakness inherited from the source".
 
-Exit codes: `0` pass, or skipped for zero coverage with no receipt (a receipt is recorded for the diff's patch-id, which the server-side `codex-review` can verify
-instead of reviewing again), `1` blocked (fix and rerun; a rerun of the same diff is the same round), `2` error (a model
+Exit codes: `0` pass, or skipped for zero coverage with no receipt (a receipt is recorded for the diff's patch-id; the server-side `codex-review` still reviews, because receipts do not waive review under this policy), `1` blocked (fix and rerun; a rerun of the same diff is the same round), `2` error (a model
 run failed and fewer than `min_complete` finished, or no policy), `3` round cap reached with blocking findings left. At the cap fix only correctness on the supported path,
 answer everything else as deferred with a follow-up issue each, and push; a blocker is never deferred, send it to the maintainer.
 
@@ -75,11 +76,15 @@ which reviews each pull request head with Codex.
   `go vet ./...` and `go test -race ./...`, which build and test `scripts/reviewgate` and check this policy file
   (`TestRepoPolicy`) like any other package. `pr-check` and the queue conditions are unchanged.
 - **Verification is the watcher's, and optional.** `reviewgate verify` is the function the watcher calls before it reviews:
-  the record must name the diff's patch-id, its evidence files must match their recorded hashes, every run must be
-  complete, and the verdict recomputed from the evidence under the base branch's policy must pass; the record's `total`
-  must equal the number of files the diff changes. A receipt that does not verify costs nothing: the watcher reviews the
-  diff in full, as it does for any head with no receipt. So a mash pull request is never less reviewed than before, and
-  the receipt only saves a round.
+  the record is found by the diff's patch-id, but a patch-id match is only the lookup. The watcher also passes the
+  checkout it is verifying (`-base` and `-head`, the full commits of the range the gate reviewed, and `-source-sha`, the
+  source artifact hash OCR reports for it), and every run's recorded `exact_range` must be exactly `base..head` and its
+  source hash exactly that one, so a branch rebased onto a new base (the same patch, a new range) is not verified. The
+  evidence files must match their recorded hashes, every run must be complete, and the verdict recomputed from the evidence under the base branch's policy must pass; the record's `total`
+  must equal the number of files the diff changes. Even then `verify` exits 1 unless the base policy sets
+  `receipts_waive_review` (with an attestation verifier), which the repository's policy does not: the output tells
+  "receipt invalid" from "receipt checks out, but receipts do not waive review". Either way the watcher reviews the
+  diff in full, as it does for any head with no receipt, so a mash pull request is never less reviewed than before.
 - **The watcher must look where the gate writes.** The defaults now agree: with no environment set, the gate writes
   its records to the path the watcher reads (`${XDG_DATA_HOME:-$HOME/.local/share}/<the watcher's directory>/reviews/inloop-v1`,
   with a suffix when the base policy has standing questions; the gate and the watcher derive it the same way). The
@@ -102,11 +107,13 @@ which reviews each pull request head with Codex.
   documentation may be left to the in-session review. Any other uncovered file, or a partial record that names no
   covered files, is not verified and the server reviews the diff itself (the reason lists the first three such files).
   Full coverage verifies with or without names.
-- **The manifest range:** each run's `exact_range` (`A..B`, resolved shas, on the record's `run-<i>` line) must be of the
-  pushed diff: both commits exist in the review checkout and `git diff A B` has the patch-id of the pushed head. A run with
-  no range, an absent commit or another diff's range is not verified (`run <i> reviewed a different diff`).
+- **The manifest range and source hash:** each run's `exact_range` (`A..B`, resolved shas, on the record's `run-<i>` line)
+  must equal the checkout's `-base..-head` and its `source_artifact_sha256` must equal `-source-sha`, and both must agree
+  with the manifest inside the evidence file. A run with no range or source hash, or another range or hash, is not
+  verified (`run <i> reviewed a different range`, `run <i> reviewed a different source`).
 
-A rebase keeps the patch-id and the commits named by the range stay in the repository.
+A rebase keeps the patch-id but changes the base and head, so it needs a new review; the patch-id is only the key the
+record is stored and looked up under, and the round counter's identity of a head.
 
 ## Models
 

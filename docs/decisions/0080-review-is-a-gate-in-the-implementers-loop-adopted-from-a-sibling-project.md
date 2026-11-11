@@ -51,8 +51,11 @@ does not restate their reasoning.
 4. **The server side verifies, and does not depend on the gate.** A passing gate writes a receipt keyed by the diff's
    patch-id, with each model's OCR output as evidence. `reviewgate verify` recomputes the verdict from that evidence under
    the base branch's policy. It is called by the review watcher that posts `codex-review`, which lives outside this
-   repository; a diff with no verified receipt gets the full server-side review as before. A diff that changes a
-   `security-critical` path, or that OCR covers none of, is never waived. No mash CI job verifies a receipt, and
+   repository. Receipts do not waive review until a trusted attestation exists: `policy.json` sets
+   `receipts_waive_review: false`, so `verify` runs all its checks and then exits 1 ("receipt checks out, but receipts
+   do not waive review"), and every diff gets the full server-side review. The loader rejects `true` unless an
+   `attestation` object names a `verifier`. A diff that changes a `security-critical` path, or that OCR covers none
+   of, would never be waived in any case. No mash CI job verifies a receipt, and
    `.mergify.yml`, `ci.yml` and the queue conditions are unchanged.
 5. **What is not adopted.** The source ADR's decisions on review volume and on the fallback reviewer concern the
    watcher, not this repository, and are not decided here. Neither is the rule that a pull request may pass
@@ -92,22 +95,26 @@ severities, round caps and the tier each representative path resolves to. `bash 
 questions in the background and the findings log. `go run ./scripts/adrlint docs` checks this record. A review by a real
 `ocr` run and the watcher's verification of a mash receipt are not covered by any test in this repository.
 
-### Known weaknesses inherited from the source
+### Known weakness inherited from the source
 
-A Codex adversarial review of pull request #352 (gpt-6-sol, 2026-11-10) found two weaknesses in the receipt mechanism
-this record adopts. Both are in the source project's design, and mash carries them unchanged.
+A Codex adversarial review of pull request #352 (gpt-6-sol, 2026-11-10) found a weakness in the receipt mechanism this
+record adopts. It is in the source project's design, and mash carries it unchanged.
 
 * **Forged receipts.** `reviewgate verify` checks a receipt's evidence against hashes stored in that same writable
   receipt. Anyone who can write the store the watcher reads can write a `pass` record and a matching evidence file for an
-  unreviewed patch, and `verify` recomputes a pass.
-* **Stale receipts.** A receipt is looked up by patch-id and changed file names only. OCR's `exact_range` and source
-  artifact hash are recorded but never checked, so after a rebase onto changed surrounding code an old clean review can
-  waive review of the new combination. The patch-id also omits hunk line numbers.
+  unreviewed patch, and `verify` recomputes a pass. Mitigated here: the receipt checks still pass for a forgery, but the
+  repository's policy does not let a receipt waive review (`receipts_waive_review: false`, enforced in `verify` and
+  in the policy loader), so a forged receipt gains nothing.
 
-mash does not diverge from the source: the fix belongs at the source, and mash pulls it. Until it is fixed, a receipt is
-evidence of a local review and not a substitute for the server-side `codex-review` run. `TestKnownWeakness_ForgedReceiptVerifies`
-and `TestKnownWeakness_ReceiptIgnoresRange` in `scripts/reviewgate/main_test.go` pin today's behaviour; when the source
-fixes these, those tests must be flipped deliberately.
+The same review also found stale receipts: a lookup by patch-id and changed file names alone let an old clean review
+waive review of a rebased branch (the same patch on a new base). That one is fixed here: `reviewgate verify` takes the
+checkout's base, head and source hash and accepts a run only when its recorded `exact_range` and `source_artifact_sha256`
+equal them; the patch-id is only the lookup key.
+
+Until a trusted attestation replaces the writable store, a receipt is evidence of a local review and not a substitute
+for the server-side `codex-review` run. `TestKnownWeakness_ForgedReceiptVerifies` in `scripts/reviewgate/main_test.go`
+pins that a forged receipt passes the receipt checks and that the repository policy still does not waive review; when a
+trusted attestation exists, that test must be revisited deliberately, not deleted.
 
 ## Pros and Cons of the Options
 

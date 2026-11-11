@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -279,17 +281,19 @@ func TestVerdictUsage(t *testing.T) {
 		}
 	}
 	for name, body := range map[string]string{
-		"bad json":              `{`,
-		"bad default":           `{"default_tier":"x","tiers":[{"name":"a","round_cap":1}]}`,
-		"no cap":                `{"default_tier":"a","tiers":[{"name":"a"}]}`,
-		"bad severity":          `{"default_tier":"a","tiers":[{"name":"a","round_cap":1,"block":["nope"]}]}`,
-		"duplicate tier":        `{"default_tier":"a","tiers":[{"name":"a","round_cap":1},{"name":"a","round_cap":1}]}`,
-		"unnamed tier":          `{"default_tier":"a","tiers":[{"round_cap":1}]}`,
-		"question empty text":   `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"high","text":" "}]}`,
-		"question empty id":     `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"severity":"high","text":"t"}]}`,
-		"question duplicate id": `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"high","text":"t"},{"id":"q","severity":"low","text":"u"}]}`,
-		"question bad severity": `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"nope","text":"t"}]}`,
-		"trailing junk":         `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}]}x`,
+		"bad json":                  `{`,
+		"bad default":               `{"default_tier":"x","tiers":[{"name":"a","round_cap":1}]}`,
+		"no cap":                    `{"default_tier":"a","tiers":[{"name":"a"}]}`,
+		"bad severity":              `{"default_tier":"a","tiers":[{"name":"a","round_cap":1,"block":["nope"]}]}`,
+		"duplicate tier":            `{"default_tier":"a","tiers":[{"name":"a","round_cap":1},{"name":"a","round_cap":1}]}`,
+		"unnamed tier":              `{"default_tier":"a","tiers":[{"round_cap":1}]}`,
+		"question empty text":       `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"high","text":" "}]}`,
+		"question empty id":         `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"severity":"high","text":"t"}]}`,
+		"question duplicate id":     `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"high","text":"t"},{"id":"q","severity":"low","text":"u"}]}`,
+		"question bad severity":     `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"questions":[{"id":"q","severity":"nope","text":"t"}]}`,
+		"waive without attestation": `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"min_complete":1,"receipts_waive_review":true}`,
+		"waive with empty verifier": `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}],"min_complete":1,"receipts_waive_review":true,"attestation":{"verifier":" "}}`,
+		"trailing junk":             `{"default_tier":"a","tiers":[{"name":"a","round_cap":1}]}x`,
 	} {
 		if _, err := loadPolicy(writeFile(t, filepath.Join(e.dir, "bad.json"), body)); err == nil {
 			t.Errorf("%s: policy accepted", name)
@@ -614,6 +618,9 @@ func TestRepoPolicy(t *testing.T) {
 		len(p.FallbackModels) != 1 || p.FallbackModels[0] != (modelRef{"openrouter", "z-ai/glm-5.3"}) {
 		t.Errorf("min_complete %d, default %q, models %v, fallback %v", p.MinComplete, p.DefaultTier, p.Models, p.FallbackModels)
 	}
+	if p.ReceiptsWaiveReview || p.Attestation != nil {
+		t.Errorf("the repo policy must not let receipts waive review: %v %v", p.ReceiptsWaiveReview, p.Attestation)
+	}
 	var names []string
 	for _, tr := range p.Tiers {
 		names = append(names, tr.Name)
@@ -690,6 +697,39 @@ type vfx struct {
 	policy  string
 	changed string
 	record  string
+	co      checkout // the checkout being verified; the fixture records its manifest as this one
+}
+
+// waivePolicy writes a test-only copy of the repo policy that lets receipts waive review (with the attestation
+// placeholder loadPolicy demands), so the verify tests keep exercising the receipt checks. The repo's own policy never does.
+func waivePolicy(t *testing.T, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(`../../docs/review/policy.json`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["receipts_waive_review"] = true
+	m["attestation"] = map[string]any{"verifier": "test-only"}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeFile(t, filepath.Join(dir, "waive-policy.json"), string(out))
+}
+
+// The checkout the fixtures record and verify, unless a test says otherwise.
+var fixtureCheckout = checkout{base: strings.Repeat("b", 40), head: strings.Repeat("h", 40), sourceSHA: strings.Repeat("5", 64)}
+
+// withManifest gives an OCR body without a manifest the one for co, as `ocr review --from base --to head` writes it.
+func withManifest(body string, co checkout) string {
+	if strings.Contains(body, `"manifest"`) {
+		return body
+	}
+	return `{"manifest":{"input":{"exact_range":"` + co.base + `..` + co.head + `","source_artifact_sha256":"` + co.sourceSHA + `"}},` + strings.TrimPrefix(body, "{")
 }
 
 // newVerifyFixture writes a record with `reviewgate record` over the given OCR bodies, under the repo's own policy.
@@ -702,7 +742,7 @@ func newVerifyFixture(t *testing.T, verdictV, tierV string, covered, total int, 
 func newVerifyFixtureNames(t *testing.T, verdictV, tierV string, covered, total int, changed, names []string, ocrs ...string) *vfx {
 	t.Helper()
 	dir := t.TempDir()
-	f := &vfx{t: t, store: filepath.Join(dir, "store"), policy: filepath.Join("..", "..", "docs", "review", "policy.json")}
+	f := &vfx{t: t, store: filepath.Join(dir, "store"), policy: waivePolicy(t, dir), co: fixtureCheckout}
 	f.changed = writeFile(t, filepath.Join(dir, "changed.txt"), strings.Join(changed, "\n"))
 	args := []string{"record", "-store", f.store, "-slug", "o/r", "-patchid", "pid1", "-verdict", verdictV, "-tier", tierV, "-round", "2", "-models", "m1,m2",
 		"-time", "2026-11-01T10:00:00Z", "-covered", fmt.Sprint(covered), "-total", fmt.Sprint(total)}
@@ -710,7 +750,7 @@ func newVerifyFixtureNames(t *testing.T, verdictV, tierV string, covered, total 
 		args = append(args, "-covered-files", writeFile(t, filepath.Join(dir, "covered.txt"), strings.Join(names, "\n")))
 	}
 	for i, o := range ocrs {
-		args = append(args, "-evidence", writeFile(t, filepath.Join(dir, fmt.Sprintf("ev%d.json", i)), o))
+		args = append(args, "-evidence", writeFile(t, filepath.Join(dir, fmt.Sprintf("ev%d.json", i)), withManifest(o, f.co)))
 	}
 	var out, errb bytes.Buffer
 	if code := run(args, &out, &errb); code != 0 {
@@ -722,8 +762,15 @@ func newVerifyFixtureNames(t *testing.T, verdictV, tierV string, covered, total 
 
 func (f *vfx) verify(patchid string) (int, string) {
 	f.t.Helper()
+	return f.verifyAt(patchid, f.co)
+}
+
+// verifyAt runs verify as the checkout co.
+func (f *vfx) verifyAt(patchid string, co checkout) (int, string) {
+	f.t.Helper()
 	var out, errb bytes.Buffer
-	code := run([]string{"verify", "-store", f.store, "-slug", "o/r", "-patchid", patchid, "-policy", f.policy, "-changed", f.changed}, &out, &errb)
+	code := run([]string{"verify", "-store", f.store, "-slug", "o/r", "-patchid", patchid, "-base", co.base, "-head", co.head, "-source-sha", co.sourceSHA,
+		"-policy", f.policy, "-changed", f.changed}, &out, &errb)
 	if code == 1 && errb.Len() != 0 {
 		f.t.Errorf("stderr on exit 1: %s", errb.String())
 	}
@@ -913,47 +960,187 @@ func TestPolicyModelsValid(t *testing.T) {
 
 // ---- known weaknesses inherited from the source ----
 //
-// The two tests below pin behaviour that ADR 0080 ("Known weaknesses inherited from the source") records as
-// weaknesses. They assert today's behaviour on purpose. When the source project fixes them and mash pulls the fix, these
-// tests must be flipped deliberately, not deleted or loosened.
+// The test below pins behaviour that ADR 0080 ("Known weaknesses inherited from the source") records as a weakness. It
+// asserts today's behaviour on purpose. When a trusted attestation replaces the writable store, it must be flipped
+// deliberately, not deleted or loosened.
 
-// TestKnownWeakness_ForgedReceiptVerifies pins that a receipt written by hand, with no review behind it, verifies: verify
-// checks the evidence against hashes held in the same writable receipt.
+// TestKnownWeakness_ForgedReceiptVerifies pins that a receipt written by hand, with no review behind it, passes the
+// receipt checks (they compare the evidence with hashes held in the same writable receipt), and that the repo policy
+// therefore never lets a receipt waive review.
 func TestKnownWeakness_ForgedReceiptVerifies(t *testing.T) {
 	dir := t.TempDir()
 	store := filepath.Join(dir, "store")
 	rec := filepath.Join(store, "o_r", "forged1")
-	clean := ocrJSON("complete", "openrouter", "never-ran")
+	co := fixtureCheckout // a forger knows the range and source hash it must claim: they are in the pushed branch
+	clean := withManifest(ocrJSON("complete", "openrouter", "never-ran"), co)
 	writeFile(t, rec+".evidence-1.json", clean)
-	body := fmt.Sprintf("verdict: pass\ntier: standard\nround: 1\nmodels: never-ran\ntime: 2026-11-01T10:00:00Z\ncovered: 1\ntotal: 1\ncovered-file: cmd/x.go\nevidence: 1\nrun-1: %x  \n", sha256.Sum256([]byte(clean)))
+	body := fmt.Sprintf("verdict: pass\ntier: standard\nround: 1\nmodels: never-ran\ntime: 2026-11-01T10:00:00Z\ncovered: 1\ntotal: 1\ncovered-file: cmd/x.go\nevidence: 1\nrun-1: %x %s..%s %s\n", sha256.Sum256([]byte(clean)), co.base, co.head, co.sourceSHA)
 	writeFile(t, rec, body)
 	changed := writeFile(t, filepath.Join(dir, "changed.txt"), "cmd/x.go")
-	var out, errb bytes.Buffer
-	code := run([]string{"verify", "-store", store, "-slug", "o/r", "-patchid", "forged1", "-policy", filepath.Join("..", "..", "docs", "review", "policy.json"), "-changed", changed}, &out, &errb)
-	if code != 0 || !strings.HasPrefix(out.String(), "inloop: ocr never-ran") {
-		t.Errorf("known weakness changed (forged receipt no longer verifies; flip this test): exit %d: %q %s", code, out.String(), errb.String())
+	verifyWith := func(pol string) (int, string) {
+		var out, errb bytes.Buffer
+		code := run([]string{"verify", "-store", store, "-slug", "o/r", "-patchid", "forged1", "-base", co.base, "-head", co.head, "-source-sha", co.sourceSHA, "-policy", pol, "-changed", changed}, &out, &errb)
+		return code, out.String()
+	}
+	if code, out := verifyWith(waivePolicy(t, dir)); code != 0 || !strings.HasPrefix(out, "inloop: ocr never-ran") {
+		t.Errorf("known weakness changed (forged receipt no longer passes the receipt checks; flip this test): exit %d: %q", code, out)
+	}
+	// The mitigation: the repo policy does not let any receipt waive review, so the forgery buys nothing.
+	if code, out := verifyWith(filepath.Join("..", "..", "docs", "review", "policy.json")); code != 1 || !strings.Contains(out, "receipts do not waive review") {
+		t.Errorf("repo policy must not waive review: exit %d: %q", code, out)
 	}
 }
 
-// TestKnownWeakness_ReceiptIgnoresRange pins that verify never compares the recorded exact_range or source artifact hash
-// with anything: a receipt whose recorded range and source hash are rewritten to other values still verifies, and verify
-// takes no range at all, only the patch-id and the changed file names.
-func TestKnownWeakness_ReceiptIgnoresRange(t *testing.T) {
-	withManifest := `{"status":"complete","llm":{"provider":"openrouter","model":"m1"},"message":"","summary":{},"comments":[],` +
-		`"manifest":{"input":{"exact_range":"aaaa..bbbb","source_artifact_sha256":"` + strings.Repeat("a", 64) + `"}}}`
-	f := newVerifyFixture(t, "pass", "standard", 1, 1, []string{"cmd/x.go"}, withManifest)
-	b, err := os.ReadFile(f.record)
-	if err != nil || !strings.Contains(string(b), "aaaa..bbbb") {
-		t.Fatalf("fixture did not record the range: %v %q", err, b)
+// ---- verify binds a receipt to the checkout ----
+
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, b)
 	}
+	return strings.TrimSpace(string(b))
+}
+
+// patchIDOf is `git diff base head | git patch-id --verbatim`, the key the gate records under.
+func patchIDOf(t *testing.T, dir, base, head string) string {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", `git -C "$1" diff "$2" "$3" | git patch-id --verbatim | cut -d' ' -f1`, "sh", dir, base, head)
+	b, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// TestVerifyRejectsRebasedBranch is the stale-receipt case: a clean review is recorded for base1..head1, the branch is
+// rebased onto a new base (the same patch, a new base and head, so the same patch-id), and the receipt no longer verifies.
+func TestVerifyRejectsRebasedBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found")
+	}
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	gitIn(t, repo, "add", "-A")
+	gitIn(t, repo, "commit", "-qm", "base")
+	gitIn(t, repo, "checkout", "-q", "-b", "feat")
+	writeFile(t, filepath.Join(repo, "cmd", "x.go"), "package main\n")
+	gitIn(t, repo, "add", "-A")
+	gitIn(t, repo, "commit", "-qm", "feat")
+	base1, head1 := gitIn(t, repo, "rev-parse", "main"), gitIn(t, repo, "rev-parse", "feat")
+	pid := patchIDOf(t, repo, base1, head1)
+	srcOf := func(base, head string) string {
+		return fmt.Sprintf("%x", sha256.Sum256([]byte(gitIn(t, repo, "diff", base, head))))
+	}
+	co1 := checkout{base1, head1, srcOf(base1, head1)}
+
+	f := newVerifyFixtureWith(t, co1, pid, []string{"cmd/x.go"}, ocrJSON("complete", "p", "m1"))
+
+	// (b) the unchanged checkout verifies
+	if code, out := f.verifyAt(pid, co1); code != 0 {
+		t.Fatalf("unchanged checkout: exit %d: %q", code, out)
+	}
+
+	// (a) rebase the branch onto a new main: same patch, new base and head
+	gitIn(t, repo, "checkout", "-q", "main")
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\ntwo\n")
+	gitIn(t, repo, "commit", "-qam", "main moves")
+	gitIn(t, repo, "checkout", "-q", "feat")
+	gitIn(t, repo, "rebase", "-q", "main")
+	base2, head2 := gitIn(t, repo, "rev-parse", "main"), gitIn(t, repo, "rev-parse", "feat")
+	if base2 == base1 || head2 == head1 {
+		t.Fatalf("the rebase did not move base and head: %s %s", base2, head2)
+	}
+	if got := patchIDOf(t, repo, base2, head2); got != pid {
+		t.Fatalf("the rebase changed the patch-id (%s, was %s); the test needs the same patch", got, pid)
+	}
+	co2 := checkout{base2, head2, srcOf(base2, head2)}
+	if co2.sourceSHA != co1.sourceSHA {
+		t.Fatalf("the source hash moved with the rebase; the test must isolate the range")
+	}
+	code, out := f.verifyAt(pid, co2)
+	if code != 1 || !strings.Contains(out, "reviewed a different range") {
+		t.Errorf("rebased branch with the same patch-id must not verify: exit %d: %q", code, out)
+	}
+}
+
+// newVerifyFixtureWith records one pass for the given checkout under patchid.
+func newVerifyFixtureWith(t *testing.T, co checkout, patchid string, changed []string, ocrs ...string) *vfx {
+	t.Helper()
+	dir := t.TempDir()
+	f := &vfx{t: t, store: filepath.Join(dir, "store"), policy: waivePolicy(t, dir), co: co}
+	f.changed = writeFile(t, filepath.Join(dir, "changed.txt"), strings.Join(changed, "\n"))
+	args := []string{"record", "-store", f.store, "-slug", "o/r", "-patchid", patchid, "-verdict", "pass", "-tier", "standard", "-round", "1", "-models", "m1",
+		"-covered", fmt.Sprint(len(changed)), "-total", fmt.Sprint(len(changed))}
+	for i, o := range ocrs {
+		args = append(args, "-evidence", writeFile(t, filepath.Join(dir, fmt.Sprintf("ev%d.json", i)), withManifest(o, co)))
+	}
+	var out, errb bytes.Buffer
+	if code := run(args, &out, &errb); code != 0 {
+		t.Fatalf("record exit %d: %s", code, errb.String())
+	}
+	f.record = filepath.Join(f.store, "o_r", patchid)
+	return f
+}
+
+// TestVerifyBindsRangeAndSource covers the unchanged checkout, a changed source hash on the same range, a changed range
+// on the same source hash, and runs with no or a disagreeing manifest.
+func TestVerifyBindsRangeAndSource(t *testing.T) {
+	clean := ocrJSON("complete", "p", "m1")
+	std := []string{"cmd/x.go"}
+	f := newVerifyFixture(t, "pass", "standard", 1, 1, std, clean)
 	if code, out := f.verify("pid1"); code != 0 {
-		t.Fatalf("baseline: exit %d: %q", code, out)
+		t.Fatalf("unchanged checkout: exit %d: %q", code, out)
+	}
+	for _, tc := range []struct {
+		name string
+		co   checkout
+		want string
+	}{
+		{"source hash changed, same range", checkout{f.co.base, f.co.head, strings.Repeat("6", 64)}, "reviewed a different source"},
+		{"head changed, same source hash", checkout{f.co.base, strings.Repeat("e", 40), f.co.sourceSHA}, "reviewed a different range"},
+		{"base changed, same source hash", checkout{strings.Repeat("e", 40), f.co.head, f.co.sourceSHA}, "reviewed a different range"},
+		{"abbreviated head", checkout{f.co.base, f.co.head[:12], f.co.sourceSHA}, "reviewed a different range"},
+	} {
+		if code, out := f.verifyAt("pid1", tc.co); code != 1 || !strings.Contains(out, tc.want) {
+			t.Errorf("%s: exit %d: %q, want a reason containing %q", tc.name, code, out, tc.want)
+		}
+	}
+	// A run whose manifest is missing cannot be tied to a checkout, and a record that disagrees with its evidence fails.
+	nomanifest := newVerifyFixtureWith(t, fixtureCheckout, "pid1", std, `{"status":"complete","llm":{"provider":"p","model":"m"},"comments":[],"manifest":{}}`)
+	if code, out := nomanifest.verify("pid1"); code != 1 || !strings.Contains(out, "reviewed a different range") {
+		t.Errorf("no manifest: exit %d: %q", code, out)
 	}
 	f.rewriteRecord(func(s string) string {
-		s = strings.ReplaceAll(s, "aaaa..bbbb", "cccc..dddd")
-		return strings.ReplaceAll(s, strings.Repeat("a", 64)+"\n", strings.Repeat("f", 64)+"\n")
+		return strings.ReplaceAll(s, strings.Repeat("5", 64)+"\n", strings.Repeat("6", 64)+"\n")
 	})
+	if code, out := f.verifyAt("pid1", checkout{f.co.base, f.co.head, strings.Repeat("6", 64)}); code != 1 || !strings.Contains(out, "differ from its evidence manifest") {
+		t.Errorf("record disagrees with evidence: exit %d: %q", code, out)
+	}
+	// verify refuses to run without the checkout.
+	var out, errb bytes.Buffer
+	if code := run([]string{"verify", "-store", f.store, "-slug", "o/r", "-patchid", "pid1", "-policy", f.policy, "-changed", f.changed}, &out, &errb); code != 2 {
+		t.Errorf("verify without -base/-head/-source-sha: exit %d, want 2", code)
+	}
+}
+
+// TestVerifyRepoPolicyDoesNotWaive: a valid clean receipt is reported as valid but not a waiver, exit 1, so the
+// message tells it apart from an invalid receipt.
+func TestVerifyRepoPolicyDoesNotWaive(t *testing.T) {
+	f := newVerifyFixture(t, "pass", "standard", 1, 1, []string{"cmd/x.go"}, ocrJSON("complete", "p", "m1"))
 	if code, out := f.verify("pid1"); code != 0 {
-		t.Errorf("known weakness changed (verify now checks the range; flip this test): exit %d: %q", code, out)
+		t.Fatalf("test policy: exit %d: %q", code, out)
+	}
+	f.policy = filepath.Join("..", "..", "docs", "review", "policy.json")
+	code, out := f.verify("pid1")
+	if code != 1 || !strings.Contains(out, "receipt checks out") || !strings.Contains(out, "do not waive review") || !strings.Contains(out, "server-side review runs") {
+		t.Errorf("exit %d: %q", code, out)
+	}
+	f.rewriteRecord(func(s string) string { return strings.Replace(s, "covered: 1", "covered: 0", 1) })
+	if code, out := f.verify("pid1"); code != 1 || strings.Contains(out, "do not waive") {
+		t.Errorf("an invalid receipt must say why it is invalid, not that it is not a waiver: exit %d: %q", code, out)
 	}
 }

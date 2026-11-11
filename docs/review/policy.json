@@ -1,5 +1,6 @@
 {
   "min_complete": 1,
+  "receipts_waive_review": false,
   "default_tier": "standard",
   "questions": [
     {

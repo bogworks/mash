@@ -5,8 +5,7 @@
 //	reviewgate verdict -policy FILE -changed FILE -round N [-ocr FILE]... [-title STR]
 //	reviewgate record  -store DIR -slug OWNER/NAME -patchid ID -verdict pass|blocked|cap -tier NAME -round N -models "a,b" [-time RFC3339] [-covered N -total M [-covered-files FILE]] [-evidence FILE]...
 //	reviewgate rounds  -file FILE -patchid ID [-bump]
-//	reviewgate verify  -store DIR -slug OWNER/NAME -patchid ID -policy FILE -changed FILE
-//	reviewgate verify  -store DIR -slug OWNER/NAME -patchid ID -policy FILE -changed FILE
+//	reviewgate verify  -store DIR -slug OWNER/NAME -patchid ID -base SHA -head SHA -source-sha HEX -policy FILE -changed FILE
 //
 // verdict exits 0 for pass, 1 for blocked, 2 for a usage or input error (including too few complete runs: the gate
 // fails closed), and 3 when the round cap is reached with blocking findings left. A blocker finding is never deferred,
@@ -30,7 +29,11 @@
 // line, exit 1 prints "not verified: <reason>" (the caller then reviews the diff itself). It trusts nothing in the record
 // but the names of the evidence files: it checks their sha256 and recomputes the verdict from them with the same code as
 // verdict, under the given policy and changed files, round 1 (a round cap is a failure). The security-critical tier is
-// never waived. rounds keeps the
+// never waived. A patch-id alone never verifies: the caller names the checkout it is verifying (-base and -head, the
+// commits of the merge-base..head range the gate reviewed, and -source-sha, the manifest's source_artifact_sha256 for
+// that checkout) and every recorded run must carry exactly that range and that source hash, so a rebase (same patch,
+// new base and head) or a changed source is not verified. The patch-id stays the record's key and the round counter's.
+// rounds keeps the
 // per-branch round counter: one line per distinct patch-id that was reviewed with blocking findings.
 package main
 
@@ -76,6 +79,17 @@ type policy struct {
 	// FallbackModels replace codex in the watcher when codex is out; the in-session gate never runs them.
 	FallbackModels []modelRef `json:"fallback_models"`
 	Questions      []question `json:"questions"`
+	// ReceiptsWaiveReview lets a verified receipt stand in for the server-side review. It defaults to false, and
+	// loadPolicy rejects true unless Attestation names a verifier: receipts live in a store the author can write, so
+	// they are not evidence on their own (ADR 0080, known weaknesses).
+	ReceiptsWaiveReview bool         `json:"receipts_waive_review"`
+	Attestation         *attestation `json:"attestation"`
+}
+
+// attestation is a placeholder for the future trusted mechanism that makes a receipt independently verifiable. Nothing
+// implements it yet; naming a verifier is the only thing loadPolicy checks.
+type attestation struct {
+	Verifier string `json:"verifier"`
 }
 
 // question is a standing review question: every review prompt asks it, and an answer of yes is a finding of
@@ -118,6 +132,9 @@ func loadPolicy(path string) (*policy, error) {
 	var p policy
 	if err := json.Unmarshal(b, &p); err != nil {
 		return nil, fmt.Errorf("policy %s: %w", path, err)
+	}
+	if p.ReceiptsWaiveReview && (p.Attestation == nil || strings.TrimSpace(p.Attestation.Verifier) == "") {
+		return nil, fmt.Errorf("policy %s: receipts_waive_review needs an attestation object with a non-empty verifier (no trusted attestation exists yet)", path)
 	}
 	if p.MinComplete < 1 {
 		p.MinComplete = 1
@@ -765,6 +782,7 @@ type recordFile struct {
 	round, covered, total int
 	coveredFiles          []string
 	runSHA                []string
+	runRange, runSource   []string // from each run line, empty when the OCR manifest had none
 }
 
 // parseRecord reads the record's lines; a missing, repeated or non-numeric field makes it malformed.
@@ -833,11 +851,17 @@ func parseRecord(data []byte) (*recordFile, error) {
 		return nil, errors.New("malformed record: bad evidence count")
 	}
 	for i := 1; i <= count; i++ {
-		f := strings.Fields(kv[fmt.Sprintf("run-%d", i)])
-		if len(f) == 0 || len(f[0]) != 64 {
+		// "<sha256> <exact_range> <source sha>": split on single spaces, so an empty range keeps the source in place.
+		f := strings.Split(kv[fmt.Sprintf("run-%d", i)], " ")
+		if len(f[0]) != 64 || len(f) > 3 {
 			return nil, fmt.Errorf("malformed record: run-%d has no sha256", i)
 		}
+		for len(f) < 3 {
+			f = append(f, "")
+		}
 		r.runSHA = append(r.runSHA, f[0])
+		r.runRange = append(r.runRange, f[1])
+		r.runSource = append(r.runSource, f[2])
 	}
 	return r, nil
 }
@@ -855,12 +879,20 @@ var docRules = func() []globRule {
 // isDocFile reports whether f is documentation: any Markdown file, or anything under docs/.
 func isDocFile(f string) bool { return matches(docRules, f) }
 
+// checkout names what is being verified: the resolved commits of the reviewed range and the OCR source artifact hash.
+type checkout struct{ base, head, sourceSHA string }
+
 // verifyRecord decides whether the record for a patch-id still stands. It never takes the recorded verdict on trust: the
 // record only names the evidence, and the pass comes from running the verdict logic over the evidence files under the
-// given policy, round 1 (a round cap counts as blocked). It returns the one status line, or the reason it is not verified.
-func verifyRecord(store, slug, patchID string, p *policy, changed []string) (string, error) {
+// given policy, round 1 (a round cap counts as blocked). A matching patch-id is only the lookup: every recorded run must
+// also name exactly co.base..co.head as its range and co.sourceSHA as its source hash. It returns the one status line,
+// or the reason it is not verified.
+func verifyRecord(store, slug, patchID string, co checkout, p *policy, changed []string) (string, error) {
 	if err := safeID(patchID); err != nil {
 		return "", err
+	}
+	if co.base == "" || co.head == "" || co.sourceSHA == "" || strings.ContainsAny(co.base+co.head+co.sourceSHA, " \t\n.") {
+		return "", errors.New("the checkout's base, head and source hash are required, as bare values")
 	}
 	parts := strings.Split(slug, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.Contains(slug, "..") || strings.ContainsAny(slug, "\\ ") {
@@ -928,6 +960,18 @@ func verifyRecord(store, slug, patchID string, p *policy, changed []string) (str
 		if r := readRun(f); !r.ok {
 			return "", fmt.Errorf("run %d is not complete: %s", i+1, r.reason)
 		}
+		// The recorded hashes are the record's claim; the manifest in the evidence (which the sha256 above pins to the record)
+		// must say the same, and both must be this checkout's.
+		er, src := manifestOf(d)
+		if er != rec.runRange[i] || src != rec.runSource[i] {
+			return "", fmt.Errorf("run %d: the record's range and source hash differ from its evidence manifest", i+1)
+		}
+		if want := co.base + ".." + co.head; er != want {
+			return "", fmt.Errorf("run %d reviewed a different range (recorded %q, this checkout %q): a rebase or a new head needs a new review", i+1, er, want)
+		}
+		if src != co.sourceSHA {
+			return "", fmt.Errorf("run %d reviewed a different source (recorded hash %q, this checkout %q)", i+1, src, co.sourceSHA)
+		}
 		files = append(files, f)
 	}
 	if len(files) < p.MinComplete {
@@ -951,11 +995,14 @@ func verify(args []string, stdout, stderr io.Writer) int {
 	patchID := fs.String("patchid", "", "the patch-id of the pushed diff")
 	policyFile := fs.String("policy", "", "the tier policy (JSON), the base branch's")
 	changedFile := fs.String("changed", "", "the files the diff changes, one repo-relative path per line")
+	base := fs.String("base", "", "the checkout's base commit (the merge-base the gate reviewed from), a full sha")
+	head := fs.String("head", "", "the checkout's head commit, a full sha")
+	sourceSHA := fs.String("source-sha", "", "the OCR source_artifact_sha256 for this checkout")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *store == "" || *slug == "" || *patchID == "" || *policyFile == "" || *changedFile == "" {
-		fmt.Fprintln(stderr, "usage: reviewgate verify -store DIR -slug OWNER/NAME -patchid ID -policy FILE -changed FILE")
+	if *store == "" || *slug == "" || *patchID == "" || *policyFile == "" || *changedFile == "" || *base == "" || *head == "" || *sourceSHA == "" {
+		fmt.Fprintln(stderr, "usage: reviewgate verify -store DIR -slug OWNER/NAME -patchid ID -base SHA -head SHA -source-sha HEX -policy FILE -changed FILE")
 		return 2
 	}
 	notVerified := func(err error) int {
@@ -970,9 +1017,13 @@ func verify(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return notVerified(err)
 	}
-	line, err := verifyRecord(*store, *slug, *patchID, p, changed)
+	line, err := verifyRecord(*store, *slug, *patchID, checkout{*base, *head, *sourceSHA}, p, changed)
 	if err != nil {
 		return notVerified(err)
+	}
+	if !p.ReceiptsWaiveReview {
+		fmt.Fprintln(stdout, "not verified: receipt checks out ("+line+"), but receipts do not waive review under this policy (no trusted attestation); the server-side review runs")
+		return 1
 	}
 	fmt.Fprintln(stdout, line)
 	return 0
