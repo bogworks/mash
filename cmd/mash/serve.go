@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -326,7 +325,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		startSvc := func() {
 			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
-				text := promptNotice(p)
+				text, ok := promptNotice(p)
+				if !ok { // unreachable under endpoint.MaxPromptBytes; answer the caller rather than show a cut notice
+					_ = ep.Reply(p.RequestID, "mash: the prompt was too large to show and was not delivered", true)
+					return
+				}
 				_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
 			}); err != nil {
 				fmt.Fprintln(stderr, err)
@@ -914,28 +917,24 @@ func liveLeases(ctx context.Context, ep *endpoint.Endpoint) map[string]endpoint.
 	return nil
 }
 
-// PromptTextMax is the most bytes of a live prompt's text the notification carries; the rest is cut at a rune
-// boundary and the notice says how many bytes went.
-const PromptTextMax = 32 << 10
+// PromptTextMax is the most bytes of a live prompt's text. It is the endpoint's limit, the one number: the service
+// refuses a longer prompt to its caller before the session hears of it, so the notice below never cuts.
+const PromptTextMax = endpoint.MaxPromptBytes
 
-// promptNotice is the channel text for a live prompt. Everything the sender controls is shown with control
-// characters escaped (the text keeps "\n" and "\t"), and the text is capped at PromptTextMax bytes with a visible
-// marker, so a prompt cannot send terminal escapes or flood the model's context.
-func promptNotice(p endpoint.PromptEvent) string {
-	body, cut := p.Text, 0
-	if len(body) > PromptTextMax {
-		end := PromptTextMax
-		for end > 0 && !utf8.RuneStart(body[end]) {
-			end--
-		}
-		body, cut = body[:end], len(p.Text)-end
-	}
-	body = config.EscapeText(body)
-	if cut > 0 {
-		body += fmt.Sprintf("\n[truncated: %d more bytes]", cut)
+// promptNoticeMax bounds the escaped text. Escaping turns one byte into at most 4 characters (`\xNN`), so a prompt
+// within PromptTextMax cannot exceed 4x; 8x is the guard. The guard cannot trip with that limit; if it ever did, the
+// prompt is refused as a whole rather than cut.
+const promptNoticeMax = 8 * PromptTextMax
+
+// promptNotice is the channel text for a live prompt, and false if the escaped text is over promptNoticeMax. Everything
+// the sender controls is shown with control characters escaped (the text keeps "\n" and "\t"). The text is never cut.
+func promptNotice(p endpoint.PromptEvent) (string, bool) {
+	body := config.EscapeText(p.Text)
+	if len(body) > promptNoticeMax {
+		return "", false
 	}
 	return fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
-		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), body)
+		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), body), true
 }
 
 // whoText renders the directory with presence. The default lines are parsed by other tools (a launcher): never change

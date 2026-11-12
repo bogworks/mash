@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -22,7 +22,7 @@ func hasRawControl(s string) bool {
 
 func TestPromptNoticeEscapesControls(t *testing.T) {
 	text := "a\tb\nc\x1b[31mred\x1b]0;title\x07 back\x08space \u009b31m nul\x00 end 世界 \U0001F600"
-	got := promptNotice(endpoint.PromptEvent{RequestID: "r\x1b1", From: "x\x1b[2J", Trust: sap.Trust("v\x07"), Text: text})
+	got, _ := promptNotice(endpoint.PromptEvent{RequestID: "r\x1b1", From: "x\x1b[2J", Trust: sap.Trust("v\x07"), Text: text})
 	if hasRawControl(got) {
 		t.Fatalf("raw control byte in %q", got)
 	}
@@ -33,26 +33,42 @@ func TestPromptNoticeEscapesControls(t *testing.T) {
 	}
 }
 
-func TestPromptNoticeCap(t *testing.T) {
+func TestPromptNoticeNeverCuts(t *testing.T) {
+	if PromptTextMax != endpoint.MaxPromptBytes {
+		t.Fatal("the notice limit is not the endpoint's limit")
+	}
 	at := strings.Repeat("a", PromptTextMax)
-	if got := promptNotice(endpoint.PromptEvent{Text: at}); strings.Contains(got, "truncated") || !strings.HasSuffix(got, at) {
-		t.Fatalf("a prompt exactly at the cap was cut")
+	if got, ok := promptNotice(endpoint.PromptEvent{Text: at}); !ok || strings.Contains(got, "truncated") || !strings.HasSuffix(got, at) {
+		t.Fatal("a prompt exactly at the limit was cut")
 	}
-	big := strings.Repeat("b\x1b", 50<<10) // 100 KiB
-	got := promptNotice(endpoint.PromptEvent{Text: big})
-	if hasRawControl(got) {
-		t.Fatal("raw control byte in the capped notice")
+	// Control-byte-heavy text at the limit: every byte becomes 4 characters, nothing is cut, no raw control remains.
+	ctl := strings.Repeat("\x1b", PromptTextMax)
+	got, ok := promptNotice(endpoint.PromptEvent{Text: ctl})
+	if !ok || strings.Contains(got, "truncated") || hasRawControl(got) || strings.Count(got, `\x1b`) != PromptTextMax {
+		t.Fatalf("control-heavy text at the limit: ok=%v", ok)
 	}
-	if !strings.HasSuffix(got, fmt.Sprintf("[truncated: %d more bytes]", len(big)-PromptTextMax)) {
-		t.Fatalf("marker: %q", got[len(got)-60:])
+	// Past the guard the notice is refused whole, never cut (the endpoint refuses such a prompt long before).
+	if _, ok := promptNotice(endpoint.PromptEvent{Text: strings.Repeat("\x1b", promptNoticeMax/4+1)}); ok {
+		t.Fatal("text escaping past the guard was shown")
 	}
-	// The cut lands inside a multi-byte rune: it backs up to the boundary and counts the bytes it dropped.
-	cjk := strings.Repeat("世", PromptTextMax) // 3 bytes each; the cap falls mid-rune
-	got = promptNotice(endpoint.PromptEvent{Text: cjk})
-	kept := PromptTextMax - PromptTextMax%3
-	if strings.Contains(got, "�") || strings.Contains(got, `\x`) ||
-		!strings.HasSuffix(got, fmt.Sprintf("[truncated: %d more bytes]", len(cjk)-kept)) {
-		t.Fatalf("rune boundary cut wrong: %q", got[len(got)-60:])
+}
+
+// The worst case of EscapeText is 4 output bytes per input byte (`\xNN`), so the limit's worst notice is 4x, under the
+// 8x guard, and the guard cannot trip for an accepted prompt.
+func TestPromptNoticeWorstCaseArithmetic(t *testing.T) {
+	for _, b := range []byte{0x00, 0x1b, 0x7f, 0xff} {
+		if n := len(config.EscapeText(string([]byte{b}))); n != 4 {
+			t.Errorf("byte %#x escapes to %d bytes, want 4", b, n)
+		}
+	}
+	if got := len(config.EscapeText(strings.Repeat("\x80", 100))); got != 400 { // invalid UTF-8
+		t.Errorf("invalid bytes: %d", got)
+	}
+	if got := len(config.EscapeText(strings.Repeat("\u009b", 100))); got != 400 { // 2 bytes -> 4
+		t.Errorf("C1: %d", got)
+	}
+	if worst := 4 * PromptTextMax; worst >= promptNoticeMax || promptNoticeMax != 8*PromptTextMax {
+		t.Fatalf("worst %d vs guard %d", worst, promptNoticeMax)
 	}
 }
 
