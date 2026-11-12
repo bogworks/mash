@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -325,8 +326,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		startSvc := func() {
 			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
-				text := fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
-					sap.Display(p.From), p.Trust, p.RequestID, p.Text)
+				text := promptNotice(p)
 				_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
 			}); err != nil {
 				fmt.Fprintln(stderr, err)
@@ -914,6 +914,30 @@ func liveLeases(ctx context.Context, ep *endpoint.Endpoint) map[string]endpoint.
 	return nil
 }
 
+// PromptTextMax is the most bytes of a live prompt's text the notification carries; the rest is cut at a rune
+// boundary and the notice says how many bytes went.
+const PromptTextMax = 32 << 10
+
+// promptNotice is the channel text for a live prompt. Everything the sender controls is shown with control
+// characters escaped (the text keeps "\n" and "\t"), and the text is capped at PromptTextMax bytes with a visible
+// marker, so a prompt cannot send terminal escapes or flood the model's context.
+func promptNotice(p endpoint.PromptEvent) string {
+	body, cut := p.Text, 0
+	if len(body) > PromptTextMax {
+		end := PromptTextMax
+		for end > 0 && !utf8.RuneStart(body[end]) {
+			end--
+		}
+		body, cut = body[:end], len(p.Text)-end
+	}
+	body = config.EscapeText(body)
+	if cut > 0 {
+		body += fmt.Sprintf("\n[truncated: %d more bytes]", cut)
+	}
+	return fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
+		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), body)
+}
+
 // whoText renders the directory with presence. The default lines are parsed by other tools (a launcher): never change
 // them. long appends the optional directory metadata and, from live, the lease's host and version.
 func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo) string {
@@ -926,22 +950,22 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if p.Online {
 			state = "online"
 		}
-		fmt.Fprintf(&b, "%s\t%s", sap.Display(p.Record.KeyOrName()), state)
+		fmt.Fprintf(&b, "%s\t%s", config.Clean(sap.Display(p.Record.KeyOrName())), state)
 		if !p.LastSeen.IsZero() {
 			fmt.Fprintf(&b, "\tseen %s ago", time.Since(p.LastSeen).Round(time.Second))
 		}
 		if p.Record.Note != "" {
-			fmt.Fprintf(&b, "\t%s", p.Record.Note)
+			fmt.Fprintf(&b, "\t%s", config.Clean(p.Record.Note))
 		}
 		if long {
 			r := p.Record
 			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}, {"zone", r.Zone}} {
 				if f.v != "" {
-					fmt.Fprintf(&b, "\t%s %s", f.k, f.v)
+					fmt.Fprintf(&b, "\t%s %s", f.k, config.Clean(f.v))
 				}
 			}
 			if r.Alias != nil {
-				fmt.Fprintf(&b, "\talias %s/%s", r.Alias.Owner, r.Alias.Name)
+				fmt.Fprintf(&b, "\talias %s/%s", config.Clean(r.Alias.Owner), config.Clean(r.Alias.Name))
 			}
 			lk := make([]string, 0, len(r.Labels))
 			for k := range r.Labels {
@@ -949,17 +973,17 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 			}
 			sort.Strings(lk)
 			for _, k := range lk {
-				fmt.Fprintf(&b, "\tlabel.%s=%s", k, r.Labels[k])
+				fmt.Fprintf(&b, "\tlabel.%s=%s", config.Clean(k), config.Clean(r.Labels[k]))
 			}
 			if li, ok := live[r.KeyOrName()]; ok {
 				if li.Host != "" {
-					fmt.Fprintf(&b, "\tlease host %s", li.Host)
+					fmt.Fprintf(&b, "\tlease host %s", config.Clean(li.Host))
 				}
 				if li.Version != "" {
-					fmt.Fprintf(&b, "\tlease version %s", li.Version)
+					fmt.Fprintf(&b, "\tlease version %s", config.Clean(li.Version))
 				}
 				if li.Host != "" && r.Host != "" && li.Host != r.Host {
-					fmt.Fprintf(&b, "\tlease host %s differs from directory host %s", li.Host, r.Host)
+					fmt.Fprintf(&b, "\tlease host %s differs from directory host %s", config.Clean(li.Host), config.Clean(r.Host))
 				}
 			}
 		}
