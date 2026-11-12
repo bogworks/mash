@@ -28,7 +28,7 @@ import (
 // RevokeUsers revokes NATS user keys in the account JWT; mashctl sets it, which has the key store. The system account
 // credentials come from MASH_SYS_CREDS or the init server's sys.creds, the server count from MASH_SERVERS. It stays nil
 // in `mash admin`, which has neither: deprovision then only advises.
-var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error
+var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error
 
 // NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
 func NoRevokeWarning(name, user string) string {
@@ -405,15 +405,21 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		// The revocation runs inside the admin's removal, under the name's lock, after its guards passed and before
 		// anything is removed (see madmin.RevokeHook): a refused removal revokes nothing, a failed revocation removes
 		// nothing, and the key revoked is the one in the record the removal accepted.
-		adm, revokedUser, revokeErr := a, "", error(nil)
+		adm, revokedUser, revokeErr, checkErr := a, "", error(nil), error(nil)
 		if RevokeUsers != nil && !noRevoke {
 			adm = a.WithRevoker(func(ctx context.Context, user string) error {
-				if err := RevokeUsers(ctx, cfg, []string{user}, stdout); err != nil {
+				// One reading of the clock: the issue-record check and the revocation carry the same time.
+				at := RevokeNow()
+				if err := CheckNotFutureIssued(ctx, a, []RevokeTarget{{Name: shown, Key: user}}, at, stderr); err != nil {
+					checkErr = err
+					return err
+				}
+				if err := RevokeUsers(ctx, cfg, []string{user}, stdout, func() time.Time { return at }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ShortKey(user), err)
 				}
 				revokedUser = user
-				MarkRevoked(ctx, a, user, time.Now(), stderr)
+				MarkRevoked(ctx, a, user, at, stderr)
 				return nil
 			})
 		}
@@ -422,6 +428,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if msg, ok := AliasedRefusal(err, args[1]); ok {
 				fmt.Fprintln(stderr, msg)
 				return 1
+			}
+			if checkErr != nil && errors.Is(err, checkErr) {
+				return fail(checkErr)
 			}
 			if revokeErr != nil && errors.Is(err, revokeErr) {
 				return fail(fmt.Errorf("%w (--no-revoke deprovisions without revoking)", err))
@@ -796,4 +805,44 @@ func MarkRevoked(ctx context.Context, a *madmin.Admin, user string, at time.Time
 		return
 	}
 	fmt.Fprintf(stderr, "warning: user key %s... is revoked, but the issue record was not updated with it: %v\n", ShortKey(user), err)
+}
+
+// RevokeNow is the clock a revocation takes its time from; a test replaces it.
+var RevokeNow = time.Now
+
+// RevokeTarget is a user key about to be revoked and the name to show for it in messages ("" shows the short key).
+type RevokeTarget struct {
+	Name, Key string
+}
+
+// CheckNotFutureIssued refuses a revocation at time at when the issue record shows a user's JWT issued after at: NATS
+// honours a revocation only for JWTs issued at or before it, so that JWT would stay valid. Every target is checked
+// before the caller writes anything, and one future-dated key refuses them all; nothing has been changed when it
+// returns an error. A key with no record (an older deployment, a key mash did not issue) or a record that cannot be
+// read cannot be ruled out: one warning line on stderr, and the revocation goes on.
+func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []RevokeTarget, at time.Time, stderr io.Writer) error {
+	for _, t := range targets {
+		rec, found, err := a.IssuedByKey(ctx, t.Key)
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key), err)
+			continue
+		}
+		if !found {
+			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
+			continue
+		}
+		iat, err := time.Parse(time.RFC3339, rec.IssuedAt)
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: user key %s...: its issue record has no readable issue time, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
+			continue
+		}
+		if iat.UTC().After(at) {
+			who := t.Name
+			if who == "" {
+				who = ShortKey(t.Key) + "..."
+			}
+			return fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", who, iat.UTC().Format(time.RFC3339))
+		}
+	}
+	return nil
 }

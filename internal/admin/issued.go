@@ -205,6 +205,33 @@ func (a *Admin) Issued(ctx context.Context) (recs []store.Issued, present bool, 
 	return recs, true, nil
 }
 
+// IssuedByKey returns the latest issue record of publicKey. found is false when the key is not recorded or the bucket
+// does not exist (nothing was ever recorded); an entry that cannot be read or decoded is an error.
+func (a *Admin) IssuedByKey(ctx context.Context, publicKey string) (rec store.Issued, found bool, err error) {
+	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return store.Issued{}, false, nil
+	}
+	if err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record bucket: %w", err)
+	}
+	e, err := kv.Get(ctx, publicKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return store.Issued{}, false, nil
+	}
+	if err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: %w", publicKey, err)
+	}
+	if err := json.Unmarshal(e.Value(), &rec); err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: unreadable entry", publicKey)
+	}
+	if rec.PublicKey != publicKey {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: the entry names another key", publicKey)
+	}
+	rec.Purpose = rec.EffectivePurpose()
+	return rec, true, nil
+}
+
 // initIssued creates the issue record's bucket, or verifies an existing one. An existing bucket is altered in one way
 // only: a per-key history below store.IssuedHistory (the first version kept 8) is raised to it, a stream update that
 // loses no record. Everything else about it is only verified.
