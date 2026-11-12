@@ -25,14 +25,18 @@ const (
 
 // The checks a Failure names.
 const (
-	CheckServerSet      = "server_set"
-	CheckGeneration     = "generation"
-	CheckRevoked        = "revoked"
-	CheckWitness        = "witness"
-	CheckRefused        = "refused"
-	CheckRefusedCurrent = "refused_current"
-	CheckRollback       = "rollback"
+	CheckServerSet        = "server_set"
+	CheckGeneration       = "generation"
+	CheckRevoked          = "revoked"
+	CheckWitness          = "witness"
+	CheckRefused          = "refused"
+	CheckRefusedCurrent   = "refused_current"
+	CheckRollback         = "rollback"
+	CheckOldKeyNotRevoked = "old_key_not_revoked"
 )
+
+// NoSignersDetail is the detail of the generation failure when the target has no expected signing keys.
+const NoSignersDetail = "no expected signing keys"
 
 // ServerGeneration is the generation one server holds; Generation is nil (JSON null) when it is unknown.
 type ServerGeneration struct {

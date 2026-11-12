@@ -26,9 +26,10 @@
 // Scope. This package is pure logic, interfaces (Cluster, Prober, Witnesses, Ledger) and in-memory fakes in its tests.
 // The live NATS transport and AT-010 come in a later slice that implements those interfaces.
 //
-// Ledger caveat. MemLedger is process-local. The persistent compare-and-set store (the status.<account> key in KV)
-// comes later; until then two processes can still push over each other, and only the commit is atomic within one
-// process.
+// Ledger caveat. MemLedger is process-local. The Ledger's Lock is mandatory and a persistent implementation MUST make it
+// a cross-process lock (a lease in the shared store); MemLedger's lock is exclusive within one process only, so until
+// the persistent compare-and-set store (the status.<account> key in KV) comes, two processes can still push over each
+// other.
 package policyapply
 
 import (

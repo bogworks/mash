@@ -9,11 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/policy"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -43,7 +48,7 @@ func newWorld(t *testing.T, onGen1 ...string) *world {
 	if w.expect, err = NewExpect(w.c1, w.c2, []string{w.k.revoked}); err != nil {
 		t.Fatal(err)
 	}
-	w.previous = &Candidate{Generation: 1, Compiled: w.c1}
+	w.previous = &Candidate{Generation: 1, Compiled: w.c1, Signers: w.k.signers}
 	return w
 }
 
@@ -51,8 +56,13 @@ func (w *world) gate() GateInput {
 	rec, _, _ := listset.Accept(listset.Record{Generation: 1}, set2(), []byte("x"))
 	return GateInput{
 		Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Account: w.k.acctPub,
-		Record: rec, Compiled: w.c2, Previous: w.previous, Expect: w.expect, Now: fixedNow,
+		Record: rec, Compiled: w.c2, Previous: w.previous, Expect: w.expect, Signers: w.k.signers, OldKeys: w.oldKeys(), Now: fixedNow,
 	}
+}
+
+// oldKeys is the inventory of the old credentials: core's is the revoked key, the others have none.
+func (w *world) oldKeys() map[string][]string {
+	return map[string][]string{"foo.c.core": {w.k.revoked}, "foo.c.docs": {}, "foo.c.sdk": {}}
 }
 
 func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
@@ -60,6 +70,7 @@ func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
 		Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Ledger: l, Account: w.k.acctPub,
 		ListSet: ls, Received: []byte(received), Previous: w.c1, PreviousJWT: w.j1,
 		RevokedKeys: []string{w.k.revoked}, Now: fixedNow,
+		Signers: w.k.signers, PreviousSigners: w.k.signers, OldKeys: w.oldKeys(),
 		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
 			return w.k.build(w.t, c, w.k.revoked), nil
 		},
@@ -126,7 +137,7 @@ func TestNewExpect(t *testing.T) {
 
 func TestGenerationOf(t *testing.T) {
 	w := newWorld(t)
-	cands := []Candidate{{2, w.c2, []string{w.k.revoked}}, {1, w.c1, nil}}
+	cands := []Candidate{{Generation: 2, Compiled: w.c2, RevokedKeys: []string{w.k.revoked}}, {Generation: 1, Compiled: w.c1}}
 	if g, ok := GenerationOf(w.j2, cands); !ok || g != 2 {
 		t.Errorf("j2 = %d %v", g, ok)
 	}
@@ -474,4 +485,160 @@ func TestStatusGolden(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Errorf("status differs from %s (run with -update to rewrite):\n%s", path, got)
 	}
+}
+
+func TestGenerationOfSigners(t *testing.T) {
+	w := newWorld(t)
+	cands := []Candidate{{Generation: 2, Compiled: w.c2, RevokedKeys: []string{w.k.revoked}, Signers: w.k.signers}}
+	if g, ok := GenerationOf(w.j2, cands); !ok || g != 2 {
+		t.Fatalf("expected signers = %d %v", g, ok)
+	}
+	extraKP, _ := nkeys.CreateAccount()
+	extra, _ := extraKP.PublicKey()
+	if _, ok := GenerationOf(w.k.buildWith(t, w.c2, w.k.signers, []string{extra}, w.k.revoked), cands); ok {
+		t.Error("a JWT with an extra signing key was read as the target")
+	}
+	if _, ok := GenerationOf(w.k.buildWith(t, w.c2, map[string]string{"foo.c": extra}, nil, w.k.revoked), cands); ok {
+		t.Error("a JWT with another signer was read as the target")
+	}
+}
+
+func TestGateRefusesTargetWithoutSigners(t *testing.T) {
+	w := newWorld(t)
+	w.cluster.set("s1", w.j2)
+	w.cluster.set("s2", w.j2)
+	in := w.gate()
+	in.Signers = nil
+	st, _ := Gate(context.Background(), in)
+	if st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || st.Failing[0].Detail != NoSignersDetail {
+		t.Fatalf("%+v", st)
+	}
+	r := w.run(NewMemLedger(listset.Record{Generation: 1}), set2(), "bytes-2")
+	r.Signers = nil
+	st, err := Run(context.Background(), r)
+	if err != nil || st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || len(w.cluster.pushes) != 0 {
+		t.Fatalf("%+v %v pushes %d", st, err, len(w.cluster.pushes))
+	}
+}
+
+func TestGateOldKeyNotRevoked(t *testing.T) {
+	w := newWorld(t)
+	w.cluster.set("s1", w.j2)
+	w.cluster.set("s2", w.j2)
+	// Tag-only narrowing, and the old key is not among the revoked keys.
+	in := w.gate()
+	in.Expect.RevokedKeys = nil
+	st, _ := Gate(context.Background(), in)
+	if st.State == StateApplied || !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+		t.Fatalf("empty RevokedKeys: %+v", st)
+	}
+	var named bool
+	for _, f := range st.Failing {
+		named = named || (f.Check == CheckOldKeyNotRevoked && strings.Contains(f.Detail, w.k.revoked))
+	}
+	if !named {
+		t.Errorf("the key is not named: %+v", st.Failing)
+	}
+	// Missing inventory fails closed.
+	in = w.gate()
+	in.OldKeys = nil
+	if st, _ = Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+		t.Fatalf("no inventory: %+v", st)
+	}
+	// With the old key revoked the gate applies.
+	if st, _ = Gate(context.Background(), w.gate()); st.State != StateApplied {
+		t.Fatalf("%+v", st)
+	}
+	// A removed sender's keys must be revoked too.
+	in = w.gate()
+	in.Compiled = &listset.Compiled{Range: w.c2.Range, Templates: w.c2.Templates, Users: w.c2.Users[1:]}
+	in.OldKeys = map[string][]string{"foo.c.core": {"UOLD"}, "foo.c.docs": {}, "foo.c.sdk": {}}
+	if st, _ = Gate(context.Background(), in); !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+		t.Fatalf("removed sender: %+v", st.Failing)
+	}
+}
+
+func TestRunPendingGeneration(t *testing.T) {
+	w := newWorld(t)
+	w.prober.allow["s1"] = true
+	l := NewMemLedger(listset.Record{Generation: 1})
+	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
+	if err != nil || st.State != StatePartial {
+		t.Fatalf("%+v %v", st, err)
+	}
+	pend, ok, _ := l.Pending()
+	if !ok || pend.Generation != 2 {
+		t.Fatalf("pending = %+v %v", pend, ok)
+	}
+	pushes := len(w.cluster.pushes)
+
+	other := set2()
+	other.Senders[0].Allow = []string{"foo.c.docs"}
+	in := w.run(l, other, "bytes-other")
+	in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+		t.Error("signed while a generation is pending")
+		return "", errors.New("signed")
+	}
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrPendingGeneration) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.cluster.pushes) != pushes {
+		t.Error("pushed while a generation is pending")
+	}
+
+	delete(w.prober.allow, "s1")
+	st, err = Run(context.Background(), w.run(l, set2(), "bytes-2"))
+	if err != nil || st.State != StateApplied {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 2 {
+		t.Errorf("in force = %d", rec.Generation)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("pending not cleared")
+	}
+}
+
+func TestRunRollbackClearsPending(t *testing.T) {
+	w := newWorld(t)
+	w.cluster.failPush["s2"] = true
+	l := NewMemLedger(listset.Record{Generation: 1})
+	if _, err := Run(context.Background(), w.run(l, set2(), "bytes-2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("pending after every server was rolled back")
+	}
+}
+
+func TestRunRefusesOversizedJWT(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedger(listset.Record{Generation: 1})
+	in := w.run(l, set2(), "bytes-2")
+	in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+		return strings.Repeat("a", policy.AccountJWTLimit+1), nil
+	}
+	_, err := Run(context.Background(), in)
+	if !errors.Is(err, ErrAccountJWTTooLarge) || !strings.Contains(err.Error(), strconv.Itoa(policy.AccountJWTLimit+1)) || len(w.cluster.pushes) != 0 {
+		t.Fatalf("err = %v pushes %d", err, len(w.cluster.pushes))
+	}
+}
+
+func TestMemLedgerLockHonorsContext(t *testing.T) {
+	l := NewMemLedger(listset.Record{})
+	unlock, err := l.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := l.Lock(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	unlock()
+	u2, err := l.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2()
 }
