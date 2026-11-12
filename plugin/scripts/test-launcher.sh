@@ -173,6 +173,65 @@ MASH_RELEASE_BASE="file://$T/nope" CLAUDE_PLUGIN_DATA="$D4b" PATH="$PB:$BASEPATH
 check "pinned, download failed: PATH fallback used" eq "$(cat "$T/out")" "path-mash: serve"
 check "pinned, download failed: fallback logged" contains "$(cat "$T/err")" "falling back"
 check "pinned, download failed: nothing installed" absent "$D4b/bin/mash-$VER"
+# --- security stance: strict refuses the PATH fallback, relaxed (the default) falls back with a warning
+stance_run() { # data-dir, release-base, stance ("-" = unset), args...
+  _sd=$1; _sb=$2; _ss=$3; shift 3
+  if [ "$_ss" = - ]; then
+    env -u MASH_SECURITY_STANCE MASH_RELEASE_BASE="$_sb" CLAUDE_PLUGIN_DATA="$_sd" PATH="$PB:$BASEPATH" sh "$P/scripts/mash" "$@" > "$T/out" 2> "$T/err"
+  else
+    MASH_SECURITY_STANCE="$_ss" MASH_RELEASE_BASE="$_sb" CLAUDE_PLUGIN_DATA="$_sd" PATH="$PB:$BASEPATH" sh "$P/scripts/mash" "$@" > "$T/out" 2> "$T/err"
+  fi
+  RC=$?
+}
+NOREL="file://$T/nope"
+stance_run "$T/sd1" "$NOREL" relaxed serve
+check "relaxed, download fails: PATH mash runs" eq "$(cat "$T/out")" "path-mash: serve"
+check "relaxed, download fails: warning names the failure" contains "$(cat "$T/err")" "warning: pinned mash $VER unavailable (download failed)"
+check "relaxed, download fails: warning says relaxed" contains "$(cat "$T/err")" "relaxed fallback"
+stance_run "$T/sd2" "file://$REL2" relaxed serve
+check "relaxed, sha mismatch: PATH mash runs" eq "$(cat "$T/out")" "path-mash: serve"
+check "relaxed, sha mismatch: warning names sha256 mismatch" contains "$(cat "$T/err")" "warning: pinned mash $VER unavailable (sha256 mismatch for"
+check "relaxed, sha mismatch: nothing installed" absent "$T/sd2/bin/mash-$VER"
+stance_run "$T/sd3" "$MASH_RELEASE_BASE" relaxed serve
+check "relaxed, success: pinned binary runs" eq "$(cat "$T/out")" "fake-mash ran: serve"
+check "relaxed, success: no warning" eq "$(grep -c 'warning' "$T/err")" 0
+stance_run "$T/sd4" "$NOREL" strict serve
+check "strict, download fails: exit 127" eq "$RC" 127
+check "strict, download fails: PATH mash not run, stdout empty" empty_file "$T/out"
+check "strict, download fails: error names strict" contains "$(cat "$T/err")" "security stance is strict"
+check "strict, download fails: error names the failure" contains "$(cat "$T/err")" "(download failed)"
+check "strict, download fails: error says how to relax" contains "$(cat "$T/err")" "MASH_SECURITY_STANCE=relaxed"
+check "strict, download fails: no install hint" eq "$(grep -c 'go install' "$T/err")" 0
+check "strict, download fails: nothing installed" absent "$T/sd4/bin/mash-$VER"
+stance_run "$T/sd5" "file://$REL2" strict serve
+check "strict, sha mismatch: exit 127" eq "$RC" 127
+check "strict, sha mismatch: nothing on stdout" empty_file "$T/out"
+check "strict, sha mismatch: error names sha256 mismatch" contains "$(cat "$T/err")" "sha256 mismatch for"
+check "strict, sha mismatch: nothing installed" absent "$T/sd5/bin/mash-$VER"
+stance_run "$T/sd6" "$MASH_RELEASE_BASE" strict serve
+check "strict, success: pinned binary runs" eq "$(cat "$T/out")" "fake-mash ran: serve"
+check "strict, success: exit 0, no warning" eq "$RC$(grep -c 'warning' "$T/err")" 00
+stance_run "$T/sd7" "$NOREL" - serve
+check "default stance (unset) is relaxed" eq "$(cat "$T/out")" "path-mash: serve"
+stance_run "$T/sd8" "$NOREL" bogus serve
+check "invalid stance behaves as strict (exit 127)" eq "$RC" 127
+check "invalid stance does not run PATH mash" empty_file "$T/out"
+check "invalid stance note names the value" contains "$(cat "$T/err")" "unrecognised security stance 'bogus'"
+stance_run "$T/sd9" "$NOREL" strict hook
+check "strict, hook: refuses too" eq "$RC" 127
+stance_run "$T/sd9" "$NOREL" strict hook
+check "strict, hook skipping a recent failure: refuses" contains "$(cat "$T/err")" "failed recently"
+check "strict, hook skipping a recent failure: exit 127" eq "$RC" 127
+stance_run "$T/sd10" "$NOREL" strict __prefetch
+check "strict does not change prefetch (exit 0, silent)" eq "$RC$(wc -c < "$T/out" | tr -d ' ')" 00
+printf '#!/bin/sh\necho "override: $*"\n' > "$T/ovr0"; chmod +x "$T/ovr0"
+MASH_SECURITY_STANCE=strict MASH_BIN="$T/ovr0" CLAUDE_PLUGIN_DATA="$T/sd11" PATH="$PB:$BASEPATH" sh "$P/scripts/mash" a > "$T/out" 2>/dev/null
+check "strict: MASH_BIN override unchanged" eq "$(cat "$T/out")" "override: a"
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd3" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$NOREL" sh "$P/scripts/mash" cached > "$T/out" 2>/dev/null
+check "strict: managed-copy hit unchanged" eq "$(cat "$T/out")" "fake-mash ran: cached"
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd12" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2>/dev/null
+check "strict: unpinned path unchanged (PATH mash)" eq "$(cat "$T/out")" "path-mash: serve"
+
 # --- unpinned: PATH only, never downloads
 CLAUDE_PLUGIN_DATA="$T/data4c" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"
 check "unpinned uses PATH mash" eq "$(cat "$T/out")" "path-mash: serve"

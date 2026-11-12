@@ -1,0 +1,1 @@
+The plugin launcher has a security stance setting: strict refuses to fall back to mash on PATH when the pinned binary cannot be fetched or verified; relaxed (the default) falls back with a warning ([ADR 0094](docs/decisions/0094-the-plugin-launcher-has-a-provisional-security-stance-setting.md)).

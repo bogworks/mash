@@ -8,7 +8,8 @@
 # It is kept out of this file because this file is embedded in the mash binary; pinning it would change the binary.
 # Resolution order: $MASH_BIN; the managed copy for the pinned version; if pinned, download it (and only if that fails,
 # fall back to `mash` on PATH, logging it) so an older install on PATH never overrides the pin; if unpinned, `mash` on
-# PATH only. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
+# PATH only. Security stance (see security_stance): when the pinned binary cannot be fetched or verified, `strict` exits
+# 127 instead of falling back to PATH; `relaxed` (the default) falls back and warns. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
 # failed one leaves $BIN_DIR/.dl-failed-<version> and hooks skip the download for 300 s, going straight to PATH. Serve
 # keeps its 60 s fetch and prefetch 20 s, and neither honours the marker. A missing or empty mash.pins, or one without a version line, means unpinned: the launcher never downloads.
 case "$0" in
@@ -25,6 +26,22 @@ REPO_URL="https://github.com/bogworks/mash"
 HINT="mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)"
 
 log() { printf '%s\n' "mash launcher: $*" >&2; }
+
+# Why the pinned binary could not be fetched or verified; set by dlfail (and the hook skip), named in the stance message.
+FAILWHY=""
+dlfail() { FAILWHY=$1; log "${2:-$1}"; }
+
+# The security stance: what to do when the PINNED binary cannot be fetched or verified. Prints `strict` (refuse; no
+# fallback to `mash` on PATH) or `relaxed` (fall back to PATH with a warning). This is the ONLY place the setting is
+# read. PROVISIONAL: the variable name MASH_SECURITY_STANCE and its source (an environment variable) may change, and so
+# may the default. An unrecognised value fails closed as strict.
+security_stance() {
+  _s=${MASH_SECURITY_STANCE:-relaxed}   # the default: change `relaxed` here to make strict the default
+  case "$_s" in
+    strict|relaxed) printf '%s\n' "$_s" ;;
+    *) log "unrecognised security stance '$_s' (want strict or relaxed); treating it as strict"; printf 'strict\n' ;;
+  esac
+}
 
 PREFETCH=0
 [ "${1:-}" = "__prefetch" ] && PREFETCH=1
@@ -123,20 +140,20 @@ download() {
   case "$(uname -s)" in
     Linux) _os=linux ;;
     Darwin) _os=darwin ;;
-    *) log "unsupported OS $(uname -s)"; return 1 ;;
+    *) dlfail "unsupported OS $(uname -s)"; return 1 ;;
   esac
   case "$(uname -m)" in
     x86_64|amd64) _arch=amd64 ;;
     aarch64|arm64) _arch=arm64 ;;
-    *) log "unsupported architecture $(uname -m)"; return 1 ;;
+    *) dlfail "unsupported architecture $(uname -m)"; return 1 ;;
   esac
   _asset="mash-$_os-$_arch"
   _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
   if [ -z "$_want" ]; then
-    log "no pinned sha256 for $_asset; refusing to download"
+    dlfail "no pinned sha256 for $_asset" "no pinned sha256 for $_asset; refusing to download"
     return 1
   fi
-  mkdir -p "$BIN_DIR" || { log "cannot create $BIN_DIR"; return 1; }
+  mkdir -p "$BIN_DIR" || { dlfail "cannot create $BIN_DIR"; return 1; }
   _tmp="$BIN_DIR/.mash.$$.tmp"
   rm -f "$_tmp"
   _base="${MASH_RELEASE_BASE:-$REPO_URL/releases/download}"
@@ -144,22 +161,22 @@ download() {
   log "downloading $_url"
   if ! fetch "$_url" "$_tmp"; then
     rm -f "$_tmp"
-    log "download failed (offline?)"
+    dlfail "download failed" "download failed (offline?)"
     return 1
   fi
-  _got=$(sha256_of "$_tmp") || { rm -f "$_tmp"; log "no sha256sum or shasum available"; return 1; }
+  _got=$(sha256_of "$_tmp") || { rm -f "$_tmp"; dlfail "no sha256sum or shasum available"; return 1; }
   if [ "$_got" != "$_want" ]; then
     rm -f "$_tmp"
-    log "sha256 mismatch for $_asset (want $_want, got $_got); refusing"
+    dlfail "sha256 mismatch for $_asset" "sha256 mismatch for $_asset (want $_want, got $_got); refusing"
     return 1
   fi
   chmod +x "$_tmp"
-  _out=$("$_tmp" version 2>/dev/null) || { rm -f "$_tmp"; log "downloaded binary failed to run"; return 1; }
+  _out=$("$_tmp" version 2>/dev/null) || { rm -f "$_tmp"; dlfail "downloaded binary failed to run"; return 1; }
   case "$_out" in
     *"$MASH_VERSION"*) ;;
-    *) rm -f "$_tmp"; log "downloaded binary reports '$_out', expected $MASH_VERSION"; return 1 ;;
+    *) rm -f "$_tmp"; dlfail "downloaded binary reports the wrong version" "downloaded binary reports '$_out', expected $MASH_VERSION"; return 1 ;;
   esac
-  mv -f "$_tmp" "$BIN" || { rm -f "$_tmp"; log "cannot install $BIN"; return 1; }
+  mv -f "$_tmp" "$BIN" || { rm -f "$_tmp"; dlfail "cannot install $BIN"; return 1; }
   rm -f "$MARKER"
   return 0
 }
@@ -176,6 +193,7 @@ resolve() {
   fi
   if [ -n "$MASH_VERSION" ]; then
     if [ "$HOOK" = 1 ] && dl_recently_failed; then
+      FAILWHY="hook download skipped (failed recently)"
       log "hook: skipping download (failed recently)"
     elif download; then
       printf '%s\n' "$BIN"
@@ -183,8 +201,13 @@ resolve() {
     elif [ "$HOOK" = 1 ]; then
       mkdir -p "$BIN_DIR" 2>/dev/null && date +%s > "$MARKER" 2>/dev/null
     fi
+    if [ "$(security_stance)" = strict ]; then
+      log "refusing to use any other mash: the pinned binary $MASH_VERSION is unavailable ($FAILWHY) and the security stance is strict; to allow a fallback to mash on PATH set MASH_SECURITY_STANCE=relaxed"
+      return 2
+    fi
     if _p=$(path_mash); then
       log "pinned download failed; falling back to $_p"
+      log "warning: pinned mash $MASH_VERSION unavailable ($FAILWHY); using $_p instead (security stance relaxed fallback)"
       printf '%s\n' "$_p"
       return 0
     fi
@@ -205,8 +228,9 @@ if [ "$PREFETCH" = 1 ]; then
   exit 0
 fi
 
-if ! TARGET=$(resolve); then
-  log "$HINT"
+TARGET=$(resolve); _rc=$?
+if [ "$_rc" != 0 ]; then
+  [ "$_rc" = 2 ] || log "$HINT"   # 2: the strict stance already said why
   exit 127
 fi
 exec "$TARGET" "$@"
