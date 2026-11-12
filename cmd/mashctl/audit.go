@@ -347,24 +347,30 @@ func (in auditInbox) drained() bool {
 	return d.AckFloor >= in.LastSeq
 }
 
-// inboxProblems is the problems of one endpoint's inbox: mail lost unread, and an inbox near its byte cap. A message
-// dropped after it was delivered is ordinary turnover (the oldest mail goes when the cap or the age limit is reached),
-// so it is not a problem.
+// inboxProblems is the problems of one endpoint's inbox: mail lost unread. A message dropped after it was delivered is
+// ordinary turnover (the oldest mail goes when the cap or the age limit is reached), so it is not a problem. An inbox
+// near its byte cap is operational state, not a misconfiguration: inboxNote reports it, and --strict does not count it.
+// An inbox with unread loss that is also near full says so in the same problem.
 func inboxProblems(key string, in auditInbox) []auditProblem {
-	var out []auditProblem
-	if !in.Present {
+	if !in.Present || in.EvictedUnread == 0 {
 		return nil
 	}
-	if in.EvictedUnread > 0 {
-		out = append(out, auditProblem{What: "inbox", Item: key, Error: fmt.Sprintf(
-			"%d unread message(s) were evicted from this inbox (%d evicted in all; it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)",
-			in.EvictedUnread, in.Evicted)})
-	}
+	msg := fmt.Sprintf(
+		"%d unread message(s) were evicted from this inbox (%d evicted in all; it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)",
+		in.EvictedUnread, in.Evicted)
 	if in.FillPercent >= store.InboxNearFullPercent {
-		out = append(out, auditProblem{What: "inbox", Item: key, Error: fmt.Sprintf(
-			"inbox is %.0f%% full (%d of %d bytes); the oldest mail is evicted at 100%%", in.FillPercent, in.Bytes, in.MaxBytes)})
+		msg += fmt.Sprintf("; the inbox is also %.0f%% full (%d of %d bytes)", in.FillPercent, in.Bytes, in.MaxBytes)
 	}
-	return out
+	return []auditProblem{{What: "inbox", Item: key, Error: msg}}
+}
+
+// inboxNote is the note for an inbox near its byte cap that has lost no mail unread ("" otherwise). It is a note, not
+// a problem: it does not count toward --strict.
+func inboxNote(key string, in auditInbox) string {
+	if !in.Present || in.EvictedUnread > 0 || in.FillPercent < store.InboxNearFullPercent {
+		return ""
+	}
+	return fmt.Sprintf("inbox %s is %.0f%% full (%d of %d bytes); the oldest mail is evicted at 100%%", key, in.FillPercent, in.Bytes, in.MaxBytes)
 }
 
 // buildAudit combines the server snapshot with the creds files' public user keys. credsUsers maps a creds file to its
@@ -436,6 +442,9 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		}
 		rep.Records = append(rep.Records, ar)
 		rep.Problems = append(rep.Problems, inboxProblems(key, ar.Inbox)...)
+		if n := inboxNote(key, ar.Inbox); n != "" {
+			rep.Notes = append(rep.Notes, n)
+		}
 	}
 	slices.SortFunc(rep.Records, func(a, b auditRecord) int { return strings.Compare(a.Key, b.Key) })
 	slices.SortFunc(rep.Renames, func(a, b auditRename) int { return strings.Compare(a.Flat, b.Flat) })

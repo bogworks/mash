@@ -111,14 +111,45 @@ func TestAuditReportsInboxMailEvictedUnread(t *testing.T) {
 	}
 }
 
-func TestAuditReportsNearFullInbox(t *testing.T) {
+func TestAuditNearFullInboxIsANoteNotAProblem(t *testing.T) {
 	f := newAuditEnv(t)
 	f.legacy(t, "full")
 	f.capInbox(t, "full", 4096)
 	f.publishBig(t, sap.For(f.e.Owner, "full").Mail, 7) // about 3.8 KiB of 4 KiB, nothing dropped
 	r, _, code := f.retiredAudit(t, "--strict")
+	if code != 0 || len(inboxProblemsOf(r)) != 0 {
+		t.Fatalf("exit %d problems %v: a near-full inbox must not fail --strict", code, r.Problems)
+	}
+	out, _, _ := f.run(t, "--json")
+	var rep auditReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Problems) != 0 || rep.Summary.Problems != 0 {
+		t.Fatalf("problems %v", rep.Problems)
+	}
+	var found bool
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "inbox full is ") && strings.Contains(n, "% full") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no near-full note in %v", rep.Notes)
+	}
+	if txt, _, _ := f.run(t); !strings.Contains(txt, "note: inbox full is ") {
+		t.Errorf("text form lacks the note:\n%s", txt)
+	}
+}
+
+func TestAuditUnreadLossInNearFullInboxIsAProblem(t *testing.T) {
+	f := newAuditEnv(t)
+	f.legacy(t, "both")
+	f.capInbox(t, "both", 4096)
+	f.publishBig(t, sap.For(f.e.Owner, "both").Mail, 20) // nothing read, the cap dropped the oldest
+	r, _, code := f.retiredAudit(t, "--strict")
 	p := inboxProblemsOf(r)
-	if code != 1 || len(p) != 1 || !strings.Contains(p[0], "% full") || strings.Contains(p[0], "evicted from") {
+	if code != 1 || len(p) != 1 || !strings.Contains(p[0], "unread message(s) were evicted") || !strings.Contains(p[0], "% full") {
 		t.Fatalf("exit %d problems %v", code, p)
 	}
 }
