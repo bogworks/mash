@@ -2,7 +2,7 @@
 
 ## Development setup
 
-- Go 1.27.3 (see `go.mod`; CI pins `GOTOOLCHAIN=go1.27.3`).
+- Go 1.27.4 (see `go.mod`; CI pins `GOTOOLCHAIN=go1.27.4`).
 - Before opening a pull request, run:
 
 ```sh
