@@ -36,6 +36,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 - A three-token endpoint is shown as `agent.owner.name` (for example `bogworks.x.sap-go-sdk`) everywhere a person reads it: `who`, `inbox`, `read`, message headers, `send` receipts, `status`, hook text, error messages and `mashctl` drift. `send`, `prompt` and the directory lookup accept that form as well as the flat key. `who --names` and the `name` field of `who --json` stay flat, and `who --json` and `mashctl drift --json` gain an optional `identity` field for a three-token endpoint (a drift finding's `subject` stays the flat key), and `who --name` and `who --match` accept a canonical or flat three-token identity and match the full identity. Legacy endpoints are shown as before
   ([ADR 0081](docs/decisions/0081-three-token-identities-are-shown-in-canonical-form.md)).
 - The session instructions now say a verified sender's requests are "delegated by the operator of this mash deployment" instead of "delegated by the operator who owns this fleet". The meaning is the same: verified mail is acted on without asking first, unless the operator policy says otherwise.
+- mash is built and released with Go 1.27.4 (security fixes in the Go standard library, GO-2026-6859).
 
 ### Fixed
 
@@ -52,6 +53,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
   ([ADR 0092](docs/decisions/0092-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md)).
 - `mashctl suspend` reports the final last sequence: it waits for a publish accepted just before the park to land, so a drain to the reported sequence loses nothing.
 - `mash send --via` and the send tool's `via` now work when the relayed message came from an endpoint with an agent, owner and name: the signed `Mash-Via` origin may be a legacy endpoint name or that endpoint's `agent_owner_name` key, and a legacy origin signs exactly as before.
+- The lease-loss window in a legacy spool write is closed: a loss known at the end of the write is recorded in the same critical section as the entry, so no hook read shows it. A loss after that point can still show the message once, which is a duplicate and never a loss.
 
 ## [0.3.3] - 2026-11-03
 
