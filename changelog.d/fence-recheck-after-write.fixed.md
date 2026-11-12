@@ -1,1 +1,0 @@
-The lease-loss window in a legacy spool write is closed: a loss known at the end of the write is recorded in the same critical section as the entry, so no hook read shows it. A loss after that point can still show the message once, which is a duplicate and never a loss.
