@@ -247,9 +247,14 @@ func TestFullNonceSetRefusesPromptly(t *testing.T) {
 			t.Fatal(c)
 		}
 	}
+	// The requests (key generation and signing) are built before the clock starts: only the refusals are timed.
+	reqs := make([]Request, hardenManyReqs)
+	for i := range reqs {
+		reqs[i] = f.reqFor(t, "foo.c.core", userPub(t), nonceN(7, i))
+	}
 	start := time.Now()
-	for i := 0; i < hardenManyReqs; i++ {
-		if _, err := f.is.Issue(bg, f.reqFor(t, "foo.c.core", userPub(t), nonceN(7, i)), store.PurposeIssue); code(err) != CodeBusy {
+	for i := range reqs {
+		if _, err := f.is.Issue(bg, reqs[i], store.PurposeIssue); code(err) != CodeBusy {
 			t.Fatalf("%v", err)
 		}
 	}
