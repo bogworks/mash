@@ -240,14 +240,14 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	servers := []string{"s1", "s2"}
 	cl := newCluster(w.j1, servers...)
 	prober := fakeProber{cluster: cl, byGen: map[uint64]*listset.Compiled{1: w.c1, 2: w.c2}, allow: map[string]bool{}}
-	w.ledger = NewMemLedger(listset.Record{Generation: 1})
+	w.ledger = NewMemLedger(listset.Record{Generation: 1, Signed: listset.DigestCompiled(w.c1)})
 	w.prov = &recProv{ev: w.ev}
 	w.in = RunInput{
 		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
 		Ledger: evLedger{w.ledger, w.ev}, Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
 		Previous: w.c1, PreviousJWT: w.j1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
 		Signers: w.k.signers, PreviousSigners: w.k.signers,
-		OldKeys: map[string][]string{"foo.c.core": {w.k.revoked}, "foo.c.docs": {}},
+		OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked}}, "foo.c.docs": {}},
 		Sign:    func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.build(t, c, w.k.revoked), nil },
 	}
 	return w
@@ -434,5 +434,43 @@ func TestOrderedStatusJSON(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("JSON lacks %s: %s", want, s)
 		}
+	}
+}
+
+// pendingFails is a ledger whose SetPending fails.
+type pendingFails struct{ *MemLedger }
+
+func (pendingFails) SetPending(listset.Record) error { return errors.New("ledger down") }
+
+// TestRunOrderedPendingNotRecordedIsError (H2): a provisioning failure whose pending marker could not be recorded is an
+// error, not a partial status with a nil error.
+func TestRunOrderedPendingNotRecordedIsError(t *testing.T) {
+	w := newWorld14(t)
+	w.in.Ledger = pendingFails{w.ledger}
+	w.prov.fail("create:foo.c.new", true)
+	os, err := RunOrdered(context.Background(), w.in, w.prov)
+	if err == nil || !strings.Contains(err.Error(), "ledger down") {
+		t.Fatalf("err = %v", err)
+	}
+	if os.Status.InForce || os.Status.State == StateApplied {
+		t.Errorf("status = %+v", os.Status)
+	}
+}
+
+// TestRunOrderedNoSignersHeldNotApplied (L): a submission without Signers is not refused; its new addresses are held as
+// not applied.
+func TestRunOrderedNoSignersHeldNotApplied(t *testing.T) {
+	w := newWorld14(t)
+	w.in.Signers = nil
+	os, err := RunOrdered(context.Background(), w.in, w.prov)
+	if err != nil || os.Status.State != StatePartial {
+		t.Fatalf("%+v %v", os, err)
+	}
+	want := []HeldAddress{{Address: "foo.c.new", Reason: HeldNotApplied}}
+	if !reflect.DeepEqual(os.Held, want) {
+		t.Errorf("held = %+v, want %+v", os.Held, want)
+	}
+	if len(w.ev.get()) != 0 {
+		t.Errorf("events = %v", w.ev.get())
 	}
 }

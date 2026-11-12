@@ -250,13 +250,22 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 	}
 	st, err := run(ctx, in, &acc)
 	out.Status = st
+	var bc *beforeCommitError
 	switch {
-	case errors.Is(err, errProvisioning):
-		out.Status.State, out.Status.InForce = StatePartial, false
-		for _, pe := range out.Errors {
-			out.Status.Failing = append(out.Status.Failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
+	case errors.As(err, &bc) && bc.pending && errors.Is(bc.err, errProvisioning):
+		// Provisioning failed and the generation is recorded as pending: a partial status, not an error. If pending
+		// could not be recorded the ledger error is returned below instead.
+		failing := out.Status.Failing[:0:0]
+		for _, f := range st.Failing {
+			if f.Check != CheckProvision {
+				failing = append(failing, f)
+			}
 		}
-		sortFailures(out.Status.Failing)
+		for _, pe := range out.Errors {
+			failing = append(failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
+		}
+		sortFailures(failing)
+		out.Status.Failing = failing
 		return out, nil
 	case err != nil:
 		return out, err
@@ -264,9 +273,13 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		return out, nil
 	}
 	// Not applied: every new address is held.
-	if acc.Compiled == nil { // refused: nothing was accepted, and nothing is provisioned from the submission
+	if acc.Compiled == nil { // nothing was accepted, and nothing is provisioned from the submission
+		reason := HeldNotApplied
+		if st.State == StateRefused {
+			reason = HeldListSetRefused
+		}
 		for _, a := range newAddressesOf(in) {
-			out.Held = append(out.Held, HeldAddress{Address: a, Reason: HeldListSetRefused})
+			out.Held = append(out.Held, HeldAddress{Address: a, Reason: reason})
 		}
 		return out, nil
 	}

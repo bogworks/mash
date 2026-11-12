@@ -233,7 +233,7 @@ func TestAT014Live(t *testing.T) {
 			newUser = c
 		}
 	}
-	ledger := NewMemLedger(listset.Record{Generation: 1})
+	ledger := NewMemLedger(listset.Record{Generation: 1, Signed: listset.DigestCompiled(c1)})
 	prov := &liveProv{
 		t: t, e: e, ctx: ctx, ev: ev, user: newUser, ledger: ledger, admin: e.adminCreds(),
 		cands: []Candidate{
@@ -250,7 +250,7 @@ func TestAT014Live(t *testing.T) {
 	}
 	in := RunInput{
 		Cluster: liveEvCluster{e.cluster, ev}, Prober: prober, Witnesses: wit, Ledger: ledger,
-		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]string{"foo.c.core": {oldPub}},
+		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: oldPub}}},
 		Account: e.acctPub, Inventory: 2, ListSet: at014Target(), Received: []byte("at014"),
 		Previous: c1, PreviousJWT: e.account(c1), RevokedKeys: ex.RevokedKeys,
 		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
