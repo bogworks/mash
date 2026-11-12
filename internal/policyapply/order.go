@@ -251,16 +251,22 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		}
 		return nil
 	}
-	st, err := run(ctx, in, &acc)
+	// A provisioning failure turns the applied status into partial; that happens under the lease, before the write.
+	st, err := run(ctx, in, &acc, func(st Status, err error) Status {
+		if !errors.Is(err, errProvisioning) {
+			return st
+		}
+		st.State, st.InForce = StatePartial, false
+		for _, pe := range out.Errors {
+			st.Failing = append(st.Failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
+		}
+		sortFailures(st.Failing)
+		return st
+	})
 	out.Status = st
 	switch {
 	case errors.Is(err, errProvisioning):
-		out.Status.State, out.Status.InForce = StatePartial, false
-		for _, pe := range out.Errors {
-			out.Status.Failing = append(out.Status.Failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
-		}
-		sortFailures(out.Status.Failing)
-		return out, writeStatus(ctx, in.Ledger, out.Status, nil)
+		return out, nil
 	case err != nil:
 		return out, err
 	case st.State == StateApplied:

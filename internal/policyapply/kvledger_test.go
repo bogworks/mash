@@ -440,6 +440,86 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	}
 }
 
+func TestKVLedgerWriteStatusNeverGoesBackwards(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	at := func(sec int) Status {
+		return Status{State: StatePartial, Generation: uint64(sec), UpdatedAt: time.Date(2026, 1, 1, 0, 0, sec, 0, time.UTC).Format(time.RFC3339)}
+	}
+	stored := func() float64 {
+		s, _ := e.statusOf()["status"].(map[string]any)
+		return s["generation"].(float64)
+	}
+	for _, c := range []struct {
+		write int
+		want  float64
+	}{{5, 5}, {3, 5}, {5, 5}, {7, 7}} { // an older one is dropped, an equal and a newer one are stored
+		if err := l.WriteStatus(context.Background(), at(c.write)); err != nil {
+			t.Fatal(err)
+		}
+		if got := stored(); got != c.want {
+			t.Fatalf("after writing %d: stored %v, want %v", c.write, got, c.want)
+		}
+	}
+}
+
+// slowPush signals when the push starts and holds it until released.
+type slowPush struct {
+	Cluster
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *slowPush) Push(ctx context.Context, jwt string, expect []string) ([]apply.ServerAck, error) {
+	close(p.entered)
+	<-p.release
+	return p.Cluster.Push(ctx, jwt, expect)
+}
+
+// A run slowed after its gate holds the lease until its status is written, so a run that started later and finishes
+// later leaves its status, not the earlier run's.
+func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
+	e := newKVEnv(t)
+	w := newWorld(t)
+	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
+	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
+	if err := first.CompareAndCommit(0, testRecord(1)); err != nil {
+		t.Fatal(err)
+	}
+	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}
+	w.prober.allow["s1"] = true // the first run ends partial: nothing is committed
+	in1 := w.run(first, set2(), "bytes-2")
+	in1.Cluster = slow
+	in1.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC) }
+	done := make(chan error, 1)
+	go func() { _, err := Run(context.Background(), in1); done <- err }()
+	<-slow.entered
+
+	w2 := newWorld(t)
+	in2 := w2.run(second, set2(), "bytes-2")
+	in2.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 9, 0, time.UTC) }
+	done2 := make(chan Status, 1)
+	go func() {
+		st, err := Run(context.Background(), in2)
+		if err != nil {
+			t.Error(err)
+		}
+		done2 <- st
+	}()
+	time.Sleep(100 * time.Millisecond) // the second run waits for the lease
+	close(slow.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if st := <-done2; st.State != StateApplied {
+		t.Fatalf("second run: %+v", st)
+	}
+	s, _ := e.statusOf()["status"].(map[string]any)
+	if s["state"] != "applied" || s["updated_at"] != "2026-01-01T00:00:09Z" {
+		t.Fatalf("stored status = %v, want the second run's", s)
+	}
+}
+
 // fakeIssued is an IssuedAdmin over a map.
 type fakeIssued struct {
 	recs  map[string]store.Issued

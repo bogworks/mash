@@ -314,12 +314,18 @@ func (l *KVLedger) ClearPending() error {
 	return l.mutate(func(v *statusValue) error { v.Pending = nil; return nil })
 }
 
-// WriteStatus stores st as the latest status, keeping the record in force and the pending record.
+// WriteStatus stores st as the latest status, keeping the record in force and the pending record. It never goes
+// backwards: when the stored status has an updated_at newer than st's, st is dropped and nil is returned. (The
+// generation is not compared: a refused status carries generation 0.) Equal times, and a time that does not parse
+// on either side, let st through. Run calls it while holding the lease; this is the second line of defence.
 func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 	for range casTries {
 		v, rev, err := l.read(ctx)
 		if err != nil {
 			return err
+		}
+		if v.Status != nil && statusNewer(*v.Status, st) {
+			return nil
 		}
 		v.Status = &st
 		err = l.write(ctx, v, rev)
@@ -331,6 +337,19 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 		}
 	}
 	return fmt.Errorf("policy ledger %s: changed by other writers too often; try again", l.key)
+}
+
+// statusNewer reports whether a was updated strictly after b; false when either time does not parse.
+func statusNewer(a, b Status) bool {
+	ta, err := time.Parse(time.RFC3339, a.UpdatedAt)
+	if err != nil {
+		return false
+	}
+	tb, err := time.Parse(time.RFC3339, b.UpdatedAt)
+	if err != nil {
+		return false
+	}
+	return ta.After(tb)
 }
 
 // CompareAndCommit implements Ledger. It first checks that the lease is still this ledger's (ErrLeaseLost), then
