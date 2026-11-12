@@ -14,10 +14,24 @@ ruleset is the fact. Everything in the list below that is not in this paragraph 
 
 **The label gate guards the queue only.** The ruleset has no pull-request or review rule, so a direct `gh pr merge` (or
 the merge button) by an identity with write access skips Mergify entirely, and with it every queue condition. Also
-verified read-only (2026-11-10): the check `Mergify Merge Protections` does **not** go red without the label or while a
-protection is blocking. On PR #349 (labelled `hold`) its conclusion is `success` while its summary says "1 of 2
-protections blocking"; on pull requests it does not apply to it is `neutral`. The ruleset accepts it either way
-(check-neutral and check-success), so the ruleset does not enforce the queue-entry gate; only the queue does.
+verified read-only (2026-11-10), and describing the state **before** the `merge_protections` rule below: the check
+`Mergify Merge Protections` did **not** go red without the label or while a protection was blocking. On PR #349
+(labelled `hold`) its conclusion was `success` while its summary said "1 of 2 protections blocking"; on pull requests
+it did not apply to it was `neutral`. The ruleset accepts it either way (check-neutral and check-success), so then the
+ruleset did not enforce the queue-entry gate; only the queue did.
+
+**The `merge_protections` rule.** `.mergify.yml` now defines one rule, "codex-review and approval before merge", that
+mirrors the queue entry conditions that matter at an API merge: `check-success = codex-review`, an approval by the
+maintainer or the `lead-approved` label, and `label != hold`. It applies to pull requests into `main` and skips
+Mergify's own queue drafts (head ref `mergify/merge-queue/<hash>`), which have neither an approval nor a label and
+would otherwise deadlock the queue. `pr-check`, `adr-lint` and `label-reset` are not repeated: the ruleset and the
+queue already require them. With the rule, the ruleset's required check `Mergify Merge Protections` is meaningful: it
+should fail while the rule's conditions are unmet. `internal/release/mergify_test.go` checks the rule against the
+queue conditions. This is **not yet verified live**: it is verified only after this change is merged. Read-only check
+to run then: on a pull request without codex-review or approval,
+`gh api repos/bogworks/mash/commits/<head-sha>/check-runs --jq '.check_runs[] | select(.name=="Mergify Merge Protections") | .conclusion'`
+should print `failure` (not `success`), and on a queue draft it should not be `failure`. Record the date and result
+here when done.
 
 **Pinned checks (D195).** `pr-check` and `label-reset` are pinned in the ruleset with GitHub Actions as the expected
 source (`integration_id`), so a check of that name posted by anything else does not satisfy the ruleset. `adr-lint`
