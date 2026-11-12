@@ -10,7 +10,7 @@ import (
 	"sort"
 )
 
-// Generations and digests (contract mash-messaging-policy REQ-017, AT-016; ADR 0095).
+// Generations and digests (contract mash-messaging-policy REQ-017, AT-016; ADR 0098).
 //
 // Each accepted list set is one generation. A list set states the generation it was based on (ListSet.Base); Accept
 // refuses it unless that is the generation in force, so two submitters working from the same generation cannot both
