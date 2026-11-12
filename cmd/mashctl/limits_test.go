@@ -153,3 +153,25 @@ func TestLimitsOfRefusesAnIncompleteServerSet(t *testing.T) {
 		t.Fatalf("complete: %v %v", ls, err)
 	}
 }
+
+// A named cluster needs MASH_SERVERS: an isolated member sees no peers and would be measured alone. A standalone
+// server does not.
+func TestLimitsOfNamedClusterNeedsAnInventory(t *testing.T) {
+	ctx := context.Background()
+	isolated := apply.ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "c1"}
+	_, err := limitsOf(ctx, fakeSet{set: isolated}, 0, 4096)
+	if err == nil || !strings.Contains(err.Error(), "MASH_SERVERS") || !strings.Contains(err.Error(), "1 server(s) answered") {
+		t.Fatalf("named cluster, no inventory: %v", err)
+	}
+	if ls, err := limitsOf(ctx, fakeSet{set: isolated}, 1, 4096); err != nil || len(ls) != 1 {
+		t.Fatalf("inventory equal to the answered count: %v %v", ls, err)
+	}
+	if ls, err := limitsOf(ctx, fakeSet{set: apply.ServerSet{Names: []string{"s1"}, Expected: 1}}, 0, 4096); err != nil || len(ls) != 1 {
+		t.Fatalf("standalone: %v %v", ls, err)
+	}
+	three := apply.ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "c1"}
+	_, err = limitsOf(ctx, fakeSet{set: three}, 3, 4096)
+	if err == nil || !strings.Contains(err.Error(), "only 2 of 3 servers answered") {
+		t.Fatalf("fewer than the inventory: %v", err)
+	}
+}

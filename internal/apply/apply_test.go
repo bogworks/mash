@@ -73,10 +73,10 @@ func (f *fake) ServerLimits(ctx context.Context, _ int) ([]ServerReport, error) 
 		if !ok {
 			mcl = policy.DefaultMaxControlLine
 		}
-		if mcl == 0 {
-			continue
+		if mcl == 0 && f.maxPayload == 0 {
+			continue // a reply that carries neither limit is no reply
 		}
-		out = append(out, ServerReport{Server: n, MaxControlLine: mcl, MaxPayload: f.maxPayload})
+		out = append(out, ServerReport{Server: n, MaxControlLine: mcl, MaxPayload: f.maxPayload}) // mcl 0: max_control_line absent
 	}
 	return out, nil
 }

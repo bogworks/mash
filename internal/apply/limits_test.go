@@ -137,6 +137,47 @@ func TestLearnLimits(t *testing.T) {
 	}
 }
 
+// A report without max_control_line is kept: its max_payload still lowers the account JWT limit, and the override
+// gives the connect limit. A reply with neither is as no reply.
+func TestLearnLimitsKeepsMaxPayloadWithoutMaxControlLine(t *testing.T) {
+	reps := []ServerReport{{Server: "a", MaxPayload: 300_000}, {Server: "b", MaxControlLine: 2048, MaxPayload: 1 << 20}}
+	got, err := LearnLimits([]string{"a", "b"}, reps, 4096)
+	if err != nil || len(got) != 2 || got[0].Server != "a" || got[0].MaxControlLine != 4096 || got[0].AccountJWT != 300_000 ||
+		got[1].MaxControlLine != 2048 || got[1].AccountJWT != policy.AccountJWTLimit {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// without an override the missing connect limit is unknown, though the payload was reported
+	if _, err = LearnLimits([]string{"a", "b"}, reps, 0); !errors.Is(err, ErrLimitUnknown) || !strings.Contains(err.Error(), `"a"`) {
+		t.Fatalf("%v", err)
+	}
+	// neither limit reported: the override alone, and the default account limit
+	got, err = LearnLimits([]string{"c"}, []ServerReport{{Server: "c"}}, 3000)
+	if err != nil || len(got) != 1 || got[0].MaxControlLine != 3000 || got[0].AccountJWT != policy.AccountJWTLimit {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err = LearnLimits([]string{"c"}, []ServerReport{{Server: "c"}}, 0); !errors.Is(err, ErrLimitUnknown) {
+		t.Fatalf("%v", err)
+	}
+}
+
+// With the connect-line override given, a server whose reply has max_payload but no max_control_line still refuses an
+// account JWT over that max_payload, naming the server.
+func TestAccountJWTOverMaxPayloadWithoutMaxControlLine(t *testing.T) {
+	ks, fk, c := setup(t)
+	fk.servers = ServerSet{Names: []string{"nats-1"}, Expected: 1}
+	fk.maxPayload = 400
+	fk.limits = map[string]int{"nats-1": 0} // the reply carries max_payload only
+	var out bytes.Buffer
+	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: 1, MaxControlLine: 4096}, &out)
+	s := out.String()
+	if code != 1 || !strings.Contains(s, `server "nats-1"`) || !strings.Contains(s, "allows 400 (max_payload)") {
+		t.Fatalf("exit %d\n%s", code, s)
+	}
+	if fk.pushes != 0 {
+		t.Error("pushed")
+	}
+}
+
 // Over the real transport: every server answers the VARZ request with its own max_control_line, and apply refuses a
 // sender that does not fit it, naming the server, before anything is pushed.
 func TestLimitsLive(t *testing.T) {

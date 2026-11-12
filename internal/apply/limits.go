@@ -109,7 +109,8 @@ func parseVarz(b []byte) (ServerReport, bool) {
 var ErrLimitUnknown = errors.New("server limit unknown")
 
 // LearnLimits is the limits of every server in names (the servers the ping found; reports may name more), from the
-// reports the servers gave. A server is never assumed small or large: one that gave no report gets override (the
+// reports the servers gave. A report is kept whether or not it carries max_control_line: its max_payload always
+// counts, and only the connect limit falls back to the override. A server is never assumed small or large: one that gave no report gets override (the
 // operator's --max-control-line) when that is above 0, and otherwise the result is an error wrapping ErrLimitUnknown
 // that names it. An override also caps a server that did report: the smaller of the two is used, so an operator
 // who says a server is smaller than it says it is, is believed. The account JWT limit of a server is the jwt decoder
@@ -118,7 +119,7 @@ var ErrLimitUnknown = errors.New("server limit unknown")
 func LearnLimits(names []string, reports []ServerReport, override int) ([]policy.ServerLimits, error) {
 	byName := map[string]ServerReport{}
 	for _, r := range reports {
-		if r.MaxControlLine > 0 {
+		if r.MaxControlLine > 0 || r.MaxPayload > 0 { // a reply carrying neither limit says nothing
 			byName[r.Server] = r
 		}
 	}
@@ -133,17 +134,19 @@ func LearnLimits(names []string, reports []ServerReport, override int) ([]policy
 	var out []policy.ServerLimits
 	for n := range all {
 		l := policy.ServerLimits{Server: n, AccountJWT: policy.AccountJWTLimit}
-		if r, ok := byName[n]; ok {
+		r := byName[n]
+		if r.MaxPayload > 0 {
+			l.AccountJWT = min(l.AccountJWT, r.MaxPayload)
+		}
+		switch {
+		case r.MaxControlLine > 0:
 			l.MaxControlLine = r.MaxControlLine
-			if r.MaxPayload > 0 {
-				l.AccountJWT = min(l.AccountJWT, r.MaxPayload)
-			}
 			if override > 0 {
 				l.MaxControlLine = min(l.MaxControlLine, override)
 			}
-		} else if override > 0 {
+		case override > 0:
 			l.MaxControlLine = override
-		} else {
+		default:
 			unknown = append(unknown, config.Clean(n))
 			continue
 		}
@@ -187,18 +190,22 @@ func Limits(ctx context.Context, r Resolver, set ServerSet, override int) ([]pol
 }
 
 // CheckLimitSet refuses a ping answer that cannot be trusted to name every server whose limit a credential must fit:
-// no reply, gateways, replies naming different clusters, or fewer replies than the cluster reports (or than the
-// operator's inventory, MASH_SERVERS, says; 0 is none given). The smaller limit of a server that did not answer would
-// be missing, and a credential could be signed that it refuses. Unlike a write, a measure does not need the operator
-// to give an inventory when the cluster's own count is met.
+// the set must be Complete, as it must be for a write. That means a reply, no gateways, no replies naming different
+// clusters, as many replies as the cluster reports and as the operator's inventory (MASH_SERVERS; 0 is none given)
+// says, and, when a reply names a cluster, an inventory: an isolated member sees no peers, so without one the number
+// of servers cannot be verified, and a credential could be signed that another member refuses. A standalone server
+// (no cluster named) needs no inventory.
 func CheckLimitSet(set ServerSet, inventory int) error {
-	if !set.Gateways && !set.ClusterConflict && len(set.Names) > 0 && len(set.Names) >= set.need(inventory) {
+	if set.Complete(inventory) {
 		return nil
 	}
 	got, want := len(set.Names), set.need(inventory)
 	why := set.Why(inventory)
 	if set.Gateways || set.ClusterConflict || got == 0 {
 		return fmt.Errorf("the server set is not complete (%s); a limit of a server that did not answer would be missing, so nothing was measured", why)
+	}
+	if inventory <= 0 && set.Cluster != "" && got >= set.Expected {
+		return fmt.Errorf("the server set is not complete: %d server(s) answered and they are part of cluster %s, but the number of servers cannot be verified from here (an isolated member sees no peers); the smaller limit of a server that did not answer would be missing, so nothing was measured. Set MASH_SERVERS to the real number of servers you run", got, config.Clean(set.Cluster))
 	}
 	return fmt.Errorf("only %d of %d servers answered the system account request (%s); the smaller limit of a silent server would be missing, so nothing was measured. Bring the silent server back, or set MASH_SERVERS to the number of servers you run", got, want, why)
 }
