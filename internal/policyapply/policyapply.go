@@ -23,8 +23,13 @@
 // narrowing rotation, a later change, makes sure the old key is revoked). For those reaches (Expect.CredentialOnly) the
 // gate probes the sender's TARGET credential, which must be refused, and requires each witness closed.
 //
-// Scope. This package is pure logic, interfaces (Cluster, Prober, Witnesses, Ledger) and in-memory fakes in its tests.
-// The live NATS transport and AT-010 come in a later slice that implements those interfaces.
+// Scope. The gate is pure logic over the interfaces Cluster, Prober, Witnesses and Ledger, tested with in-memory fakes.
+// The live NATS transport implements them: NATSCluster (system-account requests; the server's own account JWT is read
+// with $SYS.REQ.SERVER.PING.ACCOUNTZ, so a server that has not loaded the account yet reports none), LiveProber and
+// LiveWitnesses (each connects to one named server only, never reconnects), and ProbeMinter, which writes every probe
+// to an IssueRecord before handing it out. The caller revokes the probes when the gate ends, pass or fail, with
+// RevokeMinted. AT-010 (at010_live_test.go) runs the gate on a live two-server cluster, including a server held back
+// from the push.
 //
 // Ledger caveat. MemLedger is process-local. The Ledger's Lock is mandatory and a persistent implementation MUST make it
 // a cross-process lock (a lease in the shared store); MemLedger's lock is exclusive within one process only, so until
