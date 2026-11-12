@@ -195,15 +195,17 @@ func RequireTLS(url string, insecureLoopback bool) ([]nats.Option, error) {
 	return []nats.Option{nats.IgnoreDiscoveredServers(), nats.Secure()}, nil
 }
 
-// PlainRemote returns the scheme ("nats" or "ws") and host of the first entry of url (a comma-separated server list)
-// that is plain text to a host that is not localhost or a loopback IP literal, and false when there is none. An entry
-// with no scheme is nats://, as the client reads it. The host never carries userinfo, a path or a query.
+// PlainRemote returns the scheme and host of the first entry of url (a comma-separated server list) that is plain text
+// to a host that is not localhost or a loopback IP literal, and false when there is none. Only tls:// and wss:// are
+// TLS: the client dials every other scheme (nats://, ws://, an unknown one such as foo://, or none) as plain TCP, so
+// all of them count as plain here. An entry with no scheme is nats://, as the client reads it. The host never carries
+// userinfo, a path or a query.
 func PlainRemote(url string) (scheme, host string, found bool) {
 	for _, e := range strings.Split(url, ",") {
 		scheme, host := serverParts(e)
 		host, _, _ = strings.Cut(host, "?")
 		host, _, _ = strings.Cut(host, "#")
-		if host == "" || isLoopbackHost(host) || (scheme != "nats" && scheme != "ws") {
+		if host == "" || isLoopbackHost(host) || scheme == "tls" || scheme == "wss" {
 			continue
 		}
 		return scheme, host, true
@@ -212,12 +214,21 @@ func PlainRemote(url string) (scheme, host string, found bool) {
 }
 
 // RequireEndpointTLS is the option set for an endpoint connection when require_tls (MASH_REQUIRE_TLS) is on. Before any
-// connection is made it refuses a plain nats:// or ws:// entry (a scheme-less entry is nats://) to a host that is not
-// localhost or a loopback IP literal, and the error names the host, never the URL's userinfo. Plain text to a
-// loopback host is always allowed. When any entry is tls:// or wss://, nats.Secure() makes the connection fail if the
-// server does not offer TLS. Servers a server advertises are never added to the pool, so the check covers every
-// address the client dials.
+// connection is made it refuses an entry whose scheme is not nats, tls, ws or wss (the client would dial an unknown
+// scheme as plain TCP), and any plain entry (every scheme but tls and wss; none is nats://) to a host that is not
+// localhost or a loopback IP literal. The errors name the scheme or the host, never the URL's userinfo. When any entry
+// is tls:// or wss://, the whole list requires TLS: nats.Secure() makes the connection fail if the server does not
+// offer it. Otherwise the connection is plain and every entry is loopback, so it is pinned to loopback at dial time
+// (LoopbackDialer): localhost is checked again against the address it resolves to, at every connect and reconnect.
+// Servers a server advertises are never added to the pool, so the check covers every address the client dials.
 func RequireEndpointTLS(url string) ([]nats.Option, error) {
+	for _, e := range strings.Split(url, ",") {
+		switch scheme, _ := serverParts(e); scheme {
+		case "nats", "tls", "ws", "wss":
+		default:
+			return nil, fmt.Errorf("mash: MASH_REQUIRE_TLS (require_tls) is set: unsupported scheme %q: use tls:// with the server's certificate (tls_ca for a private CA)", scheme)
+		}
+	}
 	if scheme, host, ok := PlainRemote(url); ok {
 		return nil, fmt.Errorf("mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain %s:// connection to %q: use tls:// with the server's certificate (tls_ca for a private CA)", scheme, host)
 	}
@@ -227,11 +238,16 @@ func RequireEndpointTLS(url string) ([]nats.Option, error) {
 			return append(opts, nats.Secure()), nil
 		}
 	}
-	return opts, nil
+	return append(opts, nats.SetCustomDialer(LoopbackDialer{})), nil
+}
+
+// baseDial opens the TCP connection for LoopbackDialer; a test replaces it to fake name resolution.
+var baseDial = func(network, address string) (net.Conn, error) {
+	return (&net.Dialer{Timeout: 2 * time.Second}).Dial(network, address)
 }
 
 // LoopbackDialer dials only localhost or a loopback IP literal, at the first connect and at every reconnect. It is the
-// guarantee behind insecure_loopback: whatever address the client is handed, a plain connection with admin or system
+// guarantee behind insecure_loopback and behind a plain connection under require_tls: whatever address the client is handed, a plain connection with admin or system
 // credentials is never opened to a host that is not on this machine.
 type LoopbackDialer struct{}
 
@@ -239,19 +255,19 @@ type LoopbackDialer struct{}
 func (LoopbackDialer) Dial(network, address string) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, fmt.Errorf("mash: insecure_loopback: refusing to dial %q: %w", address, err)
+		return nil, fmt.Errorf("mash: a plain connection is allowed only to localhost or a loopback address: refusing to dial %q: %w", address, err)
 	}
 	if !isLoopbackHost(host) {
-		return nil, fmt.Errorf("mash: insecure_loopback allows a plain connection only to localhost or a loopback address: refusing to dial %q", address)
+		return nil, fmt.Errorf("mash: a plain connection (insecure_loopback, or require_tls without tls://) is allowed only to localhost or a loopback address: refusing to dial %q", address)
 	}
-	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).Dial(network, address)
+	conn, err := baseDial(network, address)
 	if err != nil {
 		return nil, err
 	}
 	// a name such as localhost is checked again against the address it resolved to
 	if ta, ok := conn.RemoteAddr().(*net.TCPAddr); ok && !ta.IP.IsLoopback() {
 		conn.Close()
-		return nil, fmt.Errorf("mash: insecure_loopback: %q resolved to %s, which is not a loopback address", address, ta.IP)
+		return nil, fmt.Errorf("mash: a plain connection is allowed only to a loopback address: %q resolved to %s", address, ta.IP)
 	}
 	return conn, nil
 }

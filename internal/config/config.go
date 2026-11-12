@@ -684,7 +684,7 @@ func positiveDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 
-// PlainTextWarning returns a warning when url (or any entry of a comma-separated server list) uses nats:// or ws://
+// PlainTextWarning returns a warning when url (or any entry of a comma-separated server list) uses a plain scheme (every one but tls:// and wss://)
 // (an entry with no scheme is nats://) to a host that is not loopback, and "" otherwise. SAP identity assumes a
 // verified connection, which plain text is not. The warning names the host, never the URL's userinfo.
 func PlainTextWarning(url string) string {

@@ -36,10 +36,14 @@ the other boolean settings (`1`/`true`, `0`/`false`, anything else an error, the
 by default, and with it off nothing changes.
 
 With it on, every endpoint connection goes through one check, before the first connection is made: a URL, or any entry
-of a comma-separated list, that is plain `nats://` or `ws://` (an entry with no scheme counts as `nats://`) to a host
-that is not `localhost` or a loopback IP literal is refused. The error names the host, the setting and the fix (use
+of a comma-separated list, that is plain to a host that is not `localhost` or a loopback IP literal is refused. Any
+scheme other than `tls` and `wss` is plain, because the NATS client dials every other one (`nats`, `ws`, an unknown
+scheme such as `foo://`, or none) as plain TCP; an entry whose scheme is not `nats`, `tls`, `ws` or `wss` is refused for
+any host with `unsupported scheme "foo": use tls://`. The error names the host, the setting and the fix (use
 `tls://` with the server's certificate, `tls_ca` for a private CA), and never carries the URL's userinfo. Plain text to
-a loopback host is always allowed, with no `insecure_loopback`. A `tls://` or `wss://` entry makes the connection
+a loopback host is always allowed, with no `insecure_loopback`, and a plain loopback connection is pinned to
+loopback at dial time (`natsauth.LoopbackDialer`, which checks the address `localhost` resolves to at every connect and
+reconnect), so a `localhost` that resolves elsewhere is refused. A `tls://` or `wss://` entry makes the connection
 require TLS, so a server that does not offer it fails, and servers a server advertises are not added to the pool. The
 check shares the host and scheme parsing of `natsauth.RequireTLS`, whose behaviour and callers are unchanged.
 
@@ -47,7 +51,7 @@ check shares the host and scheme parsing of `natsauth.RequireTLS`, whose behavio
 refusal is permanent. `mash hook` connects to nothing, so it writes the refusal to stderr (the hook log) and exits 0. A
 CLI command prints it and exits non-zero.
 
-`mash status`, in the command and in the session's tool, prints `tls: WARN` for a plain nats or ws URL to a non-loopback
+`mash status`, in the command and in the session's tool, prints `tls: WARN` for a plain URL (any scheme but tls and wss) to a non-loopback
 host in every spelling (with or without a scheme, anywhere in a list), naming the host and both fixes (`tls://`, and
 `MASH_REQUIRE_TLS=1` to make it a refusal). With the setting on it prints `tls: OK (required)` when the URL is
 acceptable and `tls: FAILED` with the refusal when it is not.

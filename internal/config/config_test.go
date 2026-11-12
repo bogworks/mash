@@ -498,6 +498,12 @@ func TestPlainTextWarning(t *testing.T) {
 		"127.0.0.1:4222":                false,
 		"localhost":                     false,
 		"u:pw@example.com:4222":         true,
+		// Only tls and wss are TLS: the client dials every other scheme as plain TCP.
+		"foo://remote:4222":  true,
+		"FOO://remote:4222":  true,
+		"foo://127.0.0.1":    false,
+		"TLS://remote:4222":  false,
+		"tls://a,foo://b:42": true,
 	} {
 		if got := PlainTextWarning(url) != ""; got != warn {
 			t.Errorf("PlainTextWarning(%q) warns = %v, want %v", url, got, warn)
