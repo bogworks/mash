@@ -264,7 +264,10 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		return st
 	})
 	out.Status = st
+	var swe *statusWriteError
 	switch {
+	case errors.As(err, &swe): // a failed status write is never hidden behind the provisioning failure
+		return out, err
 	case errors.Is(err, errProvisioning):
 		return out, nil
 	case err != nil:

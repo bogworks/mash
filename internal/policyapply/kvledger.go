@@ -314,18 +314,22 @@ func (l *KVLedger) ClearPending() error {
 	return l.mutate(func(v *statusValue) error { v.Pending = nil; return nil })
 }
 
-// WriteStatus stores st as the latest status, keeping the record in force and the pending record. It never goes
-// backwards: when the stored status has an updated_at newer than st's, st is dropped and nil is returned. (The
-// generation is not compared: a refused status carries generation 0.) Equal times, and a time that does not parse
-// on either side, let st through. Run calls it while holding the lease; this is the second line of defence.
+// WriteStatus stores st as the latest status, keeping the record in force and the pending record. Only a run under
+// the lease writes status: a ledger that holds no lease gets ErrLeaseLost and writes nothing. The write is fenced:
+// the status key is read, then the lease key is read and must still have this ledger's revision and holder (as in
+// CompareAndCommit), and only then is the status key updated at the revision read. The window between the lease read
+// and the update is a few milliseconds and remains: the lease can expire and be taken over inside it. A run that
+// took over reads and writes the status key too, so the status key's own compare-and-set serializes the two: the
+// update fails and is retried, with the lease read again, rather than overwriting. No clock of any host is
+// compared: recency is the lease fence plus that compare-and-set.
 func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 	for range casTries {
 		v, rev, err := l.read(ctx)
 		if err != nil {
 			return err
 		}
-		if v.Status != nil && statusNewer(*v.Status, st) {
-			return nil
+		if err := l.fenceLease(ctx); err != nil {
+			return err
 		}
 		v.Status = &st
 		err = l.write(ctx, v, rev)
@@ -339,17 +343,15 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 	return fmt.Errorf("policy ledger %s: changed by other writers too often; try again", l.key)
 }
 
-// statusNewer reports whether a was updated strictly after b; false when either time does not parse.
-func statusNewer(a, b Status) bool {
-	ta, err := time.Parse(time.RFC3339, a.UpdatedAt)
-	if err != nil {
-		return false
+// fenceLease is checkLease for a caller that must hold the lease: a ledger that holds none gets ErrLeaseLost.
+func (l *KVLedger) fenceLease(ctx context.Context) error {
+	l.mu.Lock()
+	held := l.held
+	l.mu.Unlock()
+	if !held {
+		return ErrLeaseLost
 	}
-	tb, err := time.Parse(time.RFC3339, b.UpdatedAt)
-	if err != nil {
-		return false
-	}
-	return ta.After(tb)
+	return l.checkLease(ctx)
 }
 
 // CompareAndCommit implements Ledger. It first checks that the lease is still this ledger's (ErrLeaseLost), then

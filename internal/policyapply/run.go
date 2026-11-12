@@ -300,6 +300,12 @@ func run(ctx context.Context, in RunInput, acc *Accepted, adjust func(Status, er
 	return st, writeStatus(ctx, in.Ledger, st, err)
 }
 
+// statusWriteError is a failed write of the status; RunOrdered never suppresses it.
+type statusWriteError struct{ err error }
+
+func (e *statusWriteError) Error() string { return "write status: " + e.err.Error() }
+func (e *statusWriteError) Unwrap() error { return e.err }
+
 // writeStatus writes st to l if l is a StatusWriter and st is a status of this run: applied, partial or refused. A run
 // that failed before it had a status (the zero Status), and an applied status that came with an error (the commit or a
 // provisioning step failed, so it is not what is in force), write nothing. It returns err, joined with the error of
@@ -310,7 +316,7 @@ func writeStatus(ctx context.Context, l Ledger, st Status, err error) error {
 		return err
 	}
 	if werr := sw.WriteStatus(ctx, st); werr != nil {
-		return errors.Join(err, fmt.Errorf("write status: %w", werr))
+		return errors.Join(err, &statusWriteError{werr})
 	}
 	return err
 }
