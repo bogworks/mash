@@ -67,9 +67,31 @@ var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\v", "\n", "\f",
 	"\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
 
 // text is valid UTF-8 with every kind of line break turned into "\n", so
-// quoting each line covers everything that could read as a new line.
+// quoting each line covers everything that could read as a new line, and with
+// every other control character shown as a visible \xNN escape (showControls).
 func text(b []byte) string {
-	return lineBreaks.Replace(strings.ToValidUTF8(string(b), "\uFFFD"))
+	return showControls(lineBreaks.Replace(strings.ToValidUTF8(string(b), "\uFFFD")))
+}
+
+// showControls replaces each control character other than "\n" and "\t" (C0, DEL and C1) with its \xNN escape, so a
+// body cannot send an escape sequence to a terminal and nothing is hidden from the reader.
+func showControls(s string) string {
+	if !strings.ContainsFunc(s, isHiddenControl) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if isHiddenControl(r) {
+			fmt.Fprintf(&b, "\\x%02x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isHiddenControl(r rune) bool {
+	return r != '\n' && r != '\t' && (r < 0x20 || (r >= 0x7f && r <= 0x9f))
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
