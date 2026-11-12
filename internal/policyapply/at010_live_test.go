@@ -63,7 +63,10 @@ func at010Must[T any](v T, err error) T {
 	return v
 }
 
-func newAT010Env(t *testing.T) *at010Env {
+func newAT010Env(t *testing.T) *at010Env { return newLiveEnv(t, set1()) }
+
+// newLiveEnv starts the two-server cluster holding the compiled generation 1 of prev. AT-010 and AT-014 share it.
+func newLiveEnv(t *testing.T, prev listset.ListSet) *at010Env {
 	t.Helper()
 	e := &at010Env{t: t, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: &MemIssueRecord{}}
 	e.op = at010Must(nkeys.CreateOperator())
@@ -82,7 +85,7 @@ func newAT010Env(t *testing.T) *at010Env {
 	e.scoped["foo.c"] = at010Must(nkeys.CreateAccount())
 	e.mint = &ProbeMinter{Signer: e, Account: e.acctPub, Record: e.rec}
 
-	gen1 := e.account(compile(t, set1()))
+	gen1 := e.account(compile(t, prev))
 	e.setCurrent(gen1)
 	for _, n := range []string{"s1", "s2"} {
 		e.dirs[n] = t.TempDir()
