@@ -128,6 +128,12 @@ func statusText(src *statusSource) string {
 	if l := legacyInboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
+	if l := inboxLine(src); l != "" {
+		lines = append(lines, l)
+	}
+	if l := legacyInboxEvictionLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
@@ -460,6 +466,38 @@ func legacyInboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.LegacyInboxLine(); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// inboxLine says when the endpoint's own inbox has evicted mail it never received, or is near full. Empty when there is
+// nothing to say, from a shell (nothing is connected), with no running endpoint, and whenever the server will not or
+// cannot show the inbox: it is advice, and status never fails over it.
+func inboxLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.InboxEvictionLine(context.Background()); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// legacyInboxEvictionLine is inboxLine for the legacy inbox of an endpoint whose record carries an alias.
+func legacyInboxEvictionLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.LegacyInboxEvictionLine(context.Background()); ok {
 		return redactText(l)
 	}
 	return ""
