@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -24,8 +23,10 @@ const issuedUsage = `usage: mashctl issued list [--json]
        mashctl issued check [--json] [--sys-creds FILE] [--servers N]
 `
 
-// The exit codes of `mashctl issued check`: 0 no unrecorded key and no revoked key is connected; 1 at least one is;
-// 2 the check could not be made (usage, a connection, a server that did not answer).
+// The exit codes of `mashctl issued check`: 0 no unrecorded key and no revoked key is connected and the scan was
+// complete; 1 a finding (an unrecorded or revoked key is connected), even if the scan was incomplete, because a key found
+// is certain; 2 nothing was found but the scan was incomplete or failed (usage, a connection, a server that did not
+// answer or whose list could not be read whole). The output always says when the scan was incomplete.
 const (
 	issuedClean    = 0
 	issuedFinding  = 1
@@ -173,13 +174,6 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 	return 0
 }
 
-// issuedKnown is a user mash itself uses, taken as recorded though the record may not hold it: the admin user the
-// command connected with and the system account user it queries with, read from their creds files' JWTs.
-type issuedKnown struct {
-	PublicKey string `json:"public_key"`
-	Source    string `json:"source"`
-}
-
 // issuedFinding is a connected key the record does not hold.
 type issuedFindingOut struct {
 	Server    string   `json:"server"`
@@ -214,12 +208,11 @@ type issuedServers struct {
 }
 
 type issuedSummary struct {
-	Connected      int `json:"connected"`
-	Recorded       int `json:"recorded"`
-	Unrecorded     int `json:"unrecorded"`
-	RevokedConn    int `json:"revoked_connected"`
-	NotConnected   int `json:"recorded_not_connected"`
-	KnownMashUsers int `json:"known_mash_users"`
+	Connected    int `json:"connected"`
+	Recorded     int `json:"recorded"`
+	Unrecorded   int `json:"unrecorded"`
+	RevokedConn  int `json:"revoked_connected"`
+	NotConnected int `json:"recorded_not_connected"`
 }
 
 // issuedCheck is what `mashctl issued check --json` prints. The slices are never nil, so the JSON is stable.
@@ -234,26 +227,7 @@ type issuedCheck struct {
 	Unrecorded    []issuedFindingOut   `json:"unrecorded"`
 	RevokedConn   []issuedRevokedConn  `json:"revoked_connected"`
 	NotConnected  []issuedNotConnected `json:"recorded_not_connected"`
-	Known         []issuedKnown        `json:"known_mash_users"`
 	Summary       issuedSummary        `json:"summary"`
-}
-
-// issuedCredsKey is the public key of the user in the creds file at path, read from its JWT; the seed is never read.
-func issuedCredsKey(path string) (string, error) {
-	raw, err := config.ReadCredsFile(path)
-	if err != nil {
-		return "", err
-	}
-	defer clear(raw)
-	tok, err := jwt.ParseDecoratedJWT(raw)
-	if err != nil {
-		return "", errors.New("no readable JWT")
-	}
-	uc, err := jwt.DecodeUserClaims(tok)
-	if err != nil {
-		return "", errors.New("no readable user JWT")
-	}
-	return uc.Subject, nil
 }
 
 func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, stdout, stderr io.Writer) int {
@@ -287,12 +261,16 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 		return fail("%v", cerr)
 	}
 
-	rep := issuedCheck{Account: account, RecordPresent: present, Unrecorded: []issuedFindingOut{}, RevokedConn: []issuedRevokedConn{}, NotConnected: []issuedNotConnected{}, Known: []issuedKnown{}}
+	rep := issuedCheck{Account: account, RecordPresent: present, Unrecorded: []issuedFindingOut{}, RevokedConn: []issuedRevokedConn{}, NotConnected: []issuedNotConnected{}}
 	rep.Servers = issuedServers{Answered: []string{}, Missing: []string{}, Expected: max(set.Expected, servers, len(set.Names))}
 	answered := map[string]bool{}
+	var unreconciled []string
 	for _, s := range conns {
 		answered[s.Name] = true
 		rep.Servers.Answered = append(rep.Servers.Answered, s.Name)
+		if s.Incomplete != "" {
+			unreconciled = append(unreconciled, s.Incomplete)
+		}
 	}
 	for _, n := range set.Names {
 		if !answered[n] {
@@ -305,29 +283,23 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	case len(rep.Servers.Missing) > 0:
 		rep.Incomplete = fmt.Sprintf("%d server(s) answered the ping but not the connection list: %s", len(rep.Servers.Missing), config.Clean(strings.Join(rep.Servers.Missing, ", ")))
 	}
+	if len(unreconciled) > 0 {
+		why := strings.Join(unreconciled, "; ")
+		if rep.Incomplete != "" {
+			why = rep.Incomplete + "; " + why
+		}
+		rep.Incomplete = why
+	}
 	rep.Complete = rep.Incomplete == ""
 
 	recorded := map[string]store.Issued{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = r
 	}
-	known := map[string]bool{}
-	addKnown := func(path, source string) {
-		if path == "" {
-			return
-		}
-		if k, err := issuedCredsKey(path); err == nil && k != "" {
-			if !known[k] {
-				known[k] = true
-				rep.Known = append(rep.Known, issuedKnown{PublicKey: k, Source: source})
-			}
-		}
-	}
-	addKnown(cfg.AdminCreds, "admin creds of this command")
-	if p, err := sysCredsPath(o.sysCreds, env, cfg); err == nil {
-		addKnown(p, "system account creds of this command")
-	}
-
+	// No key is exempt: not the admin user this command connected with, not the system account user. A connected key is
+	// clean only if it is in the record. The query is for the mash account alone (acc in the CONNZ request), and the
+	// system account's users (the sys creds this command uses among them) are never in that account's connection list,
+	// so they need no exemption; the admin user is in the account, and `init` and `adopt --mint-admin` record it.
 	connected := map[string]bool{}
 	for _, s := range conns {
 		for _, c := range s.Conns {
@@ -341,9 +313,6 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 					rep.RevokedConn = append(rep.RevokedConn, issuedRevokedConn{Server: s.Name, Account: c.Account, PublicKey: c.Key,
 						Address: r.Address, Kind: r.Kind, Purpose: r.EffectivePurpose(), RevokedAt: r.RevokedAt})
 				}
-				continue
-			}
-			if known[c.Key] {
 				continue
 			}
 			rep.Unrecorded = append(rep.Unrecorded, issuedFindingOut{Server: s.Name, Account: c.Account, PublicKey: c.Key,
@@ -371,7 +340,6 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	rep.Summary.Recorded = len(recs)
 	rep.Summary.Unrecorded = len(rep.Unrecorded)
 	rep.Summary.NotConnected = len(rep.NotConnected)
-	rep.Summary.KnownMashUsers = len(rep.Known)
 	rep.Clean = len(rep.Unrecorded) == 0 && len(rep.RevokedConn) == 0 && rep.Complete
 
 	code := issuedClean
@@ -419,10 +387,10 @@ func printIssuedCheck(rep issuedCheck, w io.Writer) {
 		}
 	}
 	if !rep.Complete {
-		fmt.Fprintf(w, "INCOMPLETE: %s; keys connected to a server that did not answer were not checked\n", rep.Incomplete)
+		fmt.Fprintf(w, "INCOMPLETE: %s; keys connected to a server that did not answer, or whose list was not read whole, were not checked\n", rep.Incomplete)
 	}
-	fmt.Fprintf(w, "summary: %d connected, %d unrecorded, %d revoked but connected, %d recorded (%d not connected), %d known mash users, %d of %d servers answered\n",
-		rep.Summary.Connected, rep.Summary.Unrecorded, rep.Summary.RevokedConn, rep.Summary.Recorded, rep.Summary.NotConnected, rep.Summary.KnownMashUsers,
+	fmt.Fprintf(w, "summary: %d connected, %d unrecorded, %d revoked but connected, %d recorded (%d not connected), %d of %d servers answered\n",
+		rep.Summary.Connected, rep.Summary.Unrecorded, rep.Summary.RevokedConn, rep.Summary.Recorded, rep.Summary.NotConnected,
 		len(rep.Servers.Answered), rep.Servers.Expected)
 	if rep.Clean {
 		fmt.Fprintln(w, "ok: every connected key was issued by mash and none is revoked")

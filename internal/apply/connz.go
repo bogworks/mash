@@ -18,8 +18,14 @@ const (
 	connzPingSubject   = "$SYS.REQ.SERVER.PING.CONNZ"
 	connzDirectSubject = "$SYS.REQ.SERVER.%s.CONNZ"
 
-	// DefaultConnzPage is how many connections one CONNZ reply carries (nats-server's own default).
-	DefaultConnzPage = 1024
+	// DefaultConnzPage is how many connections one CONNZ reply asks for. nats-server's own default is 1024, but it
+	// honours a larger limit (up to the number of connections it has), so a typical scan is one page: one snapshot, no
+	// offset to drift. The reply carries each connection's JWT (auth on), so the page is not made unbounded.
+	DefaultConnzPage = 8192
+
+	// connzScanTries is how many times one server's whole scan is made when its pages do not reconcile (a connection
+	// closed or opened between two pages); after that the server is marked incomplete.
+	connzScanTries = 3
 
 	// connzTotal bounds the wait for the servers a ping should reach; connzSettle ends the wait when no set of
 	// expected servers is known; connzPageTimeout bounds one follow-up page request.
@@ -49,6 +55,11 @@ type ConnzServer struct {
 	Conns []ConnzConn
 	// Total is the server's own count of matching connections; len(Conns) equals it when every page was read.
 	Total int
+	// Incomplete is non-empty when the pages could not be made to reconcile with the server's count after
+	// connzScanTries scans (the server's connections kept changing between pages). Conns then holds what the last
+	// scan read, each connection once, and the list is NOT the whole list: a caller must treat the server like one
+	// that did not answer.
+	Incomplete string
 }
 
 type connzReply struct {
@@ -142,9 +153,8 @@ func (n NATS) Connz(ctx context.Context, account string, expect []string, page i
 		if len(seen) > maxServers {
 			return out, fmt.Errorf("%w: more than %d servers answered CONNZ", ErrServerSetRefused, maxServers)
 		}
-		cs := ConnzServer{Name: name, ID: r.Server.ID, Total: r.Data.Total}
-		cs.add(r)
-		if err := n.connzPages(ctx, &cs, account, page); err != nil {
+		cs := ConnzServer{Name: name, ID: r.Server.ID}
+		if err := n.connzScan(ctx, &cs, account, page, r); err != nil {
 			return out, err
 		}
 		out = append(out, cs)
@@ -178,36 +188,80 @@ func allSeen(expect []string, seen map[string]bool) bool {
 	return true
 }
 
-func (cs *ConnzServer) add(r connzReply) {
-	for _, c := range r.Data.Conns {
-		cs.Conns = append(cs.Conns, ConnzConn{Key: c.User, Account: c.Account, Name: c.Name, IssuerKey: c.IssuerKey, Tags: c.Tags, CID: c.CID})
+// connzScan reads one server's connections whole. The first reply (the ping's) is the first attempt's first page; the
+// further pages, and the first page of a retry, are asked for on the server's own subject. Every page is a fresh
+// snapshot of the server, so a connection that closes or opens between two pages shifts the list; a scan is therefore
+// accepted only when the connections it collected (a set keyed by CID, one server's) are as many as the total the
+// server reported on its first page AND on its last, and none came twice. Otherwise the whole scan is made again, up
+// to connzScanTries times, and then the server is marked Incomplete.
+func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, page int, first connzReply) error {
+	r := first
+	for attempt := 1; ; attempt++ {
+		ok, err := n.connzScanOnce(ctx, cs, account, page, r)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+		if attempt == connzScanTries {
+			cs.Incomplete = fmt.Sprintf("server %s's connection list changed while it was read (%d scans did not agree with its own count of %d): the list is not complete", config.Clean(cs.Name), connzScanTries, cs.Total)
+			return nil
+		}
+		if r, err = n.connzFetch(ctx, cs, account, 0, page); err != nil {
+			return err
+		}
 	}
 }
 
-// connzPages reads the pages after the first from the server's own subject until it has all of its Total.
-func (n NATS) connzPages(ctx context.Context, cs *ConnzServer, account string, page int) error {
-	for len(cs.Conns) < cs.Total {
-		if cs.ID == "" {
-			return fmt.Errorf("server %s has more connections than one CONNZ page and gave no id to ask again", config.Clean(cs.Name))
-		}
-		if cs.Total > maxConnzConns {
-			return fmt.Errorf("server %s reports %d connections: refusing to read more than %d", config.Clean(cs.Name), cs.Total, maxConnzConns)
-		}
-		rctx, cancel := context.WithTimeout(ctx, connzPageTimeout)
-		msg, err := n.Conn.RequestWithContext(rctx, fmt.Sprintf(connzDirectSubject, cs.ID), connzOptions(account, len(cs.Conns), page))
-		cancel()
-		if err != nil {
-			return fmt.Errorf("server %s: the next CONNZ page: %w", config.Clean(cs.Name), err)
-		}
-		var r connzReply
-		if json.Unmarshal(msg.Data, &r) != nil || r.Data == nil || r.Error != nil {
-			return fmt.Errorf("server %s: the next CONNZ page could not be read", config.Clean(cs.Name))
-		}
-		before := len(cs.Conns)
-		cs.add(r)
-		if len(cs.Conns) == before {
-			return fmt.Errorf("server %s: a CONNZ page came back empty before its %d connections were read", config.Clean(cs.Name), cs.Total)
+func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, offset, page int) (connzReply, error) {
+	var r connzReply
+	if cs.ID == "" {
+		return r, fmt.Errorf("server %s has more connections than one CONNZ page and gave no id to ask again", config.Clean(cs.Name))
+	}
+	rctx, cancel := context.WithTimeout(ctx, connzPageTimeout)
+	defer cancel()
+	msg, err := n.Conn.RequestWithContext(rctx, fmt.Sprintf(connzDirectSubject, cs.ID), connzOptions(account, offset, page))
+	if err != nil {
+		return r, fmt.Errorf("server %s: the next CONNZ page: %w", config.Clean(cs.Name), err)
+	}
+	if json.Unmarshal(msg.Data, &r) != nil || r.Data == nil || r.Error != nil {
+		return r, fmt.Errorf("server %s: the next CONNZ page could not be read", config.Clean(cs.Name))
+	}
+	return r, nil
+}
+
+// connzScanOnce is one scan from the first page r. It reports whether the pages reconciled with the server's counts.
+func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string, page int, r connzReply) (bool, error) {
+	cs.Total, cs.Conns = r.Data.Total, nil
+	if cs.Total > maxConnzConns {
+		return false, fmt.Errorf("server %s reports %d connections: refusing to read more than %d", config.Clean(cs.Name), cs.Total, maxConnzConns)
+	}
+	seen := map[uint64]bool{}
+	dup := false
+	add := func(r connzReply) {
+		for _, c := range r.Data.Conns {
+			if seen[c.CID] {
+				dup = true
+				continue
+			}
+			seen[c.CID] = true
+			cs.Conns = append(cs.Conns, ConnzConn{Key: c.User, Account: c.Account, Name: c.Name, IssuerKey: c.IssuerKey, Tags: c.Tags, CID: c.CID})
 		}
 	}
-	return nil
+	add(r)
+	received, last := len(r.Data.Conns), r.Data.Total
+	for received < cs.Total && !dup {
+		next, err := n.connzFetch(ctx, cs, account, received, page)
+		if err != nil {
+			return false, err
+		}
+		if len(next.Data.Conns) == 0 {
+			break // the server's list shrank under the scan
+		}
+		received += len(next.Data.Conns)
+		last = next.Data.Total
+		add(next)
+	}
+	return !dup && len(cs.Conns) == cs.Total && last == cs.Total, nil
 }

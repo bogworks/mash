@@ -43,7 +43,10 @@ unset.
 
 Writers. `mashctl add` and `mashctl reissue` write the entry after the user is minted in memory and before the directory
 record, the staged file or the creds file, so a failed write issues nothing. The admin user that `mashctl init` connects
-with is recorded by `init`, which covers `init --local --start` and `adopt --mint-admin` followed by `mashctl init`.
+with is recorded by `init`, which covers `init --local --start`. `adopt --mint-admin` records the admin user it mints itself,
+right after the minted user connected and before the creds file is written (kind `admin`, purpose `issue`, the bucket
+created on demand); if the write fails, adopt fails, says the admin credentials were not recorded and writes no creds
+file. An admin creds file given with `--admin-creds` is recorded by the next `mashctl init`.
 `mint.Mint` stays free of network I/O, and the callers write.
 
 Append-only. A re-issue of the same key adds a revision under that key; a rotation adds an entry for the new key and
@@ -54,11 +57,13 @@ keeps it. Marking is best effort: a failure prints a warning and never fails or 
 never recorded is not an error. The account JWT stays the authority on what is revoked; `revoked_at` is the record's note
 of it.
 
-The bucket. It has file storage, no TTL, a history of 8, an 8 MiB cap and discard-new when full, so a full bucket refuses
+The bucket. It has file storage, no TTL, a history of 64 revisions per key (the most a KV bucket allows), an 8 MiB cap and discard-new when full, so a full bucket refuses
 new issues and never loses a record. Its stream refuses rollup, message delete and purge, set at creation
 (`store.CreateIssuedBucket`, the way the lease bucket is made). `mashctl init` creates it. A deployment from before the
 record gets it on the first `add` or `reissue`, created over the admin connection; an existing bucket that is not as mash
-makes it is refused for writing (fail closed) and `init` reports it, and mash does not alter it.
+makes it is refused for writing (fail closed) and `init` reports it. The one change `init` makes to an existing bucket is
+to raise a history below 64 (the first version kept 8) to 64, a stream update that loses no record; a bucket whose history
+is 8 or more is accepted by verification.
 
 Access. No permission list mash makes for an endpoint, its zone key's template or a new-form endpoint grants anything on
 `$KV.mash-issued.>` or the stream's `$JS.API` subjects. A test asserts this for each list and against a live endpoint
@@ -67,14 +72,22 @@ holder of the admin creds can add a record: the record guards against signing-ke
 
 The check. `mashctl issued check` connects with the system account creds and sends `$SYS.REQ.SERVER.PING.CONNZ` with auth
 on and the MASH account as filter. The server reports a JWT user's public key as `authorized_user`, with the connection
-name, the signing key and the tags. It pages through each server's connections (further requests on the server's own
-subject), collects the keys per server and reports every connected key that is neither in the record nor one of the
-admin and system users the command itself uses. Recorded keys that are not connected are informational. A connected key that the record
+name, the signing key and the tags. It asks for a page large enough that a typical scan is one reply, and pages through
+a server with more connections (further requests on the server's own subject). Each page is a fresh snapshot, so a
+connection that closes or opens between two pages can repeat one connection and skip another. mash collects the
+connections of a server into a set keyed by connection id and accepts the scan only when the set is as large as the total
+the server reported on its first and on its last page and no connection came twice; otherwise it scans that server again,
+up to 3 times, and then treats the server like one that did not answer (incomplete). It reports every connected key that
+is not in the record. No key is exempt: the admin user the command connects with is in the account and must be recorded
+(by `init` or `adopt --mint-admin`), and the system account's users, the system creds among them, are never in the MASH
+account's connection list. Recorded keys that are not connected are informational. A connected key that the record
 holds as revoked is a separate finding, `revoked key still connected`, because the revocation did not take effect. Exit 0:
 no unrecorded key and no revoked key connected. Exit 1: at least one of either. A recorded key of any purpose counts as
-issued by mash. Exit 2: usage, connection failure, a server that did not answer, or a
-server set that cannot be shown complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `policy apply` does). A finding on
-the servers that answered is reported even when the set is incomplete.
+issued by mash. Exit 2: nothing was found, but the scan was incomplete or failed: usage, connection failure, a server that did not
+answer or whose list could not be read whole, or a server set that cannot be shown complete (a cluster needs `--servers N`
+or `MASH_SERVERS`, as `policy apply` does). A finding wins over incompleteness: a key found on the servers that answered is
+certain, so it exits 1 even when the scan was incomplete. The text and the JSON (`incomplete`, with the reason) always say
+when the scan was incomplete, so exit 1 never hides it.
 
 Users issued before the record are not in it. They show as unrecorded until `mashctl reissue NAME` records them.
 
@@ -88,6 +101,8 @@ Users issued before the record are not in it. They show as unrecorded until `mas
 * Bad, because the record rests on the admin creds as well as on the signing keys.
 * Bad, because users issued before the record are reported until they are reissued.
 * Bad, because an issue now needs one more write to the server, and is refused when it fails.
+* Bad, because the history is capped: the last 64 revisions of a key are kept, and a key is re-recorded only on a reissue
+  that keeps it, so reaching the cap would take 64 such reissues of one key; the 65th would drop the oldest revision.
 
 ### Confirmation
 
@@ -96,7 +111,11 @@ key and keeping the old one, and the admin user recorded by `init`; an add refus
 cannot be written; the endpoint permission lists granting nothing on the bucket and a live endpoint refused every
 operation on it; the stream's configuration and the refusal of an unhardened bucket; the check against an operator-mode
 server, clean for issued users and reporting exactly one user signed with a zone key outside `mashctl`, with exit codes,
-the text and JSON forms, an incomplete server set refused and paging over several CONNZ pages; the purpose written by each
+the text and JSON forms, an incomplete server set refused, paging over several CONNZ pages and a scan whose pages shift
+reported as incomplete, never clean; the admin user recorded by `adopt --mint-admin` (and adopt failing without a creds
+file when the record cannot be written); more than 8 revisions of one key kept up to the cap and an old history-8 bucket
+raised by `init`; an admin key that is connected and not recorded reported, with no exemption; the incomplete flag shown
+beside a finding; the purpose written by each
 path and refused when unknown; `revoked_at` set once, idempotently and without losing a field to a concurrent write; the
 revoking paths marking after success and tolerating a failed mark; and the check reporting a revoked key that is still
 connected.

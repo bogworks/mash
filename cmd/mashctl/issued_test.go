@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/store"
@@ -54,6 +57,23 @@ func (h *addEnv) issuedHistory(pub string) int {
 		h.t.Fatal(err)
 	}
 	return len(hist)
+}
+
+// issuedCredsKey is the public key of the user in the creds file at path, read from its JWT.
+func issuedCredsKey(path string) (string, error) {
+	raw, err := readCreds(path)
+	if err != nil {
+		return "", err
+	}
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return "", err
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil {
+		return "", err
+	}
+	return uc.Subject, nil
 }
 
 func credsSubject(t *testing.T, path string) (*jwt.UserClaims, string) {
@@ -326,7 +346,7 @@ func TestIssuedJSONShape(t *testing.T) {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	want := []string{"account", "clean", "complete", "known_mash_users", "record_present", "recorded_not_connected", "revoked_connected", "servers", "summary", "unrecorded"}
+	want := []string{"account", "clean", "complete", "record_present", "recorded_not_connected", "revoked_connected", "servers", "summary", "unrecorded"}
 	if !slices.Equal(keys, want) {
 		t.Errorf("keys %v, want %v", keys, want)
 	}
@@ -339,7 +359,7 @@ func TestIssuedJSONShape(t *testing.T) {
 			t.Errorf("servers lacks %s", k)
 		}
 	}
-	for _, k := range []string{"connected", "recorded", "unrecorded", "recorded_not_connected", "known_mash_users", "revoked_connected"} {
+	for _, k := range []string{"connected", "recorded", "unrecorded", "recorded_not_connected", "revoked_connected"} {
 		if _, ok := m["summary"].(map[string]any)[k]; !ok {
 			t.Errorf("summary lacks %s", k)
 		}
@@ -608,5 +628,143 @@ func TestIssuedListShowsAMissingPurposeAsIssue(t *testing.T) {
 	printIssuedList([]store.Issued{old}, true, true, &buf)
 	if !strings.Contains(buf.String(), `"purpose": "issue"`) || strings.Contains(buf.String(), "revoked_at") {
 		t.Errorf("%s", buf.String())
+	}
+}
+
+// --- no exemption, adopt records the admin, incompleteness --------------------------------------------------------
+
+// mintUnrecordedAdmin writes a new admin creds file for the account that mash never recorded and returns its path and key.
+func mintUnrecordedAdmin(t *testing.T, e *applyEnv) (string, string) {
+	t.Helper()
+	akp, _, err := e.ks.Account()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := bootstrap.MintAdminCreds(akp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(e.root, "other-admin.creds")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := issuedCredsKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, pub
+}
+
+// The admin creds the command itself connects with are not exempt: an admin key the record does not hold is reported
+// (it is connected, by this very command), and once recorded it is clean.
+func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
+	e := newDriftEnv(t)
+	if r, errb, code := e.issuedCheck(); code != 0 || !r.Clean {
+		t.Fatalf("clean state: %d %+v %s", code, r, errb)
+	}
+	path, pub := mintUnrecordedAdmin(t, e)
+	e.env["MASH_ADMIN_CREDS"] = path
+	r, errb, code := e.issuedCheck()
+	if code != 1 || r.Clean || len(r.Unrecorded) != 1 || r.Unrecorded[0].PublicKey != pub {
+		t.Fatalf("an unrecorded admin was not reported: %d %+v %s", code, r, errb)
+	}
+	out, _, code := e.run("issued", "check")
+	if code != 1 || !strings.Contains(out, "UNRECORDED key "+pub) {
+		t.Fatalf("text: %d %s", code, out)
+	}
+
+	// Record it (as init and adopt do) and the same connection is clean.
+	adm, ctx, done := e.admin()
+	raw, err := readCreds(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctl.RecordAdminCreds(ctx, adm, "alice", raw); err != nil {
+		t.Fatal(err)
+	}
+	done()
+	if r, errb, code := e.issuedCheck(); code != 0 || !r.Clean || len(r.Unrecorded) != 0 {
+		t.Fatalf("a recorded admin is not clean: %d %+v %s", code, r, errb)
+	}
+}
+
+// `adopt --mint-admin` records the admin user it mints, before the creds file exists, and `init` afterwards still works.
+func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	a := newAdopter(t, e)
+	out, errb, code := a.adopt("--mint-admin")
+	if code != 0 || !strings.Contains(out, "recorded the admin user in the issue record") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	path := filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")
+	pub, err := issuedCredsKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adm, ctx, done := e.admin()
+	recs, present, err := adm.Issued(ctx)
+	done()
+	if err != nil || !present || len(recs) != 1 || recs[0].PublicKey != pub || recs[0].Kind != store.IssuedAdmin || recs[0].Purpose != store.PurposeIssue || recs[0].Owner != "alice" {
+		t.Fatalf("record after adopt: %+v %v %v", recs, present, err)
+	}
+	// An adopt again keeps the file and records again (same key, one more revision); init after that is fine.
+	if out, errb, code := a.adopt("--mint-admin"); code != 0 {
+		t.Fatalf("second adopt %d\n%s\n%s", code, out, errb)
+	}
+	if out, errb, code := a.run("init"); code != 0 {
+		t.Fatalf("init %d\n%s\n%s", code, out, errb)
+	}
+	adm, ctx, done = e.admin()
+	recs, _, err = adm.Issued(ctx)
+	done()
+	if err != nil || len(recs) != 1 || recs[0].PublicKey != pub {
+		t.Fatalf("record after init: %+v %v", recs, err)
+	}
+}
+
+// If the record cannot be written, adopt fails loudly, says the admin credentials were NOT recorded and leaves no creds file.
+func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	nc := e.connect(natsauth.UserCredentials(e.pl.Creds))
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := js.CreateKeyValue(context.Background(), store.IssuedConfig()); err != nil { // allows rollup: not hardened
+		t.Fatal(err)
+	}
+	a := newAdopter(t, e)
+	out, errb, code := a.adopt("--mint-admin")
+	if code == 0 || !strings.Contains(out+errb, "NOT recorded") || !strings.Contains(out+errb, "no credential was handed out") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	if _, err := os.Stat(filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")); err == nil {
+		t.Error("the creds file was left behind")
+	}
+}
+
+// The scan is incomplete AND a finding exists: exit 1 (the finding wins), and the JSON and the text both still say the scan
+// was incomplete.
+func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
+	e := newDriftEnv(t)
+	e.env["MASH_SERVERS"] = "2"
+	e.connect(e.mint("a", "rogue"))
+	r, _, code := e.issuedCheck()
+	if code != 1 || len(r.Unrecorded) != 1 || r.Complete || r.Clean || r.Incomplete == "" {
+		t.Fatalf("%d %+v", code, r)
+	}
+	out, _, code := e.run("issued", "check", "--json")
+	if code != 1 || !strings.Contains(out, `"incomplete": "`) || !strings.Contains(out, `"complete": false`) {
+		t.Fatalf("json: %d\n%s", code, out)
+	}
+	text, _, code := e.run("issued", "check")
+	if code != 1 || !strings.Contains(text, "UNRECORDED key") || !strings.Contains(text, "INCOMPLETE: ") {
+		t.Fatalf("text: %d\n%s", code, text)
+	}
+	// Nothing found and still incomplete is exit 2.
+	e2 := newDriftEnv(t)
+	e2.env["MASH_SERVERS"] = "2"
+	if r, _, code := e2.issuedCheck(); code != 2 || r.Incomplete == "" || r.Clean {
+		t.Fatalf("no finding: %d %+v", code, r)
 	}
 }

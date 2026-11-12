@@ -11,9 +11,15 @@ import (
 // IssuedStreamName is the stream that backs the issue record's bucket.
 const IssuedStreamName = "KV_" + IssuedBucket
 
-// IssuedHistory is the most revisions the issue record keeps of one key. A re-issue of the same user key adds a
-// revision; eight keeps a trail of the last eight issues of a key.
-const IssuedHistory = 8
+// IssuedHistory is the most revisions the issue record keeps of one key: 64, the most a JetStream KV bucket allows
+// (nats.go's KeyValueMaxHistory). A key is re-recorded only by a reissue that keeps it, so 64 is far more than a key
+// sees; the cap is still a cap: a 65th revision of one key evicts the oldest, and the record holds the last 64.
+const IssuedHistory = 64
+
+// IssuedMinHistory is the smallest per-key history verification accepts. The first version of the record kept 8
+// revisions of a key; such a bucket is accepted and `mash admin init` raises it to IssuedHistory (a raise loses
+// nothing).
+const IssuedMinHistory = 8
 
 // IssuedMaxBytes caps the issue record's bucket. A record is a few hundred bytes. The stream discards new messages
 // when full, never an old record, so a full bucket refuses new issues (fail closed) and nothing is lost.
@@ -130,7 +136,8 @@ func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream) (jetstream.
 }
 
 // VerifyIssuedBucket reads the issue record's stream and returns an error wrapping ErrIssuedBucket unless it refuses
-// rollup, delete and purge, keeps no TTL and discards new messages when full. It never changes the bucket.
+// rollup, delete and purge, keeps no TTL, discards new messages when full and keeps at least IssuedMinHistory
+// revisions of a key. It never changes the bucket.
 func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 	s, err := js.Stream(ctx, IssuedStreamName)
 	if err != nil {
@@ -155,8 +162,8 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 		bad = "is not on file storage"
 	case c.Discard != jetstream.DiscardNew:
 		bad = "discards old records when full"
-	case c.MaxMsgsPerSubject < IssuedHistory:
-		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", IssuedHistory)
+	case c.MaxMsgsPerSubject < IssuedMinHistory:
+		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", IssuedMinHistory)
 	}
 	if bad != "" {
 		return fmt.Errorf("mash: %s %s: %w; recreate it as `mash admin init` makes it, copying its records", IssuedBucket, bad, ErrIssuedBucket)

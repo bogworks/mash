@@ -205,7 +205,9 @@ func (a *Admin) Issued(ctx context.Context) (recs []store.Issued, present bool, 
 	return recs, true, nil
 }
 
-// initIssued creates the issue record's bucket, or verifies an existing one. It never alters an existing bucket.
+// initIssued creates the issue record's bucket, or verifies an existing one. An existing bucket is altered in one way
+// only: a per-key history below store.IssuedHistory (the first version kept 8) is raised to it, a stream update that
+// loses no record. Everything else about it is only verified.
 func (a *Admin) initIssued(ctx context.Context) error {
 	_, err := a.js.KeyValue(ctx, store.IssuedBucket)
 	switch {
@@ -217,5 +219,24 @@ func (a *Admin) initIssued(ctx context.Context) error {
 	case err != nil:
 		return fmt.Errorf("mash: bucket %s: %w", store.IssuedBucket, err)
 	}
-	return store.VerifyIssuedBucket(ctx, a.js)
+	if err := store.VerifyIssuedBucket(ctx, a.js); err != nil {
+		return err
+	}
+	s, err := a.js.Stream(ctx, store.IssuedStreamName)
+	if err != nil {
+		return fmt.Errorf("mash: bucket %s: %w", store.IssuedBucket, err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("mash: bucket %s: %w", store.IssuedBucket, err)
+	}
+	if info.Config.MaxMsgsPerSubject >= store.IssuedHistory {
+		return nil
+	}
+	sc := info.Config
+	sc.MaxMsgsPerSubject = store.IssuedHistory
+	if _, err := a.js.UpdateStream(ctx, sc); err != nil {
+		return fmt.Errorf("mash: bucket %s: raising the history to %d: %w", store.IssuedBucket, store.IssuedHistory, err)
+	}
+	return nil
 }

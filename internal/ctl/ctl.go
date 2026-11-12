@@ -759,6 +759,13 @@ func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) er
 		return fmt.Errorf("mash: admin credentials: %w", err)
 	}
 	defer clear(raw)
+	return RecordAdminCreds(ctx, a, cfg.Owner, raw)
+}
+
+// RecordAdminCreds puts the admin user held in the creds bytes raw in the issue record (kind admin, purpose issue), over
+// a's connection. `mashctl init` uses it for the configured admin creds and `mashctl adopt --mint-admin` for the user it
+// mints, before the creds file is written. Only the public key and the JWT's name, tags and issue time are read.
+func RecordAdminCreds(ctx context.Context, a *madmin.Admin, owner string, raw []byte) error {
 	tok, err := jwt.ParseDecoratedJWT(raw)
 	if err != nil {
 		return errors.New("mash: admin credentials hold no readable JWT")
@@ -771,7 +778,7 @@ func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) er
 	if uc.IssuedAt == 0 {
 		issued = ""
 	}
-	return a.RecordIssued(ctx, store.Issued{PublicKey: uc.Subject, Address: uc.Name, Owner: cfg.Owner, Kind: store.IssuedAdmin,
+	return a.RecordIssued(ctx, store.Issued{PublicKey: uc.Subject, Address: uc.Name, Owner: owner, Kind: store.IssuedAdmin,
 		Tags: []string(uc.Tags), IssuedAt: issued, Purpose: store.PurposeIssue})
 }
 

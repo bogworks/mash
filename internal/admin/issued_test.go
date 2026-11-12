@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -154,7 +155,7 @@ func TestLiveEndpointCannotTouchIssuedRecord(t *testing.T) {
 	}
 }
 
-// Init makes the bucket as the record needs it: history 8, no TTL, file storage, and a stream that refuses rollup,
+// Init makes the bucket as the record needs it: history 64, no TTL, file storage, and a stream that refuses rollup,
 // delete and purge, even to the admin.
 func TestInitCreatesHardenedIssuedBucket(t *testing.T) {
 	_, a, js := setup(t)
@@ -168,7 +169,7 @@ func TestInitCreatesHardenedIssuedBucket(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := info.Config
-	if c.AllowRollup || !c.DenyDelete || !c.DenyPurge || c.MaxAge != 0 || c.Storage != jetstream.FileStorage || c.MaxMsgsPerSubject != 8 || c.Discard != jetstream.DiscardNew {
+	if c.AllowRollup || !c.DenyDelete || !c.DenyPurge || c.MaxAge != 0 || c.Storage != jetstream.FileStorage || c.MaxMsgsPerSubject != store.IssuedHistory || c.Discard != jetstream.DiscardNew {
 		t.Fatalf("stream config %+v", c)
 	}
 	key := userKey(t)
@@ -405,5 +406,74 @@ func TestMarkRevokedAndRecordIssuedRaceLoseNothing(t *testing.T) {
 		if i < 0 || recs[i].RevokedAt != "2026-01-01T00:00:00Z" || recs[i].Purpose != store.PurposeRotation || len(recs[i].Tags) != 1 {
 			t.Fatalf("round %d: a field was lost: %+v", round, recs)
 		}
+	}
+}
+
+// More than eight successive records of one key all stay, up to the cap of store.IssuedHistory; the cap is 64.
+func TestRecordIssuedKeepsRevisionsUpToTheCap(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	if store.IssuedHistory != 64 {
+		t.Fatalf("the cap is %d, want 64", store.IssuedHistory)
+	}
+	key := userKey(t)
+	for i := 0; i < store.IssuedHistory+3; i++ {
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Tags: []string{fmt.Sprint(i)}}); err != nil {
+			t.Fatalf("record %d: %v", i, err)
+		}
+		kv, err := js.KeyValue(ctx, store.IssuedBucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := kv.History(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := min(i+1, store.IssuedHistory); len(h) != want {
+			t.Fatalf("after %d records the history holds %d, want %d", i+1, len(h), want)
+		}
+	}
+}
+
+// A bucket from the first version (history 8) is accepted, and Init raises it to the cap without losing a record.
+func TestInitRaisesAnOldIssuedBucketHistory(t *testing.T) {
+	e := testenv.Start(t)
+	a, js := initOn(t, e)
+	ctx := context.Background()
+	if _, err := store.CreateIssuedBucket(ctx, js); err != nil {
+		t.Fatal(err)
+	}
+	s, err := js.Stream(ctx, store.IssuedStreamName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := info.Config
+	sc.MaxMsgsPerSubject = 8
+	if _, err := js.UpdateStream(ctx, sc); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifyIssuedBucket(ctx, js); err != nil {
+		t.Fatalf("a history 8 bucket was refused: %v", err)
+	}
+	key := userKey(t)
+	for i := 0; i < 5; i++ {
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	info, err = s.Info(ctx)
+	if err != nil || info.Config.MaxMsgsPerSubject != store.IssuedHistory {
+		t.Fatalf("history after init: %+v %v", info.Config.MaxMsgsPerSubject, err)
+	}
+	kv, _ := js.KeyValue(ctx, store.IssuedBucket)
+	if h, err := kv.History(ctx, key); err != nil || len(h) != 5 {
+		t.Fatalf("records after the raise: %d %v", len(h), err)
 	}
 }
