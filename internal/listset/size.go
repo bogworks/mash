@@ -14,7 +14,7 @@ import (
 const (
 	// DefaultMaxConnectLine is nats-server's default max_control_line, 4096 bytes. A user's JWT travels in the CONNECT
 	// line together with the signature, name and options, so the whole line must fit (the line is measured exactly, see SizeCheck).
-	DefaultMaxConnectLine = 4096
+	DefaultMaxConnectLine = policy.DefaultMaxControlLine
 	// DefaultMaxAccountJWT is the largest account claims nats-server accepts, 1 MiB: the jwt library's decoder cap
 	// (jwt.MaxTokenSize), which the server applies to every account JWT whatever max_payload says. It is
 	// budget.go's AccountJWTLimit.
