@@ -147,9 +147,9 @@ func applyResolver(t *testing.T, e *applyEnv) apply.Resolver {
 	return apply.NATS{Conn: nc}
 }
 
-// With no system credentials the applied-policy check cannot be made: unzone refuses and changes nothing, unless the
-// operator passes --no-policy-check, which says what it skipped and goes on.
-func TestUnzoneWithoutSysCredsRefusesUnlessNoPolicyCheck(t *testing.T) {
+// With no system credentials the applied-policy check cannot be made: unzone refuses and changes nothing. There is no
+// flag that skips the check: --no-policy-check is an unknown argument and changes nothing either.
+func TestUnzoneWithoutSysCredsRefusesAndHasNoBypass(t *testing.T) {
 	e := newApplyEnv(t, twoZones)
 	zonedFixture(t, e, false)
 	// The default sys.creds is found next to the admin creds: put a copy of the admin creds where there is none.
@@ -163,7 +163,7 @@ func TestUnzoneWithoutSysCredsRefusesUnlessNoPolicyCheck(t *testing.T) {
 	}
 	e.env["MASH_SYS_CREDS"], e.env["MASH_ADMIN_CREDS"] = "", alone
 	out, errb, code := e.run("unzone", "alpha")
-	if code != 1 || !strings.Contains(errb, "cannot check whether a zone policy is applied") || !strings.Contains(errb, "--no-policy-check") || strings.Contains(out, "unzoned") {
+	if code != 1 || !strings.Contains(errb, "cannot check whether a zone policy is applied") || strings.Contains(errb, "--no-policy-check") || strings.Contains(out, "unzoned") {
 		t.Fatalf("unzone: %d\n%s\n%s", code, out, errb)
 	}
 	recs, _ := openTestAdmin(t, e).List(context.Background())
@@ -171,12 +171,11 @@ func TestUnzoneWithoutSysCredsRefusesUnlessNoPolicyCheck(t *testing.T) {
 		t.Fatal("a refused unzone changed the record")
 	}
 	out, errb, code = e.run("unzone", "alpha", "--no-policy-check")
-	const skip = "mashctl: unzone: skipping the applied-zone-policy check (--no-policy-check): if a zone policy is applied, stay on the last release that has zones"
-	if code != 0 || !strings.Contains(out, "unzoned alpha") || !strings.Contains(errb, skip) {
+	if code != 2 || !strings.Contains(errb, "unknown") || strings.Contains(out, "unzoned") || strings.Contains(errb, "skipping") {
 		t.Fatalf("--no-policy-check: %d\n%s\n%s", code, out, errb)
 	}
 	recs, _ = openTestAdmin(t, e).List(context.Background())
-	if err := store.FirstZonedRecord(recs); err != nil {
-		t.Fatal(err)
+	if err := store.FirstZonedRecord(recs); err == nil {
+		t.Fatal("--no-policy-check changed the record")
 	}
 }

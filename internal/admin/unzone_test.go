@@ -153,3 +153,55 @@ func TestUnzoneResumesAfterACrashAtEitherStep(t *testing.T) {
 		t.Fatalf("record %+v", rec)
 	}
 }
+
+// An inbox that cannot be moved is refused before the directory record changes: the record keeps its zone.
+func TestUnzoneChecksTheStreamBeforeTheRecord(t *testing.T) {
+	cases := map[string]func(t *testing.T, js jetstream.JetStream){
+		"missing stream": func(t *testing.T, js jetstream.JetStream) {
+			if err := js.DeleteStream(context.Background(), "inbox-alpha"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"unexpected filter": func(t *testing.T, js jetstream.JetStream) {
+			s, _ := js.Stream(context.Background(), "inbox-alpha")
+			cfg := s.CachedInfo().Config
+			cfg.Subjects = append(cfg.Subjects, "agents.mail.*.o.other")
+			if _, err := js.UpdateStream(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"suspended": func(t *testing.T, js jetstream.JetStream) {
+			s, _ := js.Stream(context.Background(), "inbox-alpha")
+			cfg := s.CachedInfo().Config
+			saved, _ := json.Marshal(cfg.Subjects)
+			cfg.Metadata = map[string]string{store.MetaSuspendedSubjects: string(saved)}
+			cfg.Subjects = []string{store.SuspendedSubject("alpha")}
+			if _, err := js.UpdateStream(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, a, js := setup(t)
+			ctx := context.Background()
+			_, user := e.Mint(t, "alpha")
+			if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{Zone: "z1"}); err != nil {
+				t.Fatal(err)
+			}
+			breakIt(t, js)
+			kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+			before, _ := kv.Get(ctx, "alpha")
+			if changed, err := a.Unzone(ctx, "alpha"); err == nil || changed {
+				t.Fatalf("unzone: %v %v", changed, err)
+			}
+			after, _ := kv.Get(ctx, "alpha")
+			if after.Revision() != before.Revision() {
+				t.Fatalf("the record was rewritten: %s", after.Value())
+			}
+			if rec, err := store.ParseRecord("alpha", after.Value()); err != nil || rec.Zone != "z1" {
+				t.Fatalf("record %+v %v", rec, err)
+			}
+		})
+	}
+}

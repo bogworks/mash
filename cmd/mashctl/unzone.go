@@ -12,7 +12,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE] [--no-policy-check]\n  unzone does not reissue the endpoint's user; afterwards run: mashctl permissions NAME --nsc\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
+const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE]\n  unzone does not reissue the endpoint's user; afterwards run: mashctl permissions NAME --nsc\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
 
 // runUnzone is `mashctl unzone` (ADR 0091): it makes a zoned record five-token, moves its inbox stream's subjects to the
 // five-token mail subject without losing stored mail (admin.Unzone) and says how to reissue its permissions. It
@@ -20,15 +20,12 @@ const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE] [--no-policy-
 //
 // The applied-policy check reads the account JWT, which needs the system account credentials and the key store. It
 // fails safe: when either is not configured here, or the account JWT cannot be read or verified, the command refuses
-// and changes nothing. Only --no-policy-check skips the check, and it says on stderr that it did.
+// and changes nothing. There is no way to skip the check.
 func runUnzone(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var name, sysCreds string
-	var noPolicyCheck bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "--no-policy-check":
-			noPolicyCheck = true
 		case a == "--sys-creds" && i+1 < len(args):
 			i++
 			sysCreds = args[i]
@@ -64,28 +61,27 @@ func runUnzone(args []string, env func(string) string, lookup config.Lookup, std
 	announceTarget(cfg, env, stderr, &sysTarget{sysCreds})
 
 	// The applied-policy check comes first: a policy deployment is refused before anything changes.
-	if noPolicyCheck {
-		fmt.Fprintln(stderr, "mashctl: unzone: skipping the applied-zone-policy check (--no-policy-check): if a zone policy is applied, stay on the last release that has zones")
-	} else if _, serr := sysCredsPath(sysCreds, env, cfg); serr != nil {
-		return fail("cannot check whether a zone policy is applied (%v); configure the system credentials, or pass --no-policy-check to skip the check; nothing was changed", serr)
-	} else if keys, kerr := openKeys(cfg, env); kerr != nil {
-		return fail("cannot check whether a zone policy is applied (%v); configure the key store, or pass --no-policy-check to skip the check; nothing was changed", kerr)
-	} else {
-		servers, perr := parseServers(env)
-		if perr != nil {
-			return fail("%v", perr)
-		}
-		nc, cerr := connectSys(cfg, sysCreds, env)
-		if cerr != nil {
-			return fail("cannot tell whether a zone policy is applied: %v; nothing was changed", cerr)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
-		rerr := apply.RefuseZonePolicy(ctx, apply.NATS{Conn: nc, Inventory: servers}, keys, servers, store.ErrZonePolicyApplied)
-		cancel()
-		nc.Close()
-		if rerr != nil {
-			return fail("refusing: %v (nothing was changed)", rerr)
-		}
+	if _, serr := sysCredsPath(sysCreds, env, cfg); serr != nil {
+		return fail("cannot check whether a zone policy is applied (%v); configure the system credentials; nothing was changed", serr)
+	}
+	keys, kerr := openKeys(cfg, env)
+	if kerr != nil {
+		return fail("cannot check whether a zone policy is applied (%v); configure the key store; nothing was changed", kerr)
+	}
+	servers, perr := parseServers(env)
+	if perr != nil {
+		return fail("%v", perr)
+	}
+	nc, cerr := connectSys(cfg, sysCreds, env)
+	if cerr != nil {
+		return fail("cannot tell whether a zone policy is applied: %v; nothing was changed", cerr)
+	}
+	pctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
+	rerr := apply.RefuseZonePolicy(pctx, apply.NATS{Conn: nc, Inventory: servers}, keys, servers, store.ErrZonePolicyApplied)
+	cancel()
+	nc.Close()
+	if rerr != nil {
+		return fail("refusing: %v (nothing was changed)", rerr)
 	}
 
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)

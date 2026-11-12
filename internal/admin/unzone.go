@@ -60,6 +60,10 @@ func (a *Admin) Unzone(ctx context.Context, name string) (changed bool, err erro
 			return false, err
 		}
 		if rec.Zone != "" {
+			// The inbox is validated before the record changes: a failing check leaves the record as it was.
+			if err := a.checkInboxForUnzoneLocked(ctx, name); err != nil {
+				return false, err
+			}
 			// Relaxing to the five-token identity is an admission decision like any other: refuse before
 			// anything changes if it could not coexist with the directory's records.
 			if err := a.admit(ctx, kv, name, ""); err != nil {
@@ -99,34 +103,55 @@ func (a *Admin) Unzone(ctx context.Context, name string) (changed bool, err erro
 	return false, fmt.Errorf("mash: directory %s kept changing under unzone; try again", name)
 }
 
-// dropZoneFilterLocked updates name's inbox stream so its subjects are the five-token mail filter alone, changing
-// nothing else. A stream with exactly that, or with no inbox stream at all, is left as it is (false); a stream whose
-// subjects are the five-token filter plus zone filters of this endpoint is updated (true); anything else is refused.
-func (a *Admin) dropZoneFilterLocked(ctx context.Context, lk *streamLock, name string) (bool, error) {
+// inboxForUnzoneLocked reads name's inbox stream and validates it for unzone without changing anything. It returns the
+// stream's config and whether its subjects are already the five-token mail filter alone. A missing stream, a suspended
+// inbox, or subjects other than the five-token filter plus zone filters of this endpoint are refused.
+func (a *Admin) inboxForUnzoneLocked(ctx context.Context, name string) (jetstream.StreamConfig, bool, error) {
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
-		return false, fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+		return jetstream.StreamConfig{}, false, fmt.Errorf("mash: inbox stream of %s: %w", name, err)
 	}
 	cfg := s.CachedInfo().Config
 	if _, ok := suspendedSubjects(name, cfg); ok {
-		return false, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` before unzone", name, name)
+		return cfg, false, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` before unzone", name, name)
 	}
 	five := sap.MailFilter(a.owner, name)
 	if slices.Equal(cfg.Subjects, []string{five}) {
-		return false, nil
+		return cfg, true, nil
 	}
 	if !slices.Contains(cfg.Subjects, five) {
-		return false, firstInboxDiff("stream", name, []inboxField{{"subjects", sortedCopy(cfg.Subjects), []string{five}}})
+		return cfg, false, firstInboxDiff("stream", name, []inboxField{{"subjects", sortedCopy(cfg.Subjects), []string{five}}})
 	}
 	for _, sub := range cfg.Subjects {
 		if sub == five {
 			continue
 		}
 		if _, ok := sap.ZoneOfMailFilter(sub, a.owner, name); !ok {
-			return false, firstInboxDiff("stream", name, []inboxField{{"subjects", sortedCopy(cfg.Subjects), []string{five}}})
+			return cfg, false, firstInboxDiff("stream", name, []inboxField{{"subjects", sortedCopy(cfg.Subjects), []string{five}}})
 		}
 	}
-	cfg.Subjects = []string{five}
+	return cfg, false, nil
+}
+
+// checkInboxForUnzoneLocked is the read-only half of dropZoneFilterLocked: Unzone runs it before it rewrites the
+// directory record, so an inbox that cannot be moved never leaves a published address that cannot receive mail.
+func (a *Admin) checkInboxForUnzoneLocked(ctx context.Context, name string) error {
+	_, _, err := a.inboxForUnzoneLocked(ctx, name)
+	return err
+}
+
+// dropZoneFilterLocked updates name's inbox stream so its subjects are the five-token mail filter alone, changing
+// nothing else. A stream with exactly that is left as it is (false); a stream whose subjects are the five-token filter
+// plus zone filters of this endpoint is updated (true); a missing stream and anything else is refused.
+func (a *Admin) dropZoneFilterLocked(ctx context.Context, lk *streamLock, name string) (bool, error) {
+	cfg, already, err := a.inboxForUnzoneLocked(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if already {
+		return false, nil
+	}
+	cfg.Subjects = []string{sap.MailFilter(a.owner, name)}
 	if err := lk.check(ctx); err != nil {
 		return false, err
 	}
