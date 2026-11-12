@@ -8,8 +8,11 @@
 # It is kept out of this file because this file is embedded in the mash binary; pinning it would change the binary.
 # Resolution order: $MASH_BIN; the managed copy for the pinned version; if pinned, download it (and only if that fails,
 # fall back to `mash` on PATH, logging it) so an older install on PATH never overrides the pin; if unpinned, `mash` on
-# PATH only. Security stance (see security_stance): when the pinned binary cannot be fetched or verified, `strict` exits
-# 127 instead of falling back to PATH; `relaxed` (the default) falls back and warns. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
+# PATH only. Security stance (see security_stance): `strict` never runs an unverified binary. It exits 127 when the
+# plugin is unpinned, when the cached managed binary's sha256 does not match mash.pins (re-checked on every run), and
+# when the pinned binary cannot be fetched or verified. `relaxed` (the default) warns and uses PATH mash (unpinned),
+# re-fetches a cached copy that fails verification, and falls back to PATH if the download fails. MASH_BIN is an
+# explicit operator choice and is never verified. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
 # failed one leaves $BIN_DIR/.dl-failed-<version> and hooks skip the download for 300 s, going straight to PATH. Serve
 # keeps its 60 s fetch and prefetch 20 s, and neither honours the marker. A missing or empty mash.pins, or one without a version line, means unpinned: the launcher never downloads.
 case "$0" in
@@ -31,7 +34,8 @@ log() { printf '%s\n' "mash launcher: $*" >&2; }
 FAILWHY=""
 dlfail() { FAILWHY=$1; log "${2:-$1}"; }
 
-# The security stance: what to do when the PINNED binary cannot be fetched or verified. Prints `strict` (refuse; no
+# The security stance: what to do when no verified binary is available (unpinned plugin, cached copy that fails
+# verification, or a pinned binary that cannot be fetched or verified). Prints `strict` (refuse; no
 # fallback to `mash` on PATH) or `relaxed` (fall back to PATH with a warning). This is the ONLY place the setting is
 # read. PROVISIONAL: the variable name MASH_SECURITY_STANCE and its source (an environment variable) may change, and so
 # may the default. An unrecognised value fails closed as strict.
@@ -71,7 +75,7 @@ dl_recently_failed() {
   [ "$_n" -ge "$_t" ] && [ $((_n - _t)) -lt 300 ]
 }
 
-# True when the managed binary for the pinned version exists.
+# True when the managed binary for the pinned version exists (not yet verified; see cached_verified).
 managed_ok() {
   [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
 }
@@ -101,6 +105,39 @@ sha256_of() {
   else
     return 1
   fi
+}
+
+# Set _asset to this platform's release asset name and _want to its sha256 from mash.pins. Returns 1 for an unsupported
+# OS or architecture (FAILWHY set), 2 when mash.pins has no sha256 for the asset.
+asset_want() {
+  case "$(uname -s)" in
+    Linux) _os=linux ;;
+    Darwin) _os=darwin ;;
+    *) FAILWHY="unsupported OS $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _arch=amd64 ;;
+    aarch64|arm64) _arch=arm64 ;;
+    *) FAILWHY="unsupported architecture $(uname -m)"; return 1 ;;
+  esac
+  _asset="mash-$_os-$_arch"
+  _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
+  [ -n "$_want" ] || return 2
+}
+
+# True when the cached managed binary's sha256 equals the pinned one, checked on every run. Otherwise sets CACHEWHY.
+CACHEWHY=""
+cached_verified() {
+  asset_want
+  case $? in
+    0) ;;
+    1) CACHEWHY=$FAILWHY; return 1 ;;
+    *) CACHEWHY="no pinned sha256 for $_asset in mash.pins"; return 1 ;;
+  esac
+  _got=$(sha256_of "$BIN") || { CACHEWHY="no sha256sum or shasum available to verify it"; return 1; }
+  [ "$_got" = "$_want" ] && return 0
+  CACHEWHY="sha256 does not match mash.pins"
+  return 1
 }
 
 fetch() { # url dest
@@ -137,22 +174,12 @@ fetch() { # url dest
 
 # Download, verify and install the pinned binary into $BIN. Non-zero on any failure; installs nothing then.
 download() {
-  case "$(uname -s)" in
-    Linux) _os=linux ;;
-    Darwin) _os=darwin ;;
-    *) dlfail "unsupported OS $(uname -s)"; return 1 ;;
+  asset_want
+  case $? in
+    0) ;;
+    1) dlfail "$FAILWHY"; return 1 ;;
+    *) dlfail "no pinned sha256 for $_asset" "no pinned sha256 for $_asset; refusing to download"; return 1 ;;
   esac
-  case "$(uname -m)" in
-    x86_64|amd64) _arch=amd64 ;;
-    aarch64|arm64) _arch=arm64 ;;
-    *) dlfail "unsupported architecture $(uname -m)"; return 1 ;;
-  esac
-  _asset="mash-$_os-$_arch"
-  _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
-  if [ -z "$_want" ]; then
-    dlfail "no pinned sha256 for $_asset" "no pinned sha256 for $_asset; refusing to download"
-    return 1
-  fi
   mkdir -p "$BIN_DIR" || { dlfail "cannot create $BIN_DIR"; return 1; }
   _tmp="$BIN_DIR/.mash.$$.tmp"
   rm -f "$_tmp"
@@ -187,9 +214,32 @@ resolve() {
     printf '%s\n' "$MASH_BIN"
     return 0
   fi
+  if [ -z "$MASH_VERSION" ]; then
+    # Unpinned: there is no sha256 to verify anything against.
+    if [ -f "$PINS" ]; then _why="$PINS has no valid version= line (it is empty, unreadable or malformed)"
+    else _why="there is no $PINS"; fi
+    if [ "$(security_stance)" = strict ]; then
+      log "refusing to run an unverified mash: this plugin is unpinned ($_why) and the security stance is strict; to allow mash from PATH set MASH_SECURITY_STANCE=relaxed"
+      return 2
+    fi
+    log "warning: this plugin is unpinned ($_why); using mash from PATH unverified (security stance relaxed)"
+    if _p=$(path_mash); then
+      printf '%s\n' "$_p"
+      return 0
+    fi
+    return 1
+  fi
   if managed_ok; then
-    printf '%s\n' "$BIN"
-    return 0
+    # Re-verified on every run: a cached copy is only as trustworthy as its hash.
+    if cached_verified; then
+      printf '%s\n' "$BIN"
+      return 0
+    fi
+    if [ "$(security_stance)" = strict ]; then
+      log "refusing to run the cached mash $BIN: $CACHEWHY and the security stance is strict; to re-fetch it and fall back to mash on PATH set MASH_SECURITY_STANCE=relaxed"
+      return 2
+    fi
+    log "warning: the cached mash $BIN failed verification ($CACHEWHY); re-fetching it (security stance relaxed)"
   fi
   if [ -n "$MASH_VERSION" ]; then
     if [ "$HOOK" = 1 ] && dl_recently_failed; then

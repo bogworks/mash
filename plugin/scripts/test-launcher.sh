@@ -232,8 +232,59 @@ MASH_SECURITY_STANCE=strict MASH_BIN="$T/ovr0" CLAUDE_PLUGIN_DATA="$T/sd11" PATH
 check "strict: MASH_BIN override unchanged" eq "$(cat "$T/out")" "override: a"
 MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd3" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$NOREL" sh "$P/scripts/mash" cached > "$T/out" 2>/dev/null
 check "strict: managed-copy hit unchanged" eq "$(cat "$T/out")" "fake-mash ran: cached"
-MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd12" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2>/dev/null
-check "strict: unpinned path unchanged (PATH mash)" eq "$(cat "$T/out")" "path-mash: serve"
+
+# --- strict never runs an unverified binary: unpinned plugin
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd12" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"; RC=$?
+check "strict, unpinned (no pins file): exit 127" eq "$RC" 127
+check "strict, unpinned: PATH mash not run" empty_file "$T/out"
+check "strict, unpinned: error names the pins file" contains "$(cat "$T/err")" "$P3/scripts/mash.pins"
+check "strict, unpinned: error says unpinned and strict" contains "$(cat "$T/err")" "unpinned"
+check "strict, unpinned: error says strict and how to relax" contains "$(cat "$T/err")" "MASH_SECURITY_STANCE=relaxed"
+check "strict, unpinned: says there is no pins file" contains "$(cat "$T/err")" "there is no"
+P5="$T/plugin5"; newplugin "$P5"
+printf '# nothing useful\nversion=\n' > "$P5/scripts/mash.pins"
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd14" PATH="$PB:$BASEPATH" sh "$P5/scripts/mash" serve > "$T/out" 2> "$T/err"; RC=$?
+check "strict, malformed pins (no version line): exit 127" eq "$RC" 127
+check "strict, malformed pins: PATH mash not run" empty_file "$T/out"
+check "strict, malformed pins: error names the file and says no valid version" contains "$(cat "$T/err")" "$P5/scripts/mash.pins has no valid version= line"
+MASH_SECURITY_STANCE=relaxed CLAUDE_PLUGIN_DATA="$T/sd15" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"; RC=$?
+check "relaxed, unpinned: PATH mash runs" eq "$(cat "$T/out")" "path-mash: serve"
+check "relaxed, unpinned: warns naming the pins file" contains "$(cat "$T/err")" "warning: this plugin is unpinned (there is no $P3/scripts/mash.pins)"
+MASH_SECURITY_STANCE=strict MASH_BIN="$T/ovr0" CLAUDE_PLUGIN_DATA="$T/sd16" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" a > "$T/out" 2>/dev/null
+check "strict, unpinned: MASH_BIN override still wins" eq "$(cat "$T/out")" "override: a"
+
+# --- strict never runs an unverified binary: the cached copy is re-verified on every run
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd3" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$NOREL" sh "$P/scripts/mash" cached > "$T/out" 2> "$T/err"; RC=$?
+check "strict, cached binary with matching sha: runs it" eq "$(cat "$T/out")" "fake-mash ran: cached"
+check "strict, cached binary with matching sha: silent" eq "$RC$(wc -c < "$T/err" | tr -d ' ')" 00
+tamper() { # data-dir: copy the verified cache and change its content, keeping it executable
+  rm -rf "$1"; mkdir -p "$1"; cp -R "$T/sd3/bin" "$1/bin"
+  printf '#!/bin/sh\necho "TAMPERED ran"\n' > "$1/bin/mash-$VER"; chmod +x "$1/bin/mash-$VER"
+}
+tamper "$T/sd17"
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd17" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$MASH_RELEASE_BASE" sh "$P/scripts/mash" x > "$T/out" 2> "$T/err"; RC=$?
+check "strict, tampered cache: exit 127" eq "$RC" 127
+check "strict, tampered cache: nothing run" empty_file "$T/out"
+check "strict, tampered cache: error names the cached path" contains "$(cat "$T/err")" "$T/sd17/bin/mash-$VER"
+check "strict, tampered cache: error says sha256 does not match mash.pins" contains "$(cat "$T/err")" "sha256 does not match mash.pins"
+check "strict, tampered cache: error says how to relax" contains "$(cat "$T/err")" "MASH_SECURITY_STANCE=relaxed"
+check "strict, tampered cache: not replaced" contains "$(cat "$T/sd17/bin/mash-$VER")" "TAMPERED"
+tamper "$T/sd18"
+MASH_SECURITY_STANCE=strict CLAUDE_PLUGIN_DATA="$T/sd18" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$MASH_RELEASE_BASE" sh "$P/scripts/mash" hook > "$T/out" 2> "$T/err"; RC=$?
+check "strict, tampered cache, hook: refuses too" eq "$RC" 127
+MASH_SECURITY_STANCE=strict MASH_BIN="$T/ovr0" CLAUDE_PLUGIN_DATA="$T/sd17" PATH="$PB:$BASEPATH" sh "$P/scripts/mash" a > "$T/out" 2>/dev/null
+check "strict, tampered cache: MASH_BIN override still wins" eq "$(cat "$T/out")" "override: a"
+tamper "$T/sd19"
+MASH_SECURITY_STANCE=relaxed CLAUDE_PLUGIN_DATA="$T/sd19" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$MASH_RELEASE_BASE" sh "$P/scripts/mash" x > "$T/out" 2> "$T/err"; RC=$?
+check "relaxed, tampered cache: re-fetches and runs the verified binary" eq "$(cat "$T/out")" "fake-mash ran: x"
+check "relaxed, tampered cache: warns on stderr" contains "$(cat "$T/err")" "failed verification"
+check "relaxed, tampered cache: cache replaced by the verified binary" eq "$(sha "$T/sd19/bin/mash-$VER")" "$(sha "$T/sd3/bin/mash-$VER")"
+tamper "$T/sd20"
+MASH_SECURITY_STANCE=relaxed CLAUDE_PLUGIN_DATA="$T/sd20" PATH="$PB:$BASEPATH" MASH_RELEASE_BASE="$NOREL" sh "$P/scripts/mash" x > "$T/out" 2> "$T/err"; RC=$?
+check "relaxed, tampered cache, release unreachable: PATH mash runs" eq "$(cat "$T/out")" "path-mash: x"
+check "relaxed, tampered cache, release unreachable: warns about the cache" contains "$(cat "$T/err")" "failed verification"
+check "relaxed, tampered cache, release unreachable: warns about the fallback" contains "$(cat "$T/err")" "relaxed fallback"
+check "relaxed, tampered cache, release unreachable: tampered file left in place" contains "$(cat "$T/sd20/bin/mash-$VER")" "TAMPERED"
 
 # --- unpinned: PATH only, never downloads
 CLAUDE_PLUGIN_DATA="$T/data4c" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"
