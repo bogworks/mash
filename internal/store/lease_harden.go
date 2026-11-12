@@ -63,6 +63,9 @@ func leaseStreamConfig(ctx context.Context, js jetstream.JetStream) (jetstream.S
 	return info.Config, nil
 }
 
+// leaseDuplicateWindow is the client library's default duplicate window for a key-value stream.
+const leaseDuplicateWindow = 2 * time.Minute
+
 // CreateLeaseBucket creates the lease bucket with its stream refusing rollup from the first moment. It builds the
 // stream configuration the way nats.go's CreateKeyValue does (name, subjects, history, size cap, TTL, duplicate
 // window, discard policy and the rest) with AllowRollup off, so a bucket made here never allows rollup, not even
@@ -98,7 +101,7 @@ func CreateLeaseBucket(ctx context.Context, js jetstream.JetStream, cfg jetstrea
 	if maxMsgSize == 0 {
 		maxMsgSize = -1
 	}
-	duplicateWindow := 2 * time.Minute
+	duplicateWindow := leaseDuplicateWindow
 	if cfg.TTL > 0 && cfg.TTL < duplicateWindow {
 		duplicateWindow = cfg.TTL
 	}
