@@ -180,6 +180,59 @@ func TestHardenLeaseBucketFailsClosed(t *testing.T) {
 	}
 }
 
+// bumpKV rewrites the key with a Put just before each of the first bumps Deletes, so every such Delete conflicts
+// with the revision the caller read.
+type bumpKV struct {
+	jetstream.KeyValue
+	bumps   int
+	deletes int
+}
+
+func (b *bumpKV) Delete(ctx context.Context, key string, opts ...jetstream.KVDeleteOpt) error {
+	b.deletes++
+	if b.deletes <= b.bumps {
+		if _, err := b.KeyValue.Put(ctx, key, []byte("live")); err != nil {
+			return err
+		}
+	}
+	return b.KeyValue.Delete(ctx, key, opts...)
+}
+
+// A lease key rewritten between clearLease's read and its delete is held by a live endpoint: after the retries
+// clearLease errors, so Provision fails closed. A single conflict is retried and the key is cleared.
+func TestClearLeaseRevisionConflict(t *testing.T) {
+	_, _, js := setup(t)
+	ctx := context.Background()
+	lease, err := js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.Put(ctx, "held", []byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	always := &bumpKV{KeyValue: lease, bumps: 1 << 30}
+	if err := admin.ClearLease(ctx, always, "held"); err == nil {
+		t.Fatal("a key that keeps changing was reported cleared")
+	}
+	if always.deletes != 3 {
+		t.Fatalf("deletes = %d, want 3", always.deletes)
+	}
+	if e, err := lease.Get(ctx, "held"); err != nil || string(e.Value()) != "live" {
+		t.Fatalf("the live lease was disturbed: %v", err)
+	}
+
+	once := &bumpKV{KeyValue: lease, bumps: 1}
+	if err := admin.ClearLease(ctx, once, "held"); err != nil {
+		t.Fatalf("single conflict: %v", err)
+	}
+	if _, err := lease.Get(ctx, "held"); !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
+		t.Fatalf("the key was not cleared: %v", err)
+	}
+	if err := admin.ClearLease(ctx, lease, "never"); err != nil {
+		t.Fatalf("absent key: %v", err)
+	}
+}
+
 // Provision clears a deprovisioned name's lease marker at once, with rollup disabled, and the key is free for an
 // endpoint's Create and for a lock.
 func TestProvisionClearsLeaseMarkerWithoutRollup(t *testing.T) {

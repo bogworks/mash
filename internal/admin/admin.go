@@ -204,21 +204,30 @@ func (a *Admin) initLease(ctx context.Context, cfg jetstream.KeyValueConfig) err
 
 // clearLease removes a deprovisioned name's lease tombstone, or a lease left in the key. The lease bucket does not
 // allow rollup, so it is a revision-aware delete, never a purge. A key that is absent or already deleted needs
-// nothing; a revision that moved since the read was written by someone else and is left alone.
+// nothing. A revision that moved since the read means a live endpoint wrote the key: the read and delete are retried,
+// and a key that keeps changing is an error, so Provision fails closed rather than proceed under a held name.
 func clearLease(ctx context.Context, lease jetstream.KeyValue, name string) error {
-	e, err := lease.Get(ctx, name)
-	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-		return nil
+	for attempt := 0; attempt < clearLeaseTries; attempt++ {
+		e, err := lease.Get(ctx, name)
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		err = lease.Delete(ctx, name, jetstream.LastRevision(e.Revision()))
+		switch {
+		case err == nil, errors.Is(err, jetstream.ErrKeyNotFound):
+			return nil
+		case !isRevisionConflict(err):
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
-	if err := lease.Delete(ctx, name, jetstream.LastRevision(e.Revision())); err != nil &&
-		!isRevisionConflict(err) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-		return err
-	}
-	return nil
+	return fmt.Errorf("lease key %q keeps changing; it is held by a live endpoint", name)
 }
+
+// clearLeaseTries bounds clearLease's read-and-delete attempts on a revision conflict.
+const clearLeaseTries = 3
 
 func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
