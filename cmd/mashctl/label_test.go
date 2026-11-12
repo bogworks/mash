@@ -41,7 +41,7 @@ func TestLabelDryRunWritesNothing(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
 	out, errb, code := h.run("label", "b", "zone=green", "--dry-run")
-	if code != 0 || !strings.Contains(out, "dry run:") || !strings.Contains(out, "b moves from zone blue to zone green") ||
+	if code != 0 || !strings.Contains(out, "dry run:") || !strings.Contains(out, "reissue needed: b (its signing key changed") ||
 		!strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -99,13 +99,9 @@ func TestLabelConsequences(t *testing.T) {
 	}
 	// a moves zones: the verbs, and the creds are signed by the old zone until reissued
 	out, errb, code = h.run("label", "a", "zone=blue")
-	if code != 0 || !strings.Contains(out, "a moves from zone red to zone blue: its mail address changes.") ||
-		!strings.Contains(out, "mashctl set-zone a blue") || !strings.Contains(out, "mashctl reissue a") ||
-		!strings.Contains(out, "creds are signed by zone red's key and keep zone red's permissions") {
+	if code != 0 || !strings.Contains(out, "reissue needed: a (its signing key changed; run: mashctl reissue a)") ||
+		strings.Contains(out, "set-zone") {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if strings.Contains(out, "reissue needed: a") {
-		t.Errorf("the moved endpoint is named in the tag line: %q", out)
 	}
 	// a new zone changes the account JWT
 	out, _, code = h.run("label", "a2", "zone=green")
@@ -114,7 +110,7 @@ func TestLabelConsequences(t *testing.T) {
 	}
 	// unsetting the subject label moves the endpoint to the default zone
 	out, _, code = h.run("unlabel", "a2", "zone")
-	if code != 0 || !strings.Contains(out, "a2 moves from zone green to zone default") {
+	if code != 0 || !strings.Contains(out, "reissue needed: a2 (its signing key changed") {
 		t.Fatalf("%d %q", code, out)
 	}
 	// a label no rule reads changes nothing to do

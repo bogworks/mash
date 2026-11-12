@@ -244,6 +244,8 @@ type Meta struct {
 	Labels      map[string]string
 	Description string
 	Caps        []string
+	// Nothing in the CLI sets Zone any more (ADR 0091); it stays so tests can make the zoned records that older
+	// releases wrote, which the guards and unzone must handle.
 	// Zone, when set, provisions the endpoint into that zone: a 6-token mail subject, and an inbox that takes both
 	// the zone and the legacy subject (ADR 0054). Empty is the legacy 5-token subject.
 	Zone string
@@ -540,7 +542,7 @@ func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, nam
 	}
 	// A zoned record needs exactly the legacy filter and the exact filter of its own zone: mail sent to its recorded
 	// subject must enter, and mail addressed to another zone must not. A legacy record accepts [legacy] or the legacy
-	// filter plus one exact zone filter, as set-zone adds that filter before it rewrites the record.
+	// filter plus one exact zone filter, which an unzone in progress leaves (it rewrites the record before the stream).
 	want := store.InboxConfigZoned(a.owner, zone, name, a.limits)
 	got := s.CachedInfo().Config
 	// A suspended stream is the endpoint's own: its saved subjects stand in for the parked one (ADR 0057).
@@ -1113,123 +1115,6 @@ func (a *Admin) recordZone(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("mash: directory %s: %w", name, err)
 	}
 	return rec.Zone, nil
-}
-
-// SetZone moves the existing endpoint name into zone without touching stored mail. It first appends the zone's mail
-// filter to the inbox stream's subjects (an update that changes nothing else and purges nothing, so mail that a
-// sender not yet updated publishes to the legacy subject still lands), then rewrites the directory record's zone and
-// mail subject against the revision it read, keeping every other field. It is idempotent: an endpoint already in zone
-// is returned as it is. An endpoint in another zone is refused, as no endpoint returns to legacy or changes zone in
-// this version.
-func (a *Admin) SetZone(ctx context.Context, name, zone string) (_ store.Record, err error) {
-	if !config.ValidName(name) {
-		return store.Record{}, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
-	}
-	if !sap.ValidZone(zone) {
-		return store.Record{}, errBadZone(zone)
-	}
-	kv, err := a.dir(ctx)
-	if err != nil {
-		return store.Record{}, err
-	}
-	lk, err := a.lockStream(ctx, name)
-	if err != nil {
-		return store.Record{}, err
-	}
-	defer lk.release(ctx)
-	ctx, end := lk.guard(ctx, "set-zone", &err)
-	defer end()
-	// Same lock order as Provision: the name's lock, then the directory-wide admission lock. Giving a legacy
-	// endpoint a zone is an admission decision, so it is made under the same lock.
-	adm, err := a.lockStream(ctx, admissionLockName)
-	if err != nil {
-		return store.Record{}, err
-	}
-	defer adm.release(ctx)
-	for try := 0; try < setMetaTries; try++ {
-		e, err := kv.Get(ctx, name)
-		if errors.Is(err, jetstream.ErrKeyNotFound) {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s is not provisioned", name)
-		}
-		if err != nil {
-			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
-		}
-		rec, err := store.ParseRecord(name, e.Value())
-		if err != nil {
-			return store.Record{}, err
-		}
-		if rec.Zone != "" && rec.Zone != zone {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s is in zone %q; moving it to another zone, or back to legacy, is not supported", name, rec.Zone)
-		}
-		if rec.Zone != zone {
-			// The endpoint is gaining a zone: refuse before anything changes if a zoned legacy endpoint could not
-			// coexist with the directory's records.
-			if err := a.admit(ctx, kv, name, zone); err != nil {
-				return store.Record{}, err
-			}
-		}
-		if err := a.addZoneFilterLocked(ctx, lk, name, zone); err != nil {
-			return store.Record{}, err
-		}
-		if rec.Zone == zone {
-			return rec, nil
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(e.Value(), &obj); err != nil {
-			return store.Record{}, fmt.Errorf("mash: directory %s: %w", name, err)
-		}
-		zb, _ := json.Marshal(zone)
-		mb, _ := json.Marshal(store.MailSubjectFor(rec.Owner, zone, name))
-		obj["zone"], obj["mail_subject"] = zb, mb
-		val, err := json.Marshal(obj)
-		if err != nil {
-			return store.Record{}, err
-		}
-		if err := lk.check(ctx); err != nil {
-			return store.Record{}, err
-		}
-		if err := adm.check(ctx); err != nil {
-			return store.Record{}, err
-		}
-		if _, err := kv.Update(ctx, name, val, e.Revision()); err != nil {
-			if isRevisionConflict(err) {
-				continue
-			}
-			return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
-		}
-		return store.ParseRecord(name, val)
-	}
-	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-zone; try again", name)
-}
-
-// addZoneFilterLocked appends the exact mail filter of zone to name's inbox stream subjects, changing nothing else.
-// The stream must have exactly the legacy filter, or the legacy filter and the exact filter of zone (a resumed
-// set-zone); anything else, another zone's filter or a wildcard included, is refused. The caller holds name's lock.
-func (a *Admin) addZoneFilterLocked(ctx context.Context, lk *streamLock, name, zone string) error {
-	s, err := a.js.Stream(ctx, sap.InboxStream(name))
-	if err != nil {
-		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
-	}
-	cfg := s.CachedInfo().Config
-	if _, ok := suspendedSubjects(name, cfg); ok {
-		return fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` before set-zone", name, name)
-	}
-	legacy, zoned := sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, zone, name)
-	switch got := sortedCopy(cfg.Subjects); {
-	case slices.Equal(got, sortedCopy([]string{legacy, zoned})):
-		return nil
-	case slices.Equal(got, []string{legacy}):
-	default:
-		return firstInboxDiff("stream", name, []inboxField{{"subjects", got, sortedCopy([]string{legacy})}})
-	}
-	cfg.Subjects = append(slices.Clone(cfg.Subjects), zoned)
-	if err := lk.check(ctx); err != nil {
-		return err
-	}
-	if _, err := a.js.UpdateStream(ctx, cfg); err != nil {
-		return fmt.Errorf("mash: inbox stream of %s: %w", name, err)
-	}
-	return nil
 }
 
 // isRevisionConflict reports a failed compare-and-set: the key's revision moved (or it was deleted) since the read.

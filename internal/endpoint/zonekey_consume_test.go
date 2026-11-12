@@ -104,6 +104,7 @@ func zkCompile(t *testing.T, src string) *policy.Compiled {
 //
 // It polls with deadlines, never fixed sleeps, and every duration is under the portable rule's 30 s.
 func TestZoneKeyChangeDuringConsumeAndSend(t *testing.T) {
+	t.Skip("TODO(Z2): needs zoned records and six-token mail permissions, which ADR 0091 removes (the guard refuses a zoned record); delete with the policy stack")
 	old := LeaseRefresh
 	LeaseRefresh = 500 * time.Millisecond
 	t.Cleanup(func() { LeaseRefresh = old })
@@ -180,7 +181,7 @@ func TestZoneKeyChangeDuringConsumeAndSend(t *testing.T) {
 		if err := os.WriteFile(creds[ep.Name], m.Creds, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := adm.Provision(actx, ep.Name, m.UserPub, m.AccountPub, "", admin.Meta{Labels: ep.Labels, Zone: ep.Zone}); err != nil {
+		if _, err := adm.Provision(actx, ep.Name, m.UserPub, m.AccountPub, "", admin.Meta{Labels: ep.Labels}); err != nil {
 			t.Fatal(err)
 		}
 	}
