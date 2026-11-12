@@ -342,6 +342,9 @@ func TestHookUnwritableSpoolFallsBackToTheChannel(t *testing.T) {
 	if n := strings.Count(lb.String(), "spool #"); n != 1 {
 		t.Fatalf("%d spool-failure lines, want 1:\n%s", n, lb.String())
 	}
+	if l, ok := a.SpoolFaultLine(); ok { // MASH_SPOOL_REQUIRED is off: the failure is routed around, with no status line
+		t.Fatalf("status line %q with the setting off", l)
+	}
 }
 
 // Review item 12: a held message whose file is missing or unparsable is rewritten from memory, so the next hook

@@ -1,0 +1,2 @@
+A new setting, `MASH_SPOOL_REQUIRED` (`spool_required`, default off), makes mail delivery fail closed: mail the spool cannot take is held unacked in the inbox and reported (stderr, a channel notice and a `spool: FAILING` line in the `status` tool) instead of falling back to the channel, and a spool that cannot be made at start is retried in the background
+([ADR 0105](docs/decisions/0105-mail-delivery-fails-closed-under-one-concrete-setting-mash-spool-required.md)).

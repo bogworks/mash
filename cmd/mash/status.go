@@ -125,6 +125,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	if l := spoolFaultLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	if l := legacyInboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
@@ -469,6 +472,23 @@ func legacyInboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.LegacyInboxLine(); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// spoolFaultLine says that mail is held because the spool is failing (MASH_SPOOL_REQUIRED). Empty when the spool works,
+// when the setting is off, from a shell (nothing is connected) and with no running endpoint. While no spool has yet
+// bound there is no endpoint state to read it from, so serve keeps the endpoint in the state and the line comes from it.
+func spoolFaultLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.SpoolFaultLine(); ok {
 		return redactText(l)
 	}
 	return ""
