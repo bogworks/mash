@@ -439,3 +439,36 @@ jobs:
               exit 1
             fi
           done
+  dry-run-notes:
+    # The dry run's proof of the release-notes path (ADR 0105): the draft job builds the notes only on a tag push, so a change
+    # to `scripts/changelog section`, `check-notes` or the compare line would otherwise first run at a real release. This job
+    # runs the same commands on the latest released change log section, in $RUNNER_TEMP: no dist, no draft, no release, no token.
+    # It needs no other job, and no job needs it.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 20
+    runs-on: [self-hosted, rh-linux]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Release notes for the latest released section
+        run: |
+          set -euo pipefail
+          # The latest released version is the first numbered heading of the change log (`## [Unreleased]` is skipped).
+          version="$(sed -n 's/^## \[\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\] - .*/\1/p' CHANGELOG.md | head -n 1)"
+          [ -n "$version" ] || { echo "CHANGELOG.md has no released version section (## [X.Y.Z] - date)" >&2; exit 1; }
+          go run ./scripts/changelog section --version "$version" > "$RUNNER_TEMP/notes.md"
+          # The base is the highest release tag strictly below the version, as the draft job finds one. None is fine.
+          prev="$({ git tag --list 'v[0-9]*.[0-9]*.[0-9]*'; echo "v$version"; } | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | sort -Vu | awk -v v="v$version" '$0 == v { exit } { p = $0 } END { print p }')"
+          if [ -n "$prev" ]; then
+            printf '\nFull changes: [%s...%s](%s/%s/compare/%s...%s)\n' "$prev" "v$version" "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY}" "$prev" "v$version" >> "$RUNNER_TEMP/notes.md"
+            go run ./scripts/changelog check-notes "$RUNNER_TEMP/notes.md" --version "$version" --prev "${prev#v}"
+          else
+            go run ./scripts/changelog check-notes "$RUNNER_TEMP/notes.md"
+          fi
