@@ -1,3 +1,4 @@
+# Frozen: used for releases up to v0.3.x. From the cutover version (docs/release-cutover) tags and SHA256SUMS are not signed with these keys.
 # Keys trusted to sign mash release tags (vN.N.N). scripts/release-check verifies every tag against this file, and
 # anyone can: git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<N.N.N>
 # The release key (the lead's "rdev" key), SHA256:plqtkAdqVCpdF/n+c54pPAFozFqXpXlJeeh2/aFnIS4

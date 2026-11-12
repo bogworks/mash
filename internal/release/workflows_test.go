@@ -1,6 +1,8 @@
 package release
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -157,7 +159,7 @@ func TestWorkflows_everyActionIsPinnedToACommit(t *testing.T) {
 
 // permissionedJobs are the release jobs that set permissions of their own; every other job takes the workflow's
 // contents: read.
-var permissionedJobs = map[string]bool{"guard": true, "draft": true, "attest": true, "attest-sbom": true, "sbom": true, "dry-run-verify": true}
+var permissionedJobs = map[string]bool{"guard": true, "draft": true, "attest": true, "sums": true, "attest-sbom": true, "sbom": true, "dry-run-verify": true}
 
 func TestRelease_isTriggeredOnlyByVersionTagsAndPinsTheBuild(t *testing.T) {
 	w := load(t, "release.yml")
@@ -230,11 +232,11 @@ func TestRelease_jobOrderAndDraftOnly(t *testing.T) {
 		sort.Strings(n)
 		return strings.Join(n, ",")
 	}
-	if need("build") != "guard" || sorted("draft") != "attest,attest-sbom,build,sbom" {
+	if need("build") != "guard" || sorted("draft") != "attest,attest-sbom,build,sbom,sums" {
 		t.Fatalf("job order: build needs %s, draft needs %s", need("build"), need("draft"))
 	}
-	if need("sbom") != "build" || need("attest-sbom") != "sbom" || need("attest") != "build" {
-		t.Fatalf("job order: sbom needs %s, attest-sbom %s, attest %s", need("sbom"), need("attest-sbom"), need("attest"))
+	if need("sbom") != "build" || need("attest-sbom") != "sbom" || sorted("attest") != "build,sums" || sorted("sums") != "build,sbom" {
+		t.Fatalf("job order: sbom needs %s, attest-sbom %s, attest %s, sums %s", need("sbom"), need("attest-sbom"), need("attest"), need("sums"))
 	}
 	var run string
 	for _, s := range w.Jobs["draft"].Steps {
@@ -338,14 +340,15 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 // (workflow_dispatch). Every other job has none. None of them is a status function that could run a job after a failure,
 // except that every job downstream of build carries one that also demands its direct needs' success (see
 // TestRelease_everyJobBelowBuildHasAStatusFunction). On a push the guard succeeds, so these behave as the implicit success().
-// allFourSucceeded is what draft and dry-run-verify demand of the four jobs they wait for.
-const allFourSucceeded = "needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success'"
+// allFourSucceeded is what draft and dry-run-verify demand of the jobs they wait for (the name predates sums).
+const allFourSucceeded = "needs.build.result == 'success' && needs.sums.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success'"
 
 var jobConditions = map[string]string{
 	"guard":          "${{ github.event_name == 'push' }}",
 	"draft":          "${{ !cancelled() && github.event_name == 'push' && " + allFourSucceeded + " }}",
 	"build":          "${{ !cancelled() && (needs.guard.result == 'success' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.guard.result == 'skipped')) }}",
-	"attest":         "${{ !cancelled() && needs.build.result == 'success' }}",
+	"attest":         "${{ !cancelled() && needs.build.result == 'success' && needs.sums.result == 'success' }}",
+	"sums":           "${{ !cancelled() && needs.build.result == 'success' && needs.sbom.result == 'success' }}",
 	"sbom":           "${{ !cancelled() && needs.build.result == 'success' }}",
 	"attest-sbom":    "${{ !cancelled() && needs.sbom.result == 'success' }}",
 	"dry-run-verify": "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && " + allFourSucceeded + " }}",
@@ -565,6 +568,7 @@ func TestRelease_guardScriptRefusesEveryBadTag(t *testing.T) {
 	if err := runGuard("v0.4", x); err == nil {
 		t.Error("a malformed tag name passed the guard")
 	}
+	cutoverCases(t, dir, runGuard, git, tag)
 	// A signed tag at a commit that is not on main.
 	git("commit", "-q", "--allow-empty", "-m", "off main")
 	out, _ := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
@@ -575,10 +579,139 @@ func TestRelease_guardScriptRefusesEveryBadTag(t *testing.T) {
 	}
 }
 
-// No release job reads GITHUB_SHA: whatever it holds on an annotated-tag push, the commit comes from the tag.
+// cutoverCases runs the guard against docs/release-cutover as it stands at the tag's commit: at or above the cutover version an
+// annotated, unsigned tag passes; below it a signature is required; a lightweight tag fails everywhere; a present file that is
+// not exactly one vN.N.N line fails closed; an absent file keeps the signature requirement. Each case sits on a new commit on main.
+func cutoverCases(t *testing.T, dir string, runGuard func(tag, sha string) error, git func(args ...string), signed func(args ...string)) {
+	t.Helper()
+	head := func() string {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// commitCutover commits docs/release-cutover with content (nil removes it) on main and returns the commit.
+	commitCutover := func(content *string) string {
+		t.Helper()
+		if content == nil {
+			git("rm", "-q", "-f", "--ignore-unmatch", "docs/release-cutover")
+			git("commit", "-q", "--allow-empty", "-m", "no cutover")
+		} else {
+			f := filepath.Join(dir, "docs", "release-cutover")
+			if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f, []byte(*content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git("add", "docs/release-cutover")
+			git("commit", "-q", "--allow-empty", "-m", "cutover")
+		}
+		git("push", "-q", "origin", "main")
+		return head()
+	}
+	unsigned := func(name, sha string) {
+		t.Helper()
+		git("-c", "tag.gpgSign=false", "tag", "-a", name, "-m", "unsigned", sha)
+		git("push", "-q", "origin", "refs/tags/"+name)
+	}
+	light := func(name, sha string) {
+		t.Helper()
+		git("tag", name, sha)
+		git("push", "-q", "origin", "refs/tags/"+name)
+	}
+	str := func(s string) *string { return &s }
+	const header = "# The first release that is keyless.\n\n"
+	c := commitCutover(str(header + "v0.4.0\n"))
+	unsigned("v0.4.0", c)
+	if err := runGuard("v0.4.0", c); err != nil {
+		t.Errorf("an annotated, unsigned tag at the cutover version was refused: %v", err)
+	}
+	unsigned("v0.4.1", c)
+	if err := runGuard("v0.4.1", c); err != nil {
+		t.Errorf("an annotated, unsigned tag above the cutover was refused: %v", err)
+	}
+	unsigned("v0.10.0", c)
+	if err := runGuard("v0.10.0", c); err != nil {
+		t.Errorf("v0.10.0 is above v0.4.0 numerically but was refused: %v", err)
+	}
+	unsigned("v1.0.0", c)
+	if err := runGuard("v1.0.0", c); err != nil {
+		t.Errorf("a higher major version was refused: %v", err)
+	}
+	unsigned("v0.3.9", c)
+	if err := runGuard("v0.3.9", c); err == nil {
+		t.Error("an unsigned annotated tag below the cutover passed the guard")
+	}
+	signed("-s", "v0.3.8", "-m", "signed", c)
+	if err := runGuard("v0.3.8", c); err != nil {
+		t.Errorf("a signed tag below the cutover was refused: %v", err)
+	}
+	signed("-s", "v0.4.2", "-m", "signed", c)
+	if err := runGuard("v0.4.2", c); err != nil {
+		t.Errorf("a signed tag above the cutover was refused: %v", err)
+	}
+	light("v0.4.3", c)
+	if err := runGuard("v0.4.3", c); err == nil {
+		t.Error("a lightweight tag at or above the cutover passed the guard")
+	}
+	light("v0.3.7", c)
+	if err := runGuard("v0.3.7", c); err == nil {
+		t.Error("a lightweight tag below the cutover passed the guard")
+	}
+	// The cutover is read at the tag's commit: a higher cutover puts the same version below it.
+	c2 := commitCutover(str("v0.10.0\n"))
+	unsigned("v0.9.9", c2)
+	if err := runGuard("v0.9.9", c2); err == nil {
+		t.Error("v0.9.9 passed unsigned below a v0.10.0 cutover (a string compare would pass it)")
+	}
+	unsigned("v0.10.1", c2)
+	if err := runGuard("v0.10.1", c2); err != nil {
+		t.Errorf("v0.10.1 was refused above a v0.10.0 cutover: %v", err)
+	}
+	// A present file that is not exactly one version line fails closed, signed tag or not.
+	for i, bad := range []struct{ what, body string }{
+		{"two versions", "v0.4.0\nv0.5.0\n"},
+		{"not a version", "latest\n"},
+		{"no v", "0.4.0\n"},
+		{"a suffix", "v0.4.0-rc1\n"},
+		{"only comments", "# v0.4.0\n"},
+		{"empty", ""},
+	} {
+		cc := commitCutover(str(bad.body))
+		u, sg := fmt.Sprintf("v7.%d.0", i), fmt.Sprintf("v7.%d.1", i)
+		unsigned(u, cc)
+		signed("-s", sg, "-m", "signed", cc)
+		for _, name := range []string{u, sg} {
+			if err := runGuard(name, cc); err == nil {
+				t.Errorf("tag %s passed with a malformed cutover file (%s): the guard must fail closed", name, bad.what)
+			}
+		}
+	}
+	// No cutover file: the signature is still required.
+	n := commitCutover(nil)
+	unsigned("v8.0.0", n)
+	if err := runGuard("v8.0.0", n); err == nil {
+		t.Error("an unsigned tag passed with no cutover file")
+	}
+	signed("-s", "v8.0.1", "-m", "signed", n)
+	if err := runGuard("v8.0.1", n); err != nil {
+		t.Errorf("a signed tag was refused with no cutover file: %v", err)
+	}
+}
+
+// No release job reads GITHUB_SHA: whatever it holds on an annotated-tag push, the commit comes from the tag. The one
+// exception is dry-run-verify, which runs only on a dispatch on main, where GITHUB_SHA is the dispatched commit (no tag).
 func TestRelease_candidateIsDerivedFromTheTagNotGITHUB_SHA(t *testing.T) {
 	w := load(t, "release.yml")
 	for name, j := range w.Jobs {
+		if name == "dry-run-verify" {
+			if !strings.Contains(j.If, "github.event_name == 'workflow_dispatch'") || strings.Contains(j.If, "push") {
+				t.Errorf("dry-run-verify reads GITHUB_SHA but may run on a push: %q", j.If)
+			}
+			continue
+		}
 		for _, st := range j.Steps {
 			if strings.Contains(st.Run, "GITHUB_SHA") || strings.Contains(st.Env["X"], "github.sha") {
 				t.Errorf("job %s step %q reads GITHUB_SHA", name, st.Name)
@@ -613,11 +746,6 @@ func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
 	g("tag", "-s", "v0.2.0", "-m", "two", "HEAD")
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
-	}
-	for _, n := range append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64"}, releaseCIAssets...) {
-		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
 	}
 	// The runner is Linux and has sha256sum; the test also runs where only shasum exists (macOS).
 	shim := t.TempDir()
@@ -661,26 +789,27 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	if err := os.WriteFile(filepath.Join(dir, "scripts", "quickstart-synadia.sh"), []byte("#!/bin/sh\necho q\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := runScript(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	// The draft does not make SHA256SUMS (the sums job did, and it was attested): without it the step fails, and a listing
+	// whose line for the script does not match the copied script fails too.
+	if out, err := runScript(); err == nil || !strings.Contains(string(out), "no SHA256SUMS") {
+		t.Fatalf("a missing SHA256SUMS passed: %v\n%s", err, out)
 	}
-	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
-	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	wantSums := append(append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets[:4]...), releaseCIAssets[4])
-	if len(sl) != len(wantSums) {
-		t.Fatalf("SHA256SUMS:\n%s", sums)
-	}
-	for i, n := range wantSums {
-		if !strings.HasSuffix(sl[i], "  "+n) {
-			t.Fatalf("SHA256SUMS line %d is not %s:\n%s", i+1, n, sums)
-		}
-	}
-	// Whatever a binary is missing, the sums are not made.
-	if err := os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json")); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte(strings.Repeat("0", 64)+"  quickstart-synadia.sh\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := runScript(); err == nil {
-		t.Fatalf("the sums were made without an SBOM:\n%s", out)
+		t.Fatalf("a SHA256SUMS that does not match the script passed:\n%s", out)
+	}
+	sum := sha256.Sum256([]byte("#!/bin/sh\necho q\n"))
+	listing := hex.EncodeToString(sum[:]) + "  quickstart-synadia.sh\n"
+	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte(listing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runScript(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS")); string(got) != listing {
+		t.Fatalf("the draft changed SHA256SUMS:\n%s", got)
 	}
 	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("the script was not copied with its mode: %v", err)
@@ -716,8 +845,8 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	for _, n := range jobNeeds(w.Jobs["draft"].Needs) {
 		have[n] = true
 	}
-	if !have["build"] || !have["attest"] {
-		t.Errorf("draft must need both build and attest, got %v", w.Jobs["draft"].Needs)
+	if !have["build"] || !have["attest"] || !have["sums"] {
+		t.Errorf("draft must need build, sums and attest, got %v", w.Jobs["draft"].Needs)
 	}
 	j := w.Jobs["attest"]
 	for _, p := range []string{"id-token", "attestations"} {
@@ -730,8 +859,9 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	for _, st := range j.Steps {
 		if attest.MatchString(st.Uses) {
 			found = true
-			if st.With["subject-path"] != "dist/mash-*" {
-				t.Errorf("attest subject-path = %v, want dist/mash-*", st.With["subject-path"])
+			// SHA256SUMS is a subject beside the four binaries; the provenance bundle (made by this step) cannot be one.
+			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-* dist/SHA256SUMS" {
+				t.Errorf("attest subject-path = %q, want dist/mash-* and dist/SHA256SUMS", st.With["subject-path"])
 			}
 		}
 	}
@@ -1236,7 +1366,7 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 			if j.Permissions["id-token"] != "write" || j.Permissions["attestations"] != "write" || len(j.Permissions) != 2 {
 				t.Errorf("job %s permissions = %v, want id-token: write and attestations: write only", id, j.Permissions)
 			}
-		case "sbom", "dry-run-verify":
+		case "sbom", "sums", "dry-run-verify":
 			if j.Permissions["contents"] != "read" || len(j.Permissions) != 1 {
 				t.Errorf("job %s permissions = %v, want contents: read only", id, j.Permissions)
 			}
@@ -1450,13 +1580,22 @@ func TestRelease_attestSBOMJobAttestsEachBinarysSBOM(t *testing.T) {
 func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	w := load(t, "release.yml")
 	j := w.Jobs["attest"]
-	if strings.Join(jobNeeds(j.Needs), ",") != "build" {
-		t.Errorf("attest needs %v, want build", j.Needs)
+	if n := jobNeeds(j.Needs); len(n) != 2 || !(n[0] == "build" && n[1] == "sums" || n[0] == "sums" && n[1] == "build") {
+		t.Errorf("attest needs %v, want build and sums (SHA256SUMS is made before it is attested)", j.Needs)
 	}
+	gotSums := false
 	for _, st := range j.Steps {
-		if strings.HasPrefix(st.Uses, "actions/download-artifact@") && st.With["pattern"] != "mash-*" {
-			t.Errorf("attest downloads %v, not just the binaries (pattern mash-*)", st.With)
+		if !strings.HasPrefix(st.Uses, "actions/download-artifact@") {
+			continue
 		}
+		if st.With["name"] == "sums" {
+			gotSums = true
+		} else if st.With["pattern"] != "mash-*" {
+			t.Errorf("attest downloads %v, not just the binaries (pattern mash-*) and the sums artifact", st.With)
+		}
+	}
+	if !gotSums {
+		t.Error("attest does not download the sums artifact")
 	}
 	var script, bundleEnv string
 	var attestID string
@@ -1493,19 +1632,19 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	if err := os.WriteFile(bundle, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64"} {
+	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "SHA256SUMS"} {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if run() == nil {
-		t.Error("three binaries were attested")
+		t.Error("three binaries and SHA256SUMS were attested")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-arm64"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := run(); err != nil {
-		t.Fatalf("four binaries and a bundle: %v", err)
+		t.Fatalf("four binaries, SHA256SUMS and a bundle: %v", err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "provenance", "mash.intoto.jsonl")); err != nil || string(b) != "{}\n" {
 		t.Errorf("provenance/mash.intoto.jsonl = %q, %v", b, err)
@@ -1517,6 +1656,13 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 		t.Error("an extra file in dist was attested")
 	}
 	os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json"))
+	os.Remove(filepath.Join(dir, "dist", "SHA256SUMS"))
+	if run() == nil {
+		t.Error("four binaries without SHA256SUMS were attested")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(bundle, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1545,26 +1691,39 @@ func TestRelease_noSLSAGeneratorAndNoGeneratorJobs(t *testing.T) {
 	}
 }
 
-// The draft attaches and lists every asset the contract names, and only the two attest jobs hold id-token.
+// The sums job lists every asset but the provenance bundle (which cannot list itself); the draft attaches every asset and
+// attaches SHA256SUMS as the sums job made it; only the two attest jobs hold id-token.
 func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 	w := load(t, "release.yml")
 	var sums, create string
-	for _, st := range w.Jobs["draft"].Steps {
+	for _, st := range w.Jobs["sums"].Steps {
 		if strings.Contains(st.Run, "sha256sum") {
 			sums = st.Run
 		}
+	}
+	for _, st := range w.Jobs["draft"].Steps {
 		if strings.Contains(st.Run, "gh release create") {
 			create = st.Run
+		}
+		if strings.Contains(st.Run, "sha256sum") && strings.Contains(st.Run, "> SHA256SUMS") {
+			t.Errorf("the draft step %q makes SHA256SUMS: it must attach the attested one unchanged", st.Name)
 		}
 	}
 	names := append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets...)
 	for _, n := range names {
-		if !strings.Contains(sums, n) {
-			t.Errorf("SHA256SUMS does not list %s:\n%s", n, sums)
-		}
 		if !strings.Contains(create, "dist/"+n) {
 			t.Errorf("the draft does not attach %s:\n%s", n, create)
 		}
+		if n == "mash.intoto.jsonl" {
+			if strings.Contains(sums, n) {
+				t.Errorf("SHA256SUMS lists %s, the provenance bundle that cannot list itself:\n%s", n, sums)
+			}
+		} else if !strings.Contains(sums, n) {
+			t.Errorf("SHA256SUMS does not list %s:\n%s", n, sums)
+		}
+	}
+	if !strings.Contains(create, "dist/SHA256SUMS") {
+		t.Errorf("the draft does not attach SHA256SUMS:\n%s", create)
 	}
 	for id, j := range w.Jobs {
 		if j.Permissions["id-token"] != "" && id != "attest" && id != "attest-sbom" {
@@ -1573,6 +1732,98 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 	}
 	if w.Jobs["draft"].Permissions["contents"] != "write" || len(w.Jobs["draft"].Permissions) != 1 {
 		t.Errorf("draft permissions: %v", w.Jobs["draft"].Permissions)
+	}
+}
+
+// The sums job, run for real: it downloads the four binaries and the four SBOMs, copies the quickstart script and writes
+// SHA256SUMS in the documented order without the provenance bundle, and uploads it as the `sums` artifact.
+func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
+	w := load(t, "release.yml")
+	j, ok := w.Jobs["sums"]
+	if !ok {
+		t.Fatal("release.yml has no sums job")
+	}
+	var script string
+	patterns, uploaded, checkout := map[string]bool{}, false, false
+	for _, st := range j.Steps {
+		if strings.HasPrefix(st.Uses, "actions/checkout@") {
+			checkout = true
+		}
+		if strings.HasPrefix(st.Uses, "actions/download-artifact@") {
+			patterns[fmt.Sprint(st.With["pattern"])] = true
+		}
+		if strings.HasPrefix(st.Uses, "actions/upload-artifact@") && st.With["name"] == "sums" && st.With["path"] == "dist/SHA256SUMS" {
+			uploaded = true
+		}
+		if strings.Contains(st.Run, "sha256sum") {
+			script = st.Run
+		}
+	}
+	if !checkout || !patterns["mash-*"] || !patterns["sbom-*"] || !uploaded || len(patterns) != 2 {
+		t.Errorf("sums job: checkout=%v downloads=%v uploaded=%v", checkout, patterns, uploaded)
+	}
+	if script == "" {
+		t.Fatal("the sums job has no sha256sum step")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bins := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64"}
+	for _, n := range append(append([]string{}, bins...), releaseCIAssets...) {
+		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shim := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shim, "sha256sum"), []byte("#!/bin/sh\nexec shasum -a 256 \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("PATH")
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		path = shim + ":" + path
+	}
+	run := func() ([]byte, error) {
+		cmd := exec.Command("bash", "-e", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "PATH="+path, "RELEASE_REF=v0.4.0")
+		return cmd.CombinedOutput()
+	}
+	if out, err := run(); err == nil || !strings.Contains(string(out), "quickstart-synadia.sh is missing") {
+		t.Fatalf("a checkout without the script passed: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scripts", "quickstart-synadia.sh"), []byte("#!/bin/sh\necho q\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
+	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
+	want := append(append(append([]string{}, bins...), "quickstart-synadia.sh"), releaseCIAssets[:4]...)
+	if len(sl) != len(want) {
+		t.Fatalf("SHA256SUMS:\n%s", sums)
+	}
+	for i, n := range want {
+		if !strings.HasSuffix(sl[i], "  "+n) {
+			t.Fatalf("SHA256SUMS line %d is not %s:\n%s", i+1, n, sums)
+		}
+	}
+	if strings.Contains(string(sums), "mash.intoto.jsonl") {
+		t.Errorf("SHA256SUMS lists the provenance bundle:\n%s", sums)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
+		t.Errorf("the script was not copied with its mode: %v", err)
+	}
+	// Whatever is missing, the sums are not made.
+	if err := os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(); err == nil {
+		t.Errorf("the sums were made without an SBOM:\n%s", out)
 	}
 }
 
@@ -1609,7 +1860,7 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 	}
 	n := jobNeeds(j.Needs)
 	sort.Strings(n)
-	if strings.Join(n, ",") != "attest,attest-sbom,build,sbom" {
+	if strings.Join(n, ",") != "attest,attest-sbom,build,sbom,sums" {
 		t.Errorf("dry-run-verify needs %v", n)
 	}
 	for id, o := range w.Jobs {
@@ -1627,8 +1878,10 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 		}
 	}
 	for _, must := range []string{
-		`gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main`,
-		`gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main`,
+		`gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"`,
+		`gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"`,
+		`gh attestation verify SHA256SUMS -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"`,
+		`gh attestation verify SHA256SUMS -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"`,
 		"(.dsseEnvelope.payload // .payload)",
 		".predicate.invocation.configSource.entryPoint",
 		".predicate.buildDefinition.externalParameters.workflow.path",
@@ -1641,8 +1894,8 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 			t.Errorf("dry-run-verify lacks %q:\n%s", must, run)
 		}
 	}
-	if strings.Count(run, "--signer-workflow") != 3 || strings.Count(run, "--source-ref refs/heads/main") != 3 {
-		t.Errorf("all three gh attestation verify calls (the bundle, build provenance and SBOM) need the signer and ref flags:\n%s", run)
+	if strings.Count(run, "--signer-workflow") != 5 || strings.Count(run, "--source-ref refs/heads/main") != 5 || strings.Count(run, `--source-digest "$GITHUB_SHA"`) != 5 {
+		t.Errorf("all five gh attestation verify calls (the bundle and the held attestation for the binaries and for SHA256SUMS, and the SBOM) need the signer, ref and commit flags:\n%s", run)
 	}
 	if strings.Contains(run, "--deny-self-hosted-runners") {
 		t.Errorf("the dry run must not deny self-hosted runners: our releases are built on them by design (ADR 0087):\n%s", run)
@@ -1686,7 +1939,7 @@ func TestRelease_everyJobBelowBuildHasAStatusFunction(t *testing.T) {
 			}
 		}
 	}
-	for _, jn := range []string{"attest", "sbom", "attest-sbom", "dry-run-verify", "draft"} {
+	for _, jn := range []string{"attest", "sbom", "sums", "attest-sbom", "dry-run-verify", "draft"} {
 		if !below[jn] {
 			t.Errorf("job %s is not below build: the chain walk is broken", jn)
 		}

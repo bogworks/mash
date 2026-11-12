@@ -58,12 +58,14 @@ var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
 // The SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
-func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Target]string, scriptHash string) error {
+// For a keyless release the provenance bundle is not listed (it cannot list itself) and a line for it is refused; it
+// is verified by its attestation instead.
+func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Target]string, scriptHash string, keyless bool) error {
 	byName := map[string]release.Target{}
 	for _, t := range release.Targets {
 		byName[t.AssetName()] = t
 	}
-	ciNames := release.CIAssetNames()
+	ciNames := release.SumsCINames(keyless)
 	isCI := map[string]bool{}
 	for _, n := range ciNames {
 		isCI[n] = true
@@ -130,7 +132,7 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Tar
 	}
 	var extra []string
 	for n := range have {
-		if strings.HasPrefix(n, "mash") {
+		if strings.HasPrefix(n, "mash") && !(keyless && n == release.ProvenanceName) {
 			if _, ok := listed[n]; !ok {
 				extra = append(extra, n)
 			}
@@ -243,29 +245,44 @@ func verifyReleaseSig(o Options, tag, x string) error {
 // binary swapped or added after the gate, or the whole asset set replaced by another validly signed release's, is
 // refused. GitHub has no compare-and-swap on assets, so a swap in the instant between this check and the publish call
 // remains; the release is immutable once published, and that closes it.
+//
+// A keyless release (the tag is at or above the cutover at x) has no SHA256SUMS.sig: one attached is refused, and
+// SHA256SUMS must instead verify as an attested subject (verifySumsAttestation); every other binding holds.
 func verifyPublishable(o Options, tag, x string, rec *gateRecord) error {
 	if !rec.ok() {
 		return gateError{errors.New("no --assets gate result from this run to bind the publish to")}
 	}
-	signers, err := signersAt(o, x)
+	kl, err := keyless(o, x, tag)
 	if err != nil {
 		return err
+	}
+	var signers, sig []byte
+	if !kl {
+		if signers, err = signersAt(o, x); err != nil {
+			return err
+		}
 	}
 	sums, err := downloadAsset(o, tag, release.SumsName)
 	if err != nil {
 		return err
 	}
-	sig, err := downloadAsset(o, tag, release.SumsSigName)
-	if err != nil {
-		if strings.Contains(err.Error(), "no assets match") {
-			return fmt.Errorf("%s is not attached to the release", release.SumsSigName)
+	if !kl {
+		sig, err = downloadAsset(o, tag, release.SumsSigName)
+		if err != nil {
+			if strings.Contains(err.Error(), "no assets match") {
+				return fmt.Errorf("%s is not attached to the release", release.SumsSigName)
+			}
+			return err
 		}
-		return err
 	}
 	if !bytes.Equal(sums, rec.sums) {
 		return fmt.Errorf("SHA256SUMS on the release is not the one the --assets gate checked against fresh builds of X; it changed after the gate")
 	}
-	if err := verifySums(signers, sums, sig); err != nil {
+	if kl {
+		if err := verifySumsAttestation(o, tag, x, sums); err != nil {
+			return err
+		}
+	} else if err := verifySums(signers, sums, sig); err != nil {
 		return err
 	}
 	listed := map[string]string{}
@@ -286,7 +303,15 @@ func verifyPublishable(o Options, tag, x string, rec *gateRecord) error {
 	if err != nil {
 		return err
 	}
-	for name, data := range map[string][]byte{release.SumsName: sums, release.SumsSigName: sig} {
+	bound := map[string][]byte{release.SumsName: sums}
+	if kl {
+		if _, ok := have[release.SumsSigName]; ok {
+			return fmt.Errorf("a keyless release carries no %s", release.SumsSigName)
+		}
+	} else {
+		bound[release.SumsSigName] = sig
+	}
+	for name, data := range bound {
 		sum := sha256.Sum256(data)
 		want := "sha256:" + hex.EncodeToString(sum[:])
 		got, ok := have[name]
@@ -331,7 +356,7 @@ func verifyPublishable(o Options, tag, x string, rec *gateRecord) error {
 	}
 	var extra []string
 	for n := range have {
-		if _, ok := listed[n]; !ok && n != release.SumsName && n != release.SumsSigName {
+		if _, ok := listed[n]; !ok && n != release.SumsName && n != release.SumsSigName && !(kl && n == release.ProvenanceName) {
 			extra = append(extra, n)
 		}
 	}
@@ -385,12 +410,17 @@ func gitBytes(dir string, args ...string) ([]byte, error) {
 }
 
 // signedSums makes sure the release carries a SHA256SUMS.sig that verifies, and returns an error if it cannot. Every
-// line of SHA256SUMS is checked against our fresh builds first, whatever happens next. Then:
+// line of SHA256SUMS is checked against our fresh builds first, whatever happens next. When kl (keyless: the tag is at
+// or above the cutover) there is no signature at all: no signers file, no key, no upload; a SHA256SUMS.sig attached is
+// refused, and SHA256SUMS must verify as an attested subject (verifySumsAttestation). Otherwise:
 //   - a SHA256SUMS.sig that is attached must verify (it is reused, so a rerun needs no key); one that does not is refused;
 //   - none attached on a published release is refused: a published release is never amended;
 //   - none attached on a draft is made with the release key (RELEASE_SIGNING_KEY), verified against the signers file at X, uploaded and
 //     read back.
-func signedSums(o Options, tag, x string, draft bool, have map[string]string, hashes map[release.Target]string, scriptHash string, rec *gateRecord) error {
+func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string, hashes map[release.Target]string, scriptHash string, rec *gateRecord) error {
+	if kl {
+		return keylessSums(o, tag, x, have, hashes, scriptHash, rec)
+	}
 	// The sums are verified against the committed file at X, which consumers trust; RELEASE_SIGNERS is the maintainer's
 	// own file for the tag and is deliberately not used here.
 	signers, err := signersAt(o, x)
@@ -404,7 +434,7 @@ func signedSums(o Options, tag, x string, draft bool, have map[string]string, ha
 	if err != nil {
 		return err
 	}
-	if err := checkSumEntries(sums, have, hashes, scriptHash); err != nil {
+	if err := checkSumEntries(sums, have, hashes, scriptHash, false); err != nil {
 		return err
 	}
 	if _, ok := have[release.SumsSigName]; ok {
@@ -443,12 +473,35 @@ func signedSums(o Options, tag, x string, draft bool, have map[string]string, ha
 	return nil
 }
 
+// keylessSums is signedSums for a release at or above the cutover: the same line-by-line check of SHA256SUMS against
+// our fresh builds, then the attestation of SHA256SUMS itself instead of a signature.
+func keylessSums(o Options, tag, x string, have map[string]string, hashes map[release.Target]string, scriptHash string, rec *gateRecord) error {
+	if _, ok := have[release.SumsSigName]; ok {
+		return fmt.Errorf("a keyless release carries no %s", release.SumsSigName)
+	}
+	if _, ok := have[release.SumsName]; !ok {
+		return errors.New("SHA256SUMS is not attached to the release (release.yml builds it)")
+	}
+	sums, err := downloadAsset(o, tag, release.SumsName)
+	if err != nil {
+		return err
+	}
+	if err := checkSumEntries(sums, have, hashes, scriptHash, true); err != nil {
+		return err
+	}
+	if err := verifySumsAttestation(o, tag, x, sums); err != nil {
+		return err
+	}
+	rec.set(sums, hashes, scriptHash)
+	return nil
+}
+
 // verifyAttestations downloads each of the four binaries from the release into a temporary directory and runs
-// `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags). A binary
+// `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags: the repository, the workflow, the tag and the commit x). A binary
 // with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
 // gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by
 // hand) from being published without provenance. Attestations need a public repository.
-func verifyAttestations(o Options, tag string) error {
+func verifyAttestations(o Options, tag, x string) error {
 	dir, err := os.MkdirTemp("", "release-check-attest-")
 	if err != nil {
 		return op(err)
@@ -465,7 +518,7 @@ func verifyAttestations(o Options, tag string) error {
 		if err := os.WriteFile(p, b, 0o644); err != nil {
 			return op(err)
 		}
-		if _, err := gh(o, append([]string{"attestation", "verify", p}, attestFlags(o, tag)...)...); err != nil {
+		if _, err := gh(o, append([]string{"attestation", "verify", p}, attestFlags(o, tag, x)...)...); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
 		}
 	}

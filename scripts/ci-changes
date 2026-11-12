@@ -18,7 +18,7 @@
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
 # Documentation that a test or the build reads stays code, so it is tested when it changes: docs/audit.md (a golden check
 # in cmd/mashctl), docs/branch-protection.md (internal/release), docs/review/ (scripts/reviewgate and scripts/gate read
-# policy.json), docs/allowed_signers and docs/skipped-releases.txt (the release tooling), CHANGELOG.md and changelog.d/
+# policy.json), docs/allowed_signers, docs/skipped-releases.txt and docs/release-cutover (the release tooling), CHANGELOG.md and changelog.d/
 # (scripts/changelog, lint.yml), every *.md under .github/, plugin/, scripts/, cmd/, internal/ and ci/ (the plugin package is
 # embedded; the rest sit beside code), test data, Go and module files, and binary assets under docs/ (internal/release
 # refuses a committed binary). docs/decisions/ is documentation: adr-lint and adr-numbers run on every pull request anyway.
@@ -33,7 +33,7 @@ is_docs() {
 	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
 	testdata/* | */testdata/* | *conformance*) return 1 ;;
 	CHANGELOG.md | changelog.d/*) return 1 ;;
-	docs/audit.md | docs/branch-protection.md | docs/review/* | docs/allowed_signers | docs/skipped-releases.txt) return 1 ;;
+	docs/audit.md | docs/branch-protection.md | docs/review/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
 	esac
 	case "$lower" in
 	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;

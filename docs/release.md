@@ -1,12 +1,12 @@
 # Releasing mash
 
-A release is a **signed tag `vN.N.N` at a candidate commit X on main**. X is built from fresh clones in different
+A release is a **tag `vN.N.N` at a candidate commit X on main** (SSH-signed below the cutover version in `docs/release-cutover`; annotated and unsigned, pushed by the minting service, at or above it). X is built from fresh clones in different
 directories with a pinned toolchain; the build is byte-reproducible and `mash version` prints
-`mash <N.N.N> (commit X)`. The maintainer tags; CI builds and drafts; the maintainer publishes after the gate.
+`mash <N.N.N> (commit X)`. The tag is made (see below); CI builds and drafts; the maintainer publishes after the gate.
 
 ## Publishing: one command
 
-From the maintainer's machine (it signs the tag with the release SSH key), with `gh` authenticated for the release repository:
+The cutover version is recorded in `docs/release-cutover` (v0.4.0). Below it, the command runs on the maintainer's machine, which signs the tag with the release SSH key; at or above it, the tag is made by the minting service (see "Keyless releases"). In both cases `gh` must be authenticated for the release repository:
 
     scripts/release-check publish [--wait 45m] <version> <X>
 
@@ -23,7 +23,35 @@ created it. Exit 0 published and verified, 2 usage, 3 refused, 4 the command fai
 out (rerun to resume). The reasoning is in [decision 0001](decisions/0001-publishing-is-one-resumable-command.md).
 Then do step 7 (record the version and commit, optional).
 
+The paragraph above describes releases below the cutover. For a release **at or above the cutover** the differences
+are in "Keyless releases" below.
+
+### Keyless releases (at or above the cutover version)
+
+The tag is annotated and unsigned. It is pushed by the minting service with a deploy key, at the maintainer's request
+(tag rulesets: creation by deploy keys only, update and deletion blocked; see
+[branch-protection.md](branch-protection.md)). `release-check publish` never creates a tag there: with no tag it
+refuses, and the maintainer asks for the tag. There is no `SHA256SUMS.sig` and no SSH tag signature. `SHA256SUMS` is an
+attested subject instead. Every attestation check pins four facts: `-R <repo>`, `--signer-workflow
+<repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and `--source-digest <X>` (X is the release
+commit). `release-check --assets` verifies the four binaries and `SHA256SUMS` that way and rebuilds the binaries. After
+`--assets` passes, publication is `scripts/release-check publish <version> <X>`: once the service's tag exists at X it
+runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
+`gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
+signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
+
+### What a keyless release does not prove
+
+- That a checked gate run authorized the release: only that the maintainer asked for the tag and ran the gate by hand.
+- That the tag rulesets held: others could still edit them, and this repository does not verify them.
+- That the published bytes are the ones the maintainer checked: the maintainer's `--assets` run is the only check.
+- Anything beyond what the attestations say: that `release.yml` of this repository, at the tag and the commit X, built
+  the files on the maintainers' runner ([ADR 0087](decisions/0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md)).
+
 ## Signing
+
+This section applies to releases below the cutover version. From the cutover nothing is signed: there is no
+`SHA256SUMS.sig`, and `SHA256SUMS` is attested (see "Keyless releases").
 
 The `--assets` gate signs `SHA256SUMS`, and `publish` always runs it. There is no flag to skip it. The signature is made
 last: the build provenance attestations, the SBOMs and the attached build provenance are verified first, and if any of them fails
@@ -90,7 +118,7 @@ The numbered steps are what the command does in each state, and the manual path 
    records at X ("is stale"); both are read from git at X, not the working tree, and a candidate without
    `docs/decisions/` has no index to check.
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
-4. **Tag** (state: no tag): `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key).
+4. **Tag** (state: no tag). Below the cutover: `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key). At or above it: the maintainer asks the minting service to push the annotated, unsigned tag at X with its deploy key; nobody signs it, and `release-check publish` refuses when no tag exists.
 5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
    targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
    attests build provenance for the four binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
@@ -102,7 +130,8 @@ The numbered steps are what the command does in each state, and the manual path 
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
    carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
-   Anyone can check a tag the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
+   Anyone can check a tag below the cutover the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
+   At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the four binaries **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
 
 ## Optional: check a downstream consumer
@@ -196,6 +225,14 @@ run with `-parallel`.
 The launcher `plugin/scripts/mash` downloads a binary only when `plugin/scripts/mash.pins` names a version and the
 sha256 of each platform binary. After the release is published:
 
+For a keyless release (at or above the cutover), `--attested` is the documented path: download the four binaries into
+one directory and run `plugin/scripts/pin-plugin <version> --attested <dir> [--repo owner/name --remote <url>]`. It reads X from
+`git ls-remote <origin URL> refs/tags/v<version>^{}` (the configured origin itself, or `--remote <url>`; `--repo` requires
+`--remote`, since the name alone does not say where the tag lives) and refuses (exit 1, nothing written) when the
+tag cannot be read or the output is not exactly one 40-hex sha. It then runs `gh attestation verify` on each binary
+with `-R`, `--signer-workflow <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and
+`--source-digest <X>`, and pins the sums it computes itself. For a release below the cutover use `--sig` (refused at or above `docs/release-cutover`, and when that file is malformed):
+
 1. Download the release's `SHA256SUMS` and `SHA256SUMS.sig` (the armored SSHSIG made with
    `ssh-keygen -Y sign -f <key> -n mash-release SHA256SUMS`).
 2. Run `plugin/scripts/pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig>`. It verifies the signature
@@ -204,8 +241,6 @@ sha256 of each platform binary. After the release is published:
    (nothing else in the manifest changes), so installed plugins update and receive the pin (Claude Code updates a plugin only when
    its version changes, ADR 0033). The next release's gate requires plugin.json to be the new tag's version again, which the
    normal pre-tag edit sets. It is idempotent.
-   After attestation (#158) is available, use `plugin/scripts/pin-plugin <version> --attested <dir of the four binaries>
-   [--repo owner/name]` instead: it runs `gh attestation verify` on each binary and pins the sums it computes itself.
 3. Commit `plugin/scripts/mash.pins` and `plugin/.claude-plugin/plugin.json` to main through a PR.
 
 pin-plugin fails closed: with no verification mode it exits 2, and a missing or bad signature, a signers file with no key
@@ -284,9 +319,18 @@ publishing, and it does not run `release-check`. It must be green on `main` befo
 These commands apply to releases from 0.3.2 on. 0.3.1 and older have no SBOM and no `mash.intoto.jsonl`, and 0.3.1 is the
 first release with build provenance. Download the assets of `v<version>` into one directory (for example
 `gh release download v<version> -R bogworks/mash`) and run the commands from there. Each proves something different;
-none of them replaces the others.
+none of them replaces the others. For a keyless release (at or above the cutover), add `--source-digest <X>` (the release
+commit) to every `gh attestation verify` below, as item 1 shows.
 
-**1. The signed checksums.** From a checkout of mash at the tag (for `ci/release.allowed_signers`):
+**1. The checksums.**
+
+For a keyless release (at or above the cutover), verify the attestation of each of the four binaries and of `SHA256SUMS`, with X the release commit (`git ls-remote <remote-url> 'refs/tags/v<version>^{}'`; for mash `<owner>/<repo>` is `bogworks/mash` and `<remote-url>` is `https://github.com/bogworks/mash.git`):
+
+    gh attestation verify <file> -R <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml \
+      --source-ref refs/tags/v<version> --source-digest <X>
+    sha256sum -c --ignore-missing SHA256SUMS
+
+This proves `release.yml` of this repository, at the tag and commit X, built and attested these bytes; the second command ties each file to `SHA256SUMS`. There is no `SHA256SUMS.sig`. For a release below the cutover, from a checkout of mash at the tag (for `ci/release.allowed_signers`):
 
     ssh-keygen -Y verify -f ci/release.allowed_signers -I release -n mash-release -s SHA256SUMS.sig < SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
@@ -377,12 +421,12 @@ and tick it off in the repository's setup issue.
       fast-forward merges; require the status checks `test (linux)`, `reproducible`,
       `lint`, `govulncheck`, `codeql` and `Mergify Merge Protections` (Merge Protections is only enforced once the
       ruleset requires that check), plus code scanning results; block deletion and force pushes; linear history.
-      Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases are
-      signed with the key in `docs/allowed_signers`, see "Signing".)
+      Do **not** require signed commits: contributors' and automation's commits are not all signed. (Releases below the cutover are
+      signed with the key in `docs/allowed_signers`, see "Signing"; from the cutover they are keyless.)
 - [ ] Repository variable `MASH_FORBIDDEN_WORDS`: the words internal to the maintainers that must not appear in the
       tree; set by the maintainers (comma-separated, whole words, case-insensitive). `adr-lint` and the standalone
       tests in `cmd/mash` read it, so the guard needs no names in the tree.
-- [ ] Ruleset for `v*` tags: no deletion, no update.
+- [ ] Rulesets for `v*` tags: A, creation by deploy keys only; B, update and deletion blocked, no bypass; the single write deploy key is held by the minting service (see [branch-protection.md](branch-protection.md)).
 - [ ] Immutable releases: switch on after the first release is published.
 
 **Merge queue (Mergify):**
