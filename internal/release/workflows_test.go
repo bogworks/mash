@@ -1078,7 +1078,7 @@ func TestCI_prCheckVerdict(t *testing.T) {
 	}
 }
 
-// The changes job, run as written in ci.yml against a stand-in git (and the real scripts/ci-changes): a pull request
+// The changes job, run as written in ci.yml against a stand-in git (whose `show` serves the real scripts/ci-changes as the base revision): a pull request
 // touches code unless every changed file is documentation (workflows_docsonly_test.go has the full table); a push always counts
 // as code.
 func TestCI_changesClassifiesThePullRequest(t *testing.T) {
@@ -1092,7 +1092,7 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 		t.Fatal("changes has no run step")
 	}
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nprintf '%s' \"$FILES\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nif [ \"$1\" = show ]; then cat scripts/ci-changes; else printf '%s' \"$FILES\"; fi\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -1109,7 +1109,7 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "out")
 		cmd := exec.Command("bash", "-c", script)
 		cmd.Dir = "../.." // the step runs scripts/ci-changes from the repository root
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+c.event, "BASE=base", "HEAD_REF=feature/x", "FILES="+c.files, "GITHUB_OUTPUT="+out)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+c.event, "BASE=base", "HEAD_REF=feature/x", "FILES="+c.files, "GITHUB_OUTPUT="+out, "RUNNER_TEMP="+t.TempDir())
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s %q: %v %s", c.event, c.files, err, b)
 		}
