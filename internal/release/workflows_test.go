@@ -720,17 +720,36 @@ func TestRelease_candidateIsDerivedFromTheTagNotGITHUB_SHA(t *testing.T) {
 	}
 }
 
-// The changelog step, run in a real repository with GITHUB_SHA set to the tag object, lists the right range.
-func TestRelease_changelogUsesTheTaggedCommit(t *testing.T) {
+// The notes step, run in a real repository with the tagged checkout's change log, writes the change log section of the
+// released version as the notes with the compare link last (ADR 0105), and refuses before any draft exists when the
+// section is missing, does not open with prose, or still holds the placeholder.
+func TestRelease_notesAreTheChangeLogSectionWithTheCompareLink(t *testing.T) {
 	w := load(t, "release.yml")
 	var script string
 	for _, st := range w.Jobs["draft"].Steps {
-		if strings.Contains(st.Run, "git log") {
+		if strings.Contains(st.Run, "scripts/changelog section") {
 			script = st.Run
 		}
 	}
 	if script == "" {
-		t.Fatal("no changelog step")
+		t.Fatal("no notes step")
+	}
+	for _, bad := range []string{"git log", "--format='- %s"} {
+		if strings.Contains(script, bad) {
+			t.Errorf("the notes step still lists commit subjects (%q):\n%s", bad, script)
+		}
+	}
+	if !strings.Contains(script, "scripts/changelog check-notes") {
+		t.Errorf("the notes step does not check the notes:\n%s", script)
+	}
+	var usesGo bool
+	for _, st := range w.Jobs["draft"].Steps {
+		if strings.HasPrefix(st.Uses, "actions/setup-go@") {
+			usesGo = true
+		}
+	}
+	if !usesGo {
+		t.Error("the draft job runs go run but has no setup-go step")
 	}
 	dir, x := guardRepo(t)
 	g := func(args ...string) string {
@@ -773,18 +792,24 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 `), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The step runs `go run ./scripts/changelog ...`: this repository's command, built once, stands in for it in the
+	// scratch repository.
+	clBin := filepath.Join(t.TempDir(), "changelog")
+	if out, err := exec.Command("go", "build", "-o", clBin, filepath.Join(repoRoot(t), "scripts", "changelog")).CombinedOutput(); err != nil {
+		t.Fatalf("building scripts/changelog: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(ghBin, "go"), []byte("#!/bin/sh\n[ \"$1 $2\" = \"run ./scripts/changelog\" ] || { echo \"unexpected go $*\" >&2; exit 1; }\nshift 2\nexec "+clBin+" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	runScript := func() ([]byte, error) {
 		cmd := exec.Command("bash", "-e", "-c", script)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "PATH="+ghBin+":"+path, "RUNNER_TEMP="+t.TempDir(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
+		cmd.Env = append(os.Environ(), "PATH="+ghBin+":"+path, "RUNNER_TEMP="+t.TempDir(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_REPOSITORY=bogworks/mash", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
 		return cmd.CombinedOutput()
 	}
 	// The tagged checkout must carry the script: without it the step fails.
 	if out, err := runScript(); err == nil || !strings.Contains(string(out), "quickstart-synadia.sh is missing") {
 		t.Fatalf("a checkout without the script passed: %v\n%s", err, out)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "scripts", "quickstart-synadia.sh"), []byte("#!/bin/sh\necho q\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -805,18 +830,48 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte(listing), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	words := strings.TrimSpace(strings.Repeat("word ", 45)) + "."
+	setChangelog := func(section string) {
+		t.Helper()
+		cl := "# Changelog\n\n## [Unreleased]\n\n" + section + "## [0.1.0] - 2026-11-01\n\n### Added\n\n- old (a1b2c3d)\n"
+		if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(cl), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notes := func() string {
+		b, _ := os.ReadFile(filepath.Join(dir, "dist", "CHANGELOG.md"))
+		return string(b)
+	}
+	// No section for the version: the step fails before there is a draft.
+	setChangelog("")
+	if out, err := runScript(); err == nil || !strings.Contains(string(out), "no section") {
+		t.Fatalf("a missing section passed: %v\n%s", err, out)
+	}
+	// A laundry list, a short summary and the placeholder all fail the same opening test the gate applies.
+	for name, section := range map[string]string{
+		"a list":        "## [0.2.0] - 2026-11-12\n\n### Added\n\n- one\n",
+		"short summary": "## [0.2.0] - 2026-11-12\n\n### Summary\n\nToo short.\n\n### Upgrading\n\nNothing to do.\n",
+		"placeholder":   "## [0.2.0] - 2026-11-12\n\n### Summary\n\nREPLACE THIS PARAGRAPH: " + words + "\n\n### Upgrading\n\nNothing to do.\n",
+	} {
+		setChangelog(section + "\n")
+		if out, err := runScript(); err == nil {
+			t.Fatalf("%s passed:\n%s", name, out)
+		}
+	}
+	good := "### Summary\n\n" + words + "\n\n### Upgrading\n\nNothing to do.\n\n### Added\n\n- Two.\n"
+	setChangelog("## [0.2.0] - 2026-11-12\n\n" + good + "\n")
 	if out, err := runScript(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	wantLink := "Full changes: [v0.1.0...v0.2.0](https://github.com/bogworks/mash/compare/v0.1.0...v0.2.0)\n"
+	if got := notes(); got != good+"\n"+wantLink || strings.Contains(got, "second change") || strings.Contains(got, "0.1.0] -") {
+		t.Fatalf("notes:\n%s", got)
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS")); string(got) != listing {
 		t.Fatalf("the draft changed SHA256SUMS:\n%s", got)
 	}
 	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("the script was not copied with its mode: %v", err)
-	}
-	b, _ := os.ReadFile(filepath.Join(dir, "dist", "CHANGELOG.md"))
-	if !strings.Contains(string(b), "second change") || strings.Contains(string(b), " x (") {
-		t.Fatalf("changelog:\n%s", b)
 	}
 }
 
