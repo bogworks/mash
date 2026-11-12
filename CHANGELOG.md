@@ -6,7 +6,27 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [0.4.0] - 2026-11-12
 
-**Upgrade step (required):** after upgrading, re-run `mash admin init` once. It hardens the lease bucket, and `mashctl audit` reports a bucket that has not been hardened.
+mash v0.4.0 is a security and groundwork release. It closes a flaw that let any endpoint in an account wipe the shared lease store, hardens several smaller edges, and lays the groundwork for three-part identities (agent, owner and name) without turning them on. It is also the first mash release cut without a signing key on anyone's machine: you verify it against GitHub's build attestations instead.
+
+### Upgrading
+
+1. **Re-run `mash admin init` once after upgrading.** It hardens the lease bucket (`KV_mash-leases`) so it no longer accepts rollup writes, which is the security fix in this release. `mashctl audit` reports a bucket that is not yet hardened, and `mash serve` now warns at start when it sees one.
+2. **Upgrade every admin tool before the bucket is hardened.** On a hardened bucket, `mash admin` and `mashctl` from 0.3.x cannot provision, deprovision or retire, and their name locks linger for up to 30 seconds. Endpoints of any version keep working. Any 0.4.0 admin command hardens the bucket as a side effect, so move every admin caller in an account to 0.4.0 together.
+3. **Plugin pinning.** The plugin published with this tag is not pinned to a binary. The plugin release that follows it (`0.4.0-pin.1`) pins the launcher to v0.4.0. If you set `MASH_PLUGIN_REQUIRE_VERIFIED`, do so only after updating to that pinned plugin.
+
+### How this release is verified
+
+From v0.4.0, mash releases are keyless. The tag is annotated and unsigned, pushed by the release service. There is no `SHA256SUMS.sig`. Instead, every binary and `SHA256SUMS` carry a GitHub build attestation made by mash's own release workflow on mash's runners. Check a download like this, pinning all four facts:
+
+```sh
+gh attestation verify mash-linux-amd64 -R bogworks/mash \
+  --signer-workflow bogworks/mash/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.4.0 \
+  --source-digest 5d907947e06cf6ebc6ff1f2827527dafe85d56f8
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+Releases before v0.4.0 still verify with their SSH signatures, and the old signer files stay in the repository, frozen. An attestation says that mash's release workflow built these bytes from this tag on a runner mash operates; it does not say that the runner was uncompromised or that a person reviewed the release. This release was cut under a recorded exception to the new release standard, described in [docs/release.md](docs/release.md) under "Exceptions to the release process".
 
 ### Added
 
