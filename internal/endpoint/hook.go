@@ -240,9 +240,12 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 
 // putEntry writes p's entry to the spool. An own-stream entry is written as it always was. A legacy-stream entry is
 // written in one critical section of the spool lock, after a check of the legacy lease made inside it, and stamped with
-// the epoch of the hold (legacyEpochNow): a lease lost after the check records epoch "none" under the same lock
-// afterwards, which hides the entry from every hook read. held is false when nothing was written because the legacy
-// lease is not held.
+// the epoch of the hold (legacyEpochNow). A lease lost after the check but known by the end of the write has its epoch
+// "none" recorded in the same critical section as the entry, so no hook read shows the entry. A lease lost later still
+// has its "none" written under the lock right after, but a hook read that takes the lock first in between can show the
+// entry once: a duplicate at worst, since the old holder cannot ack it and the next holder is redelivered it. Delivery
+// is at least once: a duplicate is accepted, a lost message never. held is false when nothing was written because the
+// legacy lease is not held.
 func (e *Endpoint) putEntry(p pending) (held bool, epoch uint64, err error) {
 	ent := EntryOf(p.mail)
 	if p.mail.Stream != LegacyStream || !e.hasLegacyStream() {
@@ -260,7 +263,9 @@ func (e *Endpoint) putEntry(p pending) (held bool, epoch uint64, err error) {
 }
 
 // putLegacyLocked is the legacy-stream half of putEntry, the caller holding the spool lock: the lease check, then the
-// stamped write. held is false when nothing was written because the legacy lease is not held.
+// stamped write, then a recheck of the hold: a loss known by then is recorded before the lock is released. held is false
+// when nothing was written because the legacy lease is not held; it stays true when the entry was written and the lease
+// was lost during the write (the entry is dropped and the message nak'd later, so the next holder is redelivered it).
 func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, epoch uint64, err error) {
 	if testLegacyCheckSeam != nil {
 		testLegacyCheckSeam()
@@ -275,7 +280,13 @@ func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, epoch uint64, er
 	if testLegacyPutSeam != nil {
 		testLegacyPutSeam()
 	}
-	return true, ent.Epoch, e.spool.Put(ent)
+	if err := e.spool.Put(ent); err != nil {
+		return true, ent.Epoch, err
+	}
+	if !e.legacyReading() {
+		e.noteLegacyEpochLocked() // lost during the write: record "none" in this critical section, not after it
+	}
+	return true, ent.Epoch, nil
 }
 
 // testSettleSeam is a test seam: called in settleHeld after the per-entry loop, before the drain is acted on. Nil in
