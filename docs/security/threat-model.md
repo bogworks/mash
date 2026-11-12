@@ -293,6 +293,27 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   signed by the old key from authenticating; then `mashctl reissue` the zone's endpoints. Run `mashctl issued check` to
   see what is connected that mash did not issue, and revoke those keys.
 
+**Owner group signing keys** (`groups/<range>.<owner>.nk`)
+- Lives: `<config dir>/keys/groups/<range>.<owner>.nk`, 0600 in 0700, beside the zone keys and under the same rules. The
+  public half is published in the account JWT as a scoped signer with the group's template. `mashctl issue serve` reads
+  it and never creates it.
+- Held by: the operator host's user (the minting authority) only.
+- A holder can: sign a user JWT that takes the group's template, with any name and tags, like a zone key. The issue
+  service signs only for a public key and an address, with the tags of mash's table.
+- If it leaks: replace the key in the account JWT and re-issue the group's senders.
+
+**Wrangler keys and the wrangler registry** (`wranglers.json`)
+- Lives: the registry is `<config dir>/keys/wranglers.json`, 0600, public keys only, in the key store directory. The
+  wrangler's private key stays on the wrangler's host. The registry exists only for test accounts: how a real wrangler's
+  key is registered is not decided (ADR 0104), and `mashctl issue serve` refuses an account without a test registry.
+- Held by: the registry by the operator host's user; the wrangler key by the wrangler on each sender's host.
+- A holder can: the wrangler key signs issue requests for the host and owner group it is registered for: it can have any
+  address of that group signed for a public key it chooses, so a compromised wrangler compromises that group's addresses
+  on that host, never another group's (the address is inside the signed bytes). Whoever can write the registry can
+  register a wrangler key, which is why the file is 0600 and read only if no one else can write it.
+- If it leaks: `mashctl wrangler remove --host H --group G` (takes effect at the next request), then revoke the keys the
+  issue record shows for that group's addresses on that host and re-issue.
+
 **System account key** (`system.nk`) and **system creds** (`sys.creds`)
 - Lives: the key at `<config dir>/keys/system.nk` (0600 in 0700), only for a server `init --local` stood up. The creds
   at `<config dir>/server/sys.creds` (0600, in the 0700 server directory), or wherever `MASH_SYS_CREDS` points.

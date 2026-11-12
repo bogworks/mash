@@ -117,6 +117,7 @@ func Usage(prog string) string {
 		adoptLines(line)
 		mintLines(line)
 		issuedLines(line)
+		issueServiceLines(line)
 		retireLines(line)
 		policyLines(line)
 	}
@@ -135,6 +136,11 @@ func mintLines(line func(left, right string)) {
 func issuedLines(line func(left, right string)) {
 	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
+}
+
+func issueServiceLines(line func(left, right string)) {
+	line("issue serve [--list-set FILE] [--registry FILE]", "run the issue service: sign a user JWT for a public key a registered wrangler countersigned, with the tags of the list set (test accounts only; runs until interrupted)")
+	line("wrangler init --test-account | add --host H --group G --key PUB | list | remove --host H --group G", "the static wrangler registry for a test account (the key store's wranglers.json)")
 }
 
 func retireLines(line func(left, right string)) {

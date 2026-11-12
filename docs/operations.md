@@ -298,6 +298,17 @@ Adding an endpoint to the policy and minting its user (`mashctl add`, `mashctl r
 - **Revoked keys.** `retire`, `deprovision` and a rotating `reissue` set `revoked_at` on the key's entry after the revocation succeeds (best effort: a failure is a warning on stderr, and the revocation stands). A key that is recorded as revoked and still connected is reported as `revoked key still connected` and exits 1, because the revocation did not take effect: check that every server holds the account JWT with the revocation, and revoke the key again. Exit codes of `mashctl issued check`: 0 clean; 1 an unrecorded key or a revoked key is connected; 2 the check could not be made. A key revoked outside `mashctl` (nsc) is not marked, so it is not reported this way.
 - **After a finding.** The finding names the key and the signer. If the signer is a zone key, replace that key (`mashctl policy apply --replace-zone-key ZONE`), reissue the zone's endpoints, and revoke the unknown key in the account JWT. A key that is yours but predates the record is recorded by `mashctl reissue NAME`.
 
+## The issue service
+
+`mashctl issue serve` ([ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md)) signs a user JWT for a public key that the wrangler on the sender's host countersigned. The command's options and the request format are in [mashctl.md](mashctl.md#the-issue-service-and-the-wrangler-registry). To run it:
+
+1. The account JWT must carry the owner group's scoped signing key with its template (the policy gate does that; until it lands, push it yourself), and the key store must hold that key as `groups/<range>.<owner>.nk` (0600). The service never creates one.
+2. Make the static registry, for a test account only: `mashctl wrangler init --test-account`, then `mashctl wrangler add --host H --group range.owner --key PUB` for each wrangler. Real wrangler registration is not decided; the service refuses to start on an account with no test registry.
+3. Give the wrangler's NATS user permission to publish on `agents.issue.<range>.<owner>` and to receive replies (`_INBOX.>`). This is account setup and mash does not do it. No template mash compiles reaches that subject, so an endpoint cannot publish to it.
+4. Run `mashctl issue serve --list-set FILE` under a service manager. It uses the admin credentials; a dedicated user that can write the issue record and subscribe to its subject is better. Run one service per account.
+
+The service logs one structured line to stderr for each refusal (code, address, public key, host); it never logs a seed or a JWT. Its replay set is in memory: a restart forgets it, so a request captured before the restart can be replayed until its expiry, at most five minutes. Every issue is in the issue record (`mashctl issued list`) with purpose `issue` before it is returned.
+
 ## Removing an endpoint
 
 ```sh
