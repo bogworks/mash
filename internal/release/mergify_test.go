@@ -321,8 +321,24 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(q, "|") {
 		t.Errorf("approval group = %v, queue_conditions require %v", got, q)
 	}
-	if strings.Join(got, "|") != "approved-reviews-by = randybias|label = lead-approved" {
-		t.Errorf("approval group = %v", got)
+	// The expected approver is derived from queue_conditions, not hard-coded here, so this comparison needs no edit when
+	// the maintainer changes (TestMergify_entryNeedsApprovalOrLabel pins the maintainer deliberately).
+	var logins []string
+	for _, c := range q {
+		if l, ok := strings.CutPrefix(c, "approved-reviews-by = "); ok {
+			logins = append(logins, l)
+		}
+	}
+	if len(logins) == 0 || strings.TrimSpace(logins[0]) == "" {
+		t.Fatalf("queue_conditions name no approver login: %v", q)
+	}
+	for _, l := range logins {
+		if !contains(got, "approved-reviews-by = "+l) {
+			t.Errorf("approval group %v lacks approver %q from queue_conditions", got, l)
+		}
+	}
+	if !contains(got, "label = lead-approved") {
+		t.Errorf("approval group %v lacks label = lead-approved", got)
 	}
 }
 

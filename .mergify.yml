@@ -45,6 +45,7 @@ merge_protections:
       - check-success = codex-review
       - check-success = adr-lint
       - or:
+          # Mirrors the approver in queue_conditions; internal/release/mergify_test.go fails if they differ.
           - approved-reviews-by = randybias
           - label = lead-approved
       - label != hold
@@ -81,6 +82,7 @@ queue_rules:
       # conditions), so the list is what we rely on. Add a maintainer's login to this line and to the
       # dismiss-approvals rule below. `label != hold` above stays the brake on top of this gate.
       - or:
+          # Mirrored in merge_protections; internal/release/mergify_test.go fails if the approvers differ.
           - approved-reviews-by = randybias
           - label = lead-approved
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
