@@ -41,6 +41,8 @@ type AuditStream struct {
 	Msgs      uint64
 	FirstSeq  uint64
 	LastSeq   uint64
+	Bytes     uint64    // bytes the stream stores
+	MaxBytes  int64     // the stream's configured byte cap; 0 or less when it reports none
 	Created   time.Time // when the stream was created; zero when the server reports none
 	LastTime  time.Time // when the stream last stored a message; zero for a stream that never held one
 	Subjects  []string  // as configured; for a suspended stream the parked subject
@@ -151,7 +153,7 @@ func (a *Admin) Audit(ctx context.Context) (AuditSnapshot, error) {
 		if err != nil {
 			return snap, fmt.Errorf("mash: stream %s: %w", n, err)
 		}
-		st := AuditStream{Name: n, Msgs: info.State.Msgs, FirstSeq: info.State.FirstSeq, LastSeq: info.State.LastSeq, LastTime: info.State.LastTime, Created: info.Created,
+		st := AuditStream{Name: n, Msgs: info.State.Msgs, FirstSeq: info.State.FirstSeq, LastSeq: info.State.LastSeq, Bytes: info.State.Bytes, MaxBytes: info.Config.MaxBytes, LastTime: info.State.LastTime, Created: info.Created,
 			Subjects: slices.Clone(info.Config.Subjects)}
 		slices.Sort(st.Subjects)
 		_, st.Suspended = suspendedSubjects(strings.TrimPrefix(n, sap.InboxStream("")), info.Config)

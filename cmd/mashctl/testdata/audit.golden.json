@@ -47,7 +47,12 @@
           "ack_floor_consumer_seq": 0,
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 59,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       }
     },
     {
@@ -86,7 +91,12 @@
           "ack_floor_consumer_seq": 0,
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 162,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       }
     },
     {
@@ -125,7 +135,12 @@
           "ack_floor_consumer_seq": 0,
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 122,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       }
     },
     {
@@ -165,7 +180,12 @@
           "delivered_last": "<TIME>",
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 106,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       }
     }
   ],
@@ -203,7 +223,12 @@
           "delivered_last": "<TIME>",
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 106,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       },
       "new_inbox": {
         "stream": "inbox-acme_team1_ops1",
@@ -230,7 +255,12 @@
           "ack_floor_consumer_seq": 0,
           "num_redelivered": 0,
           "created": "<TIME>"
-        }
+        },
+        "bytes": 59,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
       },
       "drained": false,
       "trust_label": "not-available",

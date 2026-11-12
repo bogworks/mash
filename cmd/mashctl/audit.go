@@ -81,6 +81,12 @@ type auditInbox struct {
 	Subjects  []string     `json:"subjects"`
 	Suspended bool         `json:"suspended"`
 	Deliver   auditDeliver `json:"deliver"`
+
+	Bytes         uint64  `json:"bytes"`
+	MaxBytes      int64   `json:"max_bytes"`
+	FillPercent   float64 `json:"fill_percent"`
+	Evicted       uint64  `json:"evicted"`        // messages the stream took and no longer holds (a full inbox or the age limit)
+	EvictedUnread uint64  `json:"evicted_unread"` // of those, at least this many were never delivered to the endpoint
 }
 
 type auditRecord struct {
@@ -223,7 +229,7 @@ func capState(s string) string {
 }
 
 type auditProblem struct {
-	What  string `json:"what"` // record, creds, retired or lease
+	What  string `json:"what"` // record, creds, retired, lease or inbox
 	Item  string `json:"item"` // the directory key or the file
 	Error string `json:"error"`
 }
@@ -286,6 +292,13 @@ func toAuditInbox(name string, st *admin.AuditStream) auditInbox {
 	in.LastTime = auditTime(&st.LastTime)
 	in.Created = auditTime(&st.Created)
 	in.Subjects = append(in.Subjects, st.Subjects...)
+	in.Bytes, in.MaxBytes = st.Bytes, st.MaxBytes
+	is := store.InboxState{FirstSeq: st.FirstSeq, LastSeq: st.LastSeq, Bytes: st.Bytes, MaxBytes: st.MaxBytes}
+	if d := st.Deliver; d != nil && d.DeliverPolicy == "all" {
+		is.HaveConsumer, is.DeliveredStream, is.DeliveredConsumer = true, d.Delivered, d.DeliveredConsumer
+	}
+	ev := store.Eviction(is)
+	in.FillPercent, in.Evicted, in.EvictedUnread = math.Round(ev.Fill*100)/100, ev.Dropped, ev.Unread
 	if st.Deliver != nil {
 		d := st.Deliver
 		in.Deliver = auditDeliver{Present: true, Pending: d.Pending, AckPending: d.AckPending, DeliverPolicy: d.DeliverPolicy,
@@ -332,6 +345,26 @@ func (in auditInbox) drained() bool {
 		return false
 	}
 	return d.AckFloor >= in.LastSeq
+}
+
+// inboxProblems is the problems of one endpoint's inbox: mail lost unread, and an inbox near its byte cap. A message
+// dropped after it was delivered is ordinary turnover (the oldest mail goes when the cap or the age limit is reached),
+// so it is not a problem.
+func inboxProblems(key string, in auditInbox) []auditProblem {
+	var out []auditProblem
+	if !in.Present {
+		return nil
+	}
+	if in.EvictedUnread > 0 {
+		out = append(out, auditProblem{What: "inbox", Item: key, Error: fmt.Sprintf(
+			"%d unread message(s) were evicted from this inbox (%d evicted in all; it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)",
+			in.EvictedUnread, in.Evicted)})
+	}
+	if in.FillPercent >= store.InboxNearFullPercent {
+		out = append(out, auditProblem{What: "inbox", Item: key, Error: fmt.Sprintf(
+			"inbox is %.0f%% full (%d of %d bytes); the oldest mail is evicted at 100%%", in.FillPercent, in.Bytes, in.MaxBytes)})
+	}
+	return out
 }
 
 // buildAudit combines the server snapshot with the creds files' public user keys. credsUsers maps a creds file to its
@@ -402,6 +435,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			}
 		}
 		rep.Records = append(rep.Records, ar)
+		rep.Problems = append(rep.Problems, inboxProblems(key, ar.Inbox)...)
 	}
 	slices.SortFunc(rep.Records, func(a, b auditRecord) int { return strings.Compare(a.Key, b.Key) })
 	slices.SortFunc(rep.Renames, func(a, b auditRename) int { return strings.Compare(a.Flat, b.Flat) })
@@ -744,6 +778,10 @@ func writeAuditText(w io.Writer, r auditReport) {
 		fmt.Fprintf(w, "fenced lease %s (a deprovision tombstone; it expires)\n", c(k))
 	}
 	for _, p := range r.Problems {
+		if p.What == "inbox" { // a report about readable data, not a read failure
+			fmt.Fprintf(w, "inbox %s: %s\n", c(p.Item), c(p.Error))
+			continue
+		}
 		fmt.Fprintf(w, "not readable %s %s: %s\n", p.What, c(p.Item), c(p.Error))
 	}
 	if rt := r.Retired; rt != nil {
