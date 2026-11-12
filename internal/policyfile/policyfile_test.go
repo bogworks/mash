@@ -93,9 +93,9 @@ func TestRoundTripGolden(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(d.AddEndpoint("ledger", map[string]string{"zone": "internal", "team": "finance"}))
-	must(d.SetLabels("support-bot", map[string]string{"team": "helpdesk", "tier": "1"}, []string{"zone"}))
-	must(d.SetLabels("billing-agent", map[string]string{"zone": "internal"}, nil))
+	must(d.AddEndpoint("ledger", map[string]string{"net": "internal", "team": "finance"}))
+	must(d.SetLabels("support-bot", map[string]string{"team": "helpdesk", "tier": "1"}, []string{"net"}))
+	must(d.SetLabels("billing-agent", map[string]string{"net": "internal"}, nil))
 	must(d.SetLabels("web-intake", nil, []string{"internet"}))
 	must(d.SetLabels("deploy-bot", map[string]string{"kind": "tool"}, nil))
 	must(d.Save())
@@ -104,19 +104,19 @@ func TestRoundTripGolden(t *testing.T) {
 
 	rem, add := changed(string(orig), string(got))
 	eq(t, "removed", rem, []string{
-		`    labels: {zone: dmz, internet: "yes"}`,
-		`      zone: dmz`,
+		`    labels: {net: dmz, internet: "yes"}`,
+		`      net: dmz`,
 		`      team: support   # who answers`,
-		`  deploy-bot: {labels: {zone: internal}}`,
+		`  deploy-bot: {labels: {net: internal}}`,
 	})
 	eq(t, "added", add, []string{
-		`    labels: {zone: dmz}`,
+		`    labels: {net: dmz}`,
 		`      team: helpdesk   # who answers`,
 		`      tier: "1"`,
-		`    labels: {zone: internal}`,
-		`  deploy-bot: {labels: {zone: internal, kind: tool}}`,
+		`    labels: {net: internal}`,
+		`  deploy-bot: {labels: {net: internal, kind: tool}}`,
 		`  ledger:`,
-		`    labels: {team: finance, zone: internal}`,
+		`    labels: {net: internal, team: finance}`,
 	})
 	if _, err := policy.Parse(got); err != nil {
 		t.Fatal(err)
@@ -125,10 +125,10 @@ func TestRoundTripGolden(t *testing.T) {
 
 func TestSetLabelsRemoveLast(t *testing.T) {
 	d := load(t, copyTo(t, "commented.yaml"))
-	if err := d.SetLabels("deploy-bot", nil, []string{"zone"}); err != nil { // flow
+	if err := d.SetLabels("deploy-bot", nil, []string{"net"}); err != nil { // flow
 		t.Fatal(err)
 	}
-	if err := d.SetLabels("support-bot", nil, []string{"zone", "team"}); err != nil { // block
+	if err := d.SetLabels("support-bot", nil, []string{"net", "team"}); err != nil { // block
 		t.Fatal(err)
 	}
 	b, _ := d.Bytes()
@@ -152,14 +152,14 @@ func TestAddEndpointStyles(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "p.yaml")
 	os.WriteFile(p, []byte("default: allow\n# end"), 0o644)
 	d := load(t, p)
-	if err := d.AddEndpoint("a", map[string]string{"zone": "x"}); err != nil {
+	if err := d.AddEndpoint("a", map[string]string{"net": "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.AddEndpoint("b", nil); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := d.Bytes()
-	want := "default: allow\n# end\n\nendpoints:\n  a:\n    labels: {zone: x}\n  b: {}\n"
+	want := "default: allow\n# end\n\nendpoints:\n  a:\n    labels: {net: x}\n  b: {}\n"
 	if string(b) != want {
 		t.Fatalf("%q", b)
 	}
@@ -214,14 +214,14 @@ func TestCreateThenAdd(t *testing.T) {
 		t.Fatal("bad default accepted")
 	}
 	d = load(t, p)
-	if err := d.AddEndpoint("a", map[string]string{"zone": "z"}); err != nil {
+	if err := d.AddEndpoint("a", map[string]string{"net": "z"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Save(); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(p)
-	if !strings.Contains(string(b), "endpoints:\n  a:\n    labels: {zone: z}\n\nrules: []") {
+	if !strings.Contains(string(b), "endpoints:\n  a:\n    labels: {net: z}\n\nrules: []") {
 		t.Fatalf("%s", b)
 	}
 }
@@ -237,7 +237,7 @@ func TestRemoveEndpoint(t *testing.T) {
 	eq(t, "refs", refs, []string{"tests[1] web-intake->support-bot"})
 	b, _ := d.Bytes()
 	rem, add := changed(string(orig), string(b))
-	eq(t, "removed", rem, []string{"  support-bot:", "    labels:", "      zone: dmz", "      team: support   # who answers"})
+	eq(t, "removed", rem, []string{"  support-bot:", "    labels:", "      net: dmz", "      team: support   # who answers"})
 	eq(t, "added", add, nil)
 	// the test still names it, so the result is not a valid policy and cannot be saved
 	if err := d.Save(); err == nil || !strings.Contains(err.Error(), "refusing to save an invalid policy") {
@@ -530,7 +530,7 @@ func TestSameLockFile(t *testing.T) {
 
 func TestAllowEmptySurvivesAnEdit(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "policy.yaml")
-	src := "default: allow\nendpoints:\n  a:\n    labels: {zone: red}\nrules:\n  - {name: later, action: deny, from: {zone: blue}, to: {}, allow_empty: true}\n"
+	src := "default: allow\nendpoints:\n  a:\n    labels: {net: red}\nrules:\n  - {name: later, action: deny, from: {net: blue}, to: {}, allow_empty: true}\n"
 	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestAllowEmptySurvivesAnEdit(t *testing.T) {
 	if err := d.SetLabels("a", map[string]string{"team": "x"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.AddEndpoint("b", map[string]string{"zone": "red"}); err != nil {
+	if err := d.AddEndpoint("b", map[string]string{"net": "red"}); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := d.Bytes()

@@ -1,4 +1,4 @@
-// Package ctlkeys is the key store of mashctl: the account signing seed and the per-zone scoped signing seeds, kept
+// Package ctlkeys is the key store of mashctl: the account signing seed (and the operator and system keys of a server `mashctl init --local` stood up), kept
 // as 0600 files in a 0700 directory (ADR 0052). Seed text is never put in an error or a log line.
 package ctlkeys
 
@@ -12,8 +12,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
@@ -23,8 +21,6 @@ import (
 )
 
 var (
-	// ErrNoZoneKey is wrapped by ZoneKey when the zone has no key file and create is false.
-	ErrNoZoneKey = errors.New("mashctl: no signing key for zone")
 	// ErrNoOperatorKey is returned by Operator when operator.nk is absent.
 	ErrNoOperatorKey = errors.New("mashctl: no operator key (operator.nk): it exists only for a server `mashctl init --local` stood up")
 	// ErrNoSystemKey is returned by System when system.nk is absent.
@@ -37,7 +33,6 @@ const (
 	accountFile  = "account.nk"
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
-	zonesDir     = "zones"
 	seedExt      = ".nk"
 )
 
@@ -53,12 +48,6 @@ var (
 	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
 	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
-
-// zoneRE is the shape of a zone name, identical to sap.ValidZone (zone-in-subject, ADR 0054; not on main yet): swap it for that
-// when it lands. The shape also keeps path separators and dots out of file names.
-var zoneRE = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-func validZone(z string) bool { return len(z) >= 1 && len(z) <= 32 && zoneRE.MatchString(z) }
 
 // Authority is the key store rooted at one directory.
 type Authority struct {
@@ -155,11 +144,10 @@ func CheckParentDir(d string) error {
 	return nil
 }
 
-func (a *Authority) zonesPath() string { return filepath.Join(a.dir, zonesDir) }
-
-// checkDirs checks the key dir and the zones dir; with create it makes missing ones (0700).
+// checkDirs checks the key dir; with create it makes it if missing (0700). A zones directory left by an older release
+// is not read, checked or removed: its seeds are the operator's to keep or destroy (ADR 0091).
 func (a *Authority) checkDirs(create bool) error {
-	for _, d := range []string{a.dir, a.zonesPath()} {
+	for _, d := range []string{a.dir} {
 		ok, err := checkDir(d)
 		if err != nil {
 			return err
@@ -382,57 +370,6 @@ func (a *Authority) InitAccount() (pub string, created bool, err error) {
 // Account returns the account signing key pair and its public key.
 func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
-}
-
-// ZoneKey returns zone's scoped signing key; with create it generates and writes one if absent. It never overwrites.
-func (a *Authority) ZoneKey(zone string, create bool) (nkeys.KeyPair, error) {
-	if !validZone(zone) {
-		return nil, fmt.Errorf("mashctl: invalid zone name %q: use lower-case letters, digits and hyphens, starting with a letter, up to 32 characters", zone)
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.checkDirs(create); err != nil {
-		return nil, err
-	}
-	kp, _, err := getOrCreate(filepath.Join(a.zonesPath(), zone+seedExt), accountKind, create)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("%w %q", ErrNoZoneKey, zone)
-	}
-	return kp, err
-}
-
-// ZonePublic is the public key of an existing zone key.
-func (a *Authority) ZonePublic(zone string) (string, error) {
-	kp, err := a.ZoneKey(zone, false)
-	if err != nil {
-		return "", err
-	}
-	defer kp.Wipe()
-	return kp.PublicKey()
-}
-
-// Zones lists the zones that have a key file, sorted.
-func (a *Authority) Zones() ([]string, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.checkDirs(false); err != nil {
-		return nil, err
-	}
-	ents, err := os.ReadDir(a.zonesPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("mashctl: list zones: %w", err)
-	}
-	var out []string
-	for _, e := range ents {
-		if z, ok := strings.CutSuffix(e.Name(), seedExt); ok && validZone(z) && !e.IsDir() {
-			out = append(out, z)
-		}
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 // ErrDifferentKey is wrapped by ImportOperator and ImportAccount when the store already holds another key.

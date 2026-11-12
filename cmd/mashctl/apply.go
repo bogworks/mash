@@ -32,17 +32,11 @@ const (
 type applyOpts struct {
 	file, sysCreds string
 	dryRun         bool
-	replaceZones   []string
-	removeZones    []string
-	keepZones      []string
 	servers        string // --servers as given, "" when not
 }
 
 func applyUsage(verb string) string {
-	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
-	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N]\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {
@@ -65,21 +59,9 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			o.file, err = val(&i, a, "--policy")
 		case a == "--sys-creds" || strings.HasPrefix(a, "--sys-creds="):
 			o.sysCreds, err = val(&i, a, "--sys-creds")
-		case a == "--replace-zone-key" || strings.HasPrefix(a, "--replace-zone-key="):
-			var z string
-			if z, err = val(&i, a, "--replace-zone-key"); err == nil {
-				o.replaceZones = append(o.replaceZones, z)
-			}
-		case a == "--remove-zone" || strings.HasPrefix(a, "--remove-zone="):
-			var z string
-			if z, err = val(&i, a, "--remove-zone"); err == nil {
-				o.removeZones = append(o.removeZones, z)
-			}
-		case a == "--keep-zone" || strings.HasPrefix(a, "--keep-zone="):
-			var z string
-			if z, err = val(&i, a, "--keep-zone"); err == nil {
-				o.keepZones = append(o.keepZones, z)
-			}
+		case a == "--replace-zone-key" || a == "--remove-zone" || a == "--keep-zone" ||
+			strings.HasPrefix(a, "--replace-zone-key=") || strings.HasPrefix(a, "--remove-zone=") || strings.HasPrefix(a, "--keep-zone="):
+			err = fmt.Errorf("%s is gone: %s", strings.SplitN(a, "=", 2)[0], policy.ZoneRemoved)
 		case a == "--servers" || strings.HasPrefix(a, "--servers="):
 			o.servers, err = val(&i, a, "--servers")
 		case a == "--dry-run" && (verb == "apply" || verb == "repair"):
@@ -144,7 +126,7 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	return nc, nil
 }
 
-// runPolicyApply is `mashctl policy apply` and `mashctl policy diff`.
+// runPolicyApply is `mashctl policy apply`.
 func runPolicyApply(verb string, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
 	o, err := parseApplyArgs(verb, args)
@@ -228,12 +210,6 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	// The file's own tests run before anything is read or created: a file whose tests contradict its rules is not pushed.
 	failed, total := policyTestFailures(f)
 	switch {
-	case len(failed) > 0 && verb == "diff":
-		fmt.Fprintf(stdout, "policy tests FAIL: %d of %d tests in %s do not hold; apply would refuse this file\n", len(failed), total, path)
-		for _, l := range failed {
-			fmt.Fprintf(stdout, "  %s\n", l)
-		}
-		fmt.Fprintln(stdout)
 	case len(failed) > 0:
 		return fail("%s", refuseFailedTests(failed, total, path, "nothing was changed, no key was created, nothing was pushed", stdout))
 	case total == 0:
@@ -245,24 +221,14 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	if cfg.URL == "" {
 		return fail(`no server URL (config.json "url" or MASH_URL)`)
 	}
-	var c *policy.Compiled
-	if snap != nil {
-		c = snap.c
-	} else if c, err = policy.Compile(f, cfg.Owner); err != nil {
-		return fail("%v", err)
-	}
-	// the directory checks come first: they refuse whatever the file says, so they are reachable with any policy.
-	if verb == "apply" {
-		if zerr := refuseZonedDirectory(cfg); zerr != nil {
-			return fail("refusing: %v (nothing was changed)", zerr)
+	if snap == nil { // a snapshot (repair) was compiled already
+		if _, err = policy.Compile(f, cfg.Owner); err != nil {
+			return fail("%v", err)
 		}
 	}
-	if what := zoneConstructs(c); what != "" {
-		msg := fmt.Sprintf("the policy compiles zone constructs (%s): zones are removed (ADR 0091); apply is refused until the label policy model ships", what)
-		if verb == "apply" {
-			return fail("refusing: %s (nothing was changed)", msg)
-		}
-		fmt.Fprintf(stdout, "warning: %s\n\n", msg)
+	// the directory check comes first: it refuses whatever the file says, so it is reachable with any policy.
+	if zerr := refuseZonedDirectory(cfg); zerr != nil {
+		return fail("refusing: %v (nothing was changed)", zerr)
 	}
 	if snap == nil { // repair (which passes a snapshot) has announced already
 		announceTarget(cfg, env, stderr, &sysTarget{o.sysCreds})
@@ -281,26 +247,15 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	}
 	defer nc.Close()
 
-	if verb == "apply" { // zones are removed (ADR 0091): an applied zone policy is not applied over or extended
-		ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
-		err := apply.RefuseZonePolicy(ctx, apply.NATS{Conn: nc, Inventory: servers}, ks, servers, store.ErrZonePolicyApplied)
-		cancel()
-		if err != nil {
-			return fail("refusing: %v (nothing was changed)", err)
-		}
-	}
-
-	mode := apply.Apply
-	switch {
-	case verb == "diff":
-		mode = apply.Diff
-	case o.dryRun:
-		mode = apply.DryRun
-	}
+	// Zones are removed (ADR 0091): an applied zone policy is not applied over, extended or compared with.
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
-	defer cancel()
-	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
-		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
+	err = apply.RefuseZonePolicy(ctx, apply.NATS{Conn: nc, Inventory: servers}, ks, servers, store.ErrZonePolicyApplied)
+	cancel()
+	if err != nil {
+		return fail("refusing: %v (nothing was changed)", err)
+	}
+	// The guards passed and there is still nothing to apply: refuse rather than report success.
+	return fail("refusing: the zone policy stack was removed (ADR 0091); `mashctl policy apply` has no replacement until the label policy model ships (nothing was changed)")
 }
 
 // refuseZonedDirectory is the preflight of apply (ADR 0091): the first directory record that carries a zone. It fails
@@ -317,24 +272,4 @@ func refuseZonedDirectory(cfg config.Config) error {
 		return fmt.Errorf("cannot read the directory to check for zoned records: %w", err)
 	}
 	return store.FirstZonedRecord(recs)
-}
-
-// zoneConstructs names what in the compiled policy is a zone construct (ADR 0091), or "" when there is none. Compile
-// derives a zone for every declared endpoint (its subject-label value, else the default zone), so any policy that
-// declares an endpoint compiles zones, and with them zone signing keys and six-token grants. A subject label other
-// than the default is a zone construct of its own. (Parse fills the default label in, so an explicit "zone" is
-// indistinguishable from none, and is covered by the zones it yields.)
-func zoneConstructs(c *policy.Compiled) string {
-	var what []string
-	if len(c.Zones) > 0 {
-		names := make([]string, len(c.Zones))
-		for i, z := range c.Zones {
-			names[i] = z.Name
-		}
-		what = append(what, fmt.Sprintf("%d zone signing keys and six-token grants for zones %s", len(c.Zones), strings.Join(names, ", ")))
-	}
-	if c.SubjectLabel != policy.DefaultSubjectLabel {
-		what = append(what, fmt.Sprintf("subject_label %q", c.SubjectLabel))
-	}
-	return strings.Join(what, "; ")
 }

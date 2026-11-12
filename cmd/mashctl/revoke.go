@@ -73,18 +73,6 @@ func revokedInAccount(ctx context.Context, cfg config.Config, env func(string) s
 	})
 }
 
-// signerPublished reports whether the account JWT on every server lists signerPub as a scoped signing key with role
-// role; a test replaces it.
-var signerPublished = signerInAccount
-
-// signerInAccount is apply.SignerPublished over the system account connection, with the same refusals as
-// revokedInAccount: any failure to establish the answer is an error, never "published".
-func signerInAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, signerPub, role string) (bool, error) {
-	return readAccount(ctx, cfg, env, servers, func(ctx context.Context, p apply.RevokeParams) (bool, error) {
-		return apply.SignerPublished(ctx, p, signerPub, role)
-	})
-}
-
 // readAccount opens the key store, connects with the system account credentials and runs read over every server.
 func readAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, read func(context.Context, apply.RevokeParams) (bool, error)) (bool, error) {
 	keyDir, err := ctlkeys.DirFor(cfg, env)

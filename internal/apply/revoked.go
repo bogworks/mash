@@ -78,25 +78,3 @@ func KeyRevoked(ctx context.Context, p RevokeParams, pub string) (bool, error) {
 	}
 	return false, nil
 }
-
-// SignerPublished reports whether every server's copy of the account JWT lists signerPub as a scoped signing key
-// whose role is role (the zone a new user JWT will be signed for). A user JWT signed by a key that some server's
-// account JWT lacks cannot connect there. It is false if any copy lacks the key or scopes it to another role; a
-// silent, unverifiable or incomplete server set is an error (see accountClaims).
-func SignerPublished(ctx context.Context, p RevokeParams, signerPub, role string) (bool, error) {
-	copies, err := accountClaims(ctx, p)
-	if err != nil {
-		return false, err
-	}
-	for _, c := range copies {
-		sc, ok := c.SigningKeys.GetScope(signerPub)
-		if !ok {
-			return false, nil
-		}
-		us, _ := sc.(*jwt.UserScope)
-		if us == nil || us.Role != role {
-			return false, nil
-		}
-	}
-	return true, nil
-}

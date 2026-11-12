@@ -15,7 +15,6 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/policyfile"
 )
 
@@ -135,7 +134,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	}
 	defer doc.Close()
 	beforeBytes, _ := doc.Bytes()
-	beforeFile, before, err := compileBytes(beforeBytes, cfg.Owner)
+	beforeFile, _, err := compileBytes(beforeBytes, cfg.Owner)
 	if err != nil {
 		return fail("%s: %v", path, err)
 	}
@@ -149,7 +148,6 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	}
 
 	// (2) the entry removed in memory.
-	var after *policy.Compiled
 	editPolicy := declared
 	if declared {
 		refs, err := doc.RemoveEndpoint(name)
@@ -165,7 +163,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			fmt.Fprintf(stderr, "mashctl: retire %s: tests still name %s: %s; the policy file is left as it is\n", name, name, strings.Join(refs, ", "))
 		} else {
 			afterBytes, _ := doc.Bytes()
-			if _, after, err = compileBytes(afterBytes, cfg.Owner); err != nil {
+			if _, _, err = compileBytes(afterBytes, cfg.Owner); err != nil {
 				return fail("the edit does not make a valid policy: %v", err)
 			}
 		}
@@ -299,11 +297,6 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	fmt.Fprintf(stdout, "retired %s\n", name)
 	if renamed != "" {
 		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
-	}
-	if after != nil {
-		for _, l := range consequences(before, after) {
-			fmt.Fprintln(stdout, l)
-		}
 	}
 	switch {
 	case user == "":

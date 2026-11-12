@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/admin"
@@ -203,48 +201,6 @@ func writeCredsNew(path string, creds []byte) (undo func(), err error) {
 	}, nil
 }
 
-// TODO(Z2): remove with the policy stack (ADR 0091).
-// zoneSetChanged reports whether the account JWT's scoped keys must change between two compiles: a zone was added,
-// removed, or any zone's permission template differs.
-func zoneSetChanged(before, after *policy.Compiled) bool {
-	if len(before.Zones) != len(after.Zones) {
-		return true
-	}
-	for i := range after.Zones {
-		if before.Zones[i].Name != after.Zones[i].Name || !reflect.DeepEqual(before.Zones[i].Perms, after.Zones[i].Perms) {
-			return true
-		}
-	}
-	return false
-}
-
-// consequences is what an edit from the before compile to the after compile leaves for the operator, one line each
-// and none when nothing needs doing: an endpoint whose zone changed (its creds are signed by the old zone's key until
-// reissued, and the directory record is in the old zone), other endpoints whose tags changed (their user JWTs are
-// stale), and a changed account JWT (a zone added or removed, or a zone's permission template changed).
-func consequences(before, after *policy.Compiled) []string {
-	var out []string
-	var stale []string
-	for _, e := range before.Endpoints {
-		ne, ok := findEndpoint(after, e.Name)
-		switch {
-		case !ok:
-		case e.Zone != ne.Zone:
-			// TODO(Z2): remove with the policy stack (ADR 0091): the compiled zone is the policy's, not an address.
-			out = append(out, fmt.Sprintf("reissue needed: %s (its signing key changed; run: mashctl reissue %s)", e.Name, e.Name))
-		case !slices.Equal(e.Tags, ne.Tags):
-			stale = append(stale, e.Name)
-		}
-	}
-	if len(stale) > 0 {
-		out = append(out, fmt.Sprintf("reissue needed: %s (run: mashctl reissue %s)", strings.Join(stale, ", "), strings.Join(stale, " ")))
-	}
-	if zoneSetChanged(before, after) {
-		out = append(out, "account update needed: run mashctl policy apply")
-	}
-	return out
-}
-
 // runAdd is `mashctl add`.
 func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	o, err := parseAddArgs(args)
@@ -292,7 +248,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 	defer doc.Close()
 	beforeBytes, _ := doc.Bytes()
-	beforeFile, before, err := compileBytes(beforeBytes, cfg.Owner)
+	beforeFile, _, err := compileBytes(beforeBytes, cfg.Owner)
 	if err != nil {
 		return fail("%s: %v", path, err)
 	}
@@ -324,13 +280,6 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	if !ok {
 		return fail("internal error: the new endpoint did not compile")
 	}
-	// The JWTs the policy needs must fit before anything is created, provisioned or written.
-	rep, berr := policy.Budget(after)
-	if rerr := budgetRefusal(o.name, rep, berr); rerr != nil {
-		fmt.Fprintf(stderr, "mashctl: %v\n", rerr)
-		return 1
-	}
-
 	credsPath, err := credsFileFor(cfg, o.name)
 	if err != nil {
 		return fail("%v", err)
@@ -347,24 +296,10 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 	defer closeAdmin()
 
-	// TODO(Z2): remove with the policy stack (ADR 0091): the zone key and the mint below. The record carries no zone: nothing writes one.
-	// (3) mint: the zone key is created only if the zone is new (no declared endpoint is in it); a zone that already
-	// has endpoints must already have its key, or the new creds would not authenticate. A key made here is left in
-	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
-	zoneExists := slices.ContainsFunc(before.Endpoints, func(e policy.CompiledEndpoint) bool { return e.Zone == ep.Zone })
-	var mk mint.Keys = keys
-	_, keyErr := keys.ZoneKey(ep.Zone, false)
-	if zoneExists || keyErr == nil {
-		// A key that already exists (the zone has endpoints, or an earlier failed add left it) must be published as a
-		// scoped signer; only a key this call creates is exempt. The verifier connects only now, before any record.
-		mk = scopeKeys{Authority: keys, cfg: cfg, env: env}
-	}
-	m, err := mint.Mint(mk, after, o.name, nil, !zoneExists)
+	// (3) mint: the user is signed by the account signing key and carries its own permissions (ADR 0091): there is no
+	// zone key to make or to find, so nothing here waits for `policy apply`.
+	m, err := mint.Mint(keys, after, o.name, nil)
 	if err != nil {
-		if zoneExists && errors.Is(err, ctlkeys.ErrNoZoneKey) {
-			dir, _ := ctlkeys.DirFor(cfg, env)
-			return fail("the signing key for zone %s is missing (existing endpoints are in this zone), so a new endpoint's creds would not authenticate: restore the key file from backup (key directory %s), or move the endpoints to another zone; nothing was changed", ep.Zone, dir)
-		}
 		return fail("%v", err)
 	}
 	defer clear(m.Creds)
@@ -404,42 +339,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 
 	// (7) report.
 	fmt.Fprintf(stdout, "added %s creds %s\n", o.name, credsPath)
-	for _, l := range consequences(before, after) {
-		fmt.Fprintln(stdout, l)
-	}
-	if w := budgetWarning(rep); w != "" {
-		fmt.Fprintln(stderr, w)
-	}
 	return 0
-}
-
-// budgetRefusal is the error for an add whose compiled policy does not fit the JWT budgets, or nil when it fits.
-// err and r come from policy.Budget; the budget message names the biggest contributor.
-func budgetRefusal(name string, r policy.BudgetReport, err error) error {
-	if err == nil && r.OK {
-		return nil
-	}
-	reason := "the JWT budgets are exceeded"
-	if err != nil {
-		reason = strings.TrimPrefix(err.Error(), "policy: ")
-	}
-	return fmt.Errorf("adding %s would make the policy unusable: %s; nothing was changed", name, reason)
-}
-
-// budgetWarning is a one-line warning when the budget passes but the worst user JWT or the account JWT is above 80%
-// of its limit, else "".
-func budgetWarning(r policy.BudgetReport) string {
-	var parts []string
-	if r.UserLimit > 0 && r.WorstUserJWTBytes*5 > r.UserLimit*4 {
-		parts = append(parts, fmt.Sprintf("the user JWT of %s is %d of %d bytes", r.WorstUser, r.WorstUserJWTBytes, r.UserLimit))
-	}
-	if r.AccountLimit > 0 && r.AccountJWTBytes*5 > r.AccountLimit*4 {
-		parts = append(parts, fmt.Sprintf("the account JWT is %d of %d bytes", r.AccountJWTBytes, r.AccountLimit))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "warning: above 80% of a JWT budget: " + strings.Join(parts, "; ")
 }
 
 // addLabels is the labels the new endpoint is declared with: --label pairs, plus kind=tool for --tool. Giving one key two different values is an error.

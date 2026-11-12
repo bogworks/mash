@@ -122,8 +122,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user (signed by the account key), provision it and write its creds file")
+	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one)")
 }
 
 func retireLines(line func(left, right string)) {
@@ -135,10 +135,8 @@ func retireLines(line func(left, right string)) {
 func policyLines(line func(left, right string)) {
 	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
 	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
-	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: signing keys, the account push, directory labels; lists stale creds")
+	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the directory and the creds files; fixes nothing")
+	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: the account check, directory labels; lists stale creds")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
