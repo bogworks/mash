@@ -440,11 +440,34 @@ func TestZoneKeyChangeDuringConsumeAndSend(t *testing.T) {
 	if len(leaseBad) > 0 {
 		t.Errorf("the lease lapsed or changed hands: %v", leaseBad)
 	}
-	puts := leasePuts
+	puts0 := leasePuts
 	leaseMu.Unlock()
-	if puts < 3 {
-		t.Errorf("only %d lease writes seen: the refresh was not running", puts)
+	if puts0 < 1 {
+		t.Errorf("no lease write seen: the lease was never taken")
 	}
+	// The refresh loop is still writing: the watch sees one more write after this point. A count of writes over the
+	// whole test would depend on how long it ran; this depends only on the loop being alive.
+	refreshWait := 10 * LeaseRefresh
+	refreshEnd := time.Now().Add(refreshWait)
+	puts := puts0
+	for {
+		leaseMu.Lock()
+		puts = leasePuts
+		leaseMu.Unlock()
+		if puts > puts0 {
+			break
+		}
+		if time.Now().After(refreshEnd) {
+			t.Errorf("the lease was not refreshed for %v (%d writes seen)", refreshWait, puts)
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	leaseMu.Lock()
+	if len(leaseBad) > 0 {
+		t.Errorf("the lease lapsed or changed hands: %v", leaseBad)
+	}
+	leaseMu.Unlock()
 	cur, err := lkv.Get(actx, "rx")
 	if err != nil {
 		t.Fatalf("the lease is gone: %v", err)
