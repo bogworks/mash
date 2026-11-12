@@ -46,22 +46,24 @@ verified read-only (2026-11-10), and describing the state **before** the `merge_
 it did not apply to it was `neutral`. The ruleset accepts it either way (check-neutral and check-success), so then the
 ruleset did not enforce the queue-entry gate; only the queue did.
 
-**The `merge_protections` rule.** `.mergify.yml` now defines one rule, "codex-review and approval before merge", that
-mirrors the queue entry conditions that matter at an API merge: `check-success = codex-review`, an approval by the
-maintainer or the `lead-approved` label, and `label != hold`. It applies to pull requests into `main` and skips
-Mergify's own queue drafts, which have neither an approval nor a label and would otherwise deadlock the queue. A draft
-is recognised by both its head ref (`mergify/merge-queue/<hash>`) and its author (`mergify[bot]`); a head ref alone is
-not enough, since any same-repository writer can name a branch that way and would otherwise switch the rule off. `pr-check`, `adr-lint` and `label-reset` are not repeated: the ruleset and the
-queue already require them. With the rule, the ruleset's required check `Mergify Merge Protections` is meaningful: it
-should fail while the rule's conditions are unmet. `internal/release/mergify_test.go` checks the rule against the
-queue conditions. This is **not yet verified live**: it is verified only after this change is merged. Read-only check
-to run then: on a pull request without codex-review or approval,
+**The `merge_protections` rule.** `.mergify.yml` defines one rule, "codex-review and approval before merge", whose
+conditions are only the two that Mergify evaluates on the pull request itself: an approval by the maintainer or the
+`lead-approved` label, and `label != hold`. It applies to pull requests into `main` and skips Mergify's own queue drafts,
+recognised by both their head ref (`mergify/merge-queue/<hash>`) and their author (`mergify[bot]`); a head ref alone is
+not enough, since any same-repository writer can name a branch that way. **It holds no `check-success` condition, on
+purpose.** Mergify applies a rule's conditions to the queue draft's commit as merge conditions too, and `adr-lint` is
+skipped on a draft, so a rule that waited for `adr-lint` (or `codex-review`) made the queue refuse every pull request
+("failing checks: adr-lint"); this is what deadlocked the queue after #424. `codex-review` and `adr-lint` are enforced by
+the queue's `queue_conditions` at entry, and by the ruleset (`adr-lint`), and D204's `update` rule on `main` refuses any
+merge that is not Mergify's, so no gate is lost. `internal/release/mergify_test.go` compares the rule's label conditions
+with the queue conditions and fails if the rule gains a check condition. Whether the check goes red on an unapproved
+pull request is **not verified live**. Read-only check: on a pull request without approval or label,
 `gh api repos/{owner}/{repo}/commits/<head-sha>/check-runs --jq '.check_runs[] | select(.name=="Mergify Merge Protections") | .conclusion'`
 should print `failure` (not `success`), and on a queue draft it should not be `failure`. Record the date and result
 here when done.
 
 **Residual risk.** Apart from `Mergify Merge Protections`, `pr-check`, `label-reset` and `adr-lint`, nothing in GitHub
-pins `codex-review`. It is a condition only in the queue rule and the `merge_protections` rule of `.mergify.yml`, and Mergify's `check-success = <name>` matches a check run or commit status of that name whoever posted
+pins `codex-review`. It is a condition only in the queue rule of `.mergify.yml`, and Mergify's `check-success = <name>` matches a check run or commit status of that name whoever posted
 it. A pull request that adds or edits a workflow can post a check (or, with a token, a status) named `codex-review`,
 so that check proves nothing against a pull request author who controls workflows. What holds instead:
 changes to `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `scripts/adrlint/`, `internal/release/` and this file
