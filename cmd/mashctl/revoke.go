@@ -135,7 +135,7 @@ func refuseFutureIssued(name string, claims *jwt.UserClaims, now time.Time) erro
 
 // credsIssuedClaims returns the claims of the creds file at path for user. A missing file is no JWT to check (nil,
 // nil). A file that exists but cannot be read, parsed or decoded is an error: the check cannot be made, so the caller
-// must refuse rather than revoke blind A symlink is followed and its target checked; a dangling one is missing. The error never carries file content. A file that decodes but names another
+// must refuse rather than revoke blind. A symlink is followed and its target checked; a dangling one is missing. The error never carries file content. A file that decodes but names another
 // subject is deliberately skipped (nil, nil): it is not this user's JWT, so its issue time says nothing about the
 // revocation.
 func credsIssuedClaims(path, user string) (*jwt.UserClaims, error) {
