@@ -94,5 +94,5 @@ a validation failure returning no record.
 
 ## More Information
 
-Contract mash-messaging-policy draft-2 (D206), REQ-017, AT-016. Builds on [ADR 0094](0094-list-set-permissions-are-one-template-per-owner-group-with-allow-and-deny-tags-and-a-deny-sentinel.md).
+Contract mash-messaging-policy draft-2 (D206), REQ-017, AT-016. Builds on [ADR 0102](0102-list-set-permissions-are-one-template-per-owner-group-with-allow-and-deny-tags-and-a-deny-sentinel.md).
 Code: `internal/listset/generation.go`.
