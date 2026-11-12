@@ -334,6 +334,41 @@ func TestLoadSpoolFromStart(t *testing.T) {
 	}
 }
 
+func TestLoadSpoolRequired(t *testing.T) {
+	load := func(t *testing.T, file string, env map[string]string) (Config, error) {
+		t.Helper()
+		home := t.TempDir()
+		writeFile(t, home, file)
+		env["MASH_NAME"] = "a"
+		return load(envOf(env), home)
+	}
+	base := `"url":"tls://x:4222","owner":"o"`
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       bool
+	}{
+		{"default off", `{` + base + `}`, map[string]string{}, false},
+		{"env 1", `{` + base + `}`, map[string]string{"MASH_SPOOL_REQUIRED": "1"}, true},
+		{"env true", `{` + base + `}`, map[string]string{"MASH_SPOOL_REQUIRED": "true"}, true},
+		{"file key", `{` + base + `,"spool_required":true}`, map[string]string{}, true},
+		{"env 0 beats the file", `{` + base + `,"spool_required":true}`, map[string]string{"MASH_SPOOL_REQUIRED": "0"}, false},
+		{"env false beats the file", `{` + base + `,"spool_required":true}`, map[string]string{"MASH_SPOOL_REQUIRED": "false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, tc.file, tc.env)
+			if err != nil || c.SpoolRequired != tc.want {
+				t.Fatalf("SpoolRequired = %v, %v; want %v", c.SpoolRequired, err, tc.want)
+			}
+		})
+	}
+	for _, v := range []string{"yes", "on", "TRUE", "2", " 1"} {
+		if _, err := load(t, `{`+base+`}`, map[string]string{"MASH_SPOOL_REQUIRED": v}); err == nil || !strings.Contains(err.Error(), "MASH_SPOOL_REQUIRED") {
+			t.Fatalf("%q: err %v, want a MASH_SPOOL_REQUIRED error", v, err)
+		}
+	}
+}
+
 func TestLimitsConfig(t *testing.T) {
 	home := t.TempDir()
 	c, err := load(envOf(nil), home)
