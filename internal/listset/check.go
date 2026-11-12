@@ -538,6 +538,24 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 // once its tags are expanded through its group's template, the way nats-server does it (expandPermissions and
 // expanded.reach, the same code Check uses). Each slice is sorted.
 func reachOver(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
+	p, err := expandSender(c, sender)
+	if err != nil {
+		return nil, err
+	}
+	out := map[Verb][]string{}
+	for _, v := range Verbs {
+		for _, addr := range universe {
+			if p.reach(v, []string{addr})[addr] {
+				out[v] = append(out[v], addr)
+			}
+		}
+		slices.Sort(out[v])
+	}
+	return out, nil
+}
+
+// expandSender finds sender's user and group template in c and expands the template with the user's name and tags.
+func expandSender(c *Compiled, sender string) (*expanded, error) {
 	var tpl *Template
 	var user *User
 	for i := range c.Users {
@@ -560,20 +578,7 @@ func reachOver(c *Compiled, sender string, universe []string) (map[Verb][]string
 	if tpl == nil {
 		return nil, fmt.Errorf("no template %s", a.group())
 	}
-	p, err := expandPermissions(tpl.Permissions, user.Name, user.Tags)
-	if err != nil {
-		return nil, err
-	}
-	out := map[Verb][]string{}
-	for _, v := range Verbs {
-		for _, addr := range universe {
-			if p.reach(v, []string{addr})[addr] {
-				out[v] = append(out[v], addr)
-			}
-		}
-		slices.Sort(out[v])
-	}
-	return out, nil
+	return expandPermissions(tpl.Permissions, user.Name, user.Tags)
 }
 
 // universeNamed is the addresses the list set names, sorted.
