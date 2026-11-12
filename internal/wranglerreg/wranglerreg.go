@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nats-io/nkeys"
 
@@ -155,6 +156,75 @@ func (f *File) Save(path string) error {
 	}
 	return ctlkeys.SyncDir(filepath.Dir(path))
 }
+
+// lockWait is how long an edit waits for another edit of the same registry.
+const lockWait = 10 * time.Second
+
+// LockPath is the sidecar lock file of the registry at path.
+func LockPath(path string) string { return path + ".lock" }
+
+// withLock holds the key store's exclusive advisory lock (ctlkeys.LockFile) on LockPath(path) while fn runs: the lock
+// file is 0600, opened without following a symlink and owned by the effective uid, and the registry's directory is
+// held to the same checks as the registry itself. The lock is released on every exit path, panics included.
+func withLock(path string, fn func() error) error {
+	if err := ctlkeys.CheckParentDir(filepath.Dir(path)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return fmt.Errorf("wrangler registry %s: %w", path, err)
+	}
+	unlock, err := ctlkeys.LockFile(LockPath(path), lockWait)
+	if err != nil {
+		if errors.Is(err, ctlkeys.ErrLockBusy) {
+			return fmt.Errorf("%w: another mashctl wrangler command is editing the registry: run the command again", err)
+		}
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
+// Update is the one way to change the registry: under the lock it loads the file at path (a missing file wraps
+// os.ErrNotExist), calls fn on it and, if fn returns nil, saves the result. A second Update waits until the first has
+// saved, so no edit is lost and a removed key cannot come back from an edit that read the file earlier. Save replaces
+// the file by rename, so a reader (Load, Static.Lookup), which takes no lock, sees the old or the new complete file,
+// never a part of one. An error from fn leaves the file as it was.
+func Update(path string, fn func(*File) error) error {
+	return withLock(path, func() error {
+		f, err := Load(path)
+		if err != nil {
+			return err
+		}
+		if err := fn(f); err != nil {
+			return err
+		}
+		return f.Save(path)
+	})
+}
+
+// Init creates the registry at path for account as a test registry, under the lock. created is false when a registry
+// for that account and flag is already there; one for another account, or not a test registry, is an error
+// (ErrForeign) and is not overwritten.
+func Init(path, account string) (created bool, err error) {
+	err = withLock(path, func() error {
+		f, err := Load(path)
+		switch {
+		case err == nil:
+			if f.Account == account && f.TestAccount {
+				return nil
+			}
+			return ErrForeign
+		case !errors.Is(err, os.ErrNotExist):
+			return err
+		}
+		created = true
+		return (&File{Account: account, TestAccount: true, Entries: []Entry{}}).Save(path)
+	})
+	return created, err
+}
+
+// ErrForeign is the error of Init when the registry exists for another account or is not a test registry.
+var ErrForeign = errors.New("the registry exists and is for another account or not a test registry: not overwriting it")
 
 // Add registers key for host and group. A second registration of the same triple is a no-op; the same host and group
 // with another key adds a second key (a wrangler key may be rotated without a gap).

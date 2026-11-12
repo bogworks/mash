@@ -793,3 +793,57 @@ func TestIssueServiceRefusesAGroupKeyThatIsNotScopedWithTheTable(t *testing.T) {
 		})
 	}
 }
+
+// Concurrent `wrangler add` and `wrangler remove` are serialised: a removed wrangler is never restored by an add that
+// read the registry first, and `wrangler list` during the edits prints a complete registry.
+func TestWranglerCommandsAreSerialised(t *testing.T) {
+	e := newIssueEnvNoService(t)
+	if _, errb, code := e.run("wrangler", "init", "--test-account"); code != 0 {
+		t.Fatalf("init: %s", errb)
+	}
+	x := mustT(mustT(nkeys.CreateUser()).PublicKey())
+	for round := range 10 {
+		host := fmt.Sprintf("x%d", round)
+		if _, errb, code := e.run("wrangler", "add", "--host", host, "--group", "foo.c", "--key", x); code != 0 {
+			t.Fatalf("add: %s", errb)
+		}
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			if _, errb, code := e.run("wrangler", "remove", "--host", host, "--group", "foo.c"); code != 0 {
+				t.Errorf("remove: %s", errb)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			y := mustT(mustT(nkeys.CreateUser()).PublicKey())
+			if _, errb, code := e.run("wrangler", "add", "--host", fmt.Sprintf("y%d", round), "--group", "foo.c", "--key", y); code != 0 {
+				t.Errorf("add: %s", errb)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if out, errb, code := e.run("wrangler", "list"); code != 0 {
+				t.Errorf("list during an edit: %s", errb)
+			} else {
+				for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+					if l != "" && len(strings.Split(l, "\t")) != 3 {
+						t.Errorf("incomplete list line %q", l)
+					}
+				}
+			}
+		}()
+		wg.Wait()
+		out, _, _ := e.run("wrangler", "list")
+		if strings.Contains(out, host+"\t") {
+			t.Fatalf("round %d: the removed wrangler is back:\n%s", round, out)
+		}
+		if !strings.Contains(out, fmt.Sprintf("y%d\t", round)) {
+			t.Fatalf("round %d: the add was lost:\n%s", round, out)
+		}
+	}
+	if fi := mustT(os.Stat(wranglerreg.LockPath(wranglerreg.Path(e.keyDir)))); fi.Mode().Perm() != 0o600 {
+		t.Errorf("lock file mode %v", fi.Mode())
+	}
+}

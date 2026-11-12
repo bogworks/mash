@@ -8,3 +8,5 @@ template (`signing_key_not_scoped`, `template_mismatch`); the issue record's wri
 another address, so a racing revocation or a second service cannot slip in; a refused request releases its nonce; and
 `issue serve` needs the operator's `--test-account` flag and a registry file and directory only the service user can
 write.
+
+`mashctl wrangler init`, `add` and `remove` now hold a lock file (`wranglers.json.lock`, 0600, the key store's lock) from reading the registry to replacing it, so two edits at once cannot undo each other and a removed wrangler's key cannot come back. `wrangler list` and the issue service take no lock and always read a complete file.

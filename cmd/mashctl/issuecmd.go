@@ -261,54 +261,68 @@ func runWrangler(args []string, env func(string) string, lookup config.Lookup, s
 		if !testAccount {
 			return fail("the static registry is for test accounts only: pass --test-account to say this is one; real wrangler registration is not decided yet")
 		}
-		if f, err := wranglerreg.Load(path); err == nil {
-			if f.Account == account && f.TestAccount {
-				fmt.Fprintf(stdout, "wrangler registry %s already exists for account %s\n", path, account)
-				return 0
-			}
+		created, err := wranglerreg.Init(path, account)
+		switch {
+		case errors.Is(err, wranglerreg.ErrForeign):
 			return fail("%s exists and is for another account or not a test registry: not overwriting it", path)
-		} else if !errors.Is(err, os.ErrNotExist) {
+		case err != nil:
 			return fail("%v", err)
+		case !created:
+			fmt.Fprintf(stdout, "wrangler registry %s already exists for account %s\n", path, account)
+		default:
+			fmt.Fprintf(stdout, "wrote wrangler registry %s for test account %s\n", path, account)
 		}
-		f := &wranglerreg.File{Account: account, TestAccount: true, Entries: []wranglerreg.Entry{}}
-		if err := f.Save(path); err != nil {
-			return fail("%v", err)
-		}
-		fmt.Fprintf(stdout, "wrote wrangler registry %s for test account %s\n", path, account)
 		return 0
 	}
-	f, err := wranglerreg.Load(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return fail("no wrangler registry at %s: run `mashctl wrangler init --test-account` (test accounts only)", path)
-	case err != nil:
-		return fail("%v", err)
-	case f.Account != account || !f.TestAccount:
-		return fail("%v", wranglerreg.ErrNoRegistry)
+	check := func(f *wranglerreg.File) error {
+		if f.Account != account || !f.TestAccount {
+			return wranglerreg.ErrNoRegistry
+		}
+		return nil
 	}
-	switch verb {
-	case "list":
+	noRegistry := func(err error) int {
+		if errors.Is(err, os.ErrNotExist) {
+			return fail("no wrangler registry at %s: run `mashctl wrangler init --test-account` (test accounts only)", path)
+		}
+		return fail("%v", err)
+	}
+	if verb == "list" {
+		// A read takes no lock: the registry is replaced by rename, so this is the old or the new complete file.
+		f, err := wranglerreg.Load(path)
+		if err == nil {
+			err = check(f)
+		}
+		if err != nil {
+			return noRegistry(err)
+		}
 		for _, e := range f.Entries {
 			fmt.Fprintf(stdout, "%s\t%s\t%s\n", e.Host, e.Group, e.WranglerKey)
 		}
 		return 0
-	case "add":
-		if err := f.Add(host, group, key); err != nil {
-			return fail("%v", err)
+	}
+	// add and remove load, edit and save under the registry's lock (wranglerreg.Update).
+	var msg string
+	err = wranglerreg.Update(path, func(f *wranglerreg.File) error {
+		if err := check(f); err != nil {
+			return err
 		}
-		if err := f.Save(path); err != nil {
-			return fail("%v", err)
+		if verb == "add" {
+			if err := f.Add(host, group, key); err != nil {
+				return err
+			}
+			msg = fmt.Sprintf("registered wrangler key %s... for host %s, group %s\n", ctl.ShortKey(key), host, group)
+			return nil
 		}
-		fmt.Fprintf(stdout, "registered wrangler key %s... for host %s, group %s\n", ctl.ShortKey(key), host, group)
-	case "remove":
 		n := f.Remove(host, group)
 		if n == 0 {
-			return fail("no entry for host %s, group %s", host, group)
+			return fmt.Errorf("no entry for host %s, group %s", host, group)
 		}
-		if err := f.Save(path); err != nil {
-			return fail("%v", err)
-		}
-		fmt.Fprintf(stdout, "removed %d entr%s for host %s, group %s\n", n, map[bool]string{true: "y", false: "ies"}[n == 1], host, group)
+		msg = fmt.Sprintf("removed %d entr%s for host %s, group %s\n", n, map[bool]string{true: "y", false: "ies"}[n == 1], host, group)
+		return nil
+	})
+	if err != nil {
+		return noRegistry(err)
 	}
+	fmt.Fprint(stdout, msg)
 	return 0
 }

@@ -124,7 +124,7 @@ file `wranglers.json` in the key store directory (`{"account", "test_account": t
 `remove`. `issue serve` refuses to start, with `no wrangler registry for this account: the static registry is for test
 accounts only; real wrangler registration is not decided yet`, on an account with no registry, a registry that names
 another account, or one not flagged `test_account`, and so does every later lookup if the file stops being such a
-registry. The file is read at each request, so a removal takes effect without a restart. This is not a statement that
+registry. `init`, `add` and `remove` each hold an exclusive lock on `wranglers.json.lock` (0600, the key store's lock helper) across load, edit and the atomic replace, so a removed wrangler cannot be restored by an edit that read the file earlier; readers take no lock. The file is read at each request, so a removal takes effect without a restart. This is not a statement that
 wrangler keys should be registered this way on a real account.
 
 **What is left open behind interfaces.** Real registration of wrangler keys stays open. `AccountClaims` (the account JWT, read over the system account) is filled by the same lookup `policy apply` uses. `WranglerRegistry` (host and group to wrangler keys) is filled by the static
