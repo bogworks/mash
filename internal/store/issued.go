@@ -17,7 +17,7 @@ const IssuedHistory = 8
 
 // IssuedMaxBytes caps the issue record's bucket. A record is a few hundred bytes. The stream discards new messages
 // when full, never an old record, so a full bucket refuses new issues (fail closed) and nothing is lost.
-const IssuedMaxBytes = 64 << 20
+const IssuedMaxBytes = 8 << 20
 
 // The kinds of an issued user.
 const (

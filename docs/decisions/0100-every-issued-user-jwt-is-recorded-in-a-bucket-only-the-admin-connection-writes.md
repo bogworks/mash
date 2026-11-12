@@ -44,7 +44,7 @@ with is recorded by `init`, which covers `init --local --start` and `adopt --min
 Append-only. A re-issue of the same key adds a revision under that key; a rotation adds an entry for the new key and
 leaves the old key's. Nothing in mash deletes an entry, and retire and revoke do not touch the record.
 
-The bucket. It has file storage, no TTL, a history of 8, a 64 MiB cap and discard-new when full, so a full bucket refuses
+The bucket. It has file storage, no TTL, a history of 8, an 8 MiB cap and discard-new when full, so a full bucket refuses
 new issues and never loses a record. Its stream refuses rollup, message delete and purge, set at creation
 (`store.CreateIssuedBucket`, the way the lease bucket is made). `mashctl init` creates it. A deployment from before the
 record gets it on the first `add` or `reissue`, created over the admin connection; an existing bucket that is not as mash
