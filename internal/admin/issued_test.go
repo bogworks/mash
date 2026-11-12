@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -244,5 +245,165 @@ func TestRecordIssuedCreatesTheBucketOnDemandAndRefusesAnUnhardenedOne(t *testin
 	}
 	if err := a2.Init(ctx); !errors.Is(err, store.ErrIssuedBucket) {
 		t.Fatalf("init accepted it: %v", err)
+	}
+}
+
+// The purpose is a closed set: issue, rotation and probe are accepted, anything else is refused, and none given is an
+// ordinary issue.
+func TestRecordIssuedPurpose(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	for _, p := range []string{store.PurposeIssue, store.PurposeRotation, store.PurposeProbe, ""} {
+		key := userKey(t)
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Purpose: p}); err != nil {
+			t.Fatalf("purpose %q: %v", p, err)
+		}
+		recs, _, err := a.Issued(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := p
+		if want == "" {
+			want = store.PurposeIssue
+		}
+		i := slices.IndexFunc(recs, func(r store.Issued) bool { return r.PublicKey == key })
+		if i < 0 || recs[i].Purpose != want {
+			t.Errorf("purpose %q read back as %+v", p, recs)
+		}
+	}
+	bad := userKey(t)
+	for _, p := range []string{"bogus", "Issue", "probe "} {
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: bad, Address: "x", Kind: store.IssuedEndpoint, Purpose: p}); err == nil {
+			t.Errorf("purpose %q was recorded", p)
+		}
+	}
+	recs, _, _ := a.Issued(ctx)
+	if slices.ContainsFunc(recs, func(r store.Issued) bool { return r.PublicKey == bad }) {
+		t.Error("a refused write left a record")
+	}
+}
+
+// A record written before the field has no purpose and reads as issue; an unknown value already stored is shown as it is.
+func TestIssuedReadsAMissingPurposeAsIssue(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	kv, err := js.KeyValue(ctx, store.IssuedBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, odd := userKey(t), userKey(t)
+	if _, err := kv.Put(ctx, old, []byte(`{"public_key":"`+old+`","address":"o","kind":"endpoint","tags":[],"generation":0,"issued_at":"2026-01-01T00:00:00Z"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Put(ctx, odd, []byte(`{"public_key":"`+odd+`","address":"o","kind":"endpoint","tags":[],"generation":0,"issued_at":"2026-01-01T00:00:00Z","purpose":"future"}`)); err != nil {
+		t.Fatal(err)
+	}
+	recs, _, err := a.Issued(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range recs {
+		got[r.PublicKey] = r.Purpose
+	}
+	if got[old] != store.PurposeIssue || got[odd] != "future" {
+		t.Errorf("purposes %v", got)
+	}
+}
+
+// MarkRevoked sets revoked_at once, never moves or clears it, and says not recorded for a key mash never issued.
+func TestMarkRevokedSetsOnceAndIsIdempotent(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Tags: []string{"t"}, Purpose: store.PurposeRotation}); err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 11, 12, 10, 0, 0, 0, time.FixedZone("x", 3600))
+	if err := a.MarkRevoked(ctx, key, t1); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.IssuedBucket)
+	h1, _ := kv.History(ctx, key)
+	if err := a.MarkRevoked(ctx, key, t1.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	h2, _ := kv.History(ctx, key)
+	if len(h2) != len(h1) {
+		t.Errorf("a second mark wrote %d new revision(s)", len(h2)-len(h1))
+	}
+	recs, _, err := a.Issued(ctx)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("%+v %v", recs, err)
+	}
+	r := recs[0]
+	if r.RevokedAt != "2026-11-12T09:00:00Z" || r.Purpose != store.PurposeRotation || r.Address != "x" || len(r.Tags) != 1 {
+		t.Errorf("record %+v", r)
+	}
+	// A key mash never recorded, and a key that is not a user key.
+	if err := a.MarkRevoked(ctx, userKey(t), t1); !errors.Is(err, admin.ErrNotRecorded) {
+		t.Errorf("unrecorded key: %v", err)
+	}
+	if err := a.MarkRevoked(ctx, "nope", t1); err == nil || errors.Is(err, admin.ErrNotRecorded) {
+		t.Errorf("bad key: %v", err)
+	}
+	// Recording the key again keeps the revocation.
+	if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint}); err != nil {
+		t.Fatal(err)
+	}
+	if recs, _, _ := a.Issued(ctx); recs[0].RevokedAt != "2026-11-12T09:00:00Z" {
+		t.Errorf("a re-record dropped revoked_at: %+v", recs[0])
+	}
+}
+
+// With no bucket yet, a mark is not-recorded and creates nothing.
+func TestMarkRevokedWithoutABucket(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	if err := js.DeleteStream(ctx, store.IssuedStreamName); err != nil {
+		t.Skipf("cannot remove the stream: %v", err)
+	}
+	if err := a.MarkRevoked(ctx, userKey(t), time.Now()); !errors.Is(err, admin.ErrNotRecorded) {
+		t.Errorf("%v", err)
+	}
+}
+
+// Marks and records of one key made at the same time lose no field: every writer retries on a lost race.
+func TestMarkRevokedAndRecordIssuedRaceLoseNothing(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	for round := 0; round < 5; round++ {
+		key := userKey(t)
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint}); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, 12)
+		for i := 0; i < 6; i++ {
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				errs <- a.MarkRevoked(ctx, key, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+			}()
+			go func(i int) {
+				defer wg.Done()
+				errs <- a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Purpose: store.PurposeRotation, Tags: []string{"r" + string(rune('0'+i))}})
+			}(i)
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+		recs, _, err := a.Issued(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(recs, func(r store.Issued) bool { return r.PublicKey == key })
+		if i < 0 || recs[i].RevokedAt != "2026-01-01T00:00:00Z" || recs[i].Purpose != store.PurposeRotation || len(recs[i].Tags) != 1 {
+			t.Fatalf("round %d: a field was lost: %+v", round, recs)
+		}
 	}
 }

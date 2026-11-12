@@ -27,6 +27,26 @@ const (
 	IssuedAdmin = "admin"
 )
 
+// The purposes of an issued user: why mash issued the credential. The set is closed; an unknown purpose is refused on
+// write.
+const (
+	// PurposeIssue is an ordinary issue: `mashctl add`, a reissue that keeps the key, the admin user at init.
+	PurposeIssue = "issue"
+	// PurposeRotation is the new key of a reissue that rotates the user key.
+	PurposeRotation = "rotation"
+	// PurposeProbe is a probe credential of the policy gate. No mash path writes it yet.
+	PurposeProbe = "probe"
+)
+
+// ValidPurpose reports whether p is one of the closed set of purposes.
+func ValidPurpose(p string) bool {
+	switch p {
+	case PurposeIssue, PurposeRotation, PurposeProbe:
+		return true
+	}
+	return false
+}
+
 // Issued is one entry of the issue record: a user JWT mash issued. It holds public information only, never a seed or
 // a JWT. The bucket key is the user's public key.
 type Issued struct {
@@ -43,6 +63,20 @@ type Issued struct {
 	Generation int `json:"generation"`
 	// IssuedAt is RFC 3339, UTC.
 	IssuedAt string `json:"issued_at"`
+	// Purpose is why the credential was issued (PurposeIssue, PurposeRotation, PurposeProbe). A record from before the
+	// field has none, which is read as PurposeIssue (see EffectivePurpose).
+	Purpose string `json:"purpose,omitempty"`
+	// RevokedAt is RFC 3339, UTC: when mash revoked the key. Omitted while unset; once set it is never cleared.
+	RevokedAt string `json:"revoked_at,omitempty"`
+}
+
+// EffectivePurpose is Purpose, or PurposeIssue for a record written before the field existed. An unknown value is
+// returned as it is.
+func (i Issued) EffectivePurpose() string {
+	if i.Purpose == "" {
+		return PurposeIssue
+	}
+	return i.Purpose
 }
 
 // IssuedConfig is the issue record's bucket: user public key -> Issued, written only by the minting authority (the

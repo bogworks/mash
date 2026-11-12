@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -324,7 +326,7 @@ func TestIssuedJSONShape(t *testing.T) {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	want := []string{"account", "clean", "complete", "known_mash_users", "record_present", "recorded_not_connected", "servers", "summary", "unrecorded"}
+	want := []string{"account", "clean", "complete", "known_mash_users", "record_present", "recorded_not_connected", "revoked_connected", "servers", "summary", "unrecorded"}
 	if !slices.Equal(keys, want) {
 		t.Errorf("keys %v, want %v", keys, want)
 	}
@@ -337,7 +339,7 @@ func TestIssuedJSONShape(t *testing.T) {
 			t.Errorf("servers lacks %s", k)
 		}
 	}
-	for _, k := range []string{"connected", "recorded", "unrecorded", "recorded_not_connected", "known_mash_users"} {
+	for _, k := range []string{"connected", "recorded", "unrecorded", "recorded_not_connected", "known_mash_users", "revoked_connected"} {
 		if _, ok := m["summary"].(map[string]any)[k]; !ok {
 			t.Errorf("summary lacks %s", k)
 		}
@@ -349,12 +351,12 @@ func TestIssuedJSONShape(t *testing.T) {
 		t.Fatalf("list: %v %d %+v", err, code, l)
 	}
 	for _, r := range l.Issued {
-		if r.PublicKey == "" || r.Kind == "" || r.IssuedAt == "" || r.Tags == nil {
+		if r.PublicKey == "" || r.Kind == "" || r.IssuedAt == "" || r.Tags == nil || r.Purpose != store.PurposeIssue || r.RevokedAt != "" {
 			t.Errorf("entry %+v", r)
 		}
 	}
 	text, _, code := e.run("issued", "list")
-	if code != 0 || !strings.Contains(text, "endpoint\tx\t") || !strings.Contains(text, "admin\t") {
+	if code != 0 || !strings.Contains(text, "endpoint\tx\t") || !strings.Contains(text, "admin\t") || !strings.Contains(text, "purpose issue") || strings.Contains(text, "revoked") {
 		t.Fatalf("%d %s", code, text)
 	}
 	noSecrets(t, out, text)
@@ -385,5 +387,226 @@ func TestConnzReadsEveryPage(t *testing.T) {
 			t.Errorf("connection %d read twice", c.CID)
 		}
 		seen[c.CID] = true
+	}
+}
+
+// --- purpose and revoked_at ------------------------------------------------------------------------------------
+
+// Each path writes its purpose: add issue, a reissue that keeps the key issue, a reissue that rotates rotation, and
+// the admin user at init issue with kind admin.
+func TestIssuedPurposePerPath(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	fakeRevoke(t, nil)
+	fakeSignerPublished(t, true, nil)
+	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		t.Fatal(errb)
+	}
+	_, pub1 := h.credsClaims("n")
+	if r := h.issued()[pub1]; r.Purpose != store.PurposeIssue {
+		t.Errorf("add: purpose %q", r.Purpose)
+	}
+	_, adminPub := credsSubject(t, h.e.AdminCreds)
+	if r := h.issued()[adminPub]; r.Purpose != store.PurposeIssue || r.Kind != store.IssuedAdmin {
+		t.Errorf("init admin: %+v", r)
+	}
+	if out, errb, code := h.run("reissue", "n"); code != 0 {
+		t.Fatalf("%d %s %s", code, out, errb)
+	}
+	if r := h.issued()[pub1]; r.Purpose != store.PurposeIssue {
+		t.Errorf("reissue that keeps the key: purpose %q", r.Purpose)
+	}
+	fakeKeyRevoked(t, true, nil) // the reissue rotates
+	if out, errb, code := h.run("reissue", "n"); code != 0 {
+		t.Fatalf("%d %s %s", code, out, errb)
+	}
+	_, pub2 := h.credsClaims("n")
+	recs := h.issued()
+	if recs[pub2].Purpose != store.PurposeRotation {
+		t.Errorf("reissue that rotates: new key purpose %q", recs[pub2].Purpose)
+	}
+	if recs[pub1].Purpose != store.PurposeIssue {
+		t.Errorf("the old key's purpose changed: %q", recs[pub1].Purpose)
+	}
+	text, _, code := h.run("issued", "list")
+	if code != 0 || !strings.Contains(text, "purpose rotation") {
+		t.Errorf("list: %d %s", code, text)
+	}
+}
+
+// A rotating reissue marks the old key revoked after the revocation, and not the new one; a failed revocation marks nothing.
+func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	fakeSignerPublished(t, true, nil)
+	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		t.Fatal(errb)
+	}
+	_, pub1 := h.credsClaims("n")
+	fakeKeyRevoked(t, false, nil)
+
+	calls := fakeRevoke(t, errors.New("no ack"))
+	fakeKeyRevoked(t, true, nil)
+	if _, _, code := h.run("reissue", "n"); code == 0 {
+		t.Fatal("the reissue passed with the revocation failing")
+	}
+	if len(*calls) != 1 || h.issued()[pub1].RevokedAt != "" {
+		t.Fatalf("calls %v, record %+v", *calls, h.issued()[pub1])
+	}
+
+	fakeRevoke(t, nil)
+	fakeKeyRevoked(t, true, nil)
+	if out, errb, code := h.run("reissue", "n"); code != 0 {
+		t.Fatalf("%d %s %s", code, out, errb)
+	}
+	_, pub2 := h.credsClaims("n")
+	recs := h.issued()
+	if _, err := time.Parse(time.RFC3339, recs[pub1].RevokedAt); err != nil || !strings.HasSuffix(recs[pub1].RevokedAt, "Z") {
+		t.Errorf("old key revoked_at %q", recs[pub1].RevokedAt)
+	}
+	if recs[pub2].RevokedAt != "" {
+		t.Errorf("the new key is marked revoked: %+v", recs[pub2])
+	}
+	text, _, _ := h.run("issued", "list")
+	if !strings.Contains(text, "revoked "+recs[pub1].RevokedAt) {
+		t.Errorf("list does not show revoked_at:\n%s", text)
+	}
+}
+
+// retire and deprovision mark the key revoked after the revocation succeeded; a failed revocation marks nothing; a
+// failed mark is a warning and the revocation still stands; a key mash never recorded is no warning.
+func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
+	t.Run("retire", func(t *testing.T) {
+		h := newAddEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+			t.Fatal(errb)
+		}
+		_, pub := h.credsClaims("n")
+		s := stubRevoke(t)
+		s.err = errors.New("no ack")
+		if _, _, code := h.run("retire", "n"); code == 0 {
+			t.Fatal("retire passed with the revocation failing")
+		}
+		if h.issued()[pub].RevokedAt != "" {
+			t.Fatal("marked although the revocation failed")
+		}
+		s.err = nil
+		if out, errb, code := h.run("retire", "n"); code != 0 {
+			t.Fatalf("%d %s %s", code, out, errb)
+		}
+		if len(s.calls) < 2 || s.calls[len(s.calls)-1] != pub {
+			t.Fatalf("revoke calls %v", s.calls)
+		}
+		if h.issued()[pub].RevokedAt == "" {
+			t.Errorf("not marked: %+v", h.issued()[pub])
+		}
+	})
+	t.Run("deprovision", func(t *testing.T) {
+		h := newAddEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+			t.Fatal(errb)
+		}
+		_, pub := h.credsClaims("n")
+		s := stubRevoke(t)
+		if out, errb, code := h.run("deprovision", "n"); code != 0 {
+			t.Fatalf("%d %s %s", code, out, errb)
+		}
+		if len(s.calls) != 1 || s.calls[0] != pub {
+			t.Fatalf("revoke calls %v", s.calls)
+		}
+		if h.issued()[pub].RevokedAt == "" {
+			t.Errorf("not marked: %+v", h.issued()[pub])
+		}
+	})
+	t.Run("mark failure is a warning", func(t *testing.T) {
+		h := newAddEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+			t.Fatal(errb)
+		}
+		_, pub := h.credsClaims("n")
+		stubRevoke(t)
+		prev := ctl.IssuedMarkRevoked
+		ctl.IssuedMarkRevoked = func(context.Context, *admin.Admin, string, time.Time) error { return errors.New("record down") }
+		t.Cleanup(func() { ctl.IssuedMarkRevoked = prev })
+		out, errb, code := h.run("retire", "n")
+		if code != 0 {
+			t.Fatalf("a failed mark failed the retire: %d %s %s", code, out, errb)
+		}
+		if !strings.Contains(errb, "warning") || !strings.Contains(errb, "issue record was not updated") || !strings.Contains(errb, "record down") {
+			t.Errorf("no warning on stderr: %q", errb)
+		}
+		if h.issued()[pub].RevokedAt != "" {
+			t.Error("marked despite the failure")
+		}
+		if len(h.records()) != 0 {
+			t.Errorf("the retire did not complete: %v", h.records())
+		}
+	})
+	t.Run("not recorded is silent", func(t *testing.T) {
+		h := newAddEnv(t, addPolicy)
+		u := h.provisionDeclared("a") // provisioned without mashctl add: not in the issue record
+		stubRevoke(t)
+		out, errb, code := h.run("retire", "a")
+		if code != 0 || strings.Contains(errb, "issue record") {
+			t.Fatalf("%d %s %s", code, out, errb)
+		}
+		if _, ok := h.issued()[u]; ok {
+			t.Error("retire created a record")
+		}
+	})
+}
+
+// A connected key the record holds as revoked is its own finding: exit 1, listed apart from the unrecorded.
+func TestIssuedCheckReportsARevokedKeyStillConnected(t *testing.T) {
+	e := newDriftEnv(t)
+	e.connect(natsauth.UserCredentials(e.credsPath("x")), nats.Name("x-client"))
+	r, errb, code := e.issuedCheck()
+	if code != 0 || !r.Clean || len(r.RevokedConn) != 0 {
+		t.Fatalf("before: %d %+v %s", code, r, errb)
+	}
+	_, xKey := credsSubject(t, e.credsPath("x"))
+	_, yKey := credsSubject(t, e.credsPath("y"))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	// y is revoked and not connected: no finding. x is revoked and connected: a finding.
+	if err := adm.MarkRevoked(ctx, yKey, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r, _, code = e.issuedCheck(); code != 0 || len(r.RevokedConn) != 0 {
+		t.Fatalf("revoked, not connected: %d %+v", code, r)
+	}
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	r, errb, code = e.issuedCheck()
+	if code != 1 || r.Clean || len(r.Unrecorded) != 0 || len(r.RevokedConn) != 1 || r.Summary.RevokedConn != 1 {
+		t.Fatalf("after: %d %+v %s", code, r, errb)
+	}
+	f := r.RevokedConn[0]
+	if f.PublicKey != xKey || f.Address != "x" || f.RevokedAt != "2026-11-01T00:00:00Z" || f.Purpose != store.PurposeIssue || f.Server == "" {
+		t.Errorf("finding %+v", f)
+	}
+	out, _, code := e.run("issued", "check")
+	if code != 1 || !strings.Contains(out, "REVOKED key "+xKey+" still connected") || strings.Contains(out, "UNRECORDED") || strings.Contains(out, "ok: ") {
+		t.Fatalf("text: %d\n%s", code, out)
+	}
+	list, _, _ := e.run("issued", "list", "--json")
+	if !strings.Contains(list, `"revoked_at": "2026-11-01T00:00:00Z"`) {
+		t.Errorf("list --json lacks revoked_at:\n%s", list)
+	}
+	noSecrets(t, out, list)
+}
+
+// A record from before the purpose field lists as issue, in text and JSON.
+func TestIssuedListShowsAMissingPurposeAsIssue(t *testing.T) {
+	var buf strings.Builder
+	old := store.Issued{PublicKey: "UAAA", Address: "o", Kind: "endpoint", Tags: []string{}, IssuedAt: "2026-01-01T00:00:00Z"}
+	odd := store.Issued{PublicKey: "UBBB", Address: "p", Kind: "endpoint", Tags: []string{}, IssuedAt: "2026-01-01T00:00:00Z", Purpose: "future"}
+	printIssuedList([]store.Issued{old, odd}, true, false, &buf)
+	if !strings.Contains(buf.String(), "purpose issue") || !strings.Contains(buf.String(), "purpose future") {
+		t.Errorf("%s", buf.String())
+	}
+	buf.Reset()
+	printIssuedList([]store.Issued{old}, true, true, &buf)
+	if !strings.Contains(buf.String(), `"purpose": "issue"`) || strings.Contains(buf.String(), "revoked_at") {
+		t.Errorf("%s", buf.String())
 	}
 }

@@ -24,8 +24,8 @@ const issuedUsage = `usage: mashctl issued list [--json]
        mashctl issued check [--json] [--sys-creds FILE] [--servers N]
 `
 
-// The exit codes of `mashctl issued check`: 0 no unrecorded key is connected; 1 at least one is; 2 the check could not
-// be made (usage, a connection, a server that did not answer).
+// The exit codes of `mashctl issued check`: 0 no unrecorded key and no revoked key is connected; 1 at least one is;
+// 2 the check could not be made (usage, a connection, a server that did not answer).
 const (
 	issuedClean    = 0
 	issuedFinding  = 1
@@ -34,9 +34,9 @@ const (
 
 // issuedOf is the issue record's entry for a user mint just made: public information only. The issue time is the
 // JWT's own iat.
-func issuedOf(m *mint.Minted, owner string) store.Issued {
+func issuedOf(m *mint.Minted, owner, purpose string) store.Issued {
 	r := store.Issued{PublicKey: m.UserPub, Address: m.Name, Owner: owner, Zone: m.Zone, Kind: store.IssuedEndpoint,
-		Tags: append([]string{}, m.Tags...)}
+		Tags: append([]string{}, m.Tags...), Purpose: purpose}
 	if uc, err := jwt.DecodeUserClaims(m.JWT); err == nil && uc.IssuedAt > 0 {
 		r.IssuedAt = time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339)
 	}
@@ -148,6 +148,10 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 	if recs == nil {
 		recs = []store.Issued{}
 	}
+	recs = slices.Clone(recs)
+	for i := range recs {
+		recs[i].Purpose = recs[i].EffectivePurpose() // an old record with no purpose is an ordinary issue
+	}
 	if asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -159,7 +163,11 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 		return 0
 	}
 	for _, r := range recs {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\tgeneration %d\ttags %s\n", r.PublicKey, config.Clean(r.Kind), config.Clean(r.Address), config.Clean(r.IssuedAt), r.Generation, config.Clean(strings.Join(r.Tags, ",")))
+		line := fmt.Sprintf("%s\t%s\t%s\t%s\tgeneration %d\ttags %s\tpurpose %s", r.PublicKey, config.Clean(r.Kind), config.Clean(r.Address), config.Clean(r.IssuedAt), r.Generation, config.Clean(strings.Join(r.Tags, ",")), config.Clean(r.EffectivePurpose()))
+		if r.RevokedAt != "" {
+			line += "\trevoked " + config.Clean(r.RevokedAt)
+		}
+		fmt.Fprintln(stdout, line)
 	}
 	fmt.Fprintf(stdout, "%d issued\n", len(recs))
 	return 0
@@ -182,6 +190,17 @@ type issuedFindingOut struct {
 	Tags      []string `json:"tags,omitempty"`
 }
 
+// issuedRevokedConn is a connected key the record holds as revoked: the revocation did not take effect.
+type issuedRevokedConn struct {
+	Server    string `json:"server"`
+	Account   string `json:"account"`
+	PublicKey string `json:"public_key"`
+	Address   string `json:"address"`
+	Kind      string `json:"kind"`
+	Purpose   string `json:"purpose"`
+	RevokedAt string `json:"revoked_at"`
+}
+
 type issuedNotConnected struct {
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
@@ -198,13 +217,14 @@ type issuedSummary struct {
 	Connected      int `json:"connected"`
 	Recorded       int `json:"recorded"`
 	Unrecorded     int `json:"unrecorded"`
+	RevokedConn    int `json:"revoked_connected"`
 	NotConnected   int `json:"recorded_not_connected"`
 	KnownMashUsers int `json:"known_mash_users"`
 }
 
 // issuedCheck is what `mashctl issued check --json` prints. The slices are never nil, so the JSON is stable.
 type issuedCheck struct {
-	// Clean is true when no unrecorded key is connected and every server answered.
+	// Clean is true when no unrecorded key and no revoked key is connected and every server answered.
 	Clean         bool                 `json:"clean"`
 	Complete      bool                 `json:"complete"`
 	Incomplete    string               `json:"incomplete,omitempty"`
@@ -212,6 +232,7 @@ type issuedCheck struct {
 	RecordPresent bool                 `json:"record_present"`
 	Servers       issuedServers        `json:"servers"`
 	Unrecorded    []issuedFindingOut   `json:"unrecorded"`
+	RevokedConn   []issuedRevokedConn  `json:"revoked_connected"`
 	NotConnected  []issuedNotConnected `json:"recorded_not_connected"`
 	Known         []issuedKnown        `json:"known_mash_users"`
 	Summary       issuedSummary        `json:"summary"`
@@ -266,7 +287,7 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 		return fail("%v", cerr)
 	}
 
-	rep := issuedCheck{Account: account, RecordPresent: present, Unrecorded: []issuedFindingOut{}, NotConnected: []issuedNotConnected{}, Known: []issuedKnown{}}
+	rep := issuedCheck{Account: account, RecordPresent: present, Unrecorded: []issuedFindingOut{}, RevokedConn: []issuedRevokedConn{}, NotConnected: []issuedNotConnected{}, Known: []issuedKnown{}}
 	rep.Servers = issuedServers{Answered: []string{}, Missing: []string{}, Expected: max(set.Expected, servers, len(set.Names))}
 	answered := map[string]bool{}
 	for _, s := range conns {
@@ -315,7 +336,14 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 			}
 			connected[c.Key] = true
 			rep.Summary.Connected++
-			if _, ok := recorded[c.Key]; ok || known[c.Key] {
+			if r, ok := recorded[c.Key]; ok {
+				if r.RevokedAt != "" {
+					rep.RevokedConn = append(rep.RevokedConn, issuedRevokedConn{Server: s.Name, Account: c.Account, PublicKey: c.Key,
+						Address: r.Address, Kind: r.Kind, Purpose: r.EffectivePurpose(), RevokedAt: r.RevokedAt})
+				}
+				continue
+			}
+			if known[c.Key] {
 				continue
 			}
 			rep.Unrecorded = append(rep.Unrecorded, issuedFindingOut{Server: s.Name, Account: c.Account, PublicKey: c.Key,
@@ -333,15 +361,22 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 		}
 		return strings.Compare(a.PublicKey, b.PublicKey)
 	})
+	slices.SortFunc(rep.RevokedConn, func(a, b issuedRevokedConn) int {
+		if c := strings.Compare(a.Server, b.Server); c != 0 {
+			return c
+		}
+		return strings.Compare(a.PublicKey, b.PublicKey)
+	})
+	rep.Summary.RevokedConn = len(rep.RevokedConn)
 	rep.Summary.Recorded = len(recs)
 	rep.Summary.Unrecorded = len(rep.Unrecorded)
 	rep.Summary.NotConnected = len(rep.NotConnected)
 	rep.Summary.KnownMashUsers = len(rep.Known)
-	rep.Clean = len(rep.Unrecorded) == 0 && rep.Complete
+	rep.Clean = len(rep.Unrecorded) == 0 && len(rep.RevokedConn) == 0 && rep.Complete
 
 	code := issuedClean
 	switch {
-	case len(rep.Unrecorded) > 0:
+	case len(rep.Unrecorded) > 0 || len(rep.RevokedConn) > 0:
 		code = issuedFinding
 	case !rep.Complete:
 		code = issuedNoAnswer
@@ -373,6 +408,10 @@ func printIssuedCheck(rep issuedCheck, w io.Writer) {
 		}
 		fmt.Fprintln(w, line+": mash did not issue it")
 	}
+	for _, f := range rep.RevokedConn {
+		fmt.Fprintf(w, "REVOKED key %s still connected: %s %s (purpose %s) is connected to server %s in account %s, revoked at %s: the revocation did not take effect\n",
+			f.PublicKey, config.Clean(f.Kind), config.Clean(f.Address), config.Clean(f.Purpose), config.Clean(f.Server), config.Clean(f.Account), config.Clean(f.RevokedAt))
+	}
 	if len(rep.NotConnected) > 0 {
 		fmt.Fprintf(w, "recorded but not connected (informational, %d):\n", len(rep.NotConnected))
 		for _, n := range rep.NotConnected {
@@ -382,10 +421,10 @@ func printIssuedCheck(rep issuedCheck, w io.Writer) {
 	if !rep.Complete {
 		fmt.Fprintf(w, "INCOMPLETE: %s; keys connected to a server that did not answer were not checked\n", rep.Incomplete)
 	}
-	fmt.Fprintf(w, "summary: %d connected, %d unrecorded, %d recorded (%d not connected), %d known mash users, %d of %d servers answered\n",
-		rep.Summary.Connected, rep.Summary.Unrecorded, rep.Summary.Recorded, rep.Summary.NotConnected, rep.Summary.KnownMashUsers,
+	fmt.Fprintf(w, "summary: %d connected, %d unrecorded, %d revoked but connected, %d recorded (%d not connected), %d known mash users, %d of %d servers answered\n",
+		rep.Summary.Connected, rep.Summary.Unrecorded, rep.Summary.RevokedConn, rep.Summary.Recorded, rep.Summary.NotConnected, rep.Summary.KnownMashUsers,
 		len(rep.Servers.Answered), rep.Servers.Expected)
 	if rep.Clean {
-		fmt.Fprintln(w, "ok: every connected key was issued by mash")
+		fmt.Fprintln(w, "ok: every connected key was issued by mash and none is revoked")
 	}
 }

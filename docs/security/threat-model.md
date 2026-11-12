@@ -335,12 +335,13 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
 - If it leaks: treat every key in it as leaked: replace them in the order above, operator last.
 
 **The issue record** (`mash-issued` bucket)
-- What: one entry per user JWT `mashctl` issued: public key, address, kind, tags, generation, time. Only the admin
+- What: one entry per user JWT `mashctl` issued: public key, address, kind, tags, generation, time, purpose (`issue`, `rotation` or `probe`) and, once mash
+  has revoked the key, the revocation time. Only the admin
   connection `mashctl` holds writes it; endpoint users have no permission on it, and the stream refuses rollup, delete and
   purge. It holds no seed or JWT. It is written before the creds are handed out.
 - What it does not do: it does not stop a copy of a zone key signing a user elsewhere; it makes that user visible.
   `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
-  issue. It sees connections open at the moment of the check, not users that connected and left, and a holder of the
+  issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
 
 ## 11. Keeping it current

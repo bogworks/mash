@@ -133,8 +133,8 @@ func mintLines(line func(left, right string)) {
 }
 
 func issuedLines(line func(left, right string)) {
-	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time)")
-	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue; exit 1 on one, 2 when the check could not complete")
+	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
+	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
 func retireLines(line func(left, right string)) {
@@ -413,6 +413,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 					return fmt.Errorf("user key %s...: %w", ShortKey(user), err)
 				}
 				revokedUser = user
+				MarkRevoked(ctx, a, user, time.Now(), stderr)
 				return nil
 			})
 		}
@@ -771,5 +772,21 @@ func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) er
 		issued = ""
 	}
 	return a.RecordIssued(ctx, store.Issued{PublicKey: uc.Subject, Address: uc.Name, Owner: cfg.Owner, Kind: store.IssuedAdmin,
-		Tags: []string(uc.Tags), IssuedAt: issued})
+		Tags: []string(uc.Tags), IssuedAt: issued, Purpose: store.PurposeIssue})
+}
+
+// IssuedMarkRevoked is the write MarkRevoked makes; a test replaces it to make the write fail.
+var IssuedMarkRevoked = func(ctx context.Context, a *madmin.Admin, user string, at time.Time) error {
+	return a.MarkRevoked(ctx, user, at)
+}
+
+// MarkRevoked notes in the issue record that user's key was revoked at at. It runs after the revocation succeeded and
+// is best effort: a key mash never recorded is no finding, any other failure is a warning on stderr, and nothing
+// here fails or undoes the revocation.
+func MarkRevoked(ctx context.Context, a *madmin.Admin, user string, at time.Time, stderr io.Writer) {
+	err := IssuedMarkRevoked(ctx, a, user, at)
+	if err == nil || errors.Is(err, madmin.ErrNotRecorded) {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: user key %s... is revoked, but the issue record was not updated with it: %v\n", ShortKey(user), err)
 }
