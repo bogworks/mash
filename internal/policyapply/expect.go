@@ -39,7 +39,9 @@ type Expect struct {
 	// narrowing). The target's template, expanded with the OLD tags, still grants them, so the old credential is
 	// refused only by revoking its key (REQ-014's narrowing rotation, a later change, makes sure it is revoked). The
 	// gate probes each with the target credential (Current) and requires it refused, and requires each witness
-	// closed. Sorted as Removed.
+	// closed. It also holds the reaches of a sender whose old credential cannot be expanded under the target's template
+	// (the template needs a tag the old tags lack): the old credential cannot connect, which is not a refusal of one
+	// send. Sorted as Removed.
 	CredentialOnly []RemovedReach
 	// RemovedSenders are the senders of the previous generation the target does not have, sorted. Each needs a closed
 	// witness on every server: a connection it opened before the push must not stay usable.
@@ -95,9 +97,16 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 		if err != nil {
 			return Expect{}, fmt.Errorf("target generation: %w", err)
 		}
+		// The target's template with the OLD tags. When it cannot be expanded (a template line that needs a tag the old
+		// credential lacks, such as a new tag-driven deny line) the server cannot take that credential at all, and a
+		// send with it cannot be shown refused by one probe: every removed reach is credential-only, tested with the
+		// target credential.
 		oldCred, err := listset.ReachOf(withUser(target, u), s, all)
 		if err != nil {
-			return Expect{}, fmt.Errorf("target template with old tags: %w", err)
+			oldCred = map[listset.Verb][]string{}
+			for _, v := range listset.Verbs {
+				oldCred[v] = all
+			}
 		}
 		nu := newUserByS[s]
 		current := ProbeCred{Sender: s, Name: nu.Name, Tags: slices.Clone(nu.Tags)}
