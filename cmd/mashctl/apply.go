@@ -122,7 +122,8 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(credsPath)
+	// The same mode check as admin and endpoint credentials: a file other users can read is refused, before it is used.
+	raw, err := config.ReadCredsFile(credsPath)
 	if err != nil {
 		return nil, fmt.Errorf("system account credentials: %v", err)
 	}
