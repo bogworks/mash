@@ -1,1 +1,0 @@
-The session instructions now say a verified sender's requests are "delegated by the operator of this mash deployment" instead of "delegated by the operator who owns this fleet". The meaning is the same: verified mail is acted on without asking first, unless the operator policy says otherwise.

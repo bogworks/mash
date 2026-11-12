@@ -1,1 +1,0 @@
-A legacy-stream message delivered just as the endpoint lost its legacy lease is now nak'd, so a retake gets it within about a second instead of after the 30 s ack wait. This also removes a rare failure of the retake test on loaded runners.
