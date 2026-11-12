@@ -283,7 +283,28 @@ type Accepted struct {
 func Run(ctx context.Context, in RunInput) (Status, error) { return run(ctx, in, nil) }
 
 // run is Run; when acc is not nil it is filled with what was accepted once the Expect is derived, before any push.
+// When the ledger is a StatusWriter, the Status of the run is written to it at the end (see writeStatus).
 func run(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
+	st, err := runLocked(ctx, in, acc)
+	return st, writeStatus(ctx, in.Ledger, st, err)
+}
+
+// writeStatus writes st to l if l is a StatusWriter and st is a status of this run: applied, partial or refused. A run
+// that failed before it had a status (the zero Status), and an applied status that came with an error (the commit or a
+// provisioning step failed, so it is not what is in force), write nothing. It returns err, joined with the error of
+// the write if that failed.
+func writeStatus(ctx context.Context, l Ledger, st Status, err error) error {
+	sw, ok := l.(StatusWriter)
+	if !ok || st.State == "" || (err != nil && st.State == StateApplied) {
+		return err
+	}
+	if werr := sw.WriteStatus(ctx, st); werr != nil {
+		return errors.Join(err, fmt.Errorf("write status: %w", werr))
+	}
+	return err
+}
+
+func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
 	unlock, err := in.Ledger.Lock(ctx)
 	if err != nil {
 		return Status{}, err

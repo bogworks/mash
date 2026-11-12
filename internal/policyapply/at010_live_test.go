@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 )
 
@@ -53,7 +54,7 @@ type at010Env struct {
 	mu   sync.Mutex
 	cur  string // the account JWT last pushed
 	iat  int64  // its issue time
-	rec  *MemIssueRecord
+	rec  *AdminIssueRecord
 	mint *ProbeMinter
 }
 
@@ -73,7 +74,7 @@ func newLiveEnv(t *testing.T, prev listset.ListSet) *at010Env { return newLiveEn
 // newLiveEnvJS is newLiveEnv with JetStream on every server and enabled for the account when js is true.
 func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	t.Helper()
-	e := &at010Env{t: t, js: js, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: &MemIssueRecord{}}
+	e := &at010Env{t: t, js: js, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: newLiveIssueRecord(t)}
 	e.op = at010Must(nkeys.CreateOperator())
 	opPub := at010Must(e.op.PublicKey())
 	oc := jwt.NewOperatorClaims(opPub)
@@ -398,7 +399,7 @@ func (e *at010Env) checkProbesRevoked(ctx context.Context, keys []string) {
 			}
 		}
 	}
-	entries := e.rec.Entries()
+	entries := e.entries()
 	byKey := map[string]IssueEntry{}
 	for _, en := range entries {
 		if en.Purpose != PurposeProbe {
@@ -407,8 +408,8 @@ func (e *at010Env) checkProbesRevoked(ctx context.Context, keys []string) {
 		if en.RevokedAt == nil {
 			e.t.Errorf("probe %s for %s is not marked revoked", en.PublicKey, en.Address)
 		}
-		if !en.Expires.After(en.IssuedAt) || en.Expires.Sub(en.IssuedAt) > 10*time.Minute {
-			e.t.Errorf("probe %s expires %s after it was issued", en.PublicKey, en.Expires.Sub(en.IssuedAt))
+		if en.IssuedAt.IsZero() { // the record keeps no expiry: a probe's lives in its JWT only
+			e.t.Errorf("probe %s has no issue time", en.PublicKey)
 		}
 		byKey[en.PublicKey] = en
 	}
@@ -628,4 +629,26 @@ func at010HeldBack(t *testing.T) {
 // cur0 signs the previous generation, the one Converge would push back, with the revoked keys kept.
 func (e *at010Env) cur0(r *at010Run) func([]string) (string, error) {
 	return func(revoked []string) (string, error) { return e.account(r.c1, revoked...), nil }
+}
+
+// entries is every entry of the live issue record.
+func (e *at010Env) entries() []IssueEntry {
+	e.t.Helper()
+	out, err := e.rec.All(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return out
+}
+
+// newLiveIssueRecord is the live path's issue record: an AdminIssueRecord over an admin on its own JetStream server
+// (the issue record's bucket is created on first use, as in production).
+func newLiveIssueRecord(t *testing.T) *AdminIssueRecord {
+	t.Helper()
+	nc := newJetStreamConn(t)
+	a, err := admin.New(nc, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewAdminIssueRecord(a)
 }

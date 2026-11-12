@@ -379,14 +379,14 @@ func (s *at013) maxGap() time.Duration {
 func (s *at013) requireRevoked(keys []string, notBefore time.Time) {
 	s.t.Helper()
 	byKey := map[string]IssueEntry{}
-	for _, en := range s.e.rec.Entries() {
+	for _, en := range s.e.entries() {
 		byKey[en.PublicKey] = en
 	}
 	for _, k := range keys {
 		en, ok := byKey[k]
 		if !ok || en.RevokedAt == nil {
 			s.t.Errorf("key %s is not marked revoked in the issue record", k)
-		} else if en.RevokedAt.Before(notBefore) {
+		} else if en.RevokedAt.Before(notBefore.Truncate(time.Second)) { // the record keeps whole seconds
 			s.t.Errorf("key %s revoked at %v, before %v", k, en.RevokedAt, notBefore)
 		}
 	}
@@ -440,7 +440,7 @@ func TestAT013Live(t *testing.T) {
 		s.requireRevoked(old, seen)
 		s.requireOldRefused("foo.c.core")
 		// The new key is in the record as a rotation, not revoked, and works on every server.
-		for _, en := range s.e.rec.Entries() {
+		for _, en := range s.e.entries() {
 			if en.PublicKey == s.host.pub && (en.Purpose != PurposeRotation || en.RevokedAt != nil || en.Generation != 2) {
 				t.Errorf("new key entry = %+v", en)
 			}
