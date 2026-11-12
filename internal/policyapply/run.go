@@ -221,6 +221,20 @@ type RunInput struct {
 	Now  func() time.Time
 	// OnStatus, if set, receives the applying status before the push.
 	OnStatus func(Status)
+	// BeforeCommit, if set, runs after the gate reports applied and before the generation is committed, still under
+	// the ledger's lock. It gets what Run accepted and froze. If it fails, nothing is committed and the generation is
+	// pending (a resubmission of the same content runs it again), and Run returns the error. RunOrdered uses it to
+	// provision new addresses.
+	BeforeCommit func(ctx context.Context, acc Accepted, st Status) error
+}
+
+// Accepted is what Run accepted and froze for one submission: the record, the Compiled that was signed and gated, and
+// the Expect derived from it. It is derived inside Run from the submission; a caller never supplies it. Compiled is
+// shared with Run and must be treated as read-only.
+type Accepted struct {
+	Record   listset.Record
+	Compiled *listset.Compiled
+	Expect   Expect
 }
 
 // Run accepts, signs, pushes, converges and gates a list set, and commits the generation only if it is applied.
@@ -239,10 +253,15 @@ type RunInput struct {
 //
 // A list set that fails validation comes back as a refused Status and a nil error. A stale base, a signing error or a
 // mismatch between the signed JWT and the accepted output (ErrSignedMismatch, before any push) come back as errors.
-// When the final state is not applied nothing is committed and the Status says partial with the failures. The Compiled
+// When the final state is not applied nothing is committed and the Status says partial with the failures. If
+// RunInput.BeforeCommit fails after the gate applied, nothing is committed, the generation is pending, and its error
+// is returned. The Compiled
 // is deep-copied before Sign; Sign gets its own copy, and both the copy and the frozen original must still digest to
 // Record.Signed, and the JWT must decode to the target generation, before anything is pushed.
-func Run(ctx context.Context, in RunInput) (Status, error) {
+func Run(ctx context.Context, in RunInput) (Status, error) { return run(ctx, in, nil) }
+
+// run is Run; when acc is not nil it is filled with what was accepted once the Expect is derived, before any push.
+func run(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
 	unlock, err := in.Ledger.Lock(ctx)
 	if err != nil {
 		return Status{}, err
@@ -309,6 +328,9 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	if acc != nil {
+		*acc = Accepted{Record: rec, Compiled: frozen, Expect: expect}
+	}
 	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
@@ -351,6 +373,15 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 			err = perr
 		}
 		return st, err
+	}
+	if in.BeforeCommit != nil {
+		if err := in.BeforeCommit(ctx, Accepted{Record: rec, Compiled: frozen, Expect: expect}, st); err != nil {
+			// The target is on the servers and not committed: pending, so only the same content may follow.
+			if perr := in.Ledger.SetPending(rec); perr != nil {
+				err = errors.Join(err, perr)
+			}
+			return st, fmt.Errorf("before committing generation %d: %w", rec.Generation, err)
+		}
 	}
 	if err := in.Ledger.CompareAndCommit(base.Generation, rec); err != nil {
 		return st, fmt.Errorf("commit generation %d: %w", rec.Generation, err)

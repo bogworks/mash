@@ -61,6 +61,13 @@ tags therefore has exactly the permissions the sender's old credential has under
 So "a send with each old credential is refused" is met by the probe plus the revocation, because mash holds no sender
 seed (D201).
 
+An old credential that the target template cannot expand (the target adds a template line that needs a tag the old
+credential lacks, such as a new tag-driven deny line) is refused at connect by the server, because the template cannot
+be applied to it. The gate does not rely on that: it counts every reach of such a sender as credential-only, requires
+its old keys, from the old-key inventory, to be revoked on every server (`old_key_not_revoked` otherwise), and probes
+the target credential. This departs from probing the old name and tags, which the server cannot do for such a sender,
+and the revocation is the evidence for the old credential.
+
 Probes follow these rules: each has a fresh key pair and an expiry of minutes; it carries no tag the list set does not
 give that sender; it is recorded in the issue record (REQ-018) with purpose `probe`; and it is revoked when the gate
 ends, pass or fail.
