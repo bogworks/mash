@@ -35,7 +35,10 @@ refuses, and the maintainer asks for the tag. There is no `SHA256SUMS.sig` and n
 attested subject instead. Every attestation check pins four facts: `-R <repo>`, `--signer-workflow
 <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and `--source-digest <X>` (X is the release
 commit). `release-check --assets` verifies the four binaries and `SHA256SUMS` that way and rebuilds the binaries. After
-`--assets` passes, the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
+`--assets` passes, publication is `scripts/release-check publish <version> <X>`: once the service's tag exists at X it
+runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
+`gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
+signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
 
 ### What a keyless release does not prove
 
@@ -321,9 +324,9 @@ commit) to every `gh attestation verify` below, as item 1 shows.
 
 **1. The checksums.**
 
-For a keyless release (at or above the cutover), verify the attestation of each of the four binaries and of `SHA256SUMS`, with X the release commit (`git ls-remote https://github.com/bogworks/mash.git 'refs/tags/v<version>^{}'`):
+For a keyless release (at or above the cutover), verify the attestation of each of the four binaries and of `SHA256SUMS`, with X the release commit (`git ls-remote <remote-url> 'refs/tags/v<version>^{}'`; for mash `<owner>/<repo>` is `bogworks/mash` and `<remote-url>` is `https://github.com/bogworks/mash.git`):
 
-    gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
+    gh attestation verify <file> -R <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml \
       --source-ref refs/tags/v<version> --source-digest <X>
     sha256sum -c --ignore-missing SHA256SUMS
 
