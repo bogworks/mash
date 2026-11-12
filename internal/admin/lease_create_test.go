@@ -59,6 +59,32 @@ func TestCreateLeaseBucketMatchesKeyValueStreamExceptRollup(t *testing.T) {
 	}
 }
 
+// watchUpdateWait bounds how long the lease watch test waits for one update.
+const watchUpdateWait = 10 * time.Second
+
+// nextUpdate reads the next update of the watcher, skipping the nil initial-values marker, and checks that it
+// carries the operation op and, when rev is not zero, the revision rev. The lease bucket keeps History 1, so the
+// server drops each older revision of a key as the next write lands: a watcher that is read only after several
+// writes may never see the middle ones. A test therefore reads each write's update before it issues the next write.
+func nextUpdate(t *testing.T, w jetstream.KeyWatcher, op jetstream.KeyValueOp, rev uint64) jetstream.KeyValueEntry {
+	t.Helper()
+	timeout := time.After(watchUpdateWait)
+	for {
+		select {
+		case u := <-w.Updates():
+			if u == nil {
+				continue
+			}
+			if u.Operation() != op || (rev != 0 && u.Revision() != rev) {
+				t.Fatalf("watch update: operation %v revision %d, want %v revision %d", u.Operation(), u.Revision(), op, rev)
+			}
+			return u
+		case <-timeout:
+			t.Fatalf("watch saw no update for operation %v revision %d", op, rev)
+		}
+	}
+}
+
 func TestCreateLeaseBucketWorksAsKV(t *testing.T) {
 	e := testenv.Start(t)
 	ctx := context.Background()
@@ -83,6 +109,7 @@ func TestCreateLeaseBucketWorksAsKV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nextUpdate(t, w, jetstream.KeyValuePut, rev)
 	if _, err := kv.Create(ctx, "k", []byte("b")); err == nil {
 		t.Fatal("second Create succeeded")
 	}
@@ -90,12 +117,15 @@ func TestCreateLeaseBucketWorksAsKV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nextUpdate(t, w, jetstream.KeyValuePut, rev)
 	if _, err := kv.Update(ctx, "k", []byte("d"), rev-1); err == nil {
 		t.Fatal("stale Update succeeded")
 	}
-	if _, err := kv.Put(ctx, "k", []byte("e")); err != nil {
+	putRev, err := kv.Put(ctx, "k", []byte("e"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	nextUpdate(t, w, jetstream.KeyValuePut, putRev)
 	ent, err := kv.Get(ctx, "k")
 	if err != nil || string(ent.Value()) != "e" {
 		t.Fatalf("get: %v %v", ent, err)
@@ -106,17 +136,8 @@ func TestCreateLeaseBucketWorksAsKV(t *testing.T) {
 	if _, err := kv.Get(ctx, "k"); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("after delete: %v", err)
 	}
-	seen := 0
-	timeout := time.After(5 * time.Second)
-	for seen < 4 { // create, update, put, delete (the initial-values marker is nil)
-		select {
-		case u := <-w.Updates():
-			if u != nil {
-				seen++
-			}
-		case <-timeout:
-			t.Fatalf("watch saw %d updates", seen)
-		}
+	if del := nextUpdate(t, w, jetstream.KeyValueDelete, 0); del.Revision() <= putRev {
+		t.Fatalf("delete marker revision %d, want above %d", del.Revision(), putRev)
 	}
 }
 
