@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -481,8 +482,8 @@ func TestLegacyLeaseEpochLostBeforeSpoolWriteWritesNothing(t *testing.T) {
 }
 
 // The lease is lost between the live check and the write itself, inside the critical section: the entry may reach the
-// disk, but the loss records epoch "none" under the same lock right after, so no hook read shows it, it is dropped and
-// nak'd, and the new holder shows the message once.
+// disk, but the loss is recorded as epoch "none" in the same critical section (or, if learned later, right after under
+// the lock), so no hook read here shows it, it is dropped and nak'd, and the new holder shows the message once.
 func TestLegacyLeaseEpochLostBetweenCheckAndWriteIsHidden(t *testing.T) {
 	old := LeaseRefresh
 	LeaseRefresh = 100 * time.Millisecond
@@ -524,6 +525,68 @@ func TestLegacyLeaseEpochLostBetweenCheckAndWriteIsHidden(t *testing.T) {
 	if strings.Contains(joined(ev), "raced-late") {
 		t.Fatalf("the old holder showed it:\n%s", joined(ev))
 	}
+}
+
+// The lease is lost during the write of the entry: the loss is recorded in the same critical section as the entry, so a
+// hook read that takes the lock first after the write already finds epoch "none". The later writer of "none" (the loss's
+// own, which needs the spool lock) is held back here until the reads are done, so that the read is the first to run
+// after the write; before the epoch was rechecked at the end of the write, the read showed the entry. Two things keep the
+// test from passing without proving that: the worker's drop of the entry (which records "none" itself before it discards)
+// cannot run before the reads (SpoolCheck is long, and a second batch starts it afterwards), and the reads must have seen
+// the entry on disk and hidden at once, in one locked read, at least once.
+func TestLegacyLeaseEpochLostDuringWriteIsRecordedWithTheEntry(t *testing.T) {
+	oldCheck := SpoolCheck
+	SpoolCheck = time.Hour // the worker (and so the drop of the entry) runs only when a batch arrives
+	t.Cleanup(func() { SpoolCheck = oldCheck })
+	old := LeaseRefresh
+	LeaseRefresh = 100 * time.Millisecond
+	t.Cleanup(func() { LeaseRefresh = old })
+	var gate atomic.Pointer[chan struct{}]
+	orig := legacyLockSpool
+	setVar(t, &legacyLockSpool, func(sp *spool.Spool) (func(), error) {
+		if g := gate.Load(); g != nil {
+			<-*g
+		}
+		return orig(sp)
+	})
+	f := newFixture(t, "old", "snd")
+	snd := f.client(t, "snd")
+	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
+	peer := f.clientNF(t, f.addNewForm(t, "ag", "team", "peer", newFormOpts{}))
+	ep, _, sp := openSpooled(t, f, id)
+	release := make(chan struct{})
+	gate.Store(&release)
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	kv, fired := loseAt(t, f, ep, &testLegacyPutSeam)
+	f.sendTo(t, snd, "old", "raced-write")
+	<-fired
+	entryRef := spool.Ref{Stream: LegacyStream, Seq: 1}
+	observed := false // the entry was on disk and hidden in the same locked read
+	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		unlock, err := sp.Lock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		present, shown := sp.Has(entryRef), hasLegacy(waiting(t, sp))
+		unlock()
+		if shown {
+			t.Fatal("a hook read showed a legacy entry written under a lease lost during the write")
+		}
+		observed = observed || present
+	}
+	if !observed {
+		t.Fatal("the entry was never seen on disk, so the test did not prove that a read hides it")
+	}
+	once.Do(func() { close(release) })
+	f.sendTo(t, peer, id.Flat(), "trigger") // a batch on the own stream (the legacy one is no longer read): the worker drops the entry
+	until(t, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
+	ep.stopLegacyRetry()
+	if err := (*kv).Delete(context.Background(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	_, lev := f.run(t, "old")
+	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-write") })
 }
 
 // A legacy entry written under an old epoch is skipped by the hook read once the epoch has changed.
