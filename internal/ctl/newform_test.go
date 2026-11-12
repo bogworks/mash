@@ -68,6 +68,17 @@ func TestParseNewForm(t *testing.T) {
 	if err == nil || isUsage(err) {
 		t.Fatalf("setting off: %v", err)
 	}
+	// Setting off: a bare flat key to deprovision is the admin's directory key and keeps its legacy-key path (as
+	// suspend, resume and suspended take it); the dotted form, a three-token flag and provision still need the setting.
+	off := config.Config{Owner: "own"}
+	if rest, nf, err := parseNewForm(off, fields("deprovision acme_t1_recv --drained-to 3 --suspension ID")); err != nil || nf != nil || len(rest) != 6 {
+		t.Fatalf("flat key, setting off: %v %v %v", rest, nf, err)
+	}
+	for _, s := range []string{"deprovision acme.t1.recv", "deprovision recv --agent acme", "provision acme_t1_recv --user U"} {
+		if _, _, err := parseNewForm(off, fields(s)); err == nil || isUsage(err) {
+			t.Errorf("%q, setting off: %v", s, err)
+		}
+	}
 }
 
 func fields(s string) []string {

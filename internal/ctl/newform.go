@@ -102,6 +102,12 @@ func parseNewForm(cfg config.Config, args []string) ([]string, *newForm, error) 
 	}
 	var nf newForm
 	id, positional, err := positionalIdentity(args[1])
+	// A bare flat key to deprovision, with no three-token flag and the setting off, is the admin's directory key (the
+	// scripted form of ADR 0081, as suspend, resume and suspended take it): it keeps its legacy-key path.
+	if verb == "deprovision" && cfg.AgentToken == "" && positional && err == nil && !strings.Contains(args[1], ".") &&
+		len(vals) == 0 {
+		return args, nil, nil
+	}
 	switch {
 	case positional:
 		if err != nil {
