@@ -223,7 +223,7 @@ The pins live outside the embedded files on purpose. `plugin/scripts/mash` is em
 ## What makes the build reproducible
 
 `scripts/buildrelease -src <clone> -out <file> -version <N.N.N> -commit <X>` (also used by CI) builds `./cmd/mash` with
-`GOTOOLCHAIN=go1.27.3 GOENV=off GOWORK=off GOFLAGS= CGO_ENABLED=0`, every other `GO*`/`CGO_*` variable removed, `-trimpath
+`GOTOOLCHAIN=go1.27.4 GOENV=off GOWORK=off GOFLAGS= CGO_ENABLED=0`, every other `GO*`/`CGO_*` variable removed, `-trimpath
 -buildvcs=false -mod=readonly` and `-ldflags "-X …/internal/endpoint.Version=<N.N.N> -X main.commit=<X>"`. It refuses a
 source tree whose HEAD is not X, that holds any untracked or ignored file, or that contains the output, and runs
 `go mod download` + `go mod verify` first, so the module cache is what `go.sum` names.
