@@ -144,6 +144,9 @@ func policyLines(line func(left, right string)) {
 	line("policy test [--policy FILE]", "run the file's tests")
 	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the directory and the creds files; fixes nothing")
 	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: the account check, directory labels; lists stale creds")
+	line("policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "the list set in force and how far it is applied (reads the policy bucket; changes nothing)")
+	line("policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "whether SENDER may mail RECEIVER under the list set in force, and why")
+	line("policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]", "what applying the list-set document FILE would do; exits 1 when the plan is refused")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the

@@ -17,7 +17,16 @@ const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
        mashctl policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
        mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N]
+       mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+       mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+       mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
        (repair is additive EXCEPT that it clears labels the file does not name on endpoints the file declares)
+       (show, explain and diff read the list set in force from the policy bucket and change nothing;
+        SENDER and RECEIVER are three-part addresses; FILE is a list-set document, canonical JSON or a compact JWS;
+        the policy bucket is named by the MASH_POLICY_BUCKET setting, a bucket name that may contain {range};
+        --range fills {range} and is required only when the setting has it; --bucket NAME overrides the setting;
+        --account defaults to the key store's account key;
+        diff checks the signature only when --submitter is given, and exits 1 when the plan is refused)
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.
@@ -80,6 +89,12 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 		return runPolicyDrift(rest, env, lookup, stdout, stderr)
 	case "repair":
 		return runPolicyRepair(rest, env, lookup, stdout, stderr)
+	case "show":
+		return policyListSetShow(rest, env, lookup, stdout, stderr)
+	case "explain":
+		return policyListSetExplain(rest, env, lookup, stdout, stderr)
+	case "diff":
+		return policyListSetDiff(rest, env, lookup, stdout, stderr)
 	default:
 		return usage()
 	}

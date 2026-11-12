@@ -151,31 +151,27 @@ func TestPolicyCheckRefusesAZone(t *testing.T) {
 }
 
 func TestPolicyUsageAndRouting(t *testing.T) {
-	// a removed verb is an unknown verb: the usage error, exit 2, and the usage lists only what remains
-	for _, args := range [][]string{{"policy"}, {"policy", "frobnicate"}, {"policy", "show"}, {"policy", "show", "--json"}, {"policy", "explain", "a", "b"}, {"policy", "diff"}, {"policy", "check", "--nope"}, {"policy", "check", "extra"}, {"policy", "check", "--policy"}} {
+	// an unknown verb, a bad argument or no verb is the usage error, exit 2, and the usage lists every verb
+	for _, args := range [][]string{{"policy"}, {"policy", "frobnicate"}, {"policy", "explain", "a"}, {"policy", "diff"}, {"policy", "show", "extra"}, {"policy", "check", "--nope"}, {"policy", "check", "extra"}, {"policy", "check", "--policy"}} {
 		out, errb, code := policyRun(t, nil, args...)
 		if code != 2 || out != "" || !strings.Contains(errb, "usage: mashctl policy check") {
 			t.Fatalf("%v: %d %q %q", args, code, out, errb)
 		}
 	}
+	verbs := []string{"policy check", "policy test", "policy apply", "policy drift", "policy repair", "policy show", "policy explain", "policy diff"}
 	_, errb, _ := policyRun(t, nil, "policy")
-	for _, gone := range []string{"policy show", "policy explain", "policy diff"} {
-		if strings.Contains(errb, gone) {
-			t.Fatalf("usage still lists %s:\n%s", gone, errb)
+	for _, v := range verbs {
+		if !strings.Contains(errb, "mashctl "+v) {
+			t.Fatalf("usage lacks %s:\n%s", v, errb)
 		}
 	}
 	out, _, code := policyRun(t, nil, "help")
 	if code != 0 {
 		t.Fatal(code)
 	}
-	for _, v := range []string{"policy check", "policy test", "policy drift", "policy repair"} {
+	for _, v := range []string{"policy check", "policy test", "policy drift", "policy repair", "policy show", "policy explain", "policy diff"} {
 		if !strings.Contains(out, "mashctl "+v) {
-			t.Fatalf("usage lacks %s:\n%s", v, out)
-		}
-	}
-	for _, gone := range []string{"policy show", "policy explain", "policy diff"} {
-		if strings.Contains(out, gone) {
-			t.Fatalf("help still lists %s:\n%s", gone, out)
+			t.Fatalf("help lacks %s:\n%s", v, out)
 		}
 	}
 }

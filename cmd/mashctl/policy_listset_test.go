@@ -360,3 +360,79 @@ func TestListSetDiffInputErrors(t *testing.T) {
 		t.Fatalf("bad account: %d %q", code, errb)
 	}
 }
+
+// runPolicyVia runs the verb through runPolicy, the way mashctl dispatches it, with the account and range of the seed.
+func (e *listSetEnv) runPolicyVia(args ...string) (string, string, int) {
+	e.t.Helper()
+	var out, errb bytes.Buffer
+	env := func(k string) string { return e.env[k] }
+	lookup := func(k string) (string, bool) { v, ok := e.env[k]; return v, ok && v != "" }
+	args = append(args, "--account", e.acctPub, "--range", listSetRange)
+	code := runPolicy(args, env, lookup, &out, &errb)
+	return out.String(), errb.String(), code
+}
+
+// The verbs are reached through runPolicy, not only through their handlers.
+func TestRunPolicyListSetVerbs(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+
+	out, errb, code := e.runPolicyVia("show")
+	if code != 0 || errb != "" || e.masked(out) != e.masked(mustRun(t, e, "show")) {
+		t.Fatalf("show: %d\n%s\n%s", code, out, errb)
+	}
+	out, errb, code = e.runPolicyVia("show", "--json")
+	var v map[string]any
+	if code != 0 || errb != "" || json.Unmarshal([]byte(out), &v) != nil || v["list_set_in_force"] != true {
+		t.Fatalf("show --json: %d\n%s\n%s", code, out, errb)
+	}
+
+	out, errb, code = e.runPolicyVia("explain", "foo.c.core", "foo.c.core")
+	if code != 0 || errb != "" || out == "" {
+		t.Fatalf("explain: %d\n%s\n%s", code, out, errb)
+	}
+	if want := mustRun(t, e, "explain", "foo.c.core", "foo.c.core"); out != want {
+		t.Fatalf("explain differs from the handler:\n%s\n%s", out, want)
+	}
+	if _, errb, code = e.runPolicyVia("explain", "foo.c.core"); code != 2 || !strings.Contains(errb, "usage: mashctl policy check") {
+		t.Fatalf("explain usage: %d %q", code, errb)
+	}
+
+	next := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+	})
+	f := e.file("next.json", next)
+	out, errb, code = e.runPolicyVia("diff", f)
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted") {
+		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
+	}
+	out, _, code = e.runPolicyVia("diff", f, "--json")
+	if code != 0 || json.Unmarshal([]byte(out), &map[string]any{}) != nil {
+		t.Fatalf("diff --json: %d\n%s", code, out)
+	}
+	if _, errb, code = e.runPolicyVia("diff"); code != 2 || !strings.Contains(errb, "usage:") {
+		t.Fatalf("diff usage: %d %q", code, errb)
+	}
+}
+
+func mustRun(t *testing.T, e *listSetEnv, args ...string) string {
+	t.Helper()
+	out, errb, code := e.run(args[0], args[1:]...)
+	if code != 0 {
+		t.Fatalf("%v: %d %s", args, code, errb)
+	}
+	return out
+}
+
+func TestRunPolicyNoArgsListsListSetVerbs(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runPolicy(nil, func(string) string { return "" }, func(string) (string, bool) { return "", false }, &out, &errb)
+	if code != 2 || out.Len() != 0 {
+		t.Fatalf("%d %q", code, out.String())
+	}
+	for _, v := range []string{"mashctl policy show", "mashctl policy explain", "mashctl policy diff", "MASH_POLICY_BUCKET"} {
+		if !strings.Contains(errb.String(), v) {
+			t.Fatalf("usage lacks %s:\n%s", v, errb.String())
+		}
+	}
+}

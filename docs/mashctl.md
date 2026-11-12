@@ -140,7 +140,33 @@ The three-token form of `provision` and `deprovision` (`--agent A [--owner O] [-
 
 ## Applying the policy
 
-`mashctl policy apply [--dry-run]` parses the policy file, runs its tests, refuses a directory that holds a zoned record, and refuses when the account JWT on the servers still carries a scoped signing key (a zone policy from an older release; stay on the last zoned release until the label policy model ships). Those guards run first, so an account with an applied zone policy gets that more specific refusal. When none of them refuses, `policy apply` still refuses, with exit 1 and `nothing was changed`: the zone policy stack was removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) and `policy apply` has no replacement until the label policy model ships. `policy show`, `policy explain` and `policy diff` were removed with the zone model and are unknown verbs (usage error, exit 2). `--replace-zone-key`, `--remove-zone` and `--keep-zone` are gone. A policy file that still carries a zone (a `subject_label`, a `zone` or `zones` field, or a `zone` label or selector) does not parse: remove it.
+`mashctl policy apply [--dry-run]` parses the policy file, runs its tests, refuses a directory that holds a zoned record, and refuses when the account JWT on the servers still carries a scoped signing key (a zone policy from an older release; stay on the last zoned release until the label policy model ships). Those guards run first, so an account with an applied zone policy gets that more specific refusal. When none of them refuses, `policy apply` still refuses, with exit 1 and `nothing was changed`: the zone policy stack was removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) and `policy apply` has no replacement until the label policy model ships. The zone-model `policy show`, `policy explain` and `policy diff` were removed; the verbs of those names now read the list set (see [Reading the list set](#reading-the-list-set)). `--replace-zone-key`, `--remove-zone` and `--keep-zone` are gone. A policy file that still carries a zone (a `subject_label`, a `zone` or `zones` field, or a `zone` label or selector) does not parse: remove it.
+
+## Reading the list set
+
+```sh
+mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
+```
+
+These three verbs read the policy in force from the policy bucket over the admin connection and change nothing: they write no bucket entry, no record and no file.
+
+- `show` prints the list set in force and how far it is applied: its generation, its state, and the generation each server holds. With nothing in force it says so.
+- `explain SENDER RECEIVER` says whether the sender may mail the receiver under the list set in force, and which entries decide it. SENDER and RECEIVER are three-part addresses (`range.owner.name`).
+- `diff FILE` reads a list-set document (canonical JSON or a compact JWS) and prints what applying it would do to the list set in force, without applying it. The plan is accepted or refused, and a refusal names the reasons. `diff` checks the signature only when `--submitter` is given; without it the file is read as it is.
+
+Flags:
+
+- `--json` prints the result as JSON in place of the text.
+- `--bucket NAME` names the policy bucket and overrides the setting below.
+- `--range RANGE` fills `{range}` in the bucket name. It is required when the bucket name has `{range}` and refused when it does not.
+- `--account KEY` is the account public key. It defaults to the account key in the key store.
+- `--submitter PUBKEY` (`diff` only) is the public key that must have signed FILE.
+
+The bucket is named by the `MASH_POLICY_BUCKET` setting, a bucket name pattern that may contain `{range}` (letters, digits, `-` and `_`). The seam that fixes the name is pending; until it lands, set `MASH_POLICY_BUCKET` or pass `--bucket`. With neither, the verb fails with `no policy bucket`. A value that is not a valid bucket name is named by its source and never printed back.
+
+Exit codes: 0 on success; 1 for a failure (no bucket, no connection, an unreadable file) and, for `diff`, a refused plan; 2 for a usage error (a missing or extra argument, an unknown flag, an address or key that fails validation).
 
 ## Checking and repairing drift
 

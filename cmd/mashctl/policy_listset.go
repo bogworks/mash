@@ -20,18 +20,6 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// policyListSetUsage is the usage of the list-set verbs that replace the zone verbs show, explain and diff. They read
-// the account-wide list set in force from the range's policy bucket and change nothing.
-const policyListSetUsage = `usage: mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
-       mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
-       mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
-       (SENDER and RECEIVER are three-part addresses; FILE is a list-set document, canonical JSON or a compact JWS;
-        the policy bucket is named by the MASH_POLICY_BUCKET setting, a bucket name that may contain {range};
-        --range fills {range} and is required only when the setting has it; --bucket NAME overrides the setting;
-        --account defaults to the key store's account key;
-        diff checks the signature only when --submitter is given, and exits 1 when the plan is refused)
-`
-
 // listSetOpts are the flags and positional arguments of a list-set verb.
 type listSetOpts struct {
 	json                            bool
@@ -181,7 +169,7 @@ func listSetUsageFail(pfx string, err error, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 	}
-	fmt.Fprint(stderr, policyListSetUsage)
+	fmt.Fprint(stderr, policyUsage)
 	return 2
 }
 
@@ -289,10 +277,4 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 		return 1
 	}
 	return 0
-}
-
-// The list-set verbs are wired into runPolicy by the change that removes the zone verbs of the same names. Until
-// then only their tests call them, which the unused linter would report.
-var _ = []func([]string, func(string) string, config.Lookup, io.Writer, io.Writer) int{
-	policyListSetShow, policyListSetExplain, policyListSetDiff,
 }
