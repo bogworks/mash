@@ -491,6 +491,13 @@ func TestPlainTextWarning(t *testing.T) {
 		"tls://a:4222,nats://10.0.0.5:4222":     true,
 		"nats://127.0.0.1:4222, nats://b:4222":  true,
 		"nats://127.0.0.1:4222,nats://[::1]:42": false,
+		// An entry with no scheme is nats://: it was silently skipped.
+		"10.0.0.5:4222":                 true,
+		"example.com":                   true,
+		"tls://a:4222,example.com:4222": true,
+		"127.0.0.1:4222":                false,
+		"localhost":                     false,
+		"u:pw@example.com:4222":         true,
 	} {
 		if got := PlainTextWarning(url) != ""; got != warn {
 			t.Errorf("PlainTextWarning(%q) warns = %v, want %v", url, got, warn)
@@ -871,6 +878,41 @@ func TestLoadInsecureLoopback(t *testing.T) {
 	}
 	if _, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_LOOPBACK": "yes"}); err == nil || !strings.Contains(err.Error(), "MASH_INSECURE_LOOPBACK") {
 		t.Fatalf("a bad value: %v", err)
+	}
+}
+
+func TestLoadRequireTLS(t *testing.T) {
+	load := func(file string, env map[string]string) (Config, error) {
+		home := t.TempDir()
+		writeFile(t, home, file)
+		env["MASH_NAME"] = "a"
+		return load(envOf(env), home)
+	}
+	base := `"url":"nats://127.0.0.1:4222","owner":"o"`
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       bool
+		source     string
+	}{
+		{"default off", `{` + base + `}`, map[string]string{}, false, "default"},
+		{"file key", `{` + base + `,"require_tls":true}`, map[string]string{}, true, "config.json"},
+		{"file false", `{` + base + `,"require_tls":false}`, map[string]string{}, false, "config.json"},
+		{"env 1", `{` + base + `}`, map[string]string{"MASH_REQUIRE_TLS": "1"}, true, "MASH_REQUIRE_TLS"},
+		{"env true", `{` + base + `}`, map[string]string{"MASH_REQUIRE_TLS": "true"}, true, "MASH_REQUIRE_TLS"},
+		{"env 0 beats the file", `{` + base + `,"require_tls":true}`, map[string]string{"MASH_REQUIRE_TLS": "0"}, false, "MASH_REQUIRE_TLS"},
+		{"env false beats the file", `{` + base + `,"require_tls":true}`, map[string]string{"MASH_REQUIRE_TLS": "false"}, false, "MASH_REQUIRE_TLS"},
+		{"env 1 beats the file", `{` + base + `,"require_tls":false}`, map[string]string{"MASH_REQUIRE_TLS": "1"}, true, "MASH_REQUIRE_TLS"},
+	} {
+		c, err := load(tc.file, tc.env)
+		if err != nil || c.RequireTLS != tc.want || c.Source["require_tls"] != tc.source {
+			t.Fatalf("%s: %v, %v, source %q; want %v, %q", tc.name, c.RequireTLS, err, c.Source["require_tls"], tc.want, tc.source)
+		}
+	}
+	for _, v := range []string{"yes", "on", "TRUE", "2"} {
+		if _, err := load(`{`+base+`}`, map[string]string{"MASH_REQUIRE_TLS": v}); err == nil || !strings.Contains(err.Error(), "MASH_REQUIRE_TLS") {
+			t.Fatalf("a bad value %q: %v", v, err)
+		}
 	}
 }
 

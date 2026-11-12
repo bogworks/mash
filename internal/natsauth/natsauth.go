@@ -195,6 +195,41 @@ func RequireTLS(url string, insecureLoopback bool) ([]nats.Option, error) {
 	return []nats.Option{nats.IgnoreDiscoveredServers(), nats.Secure()}, nil
 }
 
+// PlainRemote returns the scheme ("nats" or "ws") and host of the first entry of url (a comma-separated server list)
+// that is plain text to a host that is not localhost or a loopback IP literal, and false when there is none. An entry
+// with no scheme is nats://, as the client reads it. The host never carries userinfo, a path or a query.
+func PlainRemote(url string) (scheme, host string, found bool) {
+	for _, e := range strings.Split(url, ",") {
+		scheme, host := serverParts(e)
+		host, _, _ = strings.Cut(host, "?")
+		host, _, _ = strings.Cut(host, "#")
+		if host == "" || isLoopbackHost(host) || (scheme != "nats" && scheme != "ws") {
+			continue
+		}
+		return scheme, host, true
+	}
+	return "", "", false
+}
+
+// RequireEndpointTLS is the option set for an endpoint connection when require_tls (MASH_REQUIRE_TLS) is on. Before any
+// connection is made it refuses a plain nats:// or ws:// entry (a scheme-less entry is nats://) to a host that is not
+// localhost or a loopback IP literal, and the error names the host, never the URL's userinfo. Plain text to a
+// loopback host is always allowed. When any entry is tls:// or wss://, nats.Secure() makes the connection fail if the
+// server does not offer TLS. Servers a server advertises are never added to the pool, so the check covers every
+// address the client dials.
+func RequireEndpointTLS(url string) ([]nats.Option, error) {
+	if scheme, host, ok := PlainRemote(url); ok {
+		return nil, fmt.Errorf("mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain %s:// connection to %q: use tls:// with the server's certificate (tls_ca for a private CA)", scheme, host)
+	}
+	opts := []nats.Option{nats.IgnoreDiscoveredServers()}
+	for _, e := range strings.Split(url, ",") {
+		if scheme, _ := serverParts(e); scheme == "tls" || scheme == "wss" {
+			return append(opts, nats.Secure()), nil
+		}
+	}
+	return opts, nil
+}
+
 // LoopbackDialer dials only localhost or a loopback IP literal, at the first connect and at every reconnect. It is the
 // guarantee behind insecure_loopback: whatever address the client is handed, a plain connection with admin or system
 // credentials is never opened to a host that is not on this machine.
