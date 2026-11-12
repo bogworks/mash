@@ -48,6 +48,19 @@ signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
 - Anything beyond what the attestations say: that `release.yml` of this repository, at the tag and the commit X, built
   the files on the maintainers' runner ([ADR 0087](decisions/0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md)).
 
+### Exceptions to the release process
+
+A release made before the standard process exists is recorded here with what it skipped and what ran instead.
+
+**v0.4.0 (exception D208, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
+
+- Gate: `scripts/release-check 5d907947e06cf6ebc6ff1f2827527dafe85d56f8 0.4.0` passed (exit 0) once main's push CI on that commit was green (the first push run failed on a flaky test, `TestServeLeaseRetryFromConfig`, and passed on its rerun, attempt 2). Mail latency: urgent mail 0.14s against 0.15s for v0.3.3.
+- Tag: `v0.4.0` annotated, unsigned, pushed at X by the minting service (cutover v0.4.0, [ADR 0095](decisions/0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md)).
+- Build: `release.yml` run 43268250316. Its `attest` job failed its exact-subject check because the persistent runner's `dist/` still held a stale SBOM from an earlier job; the check failed closed, the failed jobs were rerun, and the rerun (attempt 2) passed with exactly the four binaries and `SHA256SUMS`. The workflow now starts every job from an empty `dist` and names the subjects explicitly (pull request #491).
+- Publication: `scripts/release-check publish 0.4.0 5d907947e06cf6ebc6ff1f2827527dafe85d56f8` from a clean checkout at X exited 0 ("v0.4.0 is published and verified"): tag at X, no signature, fresh build of X equal to the assets, build provenance and SBOM attestations for all four binaries, `SHA256SUMS` checked against the builds and its attestation verified; the release was then published and re-verified read-only. Published 2026-11-12T17:31:19Z.
+- Skipped, as the exception says: the gate was run by hand, not in the workflow; there was no gate-run binding for the publish and no release watch; the release used the shared runners; the tag rulesets were not verified by the repository's tests.
+- Not proven: that a checked gate run authorized the release; that the published bytes are the ones the maintainer checked beyond the `--assets` run; the claims in the list above.
+
 ## Signing
 
 This section applies to releases below the cutover version. From the cutover nothing is signed: there is no
@@ -86,6 +99,15 @@ The numbered steps are what the command does in each state, and the manual path 
    go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md
    ```
    and set `plugin/.claude-plugin/plugin.json`'s `version` to `X.Y.Z`. `assemble --dry-run` prints the section first.
+   **Then replace the two placeholders.** A release's notes and its change-log section are the same text, and it opens
+   with prose before any list ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
+   `assemble` writes, directly under the new `## [X.Y.Z] - date` heading, a `### Summary` whose paragraph starts
+   `REPLACE THIS PARAGRAPH:` and a `### Upgrading` whose sentence starts `REPLACE THIS:`, above the fragment-derived lists.
+   * **Summary:** at least 40 words of paragraph text, before any list or heading. Say what the release is for and who
+     should care, what changed for the user, how to verify the download, and any known limits. It is prose, not a
+     shortened list of the bullets below it.
+   * **Upgrading:** at least one sentence of paragraph text before any list: what an operator must do after upgrading
+     (steps may follow as a list), or, when there is nothing to do, the sentence "Nothing to do."
    Merge it and take its merge commit as X.
 3. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
    the release repository (never a configured origin), checks X is an ancestor, reads X's check runs through `gh`
@@ -117,6 +139,12 @@ The numbered steps are what the command does in each state, and the manual path 
    not assembled"), and one whose `docs/decisions/INDEX.md` differs from what `adrlint index` generates from the
    records at X ("is stale"); both are read from git at X, not the working tree, and a candidate without
    `docs/decisions/` has no index to check.
+   It also refuses a candidate whose `CHANGELOG.md` at X has no `## [<version>] - date` section that opens with a
+   `### Summary` (the first heading, then at least 40 words of paragraph text before the first list or heading) and a
+   `### Upgrading` heading followed by at least one sentence before any list, or whose section still contains
+   `REPLACE THIS`. Paragraph text is a line that is not a heading, a list item, a table row or inside a code fence. Only
+   the section of the version being released is judged, and only when X records a cutover (`docs/release-cutover`) and
+   the version is at or above it; below it, or with no cutover record, nothing is judged.
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
 4. **Tag** (state: no tag). Below the cutover: `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key). At or above it: the maintainer asks the minting service to push the annotated, unsigned tag at X with its deploy key; nobody signs it, and `release-check publish` refuses when no tag exists.
 5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
@@ -125,11 +153,16 @@ The numbered steps are what the command does in each state, and the manual path 
    CycloneDX SBOM per binary and attests it, and keeps the Sigstore bundle of its build provenance attestation as `mash.intoto.jsonl` (see "SBOM and
    build provenance"). Only after all of these succeed does it create a **draft** release with the four binaries, the four
    `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`),
-   `SHA256SUMS` (which lists the binaries, the SBOMs, `mash.intoto.jsonl` and the script) and a changelog.
+   `SHA256SUMS` (which lists the binaries, the SBOMs, `mash.intoto.jsonl` and the script) and the release notes. The notes are
+   the change-log section of the released version (`go run ./scripts/changelog section --version X.Y.Z`) with one final
+   paragraph, `Full changes: [v<previous>...v<tag>](https://github.com/<repository>/compare/v<previous>...v<tag>)`, where the
+   previous release comes from `scripts/notes-base` (the first release has no such line). The job fails before the draft
+   exists when the version has no section or the notes fail `go run ./scripts/changelog check-notes`, the opening test the
+   gate applies (below). Raw commit subjects are never the notes.
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); the release body must also pass the same opening test (a Summary and an Upgrading section, as above), hold a link containing `compare/v<previous>...v<version>` (the previous release is the highest earlier published `vN.N.N`; with none, any `/compare/v` link ending `...v<version>`), have no line ending in a parenthesized commit hash of 7 to 40 hex digits, and not contain `REPLACE THIS`. The body is judged only for a version strictly above the cutover: the cutover release itself (v0.4.0) was published before this rule and is not re-judged, and earlier ones never are. Only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag below the cutover the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
    At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the four binaries **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
@@ -304,12 +337,16 @@ A `workflow_dispatch` run on `main` builds the four binaries twice and compares 
 the SBOMs, and keeps the provenance bundle, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
 a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
 `--signer-workflow` and `--source-ref refs/heads/main`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
-`release-check --assets` does. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
+`release-check --assets` does. The `dry-run-notes` job also runs the release-notes step (`scripts/changelog section` and `check-notes`, with the compare line) against the latest released change log section, so a change to the notes path is proven before a tag. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
 ref builds nothing.
 
 A dry run is only meaningful if the verify job ran: check that `dry-run-verify` shows success, not skipped. A skipped job anywhere
 in a job's `needs` chain skips everything below it unless the job has its own status-function `if`, which is why each job below
 `build` has one; a green run in which `dry-run-verify` was skipped verified nothing.
+
+Release jobs start from an empty `dist` (`rm -rf dist provenance && mkdir -p dist` is the first step of each) because the self-hosted runners are persistent and a file left by an earlier job's workspace must never reach a later one.
+
+After ANY change to `release.yml`, run a dry run (a `workflow_dispatch` on `main`, above) and check it is green, with `dry-run-verify` showing success, before the next tag.
 
 It does not exercise the tag guard (tag shape, signature, on main, older drafts), the maintainer's signing, the draft job or
 publishing, and it does not run `release-check`. It must be green on `main` before a release that changes the pipeline is tagged.

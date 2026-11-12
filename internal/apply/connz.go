@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -23,8 +24,8 @@ const (
 	// offset to drift. The reply carries each connection's JWT (auth on), so the page is not made unbounded.
 	DefaultConnzPage = 8192
 
-	// connzScanTries is how many times one server's whole scan is made when its pages do not reconcile (a connection
-	// closed or opened between two pages); after that the server is marked incomplete.
+	// connzScanTries is how many times one server's whole scan is made when its pages do not reconcile or two multi-page
+	// scans do not agree (a connection closed or opened between two pages); after that the server is marked incomplete.
 	connzScanTries = 3
 
 	// connzTotal bounds the wait for the servers a ping should reach; connzSettle ends the wait when no set of
@@ -55,8 +56,9 @@ type ConnzServer struct {
 	Conns []ConnzConn
 	// Total is the server's own count of matching connections; len(Conns) equals it when every page was read.
 	Total int
-	// Incomplete is non-empty when the pages could not be made to reconcile with the server's count after
-	// connzScanTries scans (the server's connections kept changing between pages). Conns then holds what the last
+	// Incomplete is non-empty when, after connzScanTries scans, the pages did not reconcile with the server's count or
+	// (for a list of several pages) two consecutive scans did not collect the same connections: the server's
+	// connections kept changing between pages. Conns then holds what the last
 	// scan read, each connection once, and the list is NOT the whole list: a caller must treat the server like one
 	// that did not answer.
 	Incomplete string
@@ -189,23 +191,38 @@ func allSeen(expect []string, seen map[string]bool) bool {
 }
 
 // connzScan reads one server's connections whole. The first reply (the ping's) is the first attempt's first page; the
-// further pages, and the first page of a retry, are asked for on the server's own subject. Every page is a fresh
-// snapshot of the server, so a connection that closes or opens between two pages shifts the list; a scan is therefore
-// accepted only when the connections it collected (a set keyed by CID, one server's) are as many as the total the
-// server reported on its first page AND on its last, and none came twice. Otherwise the whole scan is made again, up
-// to connzScanTries times, and then the server is marked Incomplete.
+// further pages, and the first page of a retry, are asked for on the server's own subject. A scan of one page is one
+// consistent snapshot and is accepted when its count matches the server's total. A scan of several pages is not: every
+// page is a fresh snapshot, so a connection that closes between two pages and another that opens can shift the list
+// while the total stays the same, leaving the collected ids unique, as many as the total, and one live connection
+// missing. A multi-page scan is therefore accepted only when it reconciles (as many unique ids as the total on its first
+// and on its last page) AND the scan before it, also reconciled, collected exactly the same set of connection ids. A
+// scan that does not agree is made again, up to connzScanTries scans in all, and then the server is marked Incomplete.
 func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, page int, first connzReply) error {
 	r := first
+	var prev map[uint64]bool // the set of the last multi-page scan that reconciled
 	for attempt := 1; ; attempt++ {
-		ok, err := n.connzScanOnce(ctx, cs, account, page, r)
+		ok, multi, err := n.connzScanOnce(ctx, cs, account, page, r)
 		if err != nil {
 			return err
 		}
 		if ok {
-			return nil
+			if !multi {
+				return nil
+			}
+			cur := make(map[uint64]bool, len(cs.Conns))
+			for _, c := range cs.Conns {
+				cur[c.CID] = true
+			}
+			if prev != nil && maps.Equal(prev, cur) {
+				return nil
+			}
+			prev = cur
+		} else {
+			prev = nil
 		}
 		if attempt == connzScanTries {
-			cs.Incomplete = fmt.Sprintf("server %s's connection list changed while it was read (%d scans did not agree with its own count of %d): the list is not complete", config.Clean(cs.Name), connzScanTries, cs.Total)
+			cs.Incomplete = fmt.Sprintf("server %s's connection list changed while it was read (%d scans did not agree with each other or with its own count of %d): the list is not complete", config.Clean(cs.Name), connzScanTries, cs.Total)
 			return nil
 		}
 		if r, err = n.connzFetch(ctx, cs, account, 0, page); err != nil {
@@ -231,11 +248,12 @@ func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, o
 	return r, nil
 }
 
-// connzScanOnce is one scan from the first page r. It reports whether the pages reconciled with the server's counts.
-func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string, page int, r connzReply) (bool, error) {
+// connzScanOnce is one scan from the first page r. It reports whether the pages reconciled with the server's counts and
+// whether the scan took more than one page.
+func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string, page int, r connzReply) (ok, multi bool, err error) {
 	cs.Total, cs.Conns = r.Data.Total, nil
 	if cs.Total > maxConnzConns {
-		return false, fmt.Errorf("server %s reports %d connections: refusing to read more than %d", config.Clean(cs.Name), cs.Total, maxConnzConns)
+		return false, false, fmt.Errorf("server %s reports %d connections: refusing to read more than %d", config.Clean(cs.Name), cs.Total, maxConnzConns)
 	}
 	seen := map[uint64]bool{}
 	dup := false
@@ -254,8 +272,9 @@ func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string
 	for received < cs.Total && !dup {
 		next, err := n.connzFetch(ctx, cs, account, received, page)
 		if err != nil {
-			return false, err
+			return false, multi, err
 		}
+		multi = true
 		if len(next.Data.Conns) == 0 {
 			break // the server's list shrank under the scan
 		}
@@ -263,5 +282,5 @@ func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string
 		last = next.Data.Total
 		add(next)
 	}
-	return !dup && len(cs.Conns) == cs.Total && last == cs.Total, nil
+	return !dup && len(cs.Conns) == cs.Total && last == cs.Total, multi, nil
 }

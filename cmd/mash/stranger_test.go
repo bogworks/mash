@@ -109,10 +109,7 @@ func TestStrangerMinimalPathHookIsVisible(t *testing.T) {
 			t.Skipf("a mash is installed in %s", d)
 		}
 	}
-	root, err := filepath.Abs("../../plugin")
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := pluginRootUnpinned(t)
 	ran := 0
 	for _, h := range pluginHooks(t) {
 		if h.Event != "PostToolUse" && h.Event != "UserPromptSubmit" {

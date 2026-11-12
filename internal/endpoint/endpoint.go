@@ -124,6 +124,10 @@ type Endpoint struct {
 	fromStart bool
 	// noChannel: the host takes no channel delivery, so mail is held, never channel-delivered (NoChannel).
 	noChannel bool
+	// fault and faultOn: the spool failure report of fail-closed delivery (spoolrequired.go); spoolReq carries a late BindSpool to the deliver loop.
+	fault    spoolFault
+	faultOn  bool
+	spoolReq chan spoolBind
 
 	// hl is the hookless detector's state (hookless.go), guarded by its own mutex: tool calls and the read tool reach
 	// it from other goroutines than Run's.
@@ -382,8 +386,8 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
 		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
-		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
-		dir:           map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
+		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),
+		dir: map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
 	if opts.Presence {
 		// Asked before anything else, so the answers arrive while the rest of the open is under way.
 		e.pre.probe = e.startPresence()
