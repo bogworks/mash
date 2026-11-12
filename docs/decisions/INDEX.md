@@ -43,7 +43,7 @@
 | [0039](0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md) | mash reads Claude Code's managed settings, read-only, for diagnosis only | accepted | 2026-11-01 |
 | [0040](0040-hook-ownership-session-id-launch-token-then-process-chain.md) | Hook ownership: session id, launch token, then process chain | accepted | 2026-11-01 |
 | [0041](0041-sessions-whose-hooks-never-run-stop-waking-deliver-through-read.md) | Sessions whose hooks never run stop waking and deliver through the read tool | accepted | 2026-11-01 |
-| [0042](0042-sign-sha256sums-with-sshsig.md) | A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild | accepted | 2026-10-31 |
+| [0042](0042-sign-sha256sums-with-sshsig.md) | A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild | superseded by ADR-0095 | 2026-10-31 |
 | [0043](0043-second-launch-of-a-running-session-is-refused-and-told-once.md) | A second launch of a running session is refused, and told once | accepted | 2026-11-01 |
 | [0044](0044-config-and-state-directories-are-relocatable.md) | Config and state directories are relocatable by MASH_CONFIG_DIR and MASH_STATE_DIR | accepted | 2026-11-01 |
 | [0045](0045-product-code-carries-no-personal-convention-a-ratchet-lint-enforces-it.md) | Product code carries no personal convention; a ratchet lint enforces it | accepted | 2026-11-01 |
@@ -92,3 +92,4 @@
 | [0091](0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md) | There are no zones: mail keeps the five-token subject and the address is the fence | accepted | 2026-11-11 |
 | [0092](0092-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md) | A new serve of the same session takes over the endpoint lease | accepted | 2026-11-10 |
 | [0093](0093-the-lease-bucket-does-not-allow-rollup-writes.md) | The lease bucket does not allow rollup writes | accepted | 2026-11-12 |
+| [0095](0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md) | Releases from the cutover version are keyless: the tag is pushed by the minting service and attestations replace the signatures | accepted | 2026-11-12 |
