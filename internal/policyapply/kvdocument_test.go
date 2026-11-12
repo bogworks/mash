@@ -57,7 +57,7 @@ func TestKVLedgerReadOnlyWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ro, err := OpenKVLedgerReadOnly(context.Background(), js, kvRange, kvAccount)
+	ro, err := OpenKVLedgerReadOnly(context.Background(), js, kvBucket, kvAccount)
 	if err != nil {
 		t.Fatal(err)
 	}

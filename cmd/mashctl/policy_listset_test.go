@@ -24,6 +24,12 @@ var updateListSetGolden = flag.Bool("update-listset", false, "rewrite cmd/mashct
 
 const listSetRange = "foo"
 
+// listSetPattern is the operator's MASH_POLICY_BUCKET setting in the tests; listSetBucket is its name for the range foo.
+const (
+	listSetPattern = "test_{range}_policy"
+	listSetBucket  = "test_foo_policy"
+)
+
 // listSetDoc is a list-set document for account in the range foo.
 func listSetDoc(t *testing.T, account string, gen, base int, mod func(m map[string]any)) []byte {
 	t.Helper()
@@ -58,6 +64,7 @@ func newListSetEnv(t *testing.T) *listSetEnv {
 	t.Helper()
 	e := newApplyEnv(t, twoZones)
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
+	e.env[policyapply.PolicyBucketEnv] = listSetPattern
 	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.pl.Creds))
 	if err != nil {
 		t.Fatal(err)
@@ -75,10 +82,10 @@ func (e *listSetEnv) seed(doc []byte, gen uint64, st *policyapply.Status) {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := e.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: policyapply.PolicyBucket(listSetRange), History: 8}); err != nil {
+	if _, err := e.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: listSetBucket, History: 8}); err != nil {
 		e.t.Fatal(err)
 	}
-	l, err := policyapply.NewKVLedger(ctx, e.js, listSetRange, e.acctPub, policyapply.KVLedgerOptions{})
+	l, err := policyapply.NewKVLedger(ctx, e.js, e.acctPub, policyapply.KVLedgerOptions{Bucket: listSetBucket})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -111,7 +118,9 @@ func (e *listSetEnv) run(handler string, args ...string) (string, string, int) {
 	if !slices.Contains(args, "--account") {
 		args = append(args, "--account", e.acctPub)
 	}
-	args = append(args, "--range", listSetRange)
+	if !slices.Contains(args, "--range") && !slices.Contains(args, "--bucket") {
+		args = append(args, "--range", listSetRange)
+	}
 	var code int
 	switch handler {
 	case "show":
@@ -205,6 +214,47 @@ func TestListSetShowNoBucketAndUsage(t *testing.T) {
 	errb.Reset()
 	if code := policyListSetShow([]string{"--json"}, env, lookup, &out, &errb); code != 1 || !strings.Contains(errb.String(), "no range") {
 		t.Fatalf("no range: %d %q", code, errb.String())
+	}
+}
+
+func TestListSetBucketSetting(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	secret := "SECRET/value"
+
+	// A missing setting is an error naming it, exit 1.
+	delete(e.env, policyapply.PolicyBucketEnv)
+	if _, errb, code := e.run("show"); code != 1 || !strings.Contains(errb, policyapply.PolicyBucketEnv) {
+		t.Fatalf("missing setting: %d %q", code, errb)
+	}
+	// --bucket overrides a missing setting, and needs no range.
+	if out, errb, code := e.run("show", "--bucket", listSetBucket); code != 0 || errb != "" || !strings.Contains(out, "generation") {
+		t.Fatalf("--bucket: %d %q %q", code, out, errb)
+	}
+	// --bucket overrides a setting that names another bucket.
+	e.env[policyapply.PolicyBucketEnv] = "other_{range}_policy"
+	if _, errb, code := e.run("show", "--bucket", listSetBucket); code != 0 || errb != "" {
+		t.Fatalf("--bucket over setting: %d %q", code, errb)
+	}
+	if _, errb, code := e.run("show"); code != 1 || !strings.Contains(errb, "other_foo_policy") {
+		t.Fatalf("setting names another bucket: %d %q", code, errb)
+	}
+	// A setting without {range} needs no --range, and refuses one.
+	e.env[policyapply.PolicyBucketEnv] = listSetBucket
+	if _, errb, code := e.run("show", "--range", "foo"); code != 1 || !strings.Contains(errb, "{range}") {
+		t.Fatalf("range without placeholder: %d %q", code, errb)
+	}
+	if _, errb, code := e.run("show", "--bucket", listSetBucket); code != 0 || errb != "" {
+		t.Fatalf("fixed setting: %d %q", code, errb)
+	}
+	// An invalid value is refused and never shown.
+	e.env[policyapply.PolicyBucketEnv] = secret
+	if _, errb, code := e.run("show", "--range", "foo"); code != 1 || strings.Contains(errb, secret) || !strings.Contains(errb, "not shown") {
+		t.Fatalf("invalid setting: %d %q", code, errb)
+	}
+	e.env[policyapply.PolicyBucketEnv] = listSetPattern
+	if _, errb, code := e.run("show", "--bucket", secret); code != 1 || strings.Contains(errb, secret) || !strings.Contains(errb, "not shown") {
+		t.Fatalf("invalid --bucket: %d %q", code, errb)
 	}
 }
 

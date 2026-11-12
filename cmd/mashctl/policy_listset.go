@@ -22,19 +22,21 @@ import (
 
 // policyListSetUsage is the usage of the list-set verbs that replace the zone verbs show, explain and diff. They read
 // the account-wide list set in force from the range's policy bucket and change nothing.
-const policyListSetUsage = `usage: mashctl policy show [--json] --range RANGE [--account KEY]
-       mashctl policy explain SENDER RECEIVER [--json] --range RANGE [--account KEY]
-       mashctl policy diff FILE [--json] [--submitter PUBKEY] --range RANGE [--account KEY]
+const policyListSetUsage = `usage: mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+       mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+       mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
        (SENDER and RECEIVER are three-part addresses; FILE is a list-set document, canonical JSON or a compact JWS;
-        --range is required: no setting names it; --account defaults to the key store's account key;
+        the policy bucket is named by the MASH_POLICY_BUCKET setting, a bucket name that may contain {range};
+        --range fills {range} and is required only when the setting has it; --bucket NAME overrides the setting;
+        --account defaults to the key store's account key;
         diff checks the signature only when --submitter is given, and exits 1 when the plan is refused)
 `
 
 // listSetOpts are the flags and positional arguments of a list-set verb.
 type listSetOpts struct {
-	json                    bool
-	rng, account, submitter string
-	args                    []string
+	json                            bool
+	rng, bucket, account, submitter string
+	args                            []string
 }
 
 func parseListSetArgs(args []string, allowSubmitter bool) (listSetOpts, error) {
@@ -64,6 +66,8 @@ func parseListSetArgs(args []string, allowSubmitter bool) (listSetOpts, error) {
 			o.json = true
 		case name == "--range":
 			o.rng, err = val()
+		case name == "--bucket":
+			o.bucket, err = val()
 		case name == "--account":
 			o.account, err = val()
 		case name == "--submitter" && allowSubmitter:
@@ -80,6 +84,34 @@ func parseListSetArgs(args []string, allowSubmitter bool) (listSetOpts, error) {
 	return o, nil
 }
 
+// resolveListSetBucket names the policy bucket: --bucket, else the MASH_POLICY_BUCKET setting as a pattern with
+// --range filling {range}. It prints its own errors and never prints a value it was given.
+func resolveListSetBucket(pfx string, o listSetOpts, env func(string) string, stderr io.Writer) (string, bool) {
+	pattern, source := o.bucket, "--bucket"
+	if pattern == "" {
+		pattern, source = env(policyapply.PolicyBucketEnv), policyapply.PolicyBucketEnv
+	}
+	if pattern == "" {
+		fmt.Fprintf(stderr, "%sno policy bucket: set %s to the bucket name (it may contain {range}) or pass --bucket NAME\n", pfx, policyapply.PolicyBucketEnv)
+		return "", false
+	}
+	hasRange := strings.Contains(pattern, "{range}")
+	switch {
+	case hasRange && o.rng == "":
+		fmt.Fprintf(stderr, "%sno range: %s has {range}, so pass --range RANGE\n", pfx, source)
+		return "", false
+	case !hasRange && o.rng != "":
+		fmt.Fprintf(stderr, "%s--range is given but %s has no {range} (the value is not shown)\n", pfx, source)
+		return "", false
+	}
+	name, err := policyapply.PolicyBucket(pattern, o.rng)
+	if err != nil { // the error quotes the value: name the source only
+		fmt.Fprintf(stderr, "%s%s is not a valid KV bucket name (letters, digits, '-' and '_', and {range}) (the value is not shown)\n", pfx, source)
+		return "", false
+	}
+	return name, true
+}
+
 // listSetReader is the read-only ledger of the account in the range's policy bucket, and the context to read it in.
 type listSetReader struct {
 	r   policydoc.Reader
@@ -94,11 +126,12 @@ func openListSetReader(pfx string, o listSetOpts, env func(string) string, looku
 		fmt.Fprintf(stderr, pfx+format+"\n", a...)
 		return nil, nil, false
 	}
-	if o.rng == "" {
-		return fail("no range: pass --range RANGE")
-	}
-	if !config.ValidName(o.rng) { // named, never printed: a mistyped argument may be a secret
+	if o.rng != "" && !config.ValidName(o.rng) { // named, never printed: a mistyped argument may be a secret
 		return fail("--range is not a valid range name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+	}
+	bucket, ok := resolveListSetBucket(pfx, o, env, stderr)
+	if !ok {
+		return nil, nil, false
 	}
 	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
@@ -126,7 +159,7 @@ func openListSetReader(pfx string, o listSetOpts, env func(string) string, looku
 		closeAdmin()
 		return fail("%v", err)
 	}
-	l, err := policyapply.OpenKVLedgerReadOnly(ctx, js, o.rng, account)
+	l, err := policyapply.OpenKVLedgerReadOnly(ctx, js, bucket, account)
 	if err != nil {
 		closeAdmin()
 		return fail("%v", err)

@@ -136,9 +136,9 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 }
 
 // OpenKVLedgerReadOnly returns a KVLedger for reading only: the caller uses InForceDocument and LatestStatus, and never
-// Lock or the writing methods, so it takes no lease and writes nothing.
-func OpenKVLedgerReadOnly(ctx context.Context, js jetstream.JetStream, rng, account string) (*KVLedger, error) {
-	return NewKVLedger(ctx, js, rng, account, KVLedgerOptions{})
+// Lock or the writing methods, so it takes no lease and writes nothing. bucket is the resolved policy bucket name.
+func OpenKVLedgerReadOnly(ctx context.Context, js jetstream.JetStream, bucket, account string) (*KVLedger, error) {
+	return NewKVLedger(ctx, js, account, KVLedgerOptions{Bucket: bucket})
 }
 
 // Account returns the account public key this ledger is for.
