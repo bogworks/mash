@@ -27,6 +27,11 @@ type mergify struct {
 		Mode              string `yaml:"mode"`
 		MaxParallelChecks int    `yaml:"max_parallel_checks"`
 	} `yaml:"merge_queue"`
+	MergeProtections []struct {
+		Name              string `yaml:"name"`
+		If                []any  `yaml:"if"`
+		SuccessConditions []any  `yaml:"success_conditions"`
+	} `yaml:"merge_protections"`
 	Protections struct {
 		AutoMerge []string `yaml:"auto_merge_conditions"`
 	} `yaml:"merge_protections_settings"`
@@ -280,4 +285,155 @@ func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	if !strings.Contains(string(doc), "Dismiss stale pull request approvals") {
 		t.Error("docs/branch-protection.md does not mention 'Dismiss stale pull request approvals'")
 	}
+}
+
+// The ruleset requires `Mergify Merge Protections`, which is neutral unless a merge_protections rule exists, so a pull
+// request green on CI but lacking codex-review and an approval could be merged through the API. The rule mirrors the
+// queue's entry conditions (compared as parsed strings so they cannot drift) and must not apply to queue drafts.
+func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
+	m := loadMergify(t)
+	if len(m.MergeProtections) != 1 {
+		t.Fatalf("want exactly one merge_protections rule, got %d", len(m.MergeProtections))
+	}
+	r := m.MergeProtections[0]
+	qPlain, qOrs := splitConditions(t, m.QueueRules[0].QueueConditions)
+	plain, ors := splitConditions(t, r.SuccessConditions)
+	if len(plain) != 3 || len(ors) != 1 {
+		t.Fatalf("success_conditions = %v, want two plain conditions and one or group", r.SuccessConditions)
+	}
+	for _, want := range []string{"check-success = codex-review", "check-success = adr-lint", "label != hold"} {
+		if !contains(plain, want) {
+			t.Errorf("success_conditions lack %q", want)
+		}
+		if !contains(qPlain, want) {
+			t.Errorf("queue_conditions lack %q, so the rule has drifted from the queue", want)
+		}
+	}
+	// The approver list mirrors queue_conditions deliberately, so changing maintainers is one edit (the same login in
+	// both lists) and this test catches drift between them.
+	got := append([]string{}, ors[0]...)
+	sort.Strings(got)
+	if len(qOrs) != 1 {
+		t.Fatalf("want one or group in queue_conditions, got %d", len(qOrs))
+	}
+	q := append([]string{}, qOrs[0]...)
+	sort.Strings(q)
+	if strings.Join(got, "|") != strings.Join(q, "|") {
+		t.Errorf("approval group = %v, queue_conditions require %v", got, q)
+	}
+	// The expected approver is derived from queue_conditions, not hard-coded here, so this comparison needs no edit when
+	// the maintainer changes (TestMergify_entryNeedsApprovalOrLabel pins the maintainer deliberately).
+	var logins []string
+	for _, c := range q {
+		if l, ok := strings.CutPrefix(c, "approved-reviews-by = "); ok {
+			logins = append(logins, l)
+		}
+	}
+	if len(logins) == 0 || strings.TrimSpace(logins[0]) == "" {
+		t.Fatalf("queue_conditions name no approver login: %v", q)
+	}
+	for _, l := range logins {
+		if !contains(got, "approved-reviews-by = "+l) {
+			t.Errorf("approval group %v lacks approver %q from queue_conditions", got, l)
+		}
+	}
+	if !contains(got, "label = lead-approved") {
+		t.Errorf("approval group %v lacks label = lead-approved", got)
+	}
+}
+
+// evalCondition evaluates a Mergify condition tree against pull request attributes: a list is an AND, `or:` an OR, and
+// a string is `[-]attr (~=|!=|=) value`, where a leading `-` negates it.
+func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
+	t.Helper()
+	switch v := c.(type) {
+	case []any:
+		for _, x := range v {
+			if !evalCondition(t, x, attrs) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		list, ok := v["or"].([]any)
+		if !ok || len(v) != 1 {
+			t.Fatalf("unsupported condition map %v", v)
+		}
+		for _, x := range list {
+			if evalCondition(t, x, attrs) {
+				return true
+			}
+		}
+		return false
+	case string:
+		m := regexp.MustCompile(`^(-?)([a-z-]+) (~=|!=|=) (.+)$`).FindStringSubmatch(v)
+		if m == nil {
+			t.Fatalf("unsupported condition %q", v)
+		}
+		var res bool
+		switch m[3] {
+		case "~=":
+			res = regexp.MustCompile(m[4]).MatchString(attrs[m[2]])
+		case "=":
+			res = attrs[m[2]] == m[4]
+		case "!=":
+			res = attrs[m[2]] != m[4]
+		}
+		return res != (m[1] == "-")
+	}
+	t.Fatalf("unsupported condition %v", c)
+	return false
+}
+
+// The queue-draft exemption must need both the head ref and Mergify's bot as author: a head ref alone is chosen by any
+// same-repository writer and would let them switch the rule off for their own pull request.
+func TestMergify_mergeProtectionsSkipsQueueDrafts(t *testing.T) {
+	r := loadMergify(t).MergeProtections[0]
+	for _, c := range []struct {
+		head, author string
+		active       bool
+	}{
+		{"mergify/merge-queue/abc", "mergify[bot]", false},
+		{"mergify/merge-queue/abc", "randybias", true},
+		{"pr/ctl/x", "mergify[bot]", true},
+		{"pr/ctl/x", "randybias", true},
+	} {
+		attrs := map[string]string{"base": "main", "head": c.head, "author": c.author}
+		if got := evalCondition(t, r.If, attrs); got != c.active {
+			t.Errorf("head %q author %q: rule active = %v, want %v", c.head, c.author, got, c.active)
+		}
+	}
+}
+
+// Every check a merge_protections rule waits for is one CI publishes; codex-review is the review watcher's external
+// status, as in TestMergify_waitsOnlyForChecksThatExist.
+func TestMergify_mergeProtectionsChecksExist(t *testing.T) {
+	names := map[string]bool{}
+	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} {
+		for key, j := range load(t, f).Jobs {
+			n := j.Name
+			if n == "" {
+				n = key
+			}
+			names[n] = true
+		}
+	}
+	check := regexp.MustCompile(`^check-success = (.+)$`)
+	for _, r := range loadMergify(t).MergeProtections {
+		plain, _ := splitConditions(t, r.SuccessConditions)
+		for _, c := range plain {
+			if mm := check.FindStringSubmatch(c); mm != nil && mm[1] != "codex-review" && !names[mm[1]] {
+				t.Errorf("merge_protections waits for %q, which no CI job publishes", mm[1])
+			}
+		}
+	}
+}
+
+func contains(l []string, s string) bool {
+	for _, x := range l {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
