@@ -298,10 +298,10 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 	r := m.MergeProtections[0]
 	qPlain, qOrs := splitConditions(t, m.QueueRules[0].QueueConditions)
 	plain, ors := splitConditions(t, r.SuccessConditions)
-	if len(plain) != 2 || len(ors) != 1 {
+	if len(plain) != 3 || len(ors) != 1 {
 		t.Fatalf("success_conditions = %v, want two plain conditions and one or group", r.SuccessConditions)
 	}
-	for _, want := range []string{"check-success = codex-review", "label != hold"} {
+	for _, want := range []string{"check-success = codex-review", "check-success = adr-lint", "label != hold"} {
 		if !contains(plain, want) {
 			t.Errorf("success_conditions lack %q", want)
 		}
@@ -309,6 +309,8 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 			t.Errorf("queue_conditions lack %q, so the rule has drifted from the queue", want)
 		}
 	}
+	// The approver list mirrors queue_conditions deliberately, so changing maintainers is one edit (the same login in
+	// both lists) and this test catches drift between them.
 	got := append([]string{}, ors[0]...)
 	sort.Strings(got)
 	if len(qOrs) != 1 {
