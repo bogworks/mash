@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -60,4 +61,88 @@ func leaseStreamConfig(ctx context.Context, js jetstream.JetStream) (jetstream.S
 		return jetstream.StreamConfig{}, fmt.Errorf("mash: lease bucket stream: %w", err)
 	}
 	return info.Config, nil
+}
+
+// CreateLeaseBucket creates the lease bucket with its stream refusing rollup from the first moment. It builds the
+// stream configuration the way nats.go's CreateKeyValue does (name, subjects, history, size cap, TTL, duplicate
+// window, discard policy and the rest) with AllowRollup off, so a bucket made here never allows rollup, not even
+// briefly. cfg.Bucket must be LeaseBucket; a mirror, sources or a limit marker TTL are not supported. If the stream
+// already exists (another caller created it first) the existing bucket is hardened. The result is verified, and an
+// error is returned unless the stream refuses rollup (fail closed).
+func CreateLeaseBucket(ctx context.Context, js jetstream.JetStream, cfg jetstream.KeyValueConfig) (jetstream.KeyValue, error) {
+	if cfg.Bucket != LeaseBucket {
+		return nil, fmt.Errorf("mash: lease bucket: unexpected bucket name %q", cfg.Bucket)
+	}
+	if cfg.Mirror != nil || len(cfg.Sources) > 0 || cfg.LimitMarkerTTL != 0 {
+		return nil, errors.New("mash: lease bucket: mirror, sources and limit marker TTL are not supported")
+	}
+	if _, err := js.AccountInfo(ctx); err != nil {
+		return nil, err
+	}
+	history := int64(1)
+	if cfg.History > 0 {
+		if cfg.History > jetstream.KeyValueMaxHistory {
+			return nil, jetstream.ErrHistoryTooLarge
+		}
+		history = int64(cfg.History)
+	}
+	replicas := cfg.Replicas
+	if replicas == 0 {
+		replicas = 1
+	}
+	maxBytes := cfg.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = -1
+	}
+	maxMsgSize := cfg.MaxValueSize
+	if maxMsgSize == 0 {
+		maxMsgSize = -1
+	}
+	duplicateWindow := 2 * time.Minute
+	if cfg.TTL > 0 && cfg.TTL < duplicateWindow {
+		duplicateWindow = cfg.TTL
+	}
+	var compression jetstream.StoreCompression
+	if cfg.Compression {
+		compression = jetstream.S2Compression
+	}
+	scfg := jetstream.StreamConfig{
+		Name:              LeaseStreamName,
+		Description:       cfg.Description,
+		Subjects:          []string{"$KV." + cfg.Bucket + ".>"},
+		MaxMsgsPerSubject: history,
+		MaxBytes:          maxBytes,
+		MaxAge:            cfg.TTL,
+		MaxMsgSize:        maxMsgSize,
+		Storage:           cfg.Storage,
+		Replicas:          replicas,
+		Placement:         cfg.Placement,
+		AllowRollup:       false,
+		DenyDelete:        true,
+		Duplicates:        duplicateWindow,
+		MaxMsgs:           -1,
+		MaxConsumers:      -1,
+		AllowDirect:       true,
+		RePublish:         cfg.RePublish,
+		Compression:       compression,
+		Discard:           jetstream.DiscardNew,
+		Metadata:          cfg.Metadata,
+	}
+	if _, err := js.CreateStream(ctx, scfg); err != nil {
+		if !errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
+			return nil, err
+		}
+		// Lost a create race (or the bucket exists): bring the existing one to the same setting.
+		if err := HardenLeaseBucket(ctx, js); err != nil {
+			return nil, err
+		}
+	}
+	kv, err := js.KeyValue(ctx, cfg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	if err := VerifyLeaseBucket(ctx, js); err != nil {
+		return nil, err
+	}
+	return kv, nil
 }

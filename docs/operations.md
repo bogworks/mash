@@ -112,6 +112,8 @@ mash admin init
 
 Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. By default the directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous (see [Limits](#limits) to change them). Running `mash admin init` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key; a bucket whose cap is smaller than the configured one is raised to it; a bucket with a larger cap keeps it. Init never lowers a cap and never purges anything.
 
+After upgrading mash, re-run `mash admin init`: it hardens the lease bucket, so that it no longer allows rollup writes (a deployment that has not re-run it keeps its old bucket until an admin lock runs). `mashctl audit` reports a lease bucket that has not been hardened as a problem, with the text `lease bucket allows rollup writes; run "mash admin init" to harden it`, and `--strict` then exits 1.
+
 ## Adding an endpoint
 
 An endpoint is one named Claude Code session. Names are lower-case letters, digits and single hyphens, up to 48 characters, unique per NATS account, not per owner: two owners who share an account cannot both have an endpoint called `review`, and every endpoint in the account can read the whole directory, other owners' records included (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md), one owner per deployment).

@@ -80,12 +80,12 @@ type streamLock struct {
 }
 
 // leaseKV returns the lease bucket, creating it with the configured limits if a deployment from before the lock has
-// not been re-initialised (`mash admin init` creates it). The bucket it returns refuses rollup: a new one is hardened
-// before it is returned, an existing one is verified and hardened, and one that cannot be is an error.
+// not been re-initialised (`mash admin init` creates it). The bucket it returns refuses rollup: a new one is created refusing
+// rollup, an existing one is verified and hardened, and one that cannot be is an error.
 func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		if kv, err = a.js.CreateKeyValue(ctx, store.LeaseConfigFor(a.limits)); err != nil {
+		if kv, err = store.CreateLeaseBucket(ctx, a.js, store.LeaseConfigFor(a.limits)); err != nil {
 			// Lost a race with another admin creating it, or no right to create: read it again.
 			if kv2, err2 := a.js.KeyValue(ctx, store.LeaseBucket); err2 == nil {
 				kv, err = kv2, nil

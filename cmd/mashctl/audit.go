@@ -223,7 +223,7 @@ func capState(s string) string {
 }
 
 type auditProblem struct {
-	What  string `json:"what"` // record, creds or retired
+	What  string `json:"what"` // record, creds, retired or lease
 	Item  string `json:"item"` // the directory key or the file
 	Error string `json:"error"`
 }
@@ -434,6 +434,14 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 	retired, retiredProbs := buildRetired(snap.Retired)
 	rep.Retired = &retired
 	rep.Problems = append(rep.Problems, retiredProbs...)
+	if snap.LeaseRollup {
+		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
+			Error: `lease bucket allows rollup writes; run "mash admin init" to harden it`})
+	}
+	if snap.LeaseError != "" {
+		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
+			Error: "the lease bucket's configuration could not be read: " + snap.LeaseError})
+	}
 	slices.SortFunc(rep.Problems, func(a, b auditProblem) int {
 		return strings.Compare(a.What+"\x00"+a.Item+"\x00"+a.Error, b.What+"\x00"+b.Item+"\x00"+b.Error)
 	})

@@ -173,11 +173,11 @@ func (a *Admin) Init(ctx context.Context) error {
 
 // initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An
 // existing bucket is updated through its stream (never CreateOrUpdateKeyValue, which would set rollup back on), so
-// there is no moment at which an updated bucket allows rollup. A new bucket is created and then hardened: nothing can
-// use it before it exists.
+// there is no moment at which an updated bucket allows rollup. A new bucket is created with rollup off from the start
+// (store.CreateLeaseBucket).
 func (a *Admin) initLease(ctx context.Context, cfg jetstream.KeyValueConfig) error {
 	if _, err := a.js.KeyValue(ctx, cfg.Bucket); errors.Is(err, jetstream.ErrBucketNotFound) {
-		if _, err := a.js.CreateKeyValue(ctx, cfg); err != nil {
+		if _, err := store.CreateLeaseBucket(ctx, a.js, cfg); err != nil {
 			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 		}
 	} else if err != nil {
@@ -204,8 +204,9 @@ func (a *Admin) initLease(ctx context.Context, cfg jetstream.KeyValueConfig) err
 
 // clearLease removes a deprovisioned name's lease tombstone, or a lease left in the key. The lease bucket does not
 // allow rollup, so it is a revision-aware delete, never a purge. A key that is absent or already deleted needs
-// nothing. A revision that moved since the read means a live endpoint wrote the key: the read and delete are retried,
-// and a key that keeps changing is an error, so Provision fails closed rather than proceed under a held name.
+// nothing. Otherwise it deletes the key's current value by its revision. If the key changed between the read and the
+// delete (a revision conflict), it reads and deletes again. It returns an error only if the key changed on all
+// clearLeaseTries attempts, so Provision stops rather than proceed over a lease that is being refreshed.
 func clearLease(ctx context.Context, lease jetstream.KeyValue, name string) error {
 	for attempt := 0; attempt < clearLeaseTries; attempt++ {
 		e, err := lease.Get(ctx, name)
