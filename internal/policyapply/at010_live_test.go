@@ -304,10 +304,23 @@ func credsOf(c *listset.Compiled) []ProbeCred {
 	return out
 }
 
-func (e *at010Env) gateInput(rec listset.Record, c2 *listset.Compiled, ex Expect, p *LiveProber, w *LiveWitnesses, c1 *listset.Compiled) GateInput {
+// signers returns the expected scoped signing key of each template's owner group.
+func (e *at010Env) signers(c *listset.Compiled) map[string]string {
+	out := map[string]string{}
+	for _, tpl := range c.Templates {
+		out[tpl.Group] = at010Must(e.scoped[tpl.Group].PublicKey())
+	}
+	return out
+}
+
+func (e *at010Env) gateInput(r *at010Run, p *LiveProber, w *LiveWitnesses) GateInput {
 	return GateInput{
 		Cluster: e.cluster, Prober: p, Witnesses: w, Account: e.acctPub, Inventory: 2,
-		Record: rec, Compiled: c2, Previous: &Candidate{Generation: 1, Compiled: c1}, Expect: ex,
+		Record: r.rec, Compiled: r.c2, Expect: r.ex,
+		Previous: &Candidate{Generation: 1, Compiled: r.c1, Signers: e.signers(r.c1)},
+		Signers:  e.signers(r.c2),
+		// core's credential-only reach is refused only by revoking the key of its old credential.
+		OldKeys: map[string][]string{"foo.c.core": {r.realPub}},
 	}
 }
 
@@ -456,7 +469,10 @@ func at010Applied(t *testing.T) {
 	r.openWitnesses(ctx, e.urls)
 	// Before the push both servers hold the previous generation.
 	for n, c := range e.heldJWTs(ctx) {
-		if g, ok := generationOfClaims(c, []Candidate{{2, r.c2, r.ex.RevokedKeys}, {1, r.c1, nil}}); !ok || g != 1 {
+		if g, ok := generationOfClaims(c, []Candidate{
+			{Generation: 2, Compiled: r.c2, RevokedKeys: r.ex.RevokedKeys, Signers: e.signers(r.c2)},
+			{Generation: 1, Compiled: r.c1, Signers: e.signers(r.c1)},
+		}); !ok || g != 1 {
 			t.Fatalf("server %s holds generation %d (%v) before the push", n, g, ok)
 		}
 	}
@@ -465,7 +481,7 @@ func at010Applied(t *testing.T) {
 	j2 := e.account(r.c2, r.realPub)
 	e.pushTo(ctx, j2, "s1", "s2")
 
-	st, err := Gate(ctx, e.gateInput(r.rec, r.c2, r.ex, r.prober, r.wit, r.c1))
+	st, err := Gate(ctx, e.gateInput(r, r.prober, r.wit))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +537,7 @@ func at010HeldBack(t *testing.T) {
 	// A connection to s2 before it takes the change: it loads the account from s2's own directory.
 	r.openWitnesses(ctx, map[string]string{"s2": e.urls["s2"]})
 
-	gi := e.gateInput(r.rec, r.c2, r.ex, r.prober, r.wit, r.c1)
+	gi := e.gateInput(r, r.prober, r.wit)
 	st, err := Gate(ctx, gi)
 	if err != nil {
 		t.Fatal(err)
