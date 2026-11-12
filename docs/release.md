@@ -48,6 +48,19 @@ signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
 - Anything beyond what the attestations say: that `release.yml` of this repository, at the tag and the commit X, built
   the files on the maintainers' runner ([ADR 0087](decisions/0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md)).
 
+### Exceptions to the release process
+
+A release made before the standard process exists is recorded here with what it skipped and what ran instead.
+
+**v0.4.0 (exception D208, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
+
+- Gate: `scripts/release-check 5d907947e06cf6ebc6ff1f2827527dafe85d56f8 0.4.0` passed (exit 0) once main's push CI on that commit was green (the first push run failed on a flaky test, `TestServeLeaseRetryFromConfig`, and passed on its rerun, attempt 2). Mail latency: urgent mail 0.14s against 0.15s for v0.3.3.
+- Tag: `v0.4.0` annotated, unsigned, pushed at X by the minting service (cutover v0.4.0, [ADR 0095](decisions/0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md)).
+- Build: `release.yml` run 43268250316. Its `attest` job failed its exact-subject check because the persistent runner's `dist/` still held a stale SBOM from an earlier job; the check failed closed, the failed jobs were rerun, and the rerun (attempt 2) passed with exactly the four binaries and `SHA256SUMS`. The workflow now starts every job from an empty `dist` and names the subjects explicitly (pull request #491).
+- Publication: `scripts/release-check publish 0.4.0 5d907947e06cf6ebc6ff1f2827527dafe85d56f8` from a clean checkout at X exited 0 ("v0.4.0 is published and verified"): tag at X, no signature, fresh build of X equal to the assets, build provenance and SBOM attestations for all four binaries, `SHA256SUMS` checked against the builds and its attestation verified; the release was then published and re-verified read-only. Published 2026-11-12T17:31:19Z.
+- Skipped, as the exception says: the gate was run by hand, not in the workflow; there was no gate-run binding for the publish and no release watch; the release used the shared runners; the tag rulesets were not verified by the repository's tests.
+- Not proven: that a checked gate run authorized the release; that the published bytes are the ones the maintainer checked beyond the `--assets` run; the claims in the list above.
+
 ## Signing
 
 This section applies to releases below the cutover version. From the cutover nothing is signed: there is no
@@ -310,6 +323,10 @@ ref builds nothing.
 A dry run is only meaningful if the verify job ran: check that `dry-run-verify` shows success, not skipped. A skipped job anywhere
 in a job's `needs` chain skips everything below it unless the job has its own status-function `if`, which is why each job below
 `build` has one; a green run in which `dry-run-verify` was skipped verified nothing.
+
+Release jobs start from an empty `dist` (`rm -rf dist provenance && mkdir -p dist` is the first step of each) because the self-hosted runners are persistent and a file left by an earlier job's workspace must never reach a later one.
+
+After ANY change to `release.yml`, run a dry run (a `workflow_dispatch` on `main`, above) and check it is green, with `dry-run-verify` showing success, before the next tag.
 
 It does not exercise the tag guard (tag shape, signature, on main, older drafts), the maintainer's signing, the draft job or
 publishing, and it does not run `release-check`. It must be green on `main` before a release that changes the pipeline is tagged.
