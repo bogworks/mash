@@ -4,6 +4,7 @@ package ctlkeys
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +149,35 @@ func TestCheckParentDir(t *testing.T) {
 	}
 	otherUser(t)
 	if err := CheckParentDir(d); err == nil || !strings.Contains(err.Error(), "owned by uid") {
+		t.Fatalf("foreign owner: got %v", err)
+	}
+}
+
+func TestCheckStrictParentDir(t *testing.T) {
+	d := t.TempDir()
+	for _, mode := range []os.FileMode{0o700, 0o755, 0o750} {
+		os.Chmod(d, mode)
+		if err := CheckStrictParentDir(d); err != nil {
+			t.Fatalf("mode %04o: %v", mode, err)
+		}
+	}
+	for _, mode := range []os.FileMode{0o770, 0o775, 0o720, 0o777, 0o757} {
+		os.Chmod(d, mode)
+		if err := CheckStrictParentDir(d); err == nil || !strings.Contains(err.Error(), "chmod go-w "+d) {
+			t.Fatalf("mode %04o: got %v", mode, err)
+		}
+	}
+	os.Chmod(d, 0o700)
+	link := filepath.Join(t.TempDir(), "l")
+	os.Symlink(d, link)
+	if err := CheckStrictParentDir(link); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink: got %v", err)
+	}
+	if err := CheckStrictParentDir(filepath.Join(d, "missing")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing: got %v", err)
+	}
+	otherUser(t)
+	if err := CheckStrictParentDir(d); err == nil || !strings.Contains(err.Error(), "owned by uid") {
 		t.Fatalf("foreign owner: got %v", err)
 	}
 }

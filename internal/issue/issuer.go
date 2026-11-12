@@ -171,6 +171,9 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 
 	compiled, gen, err := is.ListSet.InForce(ctx)
 	if err != nil || compiled == nil {
+		if err != nil {
+			is.log().Warn("no list set in force", "reason", err.Error())
+		}
 		return nil, refuse(CodeNoListSet, "no list set is in force")
 	}
 	var user *listset.User

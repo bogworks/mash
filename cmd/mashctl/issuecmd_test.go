@@ -106,6 +106,9 @@ func newIssueEnvNoService(t *testing.T) *issueEnv {
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)
 	}
+	if err := os.Chmod(e.root, 0o700); err != nil { // the list set lives here: only its owner may write the directory
+		t.Fatal(err)
+	}
 	e.ls = issueListSet()
 	e.compiled = mustT(listset.Compile(e.ls))
 	raw := mustT(json.Marshal(e.ls))
@@ -594,7 +597,7 @@ func TestIssueServeChecksTheCustodyOfAnOverriddenRegistry(t *testing.T) {
 	if err := os.Chmod(open, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	if code, errb := serve(filepath.Join(open, "w.json")); code != 1 || !strings.Contains(errb, "writable by every user") {
+	if code, errb := serve(filepath.Join(open, "w.json")); code != 1 || !strings.Contains(errb, "chmod go-w") {
 		t.Fatalf("world-writable parent: %d %s", code, errb)
 	}
 	link := filepath.Join(e.root, "link")
@@ -845,5 +848,40 @@ func TestWranglerCommandsAreSerialised(t *testing.T) {
 	}
 	if fi := mustT(os.Stat(wranglerreg.LockPath(wranglerreg.Path(e.keyDir)))); fi.Mode().Perm() != 0o600 {
 		t.Errorf("lock file mode %v", fi.Mode())
+	}
+}
+
+// The list set decides who may be issued a credential, so `issue serve` refuses to start on one that others can write,
+// that is a symlink, or that sits in a directory a group or other user can write.
+func TestIssueServeChecksTheCustodyOfTheListSet(t *testing.T) {
+	e := newIssueEnvNoService(t)
+	e.registerWrangler()
+	serve := func(path string) (int, string) {
+		var out, errb bytes.Buffer
+		code := runEnv([]string{"issue", "serve", "--test-account", "--list-set", path}, func(k string) string { return e.env[k] }, &out, &errb)
+		return code, errb.String()
+	}
+	if err := os.Chmod(e.lsPath, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if code, errb := serve(e.lsPath); code != 1 || !strings.Contains(errb, "chmod go-w "+e.lsPath) {
+		t.Fatalf("group-writable file: %d %s", code, errb)
+	}
+	if err := os.Chmod(e.lsPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(e.root, "ls-link.json")
+	if err := os.Symlink(e.lsPath, link); err != nil {
+		t.Fatal(err)
+	}
+	if code, errb := serve(link); code != 1 || !strings.Contains(errb, "is a symlink") {
+		t.Fatalf("symlinked file: %d %s", code, errb)
+	}
+	if err := os.Chmod(e.root, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(e.root, 0o700)
+	if code, errb := serve(e.lsPath); code != 1 || !strings.Contains(errb, "chmod go-w "+e.root) {
+		t.Fatalf("group-writable directory: %d %s", code, errb)
 	}
 }

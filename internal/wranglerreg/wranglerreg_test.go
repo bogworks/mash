@@ -20,6 +20,17 @@ func key(t *testing.T) string {
 	return pub
 }
 
+// tempDir is a fresh directory only its owner can write: t.TempDir's parent is 0775 under umask 002, and the registry
+// refuses a directory that group or others can write.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	if err := os.Chmod(d, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func acct() string {
 	kp, _ := nkeys.CreateAccount()
 	pub, _ := kp.PublicKey()
@@ -27,7 +38,7 @@ func acct() string {
 }
 
 func TestStaticRefusalsAllWrapErrNoRegistry(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	path := filepath.Join(dir, FileName)
 	a := acct()
 	if _, err := OpenStatic(path, a); !errors.Is(err, ErrNoRegistry) {
@@ -72,7 +83,7 @@ func TestStaticRefusalsAllWrapErrNoRegistry(t *testing.T) {
 }
 
 func TestLoadRefusesASymlinkAndAWritableFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	path := filepath.Join(dir, FileName)
 	f := &File{Account: acct(), TestAccount: true}
 	_ = f.Save(path)
@@ -110,12 +121,12 @@ func TestRegistryCustodyOfTheFileAndItsDirectory(t *testing.T) {
 		return p
 	}
 	t.Run("sound", func(t *testing.T) {
-		if _, err := OpenStatic(write(t.TempDir()), a); err != nil {
+		if _, err := OpenStatic(write(tempDir(t)), a); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("world-writable directory", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := tempDir(t)
 		p := write(dir)
 		if err := os.Chmod(dir, 0o777); err != nil {
 			t.Fatal(err)
@@ -125,7 +136,7 @@ func TestRegistryCustodyOfTheFileAndItsDirectory(t *testing.T) {
 		}
 	})
 	t.Run("symlinked directory", func(t *testing.T) {
-		real, link := t.TempDir(), filepath.Join(t.TempDir(), "link")
+		real, link := tempDir(t), filepath.Join(tempDir(t), "link")
 		write(real)
 		if err := os.Symlink(real, link); err != nil {
 			t.Fatal(err)
@@ -135,7 +146,7 @@ func TestRegistryCustodyOfTheFileAndItsDirectory(t *testing.T) {
 		}
 	})
 	t.Run("group-writable file", func(t *testing.T) {
-		p := write(t.TempDir())
+		p := write(tempDir(t))
 		if err := os.Chmod(p, 0o660); err != nil {
 			t.Fatal(err)
 		}
@@ -147,7 +158,7 @@ func TestRegistryCustodyOfTheFileAndItsDirectory(t *testing.T) {
 
 func newReg(t *testing.T) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := tempDir(t)
 	path := filepath.Join(dir, FileName)
 	a := acct()
 	if _, err := Init(path, a); err != nil {
@@ -291,7 +302,7 @@ func TestUpdateErrorLeavesFileAndReleasesLock(t *testing.T) {
 	if err := Update(path, func(f *File) error { return nil }); err != nil {
 		t.Fatalf("lock not released: %v", err)
 	}
-	if err := Update(filepath.Join(t.TempDir(), FileName), func(*File) error { return nil }); !errors.Is(err, os.ErrNotExist) {
+	if err := Update(filepath.Join(tempDir(t), FileName), func(*File) error { return nil }); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing registry: %v", err)
 	}
 }
@@ -322,7 +333,7 @@ func TestLockFileCustody(t *testing.T) {
 		t.Errorf("symlinked lock file: %v", err)
 	}
 	// A symlinked directory is refused.
-	real, link := t.TempDir(), filepath.Join(t.TempDir(), "link")
+	real, link := tempDir(t), filepath.Join(tempDir(t), "link")
 	if err := os.Symlink(real, link); err != nil {
 		t.Skip(err)
 	}
@@ -392,4 +403,55 @@ func TestReadersDuringAnEditSeeACompleteFile(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// A directory that a group or other user can write is refused by every entry point: another member of the group could
+// replace the registry by rename and register their own wrangler key. 0700 and 0755 are accepted.
+func TestParentDirectoryMustNotBeWritableByGroupOrOthers(t *testing.T) {
+	for _, mode := range []os.FileMode{0o770, 0o775, 0o720, 0o777, 0o757} {
+		path, a := newReg(t)
+		dir := filepath.Dir(path)
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		want := "chmod go-w " + dir
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Load, mode %04o: %v", mode, err)
+		}
+		if err := Update(path, func(*File) error { t.Error("Update ran"); return nil }); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Update, mode %04o: %v", mode, err)
+		}
+		if _, err := Init(path, a); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Init, mode %04o: %v", mode, err)
+		}
+		if _, err := OpenStatic(path, a); !errors.Is(err, ErrNoRegistry) {
+			t.Errorf("OpenStatic, mode %04o: %v", mode, err)
+		}
+		if err := withLock(path, func() error { t.Error("lock held"); return nil }); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("lock, mode %04o: %v", mode, err)
+		}
+		_ = os.Chmod(dir, 0o700)
+	}
+	for _, mode := range []os.FileMode{0o700, 0o755} {
+		path, a := newReg(t)
+		if err := os.Chmod(filepath.Dir(path), mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err != nil {
+			t.Errorf("Load, mode %04o: %v", mode, err)
+		}
+		if err := Update(path, func(*File) error { return nil }); err != nil {
+			t.Errorf("Update, mode %04o: %v", mode, err)
+		}
+		if _, err := Init(path, a); err != nil {
+			t.Errorf("Init, mode %04o: %v", mode, err)
+		}
+	}
+	real, link := tempDir(t), filepath.Join(tempDir(t), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip(err)
+	}
+	if _, err := Load(filepath.Join(link, FileName)); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("symlinked parent: %v", err)
+	}
 }

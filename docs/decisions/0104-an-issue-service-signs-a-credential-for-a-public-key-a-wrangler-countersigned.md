@@ -117,7 +117,7 @@ halves.
 account is a test account, and it starts only when the registry file says `test_account: true` as well: the file alone
 cannot turn the service on. The registry file, at the default path or one given with `--registry`, is held to the key
 store's custody: the file is a regular file owned by the effective user that no group or other user can write, and its
-directory is not a symlink, is owned by the effective user and is not writable by every user. How a real wrangler's key is registered for a host and an owner group is not
+directory is not a symlink, is owned by the effective user and has no group or other write bit (mode & 0022 == 0), since a member of the directory's group could otherwise replace the file by rename. The same holds for the registry's lock file and for the list set file: all three live in a directory only their owner can write. The list set file is opened without following a symlink and must be a regular file owned by the effective user that no group or other user can write (reading by others is fine; the list set is not secret). Its checks run at every read, so a file swapped or loosened after start is refused, the service issues nothing (`no_list_set`) and logs the reason. How a real wrangler's key is registered for a host and an owner group is not
 decided; decision 206 does not say, and this is DEC-002's open part. Until it is, mash ships only a static registry: the
 file `wranglers.json` in the key store directory (`{"account", "test_account": true, "entries": [{"host", "group",
 "wrangler_key"}]}`, 0600, replaced atomically), managed by `mashctl wrangler init --test-account`, `add`, `list` and

@@ -161,6 +161,28 @@ func CheckParentDir(d string) error {
 	return nil
 }
 
+// CheckStrictParentDir is the rule for a directory that holds a file deciding who may be issued a credential (the
+// wrangler registry, its lock file, the issue service's list set): a real directory (a symlink is refused) that the
+// effective uid owns and that no group or other user can write (mode & 0022 == 0). Unlike CheckParentDir it refuses a
+// group-writable directory too, because another member of the group could replace the file by rename. A missing
+// directory is an error wrapping fs.ErrNotExist.
+func CheckStrictParentDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("directory %s is a symlink: refusing it", d)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", d)
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("directory %s has mode %04o: a group or other user can write it and could replace the files in it. Run: chmod go-w %s", d, fi.Mode().Perm(), d)
+	}
+	return ownerErr(fi, d, "directory")
+}
+
 func (a *Authority) zonesPath() string { return filepath.Join(a.dir, zonesDir) }
 
 // checkDirs checks the key dir and the zones dir; with create it makes missing ones (0700).

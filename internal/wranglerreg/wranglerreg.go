@@ -57,9 +57,10 @@ func Path(keyDir string) string { return filepath.Join(keyDir, FileName) }
 // Load reads the registry at path. A missing file wraps os.ErrNotExist. The file is opened once, without following a
 // symlink, and checked on the descriptor: it must be a regular file owned by the effective uid that no other user can
 // write. Its directory must be a real directory (not a symlink) that the effective uid owns and no other user can write,
-// the checks the key store makes for the directory of a file that decides who may be issued a credential.
+// the strict directory rule (ctlkeys.CheckStrictParentDir: no group or other write bit), because another user able to
+// write the directory could replace the registry by rename.
 func Load(path string) (*File, error) {
-	if err := ctlkeys.CheckParentDir(filepath.Dir(path)); err != nil {
+	if err := ctlkeys.CheckStrictParentDir(filepath.Dir(path)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
@@ -167,7 +168,7 @@ func LockPath(path string) string { return path + ".lock" }
 // file is 0600, opened without following a symlink and owned by the effective uid, and the registry's directory is
 // held to the same checks as the registry itself. The lock is released on every exit path, panics included.
 func withLock(path string, fn func() error) error {
-	if err := ctlkeys.CheckParentDir(filepath.Dir(path)); err != nil {
+	if err := ctlkeys.CheckStrictParentDir(filepath.Dir(path)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return err
 		}
