@@ -22,6 +22,7 @@ import (
 	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/policyfile"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
@@ -163,7 +164,7 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 				warned = true
 			}
 		}
-		tags, rotated, err := reissueOne(keys, cfg, env, c, name, stdout)
+		tags, rotated, err := reissueOne(keys, cfg, env, c, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 			code = 1
@@ -341,7 +342,7 @@ func (d credsDiff) rotates() bool {
 // (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
 // revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
 // lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
-func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout io.Writer) (tags []string, rotated bool, err error) {
+func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
 	ep, ok := findEndpoint(c, name)
 	if !ok {
 		return nil, false, fmt.Errorf("endpoint %q is not declared in the policy file", name)
@@ -409,7 +410,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 	// its creds between our check and our write.
 	err = adm.WithNameLock(ctx, name, func(ctx context.Context, lock admin.NameLock) error {
 		var err error
-		tags, rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout)
+		tags, rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
 		return err
 	})
 	if err != nil {
@@ -419,7 +420,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 }
 
 // reissueLocked is the part of reissueOne that runs under name's lock.
-func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout io.Writer) (tags []string, rotated bool, err error) {
+func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
 	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
 		return nil, false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
@@ -491,6 +492,9 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 			return nil, false, err
 		}
 		defer clear(m.Creds)
+		if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		}
 		if err := lock.Check(ctx); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
 		}
@@ -519,6 +523,11 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return nil, false, err
 	}
 	defer clear(m.Creds)
+	// The new key is in the issue record before it is staged or written anywhere: a key that can connect
+	// is always recorded. The old key's record stays (revocation is separate; the record is append-only).
+	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeRotation)); err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
+	}
 	sp := stagePath(p)
 	// The lock may have expired while the key was minted: another reissue could hold it and own the staged file now.
 	if err := nameLockCheck(ctx, lock); err != nil {
@@ -534,6 +543,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		}
 		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); the directory record and the creds file are unchanged (the old creds still work) and the new key is staged in %s; run the reissue again", why, err, sp)
 	}
+	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
 	finish := fmt.Sprintf("the old key %s... is revoked, so the endpoint is cut off; the rotation is staged in %s, and running mashctl reissue %s again finishes it", ctl.ShortKey(oldPub), sp, name)
 	if _, err := adm.SetUserLocked(ctx, lock, name, m.AccountPub, oldPub, m.UserPub); err != nil {
 		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
