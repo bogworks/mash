@@ -818,14 +818,14 @@ type RevokeTarget struct {
 // CheckNotFutureIssued refuses a revocation at time at when the issue record shows a user's JWT issued after at: NATS
 // honours a revocation only for JWTs issued at or before it, so that JWT would stay valid. Every target is checked
 // before the caller writes anything, and one future-dated key refuses them all; nothing has been changed when it
-// returns an error. A key with no record (an older deployment, a key mash did not issue) or a record that cannot be
-// read cannot be ruled out: one warning line on stderr, and the revocation goes on.
+// returns an error. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did
+// not issue) gets one warning line on stderr and the revocation goes on. A record that exists but cannot be read, or
+// whose issued_at is missing or not a time, cannot be ruled out and refuses the whole command.
 func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []RevokeTarget, at time.Time, stderr io.Writer) error {
 	for _, t := range targets {
 		rec, found, err := a.IssuedByKey(ctx, t.Key)
 		if err != nil {
-			fmt.Fprintf(stderr, "warning: user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key), err)
-			continue
+			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl reissue NAME` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
 		}
 		if !found {
 			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
@@ -833,8 +833,7 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		}
 		iat, err := time.Parse(time.RFC3339, rec.IssuedAt)
 		if err != nil {
-			fmt.Fprintf(stderr, "warning: user key %s...: its issue record has no readable issue time, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
-			continue
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q), so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), rec.IssuedAt)
 		}
 		if iat.UTC().After(at) {
 			who := t.Name

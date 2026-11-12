@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // recordIssuedAt rewrites the issue record of pub so its issued_at is at.
@@ -141,23 +144,70 @@ func TestCheckNotFutureIssued(t *testing.T) {
 	}
 }
 
-// A record that cannot be read warns and goes on; it never blocks.
-func TestCheckNotFutureIssuedLookupFailureWarns(t *testing.T) {
+// A missing bucket is an absent record: warn and go on.
+func TestCheckNotFutureIssuedMissingBucketWarns(t *testing.T) {
 	e := testenv.Start(t) // no issue-record bucket at all
 	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := testenvKey(t, e)
 	var errb strings.Builder
-	if err := ctl.CheckNotFutureIssued(context.Background(), adm, []ctl.RevokeTarget{{Key: key}}, time.Now(), &errb); err != nil || !strings.Contains(errb.String(), "has no issue record") {
+	if err := ctl.CheckNotFutureIssued(context.Background(), adm, []ctl.RevokeTarget{{Key: testenvKey(t, e)}}, time.Now(), &errb); err != nil || !strings.Contains(errb.String(), "has no issue record") {
 		t.Fatalf("missing bucket: %v %q", err, errb.String())
 	}
-	errb.Reset()
+}
+
+// A lookup that fails for any other reason refuses.
+func TestCheckNotFutureIssuedLookupErrorRefuses(t *testing.T) {
+	e := testenv.Start(t)
+	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := testenvKey(t, e)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := ctl.CheckNotFutureIssued(ctx, adm, []ctl.RevokeTarget{{Key: key}}, time.Now(), &errb); err != nil || !strings.Contains(errb.String(), "issue record could not be read") {
+	var errb strings.Builder
+	err = ctl.CheckNotFutureIssued(ctx, adm, []ctl.RevokeTarget{{Key: key}}, time.Now(), &errb)
+	if err == nil || !strings.Contains(err.Error(), "user key "+ctl.ShortKey(key)+"...: its issue record could not be read") || !strings.Contains(err.Error(), "mashctl reissue NAME") || !strings.Contains(err.Error(), "nothing was changed") || errb.String() != "" {
 		t.Fatalf("failed lookup: %v %q", err, errb.String())
+	}
+}
+
+// A record whose issued_at is missing or not a time refuses deprovision before anything is revoked or removed.
+func TestDeprovisionRefusesAMalformedIssueTime(t *testing.T) {
+	for _, bad := range []string{"", "yesterday-ish"} {
+		h := newAddEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+			t.Fatal(errb)
+		}
+		_, pub := h.credsClaims("n")
+		js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
+		if err != nil {
+			t.Fatal(err)
+		}
+		kv, err := js.KeyValue(context.Background(), store.IssuedBucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := h.issued()[pub]
+		rec.IssuedAt = bad // written straight to the bucket: RecordIssued fills an empty time
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := kv.Put(context.Background(), pub, raw); err != nil {
+			t.Fatal(err)
+		}
+		calls := fakeRevoke(t, nil)
+		recs := h.records()
+		out, errb, code := h.run("deprovision", "n")
+		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl reissue NAME") || !strings.Contains(errb, "nothing was changed") {
+			t.Fatalf("%q: %d %q %q", bad, code, out, errb)
+		}
+		if len(*calls) != 0 || len(h.records()) != len(recs) || h.issued()[pub].RevokedAt != "" {
+			t.Fatalf("%q: something changed: calls %+v records %v", bad, *calls, h.records())
+		}
 	}
 }
 

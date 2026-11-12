@@ -206,7 +206,9 @@ func (a *Admin) Issued(ctx context.Context) (recs []store.Issued, present bool, 
 }
 
 // IssuedByKey returns the latest issue record of publicKey. found is false when the key is not recorded or the bucket
-// does not exist (nothing was ever recorded); an entry that cannot be read or decoded is an error.
+// does not exist (nothing was ever recorded: jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean
+// absent); any other failure (network, permission, cancelled context, JetStream) and an entry that cannot be read or
+// decoded is an error.
 func (a *Admin) IssuedByKey(ctx context.Context, publicKey string) (rec store.Issued, found bool, err error) {
 	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
