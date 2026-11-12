@@ -38,6 +38,7 @@ const (
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
 	zonesDir     = "zones"
+	groupsDir    = "groups"
 	seedExt      = ".nk"
 )
 
@@ -158,8 +159,12 @@ func CheckParentDir(d string) error {
 func (a *Authority) zonesPath() string { return filepath.Join(a.dir, zonesDir) }
 
 // checkDirs checks the key dir and the zones dir; with create it makes missing ones (0700).
-func (a *Authority) checkDirs(create bool) error {
-	for _, d := range []string{a.dir, a.zonesPath()} {
+func (a *Authority) checkDirs(create bool) error { return a.checkDirsIn(a.zonesPath(), create) }
+
+// checkDirsIn checks the key dir and the sub directory sub (one of the key dir's own); with create it makes missing
+// ones (0700).
+func (a *Authority) checkDirsIn(sub string, create bool) error {
+	for _, d := range []string{a.dir, sub} {
 		ok, err := checkDir(d)
 		if err != nil {
 			return err
@@ -433,6 +438,40 @@ func (a *Authority) Zones() ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
+var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
+
+// groupRE is one part of an owner group name "range.owner": the shape of a zone name.
+var groupRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+// validGroup reports whether g is "range.owner" with both parts of a zone name's shape. The shape keeps path
+// separators out of file names; the single dot cannot make a name that climbs.
+func validGroup(g string) bool {
+	r, o, ok := strings.Cut(g, ".")
+	return ok && groupRE.MatchString(r) && groupRE.MatchString(o)
+}
+
+func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir) }
+
+// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk beside the
+// zones directory under the same custody rules; with create it generates and writes one if absent. It never
+// overwrites. Zone keys (ZoneKey) are the policy file's; group keys are the list set's.
+func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
+	if !validGroup(group) {
+		return nil, fmt.Errorf("mashctl: invalid owner group %q: want range.owner, each part lower-case letters, digits and hyphens, up to 32 characters", group)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.checkDirsIn(a.groupsPath(), create); err != nil {
+		return nil, err
+	}
+	kp, _, err := getOrCreate(filepath.Join(a.groupsPath(), group+seedExt), accountKind, create)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w %q", ErrNoGroupKey, group)
+	}
+	return kp, err
 }
 
 // ErrDifferentKey is wrapped by ImportOperator and ImportAccount when the store already holds another key.

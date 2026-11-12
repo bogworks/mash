@@ -151,3 +151,37 @@ func TestCheckParentDir(t *testing.T) {
 		t.Fatalf("foreign owner: got %v", err)
 	}
 }
+
+func TestGroupKeyIsKeptBesideTheZoneKeysAndNeverOverwritten(t *testing.T) {
+	a, err := Open(filepath.Join(t.TempDir(), "keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.GroupKey("foo.c", false); !errors.Is(err, ErrNoGroupKey) {
+		t.Fatalf("missing: %v", err)
+	}
+	k1, err := a.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1, _ := k1.PublicKey()
+	k2, err := a.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2, _ := k2.PublicKey(); p1 != p2 {
+		t.Error("a second create replaced the key")
+	}
+	fi, err := os.Stat(filepath.Join(a.dir, "groups", "foo.c.nk"))
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("%v %v", fi, err)
+	}
+	for _, bad := range []string{"", "foo", "foo.c.core", "../x.c", "foo.", ".c", "Foo.c", "foo/x.c"} {
+		if _, err := a.GroupKey(bad, true); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if zs, _ := a.Zones(); len(zs) != 0 {
+		t.Errorf("a group key shows as a zone: %v", zs)
+	}
+}

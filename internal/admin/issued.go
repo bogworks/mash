@@ -205,6 +205,31 @@ func (a *Admin) Issued(ctx context.Context) (recs []store.Issued, present bool, 
 	return recs, true, nil
 }
 
+// IssuedByKey reads the issue record's latest entry for one public key; nil when the record holds none (or has no
+// bucket yet). An entry that cannot be read is an error: a check must not pass over a record it cannot read.
+func (a *Admin) IssuedByKey(ctx context.Context, publicKey string) (*store.Issued, error) {
+	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mash: issue record bucket: %w", err)
+	}
+	e, err := kv.Get(ctx, publicKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mash: issue record %s: %w", publicKey, err)
+	}
+	var r store.Issued
+	if err := json.Unmarshal(e.Value(), &r); err != nil || r.PublicKey != publicKey {
+		return nil, fmt.Errorf("mash: issue record %s: unreadable entry", publicKey)
+	}
+	r.Purpose = r.EffectivePurpose()
+	return &r, nil
+}
+
 // initIssued creates the issue record's bucket, or verifies an existing one. An existing bucket is altered in one way
 // only: a per-key history below store.IssuedHistory (the first version kept 8) is raised to it, a stream update that
 // loses no record. Everything else about it is only verified.
