@@ -37,8 +37,8 @@ func parseMaxControlLine(flagVal string, env func(string) string) (int, error) {
 // credentialLimits is the limits a command that signs users (add, reissue) measures against. With system account
 // credentials it asks every server for its own, as `policy apply` does, and refuses when a server cannot be asked
 // and no --max-control-line says what it runs. Without system credentials there is nobody to ask, so it measures
-// against the default limit and says so on stderr ("default server limit"): `policy apply` is the gate that knows
-// every server's own limit. what names the command in the note.
+// against the default limit and says so on stderr ("default server limit"): only `policy apply`, which has system
+// access, is the every-server gate. what names the command in the note.
 func credentialLimits(what string, cfg config.Config, env func(string) string, stderr io.Writer) ([]policy.ServerLimits, error) {
 	override, err := parseMaxControlLine("", env)
 	if err != nil {
@@ -48,7 +48,7 @@ func credentialLimits(what string, cfg config.Config, env func(string) string, s
 		if override > 0 {
 			return apply.LearnLimits(nil, nil, override)
 		}
-		fmt.Fprintf(stderr, "mashctl: %s: no system account credentials to ask the servers their limits: measured against the %s of %d bytes; run `mashctl policy apply` for the measure against every server's own\n",
+		fmt.Fprintf(stderr, "mashctl: %s: no system account credentials to ask the servers their limits: measured against the %s of %d bytes; only `mashctl policy apply` (which has system access) measures against every server's own limit, so run it before relying on this credential\n",
 			what, policy.DefaultServer, policy.DefaultMaxControlLine)
 		return policy.DefaultServerLimits(), nil
 	}
@@ -59,10 +59,22 @@ func credentialLimits(what string, cfg config.Config, env func(string) string, s
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
-	res := apply.NATS{Conn: nc}
-	set, err := res.Servers(ctx)
+	inventory, err := parseServers(env)
+	if err != nil {
+		return nil, err
+	}
+	return limitsOf(ctx, apply.NATS{Conn: nc}, inventory, override)
+}
+
+// limitsOf asks the servers r reaches for their limits and refuses unless the set that answered is complete
+// (apply.CheckLimitSet): a silent member's smaller limit would be missing from the measure.
+func limitsOf(ctx context.Context, r apply.Resolver, inventory, override int) ([]policy.ServerLimits, error) {
+	set, err := r.Servers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot ask the servers their limits: %v", err)
 	}
-	return apply.Limits(ctx, res, set, override)
+	if err := apply.CheckLimitSet(set, inventory); err != nil {
+		return nil, err
+	}
+	return apply.Limits(ctx, r, set, override)
 }

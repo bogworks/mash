@@ -182,3 +182,39 @@ func TestLimitsLive(t *testing.T) {
 		t.Errorf("created keys %v", z)
 	}
 }
+
+// The built account JWT is measured with throwaway keys before a zone key is created: an oversize refusal leaves the
+// key store without the zone keys and pushes nothing, as its text says.
+func TestOversizeRefusalCreatesNoZoneKey(t *testing.T) {
+	ks, fk, c := setup(t)
+	if len(c.Zones) == 0 {
+		t.Fatal("the fixture has no zone")
+	}
+	fk.servers = ServerSet{Names: []string{"nats-1"}, Expected: 1}
+	fk.maxPayload = 400
+	ok := func(*policy.Compiled, []policy.ServerLimits) (policy.BudgetReport, error) {
+		return policy.BudgetReport{OK: true}, nil
+	}
+	var out bytes.Buffer
+	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: 1, Budget: ok}, &out)
+	if code != 1 || !strings.Contains(out.String(), "nothing was changed, signed or pushed") {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	if zs, err := ks.Zones(); err != nil || len(zs) != 0 {
+		t.Errorf("zone keys written: %v %v", zs, err)
+	}
+	if fk.pushes != 0 {
+		t.Error("pushed")
+	}
+	// the same run without the limit creates them
+	fk.maxPayload = 0
+	fk.applyPush = true
+	fk.acks = []ServerAck{{Server: "nats-1", Code: 200}}
+	out.Reset()
+	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: 1, Budget: ok, VerifyTries: 1, VerifyWait: 1}, &out); code != 0 {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	if zs, _ := ks.Zones(); len(zs) != len(c.Zones) {
+		t.Errorf("zone keys after a good run: %v", zs)
+	}
+}

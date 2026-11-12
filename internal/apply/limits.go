@@ -185,3 +185,52 @@ func Limits(ctx context.Context, r Resolver, set ServerSet, override int) ([]pol
 	}
 	return LearnLimits(set.Names, reports, override)
 }
+
+// CheckLimitSet refuses a ping answer that cannot be trusted to name every server whose limit a credential must fit:
+// no reply, gateways, replies naming different clusters, or fewer replies than the cluster reports (or than the
+// operator's inventory, MASH_SERVERS, says; 0 is none given). The smaller limit of a server that did not answer would
+// be missing, and a credential could be signed that it refuses. Unlike a write, a measure does not need the operator
+// to give an inventory when the cluster's own count is met.
+func CheckLimitSet(set ServerSet, inventory int) error {
+	if !set.Gateways && !set.ClusterConflict && len(set.Names) > 0 && len(set.Names) >= set.need(inventory) {
+		return nil
+	}
+	got, want := len(set.Names), set.need(inventory)
+	why := set.Why(inventory)
+	if set.Gateways || set.ClusterConflict || got == 0 {
+		return fmt.Errorf("the server set is not complete (%s); a limit of a server that did not answer would be missing, so nothing was measured", why)
+	}
+	return fmt.Errorf("only %d of %d servers answered the system account request (%s); the smaller limit of a silent server would be missing, so nothing was measured. Bring the silent server back, or set MASH_SERVERS to the number of servers you run", got, want, why)
+}
+
+// AccountJWTLimits is the account JWT limit of every server in set, from the VARZ reports alone: the jwt decoder cap,
+// lowered to a server's max_payload when it reported one. A server that gave no answer keeps the cap (its max_payload
+// is unknown, and nothing here needs its max_control_line); a command that must not be held up by a silent server,
+// as a revocation must not, measures against these.
+func AccountJWTLimits(ctx context.Context, r Resolver, set ServerSet) []policy.ServerLimits {
+	var reports []ServerReport
+	if lr, ok := r.(LimitsResolver); ok {
+		reports, _ = lr.ServerLimits(ctx, len(set.Names))
+	}
+	pay := map[string]int{}
+	for _, rep := range reports {
+		pay[rep.Server] = rep.MaxPayload
+	}
+	names := map[string]bool{}
+	for _, n := range set.Names {
+		names[n] = true
+	}
+	for n := range pay {
+		names[n] = true
+	}
+	var out []policy.ServerLimits
+	for n := range names {
+		l := policy.ServerLimits{Server: n, AccountJWT: policy.AccountJWTLimit}
+		if mp := pay[n]; mp > 0 {
+			l.AccountJWT = min(l.AccountJWT, mp)
+		}
+		out = append(out, l)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Server < out[j].Server })
+	return out
+}

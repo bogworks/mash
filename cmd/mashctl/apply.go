@@ -39,9 +39,9 @@ type applyOpts struct {
 
 func applyUsage(verb string) string {
 	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n"
+		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n  --max-control-line BYTES stands only for the max_control_line of a server that gave no answer to the limits request (and caps one that did); it says nothing of max_payload, so the account JWT on a silent server is measured against the 1 MiB decoder cap only\n"
 	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n  --max-control-line BYTES stands only for the max_control_line of a server that gave no answer to the limits request (and caps one that did); it says nothing of max_payload, so the account JWT on a silent server is measured against the 1 MiB decoder cap only\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {

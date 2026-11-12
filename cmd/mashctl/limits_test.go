@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/policy"
 )
 
@@ -96,5 +98,58 @@ func TestAddWithoutSystemCredsSaysItMeasuredTheDefault(t *testing.T) {
 	_, errb, code := h.run("add", "c", "--zone", "green")
 	if code != 0 || !strings.Contains(errb, "measured against the "+policy.DefaultServer+" of 4096 bytes") {
 		t.Fatalf("%d %q", code, errb)
+	}
+}
+
+// reissue with several names measures every name before it touches any: a later oversize name refuses the whole
+// command, and the earlier names' creds are left as they were.
+func TestReissueRefusesWholeWhenALaterNameIsOversize(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	h.seed("b")
+	h.seed("a")
+	bBefore, _ := os.ReadFile(h.creds("b"))
+	aBefore, _ := os.ReadFile(h.creds("a"))
+	h.env[maxControlLineEnv] = "300"
+	out, errb, code := h.run("reissue", "b", "a")
+	if code != 1 || !strings.Contains(errb, `reissue a: refused: sender "a"`) || !strings.Contains(errb, "no name was reissued") || strings.Contains(out, "reissued") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if after, _ := os.ReadFile(h.creds("b")); !bytes.Equal(bBefore, after) {
+		t.Error("the first name's creds changed")
+	}
+	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(aBefore, after) {
+		t.Error("the second name's creds changed")
+	}
+}
+
+// fakeSet is a resolver whose ping answers set.
+type fakeSet struct {
+	apply.Resolver
+	set apply.ServerSet
+}
+
+func (f fakeSet) Servers(context.Context) (apply.ServerSet, error) { return f.set, nil }
+
+// add and reissue refuse when the servers that answered the ping are not the whole set: a silent member's smaller
+// limit would be missing.
+func TestLimitsOfRefusesAnIncompleteServerSet(t *testing.T) {
+	ctx := context.Background()
+	two := apply.ServerSet{Names: []string{"s1"}, Expected: 2}
+	_, err := limitsOf(ctx, fakeSet{set: two}, 0, 4096)
+	if err == nil || !strings.Contains(err.Error(), "only 1 of 2 servers answered") || !strings.Contains(err.Error(), "MASH_SERVERS") {
+		t.Fatalf("cluster count: %v", err)
+	}
+	_, err = limitsOf(ctx, fakeSet{set: apply.ServerSet{Names: []string{"s1"}, Expected: 1}}, 3, 4096)
+	if err == nil || !strings.Contains(err.Error(), "only 1 of 3 servers answered") {
+		t.Fatalf("inventory: %v", err)
+	}
+	for _, s := range []apply.ServerSet{{}, {Names: []string{"s1"}, Expected: 1, Gateways: true}, {Names: []string{"s1"}, Expected: 1, ClusterConflict: true}} {
+		if _, err := limitsOf(ctx, fakeSet{set: s}, 0, 4096); err == nil || !strings.Contains(err.Error(), "not complete") {
+			t.Errorf("%+v: %v", s, err)
+		}
+	}
+	ls, err := limitsOf(ctx, fakeSet{set: apply.ServerSet{Names: []string{"s1", "s2"}, Expected: 2}}, 0, 4096)
+	if err != nil || len(ls) != 2 {
+		t.Fatalf("complete: %v %v", ls, err)
 	}
 }

@@ -156,6 +156,9 @@ type Params struct {
 	collectAll bool
 	// trust is the set of accepted issuers of the account JWT, loaded from the key store by Run and AccountFindings.
 	trust Trust
+	// sizeOnly makes build create no zone key: a missing one is a throwaway key, enough to measure the account JWT
+	// (a public key is as long as any other) and to refuse an oversize one before anything is written.
+	sizeOnly bool
 	// limits are the servers' limits, learned by Run and AccountFindings before the budget is measured; build checks
 	// the account JWT it makes against them (the default limits when it is called without).
 	limits []policy.ServerLimits
@@ -493,6 +496,15 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	if desired.SigningKeys == nil {
 		desired.SigningKeys = jwt.SigningKeys{}
 	}
+	if p.Mode == Apply && !p.sizeOnly {
+		// A zone key is a file in the key store, so the JWT is measured first with throwaway keys: an oversize one
+		// is refused before any key is created.
+		sp := p
+		sp.sizeOnly = true
+		if _, err := build(sp, opKP, acctPub, cur, replace, map[string]bool{}); err != nil {
+			return nil, err
+		}
+	}
 	b := &built{cur: cur, desired: desired}
 
 	// A scoped signer on the server under a file zone's role but with another key than the zone key apply holds
@@ -606,7 +618,7 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		case kerr == nil:
 		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
 			zp.keyIsNew = true
-			if p.Mode == Apply {
+			if p.Mode == Apply && !p.sizeOnly {
 				kp, kerr = p.Keys.ZoneKey(z.Name, true)
 				if kerr != nil {
 					return nil, kerr
@@ -672,19 +684,25 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		if len(limits) == 0 {
 			limits = policy.DefaultServerLimits()
 		}
-		var over []string
-		for _, l := range limits {
-			if len(b.token) > l.AccountJWT {
-				over = append(over, policy.Refusal{Kind: "account", Name: desired.Name, Bytes: len(b.token), Limit: l.AccountJWT,
-					Setting: accountLimitSetting(l.AccountJWT), Server: l.Server,
-					Note: "fewer zones, or fewer zone pairs granted"}.Error())
-			}
-		}
+		over := accountOver(desired.Name, len(b.token), limits)
 		if len(over) > 0 {
 			return nil, fmt.Errorf("refused: %s\nnothing was changed, signed or pushed", strings.Join(over, "\n  "))
 		}
 	}
 	return b, nil
+}
+
+// accountOver is the refusal of each server whose account JWT limit is below size bytes.
+func accountOver(name string, size int, limits []policy.ServerLimits) []string {
+	var over []string
+	for _, l := range limits {
+		if size > l.AccountJWT {
+			over = append(over, policy.Refusal{Kind: "account", Name: name, Bytes: size, Limit: l.AccountJWT,
+				Setting: accountLimitSetting(l.AccountJWT), Server: l.Server,
+				Note: "fewer zones, or fewer zone pairs granted"}.Error())
+		}
+	}
+	return over
 }
 
 // accountLimitSetting names what sets an account JWT limit: the server's max_payload when it is under the decoder
