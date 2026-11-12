@@ -217,6 +217,9 @@ stance_run "$T/sd8" "$NOREL" bogus serve
 check "invalid stance behaves as strict (exit 127)" eq "$RC" 127
 check "invalid stance does not run PATH mash" empty_file "$T/out"
 check "invalid stance note names the value" contains "$(cat "$T/err")" "unrecognised security stance 'bogus'"
+stance_run "$T/sd13" "$NOREL" "" serve
+check "empty stance behaves as strict (exit 127)" eq "$RC" 127
+check "empty stance does not run PATH mash" empty_file "$T/out"
 stance_run "$T/sd9" "$NOREL" strict hook
 check "strict, hook: refuses too" eq "$RC" 127
 stance_run "$T/sd9" "$NOREL" strict hook

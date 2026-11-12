@@ -36,7 +36,7 @@ dlfail() { FAILWHY=$1; log "${2:-$1}"; }
 # read. PROVISIONAL: the variable name MASH_SECURITY_STANCE and its source (an environment variable) may change, and so
 # may the default. An unrecognised value fails closed as strict.
 security_stance() {
-  _s=${MASH_SECURITY_STANCE:-relaxed}   # the default: change `relaxed` here to make strict the default
+  _s=${MASH_SECURITY_STANCE-relaxed}   # the default: change `relaxed` here to make strict the default
   case "$_s" in
     strict|relaxed) printf '%s\n' "$_s" ;;
     *) log "unrecognised security stance '$_s' (want strict or relaxed); treating it as strict"; printf 'strict\n' ;;
