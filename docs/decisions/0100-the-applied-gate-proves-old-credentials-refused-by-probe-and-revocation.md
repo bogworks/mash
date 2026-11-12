@@ -90,6 +90,8 @@ signed account JWT larger than `policy.AccountJWTLimit` (1 MiB), naming its size
 * Bad, because each gate run mints and revokes short-lived credentials, which adds revocations to the account JWT.
 * Bad, because a generation is read from the JWT by content: two generations with equal templates are told apart only
   by their revocations.
+* Bad, because a server reports an account's JWT only once the account is loaded there (a connection under it). A server
+  where it is not loaded reads as an unknown generation and fails the gate; the witnesses, opened first, load it.
 * Neutral, because the in-memory ledger is per process; the persistent compare-and-set store follows the homerange-mash
   seam's status key.
 
