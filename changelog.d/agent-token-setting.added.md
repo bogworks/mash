@@ -1,1 +1,0 @@
-A new optional setting, `agent_token` in config.json or `MASH_AGENT_TOKEN`, selects a three-token identity for the endpoint; unset keeps today's behaviour. Nothing provisions such endpoints yet. A MASH_AGENT_TOKEN that is set but empty is an error once a name is set, not a fallback to the legacy identity.
