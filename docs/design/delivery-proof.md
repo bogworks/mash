@@ -12,8 +12,17 @@
 > | Everything else (the bucket, the delta keys, the audit, the deprovision gate) | sections 4 to 11 | the pull requests of section 11 | Design only. |
 >
 > The eight numbered decisions in section 3 are provisional. They were set by the maintainer's planner and the
-> maintainer can overturn any of them at review. Section 3.9 lists four further decisions this design makes on its own,
+> maintainer can overturn any of them at review. Section 3.9 lists six further decisions this design makes on its own,
 > for the same review.
+
+> **Review history.** A security review of the first version found four design flaws. This version changes:
+>
+> | # | Finding | Change | Where |
+> |---|---|---|---|
+> | H1 | The gate was specified in `deprovisionLocked` only. `DeprovisionIfUser` (which `mashctl retire`, `deprovision --user` and the rollback of `mashctl add` call) and `DeprovisionDrained` have their own removal paths and could remove an inbox with no proof check. | One shared step, `Admin.guardRemoval`, runs in all three before any destructive action and hands out a token that `deleteInbox` requires. A table test covers every exported removal entry point and a structural test fails when a removal path bypasses the step. | 3.9, 4.7, 6, 7, 11 |
+> | H2 | The gate read `LastSeq` twice and left a window in which new mail arrived after the final check and was deleted with the stream. | The gate fences first (the existing suspend mechanism parks the inbox's subjects), then reads, evaluates and deletes only under the fence. A refused gate unfences. | 4.7, 6, 7 |
+> | H3 | `proof rebase` moved the base past lost or channel-acked mail, so the strict findings no longer included that history and an operator could make `--strict` pass over a known loss. | A rebase never erases evidence: it writes an `excluded` record in the archive and `--strict` reports it, for as long as the generation exists. Only a new generation gives a clean strict. | 3.9, 4.4, 4.5, 4.8, 8, 10 |
+> | H4 | Delta keys carried sequence bounds but no window token, so a subject filter could not select one numeric window, and the compaction purge could erase another window's facts that no snapshot covered. | The window is its own key token. Compaction writes the window's snapshot, verifies it covers exactly that window's facts, and only then purges by a filter on that window with a sequence bound. | 4.1, 4.6, 5, 7 |
 
 ## 1. Purpose and the claim
 
@@ -54,7 +63,9 @@ pass over a loss.
 | **duplicate-of(t)** | Acked without being shown again, because the same signed message was shown under sequence t (`dedupe`, `internal/endpoint/mail.go`) or because a hook had already shown this one (the `IsDrained` branch of `spoolBatch`, `internal/endpoint/hook.go`). It counts only if t is presented. A duplicate that names no original, or whose original is not presented, explains nothing. |
 | **generation** | The identity of one stream's life: the stream's creation time. Sequences restart at 1 when a stream is deprovisioned and provisioned again, so every record is keyed by generation. ADR 0109 writes it as `name@created` (`streamIdent`, `internal/endpoint/ledger.go`); in a key it is the creation time in Unix nanoseconds, digits only. |
 | **base** (B) | The first sequence the record covers for a generation. Below B nothing is claimed. It is written explicitly (section 4.1), never inferred from the lowest recorded sequence, so that the first messages of an inbox cannot fall below the base unnoticed. |
-| **delta key** | One KV key that holds one fact about one range of sequences, written once and never changed: `e.<flat>.<gen>.p.<lo>.<hi>` says sequences lo to hi of that generation were presented. |
+| **window** | Sequences are grouped by `floor(seq / 4096)`; that number is the window, and it is its own token in every key (section 4.1). |
+| **delta key** | One KV key that holds one fact about one range of sequences of one window, written once and never changed: `e.<flat>.<gen>.<window>.p.<lo>.<hi>` says sequences lo to hi of that generation were presented. |
+| **excluded** | A set of lost, unproven or channel-acked sequences that an operator moved the base past (`proof rebase`). They stay findings of class `excluded` for as long as the generation exists (section 4.8). |
 | **accounted** | A sequence that is presented, refused, or a duplicate of a presented one. (ADR 0109's `Gen.Accounted` also counts channel-acked sequences. The proof does not: section 4.4.) |
 | **lost** | A sequence in [B, FirstSeq-1] that is not accounted. The stream no longer holds it, so it can never be delivered or recorded again, except by a late push of a record already written locally (section 4.3). |
 | **outstanding** | A sequence in [max(B, FirstSeq), LastSeq] that is not accounted: still in the stream, waiting or not yet recorded. Normal while mail is in flight. It becomes lost if it falls below FirstSeq unrecorded. |
@@ -114,7 +125,8 @@ Rejected:
 ### 3.5 Deprovision is refused until audited (decision 5)
 
 `deprovision` (and `retire`, which calls it) removes an inbox only if the inbox is accounted for in full and its record is
-archived in an admin-side bucket. There is no bypass flag. When something is not accounted for, the operator runs an
+archived in an admin-side bucket. Every removal path reaches one shared step that fences the inbox first (section 4.7).
+There is no bypass flag. When something is not accounted for, the operator runs an
 explicit acknowledgement command that records the loss in the archive; the gate then accepts exactly that loss. Section
 4.7 defines the condition, the archive and the flow.
 
@@ -159,9 +171,16 @@ These are not among the eight. They follow from them, and the maintainer should 
 2. **Delta keys are write-once.** The bucket stream uses discard-new per subject with one message per subject, so a key
    cannot be overwritten, and a KV delete marker, which is only a publish to the same subject, is refused too.
 3. **The admin compacts, and may purge by subject filter; nobody else can.** The bucket allows purge on the stream, and
-   no endpoint template grants the purge subject. The bucket's `DenyDelete` stays on.
+   no endpoint template grants the purge subject. The bucket's `DenyDelete` stays on. A purge always names one window
+   and a sequence bound, and happens only after a verified snapshot of that window (section 4.6).
 4. **The base is written explicitly** by the endpoint at its first bind of a generation and may be raised by the admin
-   (`proof rebase`), never lowered.
+   (`proof rebase`), never lowered. A raise never erases evidence: it leaves an `excluded` record that `--strict`
+   keeps reporting (section 4.8).
+5. **One shared removal step, under a fence.** Every path that removes an inbox calls `Admin.guardRemoval` before any
+   destructive action. It parks the inbox's subjects, reads the final state, evaluates the gate, and holds the park through
+   deletion (section 4.7). A removal cannot delete mail that arrived after the check, because none can arrive.
+6. **Key layout carries the window as a token.** `e.<flat>.<gen>.<window>.<kind>.<lo>.<hi>`, so one subject filter selects
+   one window of one generation and nothing else (section 4.1).
 
 ## 4. Design
 
@@ -198,7 +217,10 @@ A second bucket, `mash-presented-archive`, written only by the admin connection,
 at deprovision and for acknowledgements (section 4.7). It follows the retired-marker bucket (`store.RetiredConfig`,
 `store.VerifyRetiredStatus` in `internal/store/store.go`): no TTL, file storage, discard new, a byte cap, never expires,
 and the issue record's rollup, delete and purge refusal (`DenyDelete` and `DenyPurge` true). History is 64 revisions per
-key, the most a KV bucket keeps, so an acknowledgement added after the archive is kept beside it. It is created by
+key, the most a KV bucket keeps, so an acknowledgement or an `excluded` record added after the archive is kept beside it.
+The revision limit must refuse the 65th write and never evict the oldest, so that evidence cannot roll off (the same
+discard-new-per-subject setting as `mash-presented`; that this behaves so on the archive's config is `not verified`, and the
+step 1 spike checks it). It is created by
 `mash admin init` and, on a deployment from before it, on first use over the admin connection, as the issue bucket is.
 
 #### The key layout
@@ -208,24 +230,29 @@ bucket's subject space `$KV.mash-presented.<key>`:
 
 | Writer | Key | Fact |
 |---|---|---|
-| endpoint | `e.<flat>.<gen>.p.<lo>.<hi>` | sequences lo..hi were presented |
-| endpoint | `e.<flat>.<gen>.r.<lo>.<hi>` | sequences lo..hi were refused by design |
-| endpoint | `e.<flat>.<gen>.c.<lo>.<hi>` | sequences lo..hi were channel-acked (delivered, not proven shown) |
-| endpoint | `e.<flat>.<gen>.d.<seq>.<of>` | sequence seq was acked without being shown again, as a duplicate of `<of>`; `<of>` is `x` when the original is unknown |
-| endpoint | `e.<flat>.<gen>.b.<B>` | the endpoint's base for this generation |
+| endpoint | `e.<flat>.<gen>.<window>.p.<lo>.<hi>` | sequences lo..hi were presented |
+| endpoint | `e.<flat>.<gen>.<window>.r.<lo>.<hi>` | sequences lo..hi were refused by design |
+| endpoint | `e.<flat>.<gen>.<window>.c.<lo>.<hi>` | sequences lo..hi were channel-acked (delivered, not proven shown) |
+| endpoint | `e.<flat>.<gen>.<window>.d.<seq>.<of>` | sequence seq was acked without being shown again, as a duplicate of `<of>`; `<of>` is `x` when the original is unknown; `<window>` is the window of `<seq>` |
+| endpoint | `e.<flat>.<gen>.b.<B>` | the endpoint's base for this generation (no window token: it is about the generation) |
 | admin | `a.<flat>.<gen>.b.<B>` | a base raised by the operator (`proof rebase`, section 4.8) |
-| admin | `s.<flat>.<gen>.<window>.<rev>` | a snapshot of one window, replacing the deltas of that window (section 4.6) |
+| admin | `s.<flat>.<gen>.<window>.<rev>` | a snapshot of one window, unioned with the deltas of that window (section 4.6) |
+
+`<window>` is `floor(seq / 4096)` in decimal, so window w holds sequences `w*4096 .. w*4096+4095` (window 0 holds 1 to
+4095). A range key's `lo` and `hi` are in the same window, and its window token is that window. Every key of one window of
+one generation therefore matches the subject filter `e.<flat>.<gen>.<window>.>`, and no key of another window or
+generation does, because a filter matches whole tokens (window 1 does not match window 11).
 
 `<flat>` is the flat key of the *stream* being accounted: the bare name for a legacy endpoint, `agent_owner_name` for a
 new-form one (`fixedPubKeyed`, `internal/admin/permissions.go`). Names contain no dot (the name rule: 1 to 48 lower-case
 letters, digits and single hyphens, `docs/name-rule.md` and the check in `internal/ctl/ctl.go`; the new-form flat key joins its three tokens with
 underscores, `sap.EndpointIdentity.Flat`), so a flat key is one token. `<gen>` is the stream's creation time as Unix
-nanoseconds, in decimal. `<lo>` and `<hi>` are decimal and `lo <= hi`.
+nanoseconds, in decimal. `<window>`, `<lo>`, `<hi>` and `<seq>` are decimal and `lo <= hi`.
 
-**How ranges are named and bounded.** Sequences are grouped in fixed windows of 4096: window w holds
-`(w*4096)+1 .. (w+1)*4096`. A delta range never crosses a window boundary, and serve splits a run that does into two
-keys. The bound makes a key's span at most 4096, which gives the reader a cheap validity check (a range wider than 4096,
-or across a boundary, is refused as malformed), lets compaction work window by window, and caps the cost of expanding a
+**How ranges are named and bounded.** A delta range never crosses a window boundary, and serve splits a run that does
+into two keys, each with its own window token. The bound makes a key's span at most 4096, which gives the reader a cheap
+validity check (a range wider than 4096, a range across a boundary, or a window token that is not `floor(lo / 4096)` is
+refused as malformed), lets compaction work window by window with a subject filter, and caps the cost of expanding a
 range. Within a window, one key covers one contiguous run of one kind from one drain pass. Two passes that record
 adjacent runs write two keys; they are never merged by the writer, because a key cannot be rewritten.
 
@@ -243,7 +270,10 @@ setting was on when channel-acked mail was recorded. The `b` marker and the admi
 apply. An admin snapshot value is described in section 4.6 and the archive value in section 4.7.
 
 An example key, for the new-form endpoint `agent_owner_name` after 1,000,009 messages:
-`$KV.mash-presented.e.agent_owner_name.1731412345123456789.p.1000000.1000009`. That is 80 bytes of subject.
+`$KV.mash-presented.e.agent_owner_name.1731412345123456789.244.p.1000000.1000009` (1,000,000 is in window 244). That is 79
+bytes of subject. The longest a key can be, with a 146 byte flat key (three 48 character names), a 7 digit window and two 10
+digit sequences, is about 225 bytes; that is far under the server's control line limit, and the step 1 spike confirms no
+lower subject limit applies (open question 4).
 
 **The base.** At its first bind to a generation, serve reads the stream and its consumer and writes
 `e.<flat>.<gen>.b.<B>` with B = `Delivered.Stream + 1` of the consumer, or 1 when the consumer does not exist or has
@@ -262,7 +292,9 @@ $KV.mash-presented.e.<flat>.>
 ```
 
 with `<flat>` being `{{name()}}` in a zone key's template (`ZonePermissions`), the literal flat key in a user's own
-permissions (`Permissions`, `NewFormPermissions`). Nothing else: no `$JS.API.DIRECT.GET.KV_mash-presented...`, no
+permissions (`Permissions`, `NewFormPermissions`). The line is unchanged by the window token: `>` matches one or more
+trailing tokens, so it covers `e.<flat>.<gen>.<window>.<kind>.<lo>.<hi>` and the shorter `e.<flat>.<gen>.b.<B>` alike, and
+the wildcard does not depend on the key's length. Nothing else: no `$JS.API.DIRECT.GET.KV_mash-presented...`, no
 `$JS.API.STREAM.INFO.KV_mash-presented`, no consumer subject, no subscribe line. A publish into a stream's subject needs
 no API grant, and the acknowledgement comes back on the connection's own reply prefix, which the endpoint already uses
 for its lease writes. The `e.` prefix keeps the admin's `s.` and `a.` keys outside the grant, so an endpoint cannot write
@@ -339,7 +371,7 @@ sequenceDiagram
     H->>S: Drained: write tombstone, remove entry
     E->>S: IsDrained(seq)
     E->>L: Note(presented, seqs), fsync
-    E->>B: PublishAsync delta keys (e.flat.gen.p.lo.hi), wait at most 1 s
+    E->>B: PublishAsync delta keys (e.flat.gen.window.p.lo.hi), wait at most 1 s
     alt acknowledged, or already written
         B-->>E: PubAck
         E->>L: pushed line (no fsync)
@@ -358,7 +390,7 @@ push, with kinds `r`, `d` and `c`. A duplicate is one key per sequence, because 
 Only the `p` kind comes from a tombstone. Nothing writes `p` for a sequence from any other source, which is what keeps a
 loss from looking like a presentation.
 
-Pushes may be late: a delta written after its window was compacted is a new key in that window, and the reader folds it
+Pushes may be late: a delta written after its window was compacted is a new key in that window, and the reader unions it
 with the window's snapshot (section 4.6). A fact only ever adds to what is accounted, so a late push can turn a sequence
 the snapshot lists as lost into an accounted one, and nothing turns an accounted one back.
 
@@ -375,11 +407,14 @@ For each (flat, generation) pair the fold builds a `ledger.Gen` (`internal/ledge
 presented, refused and channel-acked sequences, and duplicates with their named originals. It reuses `Ranges`, `Accounted`
 and `Lost` from that package, so the audit and `status` fold by one rule. It checks each key before it counts it:
 
-- the key parses, its range is at most 4096 wide and inside one window, and `lo >= 1`;
+- the key parses, its range is at most 4096 wide and inside one window, its window token equals `floor(lo / 4096)`, and
+  `lo >= 1`;
 - the version is known;
 - for the current generation, `hi <= LastSeq` of the stream, and the highest presented sequence is at most
   `Delivered.Stream`. A key above these is an **overclaim**: it is ignored, counted and reported as a finding;
-- a snapshot takes the place of the deltas of its window, and the highest `<rev>` of a window wins.
+- the facts of a window are the union of the highest-`<rev>` snapshot of that window and every delta key of that window
+  still present. A snapshot never hides a delta: facts only add, so a duplicate (a delta that the snapshot also holds)
+  changes nothing.
 
 The generation of an inbox is the stream's creation time, which `auditInbox.Created` already carries. Keys of any other
 generation of the same flat key are an old generation: the stream was deprovisioned (and archived) or recreated.
@@ -407,11 +442,17 @@ evicts it; that is why the record is a set of facts and not a re-read of the str
 The classes are exclusive and add up to `lost` before classification. All three make a finding. `unproven` and `lost`
 differ in their words and in what the acknowledgement records, not in what they block.
 
+**Excluded sets.** The fold also reads every `excluded` record under the generation's archive key (section 4.8). Each is a
+finding of class `excluded`, reported with its date, the admin key id that ran it, its reason and its counts and ranges by
+class (lost, unproven, channel-acked). It is not part of `lost`, `unproven` or `outstanding` above the raised base: the
+sequences are below the base now, so those sums do not change, and the record is how the history stays visible. An
+`excluded` record cannot be cleared: the archive refuses delete and purge, and nothing in mash removes a revision.
+
 **States of an inbox.**
 
 | State | Meaning |
 |---|---|
-| `proven` | A record exists, `lost` and `unproven` are empty, nothing is overclaimed. "No loss proven from #B." `outstanding` may be non-empty. |
+| `proven` | A record exists, `lost` and `unproven` are empty, nothing is overclaimed. "No loss proven from #B." `outstanding` may be non-empty. When the generation has an `excluded` record the state is still `proven` from the base, and the report adds the `excluded` findings beside it; `--strict` fails (section 4.5). |
 | `lost` | `lost > 0`. |
 | `unproven` | `lost == 0` and `unproven > 0`. |
 | `no proof` | A record exists but B > 1 with evicted sequences below it, or the generation's record is partly unreadable. Reported beside whichever of the above applies. |
@@ -425,7 +466,8 @@ ranges, at most 5 ranges and then a count.
 
 - State `lost`: `N message(s) lost: #a-#b were evicted from this inbox with no record that they were presented to the host (it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)`.
 - State `unproven`, takeover: `N message(s) unproven: #a-#b were delivered and then evicted with no record, after a different session took this endpoint's name over; the earlier session may have shown them`.
-- State `unproven`, channel: `N message(s) were handed to the host by the channel only (not proven shown): #a-#b; set MASH_SPOOL_REQUIRED=1 on this endpoint to hold mail until a hook or read shows it, or run mashctl proof rebase NAME to start the proof after them`. When the keys say `req` was already 1 at the time, the second clause is left out.
+- State `unproven`, channel: `N message(s) were handed to the host by the channel only (not proven shown): #a-#b; set MASH_SPOOL_REQUIRED=1 on this endpoint to hold mail until a hook or read shows it; mashctl proof rebase NAME starts the proof after them but records them as excluded, which stays a --strict finding`. When the keys say `req` was already 1 at the time, the second clause is left out.
+- Class `excluded`, one line per record: `N message(s) excluded from the proof on <date> by <admin key id>: lost L (#a-#b), unproven U (#c-#d), channel-acked C (#e-#f); reason: <reason>`. It stays for as long as the generation exists.
 - State `no record`: `no delivery record for this inbox (mash-presented has no entry for its current generation): M message(s) stored, E evicted; there is no proof either way`, followed by one of `; the endpoint is not granted the record lines` (the endpoint's directory record or creds say so, when the audit can tell) or `; the endpoint has not written one (an older mash, or its template does not grant it yet)`.
 - Beside any state, `no proof`: `the delivery record starts at #B: #1-#B-1 (E evicted, S still stored) are outside the proof`.
 - Overclaim: `the delivery record claims #a-#b, above this inbox's last sequence #L`.
@@ -443,21 +485,24 @@ an inbox with no record (the lower bound from consumer sequences, plus the line 
   "presented": 0, "refused": 0, "duplicate": 0, "channel": 0,
   "lost": 0, "unproven_takeover": 0, "unproven_channel": 0, "outstanding": 0, "before_base": 0,
   "lost_ranges": [[a,b]], "overclaim": 0, "unreadable_keys": 0, "sessions": 1,
-  "spool_required": true
+  "spool_required": true,
+  "excluded": [{"at":"2026-11-12T10:00:00Z","by":"<admin key id>","reason":"...",
+                "lost":[[a,b]],"unproven":[[c,d]],"channel":[[e,f]]}]
 }
 ```
 
 `evicted_unread` stays with its present meaning, documented as the consumer-sequence lower bound. `summary` gains
-`delivery_lost`, `delivery_unproven`, `delivery_no_record`, `delivery_overclaim` (inbox counts) and `delivery_bucket`
+`delivery_lost`, `delivery_unproven`, `delivery_no_record`, `delivery_overclaim`, `delivery_excluded` (inbox counts) and `delivery_bucket`
 (`ok`, `missing`, `unhardened`, `near_full`, `full`, with the bytes against the cap, as `retired` does).
 
 **Exit codes** are unchanged: 0, 1 for `--strict` findings, 2 for usage, 3 for a bad `--compare` file. Without `--strict`
 the audit reports and exits 0 as today. With `--strict`, `findings()` also counts: every inbox in state `lost` or
-`unproven`, every inbox in state `no record` that has mail, every overclaim, every unreadable key, a presented bucket that
+`unproven`, every inbox whose current generation has an `excluded` record (whatever its state), every inbox in state `no record` that has mail, every overclaim, every unreadable key, a presented bucket that
 is missing, unhardened or at least 90 percent full (a full bucket makes the proof impossible, unlike a full inbox, which is
 operational state), and a delivery bucket that could not be read. `outstanding` is not a finding: mail in flight is normal.
 An acknowledgement is **never** honoured by `--strict`: an acknowledged loss still fails it, and the report says
-`(acknowledged)` beside it. Strict means no loss, not no unacknowledged loss.
+`(acknowledged)` beside it. Neither is an exclusion: a `proof rebase` does not clear it, and the generation fails `--strict`
+for as long as it exists. Strict means no loss, not no unacknowledged loss.
 
 **`mashctl proof check NAME`** (new, read only) prints the same evaluation for one endpoint, with the full range lists, and
 exits 0 when the state is `proven` or `empty`, 1 otherwise, 2 on usage or connection failure. It is the evaluation the
@@ -474,21 +519,31 @@ Deltas accumulate: one key per drain pass at best (section 5). The admin compact
 every one of its sequences is decided: all are accounted, or all lie below FirstSeq. `mashctl proof compact [NAME]`
 (new; for all endpoints without NAME) does, per such window:
 
-1. Read the window's deltas and its current snapshot, if any.
+1. Read the window's deltas (the subject filter `$KV.mash-presented.e.<flat>.<gen>.<window>.>`) and its current snapshot,
+   if any (`s.<flat>.<gen>.<window>.>`), and note `R`, the stream sequence of the last message read.
 2. Write `s.<flat>.<gen>.<window>.<rev+1>` with the folded window: counts per kind (presented, refused, channel,
    resolved duplicates), the unaccounted sequences of the window as ranges (`lost`), the duplicates still unresolved with
    their named originals, and the sessions seen. A window whose sequences are all accounted is a few hundred bytes.
-3. Read the snapshot back and compare it with the fold.
-4. Purge the window's deltas and the older snapshots of the window with stream purges on subject filters (one per kind
-   under `$KV.mash-presented.e.<flat>.<gen>.`, and the window's `s.` keys), each bounded by the stream sequence of the
-   last message read in step 1 (`Sequence` in the purge request), so that a delta written during the compaction is kept.
-   `not verified`: that a purge request with a filter and a sequence bound does this against nats-server 2.15.2, and that
-   the kind filters can be expressed so that only the window's keys match; the spike checks both.
+3. **Verify.** Read the snapshot back and check that it covers exactly the facts of that window: the count per kind equals
+   the count of the facts read in step 1, and the union of its ranges equals the union of the facts read in step 1 (the
+   previous snapshot's facts included). A snapshot that fails either check is left in place (a duplicate, harmless), is
+   reported, and nothing is purged.
+4. **Purge, only after step 3 passed.** Purge by exactly two filters, each with a sequence bound: the window's deltas,
+   `$KV.mash-presented.e.<flat>.<gen>.<window>.>`, bounded to messages below `R + 1`, so any delta written after the read
+   in step 1 (a higher stream sequence) is kept; and the window's older snapshots, `s.<flat>.<gen>.<window>.>`, bounded to
+   messages below the new snapshot's own stream sequence, so the new snapshot stays. No purge ever uses a broader filter
+   (not the generation's `e.<flat>.<gen>.>`, not a flat key, not a kind), so no other window's facts can be erased, and a
+   fact that no verified snapshot of its own window holds is never purged.
+   `not verified`: that a purge request with a filter and a sequence bound does exactly this against nats-server 2.15.2
+   (the sequence field of the purge request purges messages below it), and that the window filter matches only the
+   window's own keys; the spike checks both.
 
 A late delta for a compacted window is a new key, and the next compaction folds it into the next revision. A snapshot's
 `lost` ranges are not final: a late push clears them (section 4.3). Compaction is idempotent and crash safe: the new
-snapshot is written and checked before anything is purged, the reader takes the highest revision, and a crash between
-steps 2 and 4 leaves deltas that the next run folds again.
+snapshot is written and verified before anything is purged, the reader unions the highest revision with the deltas still
+present, and a crash between steps 2 and 4 leaves the snapshot and the deltas it covers side by side. That state is
+duplicates of facts, which are harmless because the fold is a union, and the next run folds the window again and purges.
+A failure of the purge itself leaves the same state.
 
 The endpoint cannot compact. It has no purge grant, no read grant, and no permission on the `s.` and `a.` keys, and the
 bucket refuses rollup and delete. The audit reports the bucket's bytes against its cap, and `near_full` from 90 percent,
@@ -504,16 +559,90 @@ limits") must have room for it.
 
 ### 4.7 The deprovision gate
 
-`deprovision` and `retire` both end in `Admin.Deprovision` or one of its guarded variants (`internal/admin/admin.go`;
-`mashctl retire` through `deprovisionIfUser`, `cmd/mashctl/retire.go`; the verb itself in `internal/ctl/ctl.go`, shared by
-`mash admin` and `mashctl`). The gate belongs in `deprovisionLocked`, so every path has it, under the name's lock
-(`lockStream`) and **before** `beginRetire` writes a pending retired marker and before the revocation. A refused gate
-changes nothing: no marker, no revocation, no deletion, and for `retire` no edit of the policy file (the existing
-refusal path of `retire` already leaves the file untouched: `fail("%v: nothing was changed")`).
+**The structure of removal on `main`** (checked in `internal/admin/admin.go`, `internal/ctl/ctl.go`,
+`cmd/mashctl/retire.go`, `cmd/mashctl/add.go`). There are three exported removal methods on `*admin.Admin`, and each has
+its own body, not a call to a shared one:
 
-**The condition.** The gate passes when the inbox stream is absent, or has never stored a message (`LastSeq == 0`; this
-keeps the rollback calls that provisioning makes freely), or all of these hold, evaluated against the live stream and the
-bucket:
+| Entry point | Reached by | What it does, in order |
+|---|---|---|
+| `Admin.Deprovision` (calls `deprovisionLocked`) | `mashctl deprovision NAME` and `mash admin deprovision NAME` (the verb is one function in `internal/ctl/ctl.go`, shared by both) | lock the name (`lockStream`), alias guard, read the record, `beginRetire` (pending marker), `revokeLocked`, lease `fence`, `purgeDirectory`, `finalizeRetire`, `deleteInbox` |
+| `Admin.DeprovisionIfUser` | `deprovision NAME --user KEY` (both tools); `mashctl retire` (through the test seam `deprovisionIfUser`, `cmd/mashctl/retire.go`); the rollback of a failed `mashctl add` (`cmd/mashctl/add.go`) | lock, alias guard, read the record and check its user, `beginRetire`, `revokeLocked`, guarded `purgeDirectory`, `finalizeRetire`, then `fenceAndDeleteInbox` (lease `fence`, `deleteInbox`). A name with no record but a retired marker goes through `finishAfterPurge`, which ends in `fenceAndDeleteInbox` too |
+| `Admin.DeprovisionDrained` | `deprovision NAME --drained-to SEQ --suspension ID` (both tools) | lock, requires the inbox suspended with the given id and `LastSeq == SEQ`, read the record, alias guard, `beginRetire`, `revokeLocked`, guarded `purgeDirectory`, `finalizeRetire`, `fenceAndDeleteInbox`; or `finishAfterPurge` when the record is gone |
+
+All paths delete the stream in one place: `Admin.deleteInbox` calls `DeleteStream`, and `deleteInbox` is the only caller of
+`DeleteStream` in the code. The destructive actions that come before it differ by path, and the revocation, the retired
+marker and the directory purge each happen well before the stream is deleted. So a gate placed in `deprovisionLocked`
+(the first version of this design) is reached only by plain `Deprovision`: the other two would remove an inbox, and
+`retire` calls `DeprovisionIfUser`.
+
+**The one shared removal step: `Admin.guardRemoval`** (new, in a new file `internal/admin/removal.go`). Every removal path
+calls it, once, with the name's lock held (`lk`) and after its own non-destructive checks (alias guard, the record read
+and the ownership or suspension-id checks, which refuse without changing anything), and **before the first destructive
+action**: before `beginRetire`, before `revokeLocked`, before any `purgeDirectory`, before the lease `fence`, and before
+`deleteInbox`. It runs the sequence below and returns either a refusal (`*refusedError`, which `admin.IsRefusal` and the
+existing refusal text of `retire` and `deprovision` already handle: nothing was changed) or a `*removalFence`, a token
+that proves the inbox is parked, was evaluated and archived. The entry points are made to use it as follows:
+
+- `deprovisionLocked`: call it after the record read and before `beginRetire`.
+- `DeprovisionIfUser`: call it once, after the first ownership check passes (a record that belongs to another user refuses
+  earlier, with no fence), before `beginRetire`. `finishAfterPurge` calls it before `fenceAndDeleteInbox`, since a removal
+  that stopped after the purge still has an inbox to delete.
+- `DeprovisionDrained`: call it after its existing checks and before `beginRetire`. The inbox is already suspended by the
+  operator (the fence is held already, see below).
+- `fenceAndDeleteInbox` and `deleteInbox` take the `*removalFence` as a required parameter, and `deleteInbox` refuses a nil
+  one. A new removal path cannot reach the deletion without having called `guardRemoval`, and a missing call is a compile
+  error at the call site, not a review finding.
+- `mashctl retire`, `mashctl deprovision` and `mash admin deprovision` are made to use it by being unchanged: they reach
+  the three methods (the table above), so they get the gate with no code of their own. The only CLI change is the
+  `--keep-suspended` flag (below), which weakens nothing.
+
+The token also records whether this call parked the inbox. A `defer tok.release(ctx)` in each entry point resumes the
+inbox on every return that comes before the first destructive action (a refusal by the gate, a later non-destructive
+refusal such as a record that changed). The first call to `beginRetire`, `revokeLocked` or `purgeDirectory` marks the token
+`removing`: from then on the park is held, never resumed by this call, through to the deletion, because the removal is
+under way and a re-run finishes it.
+
+**The sequence (the fence).**
+
+1. *Fence.* Park the inbox's subjects with the existing suspend mechanism (`Admin.Suspend`, ADR 0057, which `mashctl
+   suspend NAME` runs: `internal/admin/suspend.go`). It saves the stream's subjects in the stream metadata and replaces them
+   with the one subject `mash.suspended.<name>` (`store.SuspendedSubject`), which sits outside `agents.>`, so no sender's
+   publish finds the stream and no new message can be stored. `Suspend` takes the name's lock itself, so `guardRemoval`
+   uses a new `suspendLocked` (the body of `Suspend`, taking the held `lk`) and `Suspend` becomes a wrapper around it; the
+   same for `resumeLocked`. An inbox that is already suspended is used as it is (`Suspend` is idempotent). A stream that
+   is absent has nothing to fence, and the gate passes (below). The fence adds one metadata key,
+   `mash_suspended_by=removal-gate`, to a park this call makes, so a later run can tell the gate's park from the operator's.
+2. *Settle and read the final state.* `settledState` reads `LastSeq` until it is unchanged across two reads 50 ms apart
+   (it exists because a publish the stream accepted before the update can still be queued for ingest and stored after the
+   update returns; it stops after 2 seconds and never fails for want of a quiet stream). The gate requires that its last two
+   reads were equal; a stream that did not settle in time refuses with a retry message and unfences. Then read, under the
+   fence and once: `FirstSeq`, `LastSeq`, the consumer's `Delivered.Stream`, the directory record, and the delivery record
+   of the current generation from the bucket (section 4.4). Mail that arrived before the fence is in `LastSeq` and is
+   counted. Mail arriving after the fence is refused by the stream's subject, so `LastSeq` is final.
+3. *Evaluate* the condition below on exactly those values.
+4. *Decide.* If the condition fails, release the fence (`resumeLocked`) unless the token's park was not the gate's (the
+   operator had already suspended the inbox, or `DeprovisionDrained` is the caller) or the operator passed `--keep-suspended`,
+   and return the refusal. If it holds, write the archive entry (below) and read it back with the same fold.
+5. *Delete, only under the fence.* Before the first destructive action, re-read `LastSeq` and compare it with step 2; a
+   difference refuses (a safety check on the fence, not a substitute for it: under the fence it cannot differ) and
+   unfences. Then the path's own destructive steps run (marker, revocation, record purge, lease tombstone) and
+   `deleteInbox(tok)` deletes the stream. The fence is held through all of it; it is never released between the check and
+   the deletion.
+
+**What a crash leaves.** After step 1 and before step 5, the stream is parked with `mash_suspended_by=removal-gate` and
+nothing else changed. `mashctl audit` shows the inbox as `suspended` (the existing field), and `mashctl resume NAME`
+restores it; no mail is lost, only refused for the time it is parked (senders see no stream, as with any suspend). Running
+`deprovision` again finds a park carrying the gate's tag, treats it as its own and starts again at step 2. After step 5
+begins, the failure rows of the existing removal apply unchanged (`PARTIAL`, a pending retired marker, a re-run finishes
+it) and the inbox stays parked, so no mail is stored in between.
+
+`--keep-suspended` (a new flag on `deprovision` and `retire`, accepted by all three forms) leaves the inbox suspended when
+the gate refuses, for an operator who wants to drain it without new mail; the refusal text then says so and gives
+`mashctl resume NAME`. It does not skip the gate.
+
+**The condition.** The gate passes when the inbox stream is absent, or the stream, read under the fence, has never stored
+a message (`LastSeq == 0`; the rollback calls that provisioning makes freely, which now fence an empty inbox for a moment
+before deleting it, so a message cannot slip in between), or all of these hold, evaluated against the values of step 2:
 
 1. the evaluation of section 4.4 finds a record for the current generation (state is not `no record`);
 2. `lost + unproven + outstanding == 0` over `[B .. LastSeq]`: every message the stream stored since the base was presented,
@@ -526,10 +655,10 @@ bucket:
 the archive records how many there were. When some of 2 or 1 fails, the gate also passes if the archive holds an
 **acknowledgement** for this generation whose digest equals the digest of the current unaccounted set (below).
 
-The check reads `LastSeq` twice, before and after the archive write. Mail stored after the second read and before the
-stream's removal is outside the claim, and the output says so; the existing `suspend` flow closes the window, because
-`deprovision --drained-to SEQ --suspension ID` already refuses a stream that moved past SEQ. The gate runs in all three
-forms of the verb.
+There is one read of `LastSeq` for the evaluation (step 2), taken under the fence, and one equality check before the first
+destructive action (step 5). The gate runs in all three forms of the verb, because it is inside the methods all three
+reach. `deprovision --drained-to SEQ --suspension ID` keeps its own refusal of a stream that moved past SEQ, and its park
+is the operator's, so the gate neither resumes it on a refusal nor needs to park it again.
 
 **The archive.** Key `<flat>.<gen>` in `mash-presented-archive`, written over the admin connection. The value is JSON with
 a version field:
@@ -539,15 +668,16 @@ a version field:
  "stream_created":"2026-11-10T08:00:00.123456789Z","archived_at":"2026-11-12T10:00:00Z","by":"<admin user public key>",
  "mash":"v0.5.0","first_seq":1200,"last_seq":4100,"base":1,"base_source":"endpoint",
  "counts":{"presented":4000,"refused":3,"duplicate":97,"channel":0},
- "lost":[],"unproven":[],"outstanding":[],"before_base":0,"sessions":1,"spool_required":true,
+ "lost":[],"unproven":[],"outstanding":[],"excluded":[],"before_base":0,"sessions":1,"spool_required":true,
  "fold_digest":"sha256:...","ranges_truncated":false}
 ```
 
 `fold_digest` is the SHA-256 of the canonical encoding of the generation, base, last sequence and the three range lists. A
 list longer than 10,000 ranges is cut, `ranges_truncated` is set, and the counts stay exact. The archive never expires
-and nothing in mash deletes from it. After the stream is removed, the admin purges the generation's delta and snapshot
-subjects from `mash-presented` (the subject filter on `e.<flat>.<gen>.>` and its admin keys), so the live bucket holds
-only generations that still exist. A failure of that purge is reported and leaves harmless keys; the audit lists them as
+and nothing in mash deletes from it. After the stream is removed, the admin purges the generation's delta, snapshot and
+admin-base subjects from `mash-presented` (three subject filters, `e.<flat>.<gen>.>`, `s.<flat>.<gen>.>` and
+`a.<flat>.<gen>.>`, each naming one generation), so the live bucket holds only generations that still exist. The stream is
+gone and fenced by then, so no later fact for that generation can be needed. A failure of that purge is reported and leaves harmless keys; the audit lists them as
 an old generation with an archive entry.
 
 **The flow, with no force flag.**
@@ -567,10 +697,14 @@ revision `{"kind":"acknowledgement","by":...,"at":...,"reason":...,"digest":...,
 an acknowledgement only if its digest equals the current one, so mail that arrives or is lost afterwards blocks again. The
 command prints what it records, and does nothing to the inbox. It does not make `--strict` pass.
 
-**Interplay with `retire`.** `retire` revokes the user, removes the record and the inbox, and edits the policy file, in
-that order (`cmd/mashctl/retire.go`). The gate refuses at the start of the removal, so a refused `retire` has revoked
-nothing and left the policy file as it was; the operator acknowledges or drains, then runs `retire` again. `retire
---force` does not bypass the gate. A `PARTIAL` result from a retire that failed midway is finished with `mashctl
+**Interplay with `retire`.** `retire` calls `DeprovisionIfUser`, which revokes the user, removes the record and the inbox,
+and then `retire` edits the policy file (`cmd/mashctl/retire.go`). The gate (through `guardRemoval`, inside
+`DeprovisionIfUser`) refuses before the revocation closure runs, so a refused `retire` has revoked nothing, has resumed the
+inbox, and has left the policy file as it was (the refusal goes down the existing path, `fail("%v: nothing was changed")`);
+the operator acknowledges or drains, then runs `retire` again. `retire --force` does not bypass the gate: `--force` only
+decides what `retire` does when the server has no record. The rollback of a failed `mashctl add` also calls
+`DeprovisionIfUser`: its inbox is new and empty, so the gate passes after fencing it. A gate refusal there (an inbox that
+holds mail) is reported as `PARTIAL` by `add` and finished by the operator. A `PARTIAL` result from a retire that failed midway is finished with `mashctl
 deprovision NAME`, which runs the gate; if the stream is already gone the gate passes (absent stream), the archive is
 written from what the bucket holds with `"stream":"absent"`, and the removal completes.
 
@@ -579,31 +713,37 @@ sequenceDiagram
     autonumber
     actor O as operator
     participant C as mashctl (deprovision / retire)
-    participant A as Admin.deprovisionLocked
+    participant A as removal entry point<br/>(Deprovision, DeprovisionIfUser, DeprovisionDrained)
+    participant G as Admin.guardRemoval
     participant J as inbox stream
     participant B as mash-presented
     participant R as mash-presented-archive
 
-    O->>C: deprovision NAME
-    C->>A: lock NAME (lockStream)
-    A->>J: stream info (generation, FirstSeq, LastSeq, consumer)
-    A->>B: read every key of NAME's generation
-    A->>A: fold, classify (lost, unproven, outstanding)
+    O->>C: deprovision NAME (or retire NAME)
+    C->>A: lock NAME (lockStream), alias guard, record checks
+    A->>G: guardRemoval (before any destructive action)
+    G->>J: FENCE: park the subjects (suspendLocked); new mail is refused
+    G->>J: settle, then read FirstSeq, LastSeq, consumer (final)
+    G->>B: read every key of NAME's generation
+    G->>G: fold, classify (lost, unproven, outstanding)
     alt LastSeq is 0 or stream absent
-        A->>A: gate passes
+        G->>G: gate passes
     else accounted in full and a record exists
-        A->>R: write final archive entry, read it back
+        G->>R: write final archive entry, read it back
     else an acknowledgement with the current digest exists
-        A->>R: write final archive entry citing it, read it back
+        G->>R: write final archive entry citing it, read it back
     else
-        A-->>C: refused: N not accounted for (nothing changed)
+        G->>J: UNFENCE: resume (unless kept suspended)
+        G-->>C: refused: N not accounted for (nothing changed)
         C-->>O: refusal text, exit 1
         O->>C: proof acknowledge NAME --reason TEXT
         C->>R: write acknowledgement (digest of the unaccounted set)
         O->>C: deprovision NAME (again)
     end
-    A->>J: stream info again (LastSeq unchanged)
-    A->>A: beginRetire (pending marker), revoke, remove record, delete stream
+    G->>J: re-read LastSeq (equal to the evaluated one)
+    G-->>A: removalFence token (inbox stays parked)
+    A->>A: beginRetire (pending marker), revoke, remove record, lease tombstone
+    A->>J: deleteInbox(token): delete the stream (fence held to here)
     A->>B: purge the generation's keys
     A-->>C: done
 ```
@@ -624,10 +764,25 @@ acked through the channel, and a spool failure is reported (`cmd/mash/serve.go`,
    say whether the setting was on when mail was acked by the channel and what to change. `config.Config.SpoolRequired`
    is the input; the value schema already has the field.
 3. **`mashctl proof rebase NAME --reason TEXT`.** Raises the base to the current `LastSeq + 1`, by writing
-   `a.<flat>.<gen>.b.<B>` and an archive revision of the fold as it was. The inbox is then proven from there and the old
-   unproven or lost sequences stay in the archive. It is the operator's statement that the proof starts now; it is what
-   lets a deployment that turned on `MASH_SPOOL_REQUIRED` get a passing `--strict` without waiting for the channel-acked
-   mail to leave the stream. It never lowers a base, and the audit prints `base_source: admin`.
+   `a.<flat>.<gen>.b.<B>` and, **first**, an `excluded` record: a revision under the generation's key `<flat>.<gen>` in
+   `mash-presented-archive` (written only over the admin connection; no endpoint grant reaches that bucket). The record
+   lists exactly what the rebase moves past: the counts and the ranges, by class (lost, unproven, channel-acked), as the
+   fold stood when it ran; who ran it (the admin key id); when; and the reason (required, bounded to 1 KiB). It is written
+   and read back before the base key is written, so a base is never raised without its record; a crash between the two
+   leaves a record and no raise, and the next run writes the raise.
+
+   A rebase never erases evidence. The base moves, so the sequences are no longer in `lost` or `unproven` for the live
+   fold, but `--strict` reports every `excluded` record of the generation as a finding of class `excluded` (section 4.4:
+   date, admin key id, reason, counts and ranges) and fails for as long as the generation exists. A known loss stays a
+   finding. An acknowledgement does not clear it, a second rebase does not, and nothing in mash removes an archive
+   revision. The only way back to a clean `--strict` for that endpoint is a new generation: remove the inbox through the
+   deprovision gate and provision it again. The excluded sequences are below the base, so they do not block the gate; the
+   final archive entry lists the generation's `excluded` records (section 4.7), so the history stays in the archive. The new generation starts at base 1 with an empty record.
+
+   What `rebase` is for: it serves non-strict operation, where `audit` and `status` should report new losses from now on
+   and stop restating old ones in the live counts; and the transition after `MASH_SPOOL_REQUIRED` is turned on, where the
+   channel-acked history is a fact of the past and the operator wants every message from now on to be judged against the
+   setting. After a rebase the audit prints `base_source: admin` and still lists the exclusion. It never lowers a base.
 4. **`status` and the `status` tool** report `hold-until-shown: on` or `off`, and, when off and the ledger holds channel-acked
    mail, say that those messages are not proven shown.
 5. **Docs** (section 8): the `MASH_SPOOL_REQUIRED` paragraph in `docs/operations.md` names the proof as the reason to set
@@ -693,9 +848,12 @@ Numbers derive from the key layout and the write path. A *drain pass* is one run
 about 10 messages or 16 KiB per run (ADR 0026), and serve coalesces the drains it sees in one 250 ms pass
 (`SpoolCheck`). Measured on this design: none. Every figure below is arithmetic from the layout, marked as such.
 
-**Bytes per delta.** The subject is about 64 to 80 bytes (section 4.1's example is 80), the value about 75 bytes
-(`{"v":1,"t":...,"n":10,"s":...,"req":1}`), and a file-store message adds about 30 bytes of record header and hash. So a
-delta is about **190 bytes stored**, and about 160 bytes on the wire (`PUB` line, subject, payload). A snapshot of a window
+**Bytes per delta.** The subject is about 68 to 85 bytes with the window token (section 4.1's example is 79: the window
+token adds 2 to 8 bytes, 4 for the example), the value about 75 bytes (`{"v":1,"t":...,"n":10,"s":...,"req":1}`), and a
+file-store message adds about 30 bytes of record header and hash. That is 184 bytes for the example, and the longest
+realistic key adds about 10, so a delta is still about **190 bytes stored** (the earlier estimate stands, its subject
+figure having been rounded up), and about 160 bytes on the wire (`PUB` line, subject, payload). The window token costs
+nothing in the permission template (the one line is unchanged) and about 4 bytes per delta. A snapshot of a window
 with nothing lost is about 220 bytes stored, and each lost run in it adds about 14.
 
 **Deltas per message.** One delta per (kind, contiguous run, window) per pass. A pass that drains k contiguous messages
@@ -724,7 +882,10 @@ in the worst case, inside the 30 second `AckWait` that `SpoolKeepAlive` keeps pu
 
 **NATS load and reads.** Writes are small appends to one stream. The audit reads the bucket once per run, by one consumer
 over the whole stream: at the cap that is about 128 MiB, or 700,000 messages at 190 bytes. The time that takes is not
-measured.
+measured. Compaction reads one window at a time through a subject filter, so it reads about 4096 / 10 to 4096 deltas
+(80 KB to 800 KB) per window and writes one snapshot of a few hundred bytes. A refused gate costs two stream configuration
+updates (park, resume) and a brief spell in which senders find no stream; a passing gate costs the park, which the deletion
+then supersedes.
 
 ## 6. Failure modes and crash points
 
@@ -745,19 +906,58 @@ measured.
 | A reader meets an unknown value version | the key | `unreadable_keys`, a finding; the key does not count as presentation. |
 | The consumer was recreated, resetting `Delivered.Stream` | the keys | Unchanged: the record does not use consumer state except in the classification of `unproven, takeover` and the overclaim bound. The base was written at first bind and stays. |
 | The admin credentials are used to add a key | the key | Indistinguishable from the endpoint's, as the issue record's admin writes are. The record guards against an endpoint's mistakes, not against the admin credentials. |
+| Mail arrives before the removal gate's fence | the stream | It is in `LastSeq` when the gate reads under the fence, so it is counted: `outstanding` until a hook shows it, and the gate refuses. |
+| Mail is sent after the fence, during the gate | nothing stored | The stream no longer takes the subject, so the sender gets no stream (as with any suspend, ADR 0057). `LastSeq` cannot move, so the evaluated state is the state that is deleted. |
+| The gate refuses (not accounted for) | the stream, unchanged | The gate resumes the inbox (unless it was already suspended by the operator, or `--keep-suspended`); nothing was marked, revoked or removed. The refusal says what is missing. |
+| Crash after the fence, before any destructive action | the parked stream, tagged `mash_suspended_by=removal-gate` | `audit` shows the inbox as suspended; `mashctl resume NAME` restores it, or running `deprovision` again takes the park as its own and re-evaluates. No mail is lost. |
+| Crash or error after the first destructive action (marker, revocation, purge) | the parked stream, pending marker | The removal's existing partial states apply (`PARTIAL`, a pending retired marker); the inbox stays parked, no mail is stored meanwhile, and a re-run runs the gate again and finishes. |
+| A new removal path is added that does not call the shared step | nothing | Does not compile when it deletes the stream (`deleteInbox` needs the token), and the structural test of section 7 fails when it takes any other destructive action without calling `guardRemoval` first. |
+| `proof rebase` moves the base past lost, unproven or channel-acked mail | the `excluded` record in the archive, then the raised base | `--strict` reports each excluded set as a finding and fails for the life of the generation; the live counts above the new base are clean. A crash between the record and the base leaves a record and no raise. |
+| Compaction crashes after the snapshot, before the purge, or the purge fails | the snapshot and the deltas it covers | Duplicate facts, harmless: the fold is a union. The next compaction folds the window again and purges. Nothing is lost, and no other window is touched, because the purge filter names one window. |
+| Compaction's verify step finds the snapshot does not cover the window's facts | the snapshot, and all deltas | Nothing is purged; the snapshot is reported as a finding of the compaction and left (a duplicate). The deltas are still the evidence. |
+| A delta arrives for a window while it is being compacted | the delta (a higher stream sequence than the read) | The purge is bounded to sequences below the read, so the delta is kept and the next compaction folds it. |
 
 ## 7. Test plan
 
 **Unit tests** (no server):
 
-- Key encode and decode: every kind, the window split of a run that crosses a boundary, the bounds (a 4097-wide range, a
-  range across a boundary, `lo` 0, a wrong version), and that decode rejects what encode never writes.
+- Key encode and decode: every kind, the window token (`floor(seq / 4096)`; sequences 4095, 4096 and 4097 fall in windows
+  0, 1 and 1), the window split of a run that crosses a boundary, the bounds (a 4097-wide range, a range across a boundary,
+  a window token that is not `floor(lo / 4096)`, `lo` 0, a wrong version), that the filter
+  `e.<flat>.<gen>.<window>.>` matches the keys of that window and no key of window 1 for window 11 or of another
+  generation, and that decode rejects what encode never writes.
 - The fold: the invariant `lost = [B..F-1] minus accounted` on given stream states, with presented, refused, channel and
   duplicate keys; a duplicate with no named original, and one whose original is not presented, explaining nothing; the
   classes of section 4.4 and that they add up; the base rule (explicit, highest wins, inconsistent when above the lowest
   recorded sequence); generations kept apart; the overclaim bounds.
 - Compaction: a fold of deltas and the fold of the snapshot plus a late delta agree; compaction twice is the same as once; a
-  crash between the snapshot write and the purge leaves a state that folds the same.
+  crash between the snapshot write and the purge leaves a state that folds the same (duplicates, union); a snapshot that
+  fails the verify step (a count or a range missing) leads to no purge; a compaction of window 1 never purges a key of
+  window 11, of window 0 or of another generation; a delta written after the read of step 1 survives the purge.
+- The removal gate: the sequence of section 4.7 on fakes: fence, then read, then evaluate, then delete, in that order, and
+  no read of `LastSeq` before the fence; a refusal resumes only a park the gate made (not the operator's, not under
+  `--keep-suspended`); a stream that does not settle refuses; a message published between the evaluation and the deletion is
+  refused by the stream and `LastSeq` is equal at the pre-deletion check.
+- **Every removal entry point is gated (table test).** A table lists every exported removal entry point of `*admin.Admin`:
+  `Deprovision`, `DeprovisionIfUser`, `DeprovisionDrained`, and the paths through them (`finishAfterPurge`, the rollback
+  call of `mashctl add`, `mashctl retire`, `mashctl deprovision`, `mash admin deprovision`). For each, the test provisions
+  an inbox with unaccounted mail (one lost, one unproven, one outstanding, and one with no record) and asserts that the
+  entry point refuses, that the stream, the directory record, the lease, the retired marker and the user's revocation are
+  all unchanged, that the inbox is not left suspended (unless it was suspended before or `--keep-suspended` was given), and
+  that the same inbox, accounted in full, is removed. `retire --force` is in the table.
+- **Structural test (a lint that fails when a removal path bypasses the shared step).** A test in `internal/admin` parses
+  the package with `go/parser` and builds the call graph of its functions. It fails when (a) any function other than
+  `deleteInbox` calls `DeleteStream`; (b) `deleteInbox` or `fenceAndDeleteInbox` is called with anything but a
+  `*removalFence` obtained from `guardRemoval`; (c) any function that calls `beginRetire`, `revokeLocked`, `purgeDirectory`
+  or `fence` is reachable from an exported method that does not call `guardRemoval` earlier in source order (the
+  guard before the first destructive call); (d) an exported `*Admin` method that reaches `deleteInbox` is not named in the
+  table test above, so adding a removal entry point without adding its table row fails. The same test runs over
+  `cmd/mashctl` and `internal/ctl` and fails on any direct call to `DeleteStream` there.
+- The `excluded` record: a rebase writes the record before the base; the record holds the counts and ranges by class, the
+  admin key id, the time and the reason; it is written once per rebase and the archive refuses a revision past 64; the
+  audit reports every excluded set as a finding of class `excluded` with its date and reason; `--strict` exits 1 for
+  the generation after a rebase, after a second rebase, and after `proof acknowledge`; a new generation (deprovision then
+  provision again) is clean.
 - The ledger additions: `base` and `pushed` records fold as sets, a lost `pushed` line only causes a re-push.
 - `VerifyPresentedBucket` for each of the settings in section 4.1 gone wrong, as `VerifyIssuedBucket` is tested.
 - The permission lists: the line is in `fixedPubKeyed`, `NewFormPermissions`, `ZonePermissions` and the bridge, nothing else
@@ -769,7 +969,9 @@ measured.
 `after-print` and `after-first-drained` (`failpoint`, `cmd/mash/hook.go`, set by `MASH_HOOK_FAILPOINT`) and serve's
 `before-ack` (`failpointBeforeAck`, `internal/endpoint/hook.go`, set by `MASH_SERVE_FAILPOINT`). New, in the same style:
 `after-ledger` (after the ledger line, before the remote write) and `after-push` (after the acknowledged write, before the
-ack). Each of the crash rows of section 6 is a test: kill the process at the point, restart, and assert the audit's state
+ack). For the removal gate, three more: `after-fence` (the inbox is parked, nothing else changed), `after-archive` (the
+archive entry is written, the removal has not begun) and `after-marker` (the first destructive action is done). Each of
+the crash rows of section 6 is a test: kill the process at the point, restart, and assert the audit's state
 and that nothing is shown twice except where the table says so.
 
 **AT-style tests** (the numbers are to be assigned by the contract's owner; which are free is not verified):
@@ -781,9 +983,15 @@ and that nothing is shown twice except where the table says so.
 - A takeover test: session A shows and does not ack, session B takes over, A's state is removed, the message is evicted:
   `unproven`, and the gate refuses it.
 - A digest line never produces a `p` key (decision 7).
-- The deprovision gate: refused with each of lost, unproven, outstanding and no record; passes when accounted in full;
-  passes with a matching acknowledgement and refuses once new mail arrives; `retire` refuses with the policy file untouched;
-  `retire --force` does not bypass; a stream that is absent passes; the archive entry is read back.
+- The deprovision gate: refused with each of lost, unproven, outstanding and no record, through each of the three entry
+  points; passes when accounted in full; passes with a matching acknowledgement and refuses once new mail arrives;
+  `retire` refuses with the policy file untouched and the user not revoked; `retire --force` does not bypass; a stream
+  that is absent passes; the archive entry is read back. With a sender publishing continuously while the gate runs,
+  every message the stream stored is in the evaluated `LastSeq` (no message is stored after the fence) and the refused
+  inbox resumes and takes mail again. After a crash at `after-fence`, `audit` shows the inbox suspended and `mashctl
+  resume` restores it.
+- Rebase: after `proof rebase` the live state is clean above the base and `--strict` still exits 1 with an `excluded`
+  finding naming the date, the admin key id and the reason; only a new generation exits 0.
 - Mixed state: one group granted, one not; `--delivery-zone` scopes `--strict`; without it `--strict` fails on `no record`.
 
 **Live test with a real operator-mode server and a write-only endpoint credential.** The harness is the one AT-011 uses
@@ -799,7 +1007,8 @@ carries the one line, and connects as that user. It asserts, on the real server:
   `maximum messages per subject exceeded`, a KV delete marker and a purge marker (headers `KV-Operation` DEL and PURGE) are
   refused, and a rollup header is refused because the stream does not allow rollup;
 - a reader with the admin creds sees exactly the facts written, folds them, and compaction (snapshot, read back, purge by
-  filter with a sequence bound) leaves the fold unchanged and a concurrent write intact;
+  filter with a sequence bound, one window at a time) leaves the fold unchanged, a concurrent write intact, and every
+  other window's keys intact;
 - a full bucket (a small `MaxBytes` for the test) refuses the next write, and serve acks regardless and reports the failure.
 
 A separate live test runs a built `mash serve` and `mash hook` against the server, shows a message, and checks that the
@@ -833,7 +1042,8 @@ these items, in this order, in words an operator can act on. The text below is t
    for it. Mail already gone before the record started is reported as outside the proof, not as lost.
 3. **`mashctl deprovision` and `mashctl retire` are refused until the endpoint's inbox is audited.** They refuse when any
    message in the inbox is not accounted for (lost, unproven, or still waiting) or when the inbox holds mail and has no
-   delivery record. There is no force flag. Run `mashctl proof check NAME` to see what is missing. To accept the loss, run
+   delivery record. There is no force flag. While the check runs the inbox is parked (new mail is refused, as with `mashctl
+   suspend`) and it is resumed if the check refuses; `--keep-suspended` leaves it parked. Run `mashctl proof check NAME` to see what is missing. To accept the loss, run
    `mashctl proof acknowledge NAME --reason "..."` and then the same command again. The acknowledgement and the final record
    are kept in `KV_mash-presented-archive`, which never expires. `mash admin deprovision` has the same check.
 4. **Grant the record lines one owner group at a time.** The endpoints of a group disconnect and reconnect once when
@@ -844,8 +1054,10 @@ these items, in this order, in words an operator can act on. The text below is t
 6. **What `--strict` proves.** It proves mash handed each message to the host's input, and that none that it received was
    dropped without a record. It does not prove the model read it, and the record is the endpoint's own statement.
 7. For a deployment that wants mail held until it is shown: set `MASH_SPOOL_REQUIRED=1` (ADR 0107) on those endpoints, and
-   run `mashctl proof rebase NAME --reason "..."` once after setting it to start the proof after mail that was acked on a
-   channel write earlier.
+   run `mashctl proof rebase NAME --reason "..."` once after setting it to judge mail from then on against the setting.
+   The rebase does not hide the earlier mail: it is kept as an `excluded` record, and `mashctl audit --strict` keeps
+   failing for that inbox for as long as its generation exists. To get a clean `--strict` for the endpoint, remove it
+   through the deprovision check and provision it again (a new generation).
 
 Items 2 and 3 change what an operator sees for the first time, so they are the first things to say in the release summary
 too.
@@ -866,9 +1078,11 @@ makes none says `Decision: none`.
 4. *The permission templates grant the delivery record line, per owner group* (decision 8, the template line, the switch, the
    rollback).
 5. *Deprovision and retire are refused until the inbox is audited, and the loss is acknowledged explicitly* (decision 5, the
-   archive bucket, the digest).
-6. *`audit --strict` treats channel-acked mail as unproven, and the proof can be rebased* (decision 2 as it applies to the
-   audit, step 2; relates to ADR 0107).
+   archive bucket, the digest). Also: *Every removal path goes through one shared step that fences the inbox first* (the
+   `guardRemoval` token, the suspend-based fence, the structural test; relates to ADR 0057).
+6. *`audit --strict` treats channel-acked mail as unproven, and a rebase never erases evidence* (decision 2 as it applies
+   to the audit, step 2; relates to ADR 0107; the `excluded` record and the rule that a known loss stays a finding for the
+   life of the generation).
 
 ## 10. Open questions
 
@@ -883,10 +1097,17 @@ The eight decisions are settled. These remain:
    init`, `audit`, or a documented cron entry should, and at what bucket fill an `audit` should do it itself.
 4. **The behaviour of the pieces marked `not verified`:** a denied JetStream publish in nats.go 1.55.0 (how it fails and how
    fast), the API error code of a second write to a write-once key, an ordered consumer over a stream with discard-new per
-   subject, and a purge with a subject filter and a sequence bound. One spike before the first pull request of section 11
-   settles all four, and may change the details of sections 4.2 and 4.6, not the design.
+   subject, a purge with a subject filter and a sequence bound, the longest key the server accepts (about 225 bytes here)
+   and the archive's refusal of a 65th revision. One spike before the first pull request of section 11 settles all of
+   them, and may change the details of sections 4.2 and 4.6, not the design.
 5. **A clustered server.** Everything here was reasoned against a single server (`Replicas` 1, as the issue bucket). That
    discard-new per subject and the purge behave the same with replicas is not verified.
+6. **May an operator-acknowledged exclusion ever clear `--strict`?** This is the one remaining policy question about the
+   proof. Today a rebase leaves an `excluded` finding that `--strict` reports for the life of the generation, and only a
+   new generation is clean (section 4.8). A deployment that has accepted an old loss in writing might want the audit to
+   stop failing on it. **Recommendation: no.** A strict result that an operator can clear is a strict result that says
+   "no loss we chose to remember", which is the claim this design refuses to make; the cost of the recommendation is a
+   re-provision to get a clean generation.
 
 ## 11. Estimate and the order of pull requests
 
@@ -894,15 +1115,18 @@ S is up to a day, M a few days, L a week or more.
 
 | # | Pull request | Size | Depends on |
 |---|---|---|---|
-| 0 | Spike: the four unverified behaviours of open question 4, against nats-server 2.15.2, with a test that fails if the server changes them (as AT-011 does). | S | |
+| 0 | Spike: the unverified behaviours of open question 4 (a denied publish, the write-once error code, the ordered consumer, the filtered and bounded purge, the longest key, the archive's 65th revision), against nats-server 2.15.2, with a test that fails if the server changes them (as AT-011 does). | S | |
 | 1 | The buckets: `store.CreatePresentedBucket`, `VerifyPresentedBucket`, the archive bucket, `mash admin init`, the audit's bucket check, the permission line in `fixedPubKeyed`, the bridge and the list-set compile, the live write-only test. No behaviour changes: nothing writes yet. ADR 1 (the bucket part) and ADR 4. | M | 0, the ledger branch |
 | 2 | The write path: the delta keys, `proofPush`, the `base`, `pushed` and `req` ledger additions, the status line, the two failpoints, the crash-point tests. | M | 1 |
 | 3 | The read path: the fold, the classes, the audit wording and JSON, `proof check`, `--delivery-zone`, the exit rule. ADR 3. | M | 2 |
-| 4 | Compaction: `proof compact`, the snapshot, the purge, the near-full warning. | M | 3 |
-| 5 | The deprovision gate: the archive, `proof acknowledge`, the gate in `deprovisionLocked`, `retire`. ADR 5. | M | 3 |
-| 6 | Step 2: channel-acked mail as unproven, `proof rebase`, the `status` wording, `req`. ADR 6. | S | 3 |
+| 4 | Compaction: `proof compact`, the windowed snapshot with its verify step, the purge by window filter and sequence bound, the near-full warning. | M | 3 |
+| 5a | The shared removal step: `Admin.guardRemoval` and the `removalFence` token in `internal/admin/removal.go`, `suspendLocked` and `resumeLocked`, the call in `deprovisionLocked`, `DeprovisionIfUser`, `DeprovisionDrained` and `finishAfterPurge`, `deleteInbox` taking the token, `--keep-suspended`, the table test over every entry point and the structural test. The evaluation is a pass, so the only behaviour change is the brief fence. Part of ADR 5. | M | 0 |
+| 5b | The deprovision gate proper: the evaluation inside `guardRemoval`, the archive entry, `proof acknowledge`, the refusal text, the `retire` and `add` rollback cases, the failpoints and crash tests. ADR 5. | M | 3, 5a |
+| 6 | Step 2: channel-acked mail as unproven, `proof rebase` with its `excluded` record, the `excluded` class in the audit and the strict rule, the `status` wording, `req`. ADR 6. | M | 3, 1 |
 | 7 | Docs and the release notes' Upgrading text, the threat-model entry. | S | 3 to 6 |
 
-The whole is L. Pull requests 4, 5 and 6 are independent of one another once 3 has landed, and can be reviewed in any order.
+The whole is L (the two changes of the review history add one M: the gate is two pull requests, and rebase is M rather than S).
+Pull requests 4, 5b and 6 are independent of one another once 3 has landed, and can be reviewed in any order; 5a needs only
+the spike and can land before the read path.
 PR 1 can merge before any endpoint writes, so the first rollout step (the buckets) is separate from the first behaviour
 change. No pull request changes delivery.
