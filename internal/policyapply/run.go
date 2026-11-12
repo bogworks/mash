@@ -9,29 +9,56 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/policy"
 )
 
 // ErrSignedMismatch is returned by Run when what was signed is not what Accept compiled: the Compiled changed, or the
 // JWT does not carry it. Nothing is pushed.
 var ErrSignedMismatch = errors.New("what was signed is not the compiled output that was accepted")
 
+// ErrPendingGeneration is returned by Run when a generation is pending and the submission is not that same content.
+// A pending generation is one whose JWT was pushed but did not pass the gate and was not rolled back, so it may still
+// be visible on servers. The operator resolves it by resubmitting the same list set: Run pushes and gates again and,
+// when applied, commits it and clears the pending record. Rolling back is Converge's work, which clears the record when
+// every server is back on the previous generation; this change offers no other way out.
+var ErrPendingGeneration = errors.New("a generation is pending: resubmit the same list set")
+
+// ErrAccountJWTTooLarge is returned by Run when the signed account JWT exceeds policy.AccountJWTLimit. Nothing is
+// pushed.
+var ErrAccountJWTTooLarge = errors.New("the signed account JWT is over the size limit")
+
 // Ledger holds the record in force. It changes only after the gate passes.
 type Ledger interface {
+	// Lock takes the exclusive run lock, or fails when ctx is done first. Run holds it across reading the record in
+	// force, Accept, sign, push, gate and commit, and re-reads the record in force AFTER taking it. A persistent
+	// implementation MUST be a cross-process lock (a lease in the shared store): a process-local lock lets runs of
+	// separate processes interleave pushes.
+	Lock(ctx context.Context) (unlock func(), err error)
 	InForce() (listset.Record, error)
 	// CompareAndCommit replaces the record in force with rec if the generation in force is base, atomically, and
 	// otherwise fails with an error matching listset.ErrStaleBase.
 	CompareAndCommit(base uint64, rec listset.Record) error
+	// Pending returns the pending generation: pushed, not applied, not rolled back. ok is false when none.
+	Pending() (rec listset.Record, ok bool, err error)
+	// SetPending records rec as pending, replacing any other.
+	SetPending(rec listset.Record) error
+	// ClearPending removes the pending record.
+	ClearPending() error
 }
 
 // MemLedger is an in-memory Ledger, safe for concurrent use. It is process-local: see the package comment.
 type MemLedger struct {
-	mu  sync.Mutex // guards rec
-	run sync.Mutex // serialises Run
-	rec listset.Record
+	mu      sync.Mutex // guards rec, pending, hasPend
+	run     chan struct{}
+	rec     listset.Record
+	pending listset.Record
+	hasPend bool
 }
 
 // NewMemLedger returns a MemLedger with rec in force; the zero Record means nothing is in force.
-func NewMemLedger(rec listset.Record) *MemLedger { return &MemLedger{rec: rec} }
+func NewMemLedger(rec listset.Record) *MemLedger {
+	return &MemLedger{rec: rec, run: make(chan struct{}, 1)}
+}
 
 // InForce returns the record in force.
 func (l *MemLedger) InForce() (listset.Record, error) {
@@ -51,11 +78,37 @@ func (l *MemLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 	return nil
 }
 
-// Lock makes Run exclusive on this ledger until the returned function is called, so two runs do not push over each
-// other: the second reads the record the first committed and is refused as stale. Run uses it when the Ledger has it.
-func (l *MemLedger) Lock() (unlock func()) {
-	l.run.Lock()
-	return l.run.Unlock
+// Lock implements Ledger. It is exclusive within this process only.
+func (l *MemLedger) Lock(ctx context.Context) (unlock func(), err error) {
+	select {
+	case l.run <- struct{}{}:
+		return func() { <-l.run }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Pending implements Ledger.
+func (l *MemLedger) Pending() (listset.Record, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.pending, l.hasPend, nil
+}
+
+// SetPending implements Ledger.
+func (l *MemLedger) SetPending(rec listset.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pending, l.hasPend = rec, true
+	return nil
+}
+
+// ClearPending implements Ledger.
+func (l *MemLedger) ClearPending() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pending, l.hasPend = listset.Record{}, false
+	return nil
 }
 
 // Converge gates the target and, when servers do not all hold it, finishes the push: it pushes targetJWT again. If
@@ -93,6 +146,9 @@ func onTarget(st Status, gen uint64) bool {
 	}
 	return len(st.Servers) > 0
 }
+
+// backOn says every server holds generation gen (the previous one): the push is rolled back everywhere.
+func backOn(st Status, gen uint64) bool { return onTarget(st, gen) }
 
 // pushed sends tok to every server and reports whether the push was acknowledged by all of them without error.
 func pushed(ctx context.Context, in GateInput, tok string) bool {
@@ -138,6 +194,12 @@ type RunInput struct {
 	PreviousRevoked []string
 	// RevokedKeys are the user public keys this change revokes.
 	RevokedKeys []string
+	// Signers are the expected scoped signing keys of the target, and PreviousSigners of the previous generation
+	// (see Candidate.Signers). Signers is required: Run refuses a target without it.
+	Signers         map[string]string
+	PreviousSigners map[string]string
+	// OldKeys are the public keys of each sender's credentials issued before this change (see GateInput.OldKeys).
+	OldKeys map[string][]string
 	// Sign builds the account JWT for the record and a copy of the Compiled. Signing is the caller's.
 	Sign func(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
 	Now  func() time.Time
@@ -147,15 +209,24 @@ type RunInput struct {
 
 // Run accepts, signs, pushes, converges and gates a list set, and commits the generation only if it is applied.
 //
+// Run holds the ledger's lock throughout and reads the record in force after taking it. If the target was pushed and
+// the final state is not applied, the target is recorded as pending unless every server is back on the previous
+// generation. While one is pending Run refuses any submission with other content with ErrPendingGeneration, before
+// signing or pushing; resubmitting the same content pushes and gates again and, when applied, commits and clears it.
+// A signed JWT over policy.AccountJWTLimit is refused with ErrAccountJWTTooLarge before any push. A target without
+// Signers is refused as a partial Status with a generation failure.
+//
 // A list set that fails validation comes back as a refused Status and a nil error. A stale base, a signing error or a
 // mismatch between the signed JWT and the accepted output (ErrSignedMismatch, before any push) come back as errors.
 // When the final state is not applied nothing is committed and the Status says partial with the failures. The Compiled
 // is deep-copied before Sign; Sign gets its own copy, and both the copy and the frozen original must still digest to
 // Record.Signed, and the JWT must decode to the target generation, before anything is pushed.
 func Run(ctx context.Context, in RunInput) (Status, error) {
-	if unlock, ok := in.Ledger.(interface{ Lock() func() }); ok {
-		defer unlock.Lock()()
+	unlock, err := in.Ledger.Lock(ctx)
+	if err != nil {
+		return Status{}, err
 	}
+	defer unlock()
 	base, err := in.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
@@ -176,11 +247,33 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 		return st, nil
 	}
 
+	pend, hasPend, err := in.Ledger.Pending()
+	if err != nil {
+		return Status{}, err
+	}
+	if hasPend && pend.Generation != base.Generation+1 { // left over from a generation that has since been committed
+		if err := in.Ledger.ClearPending(); err != nil {
+			return Status{}, err
+		}
+		hasPend = false
+	}
+	if hasPend && pend.Content != rec.Content {
+		return Status{}, fmt.Errorf("%w: generation %d is pending, not this content", ErrPendingGeneration, pend.Generation)
+	}
+	if in.Signers == nil {
+		st := newStatus(rec, StatePartial, in.Now)
+		st.Failing = []Failure{{Check: CheckGeneration, Detail: NoSignersDetail}}
+		return st, nil
+	}
+
 	frozen := cloneCompiled(compiled)
 	signCopy := cloneCompiled(frozen)
 	tok, err := in.Sign(rec, signCopy)
 	if err != nil {
 		return Status{}, fmt.Errorf("sign generation %d: %w", rec.Generation, err)
+	}
+	if len(tok) > policy.AccountJWTLimit {
+		return Status{}, fmt.Errorf("%w: %d bytes, limit %d", ErrAccountJWTTooLarge, len(tok), policy.AccountJWTLimit)
 	}
 	if listset.DigestCompiled(signCopy) != rec.Signed || listset.DigestCompiled(frozen) != rec.Signed {
 		return Status{}, ErrSignedMismatch
@@ -189,16 +282,16 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	if g, ok := GenerationOf(tok, []Candidate{{rec.Generation, frozen, expect.RevokedKeys}}); !ok || g != rec.Generation {
+	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
 
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
-		Record: rec, Compiled: frozen, Expect: expect, Now: in.Now,
+		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, OldKeys: in.OldKeys, Now: in.Now,
 	}
 	if in.Previous != nil {
-		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked}
+		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked, Signers: in.PreviousSigners}
 	}
 	if in.OnStatus != nil {
 		in.OnStatus(newStatus(rec, StateApplying, in.Now))
@@ -206,10 +299,24 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 	pushed(ctx, gi, tok)
 	st, err := Converge(ctx, gi, tok, in.PreviousJWT)
 	if err != nil || st.State != StateApplied {
+		// The target was pushed. Unless every server is back on the previous generation it may be visible, so it is
+		// pending: only a resubmission of the same content may follow.
+		var perr error
+		if err == nil && backOn(st, base.Generation) {
+			perr = in.Ledger.ClearPending()
+		} else {
+			perr = in.Ledger.SetPending(rec)
+		}
+		if err == nil {
+			err = perr
+		}
 		return st, err
 	}
 	if err := in.Ledger.CompareAndCommit(base.Generation, rec); err != nil {
 		return st, fmt.Errorf("commit generation %d: %w", rec.Generation, err)
+	}
+	if err := in.Ledger.ClearPending(); err != nil {
+		return st, fmt.Errorf("clear pending after committing generation %d: %w", rec.Generation, err)
 	}
 	return st, nil
 }

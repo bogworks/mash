@@ -40,8 +40,17 @@ tags therefore has exactly the permissions the sender's old credential has under
 
 1. The server set is complete (`internal/apply`'s rules).
 2. Every server holds the target generation. A server's generation is read from its account JWT by content: the
-   templates on its scoped keys and its revocations match the target or the previous generation, or it is unknown.
+   templates on its scoped keys, the public keys of those scoped keys and its revocations match the target or the
+   previous generation, or it is unknown. The caller passes the expected scoped signing key of each owner group; the
+   JWT must hold exactly those and no other signing key, scoped or plain, so a JWT with another or an extra signer is
+   never read as a generation. The gate fails closed (a `generation` failure, "no expected signing keys") when the
+   target has none.
 3. Every revoked key is revoked in every server's account JWT. This is the evidence that the real old key is refused.
+   The caller gives an inventory of each sender's old keys (credentials issued before the change, from the issue
+   record). For every sender with a tag-only narrowing, and every sender the change removes, each old key must be among
+   the revoked keys, else the gate fails with `old_key_not_revoked` naming the sender and key. A sender with no
+   inventory entry fails too: the inventory is required, so a narrowing cannot count as applied while the real old
+   credential still reaches the removed receiver.
 4. Every connection opened before the push (a witness) was closed by the server.
 5. On every server, a reconnecting probe with the old name and tags is refused each receiver the change removed from
    it. When the removal is by tags only, the new template still grants the old tags that receiver, so the old
@@ -60,6 +69,19 @@ pushes the previous generation again. Only then does it report a policy in force
 in force only after the gate passes, with a compare-and-set on its base, so of two submissions on one base exactly one
 wins.
 
+When the target JWT was pushed and the gate does not pass, but not every server is back on the previous generation (for
+example every server holds the target and a probe or witness check fails), the target is recorded as a pending
+generation in the ledger. While one is pending, a submission with different content is refused with
+`ErrPendingGeneration` before anything is signed or pushed, so the same base cannot be accepted while the failed change
+is visible. The operator resolves it by resubmitting the same list set: it is pushed and gated again, and when applied
+it is committed and the pending record cleared. Rollback is by Converge, which clears the record when every server is
+back on the previous generation.
+
+The ledger's lock is mandatory. A run holds it across reading the record in force, accepting, signing, pushing, gating
+and committing, and reads the record in force after taking it. A persistent ledger MUST implement it as a cross-process
+lock (a lease in the shared store); the in-memory ledger's lock is per process. A run also refuses, before any push, a
+signed account JWT larger than `policy.AccountJWTLimit` (1 MiB), naming its size and the limit.
+
 ### Consequences
 
 * Good, because the gate needs no sender seed and works on every server.
@@ -74,7 +96,8 @@ wins.
 
 Unit tests in `internal/policyapply` run the gate against fake servers: applied on two servers, a server held back
 (partial, named), convergence by re-push and by pushing the previous generation, a missing revocation, an open witness,
-a removed receiver still reached, a tag-only narrowing, and two concurrent runs on one base. AT-010 runs it against a
+a removed receiver still reached, a tag-only narrowing with and without its old keys revoked, a JWT with another or an
+extra signer, a pending generation, an oversized JWT, and two concurrent runs on one base. AT-010 runs it against a
 live two-server cluster.
 
 ## Pros and Cons of the Options

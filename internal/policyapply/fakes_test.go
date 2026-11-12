@@ -76,10 +76,19 @@ func newKeys(t *testing.T) keys {
 // build makes an account JWT carrying c's templates as scoped keys (role = group) and the revoked keys.
 func (k keys) build(t *testing.T, c *listset.Compiled, revoked ...string) string {
 	t.Helper()
+	return k.buildWith(t, c, k.signers, nil, revoked...)
+}
+
+// buildWith is build with the given scoped signer keys per group, and extra plain signing keys.
+func (k keys) buildWith(t *testing.T, c *listset.Compiled, signers map[string]string, extra []string, revoked ...string) string {
+	t.Helper()
 	claims := jwt.NewAccountClaims(k.acctPub)
+	for _, e := range extra {
+		claims.SigningKeys.Add(e)
+	}
 	for _, tpl := range c.Templates {
 		sc := jwt.NewUserScope()
-		sc.Key = k.signers[tpl.Group]
+		sc.Key = signers[tpl.Group]
 		sc.Role = tpl.Group
 		sc.Template.Permissions = tpl.Permissions
 		claims.SigningKeys.AddScopedSigner(sc)

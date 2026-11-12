@@ -14,6 +14,12 @@ type Candidate struct {
 	Generation  uint64
 	Compiled    *listset.Compiled
 	RevokedKeys []string
+	// Signers maps each template's owner group to the public key of the scoped signing key expected for it. When
+	// non-nil the JWT must carry exactly those scoped keys, each with its group as role and the template's
+	// permissions, and no other signing key, scoped or plain. When nil, generations are told apart by role,
+	// permissions and revocations alone, so a JWT with a different or an extra signer can be read as the generation:
+	// that is for tests only. A caller in production MUST pass Signers; Run and Gate refuse a target without it.
+	Signers map[string]string
 }
 
 // GenerationOf says which candidate the account JWT carries. The JWT carries no marker: a scoped signing key whose
@@ -30,11 +36,11 @@ func GenerationOf(accountJWT string, candidates []Candidate) (gen uint64, ok boo
 }
 
 func generationOfClaims(claims *jwt.AccountClaims, candidates []Candidate) (uint64, bool) {
-	roles := map[string]string{} // role -> canonical permissions
+	roles := map[string]scoped{} // role -> scoped key
 	for k := range claims.SigningKeys {
 		sc, _ := claims.SigningKeys.GetScope(k)
 		if us, isUser := sc.(*jwt.UserScope); isUser && us != nil {
-			roles[us.Role] = canonPerms(us.Template.Permissions)
+			roles[us.Role] = scoped{key: k, perms: canonPerms(us.Template.Permissions)}
 		}
 	}
 	for _, c := range candidates {
@@ -45,13 +51,23 @@ func generationOfClaims(claims *jwt.AccountClaims, candidates []Candidate) (uint
 	return 0, false
 }
 
-func matches(claims *jwt.AccountClaims, roles map[string]string, c Candidate, all []Candidate) bool {
+// scoped is a scoped signing key as found in the JWT.
+type scoped struct{ key, perms string }
+
+func matches(claims *jwt.AccountClaims, roles map[string]scoped, c Candidate, all []Candidate) bool {
 	own := map[string]bool{}
 	for _, t := range c.Compiled.Templates {
 		own[t.Group] = true
-		if got, has := roles[t.Group]; !has || got != canonPerms(t.Permissions) {
+		got, has := roles[t.Group]
+		if !has || got.perms != canonPerms(t.Permissions) {
 			return false
 		}
+		if c.Signers != nil && got.key != c.Signers[t.Group] {
+			return false
+		}
+	}
+	if c.Signers != nil && len(claims.SigningKeys) != len(own) {
+		return false // a plain, a duplicate-role or any other signing key beyond the expected ones
 	}
 	for _, o := range all {
 		if o.Compiled == nil {

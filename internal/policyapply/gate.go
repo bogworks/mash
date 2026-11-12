@@ -28,12 +28,20 @@ type GateInput struct {
 	Previous *Candidate
 	// Expect is NewExpect for this change; its RevokedKeys are the target's.
 	Expect Expect
+	// Signers are the expected scoped signing keys of the target (see Candidate.Signers). Required: Gate fails
+	// closed without them.
+	Signers map[string]string
+	// OldKeys maps each sender to the public keys of its credentials issued before this change (the caller fills it
+	// from the issue record). Every sender with a credential-only reach, and every sender the change removes, needs
+	// an entry, and each of its keys must be in Expect.RevokedKeys: a tag-only narrowing leaves the old credential's
+	// reach in the template, and only revoking its key refuses it.
+	OldKeys map[string][]string
 	// Now gives the time stamped on the Status; nil means time.Now.
 	Now func() time.Time
 }
 
 func (in GateInput) target() Candidate {
-	return Candidate{Generation: in.Record.Generation, Compiled: in.Compiled, RevokedKeys: in.Expect.RevokedKeys}
+	return Candidate{Generation: in.Record.Generation, Compiled: in.Compiled, RevokedKeys: in.Expect.RevokedKeys, Signers: in.Signers}
 }
 
 // Gate judges the target generation and reports it. It collects every failure rather than stopping at the first.
@@ -74,6 +82,12 @@ func Gate(ctx context.Context, in GateInput) (Status, error) {
 	}
 	names := slices.Clone(set.Names)
 	sort.Strings(names)
+
+	if in.Signers == nil {
+		add("", "", CheckGeneration, NoSignersDetail)
+		return finish()
+	}
+	in.checkOldKeys(add)
 
 	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
 	jwtsRead := err == nil
@@ -139,6 +153,43 @@ func Gate(ctx context.Context, in GateInput) (Status, error) {
 		}
 	}
 	return finish()
+}
+
+// checkOldKeys requires every old key of a sender with a credential-only reach, or removed by the change, to be
+// revoked. A sender with no entry in OldKeys fails: the inventory is required.
+func (in GateInput) checkOldKeys(add func(server, sender, check, detail string)) {
+	need := map[string]bool{}
+	for _, r := range in.Expect.CredentialOnly {
+		need[r.Sender] = true
+	}
+	if in.Previous != nil && in.Previous.Compiled != nil && in.Compiled != nil {
+		now := map[string]bool{}
+		for _, u := range in.Compiled.Users {
+			now[u.Sender] = true
+		}
+		for _, u := range in.Previous.Compiled.Users {
+			if !now[u.Sender] {
+				need[u.Sender] = true
+			}
+		}
+	}
+	senders := make([]string, 0, len(need))
+	for s := range need {
+		senders = append(senders, s)
+	}
+	sort.Strings(senders)
+	for _, s := range senders {
+		keys, has := in.OldKeys[s]
+		if !has {
+			add("", s, CheckOldKeyNotRevoked, "no inventory of the sender's old keys")
+			continue
+		}
+		for _, k := range keys {
+			if !slices.Contains(in.Expect.RevokedKeys, k) {
+				add("", s, CheckOldKeyNotRevoked, "old key not revoked: "+k)
+			}
+		}
+	}
 }
 
 // checkWitnesses requires a closed witness for every server and every sender with a removed reach, and for every
