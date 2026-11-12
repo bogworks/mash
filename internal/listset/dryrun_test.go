@@ -251,7 +251,8 @@ func TestDryRunNothingInForce(t *testing.T) {
 		t.Errorf("templates = %+v", p.Templates)
 	}
 	wantReceivers(t, p, "foo.c.core", Mail, []string{"foo.c.lead"}, nil)
-	if len(p.Tags) != 1 || p.Tags[0].Sender != "foo.c.core" {
+	// Every new sender has a tag entry, an empty one included.
+	if len(p.Tags) != 3 || p.Tags[0].Sender != "foo.c.core" || len(p.Tags[0].New) == 0 || len(p.Tags[1].New) != 0 || p.Tags[1].New == nil {
 		t.Errorf("tags = %+v", p.Tags)
 	}
 }

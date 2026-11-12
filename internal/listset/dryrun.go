@@ -295,9 +295,7 @@ func (p *Plan) diff(oldM *model, oldC *Compiled, newM *model, newC *Compiled) er
 			p.Revoke = append(p.Revoke, s)
 		case !inOld:
 			p.FirstCredential = append(p.FirstCredential, s)
-			if len(n.Tags) > 0 {
-				p.Tags = append(p.Tags, TagChange{s, []string{}, slices.Clone(n.Tags)})
-			}
+			p.Tags = append(p.Tags, TagChange{s, []string{}, nonNil(n.Tags)})
 		case !slices.Equal(o.Tags, n.Tags):
 			p.Tags = append(p.Tags, TagChange{s, nonNil(o.Tags), nonNil(n.Tags)})
 			if Narrowed(o.Tags, n.Tags) {
