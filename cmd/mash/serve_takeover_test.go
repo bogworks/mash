@@ -51,8 +51,9 @@ func TestServeExitsWhenStdinReachesEOF(t *testing.T) {
 	}
 }
 
-// The reported defect: a new serve of the same session, while the old is alive and holds the lease, takes the lease at
-// once (not after the retry delay); the old one steps down within a lease-refresh interval and says it was superseded.
+// The reported defect: a new serve of the same session, while the old is alive and holds the lease, takes the lease
+// promptly (the first attempt, or the one-second same-session retry when a refresh won the compare-and-set); it does
+// not wait out the long retry delay. The old one steps down within a lease-refresh interval and says it was superseded.
 func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second) // a retry would take an hour: only a takeover passes
 	endpoint.LeaseRefresh = 100 * time.Millisecond
@@ -67,11 +68,21 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	fresh := startServe(t, w.env["a"])
 	fresh.initialize(t)
 	fresh.tools(t)
-	if got := acquireAttempts.Load(); got != attempts {
-		t.Fatalf("the new serve needed %d retries", got-attempts)
+	// The old serve rewrites the lease every 100 ms, so a refresh can win the compare-and-set of the first attempt; the
+	// serve then retries after sameSessionRetry, by design. Wait for the takeover rather than expect it at once.
+	var txt string
+	deadline := time.Now().Add(10 * time.Second)
+	for id := 5; !strings.Contains(txt, "connection: OK"); id++ {
+		if time.Now().After(deadline) {
+			t.Fatalf("the new serve did not take the lease; its last status: %s", txt)
+		}
+		if id > 5 {
+			time.Sleep(50 * time.Millisecond)
+		}
+		txt = resultText(fresh.call(t, id, "status", `{}`))
 	}
-	if txt := resultText(fresh.call(t, 5, "status", `{}`)); !strings.Contains(txt, "connection: OK") {
-		t.Fatalf("the new serve's status: %s", txt)
+	if got := acquireAttempts.Load() - attempts; got > int64(sameSessionTries) {
+		t.Fatalf("the new serve needed %d retries, more than the %d same-session tries", got, sameSessionTries)
 	}
 
 	// The old one steps down at its next refresh: tools say so and name the new holder.
@@ -95,9 +106,10 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	if out, code := w.cli(t, "b", "send", "a", "after the takeover"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
-	if ev := content(fresh.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "after the takeover") {
-		t.Fatalf("the new serve got %s", ev)
-	}
+	// After a retried takeover the first channel event may be the earlier "held" notice: wait for the mail itself.
+	fresh.await(t, 5*time.Second, func(m map[string]any) bool {
+		return isChannel(m) && strings.Contains(content(m), "after the takeover")
+	})
 	old.none(t, 300*time.Millisecond, func(m map[string]any) bool {
 		return isChannel(m) && strings.Contains(content(m), "after the takeover")
 	})
