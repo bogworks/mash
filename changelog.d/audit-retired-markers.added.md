@@ -1,2 +1,0 @@
-`mashctl audit` lists the retired-identity markers (flat identity, state, retired time) with the bucket's bytes against its cap, and `--strict` fails on a pending marker or when the bucket is at or over 50% of its cap; `audit --compare` fails when a final marker has gone
-([ADR 0088](docs/decisions/0088-a-retired-new-form-name-is-burned-in-a-durable-bucket-by-a-two-phase-marker-that-is-never-deleted.md)).
