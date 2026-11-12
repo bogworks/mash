@@ -49,10 +49,8 @@ const (
 	kindKeyDiffers     = "key-differs"
 	kindRecordMissing  = "record-missing"
 	kindRecordExtra    = "record-extra"
-	kindZoneUnset      = "zone-unset"
-	kindZoneDiffers    = "zone-differs"
+	kindZonedRecord    = "zoned-record"
 	kindLabelDiffers   = "label-differs"
-	kindMailSubject    = "mail-subject-differs"
 	kindCredsStale     = "creds-stale"
 	kindCredsUnread    = "creds-unreadable"
 )
@@ -275,7 +273,6 @@ func mapKeys[M ~map[string]V, V any](m M) func(func(string) bool) {
 // dirFix is what repair does for one endpoint's directory record.
 type dirFix struct {
 	Name   string
-	Zone   string            // set the record's zone (it has none)
 	Labels map[string]string // for admin.SetMeta: a value sets the label, "" clears it
 	Lines  []string          // one line per change, the same text for a real run and --dry-run
 }
@@ -288,6 +285,9 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 	var fixes []dirFix
 	byName := map[string]store.Record{}
 	for _, r := range recs {
+		if zerr := store.ZonedRecordError(r); zerr != nil { // zones are removed (ADR 0091): an error whatever the file says
+			out = append(out, apply.Finding{Kind: kindZonedRecord, Subject: r.KeyOrName(), Detail: zerr.Error()})
+		}
 		byName[r.KeyOrName()] = r // the policy file's endpoints are legacy names: only a legacy record has that key
 	}
 	for _, e := range c.Endpoints {
@@ -298,20 +298,6 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 			continue
 		}
 		fix := dirFix{Name: e.Name}
-		switch {
-		case r.Zone == "":
-			out = append(out, apply.Finding{Kind: kindZoneUnset, Subject: e.Name,
-				Detail: fmt.Sprintf("the record has no zone (the legacy mail subject); the file says zone %s", e.Zone)})
-			fix.Zone = e.Zone
-			fix.Lines = append(fix.Lines, fmt.Sprintf("set zone %s %s", e.Name, e.Zone))
-		case r.Zone != e.Zone:
-			out = append(out, apply.Finding{Kind: kindZoneDiffers, Subject: e.Name,
-				Detail: fmt.Sprintf("the record is in zone %s, the file says zone %s (repair never moves an endpoint between zones)", config.Clean(r.Zone), e.Zone)})
-		}
-		if want := store.MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
-			out = append(out, apply.Finding{Kind: kindMailSubject, Subject: e.Name,
-				Detail: fmt.Sprintf("the record's mail subject is %q, a record in zone %q has %q", config.Clean(r.MailSubject), config.Clean(r.Zone), want)})
-		}
 		labels := map[string]string{}
 		for _, k := range slices.Sorted(mapKeys(e.Labels)) {
 			if r.Labels[k] != e.Labels[k] {
@@ -338,7 +324,7 @@ func directoryFindings(c *policy.Compiled, recs []store.Record) ([]apply.Finding
 		if len(labels) > 0 {
 			fix.Labels = labels
 		}
-		if fix.Zone != "" || fix.Labels != nil {
+		if fix.Labels != nil {
 			fixes = append(fixes, fix)
 		}
 	}
@@ -667,7 +653,7 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 			}
 			var left []apply.Finding
 			for _, f := range findings {
-				if !(fixed[f.Subject] && (f.Kind == kindZoneUnset || f.Kind == kindLabelDiffers)) {
+				if !(fixed[f.Subject] && f.Kind == kindLabelDiffers) {
 					left = append(left, f)
 				}
 			}
@@ -718,7 +704,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// repairDirectory applies fixes, or with dryRun only prints them: SetZone for a record with no zone, SetMeta for labels.
+// repairDirectory applies fixes, or with dryRun only prints them: SetMeta for labels.
 // Each change is one line, the same text either way, and a line is printed when the write succeeded (a real run) or would
 // be made (a dry run). It returns 1 when a write failed. A dry run makes no call that writes.
 func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryRun bool, pf func(string, ...any)) int {
@@ -728,20 +714,6 @@ func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryR
 	}
 	rc := 0
 	for _, f := range fixes {
-		n := 0 // the lines of f: the zone line first, then the labels
-		if f.Zone != "" {
-			if !dryRun {
-				if _, err := adm.SetZone(ctx, f.Name, f.Zone); err != nil {
-					pf("  %s: set zone %s failed: %v\n", f.Name, f.Zone, err)
-					rc = 1
-					n = 1
-					goto labels
-				}
-			}
-			pf("  %s\n", f.Lines[0])
-			n = 1
-		}
-	labels:
 		if len(f.Labels) > 0 {
 			if !dryRun {
 				if _, err := adm.SetMeta(ctx, f.Name, admin.MetaUpdate{Labels: f.Labels}); err != nil {
@@ -750,7 +722,7 @@ func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryR
 					continue
 				}
 			}
-			for _, l := range f.Lines[n:] {
+			for _, l := range f.Lines {
 				pf("  %s\n", l)
 			}
 		}

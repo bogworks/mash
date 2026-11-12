@@ -136,6 +136,7 @@ rules:
 `
 
 func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
+	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
 	e := newApplyEnv(t, twoZones)
 	a := newAdopter(t, e)
 

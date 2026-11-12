@@ -21,16 +21,16 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]
+const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]
 `
 
 // afterProvision is a test seam called between the directory record and the policy-file save.
 var afterProvision func()
 
 type addOpts struct {
-	name, file, note, zone string
-	labels                 map[string]string
-	tool                   bool
+	name, file, note string
+	labels           map[string]string
+	tool             bool
 }
 
 func parseAddArgs(args []string) (addOpts, error) {
@@ -74,11 +74,6 @@ func parseAddArgs(args []string) (addOpts, error) {
 				return o, fmt.Errorf("label %q given twice", k)
 			}
 			o.labels[k] = lv
-		case "--zone":
-			if v, err = get(); err != nil {
-				return o, err
-			}
-			o.zone = v
 		case "--policy":
 			if v, err = get(); err != nil {
 				return o, err
@@ -208,6 +203,7 @@ func writeCredsNew(path string, creds []byte) (undo func(), err error) {
 	}, nil
 }
 
+// TODO(Z2): remove with the policy stack (ADR 0091).
 // zoneSetChanged reports whether the account JWT's scoped keys must change between two compiles: a zone was added,
 // removed, or any zone's permission template differs.
 func zoneSetChanged(before, after *policy.Compiled) bool {
@@ -234,8 +230,8 @@ func consequences(before, after *policy.Compiled) []string {
 		switch {
 		case !ok:
 		case e.Zone != ne.Zone:
-			out = append(out, fmt.Sprintf("%s moves from zone %s to zone %s: its mail address changes. A directory record with no zone takes `mashctl set-zone %s %s`, then `mashctl reissue %s`; a record already in zone %s cannot be moved (set-zone refuses): retire %s and add it again with --zone %s. Until it is reissued its creds are signed by zone %s's key and keep zone %s's permissions",
-				e.Name, e.Zone, ne.Zone, e.Name, ne.Zone, e.Name, e.Zone, e.Name, ne.Zone, e.Zone, e.Zone))
+			// TODO(Z2): remove with the policy stack (ADR 0091): the compiled zone is the policy's, not an address.
+			out = append(out, fmt.Sprintf("reissue needed: %s (its signing key changed; run: mashctl reissue %s)", e.Name, e.Name))
 		case !slices.Equal(e.Tags, ne.Tags):
 			stale = append(stale, e.Name)
 		}
@@ -303,7 +299,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	if _, dup := beforeFile.Endpoints[o.name]; dup {
 		return fail("endpoint %q is already declared in %s", o.name, path)
 	}
-	labels, err := addLabels(o, before.SubjectLabel)
+	labels, err := addLabels(o)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -351,6 +347,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 	defer closeAdmin()
 
+	// TODO(Z2): remove with the policy stack (ADR 0091): the zone key and the mint below. The record carries no zone: nothing writes one.
 	// (3) mint: the zone key is created only if the zone is new (no declared endpoint is in it); a zone that already
 	// has endpoints must already have its key, or the new creds would not authenticate. A key made here is left in
 	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
@@ -379,7 +376,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 
 	// (4) the directory record and inbox.
-	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels, Zone: ep.Zone}); err != nil {
+	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels}); err != nil {
 		if strings.Contains(err.Error(), "is already provisioned") {
 			return fail("%v; %s", err, orphanText(o.name))
 		}
@@ -412,7 +409,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 
 	// (7) report.
-	fmt.Fprintf(stdout, "added %s (zone %s) creds %s\n", o.name, ep.Zone, credsPath)
+	fmt.Fprintf(stdout, "added %s creds %s\n", o.name, credsPath)
 	for _, l := range consequences(before, after) {
 		fmt.Fprintln(stdout, l)
 	}
@@ -451,9 +448,8 @@ func budgetWarning(r policy.BudgetReport) string {
 	return "warning: above 80% of a JWT budget: " + strings.Join(parts, "; ")
 }
 
-// addLabels is the labels the new endpoint is declared with: --label pairs, plus kind=tool for --tool and the
-// subject label for --zone. Giving one key two different values is an error.
-func addLabels(o addOpts, subjectLabel string) (map[string]string, error) {
+// addLabels is the labels the new endpoint is declared with: --label pairs, plus kind=tool for --tool. Giving one key two different values is an error.
+func addLabels(o addOpts) (map[string]string, error) {
 	labels := map[string]string{}
 	for k, v := range o.labels {
 		labels[k] = v
@@ -467,11 +463,6 @@ func addLabels(o addOpts, subjectLabel string) (map[string]string, error) {
 	}
 	if o.tool {
 		if err := set("kind", "tool"); err != nil {
-			return nil, err
-		}
-	}
-	if o.zone != "" {
-		if err := set(subjectLabel, o.zone); err != nil {
 			return nil, err
 		}
 	}

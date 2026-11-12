@@ -86,37 +86,32 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 	}
 }
 
-func TestMashctlZone(t *testing.T) {
+// TestMashctlNoZone: ADR 0091 removed zones; set-zone is an unknown verb, provision takes no --zone, the help names
+// neither, and a provisioned endpoint's mail subject has five tokens.
+func TestMashctlNoZone(t *testing.T) {
 	e := testenv.Start(t)
 	if _, errb, code := ctlRun(t, e, "init"); code != 0 {
 		t.Fatalf("init: %d %q", code, errb)
 	}
-	_, u := e.Mint(t, "zed")
-	_, v := e.Mint(t, "leg")
-	if out, errb, code := ctlRun(t, e, "provision", "zed", "--user", u, "--account", e.Account, "--zone", "z1"); code != 0 ||
-		!strings.Contains(out, "mail agents.mail.cc."+e.Owner+".z1.zed") || !strings.Contains(out, "zone z1") {
-		t.Fatalf("provision --zone: %d %q %q", code, out, errb)
+	_, u := e.Mint(t, "leg")
+	if out, errb, code := ctlRun(t, e, "provision", "leg", "--user", u, "--account", e.Account); code != 0 ||
+		!strings.Contains(out, "mail agents.mail.cc."+e.Owner+".leg") {
+		t.Fatalf("provision: %d %q %q", code, out, errb)
 	}
-	if _, errb, code := ctlRun(t, e, "provision", "leg", "--user", v, "--account", e.Account); code != 0 {
-		t.Fatalf("provision leg: %d %q", code, errb)
+	if _, errb, code := ctlRun(t, e, "provision", "leg2", "--user", u, "--account", e.Account, "--zone", "z1"); code == 0 || !strings.Contains(errb, "usage: mashctl provision") {
+		t.Fatalf("provision --zone: %d %q", code, errb)
 	}
-	if out, errb, code := ctlRun(t, e, "set-zone", "leg", "z2"); code != 0 || !strings.Contains(out, "zone z2") {
-		t.Fatalf("set-zone: %d %q %q", code, out, errb)
+	if _, errb, code := ctlRun(t, e, "set-zone", "leg", "z2"); code != 2 || !strings.Contains(errb, `unknown command "set-zone"`) {
+		t.Fatalf("set-zone: %d %q", code, errb)
 	}
 	out, _, code := ctlRun(t, e, "list")
-	if code != 0 || !strings.Contains(out, "\tzone=z1\n") || !strings.Contains(out, "\tzone=z2\n") {
+	if code != 0 || strings.Contains(out, "zone") {
 		t.Fatalf("list: %d %q", code, out)
-	}
-	if _, errb, code := ctlRun(t, e, "set-zone", "leg", "-"); code == 0 || !strings.Contains(errb, "mashctl: set-zone") {
-		t.Fatalf("set-zone -: %d %q", code, errb)
-	}
-	if _, errb, code := ctlRun(t, e, "set-zone", "leg"); code == 0 || !strings.Contains(errb, "usage: mashctl set-zone <name> <zone>") {
-		t.Fatalf("set-zone usage: %d %q", code, errb)
 	}
 	var h bytes.Buffer
 	runEnv([]string{"help"}, func(string) string { return "" }, &h, &h)
-	if !strings.Contains(h.String(), "mashctl set-zone <name> <zone>") || !strings.Contains(h.String(), "[--zone Z]") {
-		t.Fatalf("help lacks zone:\n%s", h.String())
+	if strings.Contains(strings.ReplaceAll(strings.ToLower(h.String()), "unzone", ""), "zone") {
+		t.Fatalf("help mentions zone:\n%s", h.String())
 	}
 }
 

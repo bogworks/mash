@@ -60,7 +60,7 @@ func looksInterrupted(cfg config.Config, credsPath, name string) bool {
 }
 
 // noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
-const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the zone key is rotated"
+const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
