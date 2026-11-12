@@ -31,13 +31,25 @@ type GateInput struct {
 	// Signers are the expected scoped signing keys of the target (see Candidate.Signers). Required: Gate fails
 	// closed without them.
 	Signers map[string]string
-	// OldKeys maps each sender to the public keys of its credentials issued before this change (the caller fills it
-	// from the issue record). Every sender with a credential-only reach, and every sender the change removes, needs
-	// an entry, and each of its keys must be in Expect.RevokedKeys: a tag-only narrowing leaves the old credential's
-	// reach in the template, and only revoking its key refuses it.
-	OldKeys map[string][]string
+	// TargetJWT is the signed target account JWT. When set, a server is on the target only if the JWT it holds has the
+	// same claims ID (jti, the hash of the encoded claims) as this token: a JWT that matches the target by content,
+	// as a previous generation with equal templates, signers and revocations does, is then read as the previous
+	// generation, not the target. When empty, the target is recognised by content alone.
+	TargetJWT string
+	// OldKeys maps each sender to its credentials issued before this change (the caller fills it from the issue
+	// record). Every sender with a credential-only reach, and every sender the change removes, needs an entry, and
+	// each of its keys must be in Expect.RevokedKeys: a tag-only narrowing leaves the old credential's reach in the
+	// template, and only revoking its key refuses it. Each key carries its issue time, because a server refuses a user
+	// JWT only when the revocation time is at or after the JWT's issue time: the gate requires that on every server.
+	OldKeys map[string][]OldKey
 	// Now gives the time stamped on the Status; nil means time.Now.
 	Now func() time.Time
+}
+
+// OldKey is one credential issued before the change: its user public key and the time its user JWT was issued (iat).
+type OldKey struct {
+	PublicKey string
+	IssuedAt  time.Time
 }
 
 func (in GateInput) target() Candidate {
@@ -98,13 +110,25 @@ func Gate(ctx context.Context, in GateInput) (Status, error) {
 	if in.Previous != nil {
 		cands = append(cands, *in.Previous)
 	}
+	var targetID string
+	if in.TargetJWT != "" {
+		if tc, derr := jwt.DecodeAccountClaims(in.TargetJWT); derr != nil {
+			add("", "", CheckGeneration, fmt.Sprintf("target JWT does not decode: %v", derr))
+		} else {
+			targetID = tc.ID
+		}
+	}
 	claims := map[string]*jwt.AccountClaims{}
 	for _, n := range names {
 		sg := ServerGeneration{Server: n}
 		if tok := jwts[n]; tok != "" {
 			if c, derr := jwt.DecodeAccountClaims(tok); derr == nil {
 				claims[n] = c
-				if g, ok := generationOfClaims(c, cands); ok {
+				use := cands
+				if in.TargetJWT != "" && c.ID != targetID {
+					use = cands[1:] // not the exact signed target: only the previous generation can match
+				}
+				if g, ok := generationOfClaims(c, use); ok {
 					sg.Generation = &g
 				}
 			}
@@ -118,12 +142,30 @@ func Gate(ctx context.Context, in GateInput) (Status, error) {
 		}
 	}
 
+	// issued is the issue time of each old key in the inventory. A revoked key with no inventory time (an Expect
+	// entry the inventory does not list, or a zero IssuedAt) is checked for presence only, which does not prove that
+	// the revocation covers the credential.
+	issued := map[string]time.Time{}
+	for _, ks := range in.OldKeys {
+		for _, k := range ks {
+			if !k.IssuedAt.IsZero() {
+				issued[k.PublicKey] = k.IssuedAt
+			}
+		}
+	}
 	for _, n := range names {
 		for _, k := range in.Expect.RevokedKeys {
-			if c := claims[n]; c == nil {
+			c := claims[n]
+			if c == nil {
 				add(n, "", CheckRevoked, "revocations unreadable: "+k)
-			} else if _, has := c.Revocations[k]; !has {
+				continue
+			}
+			at, has := c.Revocations[k]
+			if !has {
 				add(n, "", CheckRevoked, "key not refused: "+k)
+			} else if iat, ok := issued[k]; ok && at < iat.Unix() {
+				add(n, "", CheckRevoked, fmt.Sprintf("key %s: revocation at %s is older than the credential issued at %s",
+					k, time.Unix(at, 0).UTC().Format(time.RFC3339), iat.UTC().Format(time.RFC3339)))
 			}
 		}
 	}
@@ -185,8 +227,8 @@ func (in GateInput) checkOldKeys(add func(server, sender, check, detail string))
 			continue
 		}
 		for _, k := range keys {
-			if !slices.Contains(in.Expect.RevokedKeys, k) {
-				add("", s, CheckOldKeyNotRevoked, "old key not revoked: "+k)
+			if !slices.Contains(in.Expect.RevokedKeys, k.PublicKey) {
+				add("", s, CheckOldKeyNotRevoked, "old key not revoked: "+k.PublicKey)
 			}
 		}
 	}

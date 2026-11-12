@@ -118,11 +118,16 @@ func (l *MemLedger) ClearPending() error {
 // target's revoked keys revoked, or the rollback un-revokes them. The returned Status is the final gate result; it is
 // applied only if the target is.
 func Converge(ctx context.Context, in GateInput, targetJWT, previousJWT string) (Status, error) {
+	return converge(ctx, in, targetJWT, previousJWT, map[string]bool{})
+}
+
+// converge is Converge recording in acked each server that acknowledged a push of the target with OK.
+func converge(ctx context.Context, in GateInput, targetJWT, previousJWT string, acked map[string]bool) (Status, error) {
 	st, err := Gate(ctx, in)
 	if err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 		return st, err
 	}
-	if pushed(ctx, in, targetJWT) {
+	if pushed(ctx, in, targetJWT, acked) {
 		if st, err = Gate(ctx, in); err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 			return st, err
 		}
@@ -133,7 +138,7 @@ func Converge(ctx context.Context, in GateInput, targetJWT, previousJWT string) 
 		return st, nil
 	}
 	// A failed push back shows in the gate below: servers keep the generations they hold.
-	pushed(ctx, in, previousJWT)
+	pushed(ctx, in, previousJWT, nil)
 	return Gate(ctx, in)
 }
 
@@ -150,8 +155,9 @@ func onTarget(st Status, gen uint64) bool {
 // backOn says every server holds generation gen (the previous one): the push is rolled back everywhere.
 func backOn(st Status, gen uint64) bool { return onTarget(st, gen) }
 
-// pushed sends tok to every server and reports whether the push was acknowledged by all of them without error.
-func pushed(ctx context.Context, in GateInput, tok string) bool {
+// pushed sends tok to every server and reports whether the push was acknowledged by all of them without error. Each
+// server that answered OK is recorded in acked, when it is not nil.
+func pushed(ctx context.Context, in GateInput, tok string, acked map[string]bool) bool {
 	set, err := in.Cluster.Servers(ctx)
 	if err != nil {
 		return false
@@ -161,11 +167,19 @@ func pushed(ctx context.Context, in GateInput, tok string) bool {
 		return false
 	}
 	got := map[string]bool{}
+	ok := true
 	for _, a := range acks {
 		if !a.OK() {
-			return false
+			ok = false
+			continue
 		}
 		got[a.Server] = true
+		if acked != nil {
+			acked[a.Server] = true
+		}
+	}
+	if !ok {
+		return false
 	}
 	for _, n := range set.Names {
 		if !got[n] {
@@ -199,7 +213,9 @@ type RunInput struct {
 	Signers         map[string]string
 	PreviousSigners map[string]string
 	// OldKeys are the public keys of each sender's credentials issued before this change (see GateInput.OldKeys).
-	OldKeys map[string][]string
+	OldKeys map[string][]OldKey
+	// ServerLimits are the servers' size limits for listset.SizeCheck; nil means the defaults.
+	ServerLimits []listset.ServerLimits
 	// Sign builds the account JWT for the record and a copy of the Compiled. Signing is the caller's.
 	Sign func(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
 	Now  func() time.Time
@@ -215,6 +231,11 @@ type RunInput struct {
 // signing or pushing; resubmitting the same content pushes and gates again and, when applied, commits and clears it.
 // A signed JWT over policy.AccountJWTLimit is refused with ErrAccountJWTTooLarge before any push. A target without
 // Signers is refused as a partial Status with a generation failure.
+//
+// Before it commits, Run requires that every server of the complete server set acknowledged a push of the target with
+// OK (a push failure with detail otherwise), because a server may hold content equal to the target without having
+// received it. A list set whose user JWTs exceed a server's limits (listset.SizeCheck over ServerLimits) is refused
+// with stage "size" before anything is signed or pushed.
 //
 // A list set that fails validation comes back as a refused Status and a nil error. A stale base, a signing error or a
 // mismatch between the signed JWT and the accepted output (ErrSignedMismatch, before any push) come back as errors.
@@ -244,6 +265,12 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 		default:
 			return Status{}, err
 		}
+		return st, nil
+	}
+
+	if ps := listset.SizeCheck(compiled, in.ServerLimits); len(ps) > 0 {
+		st := newStatus(listset.Record{}, StateRefused, in.Now)
+		st.Refusals = refusals("size", ps)
 		return st, nil
 	}
 
@@ -288,7 +315,7 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
-		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, OldKeys: in.OldKeys, Now: in.Now,
+		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, TargetJWT: tok, OldKeys: in.OldKeys, Now: in.Now,
 	}
 	if in.Previous != nil {
 		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked, Signers: in.PreviousSigners}
@@ -296,8 +323,21 @@ func Run(ctx context.Context, in RunInput) (Status, error) {
 	if in.OnStatus != nil {
 		in.OnStatus(newStatus(rec, StateApplying, in.Now))
 	}
-	pushed(ctx, gi, tok)
-	st, err := Converge(ctx, gi, tok, in.PreviousJWT)
+	acked := map[string]bool{}
+	pushed(ctx, gi, tok, acked)
+	st, err := converge(ctx, gi, tok, in.PreviousJWT, acked)
+	if err == nil && st.State == StateApplied {
+		// Holding the target is not enough: every server must have acknowledged it.
+		for _, sv := range st.Servers {
+			if !acked[sv.Server] {
+				st.Failing = append(st.Failing, Failure{Server: sv.Server, Check: CheckPush, Detail: "did not acknowledge the push of the target with OK"})
+			}
+		}
+		if len(st.Failing) > 0 {
+			sortFailures(st.Failing)
+			st.State, st.InForce = StatePartial, false
+		}
+	}
 	if err != nil || st.State != StateApplied {
 		// The target was pushed. Unless every server is back on the previous generation it may be visible, so it is
 		// pending: only a resubmission of the same content may follow.

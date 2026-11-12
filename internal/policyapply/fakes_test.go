@@ -119,11 +119,12 @@ type fakeCluster struct {
 	jwts     map[string]string
 	dropN    map[string]int  // pushes to drop silently, per server
 	failPush map[string]bool // servers that answer 500
+	badAck   map[string]bool // servers that take the JWT but answer 500
 	pushes   []string
 }
 
 func newCluster(tok string, names ...string) *fakeCluster {
-	f := &fakeCluster{names: names, expected: len(names), jwts: map[string]string{}, dropN: map[string]int{}, failPush: map[string]bool{}}
+	f := &fakeCluster{names: names, expected: len(names), jwts: map[string]string{}, dropN: map[string]int{}, failPush: map[string]bool{}, badAck: map[string]bool{}}
 	for _, n := range names {
 		f.jwts[n] = tok
 	}
@@ -155,6 +156,9 @@ func (f *fakeCluster) Push(_ context.Context, tok string, _ []string) ([]apply.S
 			f.dropN[n]--
 		case f.failPush[n]:
 			acks = append(acks, apply.ServerAck{Server: n, Code: 500, Message: "refused"})
+		case f.badAck[n]:
+			f.jwts[n] = tok
+			acks = append(acks, apply.ServerAck{Server: n, Code: 500, Message: "late"})
 		default:
 			f.jwts[n] = tok
 			acks = append(acks, apply.ServerAck{Server: n, Code: 200})

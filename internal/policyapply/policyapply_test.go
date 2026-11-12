@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/listset"
@@ -61,8 +62,8 @@ func (w *world) gate() GateInput {
 }
 
 // oldKeys is the inventory of the old credentials: core's is the revoked key, the others have none.
-func (w *world) oldKeys() map[string][]string {
-	return map[string][]string{"foo.c.core": {w.k.revoked}, "foo.c.docs": {}, "foo.c.sdk": {}}
+func (w *world) oldKeys() map[string][]OldKey {
+	return map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked, IssuedAt: time.Unix(1000, 0)}}, "foo.c.docs": {}, "foo.c.sdk": {}}
 }
 
 func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
@@ -552,7 +553,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 	// A removed sender's keys must be revoked too.
 	in = w.gate()
 	in.Compiled = &listset.Compiled{Range: w.c2.Range, Templates: w.c2.Templates, Users: w.c2.Users[1:]}
-	in.OldKeys = map[string][]string{"foo.c.core": {"UOLD"}, "foo.c.docs": {}, "foo.c.sdk": {}}
+	in.OldKeys = map[string][]OldKey{"foo.c.core": {{PublicKey: "UOLD"}}, "foo.c.docs": {}, "foo.c.sdk": {}}
 	if st, _ = Gate(context.Background(), in); !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("removed sender: %+v", st.Failing)
 	}
@@ -693,5 +694,103 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 	in.Witnesses = w.wit
 	if st, _ = Gate(context.Background(), in); !hasFailure(st, "s1", "foo.c.gone", CheckWitness) {
 		t.Fatalf("missing: %+v", st.Failing)
+	}
+}
+
+func TestRunRequiresOKAckFromEveryServer(t *testing.T) {
+	w := newWorld(t)
+	w.cluster.badAck["s2"] = true // s2 holds the target but did not acknowledge it
+	l := NewMemLedger(listset.Record{Generation: 1})
+	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
+	if err != nil || st.State == StateApplied || !hasFailure(st, "s2", "", CheckPush) {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("committed generation %d", rec.Generation)
+	}
+}
+
+// reencode returns tok with a different name, so the same templates, signers and revocations get another claims ID.
+func reencode(t *testing.T, k keys, tok, name string) string {
+	t.Helper()
+	c, err := jwt.DecodeAccountClaims(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Name = name
+	out, err := c.Encode(k.acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestGateTargetEqualToPreviousNeedsTheSignedToken(t *testing.T) {
+	w := newWorld(t)
+	target := reencode(t, w.k, w.j1, "target") // same content as generation 1, another claims ID
+	w.cluster.set("s1", target)
+	w.cluster.set("s2", w.j1) // the push to s2 was dropped
+	in := w.gate()
+	in.Compiled = w.c1
+	in.Expect, _ = NewExpect(w.c1, w.c1, nil)
+	in.OldKeys = map[string][]OldKey{}
+	if st, _ := Gate(context.Background(), in); st.State != StateApplied {
+		t.Fatalf("without the token content matching reads both as the target: %+v", st)
+	}
+	in.TargetJWT = target
+	st, _ := Gate(context.Background(), in)
+	if st.State == StateApplied || !hasFailure(st, "s2", "", CheckGeneration) || gens(st)["s2"] != "1" || gens(st)["s1"] != "2" {
+		t.Fatalf("%+v", st)
+	}
+}
+
+func TestGateRevocationOlderThanCredentialIssue(t *testing.T) {
+	w := newWorld(t)
+	revokeAt := func(at time.Time) string {
+		c, _ := jwt.DecodeAccountClaims(w.j2)
+		c.Revocations[w.k.revoked] = at.Unix()
+		tok, err := c.Encode(w.k.acct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	issued := time.Unix(5000, 0)
+	keys := map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked, IssuedAt: issued}}, "foo.c.docs": {}, "foo.c.sdk": {}}
+	for _, tc := range []struct {
+		at      time.Time
+		applied bool
+	}{{issued.Add(-time.Second), false}, {issued, true}, {issued.Add(time.Hour), true}} {
+		tok := revokeAt(tc.at)
+		w.cluster.set("s1", tok)
+		w.cluster.set("s2", tok)
+		in := w.gate()
+		in.OldKeys = keys
+		st, _ := Gate(context.Background(), in)
+		if (st.State == StateApplied) != tc.applied {
+			t.Fatalf("revoked at %v: %+v", tc.at.Unix(), st)
+		}
+		if !tc.applied {
+			var named bool
+			for _, f := range st.Failing {
+				named = named || (f.Check == CheckRevoked && strings.Contains(f.Detail, w.k.revoked) && strings.Contains(f.Detail, "older than the credential"))
+			}
+			if !named {
+				t.Errorf("not named: %+v", st.Failing)
+			}
+		}
+	}
+}
+
+func TestRunRefusesOversizedListSet(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedger(listset.Record{Generation: 1})
+	in := w.run(l, set2(), "bytes-2")
+	in.ServerLimits = []listset.ServerLimits{{Server: "tiny", MaxConnectLine: 400}}
+	signed := false
+	in.Sign = func(listset.Record, *listset.Compiled) (string, error) { signed = true; return "", nil }
+	st, err := Run(context.Background(), in)
+	if err != nil || st.State != StateRefused || len(st.Refusals) == 0 || st.Refusals[0].Stage != "size" || signed || len(w.cluster.pushes) != 0 {
+		t.Fatalf("%+v %v signed %v pushes %d", st, err, signed, len(w.cluster.pushes))
 	}
 }

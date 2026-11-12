@@ -93,6 +93,12 @@ signed account JWT larger than `policy.AccountJWTLimit` (1 MiB), naming its size
 * Neutral, because the in-memory ledger is per process; the persistent compare-and-set store follows the homerange-mash
   seam's status key.
 
+### Hardening
+
+* Run commits only when every server of the complete set acknowledged the target push with OK, and the gate reads a server as the target only when its account JWT has the signed target's claims ID, so a previous generation equal in content is not mistaken for it.
+* An old key counts as refused only when each server's revocation time is at or after the credential's issue time (the inventory carries it); a revocation without an inventory time is checked for presence only.
+* Run runs `listset.SizeCheck` over the servers' limits right after Accept and refuses an oversized list set (stage `size`) before signing or pushing.
+
 ### Confirmation
 
 Unit tests in `internal/policyapply` run the gate against fake servers: applied on two servers, a server held back
