@@ -85,9 +85,11 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 			return Expect{}, fmt.Errorf("target generation: %w", err)
 		}
 		// The target's template with the OLD tags. When it cannot be expanded (a template line that needs a tag the old
-		// credential lacks, such as a new tag-driven deny line) the server cannot take that credential at all, and a
-		// send with it cannot be shown refused by one probe: every removed reach is credential-only, tested with the
-		// target credential.
+		// credential lacks, such as a new tag-driven deny line) the server refuses that credential at connect, so there
+		// is no old-credential probe to make. That refusal is not assumed: the gate requires the sender's old keys
+		// (GateInput.OldKeys, required for every credential-only sender) revoked on every server, which is what
+		// refuses the old credential (ADR 0100), and probes the target credential. Every removed reach is therefore
+		// credential-only.
 		oldCred, err := listset.ReachOf(withUser(target, u), s, all)
 		if err != nil {
 			oldCred = map[listset.Verb][]string{}

@@ -3,6 +3,7 @@ package policyapply
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"sort"
 
@@ -21,6 +22,10 @@ import (
 // Cost. Each push that finishes a sender's gate closes every connection under that owner group's scoped key, so every
 // sender under the key is disconnected, not only the one whose reach changed (ADR 0097). RunOrdered pushes once for
 // the whole change, so the price is paid once per owner group, not once per sender.
+//
+// Provisioning happens inside the run, after the gate reports applied and before the generation is committed. If a
+// step fails nothing is committed and the generation is pending: resubmitting the same list set pushes and gates again
+// and resumes the provisioning, so a Provisioner's steps must be idempotent.
 
 // NewAddress is an address the target generation adds and the senders that must refuse it.
 type NewAddress struct {
@@ -120,12 +125,14 @@ func SenderPassed(st Status, sender string) bool {
 // that sender's gate passes.
 func Applied(st Status, d Denial) bool { return SenderPassed(st, d.Sender) }
 
-// Provisioner takes the steps that let an address receive. RunOrdered calls it only after Run returns, and only for an
-// address whose senders that must refuse it have passed the gate.
+// Provisioner takes the steps that let an address receive. RunOrdered calls it only inside a run, after the gate
+// reports applied, and only for an address of the target list set that Run accepted and whose senders that must refuse
+// it have passed. Both steps MUST be idempotent (create-if-absent): a run whose provisioning failed is resubmitted and
+// calls them again for every new address, including those that already succeeded.
 type Provisioner interface {
-	// CreateInbox creates the inbox stream and consumer of address.
+	// CreateInbox creates the inbox stream and consumer of address, or leaves them if they exist.
 	CreateInbox(ctx context.Context, address string) error
-	// IssueCredential issues the credential of address.
+	// IssueCredential issues the credential of address, or leaves it if it is issued.
 	IssueCredential(ctx context.Context, address string) error
 }
 
@@ -135,10 +142,21 @@ const (
 	StepIssueCredential = "issue_credential"
 )
 
-// HeldAddress is a new address nothing was provisioned for, and the senders whose gate did not pass. Blocking is empty
-// when the list set was refused and nothing was pushed.
+// The reasons a HeldAddress names.
+const (
+	// HeldListSetRefused: the list set was refused, nothing was pushed and the gate never ran.
+	HeldListSetRefused = "list set refused"
+	// HeldSendersNotPassed: the gate did not pass for the senders in Blocking.
+	HeldSendersNotPassed = "senders not passed"
+	// HeldNotApplied: the generation was not applied although no sender that must refuse the address is named.
+	HeldNotApplied = "generation not applied"
+)
+
+// HeldAddress is a new address nothing was provisioned for. Blocking lists the senders whose gate did not pass, and is
+// empty unless Reason is HeldSendersNotPassed.
 type HeldAddress struct {
 	Address  string   `json:"address"`
+	Reason   string   `json:"reason"`
 	Blocking []string `json:"blocking"`
 }
 
@@ -180,38 +198,114 @@ func (o OrderedStatus) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p)
 }
 
-// RunOrdered runs the list set with Run, which includes REQ-011's gate, and only then provisions the new addresses of
-// order. A new address is provisioned (CreateInbox, then IssueCredential, stopping at the first error) iff every sender
-// in its MustRefuse passed the gate in the final Status (SenderPassed); an address no sender must refuse is
-// provisioned too. Any other address is held and nothing is provisioned for it. When the list set was refused nothing
-// was pushed, so every new address is held. The Provisioner is never called before Run returns. If Run returns an
-// error, nothing is provisioned. See the package comment for the cost of the push.
-func RunOrdered(ctx context.Context, in RunInput, order Order, prov Provisioner) (OrderedStatus, error) {
-	st, err := Run(ctx, in)
-	out := OrderedStatus{Status: st}
-	if err != nil {
-		return out, err
-	}
-	for _, na := range order.NewAddresses {
-		var blocking []string
-		for _, s := range na.MustRefuse {
-			if !SenderPassed(st, s) {
-				blocking = append(blocking, s)
+// errProvisioning is what the BeforeCommit hook of RunOrdered returns when a provisioning step failed.
+var errProvisioning = errors.New("provisioning failed")
+
+// RunOrdered runs the list set with Run, which includes REQ-011's gate, and provisions the new addresses inside the run.
+//
+// It takes no Order: the order is derived here with NewOrder from in.Previous and the target Compiled and Expect that
+// Run accepted and froze, so no caller input can add an address or remove a sender that must refuse one. After the gate
+// reports applied, and before the generation is committed, every new address of the order whose MustRefuse senders
+// all passed the gate (SenderPassed) is provisioned (CreateInbox, then IssueCredential, stopping at the first error for
+// that address). The generation is committed only if every step succeeded. If a step fails, nothing is committed, the
+// generation is pending (see Run), and the returned Status is partial, not in force, with a CheckProvision failure
+// naming the address and step; Errors names them too and the error is nil. Resubmitting the same list set pushes and
+// gates again and resumes provisioning, which is why the Provisioner's steps must be idempotent.
+//
+// When the generation is not applied, or the list set was refused, nothing is provisioned and the new addresses are
+// held, each with its Reason. The Provisioner is never called before the gate has applied. An error from Run (a stale
+// base, a pending generation, a signing error, a commit failure) is returned as is. See the package comment for the
+// cost of the push. A hook the caller set in in.BeforeCommit runs first.
+func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStatus, error) {
+	var out OrderedStatus
+	var acc Accepted
+	userHook := in.BeforeCommit
+	in.BeforeCommit = func(ctx context.Context, a Accepted, st Status) error {
+		if userHook != nil {
+			if err := userHook(ctx, a, st); err != nil {
+				return err
 			}
 		}
-		if len(blocking) > 0 || st.State == StateRefused {
-			out.Held = append(out.Held, HeldAddress{Address: na.Address, Blocking: blocking})
-			continue
+		failed := false
+		for _, na := range NewOrder(in.Previous, a.Compiled, a.Expect).NewAddresses {
+			if len(blockingOf(st, na)) > 0 { // defence: an applied gate has no failures
+				continue
+			}
+			if err := prov.CreateInbox(ctx, na.Address); err != nil {
+				out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: err.Error()})
+				failed = true
+				continue
+			}
+			if err := prov.IssueCredential(ctx, na.Address); err != nil {
+				out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepIssueCredential, Detail: err.Error()})
+				failed = true
+				continue
+			}
+			out.Provisioned = append(out.Provisioned, na.Address)
 		}
-		if err := prov.CreateInbox(ctx, na.Address); err != nil {
-			out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: err.Error()})
-			continue
+		if failed {
+			return errProvisioning
 		}
-		if err := prov.IssueCredential(ctx, na.Address); err != nil {
-			out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepIssueCredential, Detail: err.Error()})
-			continue
+		return nil
+	}
+	st, err := run(ctx, in, &acc)
+	out.Status = st
+	switch {
+	case errors.Is(err, errProvisioning):
+		out.Status.State, out.Status.InForce = StatePartial, false
+		for _, pe := range out.Errors {
+			out.Status.Failing = append(out.Status.Failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
 		}
-		out.Provisioned = append(out.Provisioned, na.Address)
+		sortFailures(out.Status.Failing)
+		return out, nil
+	case err != nil:
+		return out, err
+	case st.State == StateApplied:
+		return out, nil
+	}
+	// Not applied: every new address is held.
+	if acc.Compiled == nil { // refused: nothing was accepted, and nothing is provisioned from the submission
+		for _, a := range newAddressesOf(in) {
+			out.Held = append(out.Held, HeldAddress{Address: a, Reason: HeldListSetRefused})
+		}
+		return out, nil
+	}
+	for _, na := range NewOrder(in.Previous, acc.Compiled, acc.Expect).NewAddresses {
+		h := HeldAddress{Address: na.Address, Reason: HeldNotApplied}
+		if b := blockingOf(st, na); len(b) > 0 {
+			h.Reason, h.Blocking = HeldSendersNotPassed, b
+		}
+		out.Held = append(out.Held, h)
 	}
 	return out, nil
+}
+
+// blockingOf returns the senders that must refuse na and have not passed the gate in st.
+func blockingOf(st Status, na NewAddress) []string {
+	var blocking []string
+	for _, s := range na.MustRefuse {
+		if !SenderPassed(st, s) {
+			blocking = append(blocking, s)
+		}
+	}
+	return blocking
+}
+
+// newAddressesOf lists the senders of the submitted list set that the previous generation lacks. It is used only to
+// report held addresses when the list set was refused and nothing was accepted; nothing is provisioned from it.
+func newAddressesOf(in RunInput) []string {
+	had := map[string]bool{}
+	if in.Previous != nil {
+		for _, u := range in.Previous.Users {
+			had[u.Sender] = true
+		}
+	}
+	var out []string
+	for _, s := range in.ListSet.Senders {
+		if !had[s.Sender] && !slices.Contains(out, s.Sender) {
+			out = append(out, s.Sender)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
