@@ -55,8 +55,18 @@ When any credential does not fit any server, the whole list set is refused: the 
 size, the limit and the server, and nothing is signed, issued or pushed. mash refuses on measured size, never on a
 count, and never drops, merges or widens an entry. The old fixed constant and the tag count warning are removed.
 
-The documents state the limit as a count that depends on name length, with worked examples, and the way out: use a shared
-verb (a label rule or a zone of its own) instead of a long list of exceptions.
+The check is built against the compile that ships, the list set compile of ADR 0094 (`listset.Compile`): each sender's
+user JWT is built from its name and tags, signed by a throwaway scoped key on behalf of the account, and the account JWT
+carries every owner group's template as a scoped signer. A tag is `allow:<owner>.<name>` or `deny:<owner>.<name>` (the
+range is a literal in the template), so room depends on the length of the receiver's owner part and name. The deny
+sentinel is one tag, carried only by senders of a group whose key has a deny entry and who have no deny of their own.
+`listset.MeasureCompiled` is the entry point; it reuses the generic parts of `internal/policy` (the per-server limits,
+the CONNECT line measure and the refusal wording), and `internal/policy` does not import `internal/listset`. It is not
+wired into `policy apply` yet: today's zone compile, which apply still uses, keeps the measured check (`policy.BudgetFor`)
+until zones are removed, and the list set consumer calls `MeasureCompiled` when it replaces it.
+
+The documents state the limit as a measured table by owner part and name length, with worked examples, and the way out:
+use a shared verb instead of a long list of exceptions.
 
 ### Consequences
 
@@ -65,14 +75,15 @@ verb (a label rule or a zone of its own) instead of a long list of exceptions.
 * Good, because policy is never changed to make a credential fit.
 * Bad, because apply, add and reissue now make one more request to the system account.
 * Bad, because the measure refuses a credential within 6 bytes above a limit that the server would take.
-* Bad, because the documented count depends on the length of the zone and the names, so there is no single number.
+* Bad, because the room depends on the length of the owner part and the names, so there is no single number.
 
 ### Confirmation
 
 Tests cover the measure against a real in-process server at several `max_control_line` values (the largest tag count that
 connects, and the measure within its documented slack), the CONNECT line a real client writes captured and compared with
-the measure, the documented counts at several name lengths (the largest set accepted and one more refused with the
-sender, count, size and limit), a set refused whole when one of several servers has a smaller limit with nothing signed
+the measure, the documented table of exceptions that fit, for allow exceptions on a closed verb, with and without the sentinel, and
+deny exceptions, at several owner part and name lengths of list sets (the largest set accepted and one more refused with
+the sender, count, size and limit), a set refused whole when one of several servers has a smaller limit with nothing signed
 or pushed, an account JWT over one server's limit refused naming the account, a server that gives no limit refused
 unless the operator supplies one, and the limits read from a live server's `VARZ` reply.
 

@@ -67,31 +67,51 @@ Limits of the encoding, each measured against nats-server 2.15:
 
 mash refuses on measured size, never on a count. Before anything is signed or pushed it measures each sender's user JWT inside the full CONNECT line, and each account JWT, against the limit of every server, and refuses the whole list set when any does not fit on any server. It never drops, merges or widens an exception to make a credential fit.
 
-An exception is one address on a sender's allow or deny list, counted once across all verbs: the sender carries one tag for it (`allow:<zone>.<name>` or `deny:<zone>.<name>`), however many verbs it covers. A deny sentinel counts too. Every sender also carries the placeholder tag `deny:_none`, so a sender with N exceptions has N + 1 tags. What the CONNECT line has room for depends on the length of the names, because each tag spells out the receiving zone and the receiving endpoint.
+The check is built against the compile that ships: a list set compiles to one scoped-key template per owner group and one user per sender (`internal/listset`, [ADR 0094](decisions/0094-list-set-permissions-are-one-template-per-owner-group-with-allow-and-deny-tags-and-a-deny-sentinel.md)), and `listset.MeasureCompiled` measures that output. An exception is one address on a sender's allow or deny list, counted once across all verbs: the sender carries one tag for it, `allow:<owner>.<name>` or `deny:<owner>.<name>`, however many verbs it covers. The tag value is the address without the range, which is a literal in the template, so what a tag costs is the length of the receiver's owner part and of its name. The range, the sender's own name and its group do not repeat per exception.
 
-At the default CONNECT line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile (names are the sender's and each receiver's; the receiving zone is 3 characters):
+The deny sentinel `deny:_none` is a tag but not an exception. It is carried only by a sender whose owner group's key has a deny entry somewhere and who has no deny of its own; a group with no deny at all carries no sentinel, and a sender with a real deny does not need it. When present it costs one tag (13 bytes of JSON, so a sender with it fits up to one exception fewer, as the second table shows).
 
-| Names of | Exceptions that fit |
-| --- | --- |
-| 7 characters | 119 |
-| 10 characters | at least 100 |
-| 14 characters | 87 |
-| 32 characters | 52 |
-| 48 characters (the longest endpoint name) | 37 |
+At the default CONNECT line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile. The columns are the length of the receiver's owner part and of every name (the sender's and each receiver's); the range is 3 characters. A deny exception names a member of the sender's own owner group, so its owner part is the sender's. A range, an owner part and a name total at most 62 characters (an address is at most 64 with its two dots), so the largest owner part with a 32-character name is 27.
 
-So about 100 exceptions fit per sender where names are 10 characters or fewer and the receiving zone is short; 87 at 14 characters, and 52 at 32. The zone is part of every tag, so a long zone name costs room too: with names of 14 characters, a 14-character zone leaves room for 62 exceptions and a 32-character zone for 42. A deny exception is one character shorter than an allow one, so a sender whose exceptions are denies fits a few more. The measure is conservative by at most 6 bytes: a credential within 6 bytes of the limit may be refused although the server would take it, and one the measure accepts always connects.
+Allow exceptions on a closed verb (no sentinel):
 
-When a sender does not fit, apply (and add, reissue, `policy check`) refuses the whole set, changes nothing, and says which sender, how big, the limit, and which server:
+| Owner part | 7-character names | 14-character names | 32-character names |
+| --- | --- | --- | --- |
+| 4 | 114 | 85 | 51 |
+| 8 | 95 | 74 | 47 |
+| 14 | 77 | 62 | 42 |
+| 24 | 58 | 49 | 35 |
+
+The same allow exceptions for a sender that also carries the sentinel (its group has a deny entry and the sender has none):
+
+| Owner part | 7-character names | 14-character names | 32-character names |
+| --- | --- | --- | --- |
+| 4 | 113 | 84 | 50 |
+| 8 | 95 | 74 | 46 |
+| 14 | 76 | 62 | 41 |
+| 24 | 58 | 49 | 35 |
+
+Deny exceptions on a shared verb (the sender has its own denies, so no sentinel):
+
+| Owner part | 7-character names | 14-character names | 32-character names |
+| --- | --- | --- | --- |
+| 4 | 119 | 88 | 52 |
+| 8 | 99 | 76 | 48 |
+| 14 | 79 | 64 | 42 |
+| 24 | 59 | 50 | 36 |
+
+Worked examples. A sender that may mail 60 receivers in an owner group of 14 characters, each with a 14-character name, fits (the limit is 62); at 63 it does not, and mash says so:
 
 ```text
-mashctl: policy apply: refused: sender "s0000000000000" (zone "sendzone"): its connect line would be 4,099 bytes with 88 exceptions (89 tags); server "nats-2" allows 4,096 (max_control_line)
+sender "rng.sxx.r0000000000000" (group "rng.sxx"): its connect line would be 4,106 bytes with 63 exceptions (63 tags); server "default server limit" allows 4,096 (max_control_line)
 Use a shared verb instead of a long list of exceptions (docs/policy-file.md).
-nothing was changed, signed or pushed
 ```
 
-An account JWT that does not fit a server is refused the same way, naming the account (`account "MASH": its JWT would be 1,200,000 bytes; server "nats-2" allows 1,048,576 (the jwt decoder cap)`).
+The same sender with owner parts of 4 characters and names of 7 characters fits 114: the count is not the rule, the bytes are. A cluster is limited by its smallest server, and the message names the server that would not take it. An account JWT that does not fit a server is refused the same way, naming the account (`account "account": its JWT would be 1,200,000 bytes; server "nats-2" allows 1,048,576 (the jwt decoder cap)`); it grows with the number of owner groups and the shared verbs they hold, never with the number of senders. The measure is conservative by at most 6 bytes: a credential within 6 bytes of the limit may be refused although the server would take it, and one the measure accepts always connects.
 
-The way out is to use a shared verb instead of a long list of exceptions: give the receivers a label and a rule on it, or put them in a zone of their own, so that the sender is granted the zone whole (one wildcard on the zone's key, no tag) rather than each address one by one. A rule on a label spends no tag when it covers every endpoint of a zone and every sender of the sender's zone. Servers that run a larger `max_control_line` hold more: the limit is the server's own, and a cluster is limited by its smallest.
+The way out is to use a shared verb instead of a long list of exceptions: share the verb in the owner group, so that the senders of the group reach each other through the owner line (no tag), and keep the list for the few addresses that are not in the group. Servers that run a larger `max_control_line` hold more: the limit is the server's own.
+
+`listset.MeasureCompiled` (and `listset.Measure`, which compiles first) is not wired into `policy apply` yet: apply still compiles zones and measures that compile with the same parts (`policy.BudgetFor`). **That path is removed with zones.** On it, each tag is `allow:<zone>.<name>` and costs by zone length instead of owner-part length (names of 7, 14, 32 and 48 characters and a 3-character zone fit 119, 87, 52 and 37 exceptions), every user carries `deny:_none` (so a sender with N exceptions has N + 1 tags), and a zone key is granted whole by one wildcard where a list set shares a verb. Its refusal reads `sender "s0000000000000" (zone "sendzone"): its connect line would be 4,099 bytes with 88 exceptions (89 tags); server "nats-2" allows 4,096 (max_control_line)`.
 
 If a server does not answer the request for its limits, mash does not assume the limit: apply refuses and names the server. Say what the servers run with `--max-control-line BYTES` (or `MASH_MAX_CONTROL_LINE`); it stands for every server that did not answer, and caps one that did. `add` and `reissue` use the system account credentials when they can be found, as apply does; without them, they measure against the default limit and say so.
 
