@@ -26,7 +26,8 @@ type Candidate struct {
 // role is a template's Group (the role is the owner group "range.owner", the name the template is filed under)
 // carries that generation's Template.Permissions, and the revocation list holds every key the generation revokes. A
 // scoped key for a group of another candidate that this one lacks must be absent. When several candidates match the
-// first wins, so list the target first. ok is false when the JWT does not decode or no candidate matches.
+// first wins, so list the target first. A target equal in content to the previous generation therefore matches the
+// previous JWT too: Gate tells them apart by the target's signed token (GateInput.TargetJWT). ok is false when the JWT does not decode or no candidate matches.
 func GenerationOf(accountJWT string, candidates []Candidate) (gen uint64, ok bool) {
 	claims, err := jwt.DecodeAccountClaims(accountJWT)
 	if err != nil {

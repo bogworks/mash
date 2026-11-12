@@ -32,6 +32,7 @@ const (
 	CheckRefused          = "refused"
 	CheckRefusedCurrent   = "refused_current"
 	CheckRollback         = "rollback"
+	CheckPush             = "push"
 	CheckOldKeyNotRevoked = "old_key_not_revoked"
 )
 
