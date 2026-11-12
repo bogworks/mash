@@ -312,6 +312,43 @@ if command -v ssh-keygen >/dev/null 2>&1; then
   PATH="$NOSSH" "$PS" "$VER" "$K/SHA256SUMS" --sig "$K/SHA256SUMS.sig" --signers "$K/signers" >/dev/null 2>&1; RC=$?
   check "pin-plugin --sig without ssh-keygen exits 1" eq "$RC" 1
   check "pin-plugin --sig without ssh-keygen writes nothing" absent "$PINS"
+
+  # the cutover gate: root of the copied plugin ($PP) is $T, so the file is $T/docs/release-cutover
+  CUT="$T/docs/release-cutover"; mkdir -p "$T/docs"
+  sigpin() { "$PS" "$1" "$K/SHA256SUMS" --sig "$K/SHA256SUMS.sig" --signers "$K/signers" >/dev/null 2>"$T/err"; RC=$?; }
+  cutrefused() { # desc, version; a valid signature is supplied, so only the gate can refuse
+    rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+    sigpin "$2"
+    check "$1 exits 1" eq "$RC" 1
+    check "$1 writes nothing" absent "$PINS"
+    check "$1 leaves plugin.json alone" cmp -s "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+  }
+  cutallowed() { # desc, version
+    rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+    sigpin "$2"
+    check "$1 exits 0" eq "$RC" 0
+    check "$1 pins" test -f "$PINS"
+    rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+  }
+  printf '# first keyless release\n\nv0.4.0\n' > "$CUT"
+  cutrefused "pin-plugin --sig at the cutover" 0.4.0
+  check "pin-plugin --sig cutover refusal names the cutover" contains "$(cat "$T/err")" "--sig is not allowed for 0.4.0, at or above the cutover v0.4.0: use --attested"
+  check "pin-plugin --sig cutover refusal precedes the signature check" eq "$(contains "$(cat "$T/err")" "Good" && echo bad || echo good)" good
+  cutrefused "pin-plugin --sig above the cutover" 0.4.1
+  cutrefused "pin-plugin --sig a later minor numerically above (0.10.0 vs v0.4.0)" 0.10.0
+  cutrefused "pin-plugin --sig a later major" 1.0.0
+  cutrefused "pin-plugin --sig a pre-release suffix at the cutover" v0.4.0-rc.1
+  cutallowed "pin-plugin --sig below the cutover" 0.3.3
+  cutallowed "pin-plugin --sig 0.3.10 below v0.4.0" 0.3.10
+  rm -f "$CUT"
+  cutallowed "pin-plugin --sig with no cutover file" 0.10.0
+  printf 'v0.4.0\nv0.5.0\n' > "$CUT"
+  for _v in 0.3.3 0.4.0 0.10.0; do cutrefused "pin-plugin --sig two-line cutover file ($_v)" "$_v"; done
+  printf 'latest\n' > "$CUT"
+  for _v in 0.3.3 0.4.0 0.10.0; do cutrefused "pin-plugin --sig 'latest' cutover file ($_v)" "$_v"; done
+  printf '# only a comment\n\n' > "$CUT"
+  cutrefused "pin-plugin --sig comment-only cutover file" 0.3.3
+  rm -f "$CUT"
 else
   echo "skip - ssh-keygen not installed: signature tests"
   PP="$T/plugin-sig"; newplugin "$PP"; PS="$PP/scripts/pin-plugin"; PINS="$PP/scripts/mash.pins"
@@ -368,7 +405,7 @@ exit 0
 GH
 chmod +x "$FG/gh"
 # fake git: `ls-remote` prints FAKE_LSREMOTE (verbatim, if set) or "$FAKE_GIT_X\trefs/tags/v<ver>^{}"; records its args; exit FAKE_LS_RC.
-# Anything else goes to the real git.
+# `-C <dir> remote get-url origin` prints FAKE_ORIGIN (if set). Anything else goes to the real git.
 REALGIT=$(command -v git)
 cat > "$FG/git" <<GIT
 #!/bin/sh
@@ -377,12 +414,15 @@ if [ "\$1" = ls-remote ]; then
   [ -n "\${FAKE_LSREMOTE+x}" ] && printf '%s' "\$FAKE_LSREMOTE" || printf '%s\t%s\n' "\$FAKE_GIT_X" "\$3"
   exit "\${FAKE_LS_RC:-0}"
 fi
+if [ "\$1" = -C ] && [ "\$3 \$4 \$5" = "remote get-url origin" ] && [ -n "\${FAKE_ORIGIN:-}" ]; then
+  echo "\$FAKE_ORIGIN"; exit 0
+fi
 exec "$REALGIT" "\$@"
 GIT
 chmod +x "$FG/git"
 XSHA=0123456789abcdef0123456789abcdef01234567
 export FAKE_GIT_X=$XSHA EXPECT_REPO=o/n EXPECT_WF=o/n/.github/workflows/release.yml EXPECT_REF="refs/tags/v$VER" EXPECT_X=$XSHA
-att() { PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>"$T/err"; RC=$?; }
+att() { PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n --remote https://github.com/o/n.git >/dev/null 2>"$T/err"; RC=$?; }
 : > "$T/ghlog"; : > "$T/gitlog"
 FAKE_GH_LOG="$T/ghlog" FAKE_GIT_LOG="$T/gitlog" att
 check "pin-plugin --attested success exits 0" eq "$RC" 0
@@ -423,9 +463,46 @@ attrefused "pin-plugin --attested missing binary"
 cp "$REL/v$VER/mash-linux-arm64" "$ATT/"
 NOGH="$T/nogh"; mkdir -p "$NOGH"
 for _t in sh awk cp cat mktemp rm mv head sed dirname git sha256sum; do _p=$(command -v "$_t") && ln -sf "$_p" "$NOGH/$_t"; done
-PATH="$NOGH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>&1; RC=$?
+PATH="$NOGH" "$PS" "$VER" --attested "$ATT" --repo o/n --remote https://github.com/o/n.git >/dev/null 2>&1; RC=$?
 check "pin-plugin --attested without gh exits 1" eq "$RC" 1
 check "pin-plugin --attested without gh writes nothing" absent "$PINS"
+
+# --remote / origin: where the tag is read from
+rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+reset() { rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"; : > "$T/ghlog"; : > "$T/gitlog"; }
+for _o in https://git.example.com/acme/mash.git git@git.example.com:acme/mash.git; do
+  reset
+  FAKE_ORIGIN=$_o EXPECT_REPO=acme/mash EXPECT_WF=acme/mash/.github/workflows/release.yml FAKE_GH_LOG="$T/ghlog" FAKE_GIT_LOG="$T/gitlog" \
+    PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" >/dev/null 2>"$T/err"; RC=$?
+  check "pin-plugin --attested origin $_o exits 0" eq "$RC" 0
+  check "pin-plugin --attested origin $_o: ls-remote gets exactly the origin URL" eq "$(cat "$T/gitlog")" "ls-remote $_o refs/tags/v$VER^{}"
+  check "pin-plugin --attested origin $_o: -R is acme/mash" contains "$(head -n 1 "$T/ghlog")" "-R acme/mash "
+  check "pin-plugin --attested origin $_o pins" cmp -s "$PINS" "$T/pins1"
+done
+reset
+FAKE_ORIGIN=https://git.example.com/acme/mash.git FAKE_GIT_LOG="$T/gitlog" PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>"$T/err"; RC=$?
+check "pin-plugin --attested --repo without --remote exits 1" eq "$RC" 1
+check "pin-plugin --attested --repo without --remote writes nothing" absent "$PINS"
+check "pin-plugin --attested --repo without --remote tells the user to pass --remote" contains "$(cat "$T/err")" "pass --remote"
+check "pin-plugin --attested --repo without --remote reads no tag" empty_file "$T/gitlog"
+reset
+FAKE_ORIGIN=https://git.example.com/acme/mash.git FAKE_GH_LOG="$T/ghlog" FAKE_GIT_LOG="$T/gitlog" PATH="$FG:$PATH" \
+  "$PS" "$VER" --attested "$ATT" --repo o/n --remote ssh://git.example.org/some/where.git >/dev/null 2>"$T/err"; RC=$?
+check "pin-plugin --attested --repo --remote exits 0" eq "$RC" 0
+check "pin-plugin --attested --repo --remote: ls-remote gets that exact URL" eq "$(cat "$T/gitlog")" "ls-remote ssh://git.example.org/some/where.git refs/tags/v$VER^{}"
+check "pin-plugin --attested --repo --remote: -R is the --repo value" contains "$(head -n 1 "$T/ghlog")" "-R o/n "
+reset
+FAKE_ORIGIN=https://git.example.com/acme/mash.git EXPECT_REPO=acme/mash EXPECT_WF=acme/mash/.github/workflows/release.yml FAKE_GH_LOG="$T/ghlog" FAKE_GIT_LOG="$T/gitlog" \
+  PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --remote https://mirror.example.net/acme/mash.git >/dev/null 2>"$T/err"; RC=$?
+check "pin-plugin --attested --remote without --repo exits 0" eq "$RC" 0
+check "pin-plugin --attested --remote without --repo overrides the origin for ls-remote" eq "$(cat "$T/gitlog")" "ls-remote https://mirror.example.net/acme/mash.git refs/tags/v$VER^{}"
+check "pin-plugin --attested --remote without --repo derives -R from origin" contains "$(head -n 1 "$T/ghlog")" "-R acme/mash "
+reset
+"$PS" "$VER" "$REL/SHA256SUMS" --unverified --remote https://github.com/o/n.git >/dev/null 2>&1; RC=$?
+check "pin-plugin --remote without --attested exits 2" eq "$RC" 2
+check "pin-plugin --remote without --attested writes nothing" absent "$PINS"
+"$PS" "$VER" "$REL/SHA256SUMS" --sig x --remote https://github.com/o/n.git >/dev/null 2>&1; RC=$?
+check "pin-plugin --remote with --sig exits 2" eq "$RC" 2
 
 echo
 echo "$PASS passed, $FAIL failed"

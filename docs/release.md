@@ -223,11 +223,12 @@ The launcher `plugin/scripts/mash` downloads a binary only when `plugin/scripts/
 sha256 of each platform binary. After the release is published:
 
 For a keyless release (at or above the cutover), `--attested` is the documented path: download the four binaries into
-one directory and run `plugin/scripts/pin-plugin <version> --attested <dir> [--repo owner/name]`. It reads X from
-`git ls-remote https://github.com/<repo>.git refs/tags/v<version>^{}` and refuses (exit 1, nothing written) when the
+one directory and run `plugin/scripts/pin-plugin <version> --attested <dir> [--repo owner/name --remote <url>]`. It reads X from
+`git ls-remote <origin URL> refs/tags/v<version>^{}` (the configured origin itself, or `--remote <url>`; `--repo` requires
+`--remote`, since the name alone does not say where the tag lives) and refuses (exit 1, nothing written) when the
 tag cannot be read or the output is not exactly one 40-hex sha. It then runs `gh attestation verify` on each binary
 with `-R`, `--signer-workflow <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and
-`--source-digest <X>`, and pins the sums it computes itself. For a release below the cutover use `--sig`:
+`--source-digest <X>`, and pins the sums it computes itself. For a release below the cutover use `--sig` (refused at or above `docs/release-cutover`, and when that file is malformed):
 
 1. Download the release's `SHA256SUMS` and `SHA256SUMS.sig` (the armored SSHSIG made with
    `ssh-keygen -Y sign -f <key> -n mash-release SHA256SUMS`).

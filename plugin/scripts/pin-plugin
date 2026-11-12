@@ -1,6 +1,6 @@
 #!/bin/sh
 # pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
-# pin-plugin <version> --attested <dir> [--repo owner/name]   (keyless releases, at or above docs/release-cutover)
+# pin-plugin <version> --attested <dir> [--repo owner/name --remote <url>] [--remote <url>]   (keyless releases, at or above docs/release-cutover)
 # pin-plugin <version> <SHA256SUMS> --unverified
 # Pins the plugin launcher to a release by writing scripts/mash.pins (beside the launcher), and sets
 # .claude-plugin/plugin.json's version to <version>-pin.1 (only that line) so installed plugins update, since Claude
@@ -11,12 +11,16 @@
 # --attested is the path for keyless releases: every binary's attestation is verified with four pinned facts
 # (-R <repo>, --signer-workflow <repo>/.github/workflows/release.yml, --source-ref refs/tags/v<version>,
 # --source-digest <the release commit>). The commit is read from the remote tag (git ls-remote, peeled); if it
-# cannot be read as one 40-hex sha, nothing is written. --sig is for releases below the cutover.
+# cannot be read as one 40-hex sha, nothing is written. The tag is read from the configured origin URL itself (or
+# --remote <url>). With --repo, --remote is required: the repo name alone does not say where the tag lives. --remote
+# is only valid with --attested. --sig is for releases below the cutover (docs/release-cutover) and is refused at or
+# above it; a present but malformed docs/release-cutover refuses --sig too (fail closed).
 set -eu
 usage() {
   cat >&2 <<'U'
 usage: pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
-       pin-plugin <version> --attested <dir> [--repo owner/name]   (keyless releases: pins workflow, tag and commit)
+       pin-plugin <version> --attested <dir> [--repo owner/name --remote <url>]   (keyless releases: pins workflow, tag and commit)
+         the tag is read from origin's URL, or --remote <url>; --repo requires --remote
        pin-plugin <version> <SHA256SUMS> --unverified   (local testing only)
 exactly one mode is required
 also sets plugin.json's version to <version>-pin.1 (so installed plugins update)
@@ -35,13 +39,14 @@ case "$ver" in
   ''|[!0-9]*|*[!0-9A-Za-z.+-]*) echo "pin-plugin: bad version '$ver'" >&2; exit 2 ;;
 esac
 
-sums=""; sig=""; signers=""; attdir=""; repo=""; unverified=0
+sums=""; sig=""; signers=""; attdir=""; repo=""; remote=""; unverified=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --sig) [ $# -ge 2 ] || usage; sig=$2; shift 2 ;;
     --signers) [ $# -ge 2 ] || usage; signers=$2; shift 2 ;;
     --attested) [ $# -ge 2 ] || usage; attdir=$2; shift 2 ;;
     --repo) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
+    --remote) [ $# -ge 2 ] || usage; remote=$2; shift 2 ;;
     --unverified) unverified=1; shift ;;
     -*) usage ;;
     *) [ -z "$sums" ] || usage; sums=$1; shift ;;
@@ -58,6 +63,7 @@ if [ -n "$attdir" ]; then
 else
   [ -n "$sums" ] || usage
   [ -z "$repo" ] || usage
+  [ -z "$remote" ] || usage
   [ -z "$signers" ] || [ -n "$sig" ] || usage
 fi
 
@@ -77,6 +83,21 @@ check64() {
   [ ${#2} -eq 64 ] || die "bad sha256 length for $1"
 }
 
+# cutover_gate: refuse --sig for a version at or above docs/release-cutover (absent file: allowed; malformed: refused).
+cutover_gate() {
+  cf="$root/docs/release-cutover"
+  [ -f "$cf" ] || return 0
+  cl=$(grep -v '^[[:space:]]*#' "$cf" | grep -v '^[[:space:]]*$' || true)
+  [ -n "$cl" ] || die "$cf has no cutover version; refusing --sig"
+  [ "$(printf '%s\n' "$cl" | wc -l | tr -d ' ')" -eq 1 ] || die "$cf must hold exactly one version line; refusing --sig"
+  printf '%s\n' "$cl" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || die "$cf: bad cutover version '$cl'; refusing --sig"
+  core=${ver%%[-+]*}
+  printf '%s\n' "$core" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "cannot compare version '$ver' with the cutover $cl; refusing --sig"
+  if awk -v a="$core" -v b="${cl#v}" 'BEGIN { n = split(a, x, "."); split(b, y, "."); for (i = 1; i <= n; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 0 }'; then
+    die "--sig is not allowed for $ver, at or above the cutover $cl: use --attested"
+  fi
+}
+
 if [ -n "$attdir" ]; then
   [ -d "$attdir" ] || die "$attdir is not a directory"
   command -v gh >/dev/null 2>&1 || die "gh not found; cannot verify attestations"
@@ -84,10 +105,13 @@ if [ -n "$attdir" ]; then
     url=$(git -C "$root" remote get-url origin 2>/dev/null) || die "no --repo and no git origin to derive it from"
     repo=$(printf '%s\n' "$url" | sed -E 's#^.*[:/]([^/:]+/[^/]+)$#\1#; s#\.git$##')
     case "$repo" in */*) ;; *) die "cannot derive owner/name from origin '$url'; pass --repo" ;; esac
+    [ -n "$remote" ] || remote=$url
+  else
+    [ -n "$remote" ] || die "--repo $repo does not say where the release tag lives: pass --remote <url> too"
   fi
   for a in $ASSETS; do [ -f "$attdir/$a" ] || die "$attdir/$a not found"; done
   command -v git >/dev/null 2>&1 || die "git not found; cannot read the release tag"
-  lsout=$(git ls-remote "https://github.com/$repo.git" "refs/tags/v$ver^{}" 2>/dev/null) || die "cannot read tag v$ver of $repo; refusing"
+  lsout=$(git ls-remote "$remote" "refs/tags/v$ver^{}" 2>/dev/null) || die "cannot read tag v$ver of $repo; refusing"
   xsha=${lsout%%[[:space:]]*}
   [ "$(printf '%s\n' "$lsout" | wc -l | tr -d ' ')" -eq 1 ] || die "tag v$ver of $repo did not resolve to exactly one commit; refusing"
   [ ${#xsha} -eq 40 ] || die "tag v$ver of $repo: no 40-hex commit; refusing"
@@ -110,6 +134,7 @@ else
   if [ "$unverified" -eq 1 ]; then
     echo "pin-plugin: WARNING: --unverified: SHA256SUMS is NOT authenticated; these pins give integrity only. Never use for a release." >&2
   else
+    cutover_gate
     [ -f "$sig" ] || die "signature file $sig not found"
     [ -n "$signers" ] || signers="$root/ci/release.allowed_signers"
     [ -f "$signers" ] || die "signers file $signers not found"
