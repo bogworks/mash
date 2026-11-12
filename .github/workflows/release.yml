@@ -186,7 +186,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           go run ./scripts/changelog section --version "$version" > dist/CHANGELOG.md
           if [ -n "$prev" ]; then
-            printf '\nFull changes: [%s...%s](https://github.com/%s/compare/%s...%s)\n' "$prev" "$GITHUB_REF_NAME" "${GITHUB_REPOSITORY}" "$prev" "$GITHUB_REF_NAME" >> dist/CHANGELOG.md
+            printf '\nFull changes: [%s...%s](%s/%s/compare/%s...%s)\n' "$prev" "$GITHUB_REF_NAME" "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY}" "$prev" "$GITHUB_REF_NAME" >> dist/CHANGELOG.md
             go run ./scripts/changelog check-notes dist/CHANGELOG.md --version "$version" --prev "${prev#v}"
           else
             go run ./scripts/changelog check-notes dist/CHANGELOG.md
