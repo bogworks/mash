@@ -291,6 +291,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
 		go pingClient(ctx, srv, ep)
+		go warnLeaseRollup(ctx, ep, stderr)
 		// Hook delivery: once the plugin's hook has run in this session, mail goes through the spool (endpoint/hook.go).
 		// Without a spool, mail stays on the channel.
 		// A host that takes no channel delivery is hooked from the start, and without a spool its mail is held
@@ -1041,4 +1042,15 @@ func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.Lease
 				unlock()
 			}
 		}
+}
+
+// leaseRollupWarned makes the lease bucket warning appear at most once per process.
+var leaseRollupWarned sync.Once
+
+// warnLeaseRollup prints one stderr line when the lease bucket still allows rollup writes. It runs beside the start,
+// never delays it, and says nothing when the check cannot be made.
+func warnLeaseRollup(ctx context.Context, ep *endpoint.Endpoint, stderr io.Writer) {
+	if ep.LeaseRollupWarning(ctx) {
+		leaseRollupWarned.Do(func() { fmt.Fprintln(stderr, endpoint.LeaseRollupStartWarning) })
+	}
 }

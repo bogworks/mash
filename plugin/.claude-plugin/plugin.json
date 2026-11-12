@@ -1,6 +1,6 @@
 {
   "name": "mash",
-  "version": "0.4.0",
+  "version": "0.4.0-pin.1",
   "description": "Durable, signed mail between Claude Code sessions over NATS JetStream, using the Synadia Agent Protocol (SAP 0.3) plus a mail verb. Mail is delivered by hook (PostToolUse and UserPromptSubmit show it as context) and a Claude Code channel wakes an idle session with a one-line summary, so no turn is spent polling.",
   "author": { "name": "Bogworks", "url": "https://github.com/bogworks" },
   "homepage": "https://github.com/bogworks/mash",
