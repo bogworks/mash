@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ci-changes: does this change need the full CI job set? Prints "code=true" or "code=false" on stdout (the changes
+# jobs of ci.yml, lint.yml and security.yml append it to $GITHUB_OUTPUT). The changed paths are read from stdin, one per
+# line, as `git diff --no-renames --name-only` prints them (a rename lists both paths).
+#
+# Environment:
+#   EVENT     the workflow's github.event_name
+#   HEAD_REF  the pull request's head ref (github.head_ref; empty on other events)
+#
+# code=false only for a pull request that touches nothing but documentation: every path is under docs/ or is a *.md
+# file AND is not one a build, a test or the release tooling reads. Everything else is code:
+#   - a push, a merge group, a schedule or any other non-pull_request event (main's head always runs the full set: the
+#     release gate reads main's check runs);
+#   - a Mergify merge-queue draft (head ref mergify/merge-queue/...): it builds the combined commit, and its diff
+#     against main can look docs-only on its own. The prefix alone is enough here, unlike adr-lint's skip, because the
+#     mistake it allows is running more CI, never less;
+#   - an empty path list (nothing to compare);
+#   - any path not listed as documentation below (the default is code, so a new top-level path is code).
+# Documentation that a test or the build reads stays code, so it is tested when it changes: docs/audit.md (a golden check
+# in cmd/mashctl), docs/branch-protection.md (internal/release), docs/review/ (scripts/reviewgate and scripts/gate read
+# policy.json), docs/allowed_signers and docs/skipped-releases.txt (the release tooling), CHANGELOG.md and changelog.d/
+# (scripts/changelog, lint.yml), every *.md under .github/, plugin/, scripts/, cmd/, internal/ and ci/ (the plugin package is
+# embedded; the rest sit beside code), test data, Go and module files, and binary assets under docs/ (internal/release
+# refuses a committed binary). docs/decisions/ is documentation: adr-lint and adr-numbers run on every pull request anyway.
+set -euo pipefail
+
+# is_docs succeeds for a path that is documentation no test or build reads.
+is_docs() {
+	local p="$1" lower
+	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
+	case "$p" in
+	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
+	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
+	testdata/* | */testdata/* | *conformance*) return 1 ;;
+	CHANGELOG.md | changelog.d/*) return 1 ;;
+	docs/audit.md | docs/branch-protection.md | docs/review/* | docs/allowed_signers | docs/skipped-releases.txt) return 1 ;;
+	esac
+	case "$lower" in
+	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
+	esac
+	case "$p" in
+	docs/* | *.md) return 0 ;;
+	esac
+	return 1
+}
+
+files="$(cat)"
+code=true
+if [ "${EVENT:-}" = pull_request ]; then
+	case "${HEAD_REF:-}" in
+	mergify/merge-queue/*) ;;
+	*)
+		if [ -n "$files" ]; then
+			code=false
+			while IFS= read -r f; do
+				if ! is_docs "$f"; then
+					code=true
+					break
+				fi
+			done <<<"$files"
+		fi
+		;;
+	esac
+fi
+echo "code=$code"

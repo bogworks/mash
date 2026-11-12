@@ -20,7 +20,7 @@ import (
 // ./.github/workflows/... caller is fine; step-level `uses:` of actions is not covered.
 
 // linuxLabels, macosLabels and gateLabels are fmt.Sprint forms of the only allowed runs-on lists. rh-gate is carried only
-// by small dedicated runners with no rh-linux label, for the four gate jobs (TestGateJobsUseGateRunners).
+// by small dedicated runners with no rh-linux label, for the gate jobs (TestGateJobsUseGateRunners).
 const (
 	linuxLabels = "[self-hosted rh-linux]"
 	macosLabels = "[self-hosted rh-macos]"
@@ -244,7 +244,7 @@ func TestSelfHostedGuard_catchesEachViolation(t *testing.T) {
 	}
 }
 
-// TestGateJobsUseGateRunners pins which jobs run on the small gate runners: exactly the four gate jobs, and no other job in
+// TestGateJobsUseGateRunners pins which jobs run on the small gate runners: exactly the gate jobs (adr-lint, label-reset and the changes and pr-check jobs), and no other job in
 // any workflow, so a heavy test job can never occupy a gate runner.
 func TestGateJobsUseGateRunners(t *testing.T) {
 	want := map[string]bool{
@@ -252,6 +252,8 @@ func TestGateJobsUseGateRunners(t *testing.T) {
 		"adr-lint.yml/adr-lint":       true,
 		"ci.yml/changes":              true,
 		"ci.yml/pr-check":             true,
+		"lint.yml/changes":            true,
+		"security.yml/changes":        true,
 	}
 	files, err := filepath.Glob("../../.github/workflows/*.yml")
 	if err != nil || len(files) == 0 {

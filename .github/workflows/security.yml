@@ -1,11 +1,11 @@
 name: security
-# Docs-only changes skip the push and pull_request runs (as in ci); the weekly schedule always runs, because new
-# advisories appear without any change here. No third-party actions: govulncheck runs through `go run` at a pinned
-# version, CodeQL is GitHub's own.
+# A docs-only pull request skips the work at job level (the changes job, scripts/ci-changes), so govulncheck and codeql
+# still report, as skipped; no workflow-level paths filter, since a required check that never reports stalls the merge
+# queue. A push and the weekly schedule always run, because new advisories appear without any change here. No
+# third-party actions: govulncheck runs through `go run` at a pinned version, CodeQL is GitHub's own.
 on:
   push:
     branches: [main]
-    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
   schedule:
     - cron: '17 5 * * 1'
@@ -17,7 +17,33 @@ concurrency:
   group: security-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Does this change need the work? scripts/ci-changes decides (see ci.yml): only a docs-only pull request skips. A push
+  # and a schedule always run. The check names stay: a skipped job reports as skipped.
+  changes:
+    timeout-minutes: 5
+    runs-on: [self-hosted, rh-gate]
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          files=""
+          if [ "$EVENT" = pull_request ]; then
+            files="$(git diff --no-renames --name-only "$BASE" HEAD)"
+          fi
+          bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
   govulncheck:
+    # Skipped only when changes says docs-only; !cancelled() runs it when changes itself failed (fail closed).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     timeout-minutes: 15
     runs-on: [self-hosted, rh-linux]
     steps:
@@ -31,7 +57,9 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
   codeql:
     # Code scanning is free on public repositories only; on a private one the upload fails ("Code scanning is not enabled").
-    if: ${{ !github.event.repository.private }}
+    # Skipped only when changes says docs-only; !cancelled() runs it when changes itself failed (fail closed).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && !github.event.repository.private }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-linux]
     permissions:
