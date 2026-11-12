@@ -14,7 +14,8 @@
 > | Per-sender size table and refusal text (REQ-007, REQ-008), the dry run | sections 6.2 and 7 | the policy-size branch (`pr/core/policy-size`) | Tables copied from that branch's `docs/policy-file.md`. |
 > | The raw-client table on the open subjects (AT-020) and the release-gate list (AT-021) | sections 6.1 and 7 | the policy-release-tests branch (`pr/core/policy-release-tests`) | Copied from that branch's `docs/security/threat-model.md` 5.3.1 and `docs/release.md`. |
 > | AT-011 on nats-server 2.15.2 | section 4 | the deps-go-group branch (`pr/core/deps-go-group`), ADR 0103 | Figures copied from ADR 0103 on that branch. |
-> | #503 | not placed | not stated to the drafter | Not yet documented. Assign it a section when it lands. |
+> | #503 (a sender's lost reach to its own address is checked) | section 5.1 | #503 (sdk) | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
+> | Mail's lost-publish acknowledgement (REQ-021) | sections 4 and 6.5 | a measurement not yet made | `unmeasured`. To settle: extend the AT-011 test to publish mail (JetStream) at the instant of the close and record the acknowledgement result. |
 > | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | not on `main` or on any branch the drafter read | Not yet documented beyond the contract text. |
 > | The list set file format (DEC-004) and wiring the compile into `mashctl policy apply` | sections 2 and 5 | a decision and a change not yet made | Nothing outside `internal/listset` imports the compile on this commit. |
 
@@ -319,12 +320,13 @@ What this means for a reader who must defend the policy:
   closed the socket were lost (ADR 0097; one message on 2.15.2, ADR 0103). Messages sent while the client was
   disconnected were held by the client and delivered after the reconnect. The measured loss is only for messages in
   flight at the close.
-- **Mail and prompts differ in what the sender learns.** Mail is JetStream-backed: the sender waits for a storage
-  acknowledgement, so a publish lost at the close shows as a failed acknowledgement, and a retry with the same
-  idempotency key stores it once ([ADR 0031](decisions/0031-send-at-most-once-with-an-idempotency-key.md)). Prompts
-  and heartbeats are core NATS: a lost one is not reported to the sender. This is the contract's statement (REQ-021)
-  and ADR 0097 ("mail is durable in the inbox stream and a publisher that needs the message to arrive confirms it").
-  AT-011 itself measured loss on plain subjects, not the acknowledgement path.
+- **Mail and prompts differ in what the sender learns.** Mail's JetStream-backed publish is **expected** to surface a
+  lost publish as a failed acknowledgement, which is **not yet measured** (`unmeasured`; contract REQ-021). AT-011
+  measured core NATS subjects: a plain publish whose loss is not reported. If the expectation holds, a retry with the
+  same idempotency key stores the message once ([ADR 0031](decisions/0031-send-at-most-once-with-an-idempotency-key.md)).
+  Prompts and heartbeats are core NATS, so a lost one is not reported to the sender. ADR 0097 says "mail is durable in
+  the inbox stream and a publisher that needs the message to arrive confirms it". To settle: extend the AT-011 test to
+  publish mail (JetStream) at the instant of the close and record the acknowledgement result.
 - **The result is guarded.** `TestAT011TemplateChangeReachesOpenConnections` runs the four scenarios on every `go
   test`. It compares outcome classes (`after_reconnect`, `reconnected`, no loss outside the disconnect, fresh
   connection `changed`) and the server version with `internal/policy/testdata/at011-result.json`. It fails when either
@@ -355,6 +357,14 @@ permissions), reconnects it, and checks that it is refused on the removed receiv
 refusal is shown by every server's account JWT revoking it. Each probe is written to the issue record with purpose
 `probe` and revoked when the gate ends. The record's `probe` purpose exists on `main` and is reserved for this (ADR
 0101); no mash path writes it yet.
+
+The gate's expectations include a sender losing reach to its **own** address: a removal where the only thing taken from
+a sender is its own address (a self-only removal). A gate that skipped that case would pass a list set under which the
+sender can still reach itself. #503 removed an exclusion in the gate that skipped it, so a sender's lost reach to its own
+address is checked like any other removed receiver.
+
+> Pending: describes #503, not yet merged. Written from the maintainer's description of the change. Not yet documented:
+> the test names and the output. The contract text of REQ-011 and AT-010 does not name the self-only case.
 
 Because a template push closes every connection under the key (section 4), the gate expects a disconnect and then a
 reconnected sender that is refused. A connection that was open before the change counts as refused by being closed. The
@@ -585,8 +595,9 @@ make a security decision on a label. The authority is the signed user JWT. The l
 ### 6.5 Core NATS publishes at the close
 
 A template push closes connections. A prompt, a status probe or a heartbeat that is in flight at that instant can be lost,
-and the sender is not told, because those are core NATS publishes (section 4). Mail is acknowledged by JetStream, so its
-loss shows. A publisher that needs a message to arrive confirms it (ADR 0097).
+and the sender is not told, because those are core NATS publishes (section 4). Mail's JetStream-backed publish is expected
+to surface a lost publish as a failed acknowledgement (REQ-021), which is `unmeasured`: AT-011 measured core NATS
+subjects only. A publisher that needs a message to arrive confirms it (ADR 0097).
 
 ### 6.6 What the policy covers, and running one account both ways
 
@@ -658,8 +669,8 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | AT-007 | The documented exception limit matches the measured table | `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable` | `pr/core/policy-size`; pending |
 | AT-008 | The dry run lists exactly the changes and changes nothing | `TestDryRunAT008Golden`, `TestAT008Content`, `TestDryRunDoesNotMutateItsInputs` | `pr/core/policy-size`; pending |
 | AT-009 | `explain` and `show` work without admin rights and name what they describe | not yet documented | no test found |
-| AT-010 | The applied gate, on a cluster of two or more servers | pending: #488 | pending; `pending` row in the gate list |
-| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policy`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md), ADR 0103 | on `main` (2.15.1); ADR 0103 on `pr/core/deps-go-group` (2.15.2); required |
+| AT-010 | The applied gate, on a cluster of two or more servers | pending: #488. The gate's check of a sender's lost reach to its own address (#503) is not yet mapped to AT-010: the contract's AT-010 text does not name a self-only removal. | pending; `pending` row in the gate list |
+| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policy`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md), ADR 0103 | on `main` (2.15.1); ADR 0103 on `pr/core/deps-go-group` (2.15.2); required. It measured core NATS subjects only; mail's acknowledgement at the close is `unmeasured`. |
 | AT-012 | A credential for a public key, for exactly one address, with no private key anywhere | `TestIssueServiceAT012IssuesAJWTThatConnects`, `TestIssueServiceAT012NoPrivateKeyAnywhere`, `TestIssueServiceAT012Refusals`, `TestIssueServiceIgnoresTagsAndPermissionsInARequest` (`cmd/mashctl`), [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) | `pr/core/issue-service`; not in the gate list |
 | AT-013 | Narrowing rotates, revokes and causes no outage | pending: #498 | pending |
 | AT-014 | A new receiver is reachable only after the senders that must refuse it | pending: #489 | pending |
