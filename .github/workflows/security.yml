@@ -17,7 +17,8 @@ concurrency:
   group: security-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Does this change need the work? scripts/ci-changes decides (see ci.yml): only a docs-only pull request skips. A push
+  # Does this change need the work? scripts/ci-changes decides (see ci.yml; run from the base revision, and a diff touching
+  # .github/ or scripts/ci-changes is always code, as hardening): only a docs-only pull request skips. A push
   # and a schedule always run. The check names stay: a skipped job reports as skipped.
   changes:
     timeout-minutes: 5
@@ -38,8 +39,20 @@ jobs:
           files=""
           if [ "$EVENT" = pull_request ]; then
             files="$(git diff --no-renames --name-only "$BASE" HEAD)"
+            # Hardening: a diff touching .github/ or the classifier is always code, whatever the classifier says.
+            if grep -qE '^"?(\.github/|scripts/ci-changes"?$)' <<<"$files"; then
+              echo "code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Hardening: the classifier comes from the base revision, not the pull request's. No copy there: code.
+            if git show "$BASE:scripts/ci-changes" > "$RUNNER_TEMP/ci-changes"; then
+              bash "$RUNNER_TEMP/ci-changes" <<<"$files" >> "$GITHUB_OUTPUT"
+            else
+              echo "code=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
           fi
-          bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
   govulncheck:
     # Skipped only when changes says docs-only; !cancelled() runs it when changes itself failed (fail closed).
     needs: changes

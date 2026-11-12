@@ -111,7 +111,7 @@ func TestDocsOnly_everyChangesJobRunsTheSharedClassifier(t *testing.T) {
 				run, ref, event = st.Run, st.Env["HEAD_REF"], st.Env["EVENT"]
 			}
 		}
-		for _, want := range []string{"git diff --no-renames --name-only", "bash scripts/ci-changes", `>> "$GITHUB_OUTPUT"`, "set -euo pipefail"} {
+		for _, want := range []string{"git diff --no-renames --name-only", "bash scripts/ci-changes", `>> "$GITHUB_OUTPUT"`, "set -euo pipefail", `git show "$BASE:scripts/ci-changes"`, `.github/`} {
 			if !strings.Contains(run, want) {
 				t.Errorf("%s changes diff step lacks %q:\n%s", f, want, run)
 			}
@@ -224,5 +224,108 @@ func TestDocsOnly_conformanceSkipsOnDocsOnly(t *testing.T) {
 	}
 	if want := "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/') && needs.changes.outputs.code != 'false'"; j.If != want {
 		t.Errorf("conformance if %q; want %q", j.If, want)
+	}
+}
+
+// diffStepScripts returns each workflow's changes/diff step run script, keyed by workflow file.
+func diffStepScripts(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, f := range []string{"ci.yml", "lint.yml", "security.yml"} {
+		for _, st := range load(t, f).Jobs["changes"].Steps {
+			if st.ID == "diff" {
+				out[f] = st.Run
+			}
+		}
+		if out[f] == "" {
+			t.Fatalf("%s: no changes/diff step", f)
+		}
+	}
+	return out
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func writeRepoFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	p := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The diff step's behaviour, run for real: the classifier comes from the base revision, and a diff touching .github/ or
+// scripts/ci-changes is always code.
+func TestDocsOnly_diffStepHardening(t *testing.T) {
+	real, err := os.ReadFile("../../scripts/ci-changes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rewritten = "#!/usr/bin/env bash\necho code=false\n"
+	type change struct{ path, content string }
+	for _, c := range []struct {
+		name       string
+		event      string
+		baseHasCls bool
+		changes    []change
+		want       string
+	}{
+		{"docs only", "pull_request", true, []change{{"docs/a.md", "x\n"}}, "code=false"},
+		{"rewritten classifier plus Go", "pull_request", true, []change{{"scripts/ci-changes", rewritten}, {"internal/x.go", "package x\n"}}, "code=true"},
+		{"rewritten classifier plus docs", "pull_request", true, []change{{"scripts/ci-changes", rewritten}, {"docs/a.md", "x\n"}}, "code=true"},
+		{"workflow change", "pull_request", true, []change{{".github/workflows/x.yml", "on: push\n"}}, "code=true"},
+		{"workflow change beside docs", "pull_request", true, []change{{".github/workflows/x.yml", "on: push\n"}, {"docs/a.md", "x\n"}}, "code=true"},
+		{"base without the classifier", "pull_request", false, []change{{"docs/a.md", "x\n"}}, "code=true"},
+		{"push uses the checkout's classifier", "push", true, []change{{"docs/a.md", "x\n"}}, "code=true"},
+	} {
+		for wf, script := range diffStepScripts(t) {
+			t.Run(c.name+"/"+wf, func(t *testing.T) {
+				dir := t.TempDir()
+				git(t, dir, "init", "-q")
+				writeRepoFile(t, dir, "README.txt", "base\n")
+				if c.baseHasCls {
+					writeRepoFile(t, dir, "scripts/ci-changes", string(real))
+				}
+				git(t, dir, "add", "-A")
+				git(t, dir, "commit", "-q", "-m", "base")
+				base := git(t, dir, "rev-parse", "HEAD")
+				for _, ch := range c.changes {
+					writeRepoFile(t, dir, ch.path, ch.content)
+				}
+				git(t, dir, "add", "-A")
+				git(t, dir, "commit", "-q", "-m", "pr")
+				if c.event == "push" {
+					// The checkout's classifier is the one that runs: give the push a distinguishable one.
+					writeRepoFile(t, dir, "scripts/ci-changes", string(real))
+				}
+				outFile := filepath.Join(t.TempDir(), "output")
+				runnerTemp := t.TempDir()
+				cmd := exec.Command("bash", "-c", script)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "EVENT="+c.event, "BASE="+base, "HEAD_REF=x", "GITHUB_OUTPUT="+outFile, "RUNNER_TEMP="+runnerTemp)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("%v: %s", err, out)
+				}
+				got, err := os.ReadFile(outFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.TrimSpace(string(got)) != c.want || strings.Count(string(got), "code=") != 1 {
+					t.Errorf("output %q, want exactly %s", got, c.want)
+				}
+			})
+		}
 	}
 }
