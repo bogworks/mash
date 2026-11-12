@@ -1,0 +1,15 @@
+accepted: this would change
+receivers foo.c.core mail: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
+receivers foo.c.core prompt: added foo.d.build; removed (none)
+receivers foo.c.core status: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
+receivers foo.c.core heartbeat: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
+receivers foo.c.lead mail: added foo.c.lead; removed (none)
+receivers foo.c.lead status: added foo.c.lead; removed (none)
+receivers foo.c.lead heartbeat: added foo.c.lead; removed (none)
+template foo.c: added
+tags foo.c.core: (none) -> allow:d.build, deny:_none
+tags foo.c.lead: (none) -> deny:c.core
+rotate and revoke: (none)
+new credential: (none)
+revoke: (none)
+first credential: foo.c.core, foo.c.lead

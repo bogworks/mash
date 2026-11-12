@@ -1,0 +1,12 @@
+accepted: this would change
+receivers foo.c.lead mail: added foo.c.core; removed (none)
+receivers foo.c.lead prompt: added foo.c.core; removed (none)
+receivers foo.c.lead status: added foo.c.core; removed (none)
+receivers foo.c.lead heartbeat: added foo.c.core; removed (none)
+template foo.c: changed; disconnects foo.c.core, foo.c.lead
+tags foo.c.core: allow:d.build, deny:_none -> allow:d.build
+tags foo.c.lead: deny:c.core -> allow:c.core
+rotate and revoke: (none)
+new credential: foo.c.core, foo.c.lead
+revoke: (none)
+first credential: (none)

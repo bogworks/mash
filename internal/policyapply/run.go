@@ -50,6 +50,28 @@ type Ledger interface {
 	ClearPending() error
 }
 
+// DocumentLedger is implemented by a Ledger that also keeps the exact bytes of the list-set document of the record in
+// force and of the pending record. Run uses these two methods, with RunInput.Received, in place of SetPending and
+// CompareAndCommit.
+type DocumentLedger interface {
+	SetPendingDocument(rec listset.Record, doc []byte) error
+	CommitDocument(base uint64, rec listset.Record, doc []byte) error
+}
+
+func setPending(in RunInput, rec listset.Record) error {
+	if dl, ok := in.Ledger.(DocumentLedger); ok {
+		return dl.SetPendingDocument(rec, in.Received)
+	}
+	return in.Ledger.SetPending(rec)
+}
+
+func commit(in RunInput, base uint64, rec listset.Record) error {
+	if dl, ok := in.Ledger.(DocumentLedger); ok {
+		return dl.CommitDocument(base, rec, in.Received)
+	}
+	return in.Ledger.CompareAndCommit(base, rec)
+}
+
 // MemLedger is an in-memory Ledger, safe for concurrent use. It is process-local: see the package comment.
 type MemLedger struct {
 	mu      sync.Mutex // guards rec, pending, hasPend
@@ -405,7 +427,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		gi.Expect.RevokedKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(gi.Expect.RevokedKeys, all))))
 		if aerr != nil {
 			// The target is on the servers: pending, so only a resubmission of the same content may follow.
-			if perr := in.Ledger.SetPending(rec); perr != nil {
+			if perr := setPending(in, rec); perr != nil {
 				aerr = errors.Join(aerr, perr)
 			}
 			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
@@ -430,7 +452,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		if err == nil && len(notConnected) == 0 && backOn(st, base.Generation) {
 			perr = in.Ledger.ClearPending()
 		} else {
-			perr = in.Ledger.SetPending(rec)
+			perr = setPending(in, rec)
 		}
 		if err == nil {
 			err = perr
@@ -440,13 +462,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if in.BeforeCommit != nil {
 		if err := in.BeforeCommit(ctx, Accepted{Record: rec, Compiled: frozen, Expect: expect}, st); err != nil {
 			// The target is on the servers and not committed: pending, so only the same content may follow.
-			if perr := in.Ledger.SetPending(rec); perr != nil {
+			if perr := setPending(in, rec); perr != nil {
 				err = errors.Join(err, perr)
 			}
 			return st, fmt.Errorf("before committing generation %d: %w", rec.Generation, err)
 		}
 	}
-	if err := in.Ledger.CompareAndCommit(base.Generation, rec); err != nil {
+	if err := commit(in, base.Generation, rec); err != nil {
 		return st, fmt.Errorf("commit generation %d: %w", rec.Generation, err)
 	}
 	if err := in.Ledger.ClearPending(); err != nil {

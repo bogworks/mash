@@ -1,6 +1,7 @@
 package policyapply
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -73,6 +74,7 @@ type KVLedgerOptions struct {
 // The ledger does not create the bucket.
 type KVLedger struct {
 	kv       jetstream.KeyValue
+	account  string
 	key      string
 	leaseKey string
 	holder   string
@@ -109,7 +111,7 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 	if err != nil {
 		return nil, fmt.Errorf("policy ledger: bucket %s: %w", bucket, err)
 	}
-	l := &KVLedger{kv: kv, key: StatusKey(account), leaseKey: LeaseKey(account), holder: opts.Holder, ttl: opts.LeaseTTL,
+	l := &KVLedger{kv: kv, account: account, key: StatusKey(account), leaseKey: LeaseKey(account), holder: opts.Holder, ttl: opts.LeaseTTL,
 		poll: opts.Poll, opTO: opts.OpTimeout, now: opts.Now, sem: make(chan struct{}, 1)}
 	if l.ttl <= 0 {
 		l.ttl = DefaultLeaseTTL
@@ -133,9 +135,38 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 	return l, nil
 }
 
+// OpenKVLedgerReadOnly returns a KVLedger for reading only: the caller uses InForceDocument and LatestStatus, and never
+// Lock or the writing methods, so it takes no lease and writes nothing.
+func OpenKVLedgerReadOnly(ctx context.Context, js jetstream.JetStream, rng, account string) (*KVLedger, error) {
+	return NewKVLedger(ctx, js, rng, account, KVLedgerOptions{})
+}
+
+// Account returns the account public key this ledger is for.
+func (l *KVLedger) Account() string { return l.account }
+
+// InForceDocument returns the exact bytes of the list-set document in force, nil when none is stored (nothing in
+// force, or a record committed without its document).
+func (l *KVLedger) InForceDocument(ctx context.Context) ([]byte, error) {
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.Clone(v.InForceDocument), nil
+}
+
+// LatestStatus returns the latest status written, nil when none has been.
+func (l *KVLedger) LatestStatus(ctx context.Context) (*Status, error) {
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return v.Status, nil
+}
+
 var (
-	_ Ledger       = (*KVLedger)(nil)
-	_ StatusWriter = (*KVLedger)(nil)
+	_ Ledger         = (*KVLedger)(nil)
+	_ StatusWriter   = (*KVLedger)(nil)
+	_ DocumentLedger = (*KVLedger)(nil)
 )
 
 // recordValue is a listset.Record in the status value: digests are their strings.
@@ -152,6 +183,10 @@ type statusValue struct {
 	InForce *recordValue `json:"in_force,omitempty"`
 	Pending *recordValue `json:"pending,omitempty"`
 	Status  *Status      `json:"status,omitempty"`
+	// InForceDocument and PendingDocument are the exact bytes of the list-set documents the two records were
+	// decoded from (base64 in JSON); empty when the writer had none.
+	InForceDocument []byte `json:"in_force_document,omitempty"`
+	PendingDocument []byte `json:"pending_document,omitempty"`
 }
 
 // leaseValue is the value at the lease key.
@@ -304,14 +339,20 @@ func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	return r, err == nil, err
 }
 
-// SetPending implements Ledger.
-func (l *KVLedger) SetPending(rec listset.Record) error {
-	return l.mutate(func(v *statusValue) error { v.Pending = recordToValue(rec); return nil })
+// SetPending implements Ledger. It stores no document: the pending document is cleared.
+func (l *KVLedger) SetPending(rec listset.Record) error { return l.SetPendingDocument(rec, nil) }
+
+// SetPendingDocument records rec as pending together with the exact bytes of the document it came from.
+func (l *KVLedger) SetPendingDocument(rec listset.Record, doc []byte) error {
+	return l.mutate(func(v *statusValue) error {
+		v.Pending, v.PendingDocument = recordToValue(rec), bytes.Clone(doc)
+		return nil
+	})
 }
 
 // ClearPending implements Ledger.
 func (l *KVLedger) ClearPending() error {
-	return l.mutate(func(v *statusValue) error { v.Pending = nil; return nil })
+	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingDocument = nil, nil; return nil })
 }
 
 // WriteStatus stores st as the latest status, keeping the record in force and the pending record.
@@ -337,6 +378,12 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 // commits at the revision it read, and only if the generation in force is still base; a lost compare-and-set is read
 // again, so only a different generation in force is a stale base.
 func (l *KVLedger) CompareAndCommit(base uint64, rec listset.Record) error {
+	return l.CommitDocument(base, rec, nil)
+}
+
+// CommitDocument is CompareAndCommit that also stores the exact bytes of the document rec came from, in the same
+// write. A nil doc clears the stored document.
+func (l *KVLedger) CommitDocument(base uint64, rec listset.Record, doc []byte) error {
 	ctx, cancel := l.opCtx()
 	defer cancel()
 	if err := l.checkLease(ctx); err != nil {
@@ -354,7 +401,7 @@ func (l *KVLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 		if cur.Generation != base {
 			return &listset.StaleBaseError{Stated: base, InForce: cur.Generation}
 		}
-		v.InForce = recordToValue(rec)
+		v.InForce, v.InForceDocument = recordToValue(rec), bytes.Clone(doc)
 		err = l.write(ctx, v, rev)
 		if err == nil {
 			return nil

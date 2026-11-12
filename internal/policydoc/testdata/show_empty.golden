@@ -1,0 +1,5 @@
+This describes the list set in force, not any installed credential.
+state: no status written
+no list set is in force
+
+The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all.
