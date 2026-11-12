@@ -52,7 +52,8 @@ note on stderr that names the value.
 
 Hooks keep their download budget and failure marker. Under `strict`, a hook after a failed download refuses for the next
 300 s without trying again; that is by design, since the alternative is running an unverified binary. `$MASH_BIN` is an
-explicit operator choice and is never verified, a successful verified download is unchanged, and so is the prefetch.
+explicit operator choice, not a fallback: strict verifies what mash fetches, and an operator's `MASH_BIN` is trusted as
+given and never verified. A successful verified download is unchanged, and so is the prefetch.
 Stdout stays the binary's.
 
 ### Consequences
