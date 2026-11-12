@@ -91,7 +91,19 @@ func releaseBodyReads(o Options, x, tag string) error {
 	}
 	prev := previousRelease(tag, releases)
 	body := strings.ReplaceAll(resp.Body, "\r\n", "\n")
+	// The notes are the change-log section at X (ADR 0105): an edited draft must not publish other text. The only
+	// addition allowed is the draft job's last paragraph, the "Full changes:" compare link.
+	changelog, has, err := fileAt(o.Repo, x, "CHANGELOG.md")
+	if err != nil {
+		return err
+	}
+	section, found := releasenotes.SectionBody(changelog, o.Version)
+	if !has || !found {
+		return fmt.Errorf("CHANGELOG.md at %s has no section for %s to compare the release body with", x, o.Version)
+	}
+	sameErr := bodyIsSection(body, section)
 	return errors.Join(
+		sameErr,
 		releasenotes.NoPlaceholder(body),
 		releasenotes.Opening(body),
 		releasenotes.HasCompareLink(body, prev, o.Version),
@@ -117,4 +129,18 @@ func previousRelease(tag string, releases []releaseRow) string {
 		}
 	}
 	return strings.TrimPrefix(best, "v")
+}
+
+// bodyIsSection is nil when body is the change-log section text, optionally followed by one final paragraph that
+// starts with "Full changes:" (the compare link the draft job appends). Trailing blank space is not compared.
+func bodyIsSection(body, section string) error {
+	body = strings.TrimRight(body, " \t\n")
+	section = strings.TrimRight(strings.ReplaceAll(section, "\r\n", "\n"), " \t\n")
+	if body == section {
+		return nil
+	}
+	if rest, ok := strings.CutPrefix(body, section+"\n\n"); ok && strings.HasPrefix(rest, "Full changes:") && !strings.Contains(rest, "\n") {
+		return nil
+	}
+	return errors.New("the release body is not the CHANGELOG.md section for this version (plus the final \"Full changes:\" compare link): the release notes and the change log must be the same text (ADR 0105)")
 }

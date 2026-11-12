@@ -133,32 +133,63 @@ func fakeNotesGH(t *testing.T, body string, releases []releaseRow) string {
 
 func TestReleaseBodyReads(t *testing.T) {
 	link := "Full changes: [v0.4.0...v0.4.1](https://github.com/bogworks/mash/compare/v0.4.0...v0.4.1)\n"
-	good := goodSection() + "\n" + link
+	wrongLink := strings.ReplaceAll(link, "v0.4.0...", "v0.3.3...")
+	sec := goodSection() // the change-log section at X, as releasenotes.SectionBody returns it
 	published := []releaseRow{{TagName: "v0.4.0"}, {TagName: "v0.3.3"}, {TagName: "v0.4.2", IsDraft: true}}
+	const same = "same text"
 	cases := []struct {
 		name    string
-		cutover string
-		tag     string
-		body    string
+		cutover string // "" is v0.4.0, "-" is no record
+		tag     string // "" is v0.4.1
+		sec     string // the section in CHANGELOG.md at X; "" is a good one
+		body    string // the release body; "" is sec, then a blank line and tail when tail is not empty
+		tail    string
 		want    string // "" passes
+		notWant string // a substring the error must not hold
 	}{
-		{"a good body passes", "v0.4.0", "v0.4.1", good, ""},
-		{"no summary", "v0.4.0", "v0.4.1", "### Added\n\n- a\n\n" + link, "not \"### Summary\""},
-		{"a short summary", "v0.4.0", "v0.4.1", strings.Replace(good, proseWords(45), proseWords(10), 1), "10 words"},
-		{"no Upgrading", "v0.4.0", "v0.4.1", "### Summary\n\n" + proseWords(45) + "\n\n" + link, "no \"### Upgrading\""},
-		{"no compare link", "v0.4.0", "v0.4.1", goodSection(), "no link to the full changes"},
-		{"the compare link names the wrong previous release", "v0.4.0", "v0.4.1", strings.ReplaceAll(good, "v0.4.0...", "v0.3.3..."), "compare/v0.4.0...v0.4.1"},
-		{"a line ending in a commit hash", "v0.4.0", "v0.4.1", good + "- fix the thing (a1b2c3d)\n", "commit hash"},
-		{"the placeholder", "v0.4.0", "v0.4.1", good + "REPLACE THIS\n", "REPLACE THIS"},
-		{"the cutover release is not judged", "v0.4.0", "v0.4.0", "- raw (a1b2c3d)\n", ""},
-		{"a release below the cutover is not judged", "v0.4.0", "v0.3.3", "- raw (a1b2c3d)\n", ""},
-		{"no cutover record is not judged", "", "v0.4.1", "- raw (a1b2c3d)\n", ""},
+		{name: "a good body passes", tail: link},
+		{name: "the section alone with no compare link: refused for the link only", want: "no link to the full changes", notWant: same},
+		{name: "trailing blank space is tolerated", tail: link + "\n  \n\n"},
+		{name: "CRLF line endings are tolerated", body: strings.ReplaceAll(sec+"\n"+link, "\n", "\r\n")},
+		{name: "no summary", sec: "### Added\n\n- a\n", tail: link, want: "not \"### Summary\"", notWant: same},
+		{name: "a short summary", sec: strings.Replace(sec, proseWords(45), proseWords(10), 1), tail: link, want: "10 words", notWant: same},
+		{name: "no Upgrading", sec: "### Summary\n\n" + proseWords(45) + "\n", tail: link, want: "no \"### Upgrading\"", notWant: same},
+		{name: "the compare link names the wrong previous release", tail: wrongLink, want: "compare/v0.4.0...v0.4.1", notWant: same},
+		{name: "a line ending in a commit hash", sec: sec + "- fix the thing (a1b2c3d)\n", tail: link, want: "commit hash", notWant: same},
+		{name: "the placeholder", sec: sec + "REPLACE THIS\n", tail: link, want: "REPLACE THIS", notWant: same},
+		{name: "edited prose that is otherwise valid", body: strings.Replace(sec, proseWords(45), strings.TrimSpace(strings.Repeat("other ", 45))+".", 1) + "\n" + link, want: same},
+		{name: "an extra paragraph after the Full changes paragraph", tail: link + "\nAnother paragraph.\n", want: same},
+		{name: "an extra paragraph before the Full changes paragraph", tail: "Another paragraph.\n\n" + link, want: same},
+		{name: "a second Full changes line in the same paragraph", tail: link + link, want: same},
+		{name: "the cutover release is not judged", tag: "v0.4.0", body: "- raw (a1b2c3d)\n"},
+		{name: "a release below the cutover is not judged", tag: "v0.3.3", body: "- raw (a1b2c3d)\n"},
+		{name: "no cutover record is not judged", cutover: "-", body: "- raw (a1b2c3d)\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			o, x := notesRepo(t, c.cutover, "# Changelog\n")
-			o.GH, o.GHRepo, o.Version = fakeNotesGH(t, c.body, published), "bogworks/mash", strings.TrimPrefix(c.tag, "v")
-			err := releaseBodyReads(o, x, c.tag)
+			cutover, tag, csec, body := c.cutover, c.tag, c.sec, c.body
+			switch cutover {
+			case "":
+				cutover = "v0.4.0"
+			case "-":
+				cutover = ""
+			}
+			if tag == "" {
+				tag = "v0.4.1"
+			}
+			if csec == "" {
+				csec = sec
+			}
+			if body == "" {
+				body = csec
+				if c.tail != "" {
+					body += "\n" + c.tail
+				}
+			}
+			version := strings.TrimPrefix(tag, "v")
+			o, x := notesRepo(t, cutover, changelogWith([2]string{version, csec}))
+			o.GH, o.GHRepo, o.Version = fakeNotesGH(t, body, published), "bogworks/mash", version
+			err := releaseBodyReads(o, x, tag)
 			if c.want == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -168,17 +199,27 @@ func TestReleaseBodyReads(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("got %v, want %q", err, c.want)
 			}
+			if c.notWant != "" && strings.Contains(err.Error(), c.notWant) {
+				t.Fatalf("got %v, which must not hold %q", err, c.notWant)
+			}
 		})
 	}
 	t.Run("with no earlier release only a compare link is required", func(t *testing.T) {
-		o, x := notesRepo(t, "v0.4.0", "# Changelog\n")
-		o.GH, o.GHRepo, o.Version = fakeNotesGH(t, good, nil), "bogworks/mash", "0.4.1"
+		o, x := notesRepo(t, "v0.4.0", changelogWith([2]string{"0.4.1", sec}))
+		o.GH, o.GHRepo, o.Version = fakeNotesGH(t, sec+"\n"+link, nil), "bogworks/mash", "0.4.1"
 		if err := releaseBodyReads(o, x, "v0.4.1"); err != nil {
 			t.Fatal(err)
 		}
 	})
+	t.Run("a CHANGELOG.md at X with no section for the version is refused", func(t *testing.T) {
+		o, x := notesRepo(t, "v0.4.0", changelogWith([2]string{"0.4.0", sec}))
+		o.GH, o.GHRepo, o.Version = fakeNotesGH(t, sec+"\n"+link, published), "bogworks/mash", "0.4.1"
+		if err := releaseBodyReads(o, x, "v0.4.1"); err == nil || !strings.Contains(err.Error(), "has no section") {
+			t.Fatalf("got %v", err)
+		}
+	})
 	t.Run("an unreadable body is the gate's failure, not a refusal", func(t *testing.T) {
-		o, x := notesRepo(t, "v0.4.0", "# Changelog\n")
+		o, x := notesRepo(t, "v0.4.0", changelogWith([2]string{"0.4.1", sec}))
 		o.GH, o.GHRepo, o.Version = "/nonexistent/gh", "bogworks/mash", "0.4.1"
 		var oe opError
 		if err := releaseBodyReads(o, x, "v0.4.1"); err == nil || !asOp(err, &oe) {
@@ -229,9 +270,15 @@ func TestCheckAssets_releaseBodyScope(t *testing.T) {
 		nb, _ := json.Marshal(m)
 		write(t, f.ghDir(), "assets.json", string(nb))
 	}
-	good := goodSection() + "\nFull changes: [v0.0.9...v0.1.0](https://github.com/bogworks/mash/compare/v0.0.9...v0.1.0)\n"
+	sec := goodSection()
+	// X must hold the change-log section the body is compared with.
+	withChangelog := func(f *fixture) {
+		write(t, f.repo, "CHANGELOG.md", changelogWith([2]string{"0.1.0", sec}))
+	}
+	good := sec + "\nFull changes: [v0.0.9...v0.1.0](https://github.com/bogworks/mash/compare/v0.0.9...v0.1.0)\n"
 	t.Run("a body that is a commit list is refused above the cutover", func(t *testing.T) {
 		f := keylessFixture(t)
+		withChangelog(f)
 		f.makeKeyless(t, "v0.0.9") // v0.1.0 is strictly above it
 		setAssets(t, f, nil)
 		setBody(t, f, "# v0.1.0\n\n- raw subject (a1b2c3d)\n")
@@ -243,11 +290,24 @@ func TestCheckAssets_releaseBodyScope(t *testing.T) {
 	})
 	t.Run("a good body passes above the cutover", func(t *testing.T) {
 		f := keylessFixture(t)
+		withChangelog(f)
 		f.makeKeyless(t, "v0.0.9")
 		setAssets(t, f, nil)
 		setBody(t, f, good)
 		if err := checkAssets(context.Background(), f.o); err != nil {
 			t.Fatalf("%v\n%s", err, f.o.Out.(interface{ String() string }).String())
+		}
+	})
+	t.Run("a body edited away from the change-log section is refused above the cutover", func(t *testing.T) {
+		f := keylessFixture(t)
+		withChangelog(f)
+		f.makeKeyless(t, "v0.0.9")
+		setAssets(t, f, nil)
+		setBody(t, f, strings.Replace(good, proseWords(45), "other "+proseWords(44), 1))
+		err := checkAssets(context.Background(), f.o)
+		out := f.o.Out.(interface{ String() string }).String()
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "same text") {
+			t.Fatalf("err = %v\n%s", err, out)
 		}
 	})
 	t.Run("the cutover release itself is not judged", func(t *testing.T) {
