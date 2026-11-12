@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
 )
@@ -180,10 +181,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		home, _ = os.UserHomeDir()
 	}
 	cfg, err := config.Load(lookup, home)
-	// admin acts on the legacy identity (naming plan 1.6 gives it the three-token one), so with agent_token set it
-	// refuses rather than operate the wrong endpoint. An empty MASH_AGENT_TOKEN is a config error that hook would
-	// swallow as a no-op: refuse it for hook and admin both.
-	if args[0] == "admin" && cfg.AgentToken != "" {
+	// admin acts on the legacy identity, so with agent_token set it refuses rather than operate the wrong endpoint;
+	// the exception is the three-token form of provision and deprovision (naming plan 1.6), which names its target
+	// itself. An empty MASH_AGENT_TOKEN is a config error that hook would swallow as a no-op: refuse it for hook and
+	// admin both.
+	if args[0] == "admin" && cfg.AgentToken != "" && !ctl.NewFormRequested(args[1:]) {
 		fmt.Fprintln(stderr, errAdminAgentToken)
 		return 1
 	}

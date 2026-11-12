@@ -50,7 +50,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
 	}
-	cfg, err := loadConfig(env, lookup)
+	cfg, err := loadConfigFor(ctl.NewFormRequested(args), env, lookup)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
