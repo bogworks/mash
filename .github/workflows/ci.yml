@@ -103,6 +103,7 @@ jobs:
           set -eu
           # scripts/releasecheck builds release binaries and takes about 440 s even without -race, a third of the
           # job's wall time on the 2-vCPU macOS runner (#275); Linux runs it, with -race, on every event.
+          # shellcheck disable=SC2046 # the package list is meant to split into one argument per import path
           go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
       - name: Leave nothing behind
         if: always()
