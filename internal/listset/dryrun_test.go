@@ -422,3 +422,12 @@ func TestAT008Content(t *testing.T) {
 	}
 	wantList(t, "disconnected", p.Templates[0].DisconnectedSenders, all...)
 }
+
+// A configured account JWT limit above the decoder's 1 MiB cap is capped: the server cannot decode a larger token.
+func TestServerLimitsAccountJWTCapped(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{{0, DefaultMaxAccountJWT}, {4096, 4096}, {DefaultMaxAccountJWT + 1, DefaultMaxAccountJWT}, {8 << 20, DefaultMaxAccountJWT}} {
+		if got := (ServerLimits{MaxAccountJWT: tc.in}).accountJWT(); got != tc.want {
+			t.Errorf("accountJWT(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}

@@ -39,8 +39,10 @@ func (s ServerLimits) connectLine() int {
 	return s.MaxConnectLine
 }
 
+// accountJWT is the server's account JWT limit, never above the jwt decoder's fixed cap: a larger configured value
+// cannot make the server decode a larger token.
 func (s ServerLimits) accountJWT() int {
-	if s.MaxAccountJWT <= 0 {
+	if s.MaxAccountJWT <= 0 || s.MaxAccountJWT > DefaultMaxAccountJWT {
 		return DefaultMaxAccountJWT
 	}
 	return s.MaxAccountJWT
