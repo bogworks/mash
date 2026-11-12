@@ -97,7 +97,7 @@ func credsSubject(t *testing.T, path string) (*jwt.UserClaims, string) {
 // `mashctl add` records the user it issues, with every field, before it hands the creds out; init records the admin.
 func TestAddRecordsTheIssuedUser(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
-	if out, errb, code := h.run("add", "g", "--zone", "green", "--tool"); code != 0 {
+	if out, errb, code := h.run("add", "g", "--label", "net=green", "--tool"); code != 0 {
 		t.Fatalf("%d %s %s", code, out, errb)
 	}
 	uc, pub := h.credsClaims("g")
@@ -105,10 +105,10 @@ func TestAddRecordsTheIssuedUser(t *testing.T) {
 	if !ok {
 		t.Fatalf("no record for %s: %+v", pub, h.issued())
 	}
-	if rec.Address != "g" || rec.Owner != h.e.Owner || rec.Zone != "green" || rec.Kind != store.IssuedEndpoint || rec.Generation != 0 {
+	if rec.Address != "g" || rec.Owner != h.e.Owner || rec.Kind != store.IssuedEndpoint || rec.Generation != 0 {
 		t.Errorf("record %+v", rec)
 	}
-	if !slices.Equal(rec.Tags, []string(uc.Tags)) || len(rec.Tags) == 0 {
+	if len(rec.Tags) != 0 || len(uc.Tags) != 0 { // a user minted without a zone key carries no tags (ADR 0091)
 		t.Errorf("tags %v, JWT %v", rec.Tags, uc.Tags)
 	}
 	at, err := time.Parse(time.RFC3339, rec.IssuedAt)
@@ -139,7 +139,7 @@ func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
 	if _, err := js.CreateKeyValue(ctx, store.IssuedConfig()); err != nil { // allows rollup: not hardened
 		t.Fatal(err)
 	}
-	out, errb, code := h.run("add", "g", "--zone", "green")
+	out, errb, code := h.run("add", "g", "--label", "net=green")
 	if code != 1 || !strings.Contains(errb, "nothing was issued") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -156,8 +156,7 @@ func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
 func TestReissueRecordsAndNeverRemoves(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	fakeRevoke(t, nil)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -231,7 +230,27 @@ func connectedKeys(t *testing.T, e *applyEnv) []string {
 	return keys
 }
 
-// AT-017: users issued through mashctl and connected are clean; a user signed outside mashctl with a copy of a zone's
+// mintRogue signs a user JWT for name with the account signing key, as a holder of a copy of that key outside mashctl
+// would, and returns a connect option for it.
+func (e *applyEnv) mintRogue(name string) nats.Option {
+	e.t.Helper()
+	akp, _, err := e.ks.Account()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+	uc := jwt.NewUserClaims(upub)
+	uc.Name = name
+	uc.Permissions = admin.Permissions("alice", name) // NewUserClaims leaves the limits unlimited
+	tok, err := uc.Encode(akp)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return nats.UserJWT(func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return ukp.Sign(n) })
+}
+
+// AT-017: users issued through mashctl and connected are clean; a user signed outside mashctl with a copy of the account
 // signing key connects, and the check reports exactly its public key and exits 1.
 func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 	e := newDriftEnv(t)
@@ -251,8 +270,8 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Errorf("y is recorded and not connected, and should be listed: %+v", r.NotConnected)
 	}
 
-	// The rogue: signed by zone a's key, held outside mashctl.
-	rogue := e.mint("a", "rogue")
+	// The rogue: signed by a copy of the account signing key, held outside mashctl.
+	rogue := e.mintRogue("rogue")
 	rc := e.connect(rogue, nats.Name("rogue-client"))
 	if !rc.IsConnected() {
 		t.Fatal("the rogue did not connect")
@@ -266,13 +285,8 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 	if !nkeys.IsValidPublicUserKey(f.PublicKey) || !slices.Contains(keys, f.PublicKey) || f.Name != "rogue-client" || f.Account != e.acctPub || f.Server == "" {
 		t.Errorf("finding %+v (connected %v)", f, keys)
 	}
-	zk, _ := e.ks.ZoneKey("a", false)
-	zpub, _ := zk.PublicKey()
-	if f.IssuerKey != zpub {
-		t.Errorf("issuer %q, want zone a's key %q", f.IssuerKey, zpub)
-	}
-	if !slices.Contains(f.Tags, "deny:_none") {
-		t.Errorf("tags %v", f.Tags)
+	if f.IssuerKey != e.acctPub {
+		t.Errorf("issuer %q, want the account key %q", f.IssuerKey, e.acctPub)
 	}
 
 	// The text form names the same key, and no more.
@@ -311,7 +325,7 @@ func TestIssuedCheckRefusesAnIncompleteServerSet(t *testing.T) {
 	}
 	// a rogue is still reported when the set is incomplete: the finding is certain
 	e.env["MASH_SERVERS"] = "2"
-	e.connect(e.mint("a", "rogue"))
+	e.connect(e.mintRogue("rogue"))
 	if r, _, code := e.issuedCheck(); code != 1 || len(r.Unrecorded) != 1 || r.Complete {
 		t.Fatalf("%d %+v", code, r)
 	}
@@ -386,7 +400,7 @@ func TestIssuedJSONShape(t *testing.T) {
 func TestConnzReadsEveryPage(t *testing.T) {
 	e := newDriftEnv(t)
 	for i := 0; i < 4; i++ {
-		e.connect(e.mint("a", "p"))
+		e.connect(e.mintRogue("p"))
 	}
 	nc := e.connect(natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
 	res := apply.NATS{Conn: nc}
@@ -417,8 +431,7 @@ func TestConnzReadsEveryPage(t *testing.T) {
 func TestIssuedPurposePerPath(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	fakeRevoke(t, nil)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -456,8 +469,7 @@ func TestIssuedPurposePerPath(t *testing.T) {
 // A rotating reissue marks the old key revoked after the revocation, and not the new one; a failed revocation marks nothing.
 func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -496,7 +508,7 @@ func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
 func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	t.Run("retire", func(t *testing.T) {
 		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -521,7 +533,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	})
 	t.Run("deprovision", func(t *testing.T) {
 		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -538,7 +550,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	})
 	t.Run("mark failure is a warning", func(t *testing.T) {
 		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -748,7 +760,7 @@ func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
 	e := newDriftEnv(t)
 	e.env["MASH_SERVERS"] = "2"
-	e.connect(e.mint("a", "rogue"))
+	e.connect(e.mintRogue("rogue"))
 	r, _, code := e.issuedCheck()
 	if code != 1 || len(r.Unrecorded) != 1 || r.Complete || r.Clean || r.Incomplete == "" {
 		t.Fatalf("%d %+v", code, r)

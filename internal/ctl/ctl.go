@@ -66,15 +66,11 @@ func limitsUsage(prog string) string {
 }
 
 func provisionUsage(prog string) string {
-	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]" + newFormUsage
+	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..." + newFormUsage
 }
 
 // newFormUsage is the three-token tail of the provision usage line.
 const newFormUsage = "\n  three tokens (needs the agent_token setting): <name> --agent A [--owner O] [--alias OWNER/NAME], or agent.owner.name; --owner defaults to the configured owner"
-
-func setZoneUsage(prog string) string {
-	return "usage: " + prog + " set-zone <name> <zone>   (moves an existing endpoint into the zone: its inbox also takes the zone mail subject, mail to the old subject still arrives; a zone is 1-32 lower-case letters, digits and hyphens)"
-}
 
 func suspendUsage(prog, verb string) string {
 	return "usage: " + prog + " " + verb + " <name>"
@@ -100,9 +96,8 @@ func Usage(prog string) string {
 	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <name> [--nsc]", "the NATS permissions an endpoint user needs")
-	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]", "")
+	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]...", "")
 	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
-	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
 	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
 	line("resume <name>", "undo suspend")
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
@@ -118,6 +113,7 @@ func Usage(prog string) string {
 		mintLines(line)
 		issuedLines(line)
 		retireLines(line)
+		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It does not reissue the endpoint's user: run `mashctl permissions NAME --nsc` afterwards")
 		policyLines(line)
 	}
 	return b.String()
@@ -128,8 +124,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user (signed by the account key), provision it and write its creds file")
+	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one)")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -146,10 +142,11 @@ func retireLines(line func(left, right string)) {
 func policyLines(line func(left, right string)) {
 	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
 	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
-	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: zone keys, the account push, directory zone and labels; lists stale creds")
+	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the directory and the creds files; fixes nothing")
+	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: the account check, directory labels; lists stale creds")
+	line("policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "the list set in force and how far it is applied (reads the policy bucket; changes nothing)")
+	line("policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "whether SENDER may mail RECEIVER under the list set in force, and why")
+	line("policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]", "what applying the list-set document FILE would do; exits 1 when the plan is refused")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -275,7 +272,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return usage(err)
 		}
 		if nf != nil {
-			if err := provisionKeyArgs(prog, opt("--user"), opt("--account"), meta.Zone); err != nil {
+			if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
 				return usage(err)
 			}
 			rec, err := a.ProvisionIdentity(ctx, nf.id, nf.alias, opt("--user"), opt("--account"), opt("--note"), meta)
@@ -289,7 +286,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s%s\n", config.Clean(nf.id.String()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), alias, metaSuffix(rec))
 			return 0
 		}
-		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account"), meta.Zone); err != nil {
+		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account")); err != nil {
 			return usage(err)
 		}
 		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"), meta)
@@ -323,21 +320,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
-	case "set-zone":
-		if len(args) != 3 || !config.ValidName(args[1]) {
-			return usage(errors.New(setZoneUsage(prog)))
-		}
-		if args[2] == "-" {
-			return usage(errors.New(pfx + ": set-zone: an endpoint in a zone cannot return to the legacy subject in this version (the zone - is refused)"))
-		}
-		if !sap.ValidZone(args[2]) {
-			return usage(fmt.Errorf("%s: set-zone: the zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", pfx, sap.MaxZoneLen))
-		}
-		rec, err := a.SetZone(ctx, args[1], args[2])
-		if err != nil {
-			return fail(err)
-		}
-		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !madmin.ValidKey(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))
@@ -530,7 +512,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note), zoneSuffix(r))
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note))
 		}
 	default:
 		if prog == "mash admin" {
@@ -555,14 +537,6 @@ func optOf(args []string) func(string) string {
 	}
 }
 
-// zoneSuffix is a list line's tail for the zone: a tab and zone=<z>, empty for an endpoint with the legacy subject.
-func zoneSuffix(r store.Record) string {
-	if r.Zone == "" {
-		return ""
-	}
-	return "\tzone=" + config.Clean(r.Zone)
-}
-
 // metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
 func metaSuffix(r store.Record) string {
 	var b strings.Builder
@@ -571,9 +545,6 @@ func metaSuffix(r store.Record) string {
 	}
 	if len(r.Caps) > 0 {
 		fmt.Fprintf(&b, ", caps %s", config.Clean(strings.Join(r.Caps, ",")))
-	}
-	if r.Zone != "" {
-		fmt.Fprintf(&b, ", zone %s", config.Clean(r.Zone))
 	}
 	return b.String()
 }
@@ -598,7 +569,7 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 			labels[k] = v
 		case "--cap":
 			caps = append(caps, args[i+1])
-		case "--user", "--account", "--note", "--role", "--host", "--describe", "--zone":
+		case "--user", "--account", "--note", "--role", "--host", "--describe":
 			if seen[args[i]] {
 				return madmin.Meta{}, bad
 			}
@@ -607,20 +578,20 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 			return madmin.Meta{}, bad
 		}
 	}
-	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps, Zone: opt("--zone")}, nil
+	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps}, nil
 }
 
 // provisionArgs checks the arguments provision needs before anything touches the server. An invalid one is named,
 // never printed: a seed pasted into --user must not come back on the screen.
-func provisionArgs(prog, name, user, account, zone string) error {
+func provisionArgs(prog, name, user, account string) error {
 	if !config.ValidName(name) {
 		return errors.New(provisionUsage(prog) + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
-	return provisionKeyArgs(prog, user, account, zone)
+	return provisionKeyArgs(prog, user, account)
 }
 
-// provisionKeyArgs is provisionArgs without the legacy name: the keys and the zone, for the three-token form too.
-func provisionKeyArgs(prog, user, account, zone string) error {
+// provisionKeyArgs is provisionArgs without the legacy name: the keys, for the three-token form too.
+func provisionKeyArgs(prog, user, account string) error {
 	use := provisionUsage(prog)
 	switch {
 	case user == "":
@@ -631,8 +602,6 @@ func provisionKeyArgs(prog, user, account, zone string) error {
 		return errors.New(use + "\n--account is required")
 	case !nkeys.IsValidPublicAccountKey(account):
 		return errors.New(use + "\n--account is not a NATS account public key (A, then 55 upper-case base32 characters; the value is not shown)")
-	case zone != "" && !sap.ValidZone(zone):
-		return fmt.Errorf("%s\n--zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", use, sap.MaxZoneLen)
 	}
 	return nil
 }
@@ -642,7 +611,7 @@ func initUsage(prog string) string {
 }
 
 // permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
-// An endpoint added under a policy file gets narrower permissions from its zone's key instead.
+// An endpoint added under a policy file gets narrower permissions from the policy instead.
 func permissionsNote(prog string) string {
 	pfx, _, _ := strings.Cut(prog, " ")
 	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` or a policy file get narrower permissions from the policy (see `" + pfx + " policy explain`)."

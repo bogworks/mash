@@ -40,6 +40,10 @@ func Parse(data []byte) (*File, error) {
 		return nil, fmt.Errorf("policy: %w", err)
 	}
 
+	if err := refuseZones(top); err != nil {
+		return nil, err
+	}
+
 	var f File
 	d := yaml.NewDecoder(bytes.NewReader(data))
 	d.KnownFields(true)
@@ -48,9 +52,6 @@ func Parse(data []byte) (*File, error) {
 	}
 	if f.Default == "" {
 		f.Default = Allow
-	}
-	if f.SubjectLabel == "" {
-		f.SubjectLabel = DefaultSubjectLabel
 	}
 	f.lines = collectLines(top)
 	if err := f.checked(); err != nil {
@@ -145,4 +146,68 @@ func collectLines(top *yaml.Node) fileLines {
 		}
 	}
 	return l
+}
+
+// ZoneRemoved is the refusal of a policy file that still carries a zone. Zones are gone (ADR 0091), so a file that
+// names one is refused rather than read as if the zone were a plain label that no longer does anything.
+const ZoneRemoved = "zones were removed (ADR 0091): the address is the fence, and the server enforces no zone"
+
+// refuseZones refuses a file that carries a zone: the top-level subject_label (it named the label whose value was the
+// zone), a zone or zones section or field at the top or on an endpoint, and a label or selector key `zone` (the
+// default zone label). Every occurrence is named with its line, and the message says what to remove.
+func refuseZones(top *yaml.Node) error {
+	var found []string
+	add := func(line int, what string) { found = append(found, fmt.Sprintf("line %d: %s", line, what)) }
+	zoneKey := func(k string) bool { return k == "zone" || k == "zones" }
+	labelKeys := func(m *yaml.Node, where string) {
+		if m == nil || m.Kind != yaml.MappingNode {
+			return
+		}
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == "zone" {
+				add(m.Content[i].Line, where+" has a label named zone: remove it (it was the default zone label)")
+			}
+		}
+	}
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		k, v := top.Content[i], top.Content[i+1]
+		switch {
+		case k.Value == "subject_label":
+			add(k.Line, "subject_label names the label whose value was the zone: remove it")
+		case zoneKey(k.Value):
+			add(k.Line, k.Value+" is a zone section: remove it")
+		case k.Value == "endpoints" && v.Kind == yaml.MappingNode:
+			for j := 0; j+1 < len(v.Content); j += 2 {
+				ep := v.Content[j+1]
+				if ep.Kind != yaml.MappingNode {
+					continue
+				}
+				for l := 0; l+1 < len(ep.Content); l += 2 {
+					ek := ep.Content[l]
+					switch {
+					case zoneKey(ek.Value):
+						add(ek.Line, "endpoint "+v.Content[j].Value+" has a "+ek.Value+" field: remove it")
+					case ek.Value == "labels":
+						labelKeys(ep.Content[l+1], "endpoint "+v.Content[j].Value)
+					}
+				}
+			}
+		case k.Value == "rules" && v.Kind == yaml.SequenceNode:
+			for _, r := range v.Content {
+				if r.Kind != yaml.MappingNode {
+					continue
+				}
+				for l := 0; l+1 < len(r.Content); l += 2 {
+					switch r.Content[l].Value {
+					case "from", "to":
+						labelKeys(r.Content[l+1], "a rule's "+r.Content[l].Value+" selector")
+					}
+				}
+			}
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("policy: %s; remove what names a zone from the file (%s)", ZoneRemoved, strings.Join(found, "; "))
 }

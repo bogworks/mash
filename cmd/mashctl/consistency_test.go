@@ -1,13 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -37,8 +34,6 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{[]string{"permissions"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "c", "--bogus"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "c", "--nsc", "x"}, "usage: mashctl permissions"},
-		{[]string{"set-zone", "c"}, "usage: mashctl set-zone"},
-		{[]string{"set-zone", "c", "-"}, "set-zone"},
 		{[]string{"set-meta", "c"}, "usage: mashctl set-meta"},
 		{[]string{"limits", "--bogus"}, "usage: mashctl limits"},
 		{[]string{"limits", "--show", "x"}, "usage: mashctl limits"},
@@ -99,12 +94,10 @@ func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 		{"provision", seedShaped, "--user", u, "--account", e.Account},
 		{"provision", "d", "--user", seedShaped, "--account", e.Account},
 		{"provision", "d", "--user", u, "--account", seedShaped},
-		{"provision", "d", "--user", u, "--account", e.Account, "--zone", seedShaped},
 		{"provision", "d", "--user", u, "--account", e.Account, "--label", seedShaped + "=x"},
 		{"provision", "d", "--user", u, "--account", e.Account, "--cap", seedShaped},
 		{"provision", "d", "--user", u, "--account", e.Account, "--" + seedShaped},
 		{"set-meta", "c", "--label", seedShaped + "=x"},
-		{"set-zone", "c", seedShaped},
 		{"suspend", seedShaped},
 		{"deprovision", seedShaped},
 		{"deprovision", "c", "--user", seedShaped},
@@ -146,13 +139,6 @@ func TestPolicyAndLabelDoNotEchoInvalidArguments(t *testing.T) {
 			t.Errorf("%v: code %d, want 2", args, code)
 		}
 	}
-	if _, errb, code := h.run("policy", "explain", seedShaped, "a", "--policy", h.policy); code != 2 || !strings.Contains(errb, "FROM is not a valid endpoint name") {
-		t.Errorf("explain: %d %q", code, errb)
-	}
-	// a well-formed name that is unknown may still be shown
-	if _, errb, code := h.run("policy", "explain", "ghost", "a", "--policy", h.policy); code != 2 || !strings.Contains(errb, `"ghost"`) {
-		t.Errorf("unknown name: %d %q", code, errb)
-	}
 }
 
 func TestPolicyFileModeIsKept(t *testing.T) {
@@ -168,7 +154,7 @@ func TestPolicyFileModeIsKept(t *testing.T) {
 			if _, errb, code := h.run("unlabel", "a2", "team", "--policy", h.policy); code != 0 {
 				t.Fatalf("unlabel: %d %q", code, errb)
 			}
-			if _, errb, code := h.run("add", "g", "--zone", "red", "--policy", h.policy); code != 0 {
+			if _, errb, code := h.run("add", "g", "--label", "net=red", "--policy", h.policy); code != 0 {
 				t.Fatalf("add: %d %q", code, errb)
 			}
 			if fi, err := os.Stat(h.policy); err != nil || fi.Mode().Perm() != mode {
@@ -176,36 +162,6 @@ func TestPolicyFileModeIsKept(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPolicyCheckRunsTheBudget(t *testing.T) {
-	dir := t.TempDir()
-	var b strings.Builder
-	b.WriteString("default: deny\nendpoints:\n")
-	for i := 0; i < 300; i++ {
-		fmt.Fprintf(&b, "  agent-%03d: {labels: {zone: z%03d, all: yes}}\n", i, i)
-	}
-	b.WriteString("rules:\n  - {name: everyone, action: allow, from: {all: yes}, to: {all: yes}}\n")
-	big := write(t, dir, "big.yaml", b.String())
-	out, errb, code := policyRun(t, map[string]string{"MASH_OWNER": "acme"}, "policy", "check", "--policy", big)
-	if code != 1 || strings.Contains(out, "check: OK") || !strings.Contains(errb, "mashctl: policy check: policy: the account JWT would be") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	// the same text show --budget prints
-	_, showErr, showCode := policyRun(t, map[string]string{"MASH_OWNER": "acme"}, "policy", "show", "--budget", "--policy", big)
-	if showCode != 1 || strings.TrimPrefix(showErr, "mashctl: policy show: ") == showErr || !strings.Contains(showErr, strings.TrimSuffix(strings.TrimPrefix(errb, "mashctl: policy check: "), "\n")) {
-		t.Fatalf("show: %d %q", showCode, showErr)
-	}
-	// no owner configured: the placeholder still measures it
-	if _, errb, code := policyRun(t, nil, "policy", "check", "--policy", big); code != 1 || !strings.Contains(errb, "over the 1048576 byte limit") {
-		t.Fatalf("no owner: %d %q", code, errb)
-	}
-	// a small file is still OK
-	solo := filepath.Join(policyFiles(t), "solo.yaml")
-	if out, _, code := policyRun(t, nil, "policy", "check", "--policy", solo); code != 0 || !strings.HasPrefix(out, "check: OK - ") {
-		t.Fatalf("solo: %d %q", code, out)
-	}
-	_ = policy.AccountJWTLimit
 }
 
 func TestPolicyCheckRefusesLog(t *testing.T) {

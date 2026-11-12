@@ -435,6 +435,12 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Zones are removed (ADR 0091): a zoned record, this endpoint's or any other the directory read found, stops the
+	// start before a lease is taken.
+	if err := e.refuseZoned(); err != nil {
+		e.nc.Close()
+		return nil, err
+	}
 	if err := e.takeLease(ctx); err != nil {
 		e.nc.Close()
 		return nil, err
@@ -867,4 +873,17 @@ func (e *Endpoint) noteServerTime(server, t0, t1 time.Time) {
 // reading. A skew beyond sap.LiveSkew makes peers look offline (live signatures are refused) and mail [stale].
 func (e *Endpoint) ClockSkew() (time.Duration, bool) {
 	return time.Duration(e.skew.Load()), e.skewSet.Load()
+}
+
+// refuseZoned is the first zoned record among this endpoint's own and the directory it has read (ADR 0091).
+func (e *Endpoint) refuseZoned() error {
+	if err := store.ZonedRecordError(e.self); err != nil {
+		return err
+	}
+	for _, p := range e.Who() {
+		if err := store.ZonedRecordError(p.Record); err != nil {
+			return err
+		}
+	}
+	return nil
 }

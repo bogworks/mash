@@ -16,9 +16,11 @@ import (
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policy"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // connectTimeout bounds the connection to the server; applyDeadline bounds a whole apply.
@@ -30,17 +32,11 @@ const (
 type applyOpts struct {
 	file, sysCreds string
 	dryRun         bool
-	replaceZones   []string
-	removeZones    []string
-	keepZones      []string
 	servers        string // --servers as given, "" when not
 }
 
 func applyUsage(verb string) string {
-	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
-	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N]\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {
@@ -63,21 +59,9 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			o.file, err = val(&i, a, "--policy")
 		case a == "--sys-creds" || strings.HasPrefix(a, "--sys-creds="):
 			o.sysCreds, err = val(&i, a, "--sys-creds")
-		case a == "--replace-zone-key" || strings.HasPrefix(a, "--replace-zone-key="):
-			var z string
-			if z, err = val(&i, a, "--replace-zone-key"); err == nil {
-				o.replaceZones = append(o.replaceZones, z)
-			}
-		case a == "--remove-zone" || strings.HasPrefix(a, "--remove-zone="):
-			var z string
-			if z, err = val(&i, a, "--remove-zone"); err == nil {
-				o.removeZones = append(o.removeZones, z)
-			}
-		case a == "--keep-zone" || strings.HasPrefix(a, "--keep-zone="):
-			var z string
-			if z, err = val(&i, a, "--keep-zone"); err == nil {
-				o.keepZones = append(o.keepZones, z)
-			}
+		case a == "--replace-zone-key" || a == "--remove-zone" || a == "--keep-zone" ||
+			strings.HasPrefix(a, "--replace-zone-key=") || strings.HasPrefix(a, "--remove-zone=") || strings.HasPrefix(a, "--keep-zone="):
+			err = fmt.Errorf("%s is gone: %s", strings.SplitN(a, "=", 2)[0], policy.ZoneRemoved)
 		case a == "--servers" || strings.HasPrefix(a, "--servers="):
 			o.servers, err = val(&i, a, "--servers")
 		case a == "--dry-run" && (verb == "apply" || verb == "repair"):
@@ -143,7 +127,7 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	return nc, nil
 }
 
-// runPolicyApply is `mashctl policy apply` and `mashctl policy diff`.
+// runPolicyApply is `mashctl policy apply`.
 func runPolicyApply(verb string, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy " + verb + ": "
 	o, err := parseApplyArgs(verb, args)
@@ -227,12 +211,6 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	// The file's own tests run before anything is read or created: a file whose tests contradict its rules is not pushed.
 	failed, total := policyTestFailures(f)
 	switch {
-	case len(failed) > 0 && verb == "diff":
-		fmt.Fprintf(stdout, "policy tests FAIL: %d of %d tests in %s do not hold; apply would refuse this file\n", len(failed), total, path)
-		for _, l := range failed {
-			fmt.Fprintf(stdout, "  %s\n", l)
-		}
-		fmt.Fprintln(stdout)
 	case len(failed) > 0:
 		return fail("%s", refuseFailedTests(failed, total, path, "nothing was changed, no key was created, nothing was pushed", stdout))
 	case total == 0:
@@ -244,11 +222,14 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	if cfg.URL == "" {
 		return fail(`no server URL (config.json "url" or MASH_URL)`)
 	}
-	var c *policy.Compiled
-	if snap != nil {
-		c = snap.c
-	} else if c, err = policy.Compile(f, cfg.Owner); err != nil {
-		return fail("%v", err)
+	if snap == nil { // a snapshot (repair) was compiled already
+		if _, err = policy.Compile(f, cfg.Owner); err != nil {
+			return fail("%v", err)
+		}
+	}
+	// the directory check comes first: it refuses whatever the file says, so it is reachable with any policy.
+	if zerr := refuseZonedDirectory(cfg); zerr != nil {
+		return fail("refusing: %v (nothing was changed)", zerr)
 	}
 	if snap == nil { // repair (which passes a snapshot) has announced already
 		announceTarget(cfg, env, stderr, &sysTarget{o.sysCreds})
@@ -267,15 +248,29 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	}
 	defer nc.Close()
 
-	mode := apply.Apply
-	switch {
-	case verb == "diff":
-		mode = apply.Diff
-	case o.dryRun:
-		mode = apply.DryRun
-	}
+	// Zones are removed (ADR 0091): an applied zone policy is not applied over, extended or compared with.
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
-	defer cancel()
-	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
-		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
+	err = apply.RefuseZonePolicy(ctx, apply.NATS{Conn: nc, Inventory: servers}, ks, servers, store.ErrZonePolicyApplied)
+	cancel()
+	if err != nil {
+		return fail("refusing: %v (nothing was changed)", err)
+	}
+	// The guards passed and there is still nothing to apply: refuse rather than report success.
+	return fail("refusing: the zone policy stack was removed (ADR 0091); `mashctl policy apply` has no replacement until the label policy model ships (nothing was changed)")
+}
+
+// refuseZonedDirectory is the preflight of apply (ADR 0091): the first directory record that carries a zone. It fails
+// safe: a directory that cannot be opened or listed (no admin credentials, no directory yet, unreachable) cannot be
+// shown to hold no zoned record, so apply is refused rather than let through.
+func refuseZonedDirectory(cfg config.Config) error {
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return fmt.Errorf("cannot read the directory to check for zoned records: %w", err)
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot read the directory to check for zoned records: %w", err)
+	}
+	return store.FirstZonedRecord(recs)
 }

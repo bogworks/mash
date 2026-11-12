@@ -17,7 +17,7 @@ func keyedRecords(t *testing.T) (newForm, legacy store.Record) {
 	newForm = store.Record{Name: "x", Owner: "team1", Agent: "claude", AgentToken: "acme", Account: "A", User: "U1",
 		MailSubject: id.Subjects().Mail, Created: "2026-01-01T00:00:00Z"}
 	legacy = store.Record{Name: "x", Owner: "acme", Agent: "cc", AgentToken: "cc", Account: "A", User: "U2",
-		MailSubject: store.MailSubjectFor("acme", "z", "x"), Zone: "z", Created: "2026-01-01T00:00:00Z"}
+		MailSubject: store.MailSubjectFor("acme", "", "x"), Created: "2026-01-01T00:00:00Z"}
 	return
 }
 
@@ -25,7 +25,7 @@ func keyedRecords(t *testing.T) (newForm, legacy store.Record) {
 // evidence that it is provisioned.
 func TestDirectoryFindingsNewFormRecordIsNotTheLegacyEndpoint(t *testing.T) {
 	nf, lg := keyedRecords(t)
-	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x", Zone: "z"}}}
+	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x"}}}
 
 	out, _ := directoryFindings(c, []store.Record{nf})
 	kinds := map[string]string{}

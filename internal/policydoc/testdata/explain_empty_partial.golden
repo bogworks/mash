@@ -1,0 +1,11 @@
+This describes the list set in force, not any installed credential.
+state: partial
+in force: no
+status generation: 7
+server nats-a: generation 7
+server nats-b: generation 6
+server nats-c: generation unknown
+notice: partial application: servers hold different generations (nats-a: 7, nats-b: 6, nats-c: unknown); no account-wide policy in force
+no list set is in force
+
+The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all.
