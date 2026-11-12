@@ -223,10 +223,7 @@ func credsAccountKey(p string) (string, error) {
 
 // readCreds reads name's creds file at path, refusing one other users can read.
 func readCreds(path string) ([]byte, error) {
-	if err := config.CheckCredsMode(path); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(path)
+	return config.ReadCredsFile(path)
 }
 
 // credsDiff is how a creds file's JWT differs from what a mint now would issue for the endpoint.
