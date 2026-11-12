@@ -311,6 +311,10 @@ A dry run is only meaningful if the verify job ran: check that `dry-run-verify` 
 in a job's `needs` chain skips everything below it unless the job has its own status-function `if`, which is why each job below
 `build` has one; a green run in which `dry-run-verify` was skipped verified nothing.
 
+Release jobs start from an empty `dist` (`rm -rf dist provenance && mkdir -p dist` is the first step of each) because the self-hosted runners are persistent and a file left by an earlier job's workspace must never reach a later one.
+
+After ANY change to `release.yml`, run a dry run (a `workflow_dispatch` on `main`, above) and check it is green, with `dry-run-verify` showing success, before the next tag.
+
 It does not exercise the tag guard (tag shape, signature, on main, older drafts), the maintainer's signing, the draft job or
 publishing, and it does not run `release-check`. It must be green on `main` before a release that changes the pipeline is tagged.
 

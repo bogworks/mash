@@ -860,8 +860,11 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 		if attest.MatchString(st.Uses) {
 			found = true
 			// SHA256SUMS is a subject beside the four binaries; the provenance bundle (made by this step) cannot be one.
-			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-* dist/SHA256SUMS" {
-				t.Errorf("attest subject-path = %q, want dist/mash-* and dist/SHA256SUMS", st.With["subject-path"])
+			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-linux-amd64 dist/mash-linux-arm64 dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/SHA256SUMS" {
+				t.Errorf("attest subject-path = %q, want the four binaries by name and dist/SHA256SUMS", st.With["subject-path"])
+			}
+			if strings.Contains(fmt.Sprint(st.With["subject-path"]), "*") {
+				t.Errorf("attest subject-path must not glob (a stale file in dist would be attested): %q", st.With["subject-path"])
 			}
 		}
 	}
@@ -884,6 +887,47 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 				t.Errorf("job %s must not hold %s", id, p)
 			}
 		}
+	}
+}
+
+// The runners are persistent, so a job that touches dist or provenance must empty them before its first step that does.
+func TestRelease_everyJobTouchingDistStartsFromAnEmptyDist(t *testing.T) {
+	w := load(t, "release.yml")
+	touches := func(st step) bool {
+		if strings.HasPrefix(st.Uses, "actions/checkout@") {
+			return false
+		}
+		blob := st.Run + " " + fmt.Sprint(st.With) + " " + fmt.Sprint(st.Env)
+		return strings.Contains(blob, "dist") || strings.Contains(blob, "provenance")
+	}
+	clean := func(st step) bool {
+		return strings.Contains(st.Run, "rm -rf dist provenance") && strings.Contains(st.Run, "mkdir -p dist")
+	}
+	checked := 0
+	for id, j := range w.Jobs {
+		first := -1
+		for i, st := range j.Steps {
+			if touches(st) {
+				first = i
+				break
+			}
+		}
+		if first < 0 {
+			continue
+		}
+		checked++
+		cleaned := false
+		for _, st := range j.Steps[:first+1] {
+			if clean(st) {
+				cleaned = true
+			}
+		}
+		if !cleaned {
+			t.Errorf("job %s: no step running `rm -rf dist provenance` and `mkdir -p dist` at or before its first step that touches dist or provenance", id)
+		}
+	}
+	if checked < 7 {
+		t.Errorf("only %d jobs touch dist or provenance, want at least 7", checked)
 	}
 }
 
