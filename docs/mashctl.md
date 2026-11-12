@@ -120,6 +120,44 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
 `mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, undrained legacy inboxes, unreadable items, movement found by `--compare`), 2 usage, 3 the audit could not complete (server unreachable, unreadable required input, bad `--compare` file). See [audit.md](audit.md).
 
+## mashctl inbox inspect
+
+```text
+mashctl inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]
+```
+
+Shows one endpoint's stored messages and where its `deliver` consumer stands, so a test lane can prove what the transport kept and delivered. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`, and also when `agent_token` is set.
+
+- `address` is an endpoint name (a legacy endpoint), a flat key `agent_owner_name`, or `agent.owner.name` (`cc.OWNER.NAME` names a legacy endpoint). It is read from the directory record, one key; an address that names no record, or a dotted address whose owner is not the record's, is refused (exit 1).
+- The default is the last 20 messages, oldest first. `--limit N` caps the count. `--from SEQ` and `--to SEQ` are an inclusive stream-sequence range, clamped to the stream's first and last sequence; with `--from` the first N messages from it are shown.
+- During an alias window an endpoint has two inbox streams. The endpoint's own is shown; `--legacy` shows the alias's legacy stream, and is refused for a record with no alias.
+- Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream, no alias for `--legacy`), 2 a usage error, 3 it could not complete (no server, no credentials).
+
+The text form prints the stream and consumer totals, a table of messages and a `note:` line for each limit. `--json` prints one object. The schema string and the field names are a stable contract; they change only when a field is removed or changes meaning.
+
+| field | meaning |
+| --- | --- |
+| `schema` | `mash-inbox-inspect@1` |
+| `address` | the address as given |
+| `stream` | `name`, `first_seq`, `last_seq`, `messages`, `bytes` of the inbox stream |
+| `consumer` | the `deliver` consumer, or `null` when it does not exist (every message is then `undelivered`): `name`; `ack_floor` and `delivered`, each `{stream_seq, consumer_seq}`; `num_pending`; `num_redelivered`; `num_ack_pending` |
+| `messages[].seq` | the stream sequence |
+| `messages[].msg_id` | the `Nats-Msg-Id` header, empty when there is none |
+| `messages[].sender` | the sender's name: from the directory for `verified` and `stale`, the signed name for the others, `?` when the header names none |
+| `messages[].trust` | `verified`, `claimed`, `unknown-signer`, `stale`, `forged`, `malformed` or `absent`, from the stored `Agent-Sender` header (forged and malformed mail is shown, not hidden) |
+| `messages[].stored_at` | the stream's store time, RFC 3339 UTC |
+| `messages[].size` | payload size in bytes |
+| `messages[].kind` | the `Mash-Kind` header |
+| `messages[].state` | `acked`, `undelivered` or `delivered-unacked-or-acked-out-of-order` (text form: `delivered, ack not confirmed`) |
+| `messages[].delivery_count`, `messages[].ack_time` | always `null` |
+| `limits` | the strings below |
+
+The state comes from the consumer's cursors alone: `acked` when the sequence is at or below `ack_floor.stream_seq`, `undelivered` when it is above `delivered.stream_seq`, otherwise `delivered-unacked-or-acked-out-of-order`, because NATS does not report acknowledgements above the ack floor. The trust label is worked out as the receiving endpoint does, except that the signer is looked up by the name it signed (one directory key read) instead of by listing the directory: a signature by a key that is not on that name's record is `unknown-signer`, and a signed header with no name is too.
+
+Limits, also in the `limits` array: per-message delivery count and ack time are not kept by JetStream or mash; the consumer's `num_redelivered` is the aggregate. A message above the ack floor and at or below the last delivered sequence may be unacknowledged or acknowledged out of order, and the server does not say which.
+
+See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`, `num_redelivered`, `pending`, `ack_pending`) the audit reports per inbox.
+
 ## Retiring an endpoint
 
 ```sh
