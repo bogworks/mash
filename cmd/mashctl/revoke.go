@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -131,21 +133,39 @@ func refuseFutureIssued(name string, claims *jwt.UserClaims, now time.Time) erro
 	return nil
 }
 
-// credsIssuedClaims returns the claims of the creds file at path when it is readable, parses, and names user; any
-// other case is nil, because the file is an optional source of the user's JWT.
-func credsIssuedClaims(path, user string) *jwt.UserClaims {
+// credsIssuedClaims returns the claims of the creds file at path for user. A missing file is no JWT to check (nil,
+// nil). A file that exists but cannot be read, parsed or decoded is an error: the check cannot be made, so the caller
+// must refuse rather than revoke blind (a non-regular file is left alone, as retire leaves it). The error never carries file content. A file that decodes but names another
+// subject is deliberately skipped (nil, nil): it is not this user's JWT, so its issue time says nothing about the
+// revocation.
+func credsIssuedClaims(path, user string) (*jwt.UserClaims, error) {
+	fi, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err == nil && !fi.Mode().IsRegular() {
+		// A symlink or other non-regular file is never read or followed: retire leaves it alone too, so it is not
+		// treated as this user's creds.
+		return nil, nil
+	}
 	raw, err := readCreds(path)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil // removed between the two calls
+		}
+		return nil, fmt.Errorf("creds file %s exists but cannot be read: %w", path, err)
 	}
 	defer clear(raw)
 	tok, err := jwt.ParseDecoratedJWT(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("creds file %s exists but holds no readable JWT", path)
 	}
 	uc, err := jwt.DecodeUserClaims(tok)
-	if err != nil || uc.Subject != user {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("creds file %s exists but its JWT cannot be decoded", path)
 	}
-	return uc
+	if uc.Subject != user {
+		return nil, nil
+	}
+	return uc, nil
 }

@@ -70,3 +70,104 @@ func TestRefuseFutureIssued(t *testing.T) {
 		t.Errorf("future iat: %v", err)
 	}
 }
+
+// A creds file that exists but cannot be checked refuses the retire with nothing changed; a missing one does not.
+func TestRetireCredsCheckFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		damage func(t *testing.T, path string)
+		want   string
+	}{
+		{"mode 0644", func(t *testing.T, p string) {
+			if err := os.Chmod(p, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "exists but cannot be read"},
+		{"garbage", func(t *testing.T, p string) {
+			if err := os.WriteFile(p, []byte("not a creds file\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, "exists but its JWT cannot be decoded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFleetEnv(t, addPolicy)
+			if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+				t.Fatal(errb)
+			}
+			tc.damage(t, h.creds("c"))
+			before, _ := os.ReadFile(h.creds("c"))
+			fiBefore, _ := os.Stat(h.creds("c"))
+			recs := h.records()
+			policyBefore := h.policyText()
+			calls := fakeRevoke(t, nil)
+			out, errb, code := h.run("retire", "c")
+			if code != 1 || out != "" || !strings.Contains(errb, tc.want) || !strings.Contains(errb, "nothing was changed") {
+				t.Fatalf("%d %q %q", code, out, errb)
+			}
+			noSecrets(t, out, errb)
+			if strings.Contains(errb, "not a creds file") {
+				t.Fatal("file content printed")
+			}
+			if len(*calls) != 0 {
+				t.Fatalf("revoke calls %+v", *calls)
+			}
+			after, _ := os.ReadFile(h.creds("c"))
+			fiAfter, _ := os.Stat(h.creds("c"))
+			if !bytes.Equal(before, after) || fiBefore.Mode() != fiAfter.Mode() {
+				t.Fatal("creds file changed")
+			}
+			if len(h.records()) != len(recs) || h.policyText() != policyBefore {
+				t.Fatal("record or policy changed")
+			}
+		})
+	}
+
+	t.Run("missing file proceeds", func(t *testing.T) {
+		h := newFleetEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+			t.Fatal(errb)
+		}
+		if err := os.Remove(h.creds("c")); err != nil {
+			t.Fatal(err)
+		}
+		calls := fakeRevoke(t, nil)
+		out, errb, code := h.run("retire", "c")
+		if code != 0 || len(*calls) != 1 {
+			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
+		}
+	})
+}
+
+// The creds check runs inside the guarded removal, under the name's lock: creds that become unreadable after the
+// directory read and before the revoke still refuse the retire, with nothing revoked or removed.
+func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+		t.Fatal(errb)
+	}
+	recs := h.records()
+	policyBefore := h.policyText()
+	calls := fakeRevoke(t, nil)
+
+	swapped := 0
+	beforeRetireRevoke = func() {
+		swapped++
+		if err := os.Chmod(h.creds("c"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeRetireRevoke = nil })
+	out, errb, code := h.run("retire", "c")
+	if swapped != 1 {
+		t.Fatalf("seam ran %d times", swapped)
+	}
+	if code != 1 || out != "" || !strings.Contains(errb, "exists but cannot be read") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("revoke calls %+v", *calls)
+	}
+	if len(h.records()) != len(recs) || h.policyText() != policyBefore {
+		t.Fatal("record or policy changed")
+	}
+}

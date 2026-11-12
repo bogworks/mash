@@ -25,6 +25,10 @@ const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds]
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
 var afterRetireRead func()
 
+// beforeRetireRevoke is a test seam called inside the guarded removal, under the name's lock, before the creds check
+// and the revoke.
+var beforeRetireRevoke func()
+
 // deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
 var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
@@ -188,18 +192,29 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
-		var revokeErr error
+		var revokeErr, checkErr error
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
-			// The creds file is an optional source of the user's JWT: when it is readable and names this key, a JWT
-			// dated after the revocation time is refused before anything is removed.
-			if credsErr == nil {
-				if err := refuseFutureIssued(name, credsIssuedClaims(credsPath, user), retireRevokeNow()); err != nil {
-					return fail("%v", err)
-				}
-			}
 			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
+				if beforeRetireRevoke != nil {
+					beforeRetireRevoke()
+				}
+				// Inside the guarded removal, under the name's lock, just before the revoke: the creds file is an
+				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
+				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
+				if credsErr == nil {
+					claims, err := credsIssuedClaims(credsPath, u)
+					if err == nil {
+						err = refuseFutureIssued(name, claims, retireRevokeNow())
+					} else {
+						err = fmt.Errorf("%w; nothing was changed", err)
+					}
+					if err != nil {
+						checkErr = err
+						return fmt.Errorf("creds check: %w", err)
+					}
+				}
 				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
@@ -214,6 +229,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			if admin.IsRefusal(err) {
 				if msg, ok := ctl.AliasedRefusal(err, name); ok {
 					return fail("%s", msg)
+				}
+				if checkErr != nil && errors.Is(err, checkErr) {
+					return fail("%v", checkErr)
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					return fail("%v: nothing was changed (--no-revoke retires without revoking)", err)
