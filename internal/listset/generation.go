@@ -8,14 +8,16 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 )
 
 // Generations and digests (contract mash-messaging-policy REQ-017, AT-016; ADR 0098).
 //
 // Each accepted list set is one generation. A list set states the generation it was based on (ListSet.Base); Accept
 // refuses it unless that is the generation in force, so two submitters working from the same generation cannot both
-// win, and a stale one changes nothing. The package stores nothing: the caller keeps the Record in force and replaces
-// it only with the Record Accept returns.
+// win, and a stale one changes nothing. Accept is a pure function and does not by itself serialize submissions: two
+// callers that read the same Record and call Accept both succeed. Ledger holds the Record in force and makes the
+// check and the replacement one atomic step within a process. The package persists nothing.
 
 // ErrStaleBase is matched, through errors.Is, by the *StaleBaseError Accept returns for a list set whose stated base
 // is not the generation in force.
@@ -49,24 +51,32 @@ func (d Digest) String() string { return "sha256:" + hex.EncodeToString(d[:]) }
 // IsZero reports whether d is the zero Digest, which no real input produces.
 func (d Digest) IsZero() bool { return d == Digest{} }
 
-// Record describes the list set in force: its generation and two digests. The zero Record means nothing is in force.
+// Record describes the list set in force: its generation and three digests. The zero Record means nothing is in force.
 type Record struct {
 	// Generation is the number of the list set in force; the first accepted list set is generation 1.
 	Generation uint64
-	// Received is the digest of the list set as received (DigestListSet).
+	// Received is the SHA-256 of exactly the bytes the list set was received as, so it identifies the submission.
+	// It is the zero Digest when Accept was given nil bytes, which means no bytes were supplied.
 	Received Digest
+	// Content is the digest of the list set's content (DigestListSet), independent of encoding and ordering: two
+	// encodings of the same content share a Content and differ in Received.
+	Content Digest
 	// Signed is the digest of what was signed from it (DigestCompiled).
 	Signed Digest
 }
 
-// Accept decides whether ls may replace the list set in force, and if so compiles it.
+// Accept decides whether ls may replace the list set in force, and if so compiles it. received is the exact bytes
+// ls was decoded from; Record.Received is their SHA-256, or the zero Digest if received is nil.
 //
 // It refuses a list set whose Base is not inForce.Generation with a *StaleBaseError (matching ErrStaleBase) before it
 // validates or compiles anything, and refuses one when the generation would overflow with ErrGenerationOverflow.
 // Otherwise it runs Compile (which validates and checks) and returns the new Record, with Generation
 // inForce.Generation+1, together with the compiled output. On any error it returns the zero Record and nil, so the
 // caller keeps inForce and signs nothing. A zero inForce means nothing is in force, and ls.Base must then be 0.
-func Accept(inForce Record, ls ListSet) (Record, *Compiled, error) {
+//
+// Accept is pure and does not by itself serialize submissions: two submissions built on the same inForce both pass
+// it and get the same next generation. Use a Ledger to have exactly one of them win.
+func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
 	if ls.Base != inForce.Generation {
 		return Record{}, nil, &StaleBaseError{Stated: ls.Base, InForce: inForce.Generation}
 	}
@@ -77,11 +87,50 @@ func Accept(inForce Record, ls ListSet) (Record, *Compiled, error) {
 	if err != nil {
 		return Record{}, nil, err
 	}
-	return Record{
+	rec := Record{
 		Generation: inForce.Generation + 1,
-		Received:   DigestListSet(ls),
+		Content:    DigestListSet(ls),
 		Signed:     DigestCompiled(c),
-	}, c, nil
+	}
+	if received != nil {
+		rec.Received = sha256.Sum256(received)
+	}
+	return rec, c, nil
+}
+
+// Ledger holds the Record in force and is safe for concurrent use. Its Accept runs the pure Accept against the
+// current record and replaces the record only on success, under one lock: an atomic compare-and-replace, so of
+// several submissions built on the same generation exactly one succeeds and the rest get ErrStaleBase.
+//
+// A Ledger is in process memory only. Persisting the record and the cross-process apply path are not built yet, and
+// that path must keep the same compare-and-replace: check the base against the stored record and replace it in one
+// atomic step.
+type Ledger struct {
+	mu      sync.Mutex
+	inForce Record
+}
+
+// NewLedger returns a Ledger whose record in force is inForce; the zero Record means nothing is in force.
+func NewLedger(inForce Record) *Ledger { return &Ledger{inForce: inForce} }
+
+// InForce returns the record in force.
+func (l *Ledger) InForce() Record {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.inForce
+}
+
+// Accept is the package Accept run against the record in force, which it replaces with the returned Record on
+// success. On any error the record in force is unchanged.
+func (l *Ledger) Accept(ls ListSet, received []byte) (Record, *Compiled, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rec, c, err := Accept(l.inForce, ls, received)
+	if err != nil {
+		return Record{}, nil, err
+	}
+	l.inForce = rec
+	return rec, c, nil
 }
 
 // DigestListSet returns the digest of ls over a canonical encoding that does not depend on the order of its switches,
@@ -96,8 +145,7 @@ func Accept(inForce Record, ls ListSet) (Record, *Compiled, error) {
 //	| count of senders  | senders sorted by their encoding, each Sender
 //	                        | count of allow | allow sorted | count of deny | deny sorted
 //
-// Once a file format exists (DEC-004) the received digest may move to the received bytes. This function is the one
-// place to change; Accept and Record do not care what the digest covers.
+// It gives Record.Content. Record.Received is a separate digest of the received bytes.
 func DigestListSet(ls ListSet) Digest {
 	e := newEnc("mash.listset.v1\x00")
 	e.u64(ls.Base)

@@ -1,9 +1,11 @@
 package listset
 
 import (
+	"crypto/sha256"
 	"errors"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -11,9 +13,9 @@ func based(ls ListSet, base uint64) ListSet { ls.Base = base; return ls }
 
 // AT-016: a list set based on N-1 (or N+1) when N is in force is refused; nothing is returned.
 func TestAT016_StaleBaseRefused(t *testing.T) {
-	inForce := Record{Generation: 5, Received: DigestListSet(at001()), Signed: Digest{1}}
+	inForce := Record{Generation: 5, Content: DigestListSet(at001()), Signed: Digest{1}}
 	for _, base := range []uint64{4, 6, 0} {
-		rec, c, err := Accept(inForce, based(at001(), base))
+		rec, c, err := Accept(inForce, based(at001(), base), nil)
 		if rec != (Record{}) || c != nil {
 			t.Fatalf("base %d: Accept returned output for a stale list set", base)
 		}
@@ -32,34 +34,34 @@ func TestAccept_StaleBaseBeforeValidation(t *testing.T) {
 	ls := at001()
 	ls.Range = ""
 	ls.Base = 3
-	if _, _, err := Accept(Record{Generation: 1}, ls); !errors.Is(err, ErrStaleBase) {
+	if _, _, err := Accept(Record{Generation: 1}, ls, nil); !errors.Is(err, ErrStaleBase) {
 		t.Fatalf("want ErrStaleBase, got %v", err)
 	}
 }
 
 func TestAccept_FirstAndChain(t *testing.T) {
-	rec, c, err := Accept(Record{}, at001())
+	rec, c, err := Accept(Record{}, at001(), []byte("v1"))
 	if err != nil || c == nil {
 		t.Fatalf("first acceptance: %v", err)
 	}
-	if rec.Generation != 1 || rec.Received != DigestListSet(at001()) || rec.Signed != DigestCompiled(c) || rec.Received.IsZero() || rec.Signed.IsZero() {
+	if rec.Generation != 1 || rec.Content != DigestListSet(at001()) || rec.Received != sha256.Sum256([]byte("v1")) || rec.Signed != DigestCompiled(c) || rec.Content.IsZero() || rec.Received.IsZero() || rec.Signed.IsZero() {
 		t.Fatalf("unexpected first record %+v", rec)
 	}
 	for want := uint64(2); want <= 4; want++ {
-		next, _, err := Accept(rec, based(at001(), rec.Generation))
+		next, _, err := Accept(rec, based(at001(), rec.Generation), []byte("v1"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if next.Generation != want {
 			t.Fatalf("generation %d, want %d", next.Generation, want)
 		}
-		if next.Received == rec.Received {
-			t.Fatal("received digest should change with the base")
+		if next.Content == rec.Content {
+			t.Fatal("content digest should change with the base")
 		}
 		rec = next
 	}
 	// A repeat of the generation just replaced is now stale.
-	if _, _, err := Accept(rec, based(at001(), rec.Generation-1)); !errors.Is(err, ErrStaleBase) {
+	if _, _, err := Accept(rec, based(at001(), rec.Generation-1), nil); !errors.Is(err, ErrStaleBase) {
 		t.Fatalf("want ErrStaleBase, got %v", err)
 	}
 }
@@ -68,7 +70,7 @@ func TestAccept_ValidationFailureReturnsNoRecord(t *testing.T) {
 	ls := at001()
 	ls.Senders[0].Allow = append(ls.Senders[0].Allow, "foo.c.*")
 	ls.Base = 2
-	rec, c, err := Accept(Record{Generation: 2}, ls)
+	rec, c, err := Accept(Record{Generation: 2}, ls, nil)
 	var ve *ValidationError
 	if !errors.As(err, &ve) || rec != (Record{}) || c != nil {
 		t.Fatalf("want a ValidationError and no record, got %v %+v %v", err, rec, c)
@@ -79,7 +81,7 @@ func TestAccept_ValidationFailureReturnsNoRecord(t *testing.T) {
 }
 
 func TestAccept_GenerationOverflow(t *testing.T) {
-	rec, c, err := Accept(Record{Generation: math.MaxUint64}, based(at001(), math.MaxUint64))
+	rec, c, err := Accept(Record{Generation: math.MaxUint64}, based(at001(), math.MaxUint64), nil)
 	if !errors.Is(err, ErrGenerationOverflow) || rec != (Record{}) || c != nil {
 		t.Fatalf("want ErrGenerationOverflow, got %v", err)
 	}
@@ -175,4 +177,88 @@ func TestDigestCompiled(t *testing.T) {
 		t.Fatal("template change did not change the digest")
 	}
 	_ = DigestCompiled(nil)
+}
+
+func TestAccept_ReceivedDigests(t *testing.T) {
+	a1, _, err := Accept(Record{}, at001(), []byte("encoding one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, _, _ := Accept(Record{}, at001(), []byte("encoding one"))
+	if a1.Received != a2.Received || a1.Received != sha256.Sum256([]byte("encoding one")) {
+		t.Fatal("same bytes must give the same Received, the SHA-256 of the bytes")
+	}
+	b, _, _ := Accept(Record{}, at001(), []byte("encoding two"))
+	if b.Received == a1.Received {
+		t.Fatal("different bytes must give a different Received")
+	}
+	if b.Content != a1.Content || b.Content != DigestListSet(at001()) {
+		t.Fatal("same content must give the same Content whatever the bytes")
+	}
+	// nil means no bytes were supplied: zero Received. Empty, non-nil bytes are a real input.
+	n, _, _ := Accept(Record{}, at001(), nil)
+	if !n.Received.IsZero() || n.Content != a1.Content {
+		t.Fatalf("nil bytes: want zero Received and the same Content, got %+v", n)
+	}
+	e, _, _ := Accept(Record{}, at001(), []byte{})
+	if e.Received != sha256.Sum256(nil) || e.Received.IsZero() {
+		t.Fatal("empty non-nil bytes should be hashed")
+	}
+}
+
+// Many submissions built on the same base: exactly one wins, the rest are stale, and the ledger ends at base+1.
+func TestLedger_SingleWinner(t *testing.T) {
+	const n = 64
+	led := NewLedger(Record{Generation: 7, Signed: Digest{1}})
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	recs := make([]Record, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			recs[i], _, errs[i] = led.Accept(based(at001(), 7), []byte{byte(i)})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	winner := -1
+	for i, err := range errs {
+		if err == nil {
+			if winner >= 0 {
+				t.Fatalf("two winners: %d and %d", winner, i)
+			}
+			winner = i
+			continue
+		}
+		if !errors.Is(err, ErrStaleBase) || recs[i] != (Record{}) {
+			t.Fatalf("submission %d: want ErrStaleBase and no record, got %v %+v", i, err, recs[i])
+		}
+	}
+	if winner < 0 {
+		t.Fatal("no submission won")
+	}
+	got := led.InForce()
+	if got != recs[winner] || got.Generation != 8 || got.Received != sha256.Sum256([]byte{byte(winner)}) || got.Content != DigestListSet(based(at001(), 7)) {
+		t.Fatalf("ledger %+v does not hold the winner's record %+v", got, recs[winner])
+	}
+}
+
+func TestLedger_ErrorLeavesRecord(t *testing.T) {
+	in := Record{Generation: 2, Signed: Digest{2}}
+	led := NewLedger(in)
+	bad := based(at001(), 2)
+	bad.Range = ""
+	if _, _, err := led.Accept(bad, nil); err == nil {
+		t.Fatal("want an error")
+	}
+	if _, _, err := led.Accept(based(at001(), 1), nil); !errors.Is(err, ErrStaleBase) {
+		t.Fatalf("want ErrStaleBase, got %v", err)
+	}
+	if led.InForce() != in {
+		t.Fatal("a failed Accept changed the record")
+	}
 }

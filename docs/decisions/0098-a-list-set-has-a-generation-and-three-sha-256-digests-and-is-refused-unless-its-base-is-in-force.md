@@ -4,7 +4,7 @@ date: 2026-11-12
 decision-makers: Randy Bias (mash maintainer); the choices were delegated to the implementers by contract mash-messaging-policy draft-2 (D206), REQ-017
 ---
 
-# A list set has a generation and two SHA-256 digests, and is refused unless its base is the generation in force
+# A list set has a generation and three SHA-256 digests, and is refused unless its base is the generation in force
 
 ## Context and Problem Statement
 
@@ -19,12 +19,16 @@ either.
 * A stale list set must change nothing and sign nothing, and be refused before any other work (the contract's rule that
   an error at any step leaves the previous generation in force).
 * The same content must give the same digest however it was ordered, since lists are sets.
-* The received digest will move to the received bytes once a file format exists; that must be a change in one place.
+* The digest of what was received must identify the submission as received, and the digest of content must still treat two
+  encodings of the same content as equal, so both are kept.
+* Two submissions built on the same generation must not both be accepted, so the check and the replacement of the record
+  in force must be one atomic step.
 
 ## Considered Options
 
 * A counter in the list set's own content: `Base` is the generation it was written against, the new generation is
-  `Base+1`, and `Accept` is a pure function of the record in force and the list set (chosen).
+  `Base+1`, and `Accept` is a pure function of the record in force and the list set, and a `Ledger` makes the check and the
+  replacement atomic (chosen).
 * A counter held by storage, with the list set carrying only a digest of its predecessor.
 * A timestamp as the version.
 
@@ -37,27 +41,36 @@ Chosen option: the first.
   nothing was in force. `Accept` refuses, before it validates or compiles, any list set whose `Base` differs from the
   generation in force, in either direction, with `*StaleBaseError` (matching `ErrStaleBase`), and refuses to overflow the
   number. On any error it returns the zero `Record` and no output, so the caller keeps what is in force.
-* **Digests.** SHA-256, written `sha256:<hex>`. The received digest covers the list set (`DigestListSet`) in a canonical
+* **Digests.** SHA-256, written `sha256:<hex>`. A `Record` holds three. `Received` is the SHA-256 of exactly the bytes the
+  list set was received as, passed to `Accept`; it is the zero digest when `Accept` is given nil bytes, meaning none were
+  supplied. `Content` is the digest of the list set (`DigestListSet`) in a canonical
   encoding with switches, senders and each allow and deny list sorted, and includes the range and the base, so reordering
-  does not change it and any changed entry does. The signed digest covers what Compile produced (`DigestCompiled`):
+  does not change it and any changed entry does; two encodings of the same content share a `Content` and differ in
+  `Received`. `Signed` covers what Compile produced (`DigestCompiled`):
   the range, each template's lines (sorted within each list) and each user's sender, name and sorted tags. Each encoding
-  starts with a version string and uses length-prefixed fields, so one cannot be read as another. When a file format
-  exists, `DigestListSet` is the one function that moves to the received bytes.
-* **Scope.** The package keeps no state. Storing the record, comparing it across restarts and the apply path belong to the
-  code that applies a list set.
+  starts with a version string and uses length-prefixed fields, so one cannot be read as another.
+* **Serialization.** `Accept` is pure and does not by itself serialize submissions: two built on the same record both pass
+  it. `Ledger` holds the record in force behind a mutex; its `Accept` runs the pure one against the current record and
+  replaces the record only on success, so of several submissions on the same base exactly one succeeds and the rest get
+  `ErrStaleBase`.
+* **Scope.** A `Ledger` lives in process memory. Persisting the record, comparing it across restarts and the
+  cross-process apply path are not built yet; that path must keep the same compare-and-replace.
 
 ### Consequences
 
 * Good, because two submitters working from the same generation cannot both be accepted, and a stale submission is
   refused before anything is computed.
 * Good, because the check and the record are pure and testable without storage.
-* Bad, because until a file format exists the received digest covers a canonical re-encoding, not the bytes the operator
-  sent, so two files that decode to the same list set share a digest.
+* Good, because `Received` identifies the submission as sent while `Content` still equates reordered or re-encoded forms.
+* Bad, because the caller must pass the received bytes to `Accept`, and a nil value silently gives a zero `Received`.
+* Bad, because exclusivity holds only within one process until the apply path is built.
 
 ### Confirmation
 
 `internal/listset` tests: AT-016 (base N-1 and N+1 refused with nothing returned), a chain of acceptances, digest
-stability under reordering and change under any edit, and a validation failure returning no record.
+stability under reordering and change under any edit, received bytes giving `Received` (same bytes the same, different bytes different, nil zero) with the same `Content`,
+a validation failure returning no record, and many concurrent submissions on one base where exactly one succeeds, the rest
+get `ErrStaleBase`, and the ledger ends at the next generation (run under `-race`).
 
 ## Pros and Cons of the Options
 
