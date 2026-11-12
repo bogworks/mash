@@ -1,0 +1,30 @@
+# The policy tests that run on every mash release and on every change of the NATS server version mash ships with
+# (REQ-020; docs/release.md, "Policy tests on every release"). The gate step `policy-tests` reads this file and
+# `scripts/release-check --policy-tests` runs it alone.
+#
+# One row per test:  <AT id>  <package>  <test>  <status>  [note]
+#   test     the name as `go test -json` reports it, subtests after a slash (spaces in a subtest name are underscores).
+#            It becomes the -run pattern, so a test that is renamed or deleted never ran, and the gate refuses.
+#   status   required: must be started and passed (a skip is not a pass).
+#            pending:  no test on main yet; give "-" for package and test. It prints a notice and never fails, but
+#            the gate refuses once a `func TestAT<NNN>...` for that AT exists in the tree: promote it to required.
+#
+# Every live test here runs an in-process nats-server (no network).
+
+# AT-001: the template for the AT-001 shape names no peer, and the live run against a real server matches Check.
+AT-001  ./internal/listset  TestAT001TemplateNamesNoPeer       required
+AT-001  ./internal/listset  TestLiveMatchesCheck/AT-001_shape  required
+# AT-003: the live deny-key case (a deny tag holds with the owner line dropped).
+AT-003  ./internal/listset  TestLiveMatchesCheck/deny_key_(AT-003)  required
+# AT-004: the compile test over the corpus, and the zero-tag case.
+AT-004  ./internal/listset  TestAT004_Corpus    required
+AT-004  ./internal/listset  TestAT004_ZeroTags  required
+# AT-005: no live test of a deny-all sender on main yet.
+AT-005  -  -  pending  no live test of a deny-all sender is on main
+# AT-010: needs a cluster of two or more servers; sdk's harness is in an open pull request, not on main.
+AT-010  -  -  pending  the two-server applied-gate harness (sdk) is not on main
+# AT-011: does a template change reach open connections, per shipped NATS server version (checks the committed record).
+AT-011  ./internal/policy  TestAT011TemplateChangeReachesOpenConnections  required
+# AT-020: a raw client (tags-only credentials, a plain NATS client) gets no more than its lists. The whole live run:
+# its subtests all publish, subscribe and fetch as raw clients.
+AT-020  ./internal/listset  TestLiveMatchesCheck  required

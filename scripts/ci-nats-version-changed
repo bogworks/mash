@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ci-nats-version-changed: must the policy tests run for this change? Prints "run=true" or "run=false" on stdout (the
+# policy-tests job of .github/workflows/policy-tests.yml appends it to $GITHUB_OUTPUT). REQ-020: the tests run on every
+# release and on every change of the NATS server version mash ships with.
+#
+# Environment:
+#   EVENT  the workflow's github.event_name
+#   BASE   the pull request's base commit (github.event.pull_request.base.sha)
+#
+# run=true when any of these holds, and run=false only when none does:
+#   - the event is not a pull_request (a push to main or a release branch always runs them, so a version change that
+#     landed is still gated);
+#   - BASE is empty or cannot be read (nothing to compare: run);
+#   - the `github.com/nats-io/nats-server/v2` line of go.mod differs between BASE and HEAD (a bump, a downgrade, an
+#     added or removed requirement);
+#   - the pull request touches the policy test list or the step that reads it (scripts/releasecheck/policytests.*), this
+#     script, or the workflow.
+set -euo pipefail
+
+if [ "${EVENT:-}" != pull_request ] || [ -z "${BASE:-}" ]; then
+	echo "run=true"
+	exit 0
+fi
+
+modline() { # the module's requirement line in go.mod at the given revision, whitespace-normalised
+	git show "$1:go.mod" | sed -n 's/^[[:space:]]*\(require[[:space:]]\{1,\}\)\{0,1\}\(github\.com\/nats-io\/nats-server\/v2[[:space:]].*\)$/\2/p' | tr -s ' \t' ' '
+}
+
+if ! old="$(modline "$BASE")" || ! new="$(modline HEAD)"; then
+	echo "run=true"
+	exit 0
+fi
+if [ "$old" != "$new" ]; then
+	echo "run=true"
+	exit 0
+fi
+if git diff --no-renames --name-only "$BASE" HEAD | grep -qE '^(scripts/releasecheck/policytests\.|scripts/ci-nats-version-changed$|\.github/workflows/policy-tests\.yml$)'; then
+	echo "run=true"
+	exit 0
+fi
+echo "run=false"

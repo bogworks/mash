@@ -3,6 +3,7 @@
 //	release-check <X> <version>            judge candidate X for release v<version>
 //	release-check --assets <version> <X>   after CI drafted the release: is the tag right and are the assets ours?
 //	release-check --consumer <checkout> <X> <version>   as the first form, plus the consumer's check run against X (maintainers only)
+//	release-check --policy-tests           run the policy tests of REQ-020 alone (scripts/releasecheck/policytests.txt)
 //	release-check publish [--wait <d>] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
@@ -72,6 +73,8 @@ type Options struct {
 	measure         measureFunc                                                                               // test seam: the delivery-latency measurement of a binary; default measureLatencies
 	consumer        consumerRun                                                                               // test seam: the consumer's script runner; default sh <manifest command> in a fresh clone
 	consumerTimeout time.Duration                                                                             // test seam: the script's deadline; default consumerTimeout
+	policyRun       policyRunner                                                                              // test seam: runs `go test -json` for one policy test; default the real go
+	policyTests     func(ctx context.Context, o Options, x string) error                                      // test seam: the whole policy-tests step; default a fresh clone of X
 	hostGOOS        string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
 }
 
@@ -150,6 +153,13 @@ func withArgs(o Options, x, version string) Options {
 }
 
 func mainRun(args []string, out io.Writer) int {
+	if len(args) == 1 && args[0] == "--policy-tests" {
+		err := policyTestsAlone(context.Background(), out)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "release-check:", err)
+		}
+		return exitCode(err)
+	}
 	o, assets, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -392,6 +402,7 @@ func check(ctx context.Context, o Options) error {
 	r.step("the plugin runs against the candidate and the previous release, and the previous plugin against the candidate", pluginCompat(ctx, o, x, bins))
 	r.step("the render contract is unchanged since the previous release, or the change is called out", renderContract(o, x))
 	r.step("fresh-session mail arrives no slower than the previous release", latencyStep(ctx, o, bins))
+	r.step("the policy tests pass (REQ-020)", policyTestsStep(ctx, o, x))
 	if o.Consumer != "" { // opt-in: it takes 30+ minutes,
 		r.step("the consumer's check passes against the candidate", consumerStep(ctx, o, x, bins))
 	}

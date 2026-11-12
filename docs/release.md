@@ -306,6 +306,49 @@ permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx
 [decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) (whose isolated generator ADR 0079 replaces
 with the in-job attestation).
 
+## Policy tests on every release
+
+The policy tests run on every release and on every change of the NATS server version mash ships with, and a failure
+blocks the release (REQ-020). `scripts/release-check <X> <version>` runs them as the step "the policy tests pass
+(REQ-020)", in a fresh clone of X, under the gate's pinned Go settings (`-race` needs cgo, so `CGO_ENABLED` is the one
+setting it turns back on). They need no network: the live tests start an in-process nats-server.
+
+The list is `scripts/releasecheck/policytests.txt`, one row per test: AT id, package, test name, `required` or `pending`.
+
+| AT | What | Status |
+| --- | --- | --- |
+| AT-004 | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
+| AT-001 | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
+| AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`) | required |
+| AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`) | required |
+| AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
+| AT-005 | a deny-all sender is refused | pending: no live test on main |
+| AT-010 | the applied gate on a cluster of two or more servers | pending: sdk's two-server harness is not on main yet |
+
+The step is honest about what it cannot yet do. AT-010 on a cluster of two or more servers, and AT-005, have no test on
+main, so they are `pending`: the step prints a notice for each and does not fail. AT-010 stays pending until sdk's
+harness lands; the REQ-020 promise of an applied-gate run on two servers is not met before then. Two further limits: the
+AT-003 row covers the live deny-key half (the drop-the-owner-line half is covered by the compile tests), and the AT-020
+row covers publish, subscribe and consumer access as a raw client but does not yet record a delivery on the open reply and
+plumbing subjects.
+
+The step refuses (exit 3) when a required test fails, when it did not run (a renamed or deleted test has no started and
+passed event in the `go test -json` stream, and a skip is not a pass), or when a `pending` row has a `func TestAT<NNN>`
+in the tree: that row must be promoted to `required`. A unit test checks that every required row names a test that
+exists, so a rename fails CI, not the release.
+
+Run it alone, from a checkout of the commit you want to judge:
+
+    scripts/release-check --policy-tests
+
+It prints one `policy pass|FAIL|pending` line per AT and exits 0, 3 (refused) or 4 (go itself could not run).
+
+When the NATS server version changes, `.github/workflows/policy-tests.yml` runs the same command: on a pull request that
+changes the `github.com/nats-io/nats-server/v2` line of `go.mod` (or the list or the step; `scripts/ci-nats-version-changed`
+compares go.mod at the base and at HEAD), and on every push to `main` or a `release/*` branch, so a version change that
+landed is still gated. A pull request from a fork does not run it. The job is named `policy-tests`; making it a required
+status check is a repository setting a maintainer changes ([branch-protection.md](branch-protection.md)).
+
 ## Dry run
 
 The SBOM and attestation jobs only run for a real release, so a change to the pipeline can be tried without tagging one:
