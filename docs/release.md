@@ -319,18 +319,16 @@ The list is `scripts/releasecheck/policytests.txt`, one row per test: AT id, pac
 | --- | --- | --- |
 | AT-004 | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
 | AT-001 | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
-| AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`) | required |
-| AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`) | required |
+| AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`); closing mail drops the owner line, sharing restores it, and a deny holds with every user of the key carrying a deny tag (`TestAT003OwnerLineDroppedAndDenyHolds`) | required |
+| AT-005 | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
+| AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
 | AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
-| AT-005 | a deny-all sender is refused | pending: no live test on main |
 | AT-010 | the applied gate on a cluster of two or more servers | pending: sdk's two-server harness is not on main yet |
 
-The step is honest about what it cannot yet do. AT-010 on a cluster of two or more servers, and AT-005, have no test on
-main, so they are `pending`: the step prints a notice for each and does not fail. AT-010 stays pending until sdk's
-harness lands; the REQ-020 promise of an applied-gate run on two servers is not met before then. Two further limits: the
-AT-003 row covers the live deny-key half (the drop-the-owner-line half is covered by the compile tests), and the AT-020
-row covers publish, subscribe and consumer access as a raw client but does not yet record a delivery on the open reply and
-plumbing subjects.
+The step is honest about what it cannot yet do. AT-010, the applied gate on a cluster of two or more servers, has no
+test on main, so it is `pending`: the step prints a notice and does not fail. It stays pending until sdk's two-server
+harness (pull request 488) lands, and the REQ-020 promise of an applied-gate run on two servers is not met before then.
+Every other AT of REQ-020 is `required`.
 
 The step refuses (exit 3) when a required test fails, when it did not run (a renamed or deleted test has no started and
 passed event in the `go test -json` stream, and a skip is not a pass), or when a `pending` row has a `func TestAT<NNN>`

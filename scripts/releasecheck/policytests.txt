@@ -14,17 +14,22 @@
 # AT-001: the template for the AT-001 shape names no peer, and the live run against a real server matches Check.
 AT-001  ./internal/listset  TestAT001TemplateNamesNoPeer       required
 AT-001  ./internal/listset  TestLiveMatchesCheck/AT-001_shape  required
-# AT-003: the live deny-key case (a deny tag holds with the owner line dropped).
+# AT-003: the live deny-key case (a deny tag holds with the owner line dropped), and the other half: closing mail drops
+# the owner line, sharing restores it, and a deny with every user of the key carrying a deny tag holds.
 AT-003  ./internal/listset  TestLiveMatchesCheck/deny_key_(AT-003)  required
+AT-003  ./internal/listset  TestAT003OwnerLineDroppedAndDenyHolds  required
 # AT-004: the compile test over the corpus, and the zero-tag case.
 AT-004  ./internal/listset  TestAT004_Corpus    required
 AT-004  ./internal/listset  TestAT004_ZeroTags  required
-# AT-005: no live test of a deny-all sender on main yet.
-AT-005  -  -  pending  no live test of a deny-all sender is on main
+# AT-005: a deny-all sender (no allow entry; tags removed by a new list set) is refused everywhere, and keeps its own inbox.
+AT-005  ./internal/listset  TestAT005DenyAllSenderIsRefused  required
 # AT-010: needs a cluster of two or more servers; sdk's harness is in an open pull request, not on main.
-AT-010  -  -  pending  the two-server applied-gate harness (sdk) is not on main
+AT-010  -  -  pending  the two-server applied-gate harness (sdk, pull request 488) is not on main yet; no test is invented here
 # AT-011: does a template change reach open connections, per shipped NATS server version (checks the committed record).
 AT-011  ./internal/policy  TestAT011TemplateChangeReachesOpenConnections  required
 # AT-020: a raw client (tags-only credentials, a plain NATS client) gets no more than its lists. The whole live run:
-# its subtests all publish, subscribe and fetch as raw clients.
+# its subtests all publish, subscribe and fetch as raw clients. The second test pins what it reaches on the open reply
+# and plumbing subjects (the table in docs/security/threat-model.md, section 5.3.1) and that another address's inbox,
+# prompt, status and inbox stream stay out of reach.
 AT-020  ./internal/listset  TestLiveMatchesCheck  required
+AT-020  ./internal/listset  TestAT020OpenReplyAndPlumbingSubjectsArePinned  required
