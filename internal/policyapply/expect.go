@@ -103,7 +103,7 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 		current := ProbeCred{Sender: s, Name: nu.Name, Tags: slices.Clone(nu.Tags)}
 		for _, v := range listset.Verbs {
 			for _, r := range before[v] {
-				if r == s || slices.Contains(after[v], r) { // a send to oneself is no policy
+				if slices.Contains(after[v], r) {
 					continue
 				}
 				rr := RemovedReach{
