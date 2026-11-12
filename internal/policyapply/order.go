@@ -269,7 +269,7 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		}
 		sortFailures(failing)
 		out.Status.Failing = failing
-		return out, nil
+		return out, writeStatus(ctx, in.Ledger, out.Status, nil)
 	case err != nil:
 		return out, err
 	case st.State == StateApplied:
