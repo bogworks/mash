@@ -272,7 +272,10 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		return st
 	})
 	out.Status = st
+	var swe *statusWriteError
 	switch {
+	case errors.As(err, &swe): // a failed status write is never hidden behind the provisioning failure
+		return out, err
 	case errors.As(err, &bc) && bc.pending && errors.Is(bc.err, errProvisioning):
 		// Provisioning failed and the generation is recorded as pending: a partial status, not an error; run already
 		// wrote that status under the lease. If pending could not be recorded the ledger error is returned below instead.

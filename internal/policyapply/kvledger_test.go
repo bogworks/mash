@@ -167,6 +167,11 @@ func TestKVLedgerUnknownSchemaRefused(t *testing.T) {
 	if err := l.CompareAndCommit(0, testRecord(1)); !errors.Is(err, ErrUnknownSchema) {
 		t.Errorf("commit: %v", err)
 	}
+	unlock, err := l.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
 	if err := l.WriteStatus(context.Background(), Status{}); !errors.Is(err, ErrUnknownSchema) {
 		t.Errorf("status: %v", err)
 	}
@@ -440,26 +445,79 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	}
 }
 
-func TestKVLedgerWriteStatusNeverGoesBackwards(t *testing.T) {
+func statusGen(g uint64, updated time.Time) Status {
+	return Status{State: StatePartial, Generation: g, UpdatedAt: updated.UTC().Format(time.RFC3339)}
+}
+
+func (e *kvEnv) storedGeneration() float64 {
+	e.t.Helper()
+	s, _ := e.statusOf()["status"].(map[string]any)
+	return s["generation"].(float64)
+}
+
+// A later run on a host whose clock is behind still has its status stored: recency is the lease, not updated_at.
+func TestKVLedgerWriteStatusSlowerClockNotDropped(t *testing.T) {
 	e := newKVEnv(t)
-	l := e.ledger(KVLedgerOptions{})
-	at := func(sec int) Status {
-		return Status{State: StatePartial, Generation: uint64(sec), UpdatedAt: time.Date(2026, 1, 1, 0, 0, sec, 0, time.UTC).Format(time.RFC3339)}
+	ctx := context.Background()
+	now := time.Now()
+	first := e.ledger(KVLedgerOptions{Holder: "a"})
+	unlock, err := first.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	stored := func() float64 {
-		s, _ := e.statusOf()["status"].(map[string]any)
-		return s["generation"].(float64)
+	if err := first.WriteStatus(ctx, statusGen(5, now)); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range []struct {
-		write int
-		want  float64
-	}{{5, 5}, {3, 5}, {5, 5}, {7, 7}} { // an older one is dropped, an equal and a newer one are stored
-		if err := l.WriteStatus(context.Background(), at(c.write)); err != nil {
-			t.Fatal(err)
-		}
-		if got := stored(); got != c.want {
-			t.Fatalf("after writing %d: stored %v, want %v", c.write, got, c.want)
-		}
+	unlock()
+	second := e.ledger(KVLedgerOptions{Holder: "b", Now: func() time.Time { return now.Add(-time.Hour) }})
+	unlock, err = second.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := second.WriteStatus(ctx, statusGen(6, now.Add(-time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.storedGeneration(); got != 6 {
+		t.Fatalf("stored generation %v, want 6", got)
+	}
+}
+
+// A run whose lease expired and was taken over cannot overwrite the new run's status; a ledger with no lease writes none.
+func TestKVLedgerWriteStatusFencedByLease(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	if err := e.ledger(KVLedgerOptions{}).WriteStatus(ctx, statusGen(1, time.Now())); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("no lease held: %v", err)
+	}
+	a := e.ledger(KVLedgerOptions{Holder: "a", LeaseTTL: 300 * time.Millisecond})
+	unlockA, err := a.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlockA()
+	// The lease expires and b takes it over.
+	entry, err := e.kv.Get(ctx, LeaseKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.kv.Update(ctx, LeaseKey(kvAccount), a.leaseBytes("x", time.Unix(0, 0)), entry.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	b := e.ledger(KVLedgerOptions{Holder: "b", Poll: 20 * time.Millisecond})
+	unlockB, err := b.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlockB()
+	if err := b.WriteStatus(ctx, statusGen(2, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.WriteStatus(ctx, statusGen(1, time.Now())); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("old run: %v", err)
+	}
+	if got := e.storedGeneration(); got != 2 {
+		t.Fatalf("stored generation %v, want 2", got)
 	}
 }
 
