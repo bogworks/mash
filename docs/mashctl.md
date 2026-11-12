@@ -133,7 +133,7 @@ Retire does not push policy changes: run `mashctl policy apply` when told to.
 
 Because revocation is by key and time, a reissue (`mashctl reissue`, `mashctl add`) for a retired name needs a new user key (a new nkey), and a user JWT issued in the same second as the revocation is revoked too. Rotating a zone key (`--replace-zone-key`) is the other way to cut off every credential a zone signed.
 
-The three-token form of `provision` and `deprovision` (`--agent A [--owner O] [--alias OWNER/NAME]`, or `agent.owner.name`) is described in [operations.md](operations.md#provisioning-and-deprovisioning-by-the-three-tokens); with `agent_token` set, only that form of those two verbs runs.
+The three-token form of `provision` and `deprovision` (`--agent A [--owner O] [--alias OWNER/NAME]`, or `agent.owner.name`) is described in [operations.md](operations.md#provisioning-and-deprovisioning-by-the-three-tokens); with `agent_token` set, only that form of those two verbs runs. The setting gates creating and naming three-token endpoints (`provision`, the dotted form, and the `--agent`/`--owner`/`--alias` flags); an existing endpoint stays operable by its flat key regardless (`suspend`, `resume`, `suspended`, and `deprovision FLATKEY --drained-to N --suspension ID` work with the setting off).
 
 ## Exit codes and arguments
 

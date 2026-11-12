@@ -19,6 +19,11 @@ import (
 // --owner defaults to the configured owner. The flat key (agent_owner_name) is accepted in place of the canonical
 // form. The form needs the agent_token setting (config.json "agent_token" or MASH_AGENT_TOKEN); without it the verb is
 // refused and nothing is touched. A legacy name takes none of these and behaves as before.
+//
+// The setting gates creating and naming three-token endpoints (provision, the dotted agent.owner.name form, and the
+// --agent/--owner/--alias flags). An endpoint that already exists stays operable by its flat storage key regardless
+// of the setting (suspend, resume, suspended, and deprovision <flat key> --drained-to ... --suspension ...), so an
+// operator who turns the setting off can still clean up endpoints created while it was on.
 
 // newForm is a three-token target and the optional legacy alias of a provision.
 type newForm struct {

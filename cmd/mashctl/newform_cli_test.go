@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -118,5 +122,48 @@ func TestMashctlLegacyProvisionStillRefusedWithSetting(t *testing.T) {
 	_, errb, code := ctlRunWith(t, e, settingOn, "provision", "x")
 	if code == 0 || !strings.Contains(errb, refusal) {
 		t.Fatalf("%d %q", code, errb)
+	}
+}
+
+// The agent_token setting gates creating and naming three-token endpoints; an endpoint that already exists stays
+// operable by its flat key with the setting off, so an operator who turns it off can still clean up.
+func TestMashctlNewFormSettingOffCreateRefusedFlatCleanupWorks(t *testing.T) {
+	e := testenv.Start(t)
+	ctlRun(t, e, "init")
+	a, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ident, err := sap.New("acme", "team1", "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, u := e.Mint(t, "ops1")
+	if _, err := a.ProvisionIdentity(context.Background(), ident, nil, u, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	key := ident.Flat()
+	_, u2 := e.Mint(t, "ops2")
+
+	// Setting off: creating and naming are refused with the setting message, and nothing is created.
+	_, errb, code := ctlRun(t, e, "provision", "ops2", "--agent", "acme", "--owner", "team1", "--user", u2, "--account", e.Account)
+	if code != 1 || !strings.Contains(errb, "agent_token") || !strings.Contains(errb, "MASH_AGENT_TOKEN") {
+		t.Fatalf("provision with the setting off: %d %q", code, errb)
+	}
+	if out, _, _ := ctlRun(t, e, "list"); strings.Contains(out, "acme_team1_ops2") || !strings.Contains(out, key) {
+		t.Fatalf("list after the refusal: %q", out)
+	}
+
+	// Setting still off: the existing endpoint is suspended and deprovisioned by its flat key.
+	out, errb, code := ctlRun(t, e, "suspend", key)
+	m := regexp.MustCompile(`id ([0-9a-f]{32}), last_seq (\d+),`).FindStringSubmatch(out)
+	if code != 0 || m == nil {
+		t.Fatalf("suspend: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "deprovision", key, "--drained-to", m[2], "--suspension", m[1]); code != 0 || !strings.Contains(out, "deprovisioned "+key) {
+		t.Fatalf("deprovision: %d %q %q", code, out, errb)
+	}
+	if out, _, _ := ctlRun(t, e, "list"); strings.Contains(out, key) {
+		t.Fatalf("endpoint still listed: %q", out)
 	}
 }

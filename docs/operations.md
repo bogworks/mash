@@ -303,6 +303,8 @@ Deprovisioning fences the name, then removes the directory record and the inbox 
 
 `provision` and `deprovision` (in `mashctl` and `mash admin`) address a new-form endpoint by its agent, owner and name tokens ([ADR 0074](decisions/0074-an-endpoint-is-three-sap-tokens-and-keys-its-storage-on-their-flat-form.md)). It needs the `agent_token` setting (`agent_token` in `config.json` or `MASH_AGENT_TOKEN`; the value is only the switch, the verb names its own target). With the setting unset the three-token form is refused (exit 1, nothing changed); with it set, the legacy form of these two verbs is refused as before, and every other verb still refuses.
 
+The setting gates creating and naming three-token endpoints: `provision`, the dotted `agent.owner.name` form, and the `--agent`, `--owner` and `--alias` flags. An endpoint that already exists stays operable by its flat storage key regardless of the setting: `suspend`, `resume`, `suspended`, and `deprovision FLATKEY --drained-to N --suspension ID` all work with it off, so an operator who turns the setting off can still clean up endpoints created while it was on.
+
 ```bash
 mashctl provision recv --agent acme --owner team1 --user "$user" --account "$account"   # acme.team1.recv
 mashctl provision recv --agent acme --user "$user" --account "$account"                 # --owner defaults to the configured owner
