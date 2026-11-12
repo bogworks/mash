@@ -131,6 +131,9 @@ func statusText(src *statusSource) string {
 	if l := inboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
+	if l := legacyInboxEvictionLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
@@ -480,6 +483,21 @@ func inboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.InboxEvictionLine(context.Background()); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// legacyInboxEvictionLine is inboxLine for the legacy inbox of an endpoint whose record carries an alias.
+func legacyInboxEvictionLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.LegacyInboxEvictionLine(context.Background()); ok {
 		return redactText(l)
 	}
 	return ""

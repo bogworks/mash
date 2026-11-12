@@ -20,8 +20,10 @@ type InboxEviction struct {
 	// no longer holds. Deleting and purging are denied on an inbox, so what is gone was dropped by a limit: the byte cap
 	// (the oldest mail goes first) or the age limit. A stream that is deprovisioned and provisioned again starts at 0.
 	Dropped uint64
-	// Unread is how many of those were never delivered to the endpoint: at least this many were lost unread. It is
-	// exact unless a message was delivered twice (a redelivery counts as a delivery, so Unread can read low).
+	// Unread is a lower bound on how many of those were lost unread: at least this many were never delivered to the
+	// endpoint. It comes from the consumer's sequences, which count deliveries and not what the user was shown, so it
+	// can read low: mail that was fetched but never shown to the user counts as delivered, and a redelivery counts as
+	// a delivery again. A zero therefore does not prove that nothing was lost unread.
 	Unread uint64
 	// Fill is the stored bytes as a percentage of the byte cap; 0 when there is no cap.
 	Fill float64
@@ -32,7 +34,8 @@ type InboxEviction struct {
 // and the ack floor stalls below a gap only until the next delivery jumps over it, so the ack floor cannot say what
 // was lost; the delivered stream sequence against the delivered consumer sequence can: every stream sequence at or below
 // the first delivered one that the consumer skipped was dropped before it got there, and every message below
-// FirstSeq that is past the last delivery was dropped waiting.
+// FirstSeq that is past the last delivery was dropped waiting. The result is a lower bound on what was lost unread:
+// consumer sequences count deliveries, not what the user was shown.
 func Eviction(s InboxState) InboxEviction {
 	var e InboxEviction
 	if s.FirstSeq > 0 {

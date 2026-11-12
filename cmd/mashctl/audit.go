@@ -82,11 +82,14 @@ type auditInbox struct {
 	Suspended bool         `json:"suspended"`
 	Deliver   auditDeliver `json:"deliver"`
 
-	Bytes         uint64  `json:"bytes"`
-	MaxBytes      int64   `json:"max_bytes"`
-	FillPercent   float64 `json:"fill_percent"`
-	Evicted       uint64  `json:"evicted"`        // messages the stream took and no longer holds (a full inbox or the age limit)
-	EvictedUnread uint64  `json:"evicted_unread"` // of those, at least this many were never delivered to the endpoint
+	Bytes       uint64  `json:"bytes"`
+	MaxBytes    int64   `json:"max_bytes"`
+	FillPercent float64 `json:"fill_percent"`
+	Evicted     uint64  `json:"evicted"` // messages the stream took and no longer holds (a full inbox or the age limit)
+	// EvictedUnread is a lower bound: of those, at least this many were never delivered to the endpoint. It is derived
+	// from the consumer's sequences, so mail that was fetched but never shown to the user, or that was redelivered, can
+	// make it read low; 0 does not prove nothing was lost unread.
+	EvictedUnread uint64 `json:"evicted_unread"`
 }
 
 type auditRecord struct {
@@ -350,13 +353,14 @@ func (in auditInbox) drained() bool {
 // inboxProblems is the problems of one endpoint's inbox: mail lost unread. A message dropped after it was delivered is
 // ordinary turnover (the oldest mail goes when the cap or the age limit is reached), so it is not a problem. An inbox
 // near its byte cap is operational state, not a misconfiguration: inboxNote reports it, and --strict does not count it.
-// An inbox with unread loss that is also near full says so in the same problem.
+// An inbox with unread loss that is also near full says so in the same problem. The count is a lower bound (the
+// consumer's sequences cannot see mail that was fetched and never shown, or redelivered), so it is worded "at least".
 func inboxProblems(key string, in auditInbox) []auditProblem {
 	if !in.Present || in.EvictedUnread == 0 {
 		return nil
 	}
 	msg := fmt.Sprintf(
-		"%d unread message(s) were evicted from this inbox (%d evicted in all; it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)",
+		"at least %d unread message(s) lost: evicted from this inbox (%d evicted in all; it was full or its mail aged out); the endpoint should read mail sooner, or a sender is flooding it (see docs/operations.md)",
 		in.EvictedUnread, in.Evicted)
 	if in.FillPercent >= store.InboxNearFullPercent {
 		msg += fmt.Sprintf("; the inbox is also %.0f%% full (%d of %d bytes)", in.FillPercent, in.Bytes, in.MaxBytes)
@@ -399,6 +403,13 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			users[b.User] = true
 		}
 	}
+	// an inbox is evaluated once: a legacy inbox that is also a record's own inbox is reported under that record
+	evaluated := map[string]bool{}
+	for _, r := range snap.Records {
+		if id, err := r.Identity(); err == nil {
+			evaluated[id.Flat()] = true
+		}
+	}
 	for _, r := range snap.Records {
 		id, err := r.Identity()
 		if err != nil {
@@ -416,6 +427,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		if id.IsLegacy() {
 			form = "legacy"
 		}
+		var legacyInbox *auditInbox
 		ar := auditRecord{Key: key, Identity: auditIdentity{Agent: id.Agent, Owner: id.Owner, Name: id.Name}, Flat: key,
 			Form: form, User: r.User, Zone: r.Zone, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
 		if r.Alias != nil {
@@ -437,6 +449,9 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 					LegacyInbox: toAuditInbox(legacy, streams[sap.InboxStream(legacy)]), NewInbox: ar.Inbox,
 					TrustLabel: trustLabelNA, TrustLabelNote: trustLabelNote}
 				rn.Drained = rn.LegacyInbox.drained()
+				if !evaluated[legacy] {
+					evaluated[legacy], legacyInbox = true, &rn.LegacyInbox
+				}
 				rep.Renames = append(rep.Renames, rn)
 			}
 		}
@@ -444,6 +459,13 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		rep.Problems = append(rep.Problems, inboxProblems(key, ar.Inbox)...)
 		if n := inboxNote(key, ar.Inbox); n != "" {
 			rep.Notes = append(rep.Notes, n)
+		}
+		if legacyInbox != nil { // the legacy inbox of a renamed identity is evaluated the same way, and labelled as such
+			label := fmt.Sprintf("%s (legacy inbox %s)", key, legacyInbox.Stream)
+			rep.Problems = append(rep.Problems, inboxProblems(label, *legacyInbox)...)
+			if n := inboxNote(label, *legacyInbox); n != "" {
+				rep.Notes = append(rep.Notes, n)
+			}
 		}
 	}
 	slices.SortFunc(rep.Records, func(a, b auditRecord) int { return strings.Compare(a.Key, b.Key) })

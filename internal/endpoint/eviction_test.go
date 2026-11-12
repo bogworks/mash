@@ -47,7 +47,7 @@ func TestInboxEvictionLineOnAFloodedInbox(t *testing.T) {
 	f.fillInbox(t, "a", 20)
 	ep := f.client(t, "a")
 	line, ok := ep.InboxEvictionLine(context.Background())
-	if !ok || !strings.HasPrefix(line, "inbox: WARN - ") || !strings.Contains(line, "unread message(s) were evicted") ||
+	if !ok || !strings.HasPrefix(line, "inbox: WARN - ") || !strings.Contains(line, "unread message(s) lost to eviction") ||
 		!strings.Contains(line, "mashctl audit") || !strings.Contains(line, "docs/operations.md") {
 		t.Fatalf("flooded inbox: %q %v", line, ok)
 	}
@@ -72,7 +72,7 @@ func TestInboxEvictionLineSurvivesTheConsumerCatchingUp(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if line, ok := ep.InboxEvictionLine(context.Background()); !ok || !strings.Contains(line, "unread message(s) were evicted") {
+	if line, ok := ep.InboxEvictionLine(context.Background()); !ok || !strings.Contains(line, "unread message(s) lost to eviction") {
 		t.Fatalf("after catching up: %q %v", line, ok)
 	}
 }

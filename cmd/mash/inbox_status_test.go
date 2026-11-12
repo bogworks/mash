@@ -51,7 +51,7 @@ func TestStatusToolShowsInboxEviction(t *testing.T) {
 		out = statusOf(t, s, id)
 		return strings.Contains(out, "inbox: WARN - ")
 	})
-	wantAll(t, "inbox line", statusLine(t, out, "inbox: "), "unread message(s) were evicted", "read mail sooner", "mashctl audit", "docs/operations.md")
+	wantAll(t, "inbox line", statusLine(t, out, "inbox: "), "unread message(s) lost to eviction", "read mail sooner", "mashctl audit", "docs/operations.md")
 }
 
 func TestStatusToolHasNoInboxLineForACleanInbox(t *testing.T) {

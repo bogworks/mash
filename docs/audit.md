@@ -59,6 +59,10 @@ absent when the server reports none) and `num_redelivered` (messages redelivered
 `*_last` times and `last_time` are the only fields besides `generated` that differ between two runs for a reason of
 time alone; everything else is a sequence or a count.
 
+Each inbox also has `bytes`, `max_bytes`, `fill_percent`, `evicted` and `evicted_unread`. `evicted_unread` is a lower
+bound: it comes from the consumer's sequences, so mail that was fetched but never shown, or that was redelivered, can
+make it read low, and 0 does not prove nothing was lost unread.
+
 The text form shows the same per inbox on one line: `suspended`, `deliver` (`true` or `false`) and, when a consumer
 exists, `policy`, `start_seq`, `filter`, `ack_floor` (and `start_time` when set). An orphan stream line shows
 `suspended` too.
