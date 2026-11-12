@@ -51,7 +51,8 @@ tags therefore has exactly the permissions the sender's old credential has under
    the revoked keys, else the gate fails with `old_key_not_revoked` naming the sender and key. A sender with no
    inventory entry fails too: the inventory is required, so a narrowing cannot count as applied while the real old
    credential still reaches the removed receiver.
-4. Every connection opened before the push (a witness) was closed by the server.
+4. Every connection opened before the push (a witness) was closed by the server, for every sender with a removed
+   reach and for every sender the change removes.
 5. On every server, a reconnecting probe with the old name and tags is refused each receiver the change removed from
    it. When the removal is by tags only, the new template still grants the old tags that receiver, so the old
    credential is refused only by its revocation (step 3, which REQ-014's rotation provides), and the gate probes the

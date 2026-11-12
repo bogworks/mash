@@ -642,3 +642,56 @@ func TestMemLedgerLockHonorsContext(t *testing.T) {
 	}
 	u2()
 }
+
+// An allow list may name a receiver that is not a sender: removing it is still a removed reach, and it is probed.
+func TestNewExpectReceiverNotASender(t *testing.T) {
+	prev := set1()
+	prev.Senders = []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.d.ext"}}}
+	target := set1()
+	target.Senders = []listset.SenderLists{{Sender: "foo.c.core"}}
+	e, err := NewExpect(compile(t, prev), compile(t, target), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, r := range slices.Concat(e.Removed, e.CredentialOnly) {
+		found = found || (r.Sender == "foo.c.core" && r.Receiver == "foo.d.ext")
+	}
+	if !found {
+		t.Fatalf("no removed reach to foo.d.ext: %+v", e)
+	}
+}
+
+// A sender the target drops needs a closed witness on every server.
+func TestGateRemovedSenderWitness(t *testing.T) {
+	prev := set1()
+	target := set1()
+	target.Senders = prev.Senders[:2]
+	e, err := NewExpect(compile(t, prev), compile(t, target), nil)
+	if err != nil || !slices.Equal(e.RemovedSenders, []string{"foo.c.sdk"}) {
+		t.Fatalf("%+v %v", e, err)
+	}
+	w := newWorld(t)
+	w.cluster.set("s1", w.j2)
+	w.cluster.set("s2", w.j2)
+	in := w.gate()
+	in.Expect.RemovedSenders = []string{"foo.c.gone"}
+	w.wit.all = append(w.wit.all, WitnessKey{"s1", "foo.c.gone"}, WitnessKey{"s2", "foo.c.gone"})
+	w.wit.open[WitnessKey{"s2", "foo.c.gone"}] = true
+	in.Witnesses = w.wit
+	st, _ := Gate(context.Background(), in)
+	if st.State == StateApplied || !hasFailure(st, "s2", "foo.c.gone", CheckWitness) || hasFailure(st, "s1", "foo.c.gone", CheckWitness) {
+		t.Fatalf("open: %+v", st.Failing)
+	}
+	delete(w.wit.open, WitnessKey{"s2", "foo.c.gone"})
+	in.Witnesses = w.wit
+	if st, _ = Gate(context.Background(), in); st.State != StateApplied {
+		t.Fatalf("closed: %+v", st.Failing)
+	}
+	// With no witness reported at all for the removed sender, it is not proven closed.
+	w.wit.all = w.wit.all[:len(w.wit.all)-2]
+	in.Witnesses = w.wit
+	if st, _ = Gate(context.Background(), in); !hasFailure(st, "s1", "foo.c.gone", CheckWitness) {
+		t.Fatalf("missing: %+v", st.Failing)
+	}
+}

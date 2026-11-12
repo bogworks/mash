@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/bogworks/mash/internal/listset"
 )
@@ -40,11 +41,15 @@ type Expect struct {
 	// gate probes each with the target credential (Current) and requires it refused, and requires each witness
 	// closed. Sorted as Removed.
 	CredentialOnly []RemovedReach
+	// RemovedSenders are the senders of the previous generation the target does not have, sorted. Each needs a closed
+	// witness on every server: a connection it opened before the push must not stay usable.
+	RemovedSenders []string
 }
 
 // NewExpect derives what the gate checks, purely from the previous generation's Compiled (nil when none) and the
-// target's, plus the revoked keys. The universe is every sender of either generation. A sender only in one of them
-// has no removed reach: a removed sender is covered by its revoked keys.
+// target's, plus the revoked keys. The universe is every sender of either generation and every receiver address
+// either generation's allow or deny tags name (a receiver need not be a sender). A sender only in one of them has no
+// removed reach: a removed sender is covered by its revoked keys and a required closed witness (RemovedSenders).
 func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error) {
 	e := Expect{RevokedKeys: slices.Clone(revoked)}
 	slices.Sort(e.RevokedKeys)
@@ -58,12 +63,20 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 	for _, u := range prev.Users {
 		universe[u.Sender] = true
 		oldUsers[u.Sender] = u
+		addNamed(universe, prev.Range, u)
 	}
 	for _, u := range target.Users {
 		universe[u.Sender] = true
 		newUsers[u.Sender] = true
 		newUserByS[u.Sender] = u
+		addNamed(universe, target.Range, u)
 	}
+	for s := range oldUsers {
+		if !newUsers[s] {
+			e.RemovedSenders = append(e.RemovedSenders, s)
+		}
+	}
+	sort.Strings(e.RemovedSenders)
 	all := make([]string, 0, len(universe))
 	for a := range universe {
 		all = append(all, a)
@@ -106,6 +119,18 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 		}
 	}
 	return e, nil
+}
+
+// addNamed adds to universe the address of each allow and deny tag of u: the range and the tag's "owner.name" value.
+// The deny sentinel names no address.
+func addNamed(universe map[string]bool, rng string, u listset.User) {
+	for _, t := range u.Tags {
+		name, val, ok := strings.Cut(t, ":")
+		if !ok || (name != listset.AllowTag && name != listset.DenyTag) || val == listset.NoDenyValue {
+			continue
+		}
+		universe[rng+"."+val] = true
+	}
 }
 
 // withUser returns c with the user of u.Sender replaced by u: the target's templates with that sender's old name and
