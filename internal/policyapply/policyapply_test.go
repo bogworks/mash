@@ -17,6 +17,8 @@ import (
 
 	"github.com/nats-io/nkeys"
 
+	"github.com/nats-io/jwt/v2"
+
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policy"
 )
@@ -68,8 +70,9 @@ func (w *world) oldKeys() map[string][]string {
 func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
 	return RunInput{
 		Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Ledger: l, Account: w.k.acctPub,
-		ListSet: ls, Received: []byte(received), Previous: w.c1, PreviousJWT: w.j1,
-		RevokedKeys: []string{w.k.revoked}, Now: fixedNow,
+		ListSet: ls, Received: []byte(received), Previous: w.c1,
+		SignPrevious: func(revoked []string) (string, error) { return w.k.build(w.t, w.c1, revoked...), nil },
+		RevokedKeys:  []string{w.k.revoked}, Now: fixedNow,
 		Signers: w.k.signers, PreviousSigners: w.k.signers, OldKeys: w.oldKeys(),
 		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
 			return w.k.build(w.t, c, w.k.revoked), nil
@@ -347,8 +350,15 @@ func TestRunConvergeRollsBack(t *testing.T) {
 	if g := gens(st); g["s1"] != "1" || g["s2"] != "1" {
 		t.Errorf("servers = %v (want every server on the previous generation)", g)
 	}
-	if w.cluster.pushes[len(w.cluster.pushes)-1] != w.j1 {
+	last, err := jwt.DecodeAccountClaims(w.cluster.pushes[len(w.cluster.pushes)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, ok := generationOfClaims(last, []Candidate{{Generation: 1, Compiled: w.c1, Signers: w.k.signers}}); !ok || g != 1 {
 		t.Error("last push was not the previous generation")
+	}
+	if _, has := last.Revocations[w.k.revoked]; !has {
+		t.Error("last push dropped the target's revocation")
 	}
 	if rec, _ := l.InForce(); rec.Generation != 1 {
 		t.Errorf("committed generation %d", rec.Generation)

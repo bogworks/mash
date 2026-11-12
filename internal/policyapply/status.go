@@ -35,6 +35,8 @@ const (
 	CheckOldKeyNotRevoked = "old_key_not_revoked"
 	// CheckProvision is a provisioning step that failed after the gate applied (RunOrdered): nothing was committed.
 	CheckProvision = "provision"
+	// CheckNotConnected: a narrowed sender's new credential was not seen connected by the deadline (REQ-014).
+	CheckNotConnected = "not_connected"
 )
 
 // NoSignersDetail is the detail of the generation failure when the target has no expected signing keys.

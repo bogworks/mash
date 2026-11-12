@@ -252,7 +252,8 @@ func TestAT014Live(t *testing.T) {
 		Cluster: liveEvCluster{e.cluster, ev}, Prober: prober, Witnesses: wit, Ledger: ledger,
 		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]string{"foo.c.core": {oldPub}},
 		Account: e.acctPub, Inventory: 2, ListSet: at014Target(), Received: []byte("at014"),
-		Previous: c1, PreviousJWT: e.account(c1), RevokedKeys: ex.RevokedKeys,
+		Previous: c1, RevokedKeys: ex.RevokedKeys,
+		SignPrevious: func(revoked []string) (string, error) { return e.account(c1, revoked...), nil },
 		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
 			// Nothing for foo.c.new exists when the JWT is signed, which is before the push.
 			if st, co, err := prov.inbox(ctx, "s1", "foo.c.new"); err != nil || st || co {
