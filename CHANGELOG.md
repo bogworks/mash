@@ -6,9 +6,13 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [0.4.0] - 2026-11-12
 
-mash v0.4.0 is a security and groundwork release. It closes a flaw that let any endpoint in an account wipe the shared lease store, hardens several smaller edges, and lays the groundwork for three-part identities (agent, owner and name) without turning them on. It is also the first mash release cut without a signing key on anyone's machine: you verify it against GitHub's build attestations instead.
+### Summary
+
+mash v0.4.0 is a security and groundwork release. It closes a flaw that let any endpoint in an account wipe the shared lease store, hardens several smaller edges, and lays the groundwork for three-part identities (agent, owner and name) without turning them on. It is also the first mash release cut without a signing key on anyone's machine: you verify it against GitHub's build attestations instead. Every commit since v0.3.3 is listed in the [compare view](https://github.com/bogworks/mash/compare/v0.3.3...v0.4.0).
 
 ### Upgrading
+
+There is one required step after upgrading, and two things to know about admin tools and the plugin.
 
 1. **Re-run `mash admin init` once after upgrading.** It hardens the lease bucket (`KV_mash-leases`) so it no longer accepts rollup writes, which is the security fix in this release. `mashctl audit` reports a bucket that is not yet hardened, and `mash serve` now warns at start when it sees one.
 2. **Upgrade every admin tool before the bucket is hardened.** On a hardened bucket, `mash admin` and `mashctl` from 0.3.x cannot provision, deprovision or retire, and their name locks linger for up to 30 seconds. Endpoints of any version keep working. Any 0.4.0 admin command hardens the bucket as a side effect, so move every admin caller in an account to 0.4.0 together.
