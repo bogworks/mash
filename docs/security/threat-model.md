@@ -249,9 +249,103 @@ its next tool call. No signature covers plugin content. Rating M.
 | Prompt injection | None. | None. | Trust labels, quoting, "pointer, not ground truth" text (`instructions.go:20-27`). | Delegation default (1), quoting gaps (8). |
 | Leaf nodes | Discovery is account-local (`SAP:L1035`). | Leaf nodes extend an account to another server ([NATS leaf nodes](https://docs.nats.io/running-a-nats-service/configuration/leafnodes)); the leaf host is inside the trust boundary. | Not used yet. | A model for the archive leaf before it ships. |
 
-## 10. Keeping it current
+## 10. Who holds which key
 
-- Update this file in the same pull request as any change to: `internal/admin/permissions.go`,
+This section says, for each key and credential mash uses, where it lives, who holds it, what a holder can do and what to
+do if it leaks. It describes what the code does today (`internal/ctlkeys`, `internal/bootstrap`, `internal/mint`,
+`internal/admin/permissions.go`) and [docs/operations.md](../operations.md). A seed is never printed by mash, and no
+seed appears in the issue record. "The operator host" is the machine that runs `mashctl`; the control plane is the
+account that holds the key store.
+
+Custody rule: the account's scoped (zone) signing keys, and every key above them, stay with the minting authority
+(`mashctl`'s key store). No sender's host holds one; a sender's host holds only its own endpoint creds.
+
+**Operator key** (`operator.nk`)
+- Lives: `<config dir>/keys/operator.nk` (or `$MASH_KEYS_DIR`), mode 0600 in a 0700 directory. Present only when
+  `mashctl init --local` stood the server up or `mashctl adopt --operator-key` imported it. On a server you manage with
+  `nsc` or on Synadia Cloud the operator key is not in mash's key store and mash never holds it.
+- Held by: the operator host's user.
+- A holder can: sign account JWTs and revocations, so replace any account's JWT, change its limits and signing keys,
+  revoke any user key, and push the result through the system account. That is authority over everything the server
+  runs.
+- If it leaks: it cannot be rotated in place. Stand up a new operator, point the server at it, re-issue the accounts and
+  every user, and discard the old server's trust.
+
+**Account identity key** (`account.nk`)
+- Lives: `<config dir>/keys/account.nk`, 0600 in 0700; made by `mashctl init`, `init --local` or imported by `adopt`.
+- Held by: the operator host's user.
+- A holder can: sign a user with no permission limits (an admin user, such as `mashadmin`, or an endpoint with any
+  subjects) unless the operator enforces strict signing key usage, which refuses users signed by the identity key. Mint
+  itself does not use it: it reads only the public half (`internal/mint/mint.go`).
+- If it leaks: every user it signed is as strong as the key. Replace the account (a new account key under the operator,
+  re-issued users), and revoke the old account's users.
+
+**Zone (scoped) signing keys** (`zones/<zone>.nk`)
+- Lives: `<config dir>/keys/zones/<zone>.nk`, 0600 in 0700, one per zone. The public halves are published in the account
+  JWT as scoped signers (`mashctl policy apply`), each with its permission template.
+- Held by: the operator host's user (the minting authority) only.
+- A holder can: sign a user JWT that the account accepts and that takes the zone's template. The signer chooses the
+  user's name and tags, and the template expands them: the user gets the per-name grants of whatever name it carries
+  (own inbox, lease key, prompt, status and heartbeat subjects), the zone's wildcard mail lines, and a mail line for
+  every `allow` tag. A user signed this way is not in mash's issue record, which only `mashctl` writes.
+  Policy rules limit what the key's honest users get; they do not limit the key's holder.
+- If it leaks: `mashctl policy apply --replace-zone-key ZONE` replaces the key in the account JWT, which stops users
+  signed by the old key from authenticating; then `mashctl reissue` the zone's endpoints. Run `mashctl issued check` to
+  see what is connected that mash did not issue, and revoke those keys.
+
+**System account key** (`system.nk`) and **system creds** (`sys.creds`)
+- Lives: the key at `<config dir>/keys/system.nk` (0600 in 0700), only for a server `init --local` stood up. The creds
+  at `<config dir>/server/sys.creds` (0600, in the 0700 server directory), or wherever `MASH_SYS_CREDS` points.
+- Held by: the operator host's user. Never give them to an agent session.
+- A holder can: with the key, sign users of the system account. With the creds, use the server's system requests:
+  read server and connection state (`CONNZ`, which `mashctl issued check` uses), look up and ping accounts, and push
+  claims updates. The server accepts a pushed account JWT only when the operator signed it, so the creds alone cannot
+  change an account; they can read every account's connection list and use the operator-facing requests (for example
+  disconnecting clients).
+- If it leaks: replace the system user (a new user of the system account) and revoke the old one; if the key leaked,
+  that needs the operator key.
+
+**Admin creds** (`mashadmin.creds`, or whatever `admin_creds` names)
+- Lives: `<config dir>/server/mashadmin.creds` for `init --local` and `adopt --mint-admin` (0600), or a path you give
+  with `--admin-creds` (a file from `nsc`).
+- Held by: the operator host's user.
+- A holder can: everything within the MASH account: publish and subscribe on every subject, read every inbox, write the
+  directory, create and delete streams and buckets, and write the issue record. The issue record's integrity therefore
+  rests on these creds as well as on the signing keys.
+- If it leaks: revoke the admin user's key in the account JWT (`nsc revocations add-user`, then push), issue a new
+  admin user, and check the directory, the inbox streams and the issue record (`mashctl audit`, `mashctl issued list`).
+
+**Endpoint creds and seeds** (`<name>.creds`)
+- Lives: `<config dir>/<name>.creds`, 0600; `mashctl add` refuses a parent directory that others can write, and a
+  creds file readable by others is refused when read. It holds the endpoint's user JWT and seed.
+- Held by: the host that runs that one endpoint.
+- A holder can: be that endpoint: connect as it, send mail under the policy's lines for it, read its inbox, and sign
+  `Agent-Sender` headers with its seed. It cannot mint, read or write the directory's records beyond reading them, and
+  has no access to the issue record: its permissions grant nothing on `mash-issued` (a test asserts it).
+- If it leaks: `mashctl retire NAME` revokes the user key (it also removes the record and inbox), or `mashctl reissue
+  NAME` when the key is already revoked or the policy narrows; the old key stays revoked.
+
+**The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
+- Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk`, `zones/*.nk` (0600), `operator.jwt` (a
+  public JWT) and the `apply.lock` file. `mashctl` refuses a key directory that is a symlink, not a directory, readable
+  or writable by group or other, or owned by another user.
+- Held by: the control plane's user. The modes stop other users and not other processes of the same UID, so keep it
+  under a separate UID or on a mount that agent sessions cannot read ([docs/operations.md](../operations.md#where-the-key-store-lives)).
+- A holder can: everything the keys above allow. A backup of the directory is a copy of every key in it.
+- If it leaks: treat every key in it as leaked: replace them in the order above, operator last.
+
+**The issue record** (`mash-issued` bucket)
+- What: one entry per user JWT `mashctl` issued: public key, address, kind, tags, generation, time. Only the admin
+  connection `mashctl` holds writes it; endpoint users have no permission on it, and the stream refuses rollup, delete and
+  purge. It holds no seed or JWT. It is written before the creds are handed out.
+- What it does not do: it does not stop a copy of a zone key signing a user elsewhere; it makes that user visible.
+  `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
+  issue. It sees connections open at the moment of the check, not users that connected and left, and a holder of the
+  admin creds can add a record.
+
+## 11. Keeping it current
+
+- Update this file in the same pull request as any change to: `internal/admin/permissions.go`, `internal/ctlkeys/`, `internal/mint/`, the issue record (`internal/store/issued.go`),
   `internal/endpoint/instructions.go`, `internal/sap/`, trust labelling in `internal/endpoint/mail.go`, the spool or
   hook path, `plugin/`, `.github/workflows/`, `docs/release.md`, `docs/allowed_signers`, `scripts/quickstart-synadia.sh` (it handles the Synadia API token and
   admin creds), or the SAP version mash pins.

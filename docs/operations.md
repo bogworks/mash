@@ -288,6 +288,15 @@ The policy file that will restrict who may mail whom (compiled by `mashctl`, not
 
 Adding an endpoint to the policy and minting its user (`mashctl add`, `mashctl reissue`) is described in [mashctl.md](mashctl.md).
 
+## The issue record and the drift check
+
+`mashctl` keeps a record of every user JWT it issues in the `mash-issued` KV bucket (key: the user's public key; value: public key, address, owner, zone, kind, tags, generation, issue time). It exists so a user JWT signed outside `mashctl`, for example with a copy of a zone's signing key, can be found. The commands are in [mashctl.md](mashctl.md#the-issue-record).
+
+- **Who writes it.** Only the admin connection `mashctl` holds. Endpoint users have no permission on `$KV.mash-issued.>` or on the stream's `$JS.API` subjects, not even to read, and a test asserts that no permission list mash makes grants anything on it. The stream is created by `mashctl init` (or on first use by `add` or `reissue`, over the admin connection) with file storage, no TTL, a history of 8 revisions per key, a size cap of 64 MiB, discard-new when full (a full bucket refuses new issues instead of losing a record), and rollup, message delete and purge refused. mash verifies these on use and refuses to write to a bucket that was made otherwise (`recreate it as mash admin init makes it, copying its records`). A holder of the admin creds can still write the bucket, so the record protects against signing-key copies, not against the admin creds ([Who holds which key](security/threat-model.md#10-who-holds-which-key)).
+- **What the check sees.** `mashctl issued check` sends the system account's `$SYS.REQ.SERVER.PING.CONNZ` request with `auth` on and the MASH account as filter. For a JWT user the server reports the user's public key as `authorized_user`, plus the connection's name, the key that signed its JWT (`issuer_key`) and its tags; the connection's JWT also comes back and is never read or printed. A reply carries 1024 connections at most, and the rest of a server's connections are read with further requests to that server's own subject (offset and limit). Connections of other accounts are not asked for.
+- **What it does not see.** Only connections open when the check runs: a user that connected and left between checks is not seen, so run it on a schedule and after a key leak. It does not see a user that has not connected. It cannot tell a server that is down from one that has no connections except by the server set: give `--servers N` (or `MASH_SERVERS`) the real server count, or the run is `INCOMPLETE` and exits 2.
+- **After a finding.** The finding names the key and the signer. If the signer is a zone key, replace that key (`mashctl policy apply --replace-zone-key ZONE`), reissue the zone's endpoints, and revoke the unknown key in the account JWT. A key that is yours but predates the record is recorded by `mashctl reissue NAME`.
+
 ## Removing an endpoint
 
 ```sh
