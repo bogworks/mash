@@ -18,7 +18,7 @@ func lockedRevoke(t *testing.T) {
 	t.Helper()
 	var mu sync.Mutex
 	prev := revokeUsers
-	revokeUsers = func(context.Context, config.Config, func(string) string, int, []string, io.Writer) error {
+	revokeUsers = func(context.Context, config.Config, func(string) string, int, []string, io.Writer, func() time.Time) error {
 		mu.Lock()
 		defer mu.Unlock()
 		return nil

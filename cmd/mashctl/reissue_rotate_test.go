@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
@@ -57,15 +58,22 @@ func noDenyNone(tags []string) []string {
 	return slices.DeleteFunc(tags, func(s string) bool { return s == admin.NoDenyTag })
 }
 
-type revokeCall struct{ users []string }
+type revokeCall struct {
+	users []string
+	at    time.Time // the revocation time the caller passed; zero when it passed none
+}
 
 // fakeRevoke replaces the revocation seam for the test; err, when set, is what every call returns.
 func fakeRevoke(t *testing.T, err error) *[]revokeCall {
 	t.Helper()
 	var calls []revokeCall
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, users []string, _ io.Writer) error {
-		calls = append(calls, revokeCall{slices.Clone(users)})
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, users []string, _ io.Writer, now func() time.Time) error {
+		c := revokeCall{users: slices.Clone(users)}
+		if now != nil {
+			c.at = now()
+		}
+		calls = append(calls, c)
 		return err
 	}
 	t.Cleanup(func() { revokeUsers = prev })

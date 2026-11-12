@@ -506,8 +506,8 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	// A revocation covers only JWTs issued at or before its time: an old JWT that claims a later issue time (a clock
 	// that was ahead or has since been set back) would stay valid, so the rotation would report success without
 	// cutting it off. Refused before anything is staged or revoked, on the revoked-key path too.
-	if iat := time.Unix(oldClaims.IssuedAt, 0).UTC(); iat.After(reissueNow()) {
-		return nil, false, fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", name, iat.Format(time.RFC3339))
+	if err := refuseFutureIssued(name, oldClaims, reissueNow()); err != nil {
+		return nil, false, err
 	}
 
 	// Rotating: (a) the new key, staged on disk (a resumed rotation re-signs the staged key with the current policy),
@@ -530,7 +530,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if err := stageCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
 	}
-	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout); err != nil {
+	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
 		if revoked {
 			why = "the user key is already revoked in the account JWT"

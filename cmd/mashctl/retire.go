@@ -25,11 +25,18 @@ const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds]
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
 var afterRetireRead func()
 
+// beforeRetireRevoke is a test seam called inside the guarded removal, under the name's lock, before the creds check
+// and the revoke.
+var beforeRetireRevoke func()
+
 // deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
 var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
 // retireNow is the clock for the renamed creds file's suffix; a test replaces it.
 var retireNow = time.Now
+
+// retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
+var retireRevokeNow = time.Now
 
 // looksInterrupted reports whether a creds file or a directory record exists for a name the policy file lacks. A
 // server that cannot be reached counts as no record.
@@ -185,12 +192,31 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
-		var revokeErr error
+		var revokeErr, checkErr error
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
 			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
-				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut); err != nil {
+				if beforeRetireRevoke != nil {
+					beforeRetireRevoke()
+				}
+				// Inside the guarded removal, under the name's lock, just before the revoke: the creds file is an
+				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
+				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
+				revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
+				if credsErr == nil {
+					claims, err := credsIssuedClaims(credsPath, u)
+					if err == nil {
+						err = refuseFutureIssued(name, claims, revokeAt)
+					} else {
+						err = fmt.Errorf("%w; nothing was changed", err)
+					}
+					if err != nil {
+						checkErr = err
+						return fmt.Errorf("creds check: %w", err)
+					}
+				}
+				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}
@@ -204,6 +230,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			if admin.IsRefusal(err) {
 				if msg, ok := ctl.AliasedRefusal(err, name); ok {
 					return fail("%s", msg)
+				}
+				if checkErr != nil && errors.Is(err, checkErr) {
+					return fail("%v", checkErr)
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					return fail("%v: nothing was changed (--no-revoke retires without revoking)", err)
