@@ -62,6 +62,9 @@ const (
 type ListSet struct {
 	// Range is the account's range part. Every address and group must carry it.
 	Range string
+	// Base is the generation the submitter based this list set on: the one in force when it was written, 0 when
+	// nothing was in force. Accept refuses a list set whose Base is not the generation in force (REQ-017).
+	Base uint64
 	// Switches holds the group-wide switches. A sender's owner group must state all four verbs, each once.
 	Switches []SwitchEntry
 	// Senders holds one entry per sending address. A sender with empty lists is still listed: it gets a credential
