@@ -31,6 +31,9 @@ var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 // retireNow is the clock for the renamed creds file's suffix; a test replaces it.
 var retireNow = time.Now
 
+// retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
+var retireRevokeNow = time.Now
+
 // looksInterrupted reports whether a creds file or a directory record exists for a name the policy file lacks. A
 // server that cannot be reached counts as no record.
 func looksInterrupted(cfg config.Config, credsPath, name string) bool {
@@ -189,6 +192,13 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
+			// The creds file is an optional source of the user's JWT: when it is readable and names this key, a JWT
+			// dated after the revocation time is refused before anything is removed.
+			if credsErr == nil {
+				if err := refuseFutureIssued(name, credsIssuedClaims(credsPath, user), retireRevokeNow()); err != nil {
+					return fail("%v", err)
+				}
+			}
 			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
 				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut); err != nil {
 					revokeErr = err

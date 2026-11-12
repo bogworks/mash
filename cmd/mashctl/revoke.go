@@ -7,6 +7,9 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
@@ -113,4 +116,36 @@ func parseServers(env func(string) string) (int, error) {
 		return 0, fmt.Errorf("MASH_SERVERS must be a whole number of servers, 1 or more, got %q", sv)
 	}
 	return n, nil
+}
+
+// refuseFutureIssued refuses to revoke a user whose current JWT claims it was issued after now, the time the
+// revocation would carry: NATS honours a revocation only for JWTs issued at or before it, so that JWT would stay valid.
+// Nothing has been changed when it returns an error.
+func refuseFutureIssued(name string, claims *jwt.UserClaims, now time.Time) error {
+	if claims == nil {
+		return nil
+	}
+	if iat := time.Unix(claims.IssuedAt, 0).UTC(); iat.After(now) {
+		return fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", name, iat.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// credsIssuedClaims returns the claims of the creds file at path when it is readable, parses, and names user; any
+// other case is nil, because the file is an optional source of the user's JWT.
+func credsIssuedClaims(path, user string) *jwt.UserClaims {
+	raw, err := readCreds(path)
+	if err != nil {
+		return nil
+	}
+	defer clear(raw)
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return nil
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil || uc.Subject != user {
+		return nil
+	}
+	return uc
 }
