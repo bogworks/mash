@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -123,10 +124,19 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 		t.Fatalf("missing creds: %q", errb)
 	}
 
-	// a symlink is never followed
+	// a symlink is not removed, and its target is left as it was
+	targetPath, u := h.e.Mint(t, "b")
+	if _, errb, code := h.run("provision", "b", "--user", u, "--account", h.e.Account); code != 0 {
+		t.Fatal(errb)
+	}
 	target := filepath.Join(t.TempDir(), "precious")
-	os.WriteFile(target, []byte("keep"), 0o600)
-	h.provisionDeclared("b")
+	want, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(target, h.creds("b")); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +144,7 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 	if code != 1 || !strings.Contains(errb, "not a regular file") || !strings.HasPrefix(out, "retired b\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if b, err := os.ReadFile(target); err != nil || string(b) != "keep" {
+	if b, err := os.ReadFile(target); err != nil || !bytes.Equal(b, want) {
 		t.Errorf("symlink target: %q %v", b, err)
 	}
 	if _, err := os.Lstat(h.creds("b")); err != nil {

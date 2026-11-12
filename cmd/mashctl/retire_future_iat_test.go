@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -170,4 +171,75 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 	if len(h.records()) != len(recs) || h.policyText() != policyBefore {
 		t.Fatal("record or policy changed")
 	}
+}
+
+// Creds read through a symlink are checked at the link's target: a future-dated target JWT refuses the retire with
+// nothing changed, and a dangling link (no target) proceeds as a missing file does.
+func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
+	t.Run("future-dated target refuses", func(t *testing.T) {
+		h := newFleetEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+			t.Fatal(errb)
+		}
+		target := filepath.Join(t.TempDir(), "mounted.creds")
+		raw, err := os.ReadFile(h.creds("c"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(h.creds("c")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, h.creds("c")); err != nil {
+			t.Fatal(err)
+		}
+		recs := h.records()
+		policyBefore := h.policyText()
+		calls := fakeRevoke(t, nil)
+
+		prev := retireRevokeNow
+		retireRevokeNow = func() time.Time { return time.Now().Add(-clockBehind) }
+		out, errb, code := h.run("retire", "c")
+		retireRevokeNow = prev
+		if code != 1 || out != "" || !strings.Contains(errb, "claims it was issued in the future (") || !strings.Contains(errb, "nothing was changed") {
+			t.Fatalf("%d %q %q", code, out, errb)
+		}
+		noSecrets(t, out, errb)
+		if len(*calls) != 0 {
+			t.Fatalf("revoke calls %+v", *calls)
+		}
+		if fi, err := os.Lstat(h.creds("c")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("symlink changed: %v", err)
+		}
+		if after, _ := os.ReadFile(target); !bytes.Equal(raw, after) {
+			t.Fatal("target changed")
+		}
+		if len(h.records()) != len(recs) || h.policyText() != policyBefore {
+			t.Fatal("record or policy changed")
+		}
+	})
+
+	t.Run("dangling link proceeds", func(t *testing.T) {
+		h := newFleetEnv(t, addPolicy)
+		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+			t.Fatal(errb)
+		}
+		if err := os.Remove(h.creds("c")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(t.TempDir(), "absent"), h.creds("c")); err != nil {
+			t.Fatal(err)
+		}
+		calls := fakeRevoke(t, nil)
+		out, errb, code := h.run("retire", "c")
+		// as for any symlinked creds, the retire completes and reports that the link was left in place
+		if code != 1 || !strings.HasPrefix(out, "retired c\n") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
+			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
+		}
+		if _, err := os.Lstat(h.creds("c")); err != nil {
+			t.Error("the symlink itself was removed")
+		}
+	})
 }

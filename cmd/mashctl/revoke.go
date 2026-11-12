@@ -135,18 +135,21 @@ func refuseFutureIssued(name string, claims *jwt.UserClaims, now time.Time) erro
 
 // credsIssuedClaims returns the claims of the creds file at path for user. A missing file is no JWT to check (nil,
 // nil). A file that exists but cannot be read, parsed or decoded is an error: the check cannot be made, so the caller
-// must refuse rather than revoke blind (a non-regular file is left alone, as retire leaves it). The error never carries file content. A file that decodes but names another
+// must refuse rather than revoke blind A symlink is followed and its target checked; a dangling one is missing. The error never carries file content. A file that decodes but names another
 // subject is deliberately skipped (nil, nil): it is not this user's JWT, so its issue time says nothing about the
 // revocation.
 func credsIssuedClaims(path, user string) (*jwt.UserClaims, error) {
-	fi, err := os.Lstat(path)
+	// Stat follows a symlink (creds on a secret mount are links), so the target is what is checked. A dangling link
+	// has no JWT. A target that is not a regular file is refused here, before any open that could block on it.
+	fi, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	if err == nil && !fi.Mode().IsRegular() {
-		// A symlink or other non-regular file is never read or followed: retire leaves it alone too, so it is not
-		// treated as this user's creds.
-		return nil, nil
+	if err != nil {
+		return nil, fmt.Errorf("creds file %s exists but cannot be read: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("creds file %s exists but is not a regular file", path)
 	}
 	raw, err := readCreds(path)
 	if err != nil {
