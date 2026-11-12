@@ -30,7 +30,7 @@ a setting.
 ## Snapshot verified 2026-11-10 (history)
 
 This is the state as read on 2026-11-10, before D195 and D204; it is kept as history and no longer describes the
-ruleset. Read-only, with `gh api repos/bogworks/mash/rulesets/26308864`: the only branch rule on the default branch was
+ruleset. Read-only, with `gh api repos/{owner}/{repo}/rulesets/26308864`: the only branch rule on the default branch was
 the ruleset `main-protection` (enforcement active, no bypass actors) with exactly three rules: deletion blocked,
 non-fast-forward blocked, and one required status check, the context `Mergify Merge Protections`. There was **no
 required pull-request rule and no required-reviews rule**, and classic branch protection was not set (404). An earlier
@@ -56,7 +56,7 @@ queue already require them. With the rule, the ruleset's required check `Mergify
 should fail while the rule's conditions are unmet. `internal/release/mergify_test.go` checks the rule against the
 queue conditions. This is **not yet verified live**: it is verified only after this change is merged. Read-only check
 to run then: on a pull request without codex-review or approval,
-`gh api repos/bogworks/mash/commits/<head-sha>/check-runs --jq '.check_runs[] | select(.name=="Mergify Merge Protections") | .conclusion'`
+`gh api repos/{owner}/{repo}/commits/<head-sha>/check-runs --jq '.check_runs[] | select(.name=="Mergify Merge Protections") | .conclusion'`
 should print `failure` (not `success`), and on a queue draft it should not be `failure`. Record the date and result
 here when done.
 
