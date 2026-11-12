@@ -494,6 +494,9 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 			return nil, false, err
 		}
 		defer clear(m.Creds)
+		if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner)); err != nil {
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		}
 		if err := lock.Check(ctx); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
 		}
@@ -522,6 +525,11 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return nil, false, err
 	}
 	defer clear(m.Creds)
+	// The new key is in the issue record before it is staged or written anywhere: a key that can connect
+	// is always recorded. The old key's record stays (revocation is separate; the record is append-only).
+	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner)); err != nil {
+		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
+	}
 	sp := stagePath(p)
 	// The lock may have expired while the key was minted: another reissue could hold it and own the staged file now.
 	if err := nameLockCheck(ctx, lock); err != nil {
