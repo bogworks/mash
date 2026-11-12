@@ -70,6 +70,17 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
     proves the analysis finished, so also require code scanning results in the ruleset, with the alert threshold set to
     block high and above (Settings > Rules > the ruleset > Require code scanning results > CodeQL).
   `lint`, `govulncheck` and `codeql` run on every pull request (no path filter), so docs-only PRs are not left pending.
+  **No CI on docs.** A docs-only pull request skips the heavy jobs (`test (linux)`, `test (macos)`, `reproducible`,
+  `lint`, `govulncheck`, `codeql`) with a job-level `if` on the `changes` job's `code` output, never with a
+  workflow-level `paths` or `paths-ignore` (a required check that never reports stalls the queue). `conformance` is not skipped: it runs on every pull request, docs-only included, and is cheap, because the review watcher waits for it and may treat a skipped job as not done; skipping it needs the watcher's behaviour for a skipped check confirmed first. Every check name still
+  reports, as skipped, and `pr-check`, `adr-lint`, `label-reset` and `adr-numbers` run as always; `pr-check` accepts a skipped
+  heavy job only when `changes` succeeded and said `code=false`. Docs-only means every changed path is under `docs/` or is
+  a `*.md` file and is not one a build or test reads; `scripts/ci-changes` is the definition. Code, and so the full set,
+  is everything else: Go sources and module files, `.github/`, `.mergify.yml`, `scripts/`, `plugin/`, `cmd/`, `internal/`
+  and `ci/` (their Markdown included), test data, `CHANGELOG.md`, `changelog.d/`, `docs/audit.md`,
+  `docs/branch-protection.md`, `docs/review/`, `docs/allowed_signers`, `docs/skipped-releases.txt` and binary assets under
+  `docs/`. A push, a merge group and a Mergify queue draft (head ref `mergify/merge-queue/`) always run the full set, so
+  the combined commit and `main` are always tested.
   A check can only be selected as required after it has run once, so add `lint`, `govulncheck` and `codeql` after
   their first runs on `main`. `lint` passes while staticcheck findings are tolerated (see `lint.yml`).
 - **Merge queue.** mash queues with Mergify (`.mergify.yml`), which tests a queued pull request on its own branch and

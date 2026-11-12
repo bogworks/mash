@@ -2,7 +2,7 @@ name: ci
 # Every push to main runs the test jobs, docs-only too: the release gate reads main's test runs, and a docs-only
 # head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Every job runs on a
 # self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
-# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the test jobs. The macOS test job is advisory (ADR 0079).
+# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check, conformance). conformance runs on every pull request, docs-only included, because the review watcher waits for it and may treat a skipped job as not done; skipping it needs the watcher's behaviour for a skipped check confirmed first. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079).
 on:
   push:
     branches: [main]
@@ -18,7 +18,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Does this pull request touch code? A push always counts as code: the release gate reads main's test runs.
+  # Does this change need the heavy jobs? scripts/ci-changes decides (it has the definition of code): a pull request that
+  # touches only documentation no test or build reads is docs-only (code=false). A push, a merge group and a Mergify
+  # merge-queue draft always count as code: the release gate reads main's test runs, and a draft builds the combined
+  # commit. The heavy jobs skip on code=false at job level; the check names stay, a skipped job reports as skipped.
   changes:
     timeout-minutes: 5
     runs-on: [self-hosted, rh-gate]
@@ -32,21 +35,23 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          code=true
+          files=""
           if [ "$EVENT" = pull_request ]; then
             files="$(git diff --no-renames --name-only "$BASE" HEAD)"
-            # Not piped into grep -q: an early grep exit would fail the diff under pipefail.
-            if ! grep -qvE '^docs/|\.md$' <<<"$files"; then code=false; fi
           fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
   test:
     # The name is explicit and the job is not matrixed: the check name is exactly test (linux), a required check
     # (release.RequiredChecks).
     name: test (linux)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.code == 'true'
+    # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
+    # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
+    # fails on a changes job that did not succeed.
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-linux]
     steps:
@@ -74,7 +79,10 @@ jobs:
   test-macos:
     name: test (macos)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.code == 'true'
+    # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
+    # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
+    # fails on a changes job that did not succeed.
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-macos]
     steps:
@@ -113,11 +121,17 @@ jobs:
           rm -rf "$RUNNER_TOOL_CACHE/go"
           git clean -ffdx || true
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
-  # on the candidate, so the name is explicit and the job is neither conditional nor matrixed: every release target
+  # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push
+  # always runs, so the only skip is a docs-only pull request (job-level, as test): every release target
   # built from two fresh clones in different directories must give identical bytes, so a change that breaks
   # reproducibility fails here, before a tag does.
   reproducible:
     name: reproducible
+    needs: changes
+    # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
+    # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
+    # fails on a changes job that did not succeed.
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
     timeout-minutes: 30
     # Same runner as the other Linux jobs; a fork pull request runs on it too.
     # This is the release-facing check (codex H1 on #39).
@@ -189,8 +203,10 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: go run ./scripts/adrlint docs
-  # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed (test
-  # may skip a pull request that touches no code). always(), so a failed or skipped job still gives a verdict.
+  # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed. A heavy job
+  # (test, reproducible) may be skipped only when changes succeeded and said code=false (a docs-only pull request); a
+  # skip with code=true or with no answer, a failure and a cancellation all fail it. always(), so a failed or skipped job
+  # still gives a verdict.
   pr-check:
     needs: [changes, test, reproducible, adr-numbers]
     if: always()
@@ -199,16 +215,20 @@ jobs:
     steps:
       - name: Every required job passed
         env:
+          CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           TEST: ${{ needs.test.result }}
           REPRO: ${{ needs.reproducible.result }}
           ADR: ${{ needs.adr-numbers.result }}
         run: |
           set -eu
-          echo "changes: code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR"
-          [ "$REPRO" = success ] || { echo "reproducible: $REPRO" >&2; exit 1; }
+          echo "changes: $CHANGES, code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR"
+          [ "$CHANGES" = success ] || { echo "changes: $CHANGES" >&2; exit 1; }
           [ "$ADR" = success ] || { echo "adr-numbers: $ADR" >&2; exit 1; }
-          case "$CODE/$TEST" in
-            */success | false/skipped) ;;
-            *) echo "test: $TEST (code changed: $CODE)" >&2; exit 1 ;;
-          esac
+          # A heavy job passed when it succeeded, or when it was skipped on a docs-only pull request (code=false).
+          for job in test:"$TEST" reproducible:"$REPRO"; do
+            case "$CODE/${job#*:}" in
+              */success | false/skipped) ;;
+              *) echo "${job%%:*}: ${job#*:} (code changed: $CODE)" >&2; exit 1 ;;
+            esac
+          done

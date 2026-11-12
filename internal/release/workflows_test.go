@@ -367,8 +367,10 @@ func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 			if j.Name != "reproducible" {
 				t.Errorf("the reproducible job must set name: reproducible explicitly (the gate requires that exact check name)")
 			}
-			if j.If != "" || len(j.Strategy.Matrix) != 0 || j.ContinueOnError != nil {
-				t.Errorf("the reproducible job must run unconditionally, unmatrixed and strictly: %+v", j)
+			// The only condition is the heavy-job one: a push always runs it (the candidate is a commit on main) and only a
+			// docs-only pull request skips it.
+			if j.If != heavyIf || len(j.Strategy.Matrix) != 0 || j.ContinueOnError != nil {
+				t.Errorf("the reproducible job must run under the heavy-job condition only, unmatrixed and strictly: %+v", j)
 			}
 		}
 	}
@@ -1022,8 +1024,8 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	}
 }
 
-// The pr-check verdict, run as written in ci.yml: success only when reproducible passed and test passed, or test was
-// skipped because the pull request touches no code.
+// The pr-check verdict, run as written in ci.yml: success only when changes succeeded, adr-numbers passed, and test and
+// reproducible each passed or were skipped because the pull request touches no code (changes said code=false).
 func TestCI_prCheckVerdict(t *testing.T) {
 	var script string
 	for _, st := range load(t, "ci.yml").Jobs["pr-check"].Steps {
@@ -1039,6 +1041,14 @@ func TestCI_prCheckVerdict(t *testing.T) {
 		ok                     bool
 	}{
 		{"true", "success", "success", "success", true},
+		{"false", "skipped", "skipped", "success", true}, // docs-only: both heavy jobs skipped
+		{"false", "success", "skipped", "success", true},
+		{"true", "success", "skipped", "success", false}, // code changed but reproducible did not run
+		{"", "success", "skipped", "success", false},
+		{"false", "skipped", "cancelled", "success", false},
+		{"false", "cancelled", "skipped", "success", false},
+		{"false", "failure", "skipped", "success", false},
+		{"false", "skipped", "skipped", "failure", false}, // adr-numbers is never skipped
 		{"false", "skipped", "success", "success", true},
 		{"false", "success", "success", "success", true},
 		{"true", "skipped", "success", "success", false}, // code changed but tests did not run
@@ -1052,16 +1062,25 @@ func TestCI_prCheckVerdict(t *testing.T) {
 		{"true", "success", "success", "", false},
 	} {
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro, "ADR="+c.adr)
+		cmd.Env = append(os.Environ(), "CHANGES=success", "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro, "ADR="+c.adr)
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != c.ok {
 			t.Errorf("code=%q test=%s reproducible=%s: ok=%v, want %v (%s)", c.code, c.test, c.repro, err == nil, c.ok, out)
 		}
 	}
+	// A changes job that did not succeed is no answer, whatever the other jobs did.
+	for _, changes := range []string{"failure", "cancelled", "skipped", ""} {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = append(os.Environ(), "CHANGES="+changes, "CODE=false", "TEST=skipped", "REPRO=skipped", "ADR=success")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Errorf("changes=%q passed pr-check (%s)", changes, out)
+		}
+	}
 }
 
-// The changes job, run as written in ci.yml against a stand-in git: a pull request touches code unless every changed
-// file is under docs/ or is Markdown; a push always counts as code.
+// The changes job, run as written in ci.yml against a stand-in git (and the real scripts/ci-changes): a pull request
+// touches code unless every changed file is documentation (workflows_docsonly_test.go has the full table); a push always counts
+// as code.
 func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 	var script string
 	for _, st := range load(t, "ci.yml").Jobs["changes"].Steps {
@@ -1089,7 +1108,8 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 	} {
 		out := filepath.Join(t.TempDir(), "out")
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+c.event, "BASE=base", "FILES="+c.files, "GITHUB_OUTPUT="+out)
+		cmd.Dir = "../.." // the step runs scripts/ci-changes from the repository root
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+c.event, "BASE=base", "HEAD_REF=feature/x", "FILES="+c.files, "GITHUB_OUTPUT="+out)
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s %q: %v %s", c.event, c.files, err, b)
 		}
