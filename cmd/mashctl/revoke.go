@@ -23,8 +23,9 @@ import (
 var revokeUsers = revokeUserKeys
 
 // revokeUserKeys opens the key store (the operator and account keys), connects with the system account credentials and
-// revokes each user key with apply.RevokeUsers, printing one line per key. It never prints a seed.
-func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) string, servers int, users []string, stdout io.Writer) error {
+// revokes each user key with apply.RevokeUsers, printing one line per key. It never prints a seed. A non-nil now is the
+// revocation time; nil means the current time.
+func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) string, servers int, users []string, stdout io.Writer, now func() time.Time) error {
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
 		return err
@@ -43,7 +44,7 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers}, users)
+	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Now: now}, users)
 	if err != nil {
 		return err
 	}

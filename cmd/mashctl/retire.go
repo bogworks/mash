@@ -203,10 +203,11 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				// Inside the guarded removal, under the name's lock, just before the revoke: the creds file is an
 				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
 				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
+				revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
 				if credsErr == nil {
 					claims, err := credsIssuedClaims(credsPath, u)
 					if err == nil {
-						err = refuseFutureIssued(name, claims, retireRevokeNow())
+						err = refuseFutureIssued(name, claims, revokeAt)
 					} else {
 						err = fmt.Errorf("%w; nothing was changed", err)
 					}
@@ -215,7 +216,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 						return fmt.Errorf("creds check: %w", err)
 					}
 				}
-				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut); err != nil {
+				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}

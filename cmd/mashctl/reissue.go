@@ -530,7 +530,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if err := stageCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
 	}
-	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout); err != nil {
+	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
 		if revoked {
 			why = "the user key is already revoked in the account JWT"

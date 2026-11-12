@@ -60,7 +60,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		if err != nil {
 			return err
 		}
-		return revokeUsers(ctx, cfg, env, n, users, stdout)
+		return revokeUsers(ctx, cfg, env, n, users, stdout, nil)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)

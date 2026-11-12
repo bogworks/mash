@@ -51,6 +51,35 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	}
 }
 
+// Retire reads the clock once: the time the creds JWT is checked against is the revocation time it hands to the
+// revoker, even when the clock moves between the two.
+func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+		t.Fatal(errb)
+	}
+	calls := fakeRevoke(t, nil)
+
+	base := time.Now().Add(time.Hour)
+	reads := 0
+	prev := retireRevokeNow
+	retireRevokeNow = func() time.Time { // each reading is an hour later than the last
+		reads++
+		return base.Add(time.Duration(reads-1) * time.Hour)
+	}
+	out, errb, code := h.run("retire", "c")
+	retireRevokeNow = prev
+	if code != 0 || len(*calls) != 1 {
+		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
+	}
+	if reads != 1 {
+		t.Fatalf("clock read %d times, want 1", reads)
+	}
+	if got := (*calls)[0].at; !got.Equal(base) {
+		t.Fatalf("revoked at %v, want the checked time %v", got, base)
+	}
+}
+
 func TestRefuseFutureIssued(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	at := func(d time.Duration) *jwt.UserClaims {

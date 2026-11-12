@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -30,7 +31,7 @@ type revokeStub struct {
 	seen  [][]string
 }
 
-func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer) error {
+func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, users...)
@@ -150,7 +151,7 @@ func TestDeprovisionRejectsRemovedFlags(t *testing.T) {
 }
 
 func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
-	err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard)
+	err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
 	if err == nil {
 		t.Fatal("no error")
 	}
