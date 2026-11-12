@@ -193,7 +193,7 @@ jobs:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           set -euo pipefail
-          [ "$(ls dist | wc -l | tr -d ' ')" = 4 ] || { echo "dist does not hold exactly the four binaries" >&2; ls dist >&2; exit 1; }
+          [ "$(find dist -mindepth 1 -maxdepth 1 ! -name '.*' | wc -l | tr -d ' ')" = 4 ] || { echo "dist does not hold exactly the four binaries" >&2; ls dist >&2; exit 1; }
           [ -s "$BUNDLE" ] || { echo "the attestation wrote no bundle" >&2; exit 1; }
           mkdir -p provenance
           cp "$BUNDLE" provenance/mash.intoto.jsonl

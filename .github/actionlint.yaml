@@ -1,0 +1,5 @@
+self-hosted-runner:
+  labels:
+    - rh-linux
+    - rh-macos
+    - rh-gate
