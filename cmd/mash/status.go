@@ -21,6 +21,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
+	"github.com/bogworks/mash/internal/ledger"
 	"github.com/bogworks/mash/internal/mcp"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -135,6 +136,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	if l := legacyInboxEvictionLine(src); l != "" {
+		lines = append(lines, l)
+	}
+	if l := presentedLine(src); l != "" {
 		lines = append(lines, l)
 	}
 	if l := leaseBucketLine(src); l != "" {
@@ -509,6 +513,32 @@ func inboxLine(src *statusSource) string {
 		return redactText(l)
 	}
 	return ""
+}
+
+// presentedLine is the delivery line from the local presented ledger (ADR 0109). From a shell it is the counts alone: the
+// ledger is a file, but the inbox it would be compared with is not reachable without a connection. In a session it adds the
+// loss the ledger can prove against the inbox stream. Empty when there is no state directory to hold a ledger.
+func presentedLine(src *statusSource) string {
+	if !src.cli && src.state != nil {
+		if st := src.state.Load(); st != nil && st.ep != nil {
+			if l, ok := st.ep.LedgerLine(context.Background()); ok {
+				return redactText(l)
+			}
+		}
+	}
+	p := endpoint.LedgerPath(src.cfg)
+	if p == "" {
+		return ""
+	}
+	state, err := ledger.Read(p)
+	if err != nil {
+		return redactText(ledger.Unreadable(err, ""))
+	}
+	loss := ""
+	if !state.Summarize().Empty {
+		loss = "loss: not computed here (the status tool of a running session compares the ledger with the inbox)"
+	}
+	return state.Summarize().Text(loss, "")
 }
 
 // leaseBucketLine says when the lease bucket still allows rollup writes. Empty when there is nothing to say, from a

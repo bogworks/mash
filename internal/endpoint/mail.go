@@ -19,6 +19,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/kind"
+	"github.com/bogworks/mash/internal/ledger"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -185,6 +186,19 @@ func (s *seenSet) dup(p pending) bool {
 	// Past the window: the same signed timestamp is a copy of the signed bytes, a new one a genuine re-send.
 	_, copied := en.tss[p.ts]
 	return p.ts != "" && copied
+}
+
+// original is the sequence, in p's own stream, of the message p repeats under another sequence (same signed nonce); false
+// when p repeats its own delivery or nothing is known.
+func (s *seenSet) original(p pending) (uint64, bool) {
+	if p.key == "" {
+		return 0, false
+	}
+	en, ok := s.m[p.key]
+	if !ok || en.ref == (spool.Ref{}) || en.ref == refOf(p.mail) || en.ref.Stream != p.mail.Stream {
+		return 0, false
+	}
+	return en.ref.Seq, true
 }
 
 // forget undoes mark for p, a message that was recorded but not shown (a held legacy message dropped unacked): its
@@ -455,6 +469,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				e.dropped.Add(1)
 				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
 				if e.verdictFor(stream) == verdictHeld {
+					e.ledgerNote(ledger.Refused, spool.Ref{Stream: stream, Seq: ref.Seq})
 					_ = m.Ack()
 				}
 				return
@@ -733,6 +748,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 			kept := show[:0]
 			for _, p := range show {
 				if e.spool.IsDrained(refOf(p.mail)) {
+					e.ledgerNote(ledger.Presented, refOf(p.mail))
 					e.ack(p)
 				} else {
 					kept = append(kept, p)
@@ -784,6 +800,13 @@ func (e *Endpoint) dedupe(batch []pending, seen *seenSet, h *held) []pending {
 		}
 		if seen.dup(p) || inBatch.dup(p) {
 			if e.mayAck(p) {
+				of := uint64(0)
+				if o, ok := seen.original(p); ok {
+					of = o
+				} else if o, ok := inBatch.original(p); ok {
+					of = o
+				}
+				e.ledgerDuplicate(refOf(p.mail), of)
 				_ = p.msg.Ack()
 			} else {
 				_ = p.msg.Nak() // the legacy lease is gone: the holder's consumer is redelivered it, nothing is acked here
@@ -1328,6 +1351,14 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 		}
 		return
 	}
+	// A channel write is a hint, not a receipt: it is recorded as delivered, never as presented.
+	var wrote []spool.Ref
+	for _, p := range show {
+		if e.mayAck(p) {
+			wrote = append(wrote, refOf(p.mail))
+		}
+	}
+	e.ledgerNote(ledger.Channel, wrote...)
 	for _, p := range show {
 		seen.mark(p)
 		if e.mayAck(p) {
