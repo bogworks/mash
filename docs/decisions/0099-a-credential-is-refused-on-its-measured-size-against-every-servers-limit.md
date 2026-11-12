@@ -60,10 +60,13 @@ user JWT is built from its name and tags, signed by a throwaway scoped key on be
 carries every owner group's template as a scoped signer. A tag is `allow:<owner>.<name>` or `deny:<owner>.<name>` (the
 range is a literal in the template), so room depends on the length of the receiver's owner part and name. The deny
 sentinel is one tag, carried only by senders of a group whose key has a deny entry and who have no deny of their own.
-`listset.MeasureCompiled` is the entry point; it reuses the generic parts of `internal/policy` (the per-server limits,
-the CONNECT line measure and the refusal wording), and `internal/policy` does not import `internal/listset`. It is not
-wired into `policy apply` yet: today's zone compile, which apply still uses, keeps the measured check (`policy.BudgetFor`)
-until zones are removed, and the list set consumer calls `MeasureCompiled` when it replaces it.
+`listset.SizeCheck` is the entry point and the only listset measurement: it builds each sender's user JWT and the
+account JWT and measures the user's whole CONNECT line with `policy.ConnectLineBytes` (the JWT, a full-length signature,
+the client name `mash <name>` and the options), the measure calibrated live against nats.go and a real nats-server
+(`internal/policy/limits_live_test.go`). `internal/listset` imports `internal/policy` for that measure; `internal/policy`
+does not import `internal/listset`. It is not wired into `policy apply` yet: today's zone compile, which apply still
+uses, keeps the measured check (`policy.BudgetFor`) until zones are removed, and the list set consumer calls
+`SizeCheck` (through `listset.DryRun`) when it replaces it.
 
 The documents state the limit as a measured table by owner part and name length, with worked examples, and the way out:
 use a shared verb instead of a long list of exceptions.
@@ -81,7 +84,7 @@ use a shared verb instead of a long list of exceptions.
 
 Tests cover the measure against a real in-process server at several `max_control_line` values (the largest tag count that
 connects, and the measure within its documented slack), the CONNECT line a real client writes captured and compared with
-the measure, the documented table of exceptions that fit, for allow exceptions on a closed verb, with and without the sentinel, and
+the measure, the documented table of exceptions that fit (asserted against `listset.SizeCheck`), for allow exceptions on a closed verb, with and without the sentinel, and
 deny exceptions, at several owner part and name lengths of list sets (the largest set accepted and one more refused with
 the sender, count, size and limit), a set refused whole when one of several servers has a smaller limit with nothing signed
 or pushed, an account JWT over one server's limit refused naming the account, a server that gives no limit refused
