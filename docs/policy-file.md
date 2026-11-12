@@ -38,7 +38,7 @@ Rules are a union and their order means nothing. For a sender and a recipient: i
 
 ## What check, test and compile say
 
-- `check` reports errors (a null list item, a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint, `log: true` on a rule: it is not implemented yet, and a deny rule whose `from` or `to` selects no endpoint) and warnings. A deny that selects nobody denies nothing, and under `default: allow` a misspelled label fails open, so it is an error that names the rule, the selector and the line; set `allow_empty: true` on the rule if the group is intentionally empty (a zone with no endpoints yet), and it is a warning again (ADR 0060). Warnings: label values for one key that differ only in case across endpoints (`Finance` and `finance` are different values to a selector); an allow rule, or a deny rule with `allow_empty`, whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), an endpoint whose user would need more than 135 tags (see below), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
+- `check` reports errors (a null list item, a bad action, a repeated rule name, a bad name, a zone value that is not one subject token, a test naming an undeclared endpoint, `log: true` on a rule: it is not implemented yet, and a deny rule whose `from` or `to` selects no endpoint) and warnings. A deny that selects nobody denies nothing, and under `default: allow` a misspelled label fails open, so it is an error that names the rule, the selector and the line; set `allow_empty: true` on the rule if the group is intentionally empty (a zone with no endpoints yet), and it is a warning again (ADR 0060). Warnings: label values for one key that differ only in case across endpoints (`Finance` and `finance` are different values to a selector); an allow rule, or a deny rule with `allow_empty`, whose `from` or `to` selects no endpoint (a misspelled label matches nothing, and the pair falls to the default; the message adds when the selector names a zone with no endpoints), and, under `default: deny`, an endpoint no allow rule lets send or receive. Labels no rule uses are not warnings.
 - `test` evaluates the `tests` section against the rules.
 - `mashctl policy apply`, `mashctl add` and `mashctl reissue` all parse the file (so a file that does not check is refused) and run its `tests` before anything is created, minted or pushed. If any test fails they print the `FAIL` lines and `refusing: N of M policy tests in FILE fail (...)`, and exit 1; `add` creates no key, creds file or record and `reissue` rewrites no creds file (ADR 0060).
 - `explain FROM TO` names the deciding rule and the selectors that selected it, or says no rule matched and the default applied. When several rules match, a deny decides over any allow, and the text lists the others.
@@ -59,9 +59,41 @@ Limits of the encoding, each measured against nats-server 2.15:
 - `{{tag(deny)}}` expands in the publish deny list, but nats-server refuses to authenticate a user whose scoped key has such a template and who has no `deny:` tag at all (the allow template just drops its lines). So every zone key carries both templates from its first compile, and every user carries the placeholder tag `deny:_none`, which addresses nothing (no name or zone is `_none`, since names start with a letter). A tag template expands to one line per tag value, so a user with `deny:_none` and a real deny tag gets both deny lines. Adding the first deny exception to a zone therefore does not change the zone key: only the endpoints the exception names are re-signed (see [ADR 0056](decisions/0056-every-zone-key-carries-both-tag-templates-and-every-user-the-deny-none-placeholder.md))
 - Tags are lower-cased and their values become subjects as written: a tag is a permission. Whoever signs users with a zone's key is that zone's policy authority and can grant any exception.
 - **A zone wildcard covers every name in its zone, declared or not.** `agents.mail.*.<owner>.<zoneB>.*` lets a sender publish to an endpoint of zone B that the file does not list. The compile's recipient lists and tests cover declared endpoints only. The invariant that closes this is that the file is the inventory: every endpoint is minted through the file (one authority, whoever holds the account key, as above), so an endpoint of a zone that the file does not declare can exist only if someone with the key mints a user under that zone key by hand. `mashctl policy drift` reports directory records that the file does not declare; it cannot see a user minted by hand under a zone key, which has no record or creds file here.
-- A user's JWT travels in the CONNECT line, which the default server caps at 4096 bytes together with the signature and options. A 3,802-byte user JWT connects and a 3,838-byte one does not, so the budget limit is 3,750 bytes, about 135 tags. A rule on a label other than the zone, aimed at many endpoints, spends tags; keep such rules to a few endpoints or give the group its own zone.
+- A user's JWT travels in the CONNECT line, which the default server caps at 4096 bytes (`max_control_line`) together with the signature, the client name and the options. Every exception is a tag, and the tags are what make the JWT grow: see [How many exceptions one sender can have](#how-many-exceptions-one-sender-can-have). A rule on a label other than the zone, aimed at many endpoints, spends tags; keep such rules to a few endpoints or give the group its own zone.
 
 `Compiled.Effective(name)` expands a zone key for one endpoint exactly as nats-server does, and a property test checks over random files that the subjects it lets an endpoint publish to are its recipients, no more and no fewer. A live test starts nats-server in operator mode with the compiled keys and publishes every sender and recipient of the enterprise example and two further files, checking each against the compile: mail on its six-token subject is allowed exactly as compiled, while a five-token prompt and status probe to any peer is always allowed.
+
+## How many exceptions one sender can have
+
+mash refuses on measured size, never on a count. Before anything is signed or pushed it measures each sender's user JWT inside the full CONNECT line, and each account JWT, against the limit of every server, and refuses the whole list set when any does not fit on any server. It never drops, merges or widens an exception to make a credential fit.
+
+An exception is one address on a sender's allow or deny list, counted once across all verbs: the sender carries one tag for it (`allow:<zone>.<name>` or `deny:<zone>.<name>`), however many verbs it covers. A deny sentinel counts too. Every sender also carries the placeholder tag `deny:_none`, so a sender with N exceptions has N + 1 tags. What the CONNECT line has room for depends on the length of the names, because each tag spells out the receiving zone and the receiving endpoint.
+
+At the default CONNECT line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile (names are the sender's and each receiver's; the receiving zone is 3 characters):
+
+| Names of | Exceptions that fit |
+| --- | --- |
+| 7 characters | 119 |
+| 10 characters | at least 100 |
+| 14 characters | 87 |
+| 32 characters | 52 |
+| 48 characters (the longest endpoint name) | 37 |
+
+So about 100 exceptions fit per sender where names are 10 characters or fewer and the receiving zone is short; 87 at 14 characters, and 52 at 32. The zone is part of every tag, so a long zone name costs room too: with names of 14 characters, a 14-character zone leaves room for 62 exceptions and a 32-character zone for 42. A deny exception is one character shorter than an allow one, so a sender whose exceptions are denies fits a few more. The measure is conservative by at most 6 bytes: a credential within 6 bytes of the limit may be refused although the server would take it, and one the measure accepts always connects.
+
+When a sender does not fit, apply (and add, reissue, `policy check`) refuses the whole set, changes nothing, and says which sender, how big, the limit, and which server:
+
+```text
+mashctl: policy apply: refused: sender "s0000000000000" (zone "sendzone"): its connect line would be 4,099 bytes with 88 exceptions (89 tags); server "nats-2" allows 4,096 (max_control_line)
+Use a shared verb instead of a long list of exceptions (docs/policy-file.md).
+nothing was changed, signed or pushed
+```
+
+An account JWT that does not fit a server is refused the same way, naming the account (`account "MASH": its JWT would be 1,200,000 bytes; server "nats-2" allows 1,048,576 (the jwt decoder cap)`).
+
+The way out is to use a shared verb instead of a long list of exceptions: give the receivers a label and a rule on it, or put them in a zone of their own, so that the sender is granted the zone whole (one wildcard on the zone's key, no tag) rather than each address one by one. A rule on a label spends no tag when it covers every endpoint of a zone and every sender of the sender's zone. Servers that run a larger `max_control_line` hold more: the limit is the server's own, and a cluster is limited by its smallest.
+
+If a server does not answer the request for its limits, mash does not assume the limit: apply refuses and names the server. Say what the servers run with `--max-control-line BYTES` (or `MASH_MAX_CONTROL_LINE`); it stands for every server that did not answer, and caps one that did. `add` and `reissue` use the system account credentials when they can be found, as apply does; without them, they measure against the default limit and say so.
 
 ## Migrating a deployment minted before the deny placeholder
 
@@ -69,7 +101,7 @@ Zone keys now carry the deny template from their first compile and every user ca
 
 ## Sizes
 
-`Budget` measures two things by building the real JWTs with throwaway keys: the account JWT with one scoped signing key per zone, against the 1 MiB the server accepts for an account (the jwt library's decoder cap; no server setting lifts it), and the largest user JWT (its name, its tags, signed by its zone's key), against 3,750 bytes.
+`Budget` measures two things by building the real JWTs with throwaway keys, and measures each against every server's own limit: the account JWT with one scoped signing key per zone, against the most the server takes (1 MiB, the jwt library's decoder cap, which no server setting lifts; or the server's `max_payload` when that is smaller, because the claims update is one message of that size), and every sender's user JWT inside the whole CONNECT line the client sends (the JWT, its signature, the client name `mash <endpoint>` and the options), against the server's `max_control_line`. `policy apply` asks each server for those two settings (the system account `VARZ` request, which every server answers with its name) before it signs or pushes anything; `policy check` and `policy show --budget` have no server to ask and measure against the default (4,096 bytes and 1 MiB), as the `default server limit`.
 
 The account JWT grows with zones and the zone pairs granted, not with endpoints. Measured:
 
@@ -174,7 +206,7 @@ tests:
 
 | Command | What it does | Exit code |
 | --- | --- | --- |
-| `mashctl policy check` | Parses and validates the file, then runs the JWT size budget (the 1 MiB account JWT and the user JWT limit, as `show --budget` and `apply` do). Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error or an over-budget file, 0 otherwise (warnings do not fail) |
+| `mashctl policy check` | Parses and validates the file, then runs the JWT size budget against the default server limits (the 1 MiB account JWT and the CONNECT line of 4,096 bytes, as `show --budget` does; `apply` measures against each server's own limits). Prints `check: OK - N endpoints, M rules` (after any `warning:` lines), or one `error: <where>: <message>` line per problem; parse errors carry their line number. | 1 on any error or an over-budget file, 0 otherwise (warnings do not fail) |
 | `mashctl policy test` | Runs the `tests` section: `PASS from->to expect allow`, or `FAIL from->to expect allow got deny: <why>`. A file with no tests prints `test: no tests in the file`. | 1 if any test fails |
 | `mashctl policy explain FROM TO` | Says whether FROM may mail TO and which rule (or the default) decided, then the line `note: rules cover mail only; prompt and status probes are not covered by rules yet (open)`. Both must be declared endpoints. | 0 whether allowed or denied; 2 for an unknown endpoint or bad usage |
 | `mashctl policy show [--json] [--budget]` | Prints the who-may-mail-whom matrix (or the JSON form), then a summary of zones, wildcard zones and tags per endpoint, then the same `note:` line (rules cover mail only; prompt and status probes are open). With `--json` there is no note; the document carries top-level `"covers": ["mail"]` and `"open": ["prompt", "status"]` instead. `--budget` also prints the account and worst user JWT sizes against their limits (to stderr with `--json`). Needs the owner (`MASH_OWNER` or `config.json`). | 1 on an invalid file, a missing owner, or a budget over its limit |

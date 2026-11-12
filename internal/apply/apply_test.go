@@ -30,8 +30,10 @@ type fake struct {
 	pushes     int
 	lastPush   string // the token of the latest push
 	lookups    int
-	serversErr error    // Servers returns it with servers
-	all        []string // LookupAll's answer; nil: every expected server holds token
+	serversErr error          // Servers returns it with servers
+	all        []string       // LookupAll's answer; nil: every expected server holds token
+	limits     map[string]int // per server max_control_line the VARZ request reports; absent: the default; 0: no answer
+	maxPayload int            // the max_payload every server reports (0: not reported)
 }
 
 func (f *fake) Lookup(context.Context, string) (string, error) {
@@ -60,6 +62,25 @@ func (f *fake) Servers(context.Context) (ServerSet, error) {
 	}
 	return f.servers, nil
 }
+
+// ServerLimits answers the VARZ request: every server of the ping's set reports limits, the defaults unless
+// limits says otherwise (server name -> max_control_line; a server that maps to 0 is silent).
+func (f *fake) ServerLimits(ctx context.Context, _ int) ([]ServerReport, error) {
+	set, _ := f.Servers(ctx)
+	var out []ServerReport
+	for _, n := range set.Names {
+		mcl, ok := f.limits[n]
+		if !ok {
+			mcl = policy.DefaultMaxControlLine
+		}
+		if mcl == 0 {
+			continue
+		}
+		out = append(out, ServerReport{Server: n, MaxControlLine: mcl, MaxPayload: f.maxPayload})
+	}
+	return out, nil
+}
+
 func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -103,10 +124,10 @@ func TestBudgetRefusalChangesNothing(t *testing.T) {
 	ks, fk, c := setup(t)
 	var out bytes.Buffer
 	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk,
-		Budget: func(*policy.Compiled) (policy.BudgetReport, error) {
+		Budget: func(*policy.Compiled, []policy.ServerLimits) (policy.BudgetReport, error) {
 			return policy.BudgetReport{}, errors.New("policy: the account JWT would be too big")
 		}}, &out)
-	if code != 1 || !strings.Contains(out.String(), "refusing") || !strings.Contains(out.String(), "too big") {
+	if code != 1 || !strings.Contains(out.String(), "refused") || !strings.Contains(out.String(), "too big") {
 		t.Fatalf("%d %s", code, out.String())
 	}
 	if fk.pushes != 0 {

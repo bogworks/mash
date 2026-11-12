@@ -328,13 +328,6 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	if !ok {
 		return fail("internal error: the new endpoint did not compile")
 	}
-	// The JWTs the policy needs must fit before anything is created, provisioned or written.
-	rep, berr := policy.Budget(after)
-	if rerr := budgetRefusal(o.name, rep, berr); rerr != nil {
-		fmt.Fprintf(stderr, "mashctl: %v\n", rerr)
-		return 1
-	}
-
 	credsPath, err := credsFileFor(cfg, o.name)
 	if err != nil {
 		return fail("%v", err)
@@ -345,6 +338,17 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 
 	// The server connection is opened before any key or record is made, so an unreachable server changes nothing.
 	announceTarget(cfg, env, stderr, nil)
+	limits, lerr := credentialLimits("add", cfg, env, stderr)
+	if lerr != nil {
+		return fail("refused: %v; nothing was changed, signed or pushed", lerr)
+	}
+	// The JWTs the policy needs must fit every server before anything is created, signed, provisioned or written.
+	rep, berr := policy.BudgetFor(after, limits)
+	if rerr := budgetRefusal(o.name, rep, berr); rerr != nil {
+		fmt.Fprintf(stderr, "mashctl: %v\n", rerr)
+		return 1
+	}
+
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("%v", err)
@@ -432,15 +436,15 @@ func budgetRefusal(name string, r policy.BudgetReport, err error) error {
 	if err != nil {
 		reason = strings.TrimPrefix(err.Error(), "policy: ")
 	}
-	return fmt.Errorf("adding %s would make the policy unusable: %s; nothing was changed", name, reason)
+	return fmt.Errorf("refused: adding %s would make the policy unusable:\n  %s\nnothing was changed, signed or pushed", name, reason)
 }
 
 // budgetWarning is a one-line warning when the budget passes but the worst user JWT or the account JWT is above 80%
 // of its limit, else "".
 func budgetWarning(r policy.BudgetReport) string {
 	var parts []string
-	if r.UserLimit > 0 && r.WorstUserJWTBytes*5 > r.UserLimit*4 {
-		parts = append(parts, fmt.Sprintf("the user JWT of %s is %d of %d bytes", r.WorstUser, r.WorstUserJWTBytes, r.UserLimit))
+	if r.UserLimit > 0 && r.WorstConnectBytes*5 > r.UserLimit*4 {
+		parts = append(parts, fmt.Sprintf("the connect line of %s is %d of %d bytes", r.WorstUser, r.WorstConnectBytes, r.UserLimit))
 	}
 	if r.AccountLimit > 0 && r.AccountJWTBytes*5 > r.AccountLimit*4 {
 		parts = append(parts, fmt.Sprintf("the account JWT is %d of %d bytes", r.AccountJWTBytes, r.AccountLimit))

@@ -372,7 +372,8 @@ func TestCheckZoneWarnings(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 
-	// An endpoint told apart from half of 400 peers needs 200 tags, more than the connect line holds.
+	// An endpoint told apart from half of 400 peers needs 200 tags, more than the connect line holds. Check does not
+	// warn on a count of tags (mash refuses on measured size, and Budget does): it is the Budget that refuses it.
 	var b strings.Builder
 	b.WriteString("default: deny\nendpoints:\n  hub: {labels: {team: hub}}\n")
 	for i := 0; i < 400; i++ {
@@ -384,8 +385,17 @@ func TestCheckZoneWarnings(t *testing.T) {
 	for _, w := range f.Check().Warnings {
 		warn = append(warn, w.String())
 	}
-	if len(warn) == 0 || !strings.Contains(warn[0], "endpoint hub") || !strings.Contains(warn[0], "201 tags") {
-		t.Errorf("%q", warn[:min(len(warn), 3)])
+	for _, w := range warn {
+		if strings.Contains(w, "tags") {
+			t.Errorf("check warns on a count of tags: %q", w)
+		}
+	}
+	c, err := Compile(f, "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Budget(c); err == nil || !strings.Contains(err.Error(), `sender "hub"`) || !strings.Contains(err.Error(), "201 tags") {
+		t.Errorf("budget: %v", err)
 	}
 }
 
@@ -505,7 +515,7 @@ func TestBudget60AllToAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep, err := Budget(c)
-	if err != nil || !rep.OK || rep.Zones != 1 || rep.AccountLimit != 1048576 || rep.UserLimit != UserJWTLimit {
+	if err != nil || !rep.OK || rep.Zones != 1 || rep.AccountLimit != 1048576 || rep.UserLimit != DefaultMaxControlLine {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	t.Logf("60 endpoints all-to-all: account JWT %d bytes of %d, worst user JWT %d bytes (%s)", rep.AccountJWTBytes, rep.AccountLimit, rep.WorstUserJWTBytes, rep.WorstUser)
@@ -526,11 +536,11 @@ endpoints:
 			}
 		}
 	}
-	rep, err := budget(c, 2000, UserJWTLimit)
+	rep, err := budget(c, []ServerLimits{{Server: "tiny", MaxControlLine: DefaultMaxControlLine, AccountJWT: 2000}})
 	if err == nil || rep.OK || !strings.Contains(err.Error(), "biggest signing key is zone z2") {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	if rep2, err := budget(c, 1<<30, UserJWTLimit); err != nil || !rep2.OK {
+	if rep2, err := budget(c, []ServerLimits{{Server: "big", MaxControlLine: DefaultMaxControlLine, AccountJWT: 1 << 30}}); err != nil || !rep2.OK {
 		t.Fatalf("%+v %v", rep2, err)
 	}
 }
@@ -542,7 +552,7 @@ func TestBudgetUserOverLimit(t *testing.T) {
 		c.Endpoints[1].Tags = append(c.Endpoints[1].Tags, fmt.Sprintf("allow:default.peer-%03d", j))
 	}
 	rep, err := Budget(c)
-	if err == nil || rep.OK || rep.WorstUser != "tagged" || !strings.Contains(err.Error(), "user JWT of tagged") || !strings.Contains(err.Error(), "201 tags") {
+	if err == nil || rep.OK || rep.WorstUser != "tagged" || !strings.Contains(err.Error(), `sender "tagged"`) || !strings.Contains(err.Error(), "201 tags") || !strings.Contains(err.Error(), DefaultServer) {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	if rep.AccountJWTBytes > rep.AccountLimit {

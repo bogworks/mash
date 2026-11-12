@@ -201,6 +201,9 @@ func policyCheck(path string, data []byte, owner string, stdout, stderr io.Write
 		fmt.Fprintln(stderr, "mashctl: policy check: over budget")
 		return 1
 	}
+	if w := budgetWarning(brep); w != "" { // the measure is against the default server limit: apply asks the servers
+		fmt.Fprintf(stdout, "%s (%s)\n", w, policy.DefaultServer)
+	}
 	fmt.Fprintf(stdout, "check: OK - %d endpoints, %d rules\n", len(f.Endpoints), len(f.Rules))
 	return 0
 }
@@ -254,8 +257,8 @@ func policyShow(f *policy.File, owner string, o policyOpts, stdout, stderr io.Wr
 	if o.json {
 		w = stderr
 	}
-	fmt.Fprintf(w, "budget: account JWT %d of %d bytes (%d zones); worst user JWT %d of %d bytes (%s)\n",
-		rep.AccountJWTBytes, rep.AccountLimit, rep.Zones, rep.WorstUserJWTBytes, rep.UserLimit, rep.WorstUser)
+	fmt.Fprintf(w, "budget (%s): account JWT %d of %d bytes (%d zones); worst connect line %d of %d bytes (%s; its user JWT is %d bytes)\n",
+		policy.DefaultServer, rep.AccountJWTBytes, rep.AccountLimit, rep.Zones, rep.WorstConnectBytes, rep.UserLimit, rep.WorstUser, rep.WorstUserJWTBytes)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: policy show: %v\n", err)
 		return 1

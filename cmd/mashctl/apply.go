@@ -34,13 +34,14 @@ type applyOpts struct {
 	removeZones    []string
 	keepZones      []string
 	servers        string // --servers as given, "" when not
+	maxControlLine string // --max-control-line as given, "" when not
 }
 
 func applyUsage(verb string) string {
 	if verb == "diff" {
-		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
+		return "usage: mashctl policy diff [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n"
 	}
-	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N]\n"
+	return "usage: mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE] [--replace-zone-key ZONE]... [--remove-zone ZONE]... [--keep-zone ZONE]... [--servers N] [--max-control-line BYTES]\n"
 }
 
 func parseApplyArgs(verb string, args []string) (applyOpts, error) {
@@ -80,6 +81,8 @@ func parseApplyArgs(verb string, args []string) (applyOpts, error) {
 			}
 		case a == "--servers" || strings.HasPrefix(a, "--servers="):
 			o.servers, err = val(&i, a, "--servers")
+		case a == "--max-control-line" || strings.HasPrefix(a, "--max-control-line="):
+			o.maxControlLine, err = val(&i, a, "--max-control-line")
 		case a == "--dry-run" && (verb == "apply" || verb == "repair"):
 			o.dryRun = true
 		default:
@@ -199,6 +202,11 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 			return 2
 		}
 	}
+	maxControlLine, err := parseMaxControlLine(o.maxControlLine, env)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, applyUsage(verb))
+		return 2
+	}
 	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, config.ErrNoConfigDir) {
 		fmt.Fprintln(stderr, err)
@@ -277,5 +285,5 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
 	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
-		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
+		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers, MaxControlLine: maxControlLine}, stdout)
 }
