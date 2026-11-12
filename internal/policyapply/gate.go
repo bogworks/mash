@@ -192,10 +192,10 @@ func (in GateInput) checkOldKeys(add func(server, sender, check, detail string))
 	}
 }
 
-// checkWitnesses requires a closed witness for every server and every sender with a removed reach, and for every
-// witness the transport reports.
+// checkWitnesses requires a closed witness for every server and every sender with a removed reach or removed by the
+// change, and for every witness the transport reports.
 func (in GateInput) checkWitnesses(ctx context.Context, names []string, add func(server, sender, check, detail string)) {
-	if len(in.Expect.Removed) == 0 && len(in.Expect.CredentialOnly) == 0 && in.Witnesses == nil {
+	if len(in.Expect.Removed) == 0 && len(in.Expect.CredentialOnly) == 0 && len(in.Expect.RemovedSenders) == 0 && in.Witnesses == nil {
 		return
 	}
 	closed := map[WitnessKey]bool{}
@@ -213,6 +213,11 @@ func (in GateInput) checkWitnesses(ctx context.Context, names []string, add func
 	for _, r := range slices.Concat(in.Expect.Removed, in.Expect.CredentialOnly) {
 		for _, n := range names {
 			need[WitnessKey{n, r.Sender}] = true
+		}
+	}
+	for _, s := range in.Expect.RemovedSenders {
+		for _, n := range names {
+			need[WitnessKey{n, s}] = true
 		}
 	}
 	for k := range need {
