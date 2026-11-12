@@ -1,15 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/store"
 )
 
 const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE]\n  unzone does not reissue the endpoint's user; afterwards run: mashctl permissions NAME --nsc\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
@@ -61,27 +58,8 @@ func runUnzone(args []string, env func(string) string, lookup config.Lookup, std
 	announceTarget(cfg, env, stderr, &sysTarget{sysCreds})
 
 	// The applied-policy check comes first: a policy deployment is refused before anything changes.
-	if _, serr := sysCredsPath(sysCreds, env, cfg); serr != nil {
-		return fail("cannot check whether a zone policy is applied (%v); configure the system credentials; nothing was changed", serr)
-	}
-	keys, kerr := openKeys(cfg, env)
-	if kerr != nil {
-		return fail("cannot check whether a zone policy is applied (%v); configure the key store; nothing was changed", kerr)
-	}
-	servers, perr := parseServers(env)
-	if perr != nil {
-		return fail("%v", perr)
-	}
-	nc, cerr := connectSys(cfg, sysCreds, env)
-	if cerr != nil {
-		return fail("cannot tell whether a zone policy is applied: %v; nothing was changed", cerr)
-	}
-	pctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
-	rerr := apply.RefuseZonePolicy(pctx, apply.NATS{Conn: nc, Inventory: servers}, keys, servers, store.ErrZonePolicyApplied)
-	cancel()
-	nc.Close()
-	if rerr != nil {
-		return fail("refusing: %v (nothing was changed)", rerr)
+	if err := zoneGuard(cfg, sysCreds, env); err != nil {
+		return fail("%v", err)
 	}
 
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)

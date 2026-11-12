@@ -19,6 +19,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -41,6 +42,10 @@ func newAddEnv(t *testing.T) *addEnv {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// The testenv server has no system account user and its account is not the key store's: the applied-zone-policy check
+	// (zoneGuard) is stood in here. zoneguard_test.go covers the real check against a server that has one.
+	zoneGuard = func(config.Config, string, func(string) string) error { return nil }
+	t.Cleanup(func() { zoneGuard = zoneGuardCheck })
 	h := &addEnv{t: t, e: e, dir: dir, env: map[string]string{
 		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1",
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),

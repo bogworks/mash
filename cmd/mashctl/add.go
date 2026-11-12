@@ -247,6 +247,12 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		return fail("creds file %s exists; %s", credsPath, orphanText(o.name))
 	}
 
+	// An applied zone policy is refused before any key, record or file is made (ADR 0091): the owner-wide permissions
+	// minted below would bypass its mail restrictions. The check only reads.
+	if err := zoneGuard(cfg, "", env); err != nil {
+		return fail("%v", err)
+	}
+
 	// (1) mint: the user is signed by the account signing key and carries its own permissions, the owner-line set
 	// admin.Permissions(owner, name) (ADR 0091).
 	m, err := mint.Mint(keys, cfg.Owner, o.name, nil)

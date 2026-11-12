@@ -133,8 +133,18 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 			return code
 		}
 	}
+	// The applied-zone-policy check (ADR 0091) runs once per invocation, lazily: right before the first mint or rotation
+	// of a name, so a run that mints nothing needs no system credentials for it. Its result stands for every name.
+	var guardDone bool
+	var guardErr error
+	guard := func() error {
+		if !guardDone {
+			guardDone, guardErr = true, zoneGuard(cfg, "", env)
+		}
+		return guardErr
+	}
 	for _, name := range names {
-		rotated, err := reissueOne(keys, cfg, env, name, stdout, stderr)
+		rotated, err := reissueOne(keys, cfg, env, guard, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 			code = 1
@@ -300,7 +310,7 @@ func (d credsDiff) rotates() bool { return d.stale() }
 // (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
 // revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
 // lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
-func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, name string, stdout, stderr io.Writer) (rotated bool, err error) {
+func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, guard func() error, name string, stdout, stderr io.Writer) (rotated bool, err error) {
 	p, err := credsFileFor(cfg, name)
 	if err != nil {
 		return false, err
@@ -364,7 +374,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, name
 	// its creds between our check and our write.
 	err = adm.WithNameLock(ctx, name, func(ctx context.Context, lock admin.NameLock) error {
 		var err error
-		rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, name, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
+		rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, guard, name, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
 		return err
 	})
 	if err != nil {
@@ -374,7 +384,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, name
 }
 
 // reissueLocked is the part of reissueOne that runs under name's lock.
-func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, name string, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (rotated bool, err error) {
+func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, guard func() error, name string, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (rotated bool, err error) {
 	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
 		return false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
@@ -405,6 +415,12 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	// The old JWT can be revoked only in this account: a creds file issued for another account is refused.
 	if d.WrongAccount {
 		return false, fmt.Errorf("%s's creds file was issued for another account (%s...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add %s again", name, ctl.ShortKey(d.AccountPub), name)
+	}
+
+	// An applied zone policy is refused before anything is minted, staged or revoked: the owner-wide permissions of a
+	// mint would bypass its mail restrictions. The check only reads.
+	if err := guard(); err != nil {
+		return false, err
 	}
 
 	servers, err := parseServers(env)
