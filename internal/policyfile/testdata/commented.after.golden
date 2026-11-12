@@ -4,7 +4,7 @@ default: deny   # closed unless a rule opens it
 endpoints:
   # the front desk
   web-intake:
-    labels: {zone: dmz}
+    labels: {net: dmz}
 
   support-bot:
     labels:
@@ -12,19 +12,19 @@ endpoints:
       tier: "1"
 
   billing-agent:   # no labels yet
-    labels: {zone: internal}
+    labels: {net: internal}
   # the tools
-  deploy-bot: {labels: {zone: internal, kind: tool}}
+  deploy-bot: {labels: {net: internal, kind: tool}}
   ledger:
-    labels: {team: finance, zone: internal}
+    labels: {net: internal, team: finance}
 
 # rules follow
 
 rules:
   - name: dmz-talks
     action: allow
-    from: {zone: dmz}
-    to: {zone: dmz}
+    from: {net: dmz}
+    to: {net: dmz}
 
 tests:
   - {from: web-intake, to: support-bot, expect: allow}

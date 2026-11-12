@@ -14,32 +14,20 @@ import (
 
 const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy test [--policy FILE]
-       mashctl policy explain FROM TO [--policy FILE]
-       mashctl policy show [--json] [--budget] [--policy FILE]
        mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
-       mashctl policy diff [--policy FILE] [--sys-creds FILE]
        mashctl policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
-       mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]...
+       mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N]
        (repair is additive EXCEPT that it clears labels the file does not name on endpoints the file declares)
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.
 type policyOpts struct {
-	file         string
-	json, budget bool
-	args         []string
+	file string
+	args []string
 }
 
-func parsePolicyArgs(args []string, allowed ...string) (policyOpts, error) {
+func parsePolicyArgs(args []string) (policyOpts, error) {
 	var o policyOpts
-	ok := func(f string) bool {
-		for _, a := range allowed {
-			if a == f {
-				return true
-			}
-		}
-		return false
-	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -55,10 +43,6 @@ func parsePolicyArgs(args []string, allowed ...string) (policyOpts, error) {
 			if o.file == "" {
 				return o, errors.New("--policy needs a file")
 			}
-		case a == "--json" && ok("--json"):
-			o.json = true
-		case a == "--budget" && ok("--budget"):
-			o.budget = true
 		case strings.HasPrefix(a, "-"):
 			return o, fmt.Errorf("unknown %s", config.RejectedArg(a))
 		default:
@@ -88,12 +72,9 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 		return usage()
 	}
 	verb, rest := args[0], args[1:]
-	var allowed []string
 	switch verb {
-	case "check", "test", "explain":
-	case "show":
-		allowed = []string{"--json", "--budget"}
-	case "apply", "diff":
+	case "check", "test":
+	case "apply":
 		return runPolicyApply(verb, rest, env, lookup, stdout, stderr)
 	case "drift":
 		return runPolicyDrift(rest, env, lookup, stdout, stderr)
@@ -102,12 +83,12 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 	default:
 		return usage()
 	}
-	o, err := parsePolicyArgs(rest, allowed...)
+	o, err := parsePolicyArgs(rest)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: policy %s: %v\n", verb, err)
 		return usage()
 	}
-	if want := map[string]int{"explain": 2}[verb]; len(o.args) != want {
+	if len(o.args) != 0 {
 		return usage()
 	}
 	cfg, err := loadConfig(env, lookup)
@@ -133,34 +114,11 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintf(stderr, "mashctl: policy %s: %s: %v\n", verb, path, err)
 		return 1
 	}
-	switch verb {
-	case "test":
-		return policyTest(f, stdout)
-	case "explain":
-		for i, n := range o.args {
-			if !config.ValidName(n) { // named, never printed: a mistyped argument may be a secret
-				fmt.Fprintf(stderr, "mashctl: policy explain: %s is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", []string{"FROM", "TO"}[i])
-				return 2
-			}
-		}
-		x, err := policy.Explain(f, o.args[0], o.args[1])
-		if err != nil {
-			fmt.Fprintf(stderr, "mashctl: policy explain: %v\n", err)
-			return 2
-		}
-		fmt.Fprintln(stdout, x.Text)
-		fmt.Fprintln(stdout, coverageNote)
-		return 0
-	}
-	return policyShow(f, cfg.Owner, o, stdout, stderr)
+	return policyTest(f, stdout)
 }
 
-// coverageNote says what rules police today (ADR 0054, ADR 0055).
-const coverageNote = "note: rules cover mail only; prompt and status probes are not covered by rules yet (open)"
-
-// policyCheck validates the file and runs the JWT size budget on what it would compile to (the budget is what apply
-// and add would refuse on, so a file that passes check but not apply was a trap). owner is the configured owner; the
-// budget does not depend on it beyond a few bytes per subject, so a placeholder stands in when none is configured.
+// policyCheck validates the file and compiles it. owner is the configured owner; a placeholder stands in when none is
+// configured. A file that carries a zone does not parse (ADR 0091): the error says what to remove.
 func policyCheck(path string, data []byte, owner string, stdout, stderr io.Writer) int {
 	f, err := policy.Parse(data)
 	if err != nil {
@@ -187,18 +145,8 @@ func policyCheck(path string, data []byte, owner string, stdout, stderr io.Write
 	if owner == "" {
 		owner = "owner"
 	}
-	c, err := policy.Compile(f, owner)
-	if err != nil {
+	if _, err := policy.Compile(f, owner); err != nil {
 		fmt.Fprintf(stderr, "mashctl: policy check: %v\n", err)
-		return 1
-	}
-	brep, err := policy.Budget(c)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: policy check: %v\n", err)
-		return 1
-	}
-	if !brep.OK {
-		fmt.Fprintln(stderr, "mashctl: policy check: over budget")
 		return 1
 	}
 	fmt.Fprintf(stdout, "check: OK - %d endpoints, %d rules\n", len(f.Endpoints), len(f.Rules))
@@ -221,72 +169,4 @@ func policyTest(f *policy.File, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "FAIL %s->%s expect %s got %s: %s\n", r.From, r.To, r.Expect, r.Got, r.Text)
 	}
 	return code
-}
-
-func policyShow(f *policy.File, owner string, o policyOpts, stdout, stderr io.Writer) int {
-	if owner == "" {
-		fmt.Fprintln(stderr, `mashctl: policy show: no owner (config.json "owner" or MASH_OWNER)`)
-		return 1
-	}
-	c, err := policy.Compile(f, owner)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: policy show: %v\n", err)
-		return 1
-	}
-	if o.json {
-		b, err := c.JSON()
-		if err != nil {
-			fmt.Fprintf(stderr, "mashctl: policy show: %v\n", err)
-			return 1
-		}
-		stdout.Write(b)
-	} else {
-		fmt.Fprint(stdout, c.Matrix())
-		fmt.Fprint(stdout, zonesSummary(c))
-		fmt.Fprintln(stdout, coverageNote)
-	}
-	if !o.budget {
-		return 0
-	}
-	rep, err := policy.Budget(c)
-	// In --json mode stdout is a JSON document, so the budget report goes to stderr.
-	w := stdout
-	if o.json {
-		w = stderr
-	}
-	fmt.Fprintf(w, "budget: account JWT %d of %d bytes (%d zones); worst user JWT %d of %d bytes (%s)\n",
-		rep.AccountJWTBytes, rep.AccountLimit, rep.Zones, rep.WorstUserJWTBytes, rep.UserLimit, rep.WorstUser)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: policy show: %v\n", err)
-		return 1
-	}
-	if !rep.OK {
-		fmt.Fprintln(stderr, "mashctl: policy show: over budget")
-		return 1
-	}
-	return 0
-}
-
-func zonesSummary(c *policy.Compiled) string {
-	var b strings.Builder
-	b.WriteString("\nzones:\n")
-	for _, z := range c.Zones {
-		fmt.Fprintf(&b, "  %s: %s\n", z.Name, strings.Join(z.Endpoints, ", "))
-	}
-	b.WriteString("\nwildcard zones (every endpoint of the zone may mail the whole recipient zone):\n")
-	any := false
-	for _, z := range c.Zones {
-		if len(z.Wildcards) > 0 {
-			any = true
-			fmt.Fprintf(&b, "  %s -> %s\n", z.Name, strings.Join(z.Wildcards, ", "))
-		}
-	}
-	if !any {
-		b.WriteString("  (none)\n")
-	}
-	b.WriteString("\ntags per endpoint (the exceptions its user JWT carries):\n")
-	for _, e := range c.Endpoints {
-		fmt.Fprintf(&b, "  %s: %d\n", e.Name, len(e.Tags))
-	}
-	return b.String()
 }

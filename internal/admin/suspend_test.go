@@ -235,7 +235,7 @@ func TestApplyLimitsKeepsSuspension(t *testing.T) {
 	}
 }
 
-func TestSetZoneAndProvisionRefuseSuspended(t *testing.T) {
+func TestProvisionRefusesSuspended(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	_, u := e.Mint(t, "alpha")
@@ -244,9 +244,6 @@ func TestSetZoneAndProvisionRefuseSuspended(t *testing.T) {
 	}
 	if _, err := a.Suspend(ctx, "alpha"); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := a.SetZone(ctx, "alpha", "default"); err == nil || !strings.Contains(err.Error(), "suspended") {
-		t.Fatalf("SetZone: %v", err)
 	}
 	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"mash.suspended.alpha"}) {
 		t.Fatalf("subjects %v", got)

@@ -15,7 +15,6 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/policy"
 	"github.com/bogworks/mash/internal/policyfile"
 )
 
@@ -60,7 +59,7 @@ func looksInterrupted(cfg config.Config, credsPath, name string) bool {
 }
 
 // noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
-const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the zone key is rotated"
+const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
 
 // runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
 // failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
@@ -135,7 +134,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	}
 	defer doc.Close()
 	beforeBytes, _ := doc.Bytes()
-	beforeFile, before, err := compileBytes(beforeBytes, cfg.Owner)
+	beforeFile, _, err := compileBytes(beforeBytes, cfg.Owner)
 	if err != nil {
 		return fail("%s: %v", path, err)
 	}
@@ -149,7 +148,6 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	}
 
 	// (2) the entry removed in memory.
-	var after *policy.Compiled
 	editPolicy := declared
 	if declared {
 		refs, err := doc.RemoveEndpoint(name)
@@ -165,7 +163,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			fmt.Fprintf(stderr, "mashctl: retire %s: tests still name %s: %s; the policy file is left as it is\n", name, name, strings.Join(refs, ", "))
 		} else {
 			afterBytes, _ := doc.Bytes()
-			if _, after, err = compileBytes(afterBytes, cfg.Owner); err != nil {
+			if _, _, err = compileBytes(afterBytes, cfg.Owner); err != nil {
 				return fail("the edit does not make a valid policy: %v", err)
 			}
 		}
@@ -301,11 +299,6 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	fmt.Fprintf(stdout, "retired %s\n", name)
 	if renamed != "" {
 		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
-	}
-	if after != nil {
-		for _, l := range consequences(before, after) {
-			fmt.Fprintln(stdout, l)
-		}
 	}
 	switch {
 	case user == "":

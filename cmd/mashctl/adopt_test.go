@@ -128,11 +128,11 @@ func mustPub(t *testing.T, path string) string {
 	return pub
 }
 
-const oneZone = `default: deny
+const oneGroup = `default: deny
 endpoints:
-  x: {labels: {zone: a}}
+  x: {labels: {net: a}}
 rules:
-  - {name: a-to-a, action: allow, from: {zone: a}, to: {zone: a}}
+  - {name: a-to-a, action: allow, from: {net: a}, to: {net: a}}
 `
 
 func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
@@ -207,18 +207,15 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 
 	// policy apply works from the adopted key dir against the same server.
 	pf := filepath.Join(a.root, "one.yaml")
-	if err := os.WriteFile(pf, []byte(oneZone), 0o600); err != nil {
+	if err := os.WriteFile(pf, []byte(oneGroup), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, errb, code = a.run("policy", "apply", "--policy", pf)
-	if code != 0 {
+	if code != 1 || !strings.Contains(errb, "no replacement until the label policy model ships") {
 		t.Fatalf("policy apply after adopt: %d\n%s\n%s", code, out, errb)
 	}
-	if !strings.Contains(out, "zone a: new") {
-		t.Errorf("apply output:\n%s", out)
-	}
-	if n := len(scopedSigners(e.claims())); n != 1 {
-		t.Fatalf("want 1 scoped signer after apply, got %d", n)
+	if n := len(scopedSigners(e.claims())); n != 0 {
+		t.Fatalf("want no scoped signer after apply, got %d", n)
 	}
 }
 

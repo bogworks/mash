@@ -40,9 +40,8 @@ func TestLabelUnlabelRoundTripKeepsComments(t *testing.T) {
 func TestLabelDryRunWritesNothing(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
 	orig, _ := os.ReadFile(h.policy)
-	out, errb, code := h.run("label", "b", "zone=green", "--dry-run")
-	if code != 0 || !strings.Contains(out, "dry run:") || !strings.Contains(out, "b moves from zone blue to zone green") ||
-		!strings.Contains(out, "account update needed: run mashctl policy apply") {
+	out, errb, code := h.run("label", "b", "net=green", "--dry-run")
+	if code != 0 || !strings.Contains(out, "dry run:") || strings.Contains(out, "needed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if got, _ := os.ReadFile(h.policy); !bytes.Equal(got, orig) {
@@ -90,32 +89,21 @@ func TestLabelRefusals(t *testing.T) {
 	}
 }
 
+// Labels no longer change anything an endpoint's credentials carry (ADR 0091): no verb says a reissue or an account
+// update is needed.
 func TestLabelConsequences(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	// b becomes a tool: team x (a) now needs a tag for it
 	out, errb, code := h.run("label", "b", "kind=tool")
-	if code != 0 || !strings.Contains(out, "reissue needed: a (run: mashctl reissue a)") {
+	if code != 0 || strings.Contains(out, "needed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	// a moves zones: the verbs, and the creds are signed by the old zone until reissued
-	out, errb, code = h.run("label", "a", "zone=blue")
-	if code != 0 || !strings.Contains(out, "a moves from zone red to zone blue: its mail address changes.") ||
-		!strings.Contains(out, "mashctl set-zone a blue") || !strings.Contains(out, "mashctl reissue a") ||
-		!strings.Contains(out, "creds are signed by zone red's key and keep zone red's permissions") {
+	out, errb, code = h.run("label", "a", "net=blue")
+	if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "set-zone") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if strings.Contains(out, "reissue needed: a") {
-		t.Errorf("the moved endpoint is named in the tag line: %q", out)
-	}
-	// a new zone changes the account JWT
-	out, _, code = h.run("label", "a2", "zone=green")
-	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
-		t.Fatalf("%d %q", code, out)
-	}
-	// unsetting the subject label moves the endpoint to the default zone
-	out, _, code = h.run("unlabel", "a2", "zone")
-	if code != 0 || !strings.Contains(out, "a2 moves from zone green to zone default") {
-		t.Fatalf("%d %q", code, out)
+	// the zone label is refused in a file (ADR 0091), by the verb too
+	if _, errb, code = h.run("label", "a2", "zone=green"); code != 1 || !strings.Contains(errb, "ADR 0091") {
+		t.Fatalf("zone label: %d %q", code, errb)
 	}
 	// a label no rule reads changes nothing to do
 	out, _, code = h.run("label", "b", "note=hello")

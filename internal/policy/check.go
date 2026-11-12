@@ -2,12 +2,10 @@ package policy
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -36,9 +34,6 @@ type Report struct {
 // other than allow or deny, a missing from or to (write {} for everyone), or a selector with an invalid key or
 // value; a test naming an endpoint the file does not declare or expecting something other than allow or deny.
 //
-// Further errors for the zone: subject_label that is not a label key, and an endpoint whose subject label value is not
-// one subject token (sap.ValidZone: 1-32 characters, ADR 0054).
-//
 // A deny rule whose from or to selector matches no declared endpoint is also an error (a misspelled label matches
 // nothing, so under default allow the pair silently stays allowed), unless the rule sets allow_empty: true.
 //
@@ -46,8 +41,7 @@ type Report struct {
 //
 // Warnings: label values that differ only in case across endpoints for one key (Finance and finance); an allow rule, or a deny
 // rule with allow_empty, whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
-// the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); an endpoint whose user JWT
-// would need more than MaxTagsWarn tags (the connect line); under default deny, an endpoint that can neither send
+// the pair silently falls to the default); under default deny, an endpoint that can neither send
 // nor receive.
 // Labels no rule uses are not reported. Warnings are only computed for a file without errors.
 func (f *File) Check() Report {
@@ -58,10 +52,6 @@ func (f *File) Check() Report {
 
 	if f.Default != "" && f.Default != Allow && f.Default != Deny {
 		errf("default", "%q is not allow or deny", f.Default)
-	}
-
-	if sl := f.subjectLabel(); !store.ValidLabelKey(sl) {
-		errf("subject_label", "%q is not a label key: a letter, then up to 31 of a-z 0-9 _ . -", sl)
 	}
 
 	names := f.names()
@@ -78,9 +68,6 @@ func (f *File) Check() Report {
 			if labels[k] == "" {
 				errf(where, "label %s has an empty value", k)
 			}
-		}
-		if z, ok := labels[f.subjectLabel()]; ok && z != "" && !sap.ValidZone(z) {
-			errf(where, "%s=%q is the zone, which is one subject token: lower-case letters, digits and single hyphens, starting with a letter, 1-32 characters", f.subjectLabel(), z)
 		}
 	}
 
@@ -160,16 +147,13 @@ func (f *File) Check() Report {
 		}{{"from", rule.From}, {"to", rule.To}} {
 			matched := false
 			for _, n := range names {
-				if sel.s.matches(f.effectiveLabels(n)) {
+				if sel.s.matches(f.Endpoints[n].Labels) {
 					matched = true
 					break
 				}
 			}
 			if !matched {
 				msg := fmt.Sprintf("%s selector %s matches no endpoint", sel.name, sel.s)
-				if z, ok := sel.s[f.subjectLabel()]; ok && !slices.ContainsFunc(names, func(n string) bool { return f.zoneOf(n) == z }) {
-					msg += fmt.Sprintf(" (zone %s has no endpoints)", z)
-				}
 				if rule.Action == Deny && !rule.AllowEmpty {
 					errf(where, "deny rule: %s, so it denies nothing: fix the selector, or set allow_empty: true on the rule if the group is intentionally empty", msg)
 					continue
@@ -182,13 +166,6 @@ func (f *File) Check() Report {
 		return r
 	}
 	r.Warnings = append(r.Warnings, f.caseVariantWarnings(names)...)
-	p := f.plan()
-	for _, n := range names {
-		if len(p.tags[n]) > MaxTagsWarn {
-			r.Warnings = append(r.Warnings, Diagnostic{"endpoint " + n + lineSuffix(f.lines.endpoints[n]),
-				fmt.Sprintf("its user JWT needs %d tags; about %d fit the default connect line (see UserJWTLimit)", len(p.tags[n]), MaxTagsWarn)})
-		}
-	}
 	if !f.defaultAllow() {
 		m := f.matrix(names)
 		for i, n := range names {
