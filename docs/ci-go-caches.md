@@ -24,7 +24,7 @@ The release jobs, `reproducible`, `adr-lint`, `publish-check`, `codeql` and `tes
 
 ```
 /run/go-seed/<kind>/go-build/    the Go build cache
-/run/go-seed/<kind>/go-mod/      the module cache (with the go1.27.3 toolchain module if the runner's go is older)
+/run/go-seed/<kind>/go-mod/      the module cache (with the go1.27.4 toolchain module if the runner's go is older)
 /run/go-seed/<kind>/golangci/    optional, golangci-lint's cache
 ```
 
@@ -43,7 +43,7 @@ The release jobs, `reproducible`, `adr-lint`, `publish-check`, `codeql` and `tes
   concurrent jobs.
   Each runner container today has its own 4 GB tmpfs for `_work`, `_temp` and its caches, so a 1 to 1.5 GB copy is
   tight. Size that tmpfs for the seed before setting `MASH_CI_WARM=1`.
-* Toolchain: CI sets `GOTOOLCHAIN=go1.27.3`. With a per-job `GOMODCACHE`, the seed must hold that toolchain module, or
+* Toolchain: CI sets `GOTOOLCHAIN=go1.27.4`. With a per-job `GOMODCACHE`, the seed must hold that toolchain module, or
   each job downloads it again. A read-only toolchain cache mounted at `RUNNER_TOOL_CACHE` serves setup-go; it is a
   separate thing from this seed, and the two do not overlap.
 

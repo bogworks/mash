@@ -15,7 +15,7 @@ import (
 )
 
 // Toolchain is the Go toolchain every release is built with; go.mod's go directive and the workflows pin the same value.
-const Toolchain = "go1.27.3"
+const Toolchain = "go1.27.4"
 
 // keepGo are the Go variables that locate caches and modules; they cannot change what the compiler emits.
 var keepGo = map[string]bool{
