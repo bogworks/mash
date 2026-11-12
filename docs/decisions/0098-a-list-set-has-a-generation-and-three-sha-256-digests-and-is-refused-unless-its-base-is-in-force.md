@@ -21,14 +21,13 @@ either.
 * The same content must give the same digest however it was ordered, since lists are sets.
 * The digest of what was received must identify the submission as received, and the digest of content must still treat two
   encodings of the same content as equal, so both are kept.
-* Two submissions built on the same generation must not both be accepted, so the check and the replacement of the record
-  in force must be one atomic step.
+* Two submissions built on the same generation must not both be accepted; that needs an atomic check at commit, which
+  needs the apply path and so belongs to the apply work.
 
 ## Considered Options
 
 * A counter in the list set's own content: `Base` is the generation it was written against, the new generation is
-  `Base+1`, and `Accept` is a pure function of the record in force and the list set, and a `Ledger.Apply` makes the check, the
-  caller's apply step and the replacement atomic (chosen).
+  `Base+1`, and `Accept` is a pure function of the record in force and the list set (chosen).
 * A counter held by storage, with the list set carrying only a digest of its predecessor.
 * A timestamp as the version.
 
@@ -51,17 +50,14 @@ Chosen option: the first.
   `Received`. `Signed` covers what Compile produced (`DigestCompiled`):
   the range, each template's lines (sorted within each list) and each user's sender, name and sorted tags. Each encoding
   starts with a version string and uses length-prefixed fields, so one cannot be read as another.
-* **Serialization.** `Accept` is pure and does not by itself serialize submissions: two built on the same record both pass
-  it. `Ledger` holds the record in force behind a mutex. `Ledger.Apply(ls, received, apply)` runs the pure `Accept` against
-  the current record, then calls `apply` (the caller's sign-and-push step) with the new `Record` and the compiled output
-  while still holding the lock, and replaces the record only when `apply` returns nil. A nil `apply` is refused. On any
-  error, including one from `apply` (returned wrapped, so `errors.Is` works), it returns the zero `Record` and the ledger
-  is unchanged, so the previous generation stays in force and nothing new is committed. Of several submissions on the
-  same base exactly one succeeds and the rest get `ErrStaleBase`. The lock is held across `apply`, so `apply` must not
-  call back into the `Ledger`.
-* **Scope.** A `Ledger` lives in process memory. Persisting the record, comparing it across restarts and the
-  cross-process apply path are not built yet; that path must give the same guarantee: an atomic base check against the stored record at the moment of commit, after a
-  successful apply.
+* **Serialization and commit belong to the apply work.** `Accept` is pure and decides nothing on its own: it neither
+  serializes submissions nor commits anything, so two built on the same record both pass it. The caller that signs and
+  pushes must make the base check and the replacement of the record in force one atomic step, at commit time and after a
+  successful apply, so that of several submissions on the same base exactly one wins. It must use exactly the
+  `Compiled` that `Accept` returned, unmodified, whose digest is `Record.Signed`. A failed or partial apply must not
+  leave a state that lets the same base be accepted again while partial changes are visible. That path belongs to the
+  apply work, under REQ-011's applied-policy gate (contract mash-messaging-policy), and is not built here. No in-process
+  ledger is added: it would be built before the real sign-and-push call site exists.
 
 ### Consequences
 
@@ -70,15 +66,14 @@ Chosen option: the first.
 * Good, because the check and the record are pure and testable without storage.
 * Good, because `Received` identifies the submission as sent while `Content` still equates reordered or re-encoded forms.
 * Bad, because the caller must pass the received bytes, and mash cannot yet check that they decode to the list set.
-* Bad, because exclusivity holds only within one process until the apply path is built.
+* Bad, because nothing here yet gives one winner per base: serialization, commit-after-apply, partial-apply handling
+  and the use of the unmodified `Compiled` belong to the apply work under REQ-011's gate.
 
 ### Confirmation
 
 `internal/listset` tests: AT-016 (base N-1 and N+1 refused with nothing returned), a chain of acceptances, digest
 stability under reordering and change under any edit, received bytes giving `Received` (same bytes the same, different bytes different, nil and empty refused) with the same `Content`,
-a validation failure returning no record, many concurrent `Apply` calls on one base where exactly one succeeds, the rest
-get `ErrStaleBase`, and the ledger ends at the next generation (run under `-race`), a failing `apply` leaving the ledger
-unchanged so the same base then succeeds, and `apply` receiving the record and output about to be committed.
+a validation failure returning no record.
 
 ## Pros and Cons of the Options
 

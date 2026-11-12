@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"sync"
 )
 
 // Generations and digests (contract mash-messaging-policy REQ-017, AT-016; ADR 0098).
@@ -16,14 +15,14 @@ import (
 // Each accepted list set is one generation. A list set states the generation it was based on (ListSet.Base); Accept
 // refuses it unless that is the generation in force, so two submitters working from the same generation cannot both
 // win, and a stale one changes nothing. Accept is a pure function and does not by itself serialize submissions: two
-// callers that read the same Record and call Accept both succeed. Ledger holds the Record in force and makes the
-// check and the replacement one atomic step within a process. The package persists nothing.
+// callers that read the same Record and call Accept both succeed. The package holds no record in force and persists
+// nothing.
 
 // ErrStaleBase is matched, through errors.Is, by the *StaleBaseError Accept returns for a list set whose stated base
 // is not the generation in force.
 var ErrStaleBase = errors.New("list set is based on a generation that is not in force")
 
-// ErrNoReceivedBytes is returned by Accept and Ledger.Apply when received is nil or empty. Every accepted Record
+// ErrNoReceivedBytes is returned by Accept when received is nil or empty. Every accepted Record
 // identifies the submission it came from, so the bytes are required.
 var ErrNoReceivedBytes = errors.New("list set refused: no received bytes were supplied")
 
@@ -69,7 +68,7 @@ type Record struct {
 	Signed Digest
 }
 
-// Accept decides whether ls may replace the list set in force, and if so compiles it. received is the exact bytes
+// Accept checks whether ls may replace the list set in force, and if so compiles it. received is the exact bytes
 // ls was decoded from; Record.Received is their SHA-256. Nil or empty received is refused with ErrNoReceivedBytes, so
 // Received is never zero on an accepted Record.
 //
@@ -82,8 +81,16 @@ type Record struct {
 // inForce.Generation+1, together with the compiled output. On any error it returns the zero Record and nil, so the
 // caller keeps inForce and signs nothing. A zero inForce means nothing is in force, and ls.Base must then be 0.
 //
-// Accept is pure and does not by itself serialize submissions: two submissions built on the same inForce both pass
-// it and get the same next generation. Use a Ledger's Apply to have exactly one of them win.
+// Accept is pure and decides nothing on its own. It neither serializes submissions nor commits anything: two
+// submissions built on the same inForce both pass it and get the same next generation.
+//
+// The caller that signs and pushes must make the base check and the replacement of the in-force record one atomic
+// step, at commit time and after a successful apply. That caller must also use exactly the Compiled Accept returned,
+// unmodified, whose digest is Record.Signed. A failed or partial apply must not leave a state that lets the same base
+// be accepted again while partial changes are visible.
+//
+// That path belongs to the apply work, under REQ-011's applied-policy gate (contract mash-messaging-policy), and is
+// not built here.
 func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
 	if ls.Base != inForce.Generation {
 		return Record{}, nil, &StaleBaseError{Stated: ls.Base, InForce: inForce.Generation}
@@ -104,56 +111,6 @@ func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, err
 		Content:    DigestListSet(ls),
 		Signed:     DigestCompiled(c),
 	}, c, nil
-}
-
-// Ledger holds the Record in force and is safe for concurrent use. Its Apply runs the pure Accept against the
-// current record, then the caller's sign-and-push step, and replaces the record only if that step succeeds, all under
-// one lock: of several submissions built on the same generation exactly one succeeds and the rest get ErrStaleBase,
-// and a failed apply leaves the previous generation in force.
-//
-// A Ledger is in process memory only. Persisting the record and the cross-process apply path are not built yet, and
-// that path must give the same guarantee: an atomic base check against the stored record at the moment of commit,
-// after a successful apply.
-type Ledger struct {
-	mu      sync.Mutex
-	inForce Record
-}
-
-// NewLedger returns a Ledger whose record in force is inForce; the zero Record means nothing is in force.
-func NewLedger(inForce Record) *Ledger { return &Ledger{inForce: inForce} }
-
-// InForce returns the record in force.
-func (l *Ledger) InForce() Record {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.inForce
-}
-
-// Apply runs the package Accept against the record in force. If that succeeds it calls apply, the caller's
-// sign-and-push step, with the Record and Compiled that are about to be committed, and replaces the record in force
-// with that Record only if apply returns nil. It refuses a nil apply.
-//
-// On any error, including one from apply, it returns the zero Record and leaves the ledger unchanged, so the previous
-// generation stays in force and the same base can be submitted again. An error from apply is returned wrapped, so
-// errors.Is matches it.
-//
-// The lock is held across apply, so no other submission can interleave, and apply must not call back into the
-// Ledger (it would deadlock).
-func (l *Ledger) Apply(ls ListSet, received []byte, apply func(Record, *Compiled) error) (Record, error) {
-	if apply == nil {
-		return Record{}, errors.New("listset: Apply needs a non-nil apply function")
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	rec, c, err := Accept(l.inForce, ls, received)
-	if err != nil {
-		return Record{}, err
-	}
-	if err := apply(rec, c); err != nil {
-		return Record{}, fmt.Errorf("listset: apply of generation %d failed, generation %d stays in force: %w", rec.Generation, l.inForce.Generation, err)
-	}
-	l.inForce = rec
-	return rec, nil
 }
 
 // DigestListSet returns the digest of ls over a canonical encoding that does not depend on the order of its switches,
