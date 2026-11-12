@@ -159,7 +159,7 @@ func TestWorkflows_everyActionIsPinnedToACommit(t *testing.T) {
 
 // permissionedJobs are the release jobs that set permissions of their own; every other job takes the workflow's
 // contents: read.
-var permissionedJobs = map[string]bool{"guard": true, "draft": true, "attest": true, "sums": true, "attest-sbom": true, "sbom": true, "dry-run-verify": true}
+var permissionedJobs = map[string]bool{"guard": true, "draft": true, "attest": true, "sums": true, "attest-sbom": true, "sbom": true, "dry-run-verify": true, "dry-run-notes": true}
 
 func TestRelease_isTriggeredOnlyByVersionTagsAndPinsTheBuild(t *testing.T) {
 	w := load(t, "release.yml")
@@ -341,6 +341,8 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 // except that every job downstream of build carries one that also demands its direct needs' success (see
 // TestRelease_everyJobBelowBuildHasAStatusFunction). On a push the guard succeeds, so these behave as the implicit success().
 // allFourSucceeded is what draft and dry-run-verify demand of the jobs they wait for (the name predates sums).
+const dryRunNotesIf = "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}"
+
 const allFourSucceeded = "needs.build.result == 'success' && needs.sums.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success'"
 
 var jobConditions = map[string]string{
@@ -352,6 +354,7 @@ var jobConditions = map[string]string{
 	"sbom":           "${{ !cancelled() && needs.build.result == 'success' }}",
 	"attest-sbom":    "${{ !cancelled() && needs.sbom.result == 'success' }}",
 	"dry-run-verify": "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && " + allFourSucceeded + " }}",
+	"dry-run-notes":  dryRunNotesIf,
 }
 
 // ci.yml's check names are the job names, except the test jobs' explicit test (linux) and test (macos): a name that differs from
@@ -1465,7 +1468,7 @@ func TestRelease_guardRefusesOlderDraftsAndHoldsWriteOnlyThere(t *testing.T) {
 			if j.Permissions["id-token"] != "write" || j.Permissions["attestations"] != "write" || len(j.Permissions) != 2 {
 				t.Errorf("job %s permissions = %v, want id-token: write and attestations: write only", id, j.Permissions)
 			}
-		case "sbom", "sums", "dry-run-verify":
+		case "sbom", "sums", "dry-run-verify", "dry-run-notes":
 			if j.Permissions["contents"] != "read" || len(j.Permissions) != 1 {
 				t.Errorf("job %s permissions = %v, want contents: read only", id, j.Permissions)
 			}
@@ -2016,6 +2019,134 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 				t.Errorf("job %s step %q reads GITHUB_REF_NAME; a dry run has no tag", id, st.Name)
 			}
 		}
+	}
+}
+
+// The dry run also proves the release-notes path (ADR 0105): dry-run-notes runs the draft job's notes commands on the latest
+// released change log section, on a dispatch on main only, and can neither create a release nor affect one.
+func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
+	w := load(t, "release.yml")
+	j, ok := w.Jobs["dry-run-notes"]
+	if !ok {
+		t.Fatal("release.yml has no dry-run-notes job")
+	}
+	if j.If != dryRunNotesIf || strings.Contains(j.If, "push") {
+		t.Errorf("dry-run-notes if %q, want %q: a dispatch on main only, never a push", j.If, dryRunNotesIf)
+	}
+	if string(j.RunsOn) != "[self-hosted, rh-linux]" {
+		t.Errorf("dry-run-notes runs-on %q", j.RunsOn)
+	}
+	if len(j.Permissions) != 1 || j.Permissions["contents"] != "read" {
+		t.Errorf("dry-run-notes permissions %v, want contents: read only", j.Permissions)
+	}
+	if len(jobNeeds(j.Needs)) != 0 {
+		t.Errorf("dry-run-notes needs %v: it depends on no other job", j.Needs)
+	}
+	for id, o := range w.Jobs {
+		for _, d := range jobNeeds(o.Needs) {
+			if d == "dry-run-notes" {
+				t.Errorf("job %s needs dry-run-notes: the dry run must not gate anything", id)
+			}
+		}
+	}
+	var run, uses string
+	for _, st := range j.Steps {
+		run += st.Run + "\n"
+		uses += st.Uses + "\n"
+		if _, has := st.Env["GH_TOKEN"]; has || strings.Contains(fmt.Sprint(st.With), "token") {
+			t.Errorf("dry-run-notes step %q carries a token", st.Name)
+		}
+	}
+	for _, bad := range []string{"gh release", "gh ", "GH_TOKEN", "git push", "git tag -a", "git tag -s", "git tag v", "contents: write", "dist"} {
+		if strings.Contains(run, bad) {
+			t.Errorf("dry-run-notes runs %q:\n%s", bad, run)
+		}
+	}
+	for _, must := range []string{"set -euo pipefail", "scripts/changelog section", "scripts/changelog check-notes", "Full changes:", "compare/"} {
+		if !strings.Contains(run, must) {
+			t.Errorf("dry-run-notes lacks %q:\n%s", must, run)
+		}
+	}
+	if !strings.Contains(uses, "actions/checkout@") || !strings.Contains(uses, "actions/setup-go@") {
+		t.Errorf("dry-run-notes needs checkout and setup-go:\n%s", uses)
+	}
+	// The draft job and the dry run run the same two commands.
+	var draft string
+	for _, st := range w.Jobs["draft"].Steps {
+		draft += st.Run + "\n"
+	}
+	for _, c := range []string{"scripts/changelog section", "scripts/changelog check-notes"} {
+		if !strings.Contains(draft, c) || !strings.Contains(run, c) {
+			t.Errorf("draft and dry-run-notes must both run %q", c)
+		}
+	}
+
+	var script string
+	for _, st := range j.Steps {
+		if strings.Contains(st.Run, "scripts/changelog section") {
+			script = st.Run
+		}
+	}
+	dir, x := guardRepo(t)
+	g := func(args ...string) {
+		t.Helper()
+		if out, err := testenv.RunGit(append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	g("tag", "v0.1.0", x)
+	g("commit", "-q", "--allow-empty", "-m", "second change")
+	bin := t.TempDir()
+	clBin := filepath.Join(bin, "changelog")
+	if out, err := exec.Command("go", "build", "-o", clBin, filepath.Join(repoRoot(t), "scripts", "changelog")).CombinedOutput(); err != nil {
+		t.Fatalf("building scripts/changelog: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\n[ \"$1 $2\" = \"run ./scripts/changelog\" ] || { echo \"unexpected go $*\" >&2; exit 1; }\nshift 2\nexec "+clBin+" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runTemp := t.TempDir()
+	runScript := func() ([]byte, error) {
+		cmd := exec.Command("bash", "-e", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "RUNNER_TEMP="+runTemp, "GITHUB_REPOSITORY=bogworks/mash")
+		return cmd.CombinedOutput()
+	}
+	words := strings.TrimSpace(strings.Repeat("word ", 45)) + "."
+	setChangelog := func(cl string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(cl), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := "## [0.1.0] - 2026-11-01\n\n### Added\n\n- old (a1b2c3d)\n"
+	body := "### Summary\n\n" + words + "\n\n### Upgrading\n\nNothing to do.\n"
+	// No released section at all fails clearly.
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n\n- x\n")
+	if out, err := runScript(); err == nil || !strings.Contains(string(out), "no released version section") {
+		t.Fatalf("a change log with no released section passed: %v\n%s", err, out)
+	}
+	// The placeholder fails the same test the gate applies.
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-11-12\n\n### Summary\n\nREPLACE THIS PARAGRAPH: " + words + "\n\n### Upgrading\n\nNothing to do.\n\n" + old)
+	if out, err := runScript(); err == nil {
+		t.Fatalf("the placeholder passed:\n%s", out)
+	}
+	// A good latest section passes, with the previous tag as the base.
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n\n- unreleased\n\n## [0.2.0] - 2026-11-12\n\n" + body + "\n" + old)
+	if out, err := runScript(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	b, _ := os.ReadFile(filepath.Join(runTemp, "notes.md"))
+	if want := "Full changes: [v0.1.0...v0.2.0](https://github.com/bogworks/mash/compare/v0.1.0...v0.2.0)\n"; !strings.HasSuffix(string(b), want) || strings.Contains(string(b), "unreleased") {
+		t.Fatalf("notes:\n%s", b)
+	}
+	// With no tag below the version there is no compare link, and the notes still pass.
+	g("tag", "-d", "v0.1.0")
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-11-12\n\n" + body)
+	if out, err := runScript(); err != nil {
+		t.Fatalf("no previous tag: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(runTemp, "notes.md")); strings.Contains(string(b), "Full changes:") {
+		t.Fatalf("a compare link without a previous tag:\n%s", b)
 	}
 }
 
