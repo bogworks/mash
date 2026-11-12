@@ -80,19 +80,23 @@ type streamLock struct {
 }
 
 // leaseKV returns the lease bucket, creating it with the configured limits if a deployment from before the lock has
-// not been re-initialised (`mash admin init` creates it).
+// not been re-initialised (`mash admin init` creates it). The bucket it returns refuses rollup: a new one is hardened
+// before it is returned, an existing one is verified and hardened, and one that cannot be is an error.
 func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
 		if kv, err = a.js.CreateKeyValue(ctx, store.LeaseConfigFor(a.limits)); err != nil {
 			// Lost a race with another admin creating it, or no right to create: read it again.
 			if kv2, err2 := a.js.KeyValue(ctx, store.LeaseBucket); err2 == nil {
-				return kv2, nil
+				kv, err = kv2, nil
 			}
 		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mash: lease bucket (run `mash admin init`): %w", err)
+	}
+	if err := store.HardenLeaseBucket(ctx, a.js); err != nil {
+		return nil, fmt.Errorf("mash: %w", err)
 	}
 	return kv, nil
 }
@@ -172,12 +176,12 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 	}
 }
 
-// release removes the lock, but only the revision this admin wrote: if the lock expired and another admin took it
+// release removes the lock (a revision-aware delete: the lease bucket does not allow rollup, so no purge), but only the revision this admin wrote: if the lock expired and another admin took it
 // over, that admin's lock stays. Errors are ignored: a lock that cannot be removed expires.
 func (l *streamLock) release(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
 	defer cancel()
-	_ = l.kv.Purge(ctx, l.key, jetstream.LastRevision(l.rev))
+	_ = l.kv.Delete(ctx, l.key, jetstream.LastRevision(l.rev))
 }
 
 // bound returns ctx cut off lockSafety before the lock's deadline, with cause ErrLockExpiring. A caller's context

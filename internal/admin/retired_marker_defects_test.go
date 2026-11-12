@@ -169,7 +169,7 @@ func TestAbortWithLostLockLeavesMarker(t *testing.T) {
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredPending, user)
 			lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-			_ = lease.Purge(ctx, admin.LockKey(id.Flat()))
+			_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 			second := a.WithRevoker(func(context.Context, string) error { return nil })
 			if err := runPath(ctx, second, path, id.Flat(), user); err != nil {
 				t.Fatal(err)

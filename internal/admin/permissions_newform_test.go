@@ -941,12 +941,12 @@ func TestWindowBridgeLegacyLeaseOnServer(t *testing.T) {
 	if _, err := kv.Get(ctx, key); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("after release: %v", err)
 	}
-	// Re-acquire over the delete marker, the way the endpoint does, then purge.
+	// Re-acquire over the delete marker, the way the endpoint does, then delete.
 	if _, err := kv.Create(ctx, key, []byte("again")); err != nil {
 		t.Fatalf("re-acquire: %v", err)
 	}
-	if err := kv.Purge(ctx, key); err != nil {
-		t.Fatalf("purge own key: %v", err)
+	if err := kv.Delete(ctx, key); err != nil {
+		t.Fatalf("delete own key: %v", err)
 	}
 	b.v.none(t, "own legacy lease lifecycle")
 }

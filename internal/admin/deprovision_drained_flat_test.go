@@ -125,7 +125,7 @@ func TestDeprovisionDrainedNewFormCrashResume(t *testing.T) {
 	admin.SetAfterDeprovisionPurge(prev)
 	b, js := initOn(t, e)
 	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-	_ = lease.Purge(ctx, admin.LockKey(id.Flat()))
+	_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 	wantMarker(t, js, id.Flat(), store.RetiredPending, user)
 	_, err := b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
 	wantPendingBlock(t, err, id)
@@ -187,7 +187,7 @@ func TestDeprovisionDrainedRecoveryHoldsNameLock(t *testing.T) {
 	admin.SetAfterDeprovisionPurge(prev)
 	b, js := initOn(t, e)
 	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-	_ = lease.Purge(ctx, admin.LockKey(id.Flat()))
+	_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 	wantMarker(t, js, id.Flat(), store.RetiredPending, user)
 
 	var once sync.Once
@@ -255,7 +255,7 @@ func TestDeprovisionDrainedRecoveryRefusesChangedStream(t *testing.T) {
 			admin.SetAfterDeprovisionPurge(prev)
 			b, js := initOn(t, e)
 			lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-			_ = lease.Purge(ctx, admin.LockKey(id.Flat()))
+			_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 			change(t, b, js, id)
 			if err := b.DeprovisionDrained(ctx, id.Flat(), sid, seq); err == nil {
 				t.Fatal("a recovery against a changed stream must refuse")

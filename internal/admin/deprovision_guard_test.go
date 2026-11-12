@@ -74,7 +74,7 @@ func TestDeprovisionIfUserCrashAfterPurgeLeavesPendingMarkerThatIsCompleted(t *t
 	admin.SetAfterDeprovisionPurge(prev)
 	b, js := initOn(t, e)
 	kv, _ := js.KeyValue(ctx, store.LeaseBucket)
-	_ = kv.Purge(ctx, admin.LockKey(id.Flat()))
+	_ = kv.Delete(ctx, admin.LockKey(id.Flat()))
 	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
 	if _, err := dir.Get(ctx, id.Flat()); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("the record should be purged: %v", err)

@@ -323,6 +323,8 @@ the signed one.
 
 Nothing is kept past 30 days. An archive was planned in the design and not built (Appendix A).
 
+`mash admin init` creates the `mash-leases` bucket, and brings an existing one, with its stream set so that it does not allow rollup. Mash removes lease keys by a delete on the key's revision, not by a purge.
+
 ### 8.3 Identity, trust and the security model
 
 A full threat model is maintained separately: threat-model.md.
