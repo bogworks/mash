@@ -13,6 +13,10 @@
       "unchanged_subjects": "no_loss_outside_the_disconnect",
       "fresh_connection": "changed"
     },
+    "mail_at_close": {
+      "mail_acked_and_missing": "none",
+      "mail_silent_loss": "none"
+    },
     "tag_narrow": {
       "applied": "after_reconnect",
       "connection": "reconnected",
