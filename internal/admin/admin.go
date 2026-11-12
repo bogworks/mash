@@ -244,17 +244,9 @@ type Meta struct {
 	Labels      map[string]string
 	Description string
 	Caps        []string
-	// Nothing in the CLI sets Zone any more (ADR 0091); it stays so tests can make the zoned records that older
-	// releases wrote, which the guards and unzone must handle.
-	// Zone, when set, provisions the endpoint into that zone: a 6-token mail subject, and an inbox that takes both
-	// the zone and the legacy subject (ADR 0054). Empty is the legacy 5-token subject.
-	Zone string
 }
 
 func (m Meta) validate() error {
-	if m.Zone != "" && !sap.ValidZone(m.Zone) {
-		return errBadZone(m.Zone)
-	}
 	if err := store.ValidDescription(m.Description); err != nil {
 		return err
 	}
@@ -323,7 +315,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	}
 	// Mash's own admission rule: refuse an identity whose subjects overlap an existing endpoint's. Nothing is
 	// created before this passes.
-	if err := a.admit(ctx, kv, name, meta.Zone); err != nil {
+	if err := a.admit(ctx, kv, name); err != nil {
 		return store.Record{}, err
 	}
 	// A deprovisioned name's lease key holds a tombstone until it expires: clear it, so the name works at once.
@@ -334,7 +326,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	}
 	// A retried provision finds its inbox stream already there: never let the update lower its caps. The read, the
 	// check and the write run under the stream's limits lock, so a concurrent limits change cannot slip between them.
-	s, err := a.createInboxLocked(ctx, lk, name, meta.Zone)
+	s, err := a.createInboxLocked(ctx, lk, name)
 	if err != nil {
 		return store.Record{}, err
 	}
@@ -343,7 +335,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	}
 	rec = store.Record{
 		Name: name, Owner: a.owner, Agent: sap.AgentName, AgentToken: sap.AgentToken,
-		Account: account, User: user, MailSubject: store.MailSubjectFor(a.owner, meta.Zone, name), Zone: meta.Zone,
+		Account: account, User: user, MailSubject: store.MailSubjectFor(a.owner, name),
 		Created: time.Now().UTC().Format(time.RFC3339), Note: note,
 		Role: meta.Role, Host: meta.Host, Labels: meta.Labels, Description: meta.Description, Caps: sortedCaps(meta.Caps),
 	}
@@ -377,24 +369,24 @@ var afterDirectoryGet func(key string)
 // not parse is skipped when its key is a legacy-shaped key, as before admission existed, but only while no listed key
 // looks new-form (has an underscore). Once one does, any read or parse error on any key refuses the provision (fail
 // closed), because an unmodellable record could hide an overlap. The caller holds the admission lock.
-func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name, zone string) error {
+func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name string) error {
 	id, err := sap.Legacy(a.owner, name)
 	if err != nil {
 		return fmt.Errorf("mash: admit: %w", err)
 	}
 	keys, err := kv.Keys(ctx)
 	if errors.Is(err, jetstream.ErrNoKeysFound) {
-		return store.Admit(id, zone, nil)
+		return store.Admit(id, nil)
 	}
 	if err != nil {
 		return fmt.Errorf("mash: admit: list directory: %w", err)
 	}
 	slices.Sort(keys)
 	newForm := slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") })
-	if !newForm && zone == "" {
-		// Legacy-only directory and an unzoned legacy identity: legacy identities are never compared, so there is
+	if !newForm {
+		// Legacy-only directory and a legacy identity: legacy identities are never compared, so there is
 		// nothing to refuse and no record needs reading.
-		return store.Admit(id, zone, nil)
+		return store.Admit(id, nil)
 	}
 	var recs []store.Record
 	for _, k := range keys {
@@ -410,24 +402,14 @@ func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name, zone str
 		}
 		recs = append(recs, r)
 	}
-	return store.Admit(id, zone, recs)
+	return store.Admit(id, recs)
 }
 
 // createInboxLocked creates name's inbox stream, or updates an existing one to the configured limits unless that
 // would lower a cap. The caller holds name's lock.
-func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name, zone string) (jetstream.Stream, error) {
+func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name string) (jetstream.Stream, error) {
 	return a.createStreamLocked(ctx, lk, name, func(existing jetstream.Stream) jetstream.StreamConfig {
-		cfg := store.InboxConfigZoned(a.owner, zone, name, a.limits)
-		if existing != nil && zone == "" {
-			// A retried legacy provision must not drop the exact zone filter a stream already has.
-			for _, sub := range existing.CachedInfo().Config.Subjects {
-				if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
-					cfg.Subjects = append(cfg.Subjects, sap.MailFilterZone(a.owner, z, name))
-					break
-				}
-			}
-		}
-		return cfg
+		return store.InboxConfigFor(a.owner, name, a.limits)
 	})
 }
 
@@ -516,49 +498,31 @@ func (a *Admin) ensureInboxStream(ctx context.Context, name string) (s jetstream
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "ensure-inbox", &err)
 	defer end()
-	// The zone is read under the lock, and a failed read is an error, never an empty zone: that would repair a zoned
-	// endpoint's missing stream with the legacy subject only.
-	zone, err := a.recordZone(ctx, name)
-	if err != nil {
-		return nil, false, err
-	}
-	return a.ensureInboxStreamLocked(ctx, lk, name, zone)
+	return a.ensureInboxStreamLocked(ctx, lk, name)
 }
 
 // ensureInboxStreamLocked finds name's inbox stream, creating it if missing, or checks an existing one against the
 // configuration. The caller holds name's lock.
-func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, name, zone string) (s jetstream.Stream, created bool, err error) {
+func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, name string) (s jetstream.Stream, created bool, err error) {
 	s, err = a.js.Stream(ctx, sap.InboxStream(name))
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
 		if err := lk.check(ctx); err != nil {
 			return nil, false, err
 		}
-		if s, err = a.js.CreateStream(ctx, store.InboxConfigZoned(a.owner, zone, name, a.limits)); err != nil {
+		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
 			return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 		}
 		return s, true, nil
 	} else if err != nil {
 		return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 	}
-	// A zoned record needs exactly the legacy filter and the exact filter of its own zone: mail sent to its recorded
-	// subject must enter, and mail addressed to another zone must not. A legacy record accepts [legacy] or the legacy
-	// filter plus one exact zone filter, which an unzone in progress leaves (it rewrites the record before the stream).
-	want := store.InboxConfigZoned(a.owner, zone, name, a.limits)
+	want := store.InboxConfigFor(a.owner, name, a.limits)
 	got := s.CachedInfo().Config
 	// A suspended stream is the endpoint's own: its saved subjects stand in for the parked one (ADR 0057).
 	if saved, ok := suspendedSubjects(name, got); ok {
 		got.Subjects = saved
 	}
-	var alt []string
-	if zone == "" {
-		for _, sub := range got.Subjects {
-			if z, ok := sap.ZoneOfMailFilter(sub, a.owner, name); ok {
-				alt = []string{sap.MailFilter(a.owner, name), sap.MailFilterZone(a.owner, z, name)}
-				break
-			}
-		}
-	}
-	if err := checkInboxStream(name, got, want, alt); err != nil {
+	if err := checkInboxStream(name, got, want); err != nil {
 		return nil, false, err
 	}
 	return s, false, nil
@@ -588,13 +552,9 @@ func firstInboxDiff(what, name string, fields []inboxField) error {
 	return nil
 }
 
-// checkInboxStream compares an existing inbox stream with want, field by field. want carries the legacy mail filter;
-// a stream with the legacy filter and zoneFilter together is a zoned endpoint's inbox and is accepted too (ADR 0054).
-func checkInboxStream(name string, got, want jetstream.StreamConfig, alt []string) error {
+// checkInboxStream compares an existing inbox stream with want, field by field. want carries the one mail filter.
+func checkInboxStream(name string, got, want jetstream.StreamConfig) error {
 	wantSubjects := sortedCopy(want.Subjects)
-	if alt != nil && slices.Equal(sortedCopy(got.Subjects), sortedCopy(alt)) {
-		wantSubjects = sortedCopy(got.Subjects)
-	}
 	return firstInboxDiff("stream", name, []inboxField{
 		{"subjects", sortedCopy(got.Subjects), wantSubjects},
 		{"storage", got.Storage, want.Storage},
@@ -1091,30 +1051,6 @@ func (a *Admin) setUser(ctx context.Context, lk *streamLock, name, account, oldU
 		return store.ParseRecord(name, val)
 	}
 	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under reissue; try again", name)
-}
-
-func errBadZone(_ string) error {
-	return fmt.Errorf("mash: zone: 1-%d lower-case letters, digits and hyphens (the value is not shown)", sap.MaxZoneLen)
-}
-
-// recordZone is name's zone on record: empty when it has none, or when there is no record (or no directory yet).
-// Any other failure to read the directory is an error.
-func (a *Admin) recordZone(ctx context.Context, name string) (string, error) {
-	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
-	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("mash: directory: %w", err)
-	}
-	rec, err := store.GetRecord(ctx, kv, name)
-	if errors.Is(err, jetstream.ErrKeyNotFound) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("mash: directory %s: %w", name, err)
-	}
-	return rec.Zone, nil
 }
 
 // isRevisionConflict reports a failed compare-and-set: the key's revision moved (or it was deleted) since the read.

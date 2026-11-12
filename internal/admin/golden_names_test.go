@@ -98,34 +98,6 @@ func TestGoldenNSCFlags(t *testing.T) {
 	}
 }
 
-func TestGoldenZonePermissions(t *testing.T) {
-	p := ZonePermissions("o", "z", nil)
-	goldenSame(t, "pub allow", p.Pub.Allow, append([]string{
-		"agents.mail.*.o.{{tag(allow)}}",
-		"agents.prompt.*.o.*",
-		"agents.status.*.o.*",
-	}, goldenFixed("{{name()}}", "agents.hb.cc.o.{{name()}}")...))
-	goldenSame(t, "pub deny", p.Pub.Deny, []string{"agents.mail.*.o.{{tag(deny)}}"})
-	goldenSame(t, "sub allow", p.Sub.Allow, []string{
-		"_INBOX.{{name()}}.>",
-		"agents.prompt.cc.o.{{name()}}",
-		"agents.status.cc.o.{{name()}}",
-		"$SRV.>",
-		"agents.hb.*.o.*",
-	})
-	w := ZonePermissions("o", "z", []string{"y", "x"})
-	goldenSame(t, "pub allow with wildcard zones", w.Pub.Allow, append([]string{
-		"agents.mail.*.o.x.*",
-		"agents.mail.*.o.y.*",
-		"agents.mail.*.o.{{tag(allow)}}",
-		"agents.prompt.*.o.*",
-		"agents.status.*.o.*",
-	}, goldenFixed("{{name()}}", "agents.hb.cc.o.{{name()}}")...))
-	if AllowTag != "allow" || DenyTag != "deny" || NoDenyTag != "deny:_none" {
-		t.Errorf("tag names: %q %q %q", AllowTag, DenyTag, NoDenyTag)
-	}
-}
-
 // The admin's own per-endpoint lock key in the lease bucket is derived from the name.
 func TestGoldenLockKey(t *testing.T) {
 	if got := lockKey("a"); got != "limits-lock.a" {

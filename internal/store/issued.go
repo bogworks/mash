@@ -57,11 +57,11 @@ func ValidPurpose(p string) bool {
 // a JWT. The bucket key is the user's public key.
 type Issued struct {
 	PublicKey string `json:"public_key"`
-	// Address is the endpoint's directory name (for an admin user, the name in its JWT). Owner and Zone are the
-	// owner the name lives under and the zone the signing key belongs to ("" when the user has none).
+	// Address is the endpoint's directory name (for an admin user, the name in its JWT). Owner is the
+	// owner the name lives under ("" when the user has none). An entry an older release wrote may carry a "zone" key;
+	// it is ignored on read.
 	Address string   `json:"address"`
 	Owner   string   `json:"owner,omitempty"`
-	Zone    string   `json:"zone,omitempty"`
 	Kind    string   `json:"kind"`
 	Tags    []string `json:"tags"`
 	// Generation is the generation of the policy the JWT was issued under. mash has no policy generation yet, so it

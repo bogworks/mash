@@ -1573,9 +1573,14 @@ func TestAuditReportsZonedRecord(t *testing.T) {
 	}
 	_, u := g.e.Mint(t, "zoned")
 	g.users[u] = "USER-zoned"
-	if _, err := adm.Provision(context.Background(), "zoned", u, g.e.Account, "", admin.Meta{Zone: "red"}); err != nil {
+	if _, err := adm.Provision(context.Background(), "zoned", u, g.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
+	js, err := jetstream.New(g.nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeZoned(t, js, g.e.Owner, "zoned", "red")
 	out, errb, code := g.run(t, "--strict")
 	if code != 1 || !strings.Contains(errb, "1 item(s) not readable") {
 		t.Fatalf("--strict with a zoned record: %d out=%q err=%q", code, out, errb)

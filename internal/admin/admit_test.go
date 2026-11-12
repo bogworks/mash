@@ -70,20 +70,6 @@ func TestProvisionAdmitsNonOverlappingWithNewFormRecord(t *testing.T) {
 	}
 }
 
-func TestProvisionRefusesZonedWhileNewFormExists(t *testing.T) {
-	e, a, js := setup(t)
-	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	putNewFormRecord(t, js, user, "acme", "team1", "ops1")
-	_, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{Zone: "default"})
-	if err == nil || !strings.Contains(err.Error(), "zoned legacy endpoint") {
-		t.Fatalf("got %v", err)
-	}
-	if _, err := js.Stream(ctx, sap.InboxStream("alpha")); !errors.Is(err, jetstream.ErrStreamNotFound) {
-		t.Fatalf("stream created: %v", err)
-	}
-}
-
 func TestProvisionLegacyOnlyUnchanged(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
@@ -96,7 +82,7 @@ func TestProvisionLegacyOnlyUnchanged(t *testing.T) {
 	if _, err := a.Provision(ctx, "beta", ub, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Provision(ctx, "zed", uz, e.Account, "", admin.Meta{Zone: "default"}); err != nil {
+	if _, err := a.Provision(ctx, "zed", uz, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	// Already provisioned keeps its message.
@@ -116,8 +102,8 @@ func TestAdmissiblePairDeliversDisjointly(t *testing.T) {
 	legacy, _ := sap.Legacy("legowner", "ops1")
 	nf, _ := sap.New("acme", "team1", "ops1")
 	existing := []store.Record{{Name: "ops1", Owner: "legowner", Agent: "claude-code", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: store.MailSubjectFor("legowner", "", "ops1")}}
-	if err := store.Admit(nf, "", existing); err != nil {
+		MailSubject: store.MailSubjectFor("legowner", "ops1")}}
+	if err := store.Admit(nf, existing); err != nil {
 		t.Fatalf("the pair is admissible: %v", err)
 	}
 
@@ -165,7 +151,7 @@ func TestOverlappingPairCannotBothHaveStreams(t *testing.T) {
 	nf, _ := sap.New("acme", "team1", "ops1")
 	// Legacy owner team1, name ops1: its wildcard filter agents.mail.*.team1.ops1 contains acme.team1.ops1.
 	existing := []store.Record{{Name: "ops1", Owner: "team1", Agent: "claude-code", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: store.MailSubjectFor("team1", "", "ops1")}}
+		MailSubject: store.MailSubjectFor("team1", "ops1")}}
 	if _, err := js.CreateStream(ctx, store.InboxConfigFor("team1", "ops1", l)); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +164,7 @@ func TestOverlappingPairCannotBothHaveStreams(t *testing.T) {
 		t.Fatalf("the server must refuse overlapping stream subjects, got %v", err)
 	}
 	t.Logf("server refusal: %v", err)
-	if err := store.Admit(nf, "", existing); err == nil || !strings.Contains(err.Error(), "overlap") {
+	if err := store.Admit(nf, existing); err == nil || !strings.Contains(err.Error(), "overlap") {
 		t.Fatalf("Admit must refuse the overlapping pair first, got %v", err)
 	}
 }
@@ -290,7 +276,7 @@ func TestAdmissionLockHeldDuringAdmit(t *testing.T) {
 	}
 }
 
-func TestProvisionLegacyOnlyUnzonedSkipsRecordReads(t *testing.T) {
+func TestProvisionLegacyOnlySkipsRecordReads(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
 	for _, n := range []string{"a1", "a2", "a3", "a4"} {
@@ -307,14 +293,6 @@ func TestProvisionLegacyOnlyUnzonedSkipsRecordReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := gets.Load(); n != 0 {
-		t.Fatalf("unzoned legacy-only provision read %d records", n)
-	}
-	// a zoned provision still reads them
-	_, u6 := e.Mint(t, "a6")
-	if _, err := a.Provision(ctx, "a6", u6, e.Account, "", admin.Meta{Zone: "default"}); err != nil {
-		t.Fatal(err)
-	}
-	if gets.Load() == 0 {
-		t.Fatal("zoned provision read no records")
+		t.Fatalf("legacy-only provision read %d records", n)
 	}
 }

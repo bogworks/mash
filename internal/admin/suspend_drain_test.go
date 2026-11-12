@@ -18,7 +18,7 @@ import (
 func TestSuspendDrainLosesNothing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "default")
+	provisionFor(t, e, a, "alpha")
 	const subj = "agents.mail.cc.o.default.alpha"
 
 	var (

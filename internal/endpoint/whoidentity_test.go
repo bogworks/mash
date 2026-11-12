@@ -19,7 +19,7 @@ func whoIdentitySet(t *testing.T) []Presence {
 			MailSubject: id.Subjects().Mail, Created: "2026-01-01T00:00:00Z"}}
 	}
 	lg := Presence{Record: store.Record{Name: "x", Owner: "acme", Agent: "cc", AgentToken: "cc", Account: "A", User: "U2",
-		MailSubject: store.MailSubjectFor("acme", "z", "x"), Zone: "z", Created: "2026-01-01T00:00:00Z"}}
+		MailSubject: store.MailSubjectFor("acme", "x"), Created: "2026-01-01T00:00:00Z"}}
 	return []Presence{nf("acme", "team1", "x"), nf("beta", "team1", "x"), lg}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,15 +39,51 @@ func zonedFixture(t *testing.T, e *applyEnv, applyPolicyFirst bool) {
 	defer closeAdmin()
 	kp, _ := nkeys.CreateUser()
 	pub, _ := kp.PublicKey()
-	if _, err := adm.Provision(ctx, "alpha", pub, e.acctPub, "", madmin.Meta{Zone: "z1"}); err != nil {
+	if _, err := adm.Provision(ctx, "alpha", pub, e.acctPub, "", madmin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	js, _ := jetstream.New(adm.Conn())
+	makeZoned(t, js, "alice", "alpha", "z1")
 	if _, err := js.Publish(ctx, "agents.mail.cc.alice.z1.alpha", []byte("queued")); err != nil {
 		t.Fatal(err)
 	}
 	if applyPolicyFirst { // a zone policy of an older release: the account JWT carries a scoped signing key
 		e.applyZonePolicy()
+	}
+}
+
+// makeZoned rewrites the provisioned endpoint name as a zoned release left it: the record carries the zone and the
+// six-token mail subject, and the inbox stream takes the five-token filter and the zone's. Nothing in mash builds such
+// a record any more (ADR 0091).
+func makeZoned(t *testing.T, js jetstream.JetStream, owner, name, zone string) {
+	t.Helper()
+	ctx := context.Background()
+	kv, err := js.KeyValue(ctx, store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ent, err := kv.Get(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(ent.Value(), &obj); err != nil {
+		t.Fatal(err)
+	}
+	obj["zone"] = json.RawMessage(`"` + zone + `"`)
+	obj["mail_subject"] = json.RawMessage(`"agents.mail.cc.` + owner + `.` + zone + `.` + name + `"`)
+	raw, _ := json.Marshal(obj)
+	if _, err := kv.Update(ctx, name, raw, ent.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := js.Stream(ctx, "inbox-"+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := st.CachedInfo().Config
+	cfg.Subjects = []string{"agents.mail.*." + owner + "." + name, "agents.mail.*." + owner + "." + zone + "." + name}
+	if _, err := js.UpdateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 

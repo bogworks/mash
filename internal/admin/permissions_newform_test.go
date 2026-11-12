@@ -339,16 +339,6 @@ func (v *violations) deniedPub(t *testing.T, nc *nats.Conn, subj string) {
 	v.expect(t, subj)
 }
 
-func TestRefuseCompiledForNewForm(t *testing.T) {
-	if err := admin.RefuseCompiledForNewForm(false); err != nil {
-		t.Fatal(err)
-	}
-	err := admin.RefuseCompiledForNewForm(true)
-	if err == nil || !strings.Contains(err.Error(), "three-token identity cannot take a policy-compiled user until the zone ruling") {
-		t.Fatalf("got %v", err)
-	}
-}
-
 // probe is a client whose async permission errors are recorded.
 type probe struct {
 	nc   *nats.Conn
@@ -737,11 +727,11 @@ func TestLegacyUserOverlapWithNewForm(t *testing.T) {
 	publishExpect(t, p, ch, same.Subjects().Mail, true)
 
 	existing := []store.Record{{Name: "peer", Owner: e.Owner, Agent: "claude-code", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: store.MailSubjectFor(e.Owner, "", "peer")}}
-	if err := store.Admit(same, "", existing); err == nil {
+		MailSubject: store.MailSubjectFor(e.Owner, "peer")}}
+	if err := store.Admit(same, existing); err == nil {
 		t.Error("Admit accepted a new-form identity whose owner equals a legacy owner")
 	}
-	if err := store.Admit(other, "", existing); err != nil {
+	if err := store.Admit(other, existing); err != nil {
 		t.Errorf("Admit refused the disjoint identity: %v", err)
 	}
 }

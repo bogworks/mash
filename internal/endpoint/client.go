@@ -333,7 +333,7 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 			return err
 		}
 	}
-	// The endpoint's own mail subject is the one its record says: a zoned endpoint advertises its zoned subject.
+	// The endpoint's own mail subject is the one its record says (five tokens).
 	e.subj.Mail = self.MailSubject
 	if opts.FullDirectory {
 		if keysErr != nil {
