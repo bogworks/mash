@@ -55,9 +55,9 @@
 | [0051](0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) | Releases carry an SBOM per binary and SLSA provenance from an isolated generator | proposed | 2026-11-01 |
 | [0052](0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md) | mashctl mints NATS users under one scoped signing key per zone and holds the account signing key; it supersedes 0008 | accepted | 2026-11-02 |
 | [0053](0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) | Who may mail whom is a policy file of labels and rules; one label, the zone, lives in the mail subject, and mashctl compiles the rules into each zone's NATS permissions | accepted | 2026-11-02 |
-| [0054](0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md) | Mail subjects carry a zone token, and the legacy subjects stay valid | accepted | 2026-11-02 |
+| [0054](0054-mail-subjects-carry-a-zone-token-legacy-subjects-stay-valid.md) | Mail subjects carry a zone token, and the legacy subjects stay valid | superseded by ADR-0091 | 2026-11-02 |
 | [0055](0055-until-the-maintainer-rules-only-mail-is-policed-prompt-and-status-stay-open.md) | Until the maintainer rules on prompt and status, only mail is policed; they stay open on their five-token subjects | accepted | 2026-11-02 |
-| [0056](0056-every-zone-key-carries-both-tag-templates-and-every-user-the-deny-none-placeholder.md) | Every zone key carries both tag templates and every user the `deny:_none` placeholder | accepted | 2026-11-02 |
+| [0056](0056-every-zone-key-carries-both-tag-templates-and-every-user-the-deny-none-placeholder.md) | Every zone key carries both tag templates and every user the `deny:_none` placeholder | superseded by ADR-0091 | 2026-11-02 |
 | [0057](0057-an-admin-can-suspend-an-endpoints-inbound-mail-by-parking-its-inbox-stream-subjects.md) | An admin can suspend an endpoint's inbound mail by parking its inbox stream's subjects, and read whether it is suspended | accepted | 2026-11-02 |
 | [0058](0058-an-operation-under-the-name-lock-stops-before-the-lock-expires-and-rechecks-it-before-writes.md) | An operation under the name lock stops before the lock expires and re-checks it before a write | accepted | 2026-11-02 |
 | [0059](0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md) | mashctl checks who issued the account JWT, carries only its own signing keys, and requires TLS for admin and system connections | accepted | 2026-11-02 |
@@ -71,7 +71,7 @@
 | [0067](0067-a-reissue-that-narrows-an-endpoint-rotates-its-user-key-and-revokes-the-old-one.md) | A reissue that narrows an endpoint rotates its user key and revokes the old one | accepted | 2026-11-03 |
 | [0068](0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md) | A change-log entry is a fragment file in `changelog.d/`, and the ADR index is generated, so a pull request edits neither shared file | accepted | 2026-11-03 |
 | [0069](0069-a-crowded-backlog-does-not-wake-a-session-that-a-hook-is-draining.md) | A crowded backlog does not wake a session that a hook is draining | accepted | 2026-11-03 |
-| [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md) | The next ADR number is a file, `NEXT`, and the lint refuses a duplicate or stale number | accepted | 2026-11-03 |
+| [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md) | The next ADR number is a file, `NEXT`, and the lint refuses a duplicate or stale number | superseded by ADR-0089 | 2026-11-03 |
 | [0071](0071-mashctl-add-checks-the-zone-key-is-a-scoped-signer-in-the-account-jwt-before-minting.md) | `mashctl add` checks that the zone key is a scoped signer in the account JWT before minting | proposed | 2026-11-03 |
 | [0072](0072-a-directory-record-may-carry-up-to-64-labels.md) | A directory record may carry up to 64 labels | accepted | 2026-11-03 |
 | [0073](0073-a-one-time-scrub-verification-reads-its-word-list-and-exceptions-from-data-files-and-is-not-a-standing-guard.md) | A one-time scrub verification reads its word list and exceptions from data files and is not a standing guard | superseded by ADR-0075 | 2026-11-09 |
@@ -81,7 +81,14 @@
 | [0077](0077-the-name-rule-file-is-versioned-and-mash-reads-two-versions-for-one-window.md) | The name-rule file is versioned, and mash reads two versions for one window | accepted | 2026-11-10 |
 | [0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md) | Queue entry needs an approval or an approval label, and a push removes the label | accepted | 2026-11-10 |
 | [0079](0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md) | CI and release jobs run on self-hosted runners only | accepted | 2026-11-10 |
+| [0080](0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md) | Review is a gate in the implementer's loop, adopted from a sibling project | accepted | 2026-11-10 |
+| [0081](0081-three-token-identities-are-shown-in-canonical-form.md) | Three-token identities are shown in canonical form; scripts keep the flat key | accepted | 2026-11-10 |
 | [0083](0083-a-via-origin-is-an-endpoint-name-or-a-canonical-flat-key-amends-0063.md) | A via origin is a legacy endpoint name or a canonical flat key (amends 0063) | accepted | 2026-11-10 |
 | [0084](0084-ci-warms-go-caches-from-a-read-only-seed.md) | CI warms its Go caches from a read-only seed copied per job | accepted | 2026-11-11 |
 | [0086](0086-the-queue-s-gate-jobs-run-on-small-dedicated-gate-runners.md) | The queue's gate jobs run on small dedicated gate runners | accepted | 2026-11-11 |
 | [0087](0087-release-attestations-from-our-own-runners-are-accepted-and-say-only-that-we-built-them.md) | Release attestations from our own runners are accepted and say only that we built them | accepted | 2026-11-11 |
+| [0088](0088-a-retired-new-form-name-is-burned-in-a-durable-bucket-by-a-two-phase-marker-that-is-never-deleted.md) | A retired new-form name is burned in a durable bucket by a two-phase marker that is never deleted | accepted | 2026-11-11 |
+| [0089](0089-an-adr-takes-any-number-above-the-highest-on-the-base-branch-and-there-is-no-next-file.md) | An ADR takes any number above the highest on the base branch, and there is no NEXT file | accepted | 2026-11-11 |
+| [0091](0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md) | There are no zones: mail keeps the five-token subject and the address is the fence | accepted | 2026-11-11 |
+| [0092](0092-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md) | A new serve of the same session takes over the endpoint lease | accepted | 2026-11-10 |
+| [0093](0093-the-lease-bucket-does-not-allow-rollup-writes.md) | The lease bucket does not allow rollup writes | accepted | 2026-11-12 |

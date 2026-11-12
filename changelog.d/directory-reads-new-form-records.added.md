@@ -1,1 +1,0 @@
-The directory reader now accepts records of three-token identities (keyed `agent_owner_name`); nothing writes them yet. A reader older than this release cannot read such a record, so upgrade every reader before enabling new-form endpoints.
