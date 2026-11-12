@@ -6,8 +6,8 @@ table (see [0068](0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-i
 
 mash's architecture decision records (ADRs), in [MADR 4.0](https://adr.github.io/madr/) format. [0002](0002-record-architecture-decisions-as-madr-records.md)
 says how they work: one decision per file, never rewritten once accepted, superseded by a new ADR instead. A pull
-request that makes or reverses a decision carries its ADR. A pull request that adds an ADR takes any number greater than the highest in this directory on the base branch; the lint refuses a lower or taken number, and the merge queue's combined commit refuses a duplicate. There is no counter file
-([0089](0089-an-adr-takes-any-number-above-the-highest-on-the-base-branch-and-there-is-no-next-file.md) is the rule; it supersedes [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md)).
+request that makes or reverses a decision carries its ADR. A pull request that adds an ADR takes any number that no ADR file on the base branch uses (a number below the highest is fine; gaps and out-of-order merges are allowed); the lint refuses a taken number, and the merge queue's combined commit refuses a duplicate. There is no counter file
+([0106](0106-an-adrs-number-must-be-unused-not-higher-than-the-base.md) amends [0089](0089-an-adr-takes-any-number-above-the-highest-on-the-base-branch-and-there-is-no-next-file.md), which supersedes [0070](0070-the-next-adr-number-is-a-file-next-and-the-lint-refuses-a-duplicate-or-stale-number.md)).
 The lint judges only the ADR files the pull request's own diff touches, against the merge-base of the base branch and the pull request: a record accepted at the merge-base or at the base tip is immutable, and one the pull request does not touch (such as an ADR that merged after the branch point) is never flagged.
 
 0003 to 0037 were backfilled on 2026-10-31 from the design spec, pull requests, issues and maintainer discussions.
