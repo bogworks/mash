@@ -16,6 +16,7 @@ import (
 
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
@@ -115,6 +116,7 @@ func Usage(prog string) string {
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan, an undrained inbox, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
 		adoptLines(line)
 		mintLines(line)
+		issuedLines(line)
 		retireLines(line)
 		policyLines(line)
 	}
@@ -128,6 +130,11 @@ func adoptLines(line func(left, right string)) {
 func mintLines(line func(left, right string)) {
 	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
 	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+}
+
+func issuedLines(line func(left, right string)) {
+	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
+	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
 func retireLines(line func(left, right string)) {
@@ -245,6 +252,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	switch args[0] {
 	case "init":
 		if err := a.Init(ctx); err != nil {
+			return fail(err)
+		}
+		if err := recordAdminUser(ctx, a, cfg); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintln(stdout, pfx+": directory and lease buckets ready")
@@ -403,6 +413,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 					return fmt.Errorf("user key %s...: %w", ShortKey(user), err)
 				}
 				revokedUser = user
+				MarkRevoked(ctx, a, user, time.Now(), stderr)
 				return nil
 			})
 		}
@@ -737,4 +748,52 @@ func AliasedRefusal(err error, name string) (msg string, ok bool) {
 		fix = "retire or re-point " + h + " first"
 	}
 	return "mash: refusing to deprovision " + name + ": " + by + " names it as its alias; nothing was changed. To proceed, " + fix + ", then run this again", true
+}
+
+// recordAdminUser puts the admin user of cfg's admin credentials in the issue record, kind "admin": mash's own admin
+// user (the one `init --local` writes, or `adopt --mint-admin` mints) is issued outside `add`, so it is recorded the
+// first time init runs with it. Only the public key and the JWT's name and tags are read; the seed is never used.
+func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) error {
+	raw, err := config.ReadCredsFile(cfg.AdminCreds)
+	if err != nil {
+		return fmt.Errorf("mash: admin credentials: %w", err)
+	}
+	defer clear(raw)
+	return RecordAdminCreds(ctx, a, cfg.Owner, raw)
+}
+
+// RecordAdminCreds puts the admin user held in the creds bytes raw in the issue record (kind admin, purpose issue), over
+// a's connection. `mashctl init` uses it for the configured admin creds and `mashctl adopt --mint-admin` for the user it
+// mints, before the creds file is written. Only the public key and the JWT's name, tags and issue time are read.
+func RecordAdminCreds(ctx context.Context, a *madmin.Admin, owner string, raw []byte) error {
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return errors.New("mash: admin credentials hold no readable JWT")
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil {
+		return errors.New("mash: admin credentials hold no readable user JWT")
+	}
+	issued := time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339)
+	if uc.IssuedAt == 0 {
+		issued = ""
+	}
+	return a.RecordIssued(ctx, store.Issued{PublicKey: uc.Subject, Address: uc.Name, Owner: owner, Kind: store.IssuedAdmin,
+		Tags: []string(uc.Tags), IssuedAt: issued, Purpose: store.PurposeIssue})
+}
+
+// IssuedMarkRevoked is the write MarkRevoked makes; a test replaces it to make the write fail.
+var IssuedMarkRevoked = func(ctx context.Context, a *madmin.Admin, user string, at time.Time) error {
+	return a.MarkRevoked(ctx, user, at)
+}
+
+// MarkRevoked notes in the issue record that user's key was revoked at at. It runs after the revocation succeeded and
+// is best effort: a key mash never recorded is no finding, any other failure is a warning on stderr, and nothing
+// here fails or undoes the revocation.
+func MarkRevoked(ctx context.Context, a *madmin.Admin, user string, at time.Time, stderr io.Writer) {
+	err := IssuedMarkRevoked(ctx, a, user, at)
+	if err == nil || errors.Is(err, madmin.ErrNotRecorded) {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: user key %s... is revoked, but the issue record was not updated with it: %v\n", ShortKey(user), err)
 }

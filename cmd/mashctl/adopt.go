@@ -17,11 +17,14 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	madmin "github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // lookupWait bounds the account lookup of adopt (a variable so tests need not wait for the full time).
@@ -366,12 +369,23 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	case o.mintAdmin && st.haveAdmin:
 		adminPath = st.adminDst
 		step("%skeep the existing %s (it connected; not minted again)", verb, st.adminDst)
+		if !o.dryRun {
+			if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw); err != nil {
+				return fail("the admin user in %s could not be recorded in the issue record (%v). It is not recorded, so `mashctl issued check` will report it as unrecorded until it is: run `mashctl init` (or adopt again) once the cause is fixed", st.adminDst, err)
+			}
+			step("recorded the admin user in the issue record (bucket %s)", store.IssuedBucket)
+		}
 	case o.mintAdmin:
 		adminPath = st.adminDst
 		if o.dryRun {
 			step("would write the minted mashadmin user (it connected) to %s (0600)", st.adminDst)
 			break
 		}
+		// Record first, then write: a creds file that exists is always a recorded credential.
+		if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw); err != nil {
+			return fail("the minted mashadmin user could not be recorded in the issue record (%v): the admin credentials were NOT recorded and were NOT written to %s, so no credential was handed out. Fix the cause and run adopt again, or use --admin-creds FILE and run `mashctl init`", err, st.adminDst)
+		}
+		step("recorded the admin user in the issue record (bucket %s)", store.IssuedBucket)
 		created, err := ctlkeys.InstallFile(st.adminDst, st.adminRaw)
 		if err != nil {
 			return fail("%v", err)
@@ -426,7 +440,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if adminPath == "" {
 		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `add` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}
-	fmt.Fprintf(stdout, "\nWhat adopt does not do: it changes nothing on the server. It pushes no account update, creates no users on the server (the optional mashadmin exists only as a local creds file) and no buckets. The cutover of a live account, and revoking old credentials, is a separate step you run yourself.\n")
+	fmt.Fprintf(stdout, "\nWhat adopt does not do: it changes nothing on the server, except that --mint-admin records the minted mashadmin user in the issue record (creating its bucket if there is none). It pushes no account update and creates no users on the server (the optional mashadmin exists only as a local creds file). The cutover of a live account, and revoking old credentials, is a separate step you run yourself.\n")
 	return 0
 }
 
@@ -582,17 +596,43 @@ func checkAdminCreds(cfg config.Config, url string, st *adoptState) (string, err
 // connectAdmin connects with admin creds (bytes; never printed) under the rules of every admin connection: TLS
 // required unless the loopback opt-in applies. The error carries the server's text.
 func connectAdmin(cfg config.Config, url string, raw []byte) error {
-	tlsReq, err := natsauth.RequireTLS(url, cfg.InsecureLoopback)
+	c, err := dialAdmin(cfg, url, raw)
 	if err != nil {
 		return err
+	}
+	c.Close()
+	return nil
+}
+
+func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
+	tlsReq, err := natsauth.RequireTLS(url, cfg.InsecureLoopback)
+	if err != nil {
+		return nil, err
 	}
 	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-adopt-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
-		return natsauth.TLSHint(err)
+		return nil, natsauth.TLSHint(err)
 	}
-	c.Close()
-	return nil
+	return c, nil
+}
+
+// recordAdoptedAdmin writes the admin user in raw to the issue record, over its own connection (the user is the
+// account's admin, so it may write the bucket), creating the bucket on demand. It runs before the creds file is
+// written, so a credential adopt hands out is never unrecorded.
+func recordAdoptedAdmin(cfg config.Config, url, owner string, raw []byte) error {
+	c, err := dialAdmin(cfg, url, raw)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	a, err := madmin.New(c, owner)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return ctl.RecordAdminCreds(ctx, a, owner, raw)
 }
 
 // jsLimits is the JetStream limits of the account (the R1 tier when the account uses tiered limits). It errors when
