@@ -7,5 +7,6 @@ const (
 	DirectoryBucket = "mash-directory"
 	LeaseBucket     = "mash-leases"
 	RetiredBucket   = "mash-retired"
+	IssuedBucket    = "mash-issued"
 	Consumer        = "deliver"
 )

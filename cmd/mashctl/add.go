@@ -304,6 +304,12 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 	defer clear(m.Creds)
 
+	// The issue record comes before the directory record and the creds file: a user that can connect is always in it.
+	// A failure here issues nothing (the creds are in memory only).
+	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
+		return fail("%v; nothing was issued", err)
+	}
+
 	// (4) the directory record and inbox.
 	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels}); err != nil {
 		if strings.Contains(err.Error(), "is already provisioned") {

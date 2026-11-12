@@ -194,6 +194,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
+			recorder := adm
 			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
 				if beforeRetireRevoke != nil {
 					beforeRetireRevoke()
@@ -218,6 +219,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}
+				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 				return nil
 			})
 		}
