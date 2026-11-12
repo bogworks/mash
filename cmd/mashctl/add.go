@@ -14,21 +14,17 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
-	"github.com/bogworks/mash/internal/policy"
-	"github.com/bogworks/mash/internal/policyfile"
 	"github.com/bogworks/mash/internal/store"
 )
 
-const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]
+const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
 `
 
-// afterProvision is a test seam called between the directory record and the policy-file save.
-var afterProvision func()
-
 type addOpts struct {
-	name, file, note string
-	labels           map[string]string
-	tool             bool
+	name, note, describe string
+	labels               map[string]string
+	caps                 []string
+	tool                 bool
 }
 
 func parseAddArgs(args []string) (addOpts, error) {
@@ -72,11 +68,16 @@ func parseAddArgs(args []string) (addOpts, error) {
 				return o, fmt.Errorf("label %q given twice", k)
 			}
 			o.labels[k] = lv
-		case "--policy":
+		case "--describe":
 			if v, err = get(); err != nil {
 				return o, err
 			}
-			o.file = v
+			o.describe = v
+		case "--cap":
+			if v, err = get(); err != nil {
+				return o, err
+			}
+			o.caps = append(o.caps, v)
 		case "--note":
 			if v, err = get(); err != nil {
 				return o, err
@@ -115,41 +116,19 @@ func openKeys(cfg config.Config, env func(string) string) (*ctlkeys.Authority, e
 	return ctlkeys.Open(dir)
 }
 
-// compileBytes parses and compiles policy-file bytes for owner.
-func compileBytes(data []byte, owner string) (*policy.File, *policy.Compiled, error) {
-	f, err := policy.Parse(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	c, err := policy.Compile(f, owner)
-	if err != nil {
-		return nil, nil, err
-	}
-	return f, c, nil
-}
-
-func findEndpoint(c *policy.Compiled, name string) (policy.CompiledEndpoint, bool) {
-	for _, e := range c.Endpoints {
-		if e.Name == name {
-			return e, true
-		}
-	}
-	return policy.CompiledEndpoint{}, false
-}
-
 // orphanFix is the exact recovery for an add that was killed after it made a directory record or creds file.
 func orphanFix(name string) string {
 	return fmt.Sprintf("run mashctl retire %s --force --delete-creds, then mashctl add %s again", name, name)
 }
 
-// orphanText says an existing record or creds file for a name the policy file lacks looks like an interrupted add.
-// Callers use it only after checking that the policy file has no endpoint of that name.
+// orphanText says an existing creds file or inbox for a name the directory has no record of looks like an interrupted
+// add. Callers use it only after checking that the directory has no record of that name.
 func orphanText(name string) string { return orphanTextShown(name, name) }
 
 // orphanTextShown is orphanText for a directory key that people read in another form (a three-token endpoint's
 // canonical agent.owner.name, ADR 0081): the name is shown, the command keeps the key.
 func orphanTextShown(shown, key string) string {
-	return fmt.Sprintf("%s looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint %s): %s", shown, shown, orphanFix(key))
+	return fmt.Sprintf("%s looks like an interrupted add (a creds file or an inbox exists but the directory has no complete record of %s): %s", shown, shown, orphanFix(key))
 }
 
 // credsFileFor is where name's creds live: an existing file in the config directories, else <config dir>/name.creds.
@@ -216,22 +195,17 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "add")
 		return 2
 	}
-	if err := policyfile.CheckName(o.name); err != nil {
-		fmt.Fprintf(stderr, "mashctl: add: %v\n", err)
-		return 2
-	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	// The name rule comes before any key, policy edit or record: a refused name creates nothing.
+	// The name rule comes before any key or record: a refused name creates nothing.
 	if err := admin.CheckProvision(cfg.NameRule, cfg.Owner, o.name); err != nil {
 		return fail("%v", err)
 	}
-	path, err := policyPath(o.file, env, cfg)
-	if err != nil {
-		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
+	if cfg.Owner == "" {
+		return fail(`no owner (config.json "owner" or MASH_OWNER)`)
 	}
 	keys, err := openKeys(cfg, env)
 	if err != nil {
@@ -240,21 +214,6 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	if _, _, err := keys.Account(); err != nil { // before anything is touched: `mashctl init` first
 		return fail("%v", err)
 	}
-
-	// (1) the policy file, locked for the whole command.
-	doc, err := policyfile.Load(path)
-	if err != nil {
-		return fail("%v", err)
-	}
-	defer doc.Close()
-	beforeBytes, _ := doc.Bytes()
-	beforeFile, _, err := compileBytes(beforeBytes, cfg.Owner)
-	if err != nil {
-		return fail("%s: %v", path, err)
-	}
-	if _, dup := beforeFile.Endpoints[o.name]; dup {
-		return fail("endpoint %q is already declared in %s", o.name, path)
-	}
 	labels, err := addLabels(o)
 	if err != nil {
 		return fail("%v", err)
@@ -262,30 +221,9 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	if err := store.ValidLabels(labels); err != nil {
 		return fail("%v", err)
 	}
-
-	// (2) the endpoint in memory, compiled.
-	if err := doc.AddEndpoint(o.name, labels); err != nil {
-		return fail("%v", err)
-	}
-	afterBytes, _ := doc.Bytes()
-	afterFile, after, err := compileBytes(afterBytes, cfg.Owner) // Parse runs Check: a file that does not check is refused here
-	if err != nil {
-		return fail("the new endpoint does not make a valid policy: %v", err)
-	}
-	// The file's own tests gate the mint exactly as they gate apply: nothing is created, provisioned or written first.
-	if failed, total := policyTestFailures(afterFile); len(failed) > 0 {
-		return fail("%s", refuseFailedTests(failed, total, path, "nothing was changed, no key or creds file was created, nothing was provisioned", stdout))
-	}
-	ep, ok := findEndpoint(after, o.name)
-	if !ok {
-		return fail("internal error: the new endpoint did not compile")
-	}
 	credsPath, err := credsFileFor(cfg, o.name)
 	if err != nil {
 		return fail("%v", err)
-	}
-	if _, err := os.Lstat(credsPath); err == nil {
-		return fail("creds file %s exists; %s", credsPath, orphanText(o.name))
 	}
 
 	// The server connection is opened before any key or record is made, so an unreachable server changes nothing.
@@ -296,24 +234,38 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 	defer closeAdmin()
 
-	// (3) mint: the user is signed by the account signing key and carries its own permissions (ADR 0091): there is no
-	// zone key to make or to find, so nothing here waits for `policy apply`.
-	m, err := mint.Mint(keys, after, o.name, nil)
+	// A name the directory already holds is refused before a key is made or an issue entry written.
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if _, dup := findRecord(recs, o.name); dup {
+		return fail("endpoint %q already exists in the directory; nothing was changed (to rotate its user, run: mashctl reissue %s)", o.name, o.name)
+	}
+
+	if _, err := os.Lstat(credsPath); err == nil {
+		return fail("creds file %s exists; %s", credsPath, orphanText(o.name))
+	}
+
+	// (1) mint: the user is signed by the account signing key and carries its own permissions, the owner-line set
+	// admin.Permissions(owner, name) (ADR 0091).
+	m, err := mint.Mint(keys, cfg.Owner, o.name, nil)
 	if err != nil {
 		return fail("%v", err)
 	}
 	defer clear(m.Creds)
 
-	// The issue record comes before the directory record and the creds file: a user that can connect is always in it.
-	// A failure here issues nothing (the creds are in memory only).
+	// (2) The issue record comes before the directory record and the creds file: a user that can connect is always in
+	// it. A failure here issues nothing (the creds are in memory only).
 	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
 		return fail("%v; nothing was issued", err)
 	}
 
-	// (4) the directory record and inbox.
-	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels}); err != nil {
+	// (3) the directory record and inbox.
+	meta := admin.Meta{Labels: labels, Description: o.describe, Caps: o.caps}
+	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, meta); err != nil {
 		if strings.Contains(err.Error(), "is already provisioned") {
-			return fail("%v; %s", err, orphanText(o.name))
+			return fail("%v; nothing was changed", err)
 		}
 		return fail("%v", err)
 	}
@@ -324,26 +276,12 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		return ""
 	}
 
-	// (5) the creds file, never overwriting.
-	undoCreds, err := writeCredsNew(credsPath, m.Creds)
-	if err != nil {
+	// (4) the creds file, never overwriting.
+	if _, err := writeCredsNew(credsPath, m.Creds); err != nil {
 		return fail("%v%s", err, rollbackProvision())
 	}
-	if afterProvision != nil {
-		afterProvision()
-	}
 
-	// (6) the policy file.
-	if err := doc.Save(); err != nil {
-		undoCreds()
-		msg := rollbackProvision()
-		if errors.Is(err, policyfile.ErrChanged) {
-			return fail("%v: nothing was added%s. Re-run: mashctl add %s", err, msg, strings.Join(args, " "))
-		}
-		return fail("%v: nothing was added%s", err, msg)
-	}
-
-	// (7) report.
+	// (5) report.
 	fmt.Fprintf(stdout, "added %s creds %s\n", o.name, credsPath)
 	return 0
 }

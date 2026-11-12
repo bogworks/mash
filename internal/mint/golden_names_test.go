@@ -11,13 +11,7 @@ import (
 
 // The NATS user's name is the endpoint's bare name.
 func TestGoldenMintedUserName(t *testing.T) {
-	c := compile(t, `
-default: deny
-endpoints:
-  a: {labels: {team: red}}
-rules: []
-`)
-	m, err := Mint(newFakeKeys(t), c, "a", nil)
+	m, err := Mint(newFakeKeys(t), "o", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

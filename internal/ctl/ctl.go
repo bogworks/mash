@@ -124,8 +124,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user (signed by the account key), provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
+	line("reissue NAME... | --all | --changed", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -134,16 +134,13 @@ func issuedLines(line func(left, right string)) {
 }
 
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox and its policy entry")
-	line("label NAME k=v... [--policy FILE] [--dry-run] [--sync]", "set labels in the policy file (offline unless --sync updates the directory record)")
-	line("unlabel NAME k... [--policy FILE] [--dry-run] [--sync]", "remove labels from the policy file (offline unless --sync)")
+	line("retire NAME [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox")
+	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
+	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
 }
 
 func policyLines(line func(left, right string)) {
-	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
-	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the directory and the creds files; fixes nothing")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: the account check, directory labels; lists stale creds")
+	line("policy", "no subcommands yet: the policy file is gone, and endpoints are declared in the directory by `add`")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -608,10 +605,10 @@ func initUsage(prog string) string {
 }
 
 // permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
-// An endpoint added under a policy file gets narrower permissions from the policy instead.
+// An endpoint added by `mashctl add` gets narrower permissions, the owner-line set, instead.
 func permissionsNote(prog string) string {
 	pfx, _, _ := strings.Cut(prog, " ")
-	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` or a policy file get narrower permissions from the policy (see `" + pfx + " policy explain`)."
+	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` get narrower permissions, the owner-line set."
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.

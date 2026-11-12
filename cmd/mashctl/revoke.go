@@ -96,7 +96,7 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 	return read(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers})
 }
 
-// parseServers reads MASH_SERVERS the way policy apply does; 0 is none given.
+// parseServers reads MASH_SERVERS, the server count the revocation check waits for; 0 is none given.
 func parseServers(env func(string) string) (int, error) {
 	sv := env("MASH_SERVERS")
 	if sv == "" {

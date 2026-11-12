@@ -15,7 +15,6 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
-	"github.com/bogworks/mash/internal/policy"
 )
 
 // fakeKeys is an in-memory Keys.
@@ -45,30 +44,9 @@ func (f *fakeKeys) Account() (nkeys.KeyPair, string, error) {
 // The Keys the mint takes is the account key alone: *ctlkeys.Authority satisfies it, and has no zone key to give.
 var _ Keys = (*ctlkeys.Authority)(nil)
 
-func compile(t *testing.T, src string) *policy.Compiled {
-	t.Helper()
-	f, err := policy.Parse([]byte(src))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := policy.Compile(f, "o")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c
-}
-
 func TestMintVerify(t *testing.T) {
-	c := compile(t, `
-default: deny
-endpoints:
-  a: {labels: {team: red}}
-  b: {labels: {team: blue}}
-rules:
-  - {name: r, action: allow, from: {team: red}, to: {team: blue}}
-`)
 	keys := newFakeKeys(t)
-	m, err := Mint(keys, c, "a", nil)
+	m, err := Mint(keys, "o", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,15 +88,14 @@ rules:
 }
 
 func TestMintReissue(t *testing.T) {
-	c := compile(t, "endpoints:\n  a: {labels: {team: red}}\n")
 	keys := newFakeKeys(t)
-	m1, err := Mint(keys, c, "a", nil)
+	m1, err := Mint(keys, "o", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	kp, _ := jwt.ParseDecoratedNKey(m1.Creds)
 	seed, _ := kp.Seed()
-	m2, err := Mint(keys, c, "a", seed)
+	m2, err := Mint(keys, "o", "a", seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,20 +104,16 @@ func TestMintReissue(t *testing.T) {
 	}
 	// not a user seed, not a seed
 	acctSeed, _ := keys.acct.Seed()
-	if _, err := Mint(keys, c, "a", acctSeed); err == nil || !strings.Contains(err.Error(), "not a user seed") {
+	if _, err := Mint(keys, "o", "a", acctSeed); err == nil || !strings.Contains(err.Error(), "not a user seed") {
 		t.Errorf("account seed: %v", err)
 	}
-	if _, err := Mint(keys, c, "a", []byte("junk")); err == nil {
+	if _, err := Mint(keys, "o", "a", []byte("junk")); err == nil {
 		t.Error("junk seed accepted")
-	}
-	if _, err := Mint(keys, c, "nope", nil); err == nil {
-		t.Error("undeclared endpoint minted")
 	}
 }
 
 func TestMintErrorsHideSeeds(t *testing.T) {
-	c := compile(t, "endpoints:\n  a: {}\n")
-	_, err := Mint(newFakeKeys(t), c, "a", []byte("SUAJUNKJUNKJUNK"))
+	_, err := Mint(newFakeKeys(t), "o", "a", []byte("SUAJUNKJUNKJUNK"))
 	if err == nil || strings.Contains(err.Error(), "SUAJ") {
 		t.Fatalf("%v", err)
 	}
@@ -152,9 +125,8 @@ func TestMintLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts a nats-server")
 	}
-	c := compile(t, "endpoints:\n  a: {}\n  b: {}\n")
 	keys := newFakeKeys(t)
-	ma, err := Mint(keys, c, "a", nil)
+	ma, err := Mint(keys, "o", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +165,7 @@ func TestMintLive(t *testing.T) {
 	// A re-issue keeps the user key and still connects.
 	kp, _ := jwt.ParseDecoratedNKey(ma.Creds)
 	seed, _ := kp.Seed()
-	re, err := Mint(keys, c, "a", seed)
+	re, err := Mint(keys, "o", "a", seed)
 	if err != nil {
 		t.Fatal(err)
 	}

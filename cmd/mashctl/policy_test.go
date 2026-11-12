@@ -2,180 +2,44 @@ package main
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/bogworks/mash/internal/policy"
 )
 
-// policyFiles copies the policy package's golden files into a temp dir and returns it.
-func policyFiles(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, n := range []string{"solo.yaml", "enterprise.yaml"} {
-		b, err := os.ReadFile(filepath.Join("..", "..", "internal", "policy", "testdata", n))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
-			t.Fatal(err)
+// The policy group has no subcommands yet: the policy file is gone. Every call prints the usage and exits 2, whatever
+// the subcommand was (the verbs the file supported are removed, not renamed).
+func TestPolicyGroupHasNoSubcommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"policy"},
+		{"policy", "check"}, {"policy", "test"}, {"policy", "apply"}, {"policy", "apply", "--dry-run"},
+		{"policy", "drift"}, {"policy", "repair"}, {"policy", "explain", "a", "b"}, {"policy", "show"},
+		{"policy", "check", "--policy", "p.yaml"}, {"policy", "list"}, {"policy", "--json"},
+	} {
+		var out, errb bytes.Buffer
+		code := runEnv(args, func(string) string { return "" }, &out, &errb)
+		if code != 2 || out.Len() != 0 || !strings.Contains(errb.String(), "usage: mashctl policy") || !strings.Contains(errb.String(), "no subcommands yet") {
+			t.Errorf("%v: code %d out %q err %q", args, code, out.String(), errb.String())
 		}
 	}
-	return dir
 }
 
-func write(t *testing.T, dir, name, body string) string {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-// policyRun runs mashctl with only the given environment: no server, no admin credentials.
-func policyRun(t *testing.T, env map[string]string, args ...string) (string, string, int) {
-	t.Helper()
-	if env == nil {
-		env = map[string]string{}
-	}
-	if env["HOME"] == "" {
-		env["HOME"] = t.TempDir()
-	}
+// The top-level drift verb is gone with the file it compared against.
+func TestDriftVerbIsGone(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := runEnv(args, func(k string) string { return env[k] }, &out, &errb)
-	return out.String(), errb.String(), code
-}
-
-func TestPolicyCheck(t *testing.T) {
-	dir := policyFiles(t)
-	out, errb, code := policyRun(t, nil, "policy", "check", "--policy", filepath.Join(dir, "solo.yaml"))
-	if code != 0 || out != "check: OK - 3 endpoints, 1 rules\n" || errb != "" {
-		t.Fatalf("solo: %d %q %q", code, out, errb)
-	}
-	// MASH_POLICY names the file when the flag is absent
-	out, _, code = policyRun(t, map[string]string{"MASH_POLICY": filepath.Join(dir, "enterprise.yaml")}, "policy", "check")
-	if code != 0 || !strings.HasPrefix(out, "check: OK - ") {
-		t.Fatalf("env: %d %q", code, out)
-	}
-	// the flag beats the environment
-	out, _, code = policyRun(t, map[string]string{"MASH_POLICY": filepath.Join(dir, "missing.yaml")}, "policy", "check", "--policy="+filepath.Join(dir, "solo.yaml"))
-	if code != 0 || !strings.Contains(out, "3 endpoints") {
-		t.Fatalf("flag over env: %d %q", code, out)
-	}
-	// <config dir>/policy.yaml is the default
-	cfgDir := t.TempDir()
-	os.Rename(filepath.Join(dir, "solo.yaml"), filepath.Join(cfgDir, "policy.yaml"))
-	out, _, code = policyRun(t, map[string]string{"MASH_CONFIG_DIR": cfgDir}, "policy", "check")
-	if code != 0 || !strings.Contains(out, "3 endpoints") {
-		t.Fatalf("config dir: %d %q", code, out)
-	}
-	// a missing file
-	_, errb, code = policyRun(t, map[string]string{"MASH_CONFIG_DIR": t.TempDir()}, "policy", "check")
-	if code != 1 || !strings.Contains(errb, "policy.yaml") {
-		t.Fatalf("missing: %d %q", code, errb)
+	if code := runEnv([]string{"drift"}, func(string) string { return "" }, &out, &errb); code != 2 || !strings.Contains(errb.String(), "unknown command") {
+		t.Errorf("drift: %d %q", code, errb.String())
 	}
 }
 
-func TestPolicyCheckBrokenAndWarnings(t *testing.T) {
-	dir := t.TempDir()
-	broken := write(t, dir, "broken.yaml", "default: allow\nendpoints:\n  a:\n    labels: {net: x}\nrules:\n  - name: r\n    action: maybe\n    from: {}\n    to: {}\nbogus: 1\n")
-	out, errb, code := policyRun(t, nil, "policy", "check", "--policy", broken)
-	if code != 1 || !strings.Contains(out+errb, "line 10") {
-		t.Fatalf("unknown field: %d %q %q", code, out, errb)
+func TestParsePolicyArgs(t *testing.T) {
+	o, err := parsePolicyArgs([]string{"--json", "x"}, "--json")
+	if err != nil || !o.json || len(o.args) != 1 || o.args[0] != "x" {
+		t.Errorf("%+v %v", o, err)
 	}
-	invalid := write(t, dir, "invalid.yaml", "default: sometimes\nendpoints:\n  a: {}\nrules:\n  - name: r\n    action: maybe\n    from: {}\n    to: {}\n")
-	out, _, code = policyRun(t, nil, "policy", "check", "--policy", invalid)
-	if code != 1 || strings.Count(out, "error: ") != 2 || !strings.Contains(out, "error: default: ") || !strings.Contains(out, "maybe") {
-		t.Fatalf("invalid: %d %q", code, out)
-	}
-	warn := write(t, dir, "warn.yaml", "default: allow\nendpoints:\n  a:\n    labels: {net: x}\nrules:\n  - name: ghost\n    action: deny\n    from: {nosuch: label}\n    to: {}\n    allow_empty: true\n")
-	out, _, code = policyRun(t, nil, "policy", "check", "--policy", warn)
-	if code != 0 || !strings.HasPrefix(out, "warning: ") || !strings.Contains(out, "ghost") || !strings.HasSuffix(out, "check: OK - 1 endpoints, 1 rules\n") {
-		t.Fatalf("warning: %d %q", code, out)
-	}
-	// without allow_empty the same deny rule is an error naming the way out
-	noEmpty := write(t, dir, "noempty.yaml", "default: allow\nendpoints:\n  a:\n    labels: {net: x}\nrules:\n  - name: ghost\n    action: deny\n    from: {nosuch: label}\n    to: {}\n")
-	out, _, code = policyRun(t, nil, "policy", "check", "--policy", noEmpty)
-	if code != 1 || strings.Count(out, "error: ") != 1 || !strings.Contains(out, "rule ghost (line 6)") || !strings.Contains(out, "set allow_empty: true on the rule if the group is intentionally empty") {
-		t.Fatalf("deny selecting nobody: %d %q", code, out)
-	}
-}
-
-func TestPolicyTest(t *testing.T) {
-	dir := policyFiles(t)
-	out, _, code := policyRun(t, nil, "policy", "test", "--policy", filepath.Join(dir, "solo.yaml"))
-	want := "PASS coder->reviewer expect allow\nPASS coder->deploy-bot expect deny\nPASS deploy-bot->coder expect allow\n"
-	if code != 0 || out != want {
-		t.Fatalf("solo: %d %q", code, out)
-	}
-	bad := write(t, dir, "bad.yaml", "default: allow\nendpoints:\n  a: {}\n  b: {}\nrules:\n  - {name: no-b, action: deny, from: {}, to: {}}\ntests:\n  - {from: a, to: b, expect: allow}\n  - {from: a, to: b, expect: deny}\n")
-	out, _, code = policyRun(t, nil, "policy", "test", "--policy", bad)
-	x, _ := policy.Explain(mustParse(t, bad), "a", "b")
-	wantFail := "FAIL a->b expect allow got deny: " + x.Text + "\nPASS a->b expect deny\n"
-	if code != 1 || out != wantFail {
-		t.Fatalf("fail: %d %q want %q", code, out, wantFail)
-	}
-	none := write(t, dir, "none.yaml", "default: allow\nendpoints:\n  a: {}\n")
-	out, _, code = policyRun(t, nil, "policy", "test", "--policy", none)
-	if code != 0 || out != "test: no tests in the file\n" {
-		t.Fatalf("none: %d %q", code, out)
-	}
-}
-
-func mustParse(t *testing.T, path string) *policy.File {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := policy.Parse(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
-// A policy file that carries a zone is refused by check, naming ADR 0091 and what to remove.
-func TestPolicyCheckRefusesAZone(t *testing.T) {
-	p := write(t, t.TempDir(), "zoned.yaml", "subject_label: site\nendpoints:\n  a:\n    labels: {zone: x}\n")
-	env := map[string]string{"MASH_OWNER": "acme"}
-	for _, args := range [][]string{{"policy", "check", "--policy", p}, {"policy", "test", "--policy", p}} {
-		out, errb, code := policyRun(t, env, args...)
-		if code == 0 || !strings.Contains(out+errb, "ADR 0091") || !strings.Contains(out+errb, "remove") {
-			t.Fatalf("%v: %d %q %q", args, code, out, errb)
-		}
-	}
-}
-
-func TestPolicyUsageAndRouting(t *testing.T) {
-	// a removed verb is an unknown verb: the usage error, exit 2, and the usage lists only what remains
-	for _, args := range [][]string{{"policy"}, {"policy", "frobnicate"}, {"policy", "show"}, {"policy", "show", "--json"}, {"policy", "explain", "a", "b"}, {"policy", "diff"}, {"policy", "check", "--nope"}, {"policy", "check", "extra"}, {"policy", "check", "--policy"}} {
-		out, errb, code := policyRun(t, nil, args...)
-		if code != 2 || out != "" || !strings.Contains(errb, "usage: mashctl policy check") {
-			t.Fatalf("%v: %d %q %q", args, code, out, errb)
-		}
-	}
-	_, errb, _ := policyRun(t, nil, "policy")
-	for _, gone := range []string{"policy show", "policy explain", "policy diff"} {
-		if strings.Contains(errb, gone) {
-			t.Fatalf("usage still lists %s:\n%s", gone, errb)
-		}
-	}
-	out, _, code := policyRun(t, nil, "help")
-	if code != 0 {
-		t.Fatal(code)
-	}
-	for _, v := range []string{"policy check", "policy test", "policy drift", "policy repair"} {
-		if !strings.Contains(out, "mashctl "+v) {
-			t.Fatalf("usage lacks %s:\n%s", v, out)
-		}
-	}
-	for _, gone := range []string{"policy show", "policy explain", "policy diff"} {
-		if strings.Contains(out, gone) {
-			t.Fatalf("help still lists %s:\n%s", gone, out)
+	// a flag that is not allowed is unknown, --policy included
+	for _, args := range [][]string{{"--json"}, {"--policy", "f"}, {"--policy=f"}} {
+		if _, err := parsePolicyArgs(args); err == nil || !strings.Contains(err.Error(), "unknown option") {
+			t.Errorf("%v: %v", args, err)
 		}
 	}
 }

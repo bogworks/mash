@@ -1,4 +1,4 @@
-// Package mint makes the NATS user JWT and creds of one policy endpoint: signed by the account signing key and
+// Package mint makes the NATS user JWT and creds of one endpoint: signed by the account signing key and
 // carrying the endpoint's own permission set (admin.Permissions). There is no per-zone scoped signing key and no tag
 // (ADR 0091): the address is the fence, and the key that signs a user is the account's own.
 // It does no network I/O; the key comes through the Keys seam (ADR 0052).
@@ -12,7 +12,6 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/policy"
 )
 
 // Keys is the key store Mint signs with; *ctlkeys.Authority satisfies it.
@@ -29,20 +28,10 @@ type Minted struct {
 	Creds      []byte // the creds file contents (JWT and seed): a secret
 }
 
-// Mint issues the user JWT of endpoint name of c, signed by the account signing key with the permission set of
+// Mint issues the user JWT of endpoint name of owner, signed by the account signing key with the permission set of
 // admin.Permissions(owner, name). With userSeed nil it makes a fresh user key; with a user seed (a re-issue) it keeps
-// that user key. The endpoint must be declared in c.
-func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte) (*Minted, error) {
-	declared := false
-	for i := range c.Endpoints {
-		if c.Endpoints[i].Name == name {
-			declared = true
-			break
-		}
-	}
-	if !declared {
-		return nil, fmt.Errorf("mint: endpoint %q is not declared in the policy", name)
-	}
+// that user key.
+func Mint(keys Keys, owner, name string, userSeed []byte) (*Minted, error) {
 	reissue := userSeed != nil
 	acctKP, acctPub, err := keys.Account()
 	if err != nil {
@@ -81,7 +70,7 @@ func Mint(keys Keys, c *policy.Compiled, name string, userSeed []byte) (*Minted,
 	uc := jwt.NewUserClaims(userPub)
 	uc.Name = name
 	// The account's own key signs, so the user carries its permissions in the JWT itself.
-	uc.Permissions = admin.Permissions(c.Owner, name)
+	uc.Permissions = admin.Permissions(owner, name)
 	token, err := uc.Encode(acctKP)
 	if err != nil {
 		return nil, fmt.Errorf("mint: sign: %w", err)

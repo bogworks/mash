@@ -20,13 +20,12 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
-	"github.com/bogworks/mash/internal/policy"
-	"github.com/bogworks/mash/internal/policyfile"
 	"github.com/bogworks/mash/internal/store"
 )
 
-const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
-       mashctl reissue --changed [--policy FILE]
+const reissueUsage = `usage: mashctl reissue NAME...
+       mashctl reissue --all
+       mashctl reissue --changed
 `
 
 // runReissue is `mashctl reissue`. Every reissue signs with the creds file's stored user seed, so it first connects
@@ -41,18 +40,13 @@ const reissueUsage = `usage: mashctl reissue NAME... [--policy FILE]
 // The new creds are staged in <creds>.next before anything irreversible, so an interrupted rotation is finished by running the reissue again.
 func runReissue(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var names []string
-	var file string
-	changed := false
-	for i := 0; i < len(args); i++ {
-		a := args[i]
+	changed, all := false, false
+	for _, a := range args {
 		switch {
 		case a == "--changed":
 			changed = true
-		case a == "--policy" && i+1 < len(args):
-			i++
-			file = args[i]
-		case strings.HasPrefix(a, "--policy=") && len(a) > len("--policy="):
-			file = strings.TrimPrefix(a, "--policy=")
+		case a == "--all":
+			all = true
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "mashctl: reissue: unknown %s\n%s", config.RejectedArg(a), reissueUsage)
 			return 2
@@ -60,7 +54,7 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 			names = append(names, a)
 		}
 	}
-	if changed == (len(names) > 0) { // exactly one of NAME... and --changed
+	if (changed && all) || (changed || all) == (len(names) > 0) { // exactly one of NAME..., --all and --changed
 		fmt.Fprint(stderr, reissueUsage)
 		return 2
 	}
@@ -69,59 +63,51 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	path, err := policyPath(file, env, cfg)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: reissue: no policy file: use --policy FILE or MASH_POLICY (%v)\n", err)
-		return 1
-	}
 	keys, err := openKeys(cfg, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: reissue: %v\n", err)
 		return 1
 	}
-	doc, err := policyfile.Load(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: reissue: %v\n", err)
-		return 1
-	}
-	data, _ := doc.Bytes()
-	doc.Close()                                // nothing is written back
-	f, c, err := compileBytes(data, cfg.Owner) // Parse runs Check: a file that does not check is refused here
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: reissue: %s: %v\n", path, err)
-		return 1
-	}
-	// The file's own tests gate the mint exactly as they gate apply: no creds file is read or rewritten first.
-	if failed, total := policyTestFailures(f); len(failed) > 0 {
-		fmt.Fprintf(stderr, "mashctl: reissue: %s\n", refuseFailedTests(failed, total, path, "nothing was changed, no creds file was rewritten", stdout))
-		return 1
-	}
 
 	code := 0
+	var endpoints []string // --all and --changed: the endpoints of the directory
+	if changed || all {
+		if endpoints, err = directoryEndpoints(cfg, stderr); err != nil {
+			fmt.Fprintf(stderr, "mashctl: reissue: %v\n", err)
+			return 1
+		}
+	}
+	if all {
+		names = endpoints
+		if len(names) == 0 {
+			fmt.Fprintln(stdout, "nothing to reissue")
+			return 0
+		}
+	}
 	if changed {
 		servers, serversErr := parseServers(env) // read lazily below: only an endpoint that needs the revocation check uses it
-		for _, e := range c.Endpoints {
-			stale, err := staleCreds(keys, cfg, cfg.Owner, e)
+		for _, name := range endpoints {
+			stale, err := staleCreds(keys, cfg, cfg.Owner, name)
 			switch {
 			case errors.Is(err, fs.ErrNotExist):
-				fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: no creds file here\n", e.Name)
+				fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: no creds file here\n", name)
 				continue
 			case err != nil:
-				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", e.Name, err)
+				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 				return 1
 			case stale:
-				names = append(names, e.Name)
+				names = append(names, name)
 				continue
 			}
-			// The JWT matches the policy; the endpoint still needs a reissue when a rotation was interrupted (its staged
+			// The JWT matches what a mint issues now; the endpoint still needs a reissue when a rotation was interrupted (its staged
 			// file is there: the reissue resumes it or refuses a stale one) or when its user key is revoked.
-			p, err := credsFileFor(cfg, e.Name)
+			p, err := credsFileFor(cfg, name)
 			if err != nil {
-				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", e.Name, err)
+				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 				return 1
 			}
 			if _, err := os.Lstat(stagePath(p)); err == nil {
-				names = append(names, e.Name)
+				names = append(names, name)
 				continue
 			}
 			pub, err := credsUserKey(p)
@@ -134,10 +120,10 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 			}
 			switch {
 			case err != nil:
-				fmt.Fprintf(stderr, "mashctl: reissue %s: cannot tell whether its user key is revoked: %v\n", e.Name, err)
+				fmt.Fprintf(stderr, "mashctl: reissue %s: cannot tell whether its user key is revoked: %v\n", name, err)
 				code = 1
 			case revoked:
-				names = append(names, e.Name)
+				names = append(names, name)
 			}
 		}
 		if len(names) == 0 {
@@ -148,7 +134,7 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		}
 	}
 	for _, name := range names {
-		rotated, err := reissueOne(keys, cfg, env, c, name, stdout, stderr)
+		rotated, err := reissueOne(keys, cfg, env, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 			code = 1
@@ -246,17 +232,17 @@ func (d credsDiff) text() string {
 
 // staleCreds reports whether e's creds file holds a JWT that differs from what a mint now would issue: another signer,
 // other permissions, another issuer account or another name. A missing file wraps fs.ErrNotExist.
-func staleCreds(keys mint.Keys, cfg config.Config, owner string, e policy.CompiledEndpoint) (bool, error) {
-	p, err := credsFileFor(cfg, e.Name)
+func staleCreds(keys mint.Keys, cfg config.Config, owner, name string) (bool, error) {
+	p, err := credsFileFor(cfg, name)
 	if err != nil {
 		return false, err
 	}
-	d, err := compareCreds(keys, p, owner, e)
+	d, err := compareCreds(keys, p, owner, name)
 	return d.stale(), err
 }
 
-// compareCreds is the comparison behind `reissue --changed` and `policy drift` for the creds file at p.
-func compareCreds(keys mint.Keys, p, owner string, e policy.CompiledEndpoint) (credsDiff, error) {
+// compareCreds is the comparison behind `reissue --changed` for the creds file at p.
+func compareCreds(keys mint.Keys, p, owner, name string) (credsDiff, error) {
 	var d credsDiff
 	raw, err := readCreds(p)
 	if err != nil {
@@ -284,9 +270,9 @@ func compareCreds(keys mint.Keys, p, owner string, e policy.CompiledEndpoint) (c
 		d.AccountPub = uc.Issuer
 	}
 	d.WrongAccount = d.AccountPub != apub
-	d.WrongName = uc.Name != e.Name
+	d.WrongName = uc.Name != name
 	d.HasTags = len(uc.Tags) > 0
-	d.WrongPerms = !samePermissions(uc.Permissions, admin.Permissions(owner, e.Name))
+	d.WrongPerms = !samePermissions(uc.Permissions, admin.Permissions(owner, name))
 	return d, nil
 }
 
@@ -314,11 +300,7 @@ func (d credsDiff) rotates() bool { return d.stale() }
 // (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
 // revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
 // lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
-func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout, stderr io.Writer) (rotated bool, err error) {
-	ep, ok := findEndpoint(c, name)
-	if !ok {
-		return false, fmt.Errorf("endpoint %q is not declared in the policy file", name)
-	}
+func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, name string, stdout, stderr io.Writer) (rotated bool, err error) {
 	p, err := credsFileFor(cfg, name)
 	if err != nil {
 		return false, err
@@ -361,7 +343,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 	if oldPub != seedPub {
 		return false, fmt.Errorf("%s: its seed (user key %s...) is not the key its JWT names (%s...); not reissued", p, ctl.ShortKey(seedPub), ctl.ShortKey(oldPub))
 	}
-	d, err := compareCreds(keys, p, c.Owner, ep)
+	d, err := compareCreds(keys, p, cfg.Owner, name)
 	if err != nil {
 		return false, err
 	}
@@ -382,7 +364,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 	// its creds between our check and our write.
 	err = adm.WithNameLock(ctx, name, func(ctx context.Context, lock admin.NameLock) error {
 		var err error
-		rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
+		rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, name, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
 		return err
 	})
 	if err != nil {
@@ -392,7 +374,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 }
 
 // reissueLocked is the part of reissueOne that runs under name's lock.
-func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (rotated bool, err error) {
+func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, name string, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (rotated bool, err error) {
 	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
 		return false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
@@ -440,7 +422,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	}
 	recorded := staged != nil && recUser == staged.pub // the record already names the staged key: the rotation must finish
 	if !d.rotates() && !revoked && !recorded {
-		m, err := mint.Mint(keys, c, name, seed)
+		m, err := mint.Mint(keys, cfg.Owner, name, seed)
 		if err != nil {
 			return false, err
 		}
@@ -471,7 +453,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if resume {
 		newSeed = staged.seed
 	}
-	m, err := mint.Mint(keys, c, name, newSeed)
+	m, err := mint.Mint(keys, cfg.Owner, name, newSeed)
 	if err != nil {
 		return false, err
 	}
@@ -490,7 +472,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
 	}
 	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
-		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
+		why := "the creds file's JWT is different from what a mint issues now (" + d.text() + ")"
 		if revoked {
 			why = "the user key is already revoked in the account JWT"
 		}
@@ -622,4 +604,32 @@ func replaceCreds(path string, creds []byte) error {
 		return fmt.Errorf("sync %s: %w", filepath.Dir(path), err)
 	}
 	return nil
+}
+
+// directoryEndpoints is the names of the endpoints `reissue --all` and `--changed` work on: the directory's records of
+// this owner that are legacy-form (not three-token), sorted. A record of another owner or of the
+// three-token form is named on stderr and left out: this verb mints the owner-line permission set of a name.
+func directoryEndpoints(cfg config.Config, stderr io.Writer) ([]string, error) {
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return nil, fmt.Errorf("--all and --changed read the directory, which needs the server and the admin credentials: %v", err)
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, r := range recs {
+		switch {
+		case r.KeyOrName() != r.Name:
+			fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: not a legacy-form endpoint\n", r.KeyOrName())
+		case r.Owner != cfg.Owner:
+			fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: it belongs to another owner\n", r.Name)
+		default:
+			names = append(names, r.Name)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
 }

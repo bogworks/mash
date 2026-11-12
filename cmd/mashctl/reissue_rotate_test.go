@@ -23,15 +23,7 @@ import (
 // mint made it. It provisions the directory record with the same user key.
 func (h *addEnv) seedWith(name string, edit func(*jwt.UserClaims)) {
 	h.t.Helper()
-	data, err := os.ReadFile(h.policy)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	_, c, err := compileBytes(data, h.e.Owner)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	m, err := mint.Mint(h.keys(), c, name, nil)
+	m, err := mint.Mint(h.keys(), h.e.Owner, name, nil)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -111,7 +103,7 @@ func fakeKeyRevoked(t *testing.T, revoked bool, err error) *[]string {
 }
 
 func TestReissueRevokedKeyRotates(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seed("a") // add-only change, record present
 	_, oldPub := h.credsClaims("a")
 	calls := fakeRevoke(t, nil)
@@ -138,7 +130,7 @@ func TestReissueRevokedKeyRotates(t *testing.T) {
 }
 
 func TestReissueRefusesWhenRevocationUnknown(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seed("a")
 	_, oldPub := h.credsClaims("a")
 	before, _ := os.ReadFile(h.creds("a"))
@@ -162,7 +154,7 @@ func TestReissueRefusesWhenRevocationUnknown(t *testing.T) {
 }
 
 func TestReissueNarrowingRotatesKey(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	_, oldPub := h.credsClaims("a")
 	calls := fakeRevoke(t, nil)
@@ -195,7 +187,7 @@ func TestReissueNarrowingRotatesKey(t *testing.T) {
 }
 
 func TestReissueChangedRotatesPerEndpoint(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	h.seed("b") // up to date: not selected, keeps its key
 	_, oldB := h.credsClaims("b")
@@ -213,7 +205,7 @@ func TestReissueChangedRotatesPerEndpoint(t *testing.T) {
 }
 
 func TestReissueRevokeFailureLeavesCreds(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	_, oldPub := h.credsClaims("a")
 	before, _ := os.ReadFile(h.creds("a"))
@@ -251,7 +243,7 @@ func TestReissueRevokeFailureLeavesCreds(t *testing.T) {
 }
 
 func TestReissueAddOnlyKeepsKey(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seed("a")
 	_, oldPub := h.credsClaims("a")
 	calls := fakeRevoke(t, errors.New("must not be called"))
@@ -279,7 +271,7 @@ func TestReissueRefusesWithoutMatchingRecord(t *testing.T) {
 		}
 		t.Run(map[bool]string{false: "add-only", true: "narrowing"}[narrow], func(t *testing.T) {
 			// no record: a leftover creds file of a retired name
-			h := newAddEnv(t, addPolicy)
+			h := newAddEnv(t)
 			h.seedWith("a", edit)
 			before, _ := os.ReadFile(h.creds("a"))
 			calls := fakeRevoke(t, nil)
@@ -304,7 +296,7 @@ func TestReissueRefusesWithoutMatchingRecord(t *testing.T) {
 		})
 		t.Run(map[bool]string{false: "add-only user differs", true: "narrowing user differs"}[narrow], func(t *testing.T) {
 			// the record names another user key than the creds file's seed
-			h := newAddEnv(t, addPolicy)
+			h := newAddEnv(t)
 			h.seedWith("a", edit)
 			before, _ := os.ReadFile(h.creds("a"))
 			calls := fakeRevoke(t, nil)
@@ -352,7 +344,7 @@ func TestReissueRotationNeedsServer(t *testing.T) {
 		{"no admin creds", func(h *addEnv) { delete(h.env, "MASH_ADMIN_CREDS") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newAddEnv(t, addPolicy)
+			h := newAddEnv(t)
 			h.seedWith("a", extraTag)
 			before, _ := os.ReadFile(h.creds("a"))
 			calls := fakeRevoke(t, nil)
@@ -383,7 +375,7 @@ func TestReissueRefusesCredsOfAnotherAccount(t *testing.T) {
 }
 
 func reissueRefusesCredsOfAnotherAccount(t *testing.T, direct bool) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seed("a")
 	raw, err := os.ReadFile(h.creds("a"))
 	if err != nil {

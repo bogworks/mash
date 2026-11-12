@@ -28,10 +28,9 @@ func TestMashctlRefusesAgentToken(t *testing.T) {
 		{"init"},
 		{"limits"},
 		{"provision", "x"},
-		{"policy", "check"},
-		{"policy", "apply", "--dry-run"},
-		{"policy", "repair", "--dry-run"},
-		{"policy", "drift"},
+		{"label", "x", "k=v"},
+		{"retire", "x"},
+		{"reissue", "x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 		{"add", "x"},
 	} {

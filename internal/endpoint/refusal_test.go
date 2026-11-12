@@ -17,10 +17,9 @@ import (
 
 const refusedText = "refused by policy: you may not mail "
 
-// refusedSuffix is the second sentence of every refusal: the pair may be allowed by the policy file while the
-// credentials predate the rule, or the recipient may not be listed at all.
-const refusedSuffix = ". If the policy file allows this pair, or lists the recipient at all (mashctl policy explain), " +
-	"your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
+// refusedSuffix is the second sentence of every refusal: the credentials may predate the permissions mash issues now.
+const refusedSuffix = ". If the recipient is an endpoint of this owner, your credentials may be older than the permissions mash issues now:" +
+	" ask the admin to run mashctl reissue --changed."
 
 // retrySuffix is the last sentence of a refusal that carries the send's key.
 func retrySuffix(key string) string {
@@ -188,7 +187,7 @@ func TestAmbiguityDoesNotLeakToALaterSend(t *testing.T) {
 
 // A flagged send that times out says the violation could not be attributed; an unflagged one does not.
 func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
-	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl policy explain shows whether the pair is allowed)"
+	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl permissions NAME shows what an endpoint may publish)"
 	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
 	subj := sap.For(f.e.Owner, "ok").Mail
