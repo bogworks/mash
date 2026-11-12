@@ -289,6 +289,7 @@ func compareCreds(keys mint.Keys, p string, e policy.CompiledEndpoint) (credsDif
 	if err != nil {
 		return d, fmt.Errorf("%s: %w", p, err)
 	}
+	// TODO(Z2): remove with the policy stack (ADR 0091): the zone key.
 	zkp, err := keys.ZoneKey(e.Zone, false)
 	if err != nil {
 		return d, err
@@ -462,6 +463,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	// The zone key signs the new JWT, so the account JWT on every server must list it with the zone's role: a JWT
 	// signed by an unpublished key cannot connect, and a rotation would have revoked the working old key for it.
 	// Checked before anything is staged, minted or revoked, also when a staged rotation is resumed.
+	// TODO(Z2): remove with the policy stack (ADR 0091): the zone key.
 	zkp, err := keys.ZoneKey(ep.Zone, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("zone %q has no signing key: %w; nothing was changed", ep.Zone, err)

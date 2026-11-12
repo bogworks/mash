@@ -1558,3 +1558,29 @@ func TestAuditCompareEarlierNullConsumerSeqIsRefused(t *testing.T) {
 		t.Errorf("null delivered_consumer_seq: %d %q %q", code, out, errb)
 	}
 }
+
+// A directory record that carries a zone is a problem (ADR 0091): the audit reports it and --strict fails.
+func TestAuditReportsZonedRecord(t *testing.T) {
+	fixAuditClock(t)
+	g := newAuditEnv(t)
+	g.legacy(t, "plain")
+	if _, _, code := g.run(t, "--strict"); code != 0 {
+		t.Fatalf("--strict without a zoned record: %d", code)
+	}
+	adm, err := admin.New(g.nc, g.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, u := g.e.Mint(t, "zoned")
+	g.users[u] = "USER-zoned"
+	if _, err := adm.Provision(context.Background(), "zoned", u, g.e.Account, "", admin.Meta{Zone: "red"}); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := g.run(t, "--strict")
+	if code != 1 || !strings.Contains(errb, "1 item(s) not readable") {
+		t.Fatalf("--strict with a zoned record: %d out=%q err=%q", code, out, errb)
+	}
+	if !strings.Contains(out, `record zoned carries zone "red": zones are removed (ADR 0091)`) {
+		t.Errorf("the report does not name the zoned record:\n%s", out)
+	}
+}

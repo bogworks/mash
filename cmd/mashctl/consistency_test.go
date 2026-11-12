@@ -37,8 +37,6 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{[]string{"permissions"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "c", "--bogus"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "c", "--nsc", "x"}, "usage: mashctl permissions"},
-		{[]string{"set-zone", "c"}, "usage: mashctl set-zone"},
-		{[]string{"set-zone", "c", "-"}, "set-zone"},
 		{[]string{"set-meta", "c"}, "usage: mashctl set-meta"},
 		{[]string{"limits", "--bogus"}, "usage: mashctl limits"},
 		{[]string{"limits", "--show", "x"}, "usage: mashctl limits"},
@@ -99,12 +97,10 @@ func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 		{"provision", seedShaped, "--user", u, "--account", e.Account},
 		{"provision", "d", "--user", seedShaped, "--account", e.Account},
 		{"provision", "d", "--user", u, "--account", seedShaped},
-		{"provision", "d", "--user", u, "--account", e.Account, "--zone", seedShaped},
 		{"provision", "d", "--user", u, "--account", e.Account, "--label", seedShaped + "=x"},
 		{"provision", "d", "--user", u, "--account", e.Account, "--cap", seedShaped},
 		{"provision", "d", "--user", u, "--account", e.Account, "--" + seedShaped},
 		{"set-meta", "c", "--label", seedShaped + "=x"},
-		{"set-zone", "c", seedShaped},
 		{"suspend", seedShaped},
 		{"deprovision", seedShaped},
 		{"deprovision", "c", "--user", seedShaped},
@@ -168,7 +164,7 @@ func TestPolicyFileModeIsKept(t *testing.T) {
 			if _, errb, code := h.run("unlabel", "a2", "team", "--policy", h.policy); code != 0 {
 				t.Fatalf("unlabel: %d %q", code, errb)
 			}
-			if _, errb, code := h.run("add", "g", "--zone", "red", "--policy", h.policy); code != 0 {
+			if _, errb, code := h.run("add", "g", "--label", "zone=red", "--policy", h.policy); code != 0 {
 				t.Fatalf("add: %d %q", code, errb)
 			}
 			if fi, err := os.Stat(h.policy); err != nil || fi.Mode().Perm() != mode {

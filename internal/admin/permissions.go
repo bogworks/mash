@@ -21,7 +21,7 @@ func Permissions(owner, name string) jwt.Permissions {
 
 // PermissionsTo is Permissions with the three peer-addressing publish lines (mail, prompt and status to any endpoint
 // of the owner) narrowed to recipients: one line per recipient and verb, agents.<verb>.*.<owner>.<recipient>. A nil
-// recipients keeps the wildcard lines, so PermissionsTo(owner, name, nil) is Permissions. The wildcard mail line comes twice, the legacy 5-token form and the zoned 6-token form (ADR 0054); the recipient form keeps its one legacy line per recipient. An empty non-nil slice
+// recipients keeps the wildcard lines, so PermissionsTo(owner, name, nil) is Permissions. The mail line is the five-token subject agents.mail.*.<owner>.* (ADR 0091). An empty non-nil slice
 // grants no mail, prompt or status line at all; the fixed lines (own heartbeat, inbox, directory read, lease) remain,
 // so the block is never empty. Recipients must be valid endpoint names: they are placed in subjects as they are.
 func PermissionsTo(owner, name string, recipients []string) jwt.Permissions {
@@ -29,7 +29,6 @@ func PermissionsTo(owner, name string, recipients []string) jwt.Permissions {
 	if recipients == nil {
 		pub = append(pub,
 			"agents.mail.*."+owner+".*",
-			"agents.mail.*."+owner+".*.*", // the zoned mail subject (ADR 0054)
 			"agents.prompt.*."+owner+".*",
 			"agents.status.*."+owner+".*")
 	} else {
@@ -104,6 +103,7 @@ func NSCFlags(owner, name string) []string {
 	return f
 }
 
+// TODO(Z2): remove with the policy stack (ADR 0091): the tag names and ZonePermissions below are the compiler's.
 // Tag names a user's JWT carries to widen or narrow what its zone's signing key grants, and the templates that expand
 // them. A tag is "<name>:<zone>.<endpoint>" (or "<name>:<zone>.*"), lower case, and its value must be a valid subject
 // tail: it is placed in a permission subject as it stands.
