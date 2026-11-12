@@ -298,10 +298,12 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 	r := m.MergeProtections[0]
 	qPlain, qOrs := splitConditions(t, m.QueueRules[0].QueueConditions)
 	plain, ors := splitConditions(t, r.SuccessConditions)
-	if len(plain) != 3 || len(ors) != 1 {
-		t.Fatalf("success_conditions = %v, want two plain conditions and one or group", r.SuccessConditions)
+	// Only label conditions: Mergify applies these to the queue draft's commit as merge conditions, so a check-success
+	// condition (adr-lint is skipped on drafts) would deadlock the queue.
+	if len(plain) != 1 || len(ors) != 1 {
+		t.Fatalf("success_conditions = %v, want only `label != hold` and one approval or group", r.SuccessConditions)
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = adr-lint", "label != hold"} {
+	for _, want := range []string{"label != hold"} {
 		if !contains(plain, want) {
 			t.Errorf("success_conditions lack %q", want)
 		}
@@ -405,25 +407,19 @@ func TestMergify_mergeProtectionsSkipsQueueDrafts(t *testing.T) {
 	}
 }
 
-// Every check a merge_protections rule waits for is one CI publishes; codex-review is the review watcher's external
-// status, as in TestMergify_waitsOnlyForChecksThatExist.
-func TestMergify_mergeProtectionsChecksExist(t *testing.T) {
-	names := map[string]bool{}
-	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} {
-		for key, j := range load(t, f).Jobs {
-			n := j.Name
-			if n == "" {
-				n = key
-			}
-			names[n] = true
-		}
-	}
-	check := regexp.MustCompile(`^check-success = (.+)$`)
+// A merge_protections rule must hold no check conditions at all: Mergify applies them to the queue draft's commit as
+// merge conditions, where adr-lint is skipped and codex-review is not posted, so the queue refuses every pull request
+// (the #424 deadlock). Checks belong in queue_conditions.
+func TestMergify_mergeProtectionsHoldNoCheckConditions(t *testing.T) {
 	for _, r := range loadMergify(t).MergeProtections {
-		plain, _ := splitConditions(t, r.SuccessConditions)
-		for _, c := range plain {
-			if mm := check.FindStringSubmatch(c); mm != nil && mm[1] != "codex-review" && !names[mm[1]] {
-				t.Errorf("merge_protections waits for %q, which no CI job publishes", mm[1])
+		plain, ors := splitConditions(t, r.SuccessConditions)
+		all := append([]string{}, plain...)
+		for _, g := range ors {
+			all = append(all, g...)
+		}
+		for _, c := range all {
+			if strings.HasPrefix(c, "check-") {
+				t.Errorf("merge_protections rule %q has the check condition %q; keep checks in queue_conditions", r.Name, c)
 			}
 		}
 	}

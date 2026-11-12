@@ -20,30 +20,27 @@ merge_protections_settings:
     - label != hold
 
 # The ruleset's one required check is `Mergify Merge Protections` (docs/branch-protection.md). Without a rule here it
-# is neutral on every pull request, and a pull request that is green on CI but lacks codex-review and an approval could
-# be merged through the API outside the queue. This rule mirrors the queue entry conditions that matter at that point:
-# codex-review, adr-lint, a recorded approval or `lead-approved`, and not held. Same spelling as queue_conditions
-# (internal/release/mergify_test.go fails if the two drift). adr-lint is redundant with the ruleset and the queue, which
-# both require it, and is repeated deliberately because it is cheap; queue drafts are exempt by the `if` below. pr-check
-# and label-reset are not repeated: the ruleset and the queue already require them. The rule must NOT apply to Mergify's own queue draft pull requests (head
-# ref mergify/merge-queue/<hash>): a draft has no approval and no label, so the rule would fail on it and the queue
-# would deadlock. The exemption needs BOTH conditions: the head ref matches AND the author is Mergify's bot. A head ref
-# alone is not enough, because any same-repository writer can push a branch named mergify/merge-queue/x, which would
-# make the rule inactive, the required check neutral and the pull request API-mergeable without codex-review or an
-# approval. The `if` below is therefore active when either the ref does not match or the author is not mergify[bot]
-# (not (ref and bot) = (not ref) or (not bot)). Syntax: https://docs.mergify.com/merge-protections/custom-rules ; a rule whose `if` is not met is
-# inactive and does not affect the check.
+# is neutral on every pull request. This rule carries only the conditions Mergify evaluates on the pull request itself:
+# a recorded approval or `lead-approved`, and not held (same spelling as queue_conditions;
+# internal/release/mergify_test.go fails if they drift). It must NOT hold check-success conditions: Mergify applies the
+# rule's conditions to the queue draft's commit as merge conditions too, and a check such as adr-lint is skipped on a
+# draft, so the queue refused every pull request (#424 deadlocked it). codex-review and adr-lint are enforced by the
+# queue's queue_conditions at entry, and D204's `update` rule on main refuses any merge that is not Mergify's. pr-check
+# and label-reset are not repeated either.
+# The rule is also kept off Mergify's own queue draft pull requests (head ref mergify/merge-queue/<hash>), which have
+# neither approval nor label. The exemption needs BOTH the head ref and the author mergify[bot]: a head ref alone is not
+# enough, because any same-repository writer can push a branch named mergify/merge-queue/x and switch the rule off. The
+# `if` is therefore active when the ref does not match or the author is not mergify[bot]. Syntax:
+# https://docs.mergify.com/merge-protections/custom-rules ; a rule whose `if` is not met is inactive.
 merge_protections:
   - name: codex-review and approval before merge
-    description: A pull request into main needs codex-review, a maintainer approval or lead-approved, and no hold label.
+    description: A pull request into main needs a maintainer approval or lead-approved, and no hold label.
     if:
       - base = main
       - or:
           - -head ~= ^mergify/merge-queue/
           - -author = mergify[bot]
     success_conditions:
-      - check-success = codex-review
-      - check-success = adr-lint
       - or:
           # Mirrors the approver in queue_conditions; internal/release/mergify_test.go fails if they differ.
           - approved-reviews-by = randybias
