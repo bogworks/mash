@@ -371,8 +371,18 @@ func TestReissueRotationNeedsServer(t *testing.T) {
 	}
 }
 
-// TestReissueRefusesCredsOfAnotherAccount: a JWT issued for another account cannot be revoked from this one.
+// TestReissueRefusesCredsOfAnotherAccount: a JWT issued for another account cannot be revoked from this one, whether
+// it names that account in issuer_account (a signing key's JWT) or is signed directly by the other account's key (no
+// issuer_account: the issuer is the account).
 func TestReissueRefusesCredsOfAnotherAccount(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(map[bool]string{false: "issuer_account", true: "signed directly"}[direct], func(t *testing.T) {
+			reissueRefusesCredsOfAnotherAccount(t, direct)
+		})
+	}
+}
+
+func reissueRefusesCredsOfAnotherAccount(t *testing.T, direct bool) {
 	h := newAddEnv(t, addPolicy)
 	h.seed("a")
 	raw, err := os.ReadFile(h.creds("a"))
@@ -390,12 +400,16 @@ func TestReissueRefusesCredsOfAnotherAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherPub, _ := other.PublicKey()
-	uc.IssuerAccount = otherPub
-	akp, _, err := h.keys().Account()
-	if err != nil {
-		t.Fatal(err)
+	signer := other
+	if !direct {
+		uc.IssuerAccount = otherPub
+		akp, _, err := h.keys().Account()
+		if err != nil {
+			t.Fatal(err)
+		}
+		signer = akp
 	}
-	tok, err := uc.Encode(akp)
+	tok, err := uc.Encode(signer)
 	if err != nil {
 		t.Fatal(err)
 	}

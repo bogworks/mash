@@ -212,7 +212,8 @@ type credsDiff struct {
 	WrongSigner  bool   // the issuer is not the account signing key (a zone key of an older release, or another key)
 	Issuer       string // the JWT's issuer (a public key)
 	WrongPerms   bool   // the JWT's permissions are not the endpoint's (a scoped user carries none: the key's template applied)
-	WrongAccount bool   // the issuer account is not the account's key
+	WrongAccount bool   // the account the JWT was issued for is not the account's key
+	AccountPub   string // that account: issuer_account when the JWT has one, otherwise the issuer (a key signing directly is the account)
 	WrongName    bool   // the JWT's name is not the endpoint's
 	HasTags      bool   // the JWT carries tags, which only a zone key's template read (ADR 0091)
 }
@@ -275,8 +276,13 @@ func compareCreds(keys mint.Keys, p, owner string, e policy.CompiledEndpoint) (c
 	akp.Wipe()
 	d.Issuer = uc.Issuer
 	d.WrongSigner = uc.Issuer != apub
-	// A JWT the account key signs names no issuer account; a signing key's names the account it signs for.
-	d.WrongAccount = uc.IssuerAccount != "" && uc.IssuerAccount != apub
+	// A JWT the account key signs names no issuer account; a signing key's names the account it signs for. A JWT signed
+	// directly by some other account's key also names none, and then its issuer is that account.
+	d.AccountPub = uc.IssuerAccount
+	if d.AccountPub == "" {
+		d.AccountPub = uc.Issuer
+	}
+	d.WrongAccount = d.AccountPub != apub
 	d.WrongName = uc.Name != e.Name
 	d.HasTags = len(uc.Tags) > 0
 	d.WrongPerms = !samePermissions(uc.Permissions, admin.Permissions(owner, e.Name))
@@ -415,7 +421,7 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 
 	// The old JWT can be revoked only in this account: a creds file issued for another account is refused.
 	if d.WrongAccount {
-		return false, fmt.Errorf("%s's creds file was issued for another account (%s...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add %s again", name, ctl.ShortKey(oldClaims.IssuerAccount), name)
+		return false, fmt.Errorf("%s's creds file was issued for another account (%s...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add %s again", name, ctl.ShortKey(d.AccountPub), name)
 	}
 
 	servers, err := parseServers(env)
