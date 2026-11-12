@@ -153,11 +153,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
-      - name: Quickstart script and changelog
+      - name: Quickstart script and release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -170,16 +174,23 @@ jobs:
           # script just copied, byte for byte.
           [ -f dist/SHA256SUMS ] || { echo "the sums artifact brought no SHA256SUMS" >&2; exit 1; }
           (cd dist && grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c -)
-          # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: commits of
-          # an unpublished tag belong in these notes. None (the first release) means the whole history.
+          # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: the compare link
+          # runs from it. None means the first release.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
           prev="$(scripts/notes-base "$GITHUB_REF_NAME" "$commit" "$RUNNER_TEMP/releases.json")"
+          # The notes are the change log section of the released version, the same text (ADR 0105, release standard rule 23):
+          # prose first, then the lists, never raw commit subjects. `section` fails when the version has no section, and
+          # `check-notes` (internal/releasenotes, the test the release gate applies too) fails when the notes do not open with a
+          # Summary and an Upgrading section, still hold the REPLACE THIS placeholder, or end a line in a commit hash. Both run
+          # before the draft exists. The compare link is the last paragraph; the first release has no previous one.
+          version="${GITHUB_REF_NAME#v}"
+          go run ./scripts/changelog section --version "$version" > dist/CHANGELOG.md
           if [ -n "$prev" ]; then
-            range="$prev..$commit"
+            printf '\nFull changes: [%s...%s](%s/%s/compare/%s...%s)\n' "$prev" "$GITHUB_REF_NAME" "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY}" "$prev" "$GITHUB_REF_NAME" >> dist/CHANGELOG.md
+            go run ./scripts/changelog check-notes dist/CHANGELOG.md --version "$version" --prev "${prev#v}"
           else
-            range="$commit"
+            go run ./scripts/changelog check-notes dist/CHANGELOG.md
           fi
-          { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

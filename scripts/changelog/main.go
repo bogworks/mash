@@ -3,6 +3,8 @@
 //
 //	changelog check [--root r] [--dir changelog.d]
 //	changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]
+//	changelog section --version X.Y.Z [--root r] [--changelog CHANGELOG.md]
+//	changelog check-notes FILE [--version X.Y.Z [--prev X.Y.Z]]
 //
 // check lints the fragments and prints one "file: message" line per violation. A fragment is named <slug>.<kind>.md,
 // the slug being lower-case letters, digits, hyphens and underscores and the kind one of added, changed, deprecated,
@@ -19,6 +21,19 @@
 // writing nothing, a version that already has a section, a bad version or date, a fragment that fails check, a
 // CHANGELOG.md with no "## [Unreleased]" heading, and a release with nothing in it. --dry-run prints the new section.
 //
+// A release's notes are its change-log section and open with prose (ADR 0105): assemble writes, directly under the new
+// heading, "### Summary" with a paragraph starting "REPLACE THIS PARAGRAPH:" and "### Upgrading" with a sentence
+// starting "REPLACE THIS:", for the maintainer to replace before the release; the release gates refuse the marker.
+//
+// section prints the body of the "## [X.Y.Z] - date" section (everything under that heading up to the next "## "
+// heading, without the heading line) and exits 1 with a message when there is no such section. The release workflow's
+// draft job writes it as the release notes.
+//
+// check-notes judges a notes file with internal/releasenotes, the same test the release gate applies: it opens with a
+// Summary and an Upgrading section, holds no REPLACE THIS marker and no line ending in a parenthesized commit hash; with
+// --version it also needs the compare link (to /compare/v<prev>...v<version>, or just a compare link when --prev is
+// not given). It prints one line per failure and exits 1.
+//
 // Exit 0: ok. Exit 1: check found violations, or assemble refused. Exit 2: usage or an unreadable input.
 package main
 
@@ -33,12 +48,21 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bogworks/mash/internal/releasenotes"
 )
 
 const (
 	defaultDir       = "changelog.d"
 	defaultChangelog = "CHANGELOG.md"
 	unreleasedHeader = "## [Unreleased]"
+)
+
+// The placeholders assemble writes under a new section's heading. Both start with releasenotes.Placeholder, which the
+// release gates refuse.
+const (
+	SummaryPlaceholder   = "REPLACE THIS PARAGRAPH: in at least 40 words of prose, no list, say what this release is for and who should care, what changed for the user, how to verify the download, and any known limits."
+	UpgradingPlaceholder = "REPLACE THIS: say what an operator must do after upgrading, or write \"Nothing to do.\""
 )
 
 // kinds are the fragment kinds, in the order of the sections they land in.
@@ -63,12 +87,16 @@ func run(args []string, e env) int {
 		return runCheck(args[1:], e)
 	case "assemble":
 		return runAssemble(args[1:], e)
+	case "section":
+		return runSection(args[1:], e)
+	case "check-notes":
+		return runCheckNotes(args[1:], e)
 	}
 	return usage(e, "unknown mode "+args[0])
 }
 
 func usage(e env, msg string) int {
-	fmt.Fprintf(e.stderr, "changelog: %s\nusage: changelog check [--root r] [--dir changelog.d]\n       changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]\n", msg)
+	fmt.Fprintf(e.stderr, "changelog: %s\nusage: changelog check [--root r] [--dir changelog.d]\n       changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]\n       changelog section --version X.Y.Z [--root r] [--changelog CHANGELOG.md]\n       changelog check-notes FILE [--version X.Y.Z [--prev X.Y.Z]]\n", msg)
 	return 2
 }
 
@@ -363,6 +391,7 @@ func assemble(old, version, date string, frags []fragment) (full, section string
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "## [%s] - %s\n\n", version, date)
+	b.WriteString("### Summary\n\n" + SummaryPlaceholder + "\n\n### Upgrading\n\n" + UpgradingPlaceholder + "\n\n")
 	n := 0
 	for _, s := range ordered {
 		if len(s.entries) == 0 {
@@ -392,4 +421,73 @@ func assemble(old, version, date string, frags []fragment) (full, section string
 		section = strings.TrimRight(section, "\n") + "\n"
 	}
 	return full, section, nil
+}
+
+func runSection(args []string, e env) int {
+	fs := flag.NewFlagSet("section", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	version := fs.String("version", "", "the release version, X.Y.Z")
+	root := fs.String("root", ".", "the tree to read")
+	cl := fs.String("changelog", defaultChangelog, "the change log (under --root unless absolute)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *version == "" {
+		return usage(e, "section takes --version X.Y.Z [--root r] [--changelog CHANGELOG.md]")
+	}
+	if !versionRE.MatchString(*version) {
+		fmt.Fprintf(e.stderr, "changelog: version %q must be X.Y.Z\n", *version)
+		return 1
+	}
+	b, err := os.ReadFile(resolve(*root, *cl))
+	if err != nil {
+		fmt.Fprintln(e.stderr, "changelog:", err)
+		return 2
+	}
+	body, ok := releasenotes.SectionBody(string(b), *version)
+	if !ok {
+		fmt.Fprintf(e.stderr, "changelog: %s has no section \"## [%s] - date\": release preparation was not done for this version\n", resolve(*root, *cl), *version)
+		return 1
+	}
+	fmt.Fprint(e.stdout, body)
+	return 0
+}
+
+func runCheckNotes(args []string, e env) int {
+	// The file comes first, so that flags can follow it.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return usage(e, "check-notes takes FILE [--version X.Y.Z [--prev X.Y.Z]]")
+	}
+	file := args[0]
+	fs := flag.NewFlagSet("check-notes", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	version := fs.String("version", "", "also require the compare link for this version")
+	prev := fs.String("prev", "", "the previous release, X.Y.Z (with --version)")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*prev != "" && *version == "") {
+		return usage(e, "check-notes takes FILE [--version X.Y.Z [--prev X.Y.Z]]")
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		fmt.Fprintln(e.stderr, "changelog:", err)
+		return 2
+	}
+	text := string(b)
+	bad := 0
+	for _, err := range []error{
+		releasenotes.NoPlaceholder(text),
+		releasenotes.Opening(text),
+		releasenotes.NoCommitHashLines(text),
+	} {
+		if err != nil {
+			fmt.Fprintf(e.stdout, "%s: %v\n", file, err)
+			bad++
+		}
+	}
+	if *version != "" {
+		if err := releasenotes.HasCompareLink(text, *prev, *version); err != nil {
+			fmt.Fprintf(e.stdout, "%s: %v\n", file, err)
+			bad++
+		}
+	}
+	if bad > 0 {
+		return 1
+	}
+	return 0
 }
