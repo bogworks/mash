@@ -11,6 +11,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/spool"
 )
 
 // The status tool's line for a failing spool (MASH_SPOOL_REQUIRED): present while the fault stands, plain, and gone
@@ -47,10 +48,9 @@ func TestStatusSpoolFaultLine(t *testing.T) {
 func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_SPOOL_REQUIRED"] = "1"
-	state := filepath.Join(w.env["a"]["HOME"], ".local", "state")
-	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	// The state directory is named explicitly (MASH_STATE_DIR), so the test never depends on HOME or XDG_STATE_HOME.
+	state := filepath.Join(t.TempDir(), "state")
+	w.env["a"]["MASH_STATE_DIR"] = state
 	if err := os.WriteFile(state, nil, 0o600); err != nil { // a file where the state directory goes: no spool directory
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sp := spoolOf(w.env["a"])
+	sp := spool.Spool{Dir: spool.Dir(state, w.env["a"]["MASH_OWNER"], w.env["a"]["MASH_NAME"])}
 	eventually(t, 3*spoolRetryEvery+30*time.Second, "the held mail is spooled", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
 	if n := unreadOf(t, w, "a"); n != 1 {
 		t.Fatalf("unread %d, want 1: spooled, not yet drained", n)
