@@ -344,7 +344,7 @@ It prints one `policy pass|FAIL|pending` line per AT and exits 0, 3 (refused) or
 When the NATS server version changes, `.github/workflows/policy-tests.yml` runs the same command: on a pull request that
 changes the `github.com/nats-io/nats-server/v2` line of `go.mod` (or the list or the step; `scripts/ci-nats-version-changed`
 compares go.mod at the base and at HEAD), and on every push to `main` or a `release/*` branch, so a version change that
-landed is still gated. A pull request from a fork does not run it. The job is named `policy-tests`; making it a required
+landed is still gated. A pull request from a fork runs it too, held for a person's approval by the repository setting as for the other jobs. The job is named `policy-tests`; making it a required
 status check is a repository setting a maintainer changes ([branch-protection.md](branch-protection.md)).
 
 ## Dry run

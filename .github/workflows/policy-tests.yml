@@ -6,7 +6,8 @@ name: policy-tests
 #     (scripts/ci-nats-version-changed decides), runs `scripts/release-check --policy-tests`;
 #   - every push to main or a release/* branch runs it, so a version change that landed is still gated.
 # Any other pull request gets the job as a skipped no-op: the check name still reports. A pull request from a fork
-# does not run it (self-hosted runners only; the job is skipped). The job runs on a self-hosted runner picked by literal
+# runs it too, as in ci.yml: the repository holds an outside contributor's run for a person's approval (a repository
+# setting), and the decision comes from the base revision's script. The job runs on a self-hosted runner picked by literal
 # labels (ADR 0079), and the live tests use an in-process nats-server: nothing here needs the network beyond the module
 # cache. Making `policy-tests` a required status check is a repository setting a maintainer changes
 # (docs/branch-protection.md).
@@ -24,7 +25,6 @@ concurrency:
 jobs:
   policy-tests:
     name: policy-tests
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-linux]
     steps:

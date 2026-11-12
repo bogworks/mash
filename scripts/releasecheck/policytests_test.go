@@ -290,3 +290,72 @@ func TestCINatsVersionChanged(t *testing.T) {
 		t.Errorf("list changed: %s", got)
 	}
 }
+
+// The decision must not depend on how a pipe closes: a large diff, a failed diff and a push all run the tests, and an
+// unrelated change does not.
+func TestCINatsVersionChangedEdgeCases(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("..", "ci-nats-version-changed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod := func(v string) string {
+		return "module m\n\ngo 1.27\n\nrequire github.com/nats-io/nats-server/v2 " + v + "\n"
+	}
+	repo := filepath.Join(t.TempDir(), "r")
+	gitT(t, filepath.Dir(repo), "init", "-q", "-b", "main", repo)
+	write(t, repo, "go.mod", gomod("v2.15.1"))
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "base")
+	base := gitT(t, repo, "rev-parse", "HEAD")
+	decide := func(event, b string) string {
+		cmd := exec.Command("bash", script)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "EVENT="+event, "BASE="+b)
+		out, err := cmd.Output() // stdout only: git's complaint about a bad base goes to stderr
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	commit := func(msg string, n int, prefix string) {
+		for i := 0; i < n; i++ {
+			write(t, repo, fmt.Sprintf("%s/f%04d_%s.txt", prefix, i, strings.Repeat("x", 200)), "x")
+		}
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", msg)
+	}
+
+	commit("unrelated", 3, "docs")
+	if got := decide("pull_request", base); got != "run=false" {
+		t.Errorf("unrelated files only: %s", got)
+	}
+	if got := decide("push", base); got != "run=true" {
+		t.Errorf("push: %s", got)
+	}
+	if got := decide("pull_request", "0123456789abcdef0123456789abcdef01234567"); got != "run=true" {
+		t.Errorf("bad base: %s", got)
+	}
+
+	// The policy list sorts before hundreds of unrelated names, so grep -q matches and exits while git diff still has
+	// far more than a pipe holds to write: the old pipeline then failed with SIGPIPE and read as "no match".
+	commit("many unrelated", 600, "zbulk")
+	write(t, repo, "scripts/releasecheck/policytests.txt", "x")
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "list")
+	if got := decide("pull_request", base); got != "run=true" {
+		t.Errorf("large diff including the list: %s", got)
+	}
+	// A large diff with no match still reads run=false.
+	mid := gitT(t, repo, "rev-parse", "HEAD")
+	commit("more unrelated", 600, "zbulk2")
+	if got := decide("pull_request", mid); got != "run=false" {
+		t.Errorf("large unrelated diff: %s", got)
+	}
+
+	write(t, repo, "go.mod", gomod("v2.15.2"))
+	gitT(t, repo, "add", "-A")
+	gitT(t, repo, "commit", "-q", "-m", "bump")
+	if got := decide("pull_request", mid); got != "run=true" {
+		t.Errorf("version line changed: %s", got)
+	}
+}
