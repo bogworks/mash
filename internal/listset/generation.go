@@ -23,6 +23,10 @@ import (
 // is not the generation in force.
 var ErrStaleBase = errors.New("list set is based on a generation that is not in force")
 
+// ErrNoReceivedBytes is returned by Accept and Ledger.Apply when received is nil or empty. Every accepted Record
+// identifies the submission it came from, so the bytes are required.
+var ErrNoReceivedBytes = errors.New("list set refused: no received bytes were supplied")
+
 // ErrGenerationOverflow is returned by Accept when the generation in force is the largest a generation can be.
 var ErrGenerationOverflow = errors.New("generation number would overflow")
 
@@ -56,7 +60,7 @@ type Record struct {
 	// Generation is the number of the list set in force; the first accepted list set is generation 1.
 	Generation uint64
 	// Received is the SHA-256 of exactly the bytes the list set was received as, so it identifies the submission.
-	// It is the zero Digest when Accept was given nil bytes, which means no bytes were supplied.
+	// It is never the zero Digest on a Record Accept returns, because Accept refuses nil or empty bytes.
 	Received Digest
 	// Content is the digest of the list set's content (DigestListSet), independent of encoding and ordering: two
 	// encodings of the same content share a Content and differ in Received.
@@ -66,16 +70,20 @@ type Record struct {
 }
 
 // Accept decides whether ls may replace the list set in force, and if so compiles it. received is the exact bytes
-// ls was decoded from; Record.Received is their SHA-256, or the zero Digest if received is nil.
+// ls was decoded from; Record.Received is their SHA-256. Nil or empty received is refused with ErrNoReceivedBytes, so
+// Received is never zero on an accepted Record.
+//
+// No file format exists yet (DEC-004), so Accept cannot check that received decodes to ls; that is the caller's
+// responsibility. Once a decoder exists it must hand over the very bytes it decoded.
 //
 // It refuses a list set whose Base is not inForce.Generation with a *StaleBaseError (matching ErrStaleBase) before it
-// validates or compiles anything, and refuses one when the generation would overflow with ErrGenerationOverflow.
-// Otherwise it runs Compile (which validates and checks) and returns the new Record, with Generation
+// validates or compiles anything, refuses one when the generation would overflow with ErrGenerationOverflow, and
+// refuses nil or empty received with ErrNoReceivedBytes (checked after the base, before compiling). Otherwise it runs Compile (which validates and checks) and returns the new Record, with Generation
 // inForce.Generation+1, together with the compiled output. On any error it returns the zero Record and nil, so the
 // caller keeps inForce and signs nothing. A zero inForce means nothing is in force, and ls.Base must then be 0.
 //
 // Accept is pure and does not by itself serialize submissions: two submissions built on the same inForce both pass
-// it and get the same next generation. Use a Ledger to have exactly one of them win.
+// it and get the same next generation. Use a Ledger's Apply to have exactly one of them win.
 func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
 	if ls.Base != inForce.Generation {
 		return Record{}, nil, &StaleBaseError{Stated: ls.Base, InForce: inForce.Generation}
@@ -83,28 +91,29 @@ func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, err
 	if inForce.Generation == math.MaxUint64 {
 		return Record{}, nil, ErrGenerationOverflow
 	}
+	if len(received) == 0 {
+		return Record{}, nil, ErrNoReceivedBytes
+	}
 	c, err := Compile(ls)
 	if err != nil {
 		return Record{}, nil, err
 	}
-	rec := Record{
+	return Record{
 		Generation: inForce.Generation + 1,
+		Received:   sha256.Sum256(received),
 		Content:    DigestListSet(ls),
 		Signed:     DigestCompiled(c),
-	}
-	if received != nil {
-		rec.Received = sha256.Sum256(received)
-	}
-	return rec, c, nil
+	}, c, nil
 }
 
-// Ledger holds the Record in force and is safe for concurrent use. Its Accept runs the pure Accept against the
-// current record and replaces the record only on success, under one lock: an atomic compare-and-replace, so of
-// several submissions built on the same generation exactly one succeeds and the rest get ErrStaleBase.
+// Ledger holds the Record in force and is safe for concurrent use. Its Apply runs the pure Accept against the
+// current record, then the caller's sign-and-push step, and replaces the record only if that step succeeds, all under
+// one lock: of several submissions built on the same generation exactly one succeeds and the rest get ErrStaleBase,
+// and a failed apply leaves the previous generation in force.
 //
 // A Ledger is in process memory only. Persisting the record and the cross-process apply path are not built yet, and
-// that path must keep the same compare-and-replace: check the base against the stored record and replace it in one
-// atomic step.
+// that path must give the same guarantee: an atomic base check against the stored record at the moment of commit,
+// after a successful apply.
 type Ledger struct {
 	mu      sync.Mutex
 	inForce Record
@@ -120,17 +129,31 @@ func (l *Ledger) InForce() Record {
 	return l.inForce
 }
 
-// Accept is the package Accept run against the record in force, which it replaces with the returned Record on
-// success. On any error the record in force is unchanged.
-func (l *Ledger) Accept(ls ListSet, received []byte) (Record, *Compiled, error) {
+// Apply runs the package Accept against the record in force. If that succeeds it calls apply, the caller's
+// sign-and-push step, with the Record and Compiled that are about to be committed, and replaces the record in force
+// with that Record only if apply returns nil. It refuses a nil apply.
+//
+// On any error, including one from apply, it returns the zero Record and leaves the ledger unchanged, so the previous
+// generation stays in force and the same base can be submitted again. An error from apply is returned wrapped, so
+// errors.Is matches it.
+//
+// The lock is held across apply, so no other submission can interleave, and apply must not call back into the
+// Ledger (it would deadlock).
+func (l *Ledger) Apply(ls ListSet, received []byte, apply func(Record, *Compiled) error) (Record, error) {
+	if apply == nil {
+		return Record{}, errors.New("listset: Apply needs a non-nil apply function")
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	rec, c, err := Accept(l.inForce, ls, received)
 	if err != nil {
-		return Record{}, nil, err
+		return Record{}, err
+	}
+	if err := apply(rec, c); err != nil {
+		return Record{}, fmt.Errorf("listset: apply of generation %d failed, generation %d stays in force: %w", rec.Generation, l.inForce.Generation, err)
 	}
 	l.inForce = rec
-	return rec, c, nil
+	return rec, nil
 }
 
 // DigestListSet returns the digest of ls over a canonical encoding that does not depend on the order of its switches,
