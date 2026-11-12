@@ -2,7 +2,7 @@ name: ci
 # Every push to main runs the test jobs, docs-only too: the release gate reads main's test runs, and a docs-only
 # head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Every job runs on a
 # self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
-# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check, conformance). conformance runs on every pull request, docs-only included, because the review watcher waits for it and may treat a skipped job as not done; skipping it needs the watcher's behaviour for a skipped check confirmed first. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079).
+# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079).
 on:
   push:
     branches: [main]
@@ -161,9 +161,11 @@ jobs:
   # conformance: the fast static slice (build, vet, gofmt, tidy, staticcheck) that the review watcher waits for before it
   # starts a Codex review, so review rounds do not wait for the test matrix (every step here is also covered by the
   # jobs above or by lint.yml). It runs on pull_request events only, never on a merge queue's branches, and is NOT in
-  # pr-check's needs and not a Mergify condition: it only gates when a review starts, not whether a pull request merges.
+  # pr-check's needs and not a Mergify condition: it gates nothing. A docs-only pull request skips it (job-level if on the changes
+  # output; the review watcher waits only on pr-check), and a Mergify draft never runs it.
   conformance:
-    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/')
+    needs: changes
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/') && needs.changes.outputs.code != 'false'
     timeout-minutes: 15
     runs-on: [self-hosted, rh-linux]
     steps:

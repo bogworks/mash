@@ -72,7 +72,7 @@ Settings > Branches > Add branch ruleset (or classic branch protection) for `mai
   `lint`, `govulncheck` and `codeql` run on every pull request (no path filter), so docs-only PRs are not left pending.
   **No CI on docs.** A docs-only pull request skips the heavy jobs (`test (linux)`, `test (macos)`, `reproducible`,
   `lint`, `govulncheck`, `codeql`) with a job-level `if` on the `changes` job's `code` output, never with a
-  workflow-level `paths` or `paths-ignore` (a required check that never reports stalls the queue). `conformance` is not skipped: it runs on every pull request, docs-only included, and is cheap, because the review watcher waits for it and may treat a skipped job as not done; skipping it needs the watcher's behaviour for a skipped check confirmed first. Every check name still
+  workflow-level `paths` or `paths-ignore` (a required check that never reports stalls the queue). `conformance` (advisory, in no `needs` and no queue condition) is skipped on docs-only pull requests too, since the review watcher waits only on `pr-check`; a Mergify draft still runs it. Every check name still
   reports, as skipped, and `pr-check`, `adr-lint`, `label-reset` and `adr-numbers` run as always; `pr-check` accepts a skipped
   heavy job only when `changes` succeeded and said `code=false`. Docs-only means every changed path is under `docs/` or is
   a `*.md` file and is not one a build or test reads; `scripts/ci-changes` is the definition. Code, and so the full set,

@@ -40,7 +40,7 @@ func TestDocsOnly_noWorkflowLevelPathFilter(t *testing.T) {
 // Each heavy job needs changes and is skipped by the changes output; every cheap or required job is not.
 func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 	heavy := map[string][]string{
-		"ci.yml":       {"test", "test-macos", "reproducible"},
+		"ci.yml":       {"test", "test-macos", "reproducible", "conformance"},
 		"lint.yml":     {"lint"},
 		"security.yml": {"govulncheck", "codeql"},
 	}
@@ -212,20 +212,17 @@ func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
 	}
 }
 
-// conformance runs on every pull request, docs-only included: the review watcher waits for it and may treat a skipped
-// job as not done. It has no changes dependency and no code-based condition.
-func TestDocsOnly_conformanceIsNeverSkippedOnCode(t *testing.T) {
+// conformance is advisory and gates nothing, so a docs-only pull request skips it like the other heavy jobs (the
+// review watcher waits only on pr-check); a Mergify draft never runs it.
+func TestDocsOnly_conformanceSkipsOnDocsOnly(t *testing.T) {
 	j, ok := load(t, "ci.yml").Jobs["conformance"]
 	if !ok {
 		t.Fatal("ci.yml has no conformance job")
 	}
-	if strings.Contains(fmt.Sprint(j.Needs), "changes") {
-		t.Errorf("conformance needs changes: %v", j.Needs)
+	if !strings.Contains(fmt.Sprint(j.Needs), "changes") {
+		t.Errorf("conformance does not need changes: %v", j.Needs)
 	}
-	if strings.Contains(j.If, "needs.changes") || strings.Contains(j.If, "code") {
-		t.Errorf("conformance if %q depends on the changes output", j.If)
-	}
-	if want := "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/')"; j.If != want {
+	if want := "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/') && needs.changes.outputs.code != 'false'"; j.If != want {
 		t.Errorf("conformance if %q; want %q", j.If, want)
 	}
 }
