@@ -23,7 +23,7 @@ concurrency:
   group: publish-check
   cancel-in-progress: false
 env:
-  GOTOOLCHAIN: go1.27.3
+  GOTOOLCHAIN: go1.27.4
 jobs:
   check:
     runs-on: [self-hosted, rh-linux]

@@ -274,7 +274,9 @@ func TestNoTakeoverGraceOnFreeOrDeadHolder(t *testing.T) {
 }
 
 // takeoverPair opens a live same-session first endpoint and a second that takes over from it, with the grace set to
-// grace; it returns both and the time the second was opened.
+// grace; it returns both and a time taken before the second Open began, a lower bound on the takeover instant (the grace
+// runs from the takeover inside Open, so a time taken after Open returned could be later than the takeover by however
+// long Open went on).
 func takeoverPair(t *testing.T, f *fixture, name string, grace time.Duration) (first, second *Endpoint, opened time.Time) {
 	t.Helper()
 	bigRefresh(t)
@@ -286,12 +288,13 @@ func takeoverPair(t *testing.T, f *fixture, name string, grace time.Duration) (f
 		t.Fatal(err)
 	}
 	t.Cleanup(first.Close)
+	before := time.Now()
 	second, err = Open(context.Background(), f.cfg(name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(second.Close)
-	return first, second, time.Now()
+	return first, second, before
 }
 
 // AwaitTakeover returns nothing before the grace and nil after it.
@@ -309,8 +312,26 @@ func TestAwaitTakeoverWaitsOutGrace(t *testing.T) {
 	if err := second.AwaitTakeover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(opened); d < 380*time.Millisecond {
-		t.Fatalf("returned %v after the takeover, want at least the grace", d)
+	if d := time.Since(opened); d < 400*time.Millisecond {
+		t.Fatalf("returned %v after the takeover began, want at least the grace", d)
+	}
+}
+
+// Time spent after the takeover, before the test looks at the clock, does not shorten the measured span: the baseline is
+// taken before the takeover. (A baseline taken after Open returned fails here, by the length of the delay.)
+func TestAwaitTakeoverBaselinePrecedesTakeover(t *testing.T) {
+	f := newFixture(t, "a")
+	_, second, before := takeoverPair(t, f, "a", 300*time.Millisecond)
+	late := time.Now()
+	time.Sleep(60 * time.Millisecond) // time passing between the takeover and the caller's own clock reads
+	if err := second.AwaitTakeover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(before); d < 300*time.Millisecond {
+		t.Fatalf("returned %v after the takeover began, want at least the grace", d)
+	}
+	if d := time.Since(late); d >= 300*time.Millisecond {
+		t.Skipf("the late baseline also held (%v); nothing to show", d)
 	}
 }
 
