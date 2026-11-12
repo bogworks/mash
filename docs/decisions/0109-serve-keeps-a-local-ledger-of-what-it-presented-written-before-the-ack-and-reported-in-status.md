@@ -55,9 +55,13 @@ and the first write does not read as a loss.
 sequence ranges with contiguous runs collapsed. Reading folds the file in memory into sets of ranges per generation. A
 line that does not parse (a torn last write) is skipped and counted. Past 1 MiB the file is rewritten as one snapshot
 line per generation through a temporary file and a rename, keeping the counts. Lines are appended with `O_APPEND` and kept
-under 4096 bytes where they can be, so a second serve of the same session does not interleave inside a line; POSIX gives
-no such guarantee for longer lines, and a compaction racing a second writer can drop that writer's lines, which the
-takeover grace makes unlikely.
+under 4096 bytes where they can be. Every append and every compaction (read, temporary file, sync, rename, directory
+sync) holds an exclusive `flock` on a sidecar lock file, `presented.log.lock` (0600, opened without following a symlink),
+taken before the log is opened, so two serves of the same session never interleave inside a line and a compaction never
+discards a line another process appended after its read: an append lands either before the compaction's read (and is
+folded into the snapshot) or after its rename (in the new file). A wait for the lock is bounded (3 seconds); past it the
+write fails like any other ledger write failure (logged once, shown in status, the ack goes ahead). Readers take no lock
+and tolerate a torn last line. Where there is no `flock` (not unix) the lock is a no-op.
 
 **Report.** `mash status` and the `status` tool print
 `delivery: N presented, M refused, K duplicate, J channel-acked (not proven) since <first record time>; loss: ...`, with

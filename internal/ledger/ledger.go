@@ -12,6 +12,10 @@
 // are ranges with contiguous runs collapsed. A snapshot line (kind "snapshot") replaces the folded history when the
 // file passes CompactBytes.
 //
+// Every append and every compaction holds an exclusive flock on a sidecar lock file (presented.log.lock, 0600) taken
+// before the log is opened, so processes serving the same session never lose a line to a compaction's rename. Readers
+// take no lock.
+//
 // Writes are whole lines appended with O_APPEND and synced, so a reader never sees a half line except a torn last
 // one after a crash, which Read skips and counts. A line is kept under MaxLineBytes (the pipe-atomic size) where it can
 // be; O_APPEND makes each write(2) land at the end of the file on a local file system, so two writers do not
@@ -33,6 +37,20 @@ import (
 	"sync"
 	"time"
 )
+
+// LockWait bounds how long a write waits for the lock file; past it the write fails like any other write failure.
+const LockWait = 3 * time.Second
+
+// LockSuffix is appended to the log's path to name the sidecar lock file.
+const LockSuffix = ".lock"
+
+var errLockTimeout = errors.New("ledger lock busy: another process holds " + File + LockSuffix)
+
+// lockWait is LockWait; a test lowers it.
+var lockWait = LockWait
+
+// afterCompactRead is a test seam called inside compaction after the log was read and before the rename.
+var afterCompactRead func()
 
 // compactAt is CompactBytes; a test lowers it.
 var compactAt int64 = CompactBytes
@@ -439,6 +457,13 @@ func (l *Ledger) write(recs []Record) error {
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
 		return err
 	}
+	// The lock is taken before the log is opened: a compaction in another process replaces the file, and an append to
+	// the old inode after that rename would vanish.
+	unlock, err := lockFile(l.path+LockSuffix, lockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return err
@@ -494,11 +519,14 @@ func closeTornTail(f *os.File, path string) error {
 	return err
 }
 
-// compact rewrites path as one snapshot line per generation, through a temporary file and a rename. Counts are kept.
+// compact rewrites path as one snapshot line per generation, through a temporary file and a rename. Counts are kept. The caller holds the lock file.
 func compact(path string) error {
 	st, err := Read(path)
 	if err != nil {
 		return err
+	}
+	if afterCompactRead != nil {
+		afterCompactRead()
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".ledger-*")
 	if err != nil {
@@ -534,7 +562,14 @@ func compact(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 // Snapshot is the folded generation as one record; duplicates whose originals are known to have been shown fold into D.
