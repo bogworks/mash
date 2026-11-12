@@ -134,6 +134,9 @@ func statusText(src *statusSource) string {
 	if l := legacyInboxEvictionLine(src); l != "" {
 		lines = append(lines, l)
 	}
+	if l := leaseBucketLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
@@ -483,6 +486,22 @@ func inboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.InboxEvictionLine(context.Background()); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// leaseBucketLine says when the lease bucket still allows rollup writes. Empty when there is nothing to say, from a
+// shell (nothing is connected), with no running endpoint, and whenever the server will not or cannot show the stream.
+func leaseBucketLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.LeaseRollupLine(context.Background()); ok {
 		return redactText(l)
 	}
 	return ""
