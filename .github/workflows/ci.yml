@@ -18,7 +18,8 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Does this change need the heavy jobs? scripts/ci-changes decides (it has the definition of code): a pull request that
+  # Does this change need the heavy jobs? scripts/ci-changes decides (it has the definition of code), run from the base
+  # revision rather than the pull request's (hardening); a diff touching .github/ or scripts/ci-changes is always code. A pull request that
   # touches only documentation no test or build reads is docs-only (code=false). A push, a merge group and a Mergify
   # merge-queue draft always count as code: the release gate reads main's test runs, and a draft builds the combined
   # commit. The heavy jobs skip on code=false at job level; the check names stay, a skipped job reports as skipped.
@@ -41,8 +42,20 @@ jobs:
           files=""
           if [ "$EVENT" = pull_request ]; then
             files="$(git diff --no-renames --name-only "$BASE" HEAD)"
+            # Hardening: a diff touching .github/ or the classifier is always code, whatever the classifier says.
+            if grep -qE '^"?(\.github/|scripts/ci-changes"?$)' <<<"$files"; then
+              echo "code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Hardening: the classifier comes from the base revision, not the pull request's. No copy there: code.
+            if git show "$BASE:scripts/ci-changes" > "$RUNNER_TEMP/ci-changes"; then
+              bash "$RUNNER_TEMP/ci-changes" <<<"$files" >> "$GITHUB_OUTPUT"
+            else
+              echo "code=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
           fi
-          bash scripts/ci-changes <<<"$files" >> "$GITHUB_OUTPUT"
   test:
     # The name is explicit and the job is not matrixed: the check name is exactly test (linux), a required check
     # (release.RequiredChecks).

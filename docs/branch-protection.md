@@ -120,6 +120,13 @@ is a setting only if that section says so. Settings > Branches > Add branch rule
   `docs/branch-protection.md`, `docs/review/`, `docs/allowed_signers`, `docs/skipped-releases.txt` and binary assets under
   `docs/`. A push, a merge group and a Mergify queue draft (head ref `mergify/merge-queue/`) always run the full set, so
   the combined commit and `main` are always tested.
+  **Hardening of the classifier.** For a pull request the `changes` job runs `scripts/ci-changes` from the base
+  revision (`git show "$BASE:scripts/ci-changes"`), not from the pull request, and the step itself says `code=true`
+  whenever the diff touches `.github/` or `scripts/ci-changes`, without asking the classifier; a base with no
+  classifier also means `code=true`. `internal/release/workflows_docsonly_test.go` runs the step against a rewritten
+  classifier and a changed workflow. **Residual risk:** GitHub runs a pull request's own workflow files, so a pull
+  request that edits the `changes` step itself is controlled by review only; the step's guard cannot protect against
+  its own removal.
   A check can only be selected as required after it has run once, so add `lint`, `govulncheck` and `codeql` after
   their first runs on `main`. `lint` passes while staticcheck findings are tolerated (see `lint.yml`).
 - **Merge queue.** mash queues with Mergify (`.mergify.yml`), which tests a queued pull request on its own branch and
