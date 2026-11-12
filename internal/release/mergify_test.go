@@ -324,25 +324,66 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 	}
 }
 
+// evalCondition evaluates a Mergify condition tree against pull request attributes: a list is an AND, `or:` an OR, and
+// a string is `[-]attr (~=|!=|=) value`, where a leading `-` negates it.
+func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
+	t.Helper()
+	switch v := c.(type) {
+	case []any:
+		for _, x := range v {
+			if !evalCondition(t, x, attrs) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		list, ok := v["or"].([]any)
+		if !ok || len(v) != 1 {
+			t.Fatalf("unsupported condition map %v", v)
+		}
+		for _, x := range list {
+			if evalCondition(t, x, attrs) {
+				return true
+			}
+		}
+		return false
+	case string:
+		m := regexp.MustCompile(`^(-?)([a-z-]+) (~=|!=|=) (.+)$`).FindStringSubmatch(v)
+		if m == nil {
+			t.Fatalf("unsupported condition %q", v)
+		}
+		var res bool
+		switch m[3] {
+		case "~=":
+			res = regexp.MustCompile(m[4]).MatchString(attrs[m[2]])
+		case "=":
+			res = attrs[m[2]] == m[4]
+		case "!=":
+			res = attrs[m[2]] != m[4]
+		}
+		return res != (m[1] == "-")
+	}
+	t.Fatalf("unsupported condition %v", c)
+	return false
+}
+
+// The queue-draft exemption must need both the head ref and Mergify's bot as author: a head ref alone is chosen by any
+// same-repository writer and would let them switch the rule off for their own pull request.
 func TestMergify_mergeProtectionsSkipsQueueDrafts(t *testing.T) {
 	r := loadMergify(t).MergeProtections[0]
-	plain, _ := splitConditions(t, r.If)
-	re := regexp.MustCompile(`^-head ~= (.+)$`)
-	var rx *regexp.Regexp
-	for _, c := range plain {
-		if mm := re.FindStringSubmatch(c); mm != nil {
-			rx = regexp.MustCompile(mm[1])
+	for _, c := range []struct {
+		head, author string
+		active       bool
+	}{
+		{"mergify/merge-queue/abc", "mergify[bot]", false},
+		{"mergify/merge-queue/abc", "randybias", true},
+		{"pr/ctl/x", "mergify[bot]", true},
+		{"pr/ctl/x", "randybias", true},
+	} {
+		attrs := map[string]string{"base": "main", "head": c.head, "author": c.author}
+		if got := evalCondition(t, r.If, attrs); got != c.active {
+			t.Errorf("head %q author %q: rule active = %v, want %v", c.head, c.author, got, c.active)
 		}
-	}
-	if rx == nil {
-		t.Fatalf("if = %v has no `-head ~= <regex>` condition", r.If)
-	}
-	// A negated match: the rule applies when the head does NOT match.
-	if applies := !rx.MatchString("mergify/merge-queue/abc123"); applies {
-		t.Error("the rule applies to a Mergify queue draft (head mergify/merge-queue/abc123): the queue would deadlock")
-	}
-	if applies := !rx.MatchString("pr/ctl/x"); !applies {
-		t.Error("the rule skips an ordinary pull request (head pr/ctl/x)")
 	}
 }
 

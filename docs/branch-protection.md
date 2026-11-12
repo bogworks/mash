@@ -23,8 +23,9 @@ ruleset did not enforce the queue-entry gate; only the queue did.
 **The `merge_protections` rule.** `.mergify.yml` now defines one rule, "codex-review and approval before merge", that
 mirrors the queue entry conditions that matter at an API merge: `check-success = codex-review`, an approval by the
 maintainer or the `lead-approved` label, and `label != hold`. It applies to pull requests into `main` and skips
-Mergify's own queue drafts (head ref `mergify/merge-queue/<hash>`), which have neither an approval nor a label and
-would otherwise deadlock the queue. `pr-check`, `adr-lint` and `label-reset` are not repeated: the ruleset and the
+Mergify's own queue drafts, which have neither an approval nor a label and would otherwise deadlock the queue. A draft
+is recognised by both its head ref (`mergify/merge-queue/<hash>`) and its author (`mergify[bot]`); a head ref alone is
+not enough, since any same-repository writer can name a branch that way and would otherwise switch the rule off. `pr-check`, `adr-lint` and `label-reset` are not repeated: the ruleset and the
 queue already require them. With the rule, the ruleset's required check `Mergify Merge Protections` is meaningful: it
 should fail while the rule's conditions are unmet. `internal/release/mergify_test.go` checks the rule against the
 queue conditions. This is **not yet verified live**: it is verified only after this change is merged. Read-only check
