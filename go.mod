@@ -1,6 +1,6 @@
 module github.com/bogworks/mash
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/nats-io/jwt/v2 v2.8.2
