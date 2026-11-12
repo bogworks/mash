@@ -39,11 +39,15 @@ func VerifyLeaseBucket(ctx context.Context, js jetstream.JetStream) error {
 	if err != nil {
 		return err
 	}
-	if cfg.AllowRollup {
+	if LeaseRollupAllowed(cfg) {
 		return ErrLeaseBucketRollup
 	}
 	return nil
 }
+
+// LeaseRollupAllowed reports whether a lease bucket stream configuration allows rollup writes. It reads nothing and
+// changes nothing: a warning-only check (an endpoint at open) uses it where VerifyLeaseBucket's error would be too much.
+func LeaseRollupAllowed(cfg jetstream.StreamConfig) bool { return cfg.AllowRollup }
 
 // LeaseStreamConfig is the current configuration of the lease bucket's stream.
 func LeaseStreamConfig(ctx context.Context, js jetstream.JetStream) (jetstream.StreamConfig, error) {

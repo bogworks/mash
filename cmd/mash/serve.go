@@ -291,13 +291,23 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
 		go pingClient(ctx, srv, ep)
+		go warnLeaseRollup(ctx, ep, stderr)
 		// Hook delivery: once the plugin's hook has run in this session, mail goes through the spool (endpoint/hook.go).
 		// Without a spool, mail stays on the channel.
 		// A host that takes no channel delivery is hooked from the start, and without a spool its mail is held
 		// unacked in the inbox: the channel would ack what the host never sees.
 		noChannel := adapter.SpoolsFromStart()
-		if noChannel {
+		// MASH_SPOOL_REQUIRED is the fail-closed delivery knob, read here and nowhere else: mail is never delivered
+		// by the channel, so what the spool cannot take is held unacked in the inbox and a spool failure is reported.
+		failClosed := cfg.SpoolRequired
+		if noChannel || failClosed {
 			ep.NoChannel()
+		}
+		if failClosed {
+			ep.ReportSpoolFaults(func(msg string) {
+				fmt.Fprintf(stderr, "mash: spool: %s\n", msg)
+				notify("mash: spool: " + msg + ".")
+			})
 		}
 		boundAt := time.Now() // before the bind, so a hook run once this session owns the spool is never missed
 		sdir, err := endpoint.SpoolDir(cfg)
@@ -305,7 +315,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			err = ep.SetSpool(spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
 		}
 		if err != nil {
-			if cfg.SpoolFromStart && !noChannel {
+			if failClosed {
+				ep.NoteSpoolFault(err)
+				go retrySpool(ctx, ep, func() (spool.Spool, error) {
+					d, err := endpoint.SpoolDir(cfg)
+					return spool.Spool{Dir: d}, err
+				}, adapter.OwnerToken(os.Getenv), &src.owned)
+			} else if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
 				ep.NoChannel()
@@ -316,7 +332,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			} else {
 				fmt.Fprintf(stderr, "mash: spool: %v; mail stays on the channel\n", err)
 			}
-		} else if src.owned.Store(&boundAt); noChannel || cfg.SpoolFromStart {
+		} else if src.owned.Store(&boundAt); noChannel || cfg.SpoolFromStart || failClosed {
 			// Claude Code drops channel events that arrive before its first user message, and its first hook runs
 			// with that message: only with a spool can early mail wait for a hook, so a failed SetSpool keeps the
 			// channel (#16).
@@ -1041,4 +1057,45 @@ func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.Lease
 				unlock()
 			}
 		}
+}
+
+// leaseRollupWarned makes the lease bucket warning appear at most once per process.
+var leaseRollupWarned sync.Once
+
+// warnLeaseRollup prints one stderr line when the lease bucket still allows rollup writes. It runs beside the start,
+// never delays it, and says nothing when the check cannot be made.
+func warnLeaseRollup(ctx context.Context, ep *endpoint.Endpoint, stderr io.Writer) {
+	if ep.LeaseRollupWarning(ctx) {
+		leaseRollupWarned.Do(func() { fmt.Fprintln(stderr, endpoint.LeaseRollupStartWarning) })
+	}
+}
+
+// spoolRetryEvery is how often a spool that failed at start is tried again under MASH_SPOOL_REQUIRED.
+const spoolRetryEvery = 5 * time.Second
+
+// retrySpool binds the spool in the background once it works, until ctx ends. The held mail was never acked, so the
+// inbox redelivers it and it is spooled from the first message.
+func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spool, error), owner string, owned *atomic.Pointer[time.Time]) {
+	t := time.NewTicker(spoolRetryEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		boundAt := time.Now()
+		s, err := mk()
+		if err == nil {
+			err = ep.BindSpool(ctx, s, owner, true)
+		}
+		if err == nil {
+			owned.Store(&boundAt)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		ep.NoteSpoolFault(err)
+	}
 }

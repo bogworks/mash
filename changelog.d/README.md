@@ -32,5 +32,12 @@ sees and, where it helps, link the ADR or issue.
   `## [X.Y.Z] - date` section below an emptied Unreleased heading, in the order Added, Changed, Deprecated, Removed,
   Fixed, Security (only the sections that have entries), then removes the fragment files. Entries that were already
   under Unreleased come first in their section, then the fragments by slug. `--dry-run` prints the section and changes
-  nothing. It refuses a version that already has a section.
+  nothing. It refuses a version that already has a section. Directly under the new heading it writes a `### Summary`
+  paragraph starting `REPLACE THIS PARAGRAPH:` and a `### Upgrading` sentence starting `REPLACE THIS:`, which the
+  maintainer replaces before the release: a release's notes are its change-log section and open with prose, at least
+  40 words of Summary and a sentence under Upgrading ("Nothing to do." when there is nothing to do), before any list
+  ([ADR 0105](../docs/decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
+  Fragments are the lists below that prose; they are not the Summary. The release gate refuses the placeholder.
+- `go run ./scripts/changelog section --version X.Y.Z` prints that section without its heading (the release workflow's
+  notes), and `go run ./scripts/changelog check-notes FILE` applies the opening test to a file.
 - `release-check` refuses a release commit that still has fragments here.

@@ -700,6 +700,9 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		case <-tick.C:
 			e.settleHeld(deliver, h)
 			continue
+		case req := <-e.spoolReq:
+			e.bindSpool(req)
+			continue
 		case p := <-queue:
 			batch = append(batch, p)
 		}

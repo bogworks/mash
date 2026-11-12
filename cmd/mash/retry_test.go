@@ -110,6 +110,29 @@ func (s *session) exited(t *testing.T, d time.Duration) {
 	}
 }
 
+// onlineDeadline bounds awaitOnline.
+const onlineDeadline = 5 * time.Second
+
+// awaitOnline waits for the online notice and returns it, skipping any further held notice before it. A held notice
+// repeats by design when the holder read on a retry differs from the last one (serve.go, process): a lease freed
+// between a retry's create and its read of the holder is reported as held by "?" before the next attempt takes it.
+// Any other channel event is a failure.
+func (s *session) awaitOnline(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(onlineDeadline)
+	for {
+		ev := content(s.await(t, time.Until(deadline), isChannel))
+		switch {
+		case strings.Contains(ev, "is online"):
+			return ev
+		case strings.Contains(ev, "mail is off for this session"):
+			// a repeated held notice: keep waiting
+		default:
+			t.Fatalf("want the online notice, got %s", ev)
+		}
+	}
+}
+
 func content(m map[string]any) string { return m["params"].(map[string]any)["content"].(string) }
 
 func eventually(t *testing.T, d time.Duration, what string, ok func() bool) {
@@ -156,9 +179,7 @@ func TestServeRetriesHeldLease(t *testing.T) {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	freeLease(t, kv, "a")
-	if online := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(online, "online") {
-		t.Fatalf("online notice: %s", online)
-	}
+	s.awaitOnline(t)
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "sent while held") {
 		t.Fatalf("expected the queued mail after the online notice, got %s", ev)
 	}
@@ -626,9 +647,7 @@ func TestServeWaitSurvivesTransientErrors(t *testing.T) {
 			before := acquiredCount.Load()
 			freeLease(t, kv, "a")
 			eventually(t, 5*time.Second, "the waiter takes the freed name", func() bool { return acquiredCount.Load() > before })
-			if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "online") {
-				t.Fatalf("want the online notice, got %s", ev)
-			}
+			s.awaitOnline(t)
 		})
 	}
 }
@@ -798,7 +817,7 @@ func TestServeRecordsItselfWhileWaiting(t *testing.T) {
 		t.Fatalf("Waiters = %+v", got)
 	}
 	freeLease(t, kv, "a")
-	s.await(t, 5*time.Second, isChannel) // the online notice
+	s.awaitOnline(t)
 	eventually(t, 10*time.Second, "waiting record removed once bound", func() bool { _, err := os.Stat(rec); return err != nil })
 }
 
@@ -818,9 +837,7 @@ func TestServeLeaseRetryFromConfig(t *testing.T) {
 		t.Fatalf("held notice: %s", held)
 	}
 	freeLease(t, kv, "a")
-	if online := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(online, "online") {
-		t.Fatalf("online notice: %s", online)
-	}
+	s.awaitOnline(t)
 }
 
 func TestApplyRetryTiming(t *testing.T) {

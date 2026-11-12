@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,19 +64,53 @@ func TestPluginCommandsAreFrozen(t *testing.T) {
 	}
 }
 
+// pluginRootUnpinned is a copy of the plugin directory without scripts/mash.pins. A release pins the launcher by
+// committing that file, and a pinned launcher downloads its binary; these tests run the launcher against a fake mash
+// on PATH, so they must not depend on whether the checkout is pinned.
+func pluginRootUnpinned(t *testing.T) string {
+	t.Helper()
+	src, err := filepath.Abs("../../plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := t.TempDir()
+	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		if rel == filepath.Join("scripts", "mash.pins") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, info.Mode().Perm())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
 // runShellHook runs a hook command through sh with a PATH of only dir (plus the system's), returning stdout, stderr and the exit code.
 func runShellHook(t *testing.T, command, pathDir string, env ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", command)
-	root, err := filepath.Abs("../../plugin")
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := pluginRootUnpinned(t)
 	cmd.Env = append([]string{"PATH=" + pathDir + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "CLAUDE_PLUGIN_ROOT=" + root}, env...)
 	cmd.Stdin = strings.NewReader(`{"hook_event_name":"PostToolUse"}`)
 	var o, e bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &o, &e
-	err = cmd.Run()
+	err := cmd.Run()
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
 	} else if err != nil {
