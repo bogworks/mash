@@ -39,8 +39,10 @@ type StatusWriter interface {
 	WriteStatus(ctx context.Context, st Status) error
 }
 
-// KVLedgerOptions configures a KVLedger. The zero value is usable.
+// KVLedgerOptions configures a KVLedger. Only Bucket is required.
 type KVLedgerOptions struct {
+	// Bucket is the resolved name of the policy bucket (see PolicyBucket). Required.
+	Bucket string
 	// LeaseTTL is how long the run lease lasts without renewal; zero means DefaultLeaseTTL. The lease is renewed at
 	// half of it while held.
 	LeaseTTL time.Duration
@@ -90,16 +92,16 @@ type KVLedger struct {
 
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// NewKVLedger returns the ledger of account in the policy bucket of range rng. It fails, wrapping
+// NewKVLedger returns the ledger of account in the policy bucket opts.Bucket. It fails, wrapping
 // ErrNoPolicyBucket, when the bucket does not exist.
-func NewKVLedger(ctx context.Context, js jetstream.JetStream, rng, account string, opts KVLedgerOptions) (*KVLedger, error) {
-	if !accountRE.MatchString(rng) {
-		return nil, fmt.Errorf("policy ledger: %q is not a range name", rng)
+func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, opts KVLedgerOptions) (*KVLedger, error) {
+	if opts.Bucket == "" {
+		return nil, fmt.Errorf("policy ledger: no policy bucket name; set %s", PolicyBucketEnv)
 	}
 	if !accountRE.MatchString(account) {
 		return nil, fmt.Errorf("policy ledger: %q is not an account key", account)
 	}
-	bucket := PolicyBucket(rng)
+	bucket := opts.Bucket
 	kv, err := js.KeyValue(ctx, bucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
 		return nil, fmt.Errorf("%w: bucket %s is created by operations; ask for it before applying policy", ErrNoPolicyBucket, bucket)

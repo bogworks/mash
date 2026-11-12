@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,6 +51,15 @@ func newJetStreamConn(t *testing.T) *nats.Conn { return connectJS(t, startJetStr
 
 const kvRange = "r1"
 
+// kvBucket is the test bucket name, as an operator's pattern would give it.
+var kvBucket = func() string {
+	b, err := PolicyBucket("test_{range}_policy", kvRange)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()
+
 var kvAccount = func() string {
 	kp, _ := nkeys.CreateAccount()
 	pub, _ := kp.PublicKey()
@@ -70,7 +80,7 @@ func newKVEnv(t *testing.T) *kvEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kv, err := js.CreateKeyValue(context.Background(), jetstream.KeyValueConfig{Bucket: PolicyBucket(kvRange), History: 8})
+	kv, err := js.CreateKeyValue(context.Background(), jetstream.KeyValueConfig{Bucket: kvBucket, History: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +94,8 @@ func (e *kvEnv) ledger(opts KVLedgerOptions) *KVLedger {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	l, err := NewKVLedger(context.Background(), js, kvRange, kvAccount, opts)
+	opts.Bucket = kvBucket
+	l, err := NewKVLedger(context.Background(), js, kvAccount, opts)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -100,11 +111,11 @@ func TestKVLedgerMissingBucket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewKVLedger(context.Background(), js, "nope", kvAccount, KVLedgerOptions{})
+	_, err = NewKVLedger(context.Background(), js, kvAccount, KVLedgerOptions{Bucket: "nope"})
 	if !errors.Is(err, ErrNoPolicyBucket) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := js.KeyValue(context.Background(), PolicyBucket("nope")); err == nil {
+	if _, err := js.KeyValue(context.Background(), "nope"); err == nil {
 		t.Error("the ledger created the bucket")
 	}
 }
@@ -523,5 +534,38 @@ func TestAdminIssueRecordMapping(t *testing.T) {
 	}
 	if es, _ := r.ByAddress(ctx, "foo.c.none"); len(es) != 0 {
 		t.Errorf("none: %+v", es)
+	}
+}
+
+func TestKVLedgerRequiresBucket(t *testing.T) {
+	js, err := jetstream.New(newJetStreamConn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewKVLedger(context.Background(), js, kvAccount, KVLedgerOptions{})
+	if err == nil || !strings.Contains(err.Error(), PolicyBucketEnv) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPolicyBucket(t *testing.T) {
+	for _, c := range []struct {
+		pattern, rng, want string
+		ok                 bool
+	}{
+		{"mgr_{range}_policy", "r1", "mgr_r1_policy", true},
+		{"{range}-{range}", "a", "a-a", true},
+		{"fixed_policy", "", "fixed_policy", true},
+		{"fixed_policy", "ignored", "fixed_policy", true},
+		{"", "r1", "", false},
+		{"mgr_{range}_policy", "", "", false},
+		{"mgr_{range}_policy", "a.b", "", false},
+		{"mgr.{range}", "r1", "", false},
+		{"mgr {range}", "r1", "", false},
+	} {
+		got, err := PolicyBucket(c.pattern, c.rng)
+		if (err == nil) != c.ok || got != c.want {
+			t.Errorf("PolicyBucket(%q, %q) = %q, %v", c.pattern, c.rng, got, err)
+		}
 	}
 }
