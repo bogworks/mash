@@ -1,6 +1,6 @@
 #!/bin/sh
 # pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
-# pin-plugin <version> --attested <dir> [--repo owner/name]
+# pin-plugin <version> --attested <dir> [--repo owner/name]   (keyless releases, at or above docs/release-cutover)
 # pin-plugin <version> <SHA256SUMS> --unverified
 # Pins the plugin launcher to a release by writing scripts/mash.pins (beside the launcher), and sets
 # .claude-plugin/plugin.json's version to <version>-pin.1 (only that line) so installed plugins update, since Claude
@@ -8,11 +8,15 @@
 # live outside it. Idempotent (already <version>-pin.N: left alone). Run after a release.
 # Fails closed: mash.pins is written only from sums that were verified (signature or attestation), or when
 # --unverified is given explicitly (local testing only).
+# --attested is the path for keyless releases: every binary's attestation is verified with four pinned facts
+# (-R <repo>, --signer-workflow <repo>/.github/workflows/release.yml, --source-ref refs/tags/v<version>,
+# --source-digest <the release commit>). The commit is read from the remote tag (git ls-remote, peeled); if it
+# cannot be read as one 40-hex sha, nothing is written. --sig is for releases below the cutover.
 set -eu
 usage() {
   cat >&2 <<'U'
 usage: pin-plugin <version> <SHA256SUMS> --sig <SHA256SUMS.sig> [--signers <allowed_signers>]
-       pin-plugin <version> --attested <dir> [--repo owner/name]
+       pin-plugin <version> --attested <dir> [--repo owner/name]   (keyless releases: pins workflow, tag and commit)
        pin-plugin <version> <SHA256SUMS> --unverified   (local testing only)
 exactly one mode is required
 also sets plugin.json's version to <version>-pin.1 (so installed plugins update)
@@ -82,8 +86,16 @@ if [ -n "$attdir" ]; then
     case "$repo" in */*) ;; *) die "cannot derive owner/name from origin '$url'; pass --repo" ;; esac
   fi
   for a in $ASSETS; do [ -f "$attdir/$a" ] || die "$attdir/$a not found"; done
+  command -v git >/dev/null 2>&1 || die "git not found; cannot read the release tag"
+  lsout=$(git ls-remote "https://github.com/$repo.git" "refs/tags/v$ver^{}" 2>/dev/null) || die "cannot read tag v$ver of $repo; refusing"
+  xsha=${lsout%%[[:space:]]*}
+  [ "$(printf '%s\n' "$lsout" | wc -l | tr -d ' ')" -eq 1 ] || die "tag v$ver of $repo did not resolve to exactly one commit; refusing"
+  [ ${#xsha} -eq 40 ] || die "tag v$ver of $repo: no 40-hex commit; refusing"
+  case "$xsha" in *[!0-9a-f]*) die "tag v$ver of $repo: bad commit '$xsha'; refusing" ;; esac
   for a in $ASSETS; do
-    gh attestation verify "$attdir/$a" -R "$repo" >&2 || die "attestation verification failed for $a (repo $repo)"
+    gh attestation verify "$attdir/$a" -R "$repo" \
+      --signer-workflow "$repo/.github/workflows/release.yml" \
+      --source-ref "refs/tags/v$ver" --source-digest "$xsha" >&2 || die "attestation verification failed for $a (repo $repo)"
   done
   printf 'version=%s\n' "$ver" > "$out"
   for a in $ASSETS; do

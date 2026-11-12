@@ -108,6 +108,16 @@ func CIAssetNames() []string {
 	return append(n, ProvenanceName)
 }
 
+// SumsCINames are the CIAssetNames that SHA256SUMS lists: all of them, or, for a keyless release, all but the
+// provenance bundle.
+func SumsCINames(keyless bool) []string {
+	n := CIAssetNames()
+	if keyless {
+		n = n[:len(n)-1] // the provenance is last
+	}
+	return n
+}
+
 // SumsName is the checksums asset.
 const SumsName = "SHA256SUMS"
 
@@ -116,7 +126,7 @@ const ScriptName = "quickstart-synadia.sh"
 
 // SumsSigName is the detached SSH signature of SHA256SUMS (ssh-keygen -Y sign, namespace SumsNamespace). The draft
 // release.yml makes does not carry it: `release-check --assets` adds it. CheckAssets allows it, and the signing step
-// judges it.
+// judges it. A keyless release (at or above the cutover) carries none: CheckAssets refuses it there.
 const SumsSigName = "SHA256SUMS.sig"
 
 // SumsNamespace is the ssh-keygen -Y namespace of SHA256SUMS.sig. It is specific to mash, so a
@@ -126,13 +136,15 @@ const SumsNamespace = "mash-release"
 // ExpectedSums is the exact SHA256SUMS content for the given per-target hashes (hex SHA-256 of each binary), the
 // quickstart script's hash and the hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the script, the
 // SBOMs and the provenance, in that order, as release.yml's draft job lists them. A name missing from ci is left out.
-func ExpectedSums(hashes map[Target]string, scriptHash string, ci map[string]string) string {
+// A keyless release (at or above the cutover) lists the same names except the provenance bundle: it cannot list itself,
+// as release.yml makes the sums before the job that attests.
+func ExpectedSums(hashes map[Target]string, scriptHash string, ci map[string]string, keyless bool) string {
 	var b strings.Builder
 	for _, t := range Targets {
 		fmt.Fprintf(&b, "%s  %s\n", hashes[t], t.AssetName())
 	}
 	fmt.Fprintf(&b, "%s  %s\n", scriptHash, ScriptName)
-	for _, n := range CIAssetNames() {
+	for _, n := range SumsCINames(keyless) {
 		if h, ok := ci[n]; ok {
 			fmt.Fprintf(&b, "%s  %s\n", h, n)
 		}
@@ -150,8 +162,9 @@ func sha(b []byte) string {
 // SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target, the script's is scriptHash
 // (the tagged source's); the SBOMs and the provenance must be attached (their contents are verified separately, as
 // they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
-// every problem.
-func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash string) error {
+// every problem. For a keyless release (at or above the cutover) SHA256SUMS omits the provenance bundle (which stays
+// required to be attached), and a SHA256SUMS.sig is not allowed.
+func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash string, keyless bool) error {
 	var problems []string
 	add := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
 	want := map[string]string{}
@@ -169,7 +182,7 @@ func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash st
 			want[n] = got
 		}
 	}
-	want[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes, scriptHash, ci)))
+	want[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes, scriptHash, ci, keyless)))
 	if len(scriptHash) != 64 {
 		add("no usable hash for %s", ScriptName)
 	} else {
@@ -194,6 +207,9 @@ func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash st
 	}
 	for name := range have {
 		if name == SumsSigName {
+			if keyless {
+				add("asset %s is attached: a keyless release carries no %s", name, SumsSigName)
+			}
 			continue // optional here: the signing step requires it and verifies it
 		}
 		if _, ok := want[name]; !ok {

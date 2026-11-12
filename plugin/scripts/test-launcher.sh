@@ -348,25 +348,78 @@ for a in $ASSETS; do cp "$REL/v$VER/$a" "$ATT/$a"; done
 FG="$T/fakegh"; mkdir -p "$FG"
 cat > "$FG/gh" <<'GH'
 #!/bin/sh
-# fake gh: gh attestation verify <file> -R <repo>; fails for FAKE_GH_FAIL (a basename) and records the repo
+# fake gh: gh attestation verify <file> ...; records its arguments and refuses (exit 1) unless it sees
+# -R $EXPECT_REPO, --signer-workflow $EXPECT_WF, --source-ref $EXPECT_REF and --source-digest $EXPECT_X.
+# Also fails for FAKE_GH_FAIL (a basename).
 [ "$1 $2" = "attestation verify" ] || exit 64
-echo "$5" > "${FAKE_GH_LOG:-/dev/null}"
-[ "$(basename "$3")" = "${FAKE_GH_FAIL:-}" ] && { echo "verification failed" >&2; exit 1; }
+f=$3; shift 3
+echo "$*" >> "${FAKE_GH_LOG:-/dev/null}"
+r=""; w=""; g=""; x=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -R) r=$2 ;; --signer-workflow) w=$2 ;; --source-ref) g=$2 ;; --source-digest) x=$2 ;;
+  esac
+  shift
+done
+[ "$(basename "$f")" = "${FAKE_GH_FAIL:-}" ] && { echo "verification failed" >&2; exit 1; }
+[ "$r" = "$EXPECT_REPO" ] && [ "$w" = "$EXPECT_WF" ] && [ "$g" = "$EXPECT_REF" ] && [ "$x" = "$EXPECT_X" ] \
+  || { echo "fake gh: pinned facts do not match" >&2; exit 1; }
 exit 0
 GH
 chmod +x "$FG/gh"
-FAKE_GH_LOG="$T/ghrepo" PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>&1; RC=$?
+# fake git: `ls-remote` prints FAKE_LSREMOTE (verbatim, if set) or "$FAKE_GIT_X\trefs/tags/v<ver>^{}"; records its args; exit FAKE_LS_RC.
+# Anything else goes to the real git.
+REALGIT=$(command -v git)
+cat > "$FG/git" <<GIT
+#!/bin/sh
+if [ "\$1" = ls-remote ]; then
+  echo "\$*" >> "\${FAKE_GIT_LOG:-/dev/null}"
+  [ -n "\${FAKE_LSREMOTE+x}" ] && printf '%s' "\$FAKE_LSREMOTE" || printf '%s\t%s\n' "\$FAKE_GIT_X" "\$3"
+  exit "\${FAKE_LS_RC:-0}"
+fi
+exec "$REALGIT" "\$@"
+GIT
+chmod +x "$FG/git"
+XSHA=0123456789abcdef0123456789abcdef01234567
+export FAKE_GIT_X=$XSHA EXPECT_REPO=o/n EXPECT_WF=o/n/.github/workflows/release.yml EXPECT_REF="refs/tags/v$VER" EXPECT_X=$XSHA
+att() { PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>"$T/err"; RC=$?; }
+: > "$T/ghlog"; : > "$T/gitlog"
+FAKE_GH_LOG="$T/ghlog" FAKE_GIT_LOG="$T/gitlog" att
 check "pin-plugin --attested success exits 0" eq "$RC" 0
 check "pin-plugin --attested pins computed sums" cmp -s "$PINS" "$T/pins1"
-check "pin-plugin --attested passes the repo" eq "$(cat "$T/ghrepo")" "o/n"
-rm -f "$PINS"
-FAKE_GH_FAIL=mash-darwin-arm64 PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>&1; RC=$?
-check "pin-plugin --attested one failure exits 1" eq "$RC" 1
-check "pin-plugin --attested one failure writes nothing" absent "$PINS"
+check "pin-plugin --attested passes the repo" contains "$(head -n 1 "$T/ghlog")" "-R o/n"
+check "pin-plugin --attested passes the signer workflow" contains "$(head -n 1 "$T/ghlog")" "--signer-workflow o/n/.github/workflows/release.yml"
+check "pin-plugin --attested passes the source ref" contains "$(head -n 1 "$T/ghlog")" "--source-ref refs/tags/v$VER"
+check "pin-plugin --attested passes the source digest" contains "$(head -n 1 "$T/ghlog")" "--source-digest $XSHA"
+check "pin-plugin --attested verifies all four binaries" eq "$(wc -l < "$T/ghlog" | tr -d ' ')" 4
+check "pin-plugin --attested reads the peeled remote tag" contains "$(cat "$T/gitlog")" "https://github.com/o/n.git refs/tags/v$VER^{}"
+rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+attrefused() { # desc; env set by the caller; must exit 1 and write nothing
+  rm -f "$PINS"; cp "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+  att
+  check "$1 exits 1" eq "$RC" 1
+  check "$1 writes nothing" absent "$PINS"
+  check "$1 leaves plugin.json alone" cmp -s "$T/plugin.json.orig" "$PP/.claude-plugin/plugin.json"
+}
+EXPECT_WF=other/repo/.github/workflows/release.yml attrefused "pin-plugin --attested foreign workflow"
+EXPECT_REF=refs/tags/v9.9.9 attrefused "pin-plugin --attested foreign ref"
+EXPECT_X=fedcba9876543210fedcba9876543210fedcba98 attrefused "pin-plugin --attested foreign commit"
+EXPECT_REPO=x/y attrefused "pin-plugin --attested foreign repo"
+FAKE_LSREMOTE="" attrefused "pin-plugin --attested empty ls-remote"
+FAKE_LSREMOTE="not-a-sha	refs/tags/v$VER^{}
+" attrefused "pin-plugin --attested garbage ls-remote"
+FAKE_LSREMOTE="0123456789ABCDEF0123456789abcdef01234567	refs/tags/v$VER^{}
+" attrefused "pin-plugin --attested uppercase sha"
+FAKE_LSREMOTE="0123456789abcdef	refs/tags/v$VER^{}
+" attrefused "pin-plugin --attested short sha"
+FAKE_LSREMOTE="$XSHA	refs/tags/v$VER^{}
+$XSHA	refs/tags/v$VER-rc^{}
+" attrefused "pin-plugin --attested two ls-remote lines"
+FAKE_LS_RC=128 attrefused "pin-plugin --attested ls-remote failure"
+check "pin-plugin --attested names the unreadable tag" contains "$(cat "$T/err")" "cannot read tag"
+FAKE_GH_FAIL=mash-darwin-arm64 attrefused "pin-plugin --attested one failure"
 rm "$ATT/mash-linux-arm64"
-PATH="$FG:$PATH" "$PS" "$VER" --attested "$ATT" --repo o/n >/dev/null 2>&1; RC=$?
-check "pin-plugin --attested missing binary exits 1" eq "$RC" 1
-check "pin-plugin --attested missing binary writes nothing" absent "$PINS"
+attrefused "pin-plugin --attested missing binary"
 cp "$REL/v$VER/mash-linux-arm64" "$ATT/"
 NOGH="$T/nogh"; mkdir -p "$NOGH"
 for _t in sh awk cp cat mktemp rm mv head sed dirname git sha256sum; do _p=$(command -v "$_t") && ln -sf "$_p" "$NOGH/$_t"; done

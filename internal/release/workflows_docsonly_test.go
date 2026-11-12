@@ -169,6 +169,7 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"review docs beside the policy", pr, "f/x", []string{"docs/review/in-session-loop.md"}, "true"},
 		{"the release signers", pr, "f/x", []string{"docs/allowed_signers"}, "true"},
 		{"the skipped-releases list", pr, "f/x", []string{"docs/skipped-releases.txt"}, "true"},
+		{"the release cutover version", pr, "f/x", []string{"docs/release-cutover"}, "true"},
 		{"a binary asset under docs", pr, "f/x", []string{"docs/images/a.PNG"}, "true"},
 		{"a Go file under docs", pr, "f/x", []string{"docs/evidence/x/main.go"}, "true"},
 		{"a rename out of scripts into docs", pr, "f/x", []string{"scripts/notes.md", "docs/notes.md"}, "true"},
@@ -199,6 +200,7 @@ func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
 		"docs/review/policy.json",      // scripts/reviewgate tests, scripts/gate
 		"docs/allowed_signers",         // scripts/releasecheck (release signing)
 		"docs/skipped-releases.txt",    // scripts/releasecheck
+		"docs/release-cutover",         // scripts/releasecheck
 		"CHANGELOG.md",                 // scripts/changelog tests
 		"scripts/scrubcheck/words.txt", // scripts/scrubcheck tests
 	} {

@@ -26,16 +26,17 @@ const releaseWorkflowPath = ".github/workflows/release.yml"
 // attestFlags are the gh attestation verify flags that pin WHO made an attestation: the release workflow of the release
 // repository, at the release tag. There is deliberately no --deny-self-hosted-runners: the release is built and attested
 // on our own self-hosted runners, and verification accepts them by design (ADR 0087). -R alone would accept any workflow
-// of the repository on any ref.
-func attestFlags(o Options, tag string) []string {
-	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag}
+// of the repository on any ref. --source-digest pins the commit x the attestation was made for, so four facts are held:
+// the repository, the workflow, the tag and the commit.
+func attestFlags(o Options, tag, x string) []string {
+	return []string{"-R", o.GHRepo, "--signer-workflow", o.GHRepo + "/" + releaseWorkflowPath, "--source-ref", "refs/tags/" + tag, "--source-digest", x}
 }
 
 // verifySupplyChain holds the release's SBOMs and build provenance to what release.yml promises, on every binary; any
 // failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each binary it requires that
 //   - the attached mash-<os>-<arch>.cdx.json is CycloneDX JSON with components and a described main component or tool;
 //   - `gh attestation verify <binary> -R <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref
-//     refs/tags/v<version> --predicate-type https://cyclonedx.org/bom` passes and a verified
+//     refs/tags/v<version> --source-digest <X> --predicate-type https://cyclonedx.org/bom` passes and a verified
 //     statement names the binary's own sha256 as its subject and carries the attached SBOM as its predicate (an SBOM
 //     attested for some other file, or a different SBOM file, is refused);
 //   - `gh attestation verify <binary> --bundle mash.intoto.jsonl` with the same signer and ref flags passes: the
@@ -44,7 +45,7 @@ func attestFlags(o Options, tag string) []string {
 //   - the provenance's workflow entry point is .github/workflows/release.yml (checkProvenanceEntryPoint).
 //
 // It runs only for a release that passed every earlier check, like verifyAttestations.
-func verifySupplyChain(o Options, tag string) error {
+func verifySupplyChain(o Options, tag, x string) error {
 	dir, err := os.MkdirTemp("", "release-check-supply-")
 	if err != nil {
 		return op(err)
@@ -79,10 +80,10 @@ func verifySupplyChain(o Options, tag string) error {
 		if err := checkSBOM(sbom); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: %v", t.SBOMName(), err))
 		}
-		if err := verifySBOMAttestation(o, tag, bin, binBytes, t.SBOMName(), sbom); err != nil {
+		if err := verifySBOMAttestation(o, tag, x, bin, binBytes, t.SBOMName(), sbom); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
 		}
-		args := append([]string{"attestation", "verify", bin}, attestFlags(o, tag)...)
+		args := append([]string{"attestation", "verify", bin}, attestFlags(o, tag, x)...)
 		if _, err := gh(o, append(args, "--bundle", prov)...); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: no verifying build provenance in %s: %v", name, release.ProvenanceName, err))
 		}
@@ -99,8 +100,8 @@ func verifySupplyChain(o Options, tag string) error {
 // verifySBOMAttestation runs gh attestation verify with the CycloneDX predicate type on the binary and checks that a
 // verified statement has the binary's sha256 among its subjects and a predicate semantically equal to the attached
 // SBOM (actions/attest-sbom stores the SBOM JSON verbatim as the predicate; key order and whitespace do not matter).
-func verifySBOMAttestation(o Options, tag, path string, data []byte, sbomName string, sbom []byte) error {
-	args := append([]string{"attestation", "verify", path}, attestFlags(o, tag)...)
+func verifySBOMAttestation(o Options, tag, x, path string, data []byte, sbomName string, sbom []byte) error {
+	args := append([]string{"attestation", "verify", path}, attestFlags(o, tag, x)...)
 	out, err := gh(o, append(args, "--predicate-type", sbomPredicateType, "--format", "json")...)
 	if err != nil {
 		return fmt.Errorf("no verifying SBOM attestation: %w", err)
@@ -291,6 +292,25 @@ func checkSBOM(b []byte) error {
 	tools := strings.TrimSpace(string(v.Metadata.Tools))
 	if v.Metadata.Component.Name == "" && (tools == "" || tools == "null" || tools == "{}" || tools == "[]") {
 		return errors.New("metadata names neither a main component nor a tool")
+	}
+	return nil
+}
+
+// verifySumsAttestation runs `gh attestation verify` on SHA256SUMS (the bytes sums, as downloaded from the release),
+// pinned like every other subject (attestFlags): in a keyless release SHA256SUMS is itself an attested subject and
+// carries no SHA256SUMS.sig. A failure is a refusal naming SHA256SUMS.
+func verifySumsAttestation(o Options, tag, x string, sums []byte) error {
+	dir, err := os.MkdirTemp("", "release-check-sums-")
+	if err != nil {
+		return op(err)
+	}
+	defer os.RemoveAll(dir)
+	p := filepath.Join(dir, release.SumsName)
+	if err := os.WriteFile(p, sums, 0o644); err != nil {
+		return op(err)
+	}
+	if _, err := gh(o, append([]string{"attestation", "verify", p}, attestFlags(o, tag, x)...)...); err != nil {
+		return fmt.Errorf("no verifying attestation for %s: %w", release.SumsName, err)
 	}
 	return nil
 }

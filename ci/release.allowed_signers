@@ -1,3 +1,4 @@
+# Frozen: used for releases up to v0.3.x. From the cutover version (docs/release-cutover) tags and SHA256SUMS are not signed with these keys.
 # The keys trusted to sign a release's SHA256SUMS (SHA256SUMS.sig, ssh-keygen -Y sign, namespace mash-release):
 # release-check --assets signs with one and verifies against this file as it stands at the candidate X, and anyone can
 # verify a download against it: ssh-keygen -Y verify -f ci/release.allowed_signers -I release -n mash-release -s SHA256SUMS.sig < SHA256SUMS

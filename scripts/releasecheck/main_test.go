@@ -51,6 +51,7 @@ type fixture struct {
 	o          Options
 	measuredMu sync.Mutex
 	measured   []string    // the binaries the faked latency measurement ran against; the step measures in parallel
+	keyless    bool        // setAssets makes the SHA256SUMS of a keyless release (makeKeyless)
 	gate       *gateRecord // what the --assets gate of this test established (signedDraft)
 	specs      []string    // for each measurement, "<binary dir>:<serve args joined by space>", in the same order
 }
@@ -94,11 +95,15 @@ case "$1" in
     upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
     *) cat "ROOT/assets.json" ;; esac ;;
   attestation) b=$(basename "$3"); sbom=; bundle=
-    sw=; prev=
+    sw=; prev=; sd=; sr=
     for a in "$@"; do [ "$a" = --predicate-type ] && sbom=1; [ "$a" = --bundle ] && bundle=1
       # the fixture's runner is self-hosted, like the real one: the real gh refuses it under this flag
       [ "$a" = --deny-self-hosted-runners ] && { echo "verification failed: attestation was made on a self-hosted runner" >&2; exit 1; }
-      [ "$prev" = --signer-workflow ] && sw=$a; prev=$a; done
+      [ "$prev" = --signer-workflow ] && sw=$a; [ "$prev" = --source-digest ] && sd=$a; [ "$prev" = --source-ref ] && sr=$a; prev=$a; done
+    # the four pinned facts: -R and --signer-workflow, --source-ref, and --source-digest equal to the candidate commit
+    if [ -z "$sr" ]; then echo "verification failed: no --source-ref" >&2; exit 1; fi
+    if [ -z "$sd" ]; then echo "verification failed: no --source-digest" >&2; exit 1; fi
+    if [ -f "ROOT/x" ] && [ "$sd" != "$(cat ROOT/x)" ]; then echo "verification failed: source digest mismatch" >&2; exit 1; fi
     if [ -f "ROOT/signer" ] && [ "$sw" != "$(cat ROOT/signer)" ]; then echo "verification failed: signer workflow mismatch" >&2; exit 1; fi
     if [ -n "$bundle" ]; then [ -f "ROOT/noprov/$b" ] && { echo "verification failed: no matching provenance" >&2; exit 1; }
     elif [ -n "$sbom" ]; then [ -f "ROOT/noattest-sbom/$b" ] && { echo "no attestations found" >&2; exit 1; }
@@ -116,6 +121,7 @@ esac
 	if err := os.Chmod(gh, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	write(t, root, "x", x)
 	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
 		Signers: filepath.Join(root, "allowed_signers")}
 	t.Setenv("RELEASE_SIGNING_KEY", sumsKey.priv)
@@ -255,7 +261,7 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 		have[n] = "sha256:" + shaOf(body)
 		ci[n] = shaOf(body)
 	}
-	sums := release.ExpectedSums(h, shaOf("#!/bin/sh\necho quickstart\n"), ci)
+	sums := release.ExpectedSums(h, shaOf("#!/bin/sh\necho quickstart\n"), ci, f.keyless)
 	have[release.ScriptName] = "sha256:" + shaOf("#!/bin/sh\necho quickstart\n")
 	have[release.SumsName] = "sha256:" + shaOf(sums)
 	if mutate != nil {

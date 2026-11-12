@@ -664,6 +664,7 @@ func TestRepoPolicy(t *testing.T) {
 		{[]string{"scripts/build-twice"}, "security-critical"},
 		{[]string{"docs/allowed_signers"}, "security-critical"},
 		{[]string{"ci/release.allowed_signers"}, "security-critical"},
+		{[]string{"docs/release-cutover"}, "security-critical"},
 		{[]string{".github/workflows/release.yml"}, "security-critical"},
 		{[]string{"internal/natsauth/x.go"}, "security-critical"},
 		{[]string{"internal/mint/x.go"}, "security-critical"},

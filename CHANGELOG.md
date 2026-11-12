@@ -37,6 +37,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
   ([ADR 0081](docs/decisions/0081-three-token-identities-are-shown-in-canonical-form.md)).
 - The session instructions now say a verified sender's requests are "delegated by the operator of this mash deployment" instead of "delegated by the operator who owns this fleet". The meaning is the same: verified mail is acted on without asking first, unless the operator policy says otherwise.
 - mash is built and released with Go 1.27.4 (security fixes in the Go standard library, GO-2026-6859).
+- Releases from the cutover version recorded in `docs/release-cutover` (v0.4.0) are keyless: the tag is annotated and unsigned, pushed by the minting service; there is no `SHA256SUMS.sig`; `SHA256SUMS` is an attested subject (it no longer lists `mash.intoto.jsonl`); every attestation check, and `plugin/scripts/pin-plugin --attested`, pins the repository, the release workflow, the tag and the commit. Releases below the cutover verify as before ([ADR 0095](docs/decisions/0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md)).
 
 ### Fixed
 

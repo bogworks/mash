@@ -1,16 +1,19 @@
 name: release
-# Runs on a signed tag v<N.N.N> that the maintainer pushes at the candidate commit X after scripts/release-check passed. It
-# builds every target twice, in two fresh clones in different directories, and fails unless the two SHA-256s match.
+# Runs on a tag v<N.N.N> at the candidate commit X, after scripts/release-check passed. The tag is pushed either by the maintainer
+# (below the cutover version in docs/release-cutover: annotated and SSH-signed) or by the minting service with a deploy key
+# (at or above it: annotated and unsigned; keyless); the `push: tags` trigger is the same for both. It builds every target twice,
+# in two fresh clones in different directories, and fails unless the two SHA-256s match.
 # It publishes a DRAFT release, then re-checks release order (scripts/draft-guard --after-create) and fails, leaving its draft in place
-# for manual resolution, if a lower draft or a higher published release stands beside it; the maintainer runs `scripts/release-check --assets <version> <X>` (tag signature, tag at X,
-# exactly our builds attached) before publishing. Every job runs on a self-hosted runner,
+# for manual resolution, if a lower draft or a higher published release stands beside it; the maintainer runs `scripts/release-check --assets <version> <X>` (tag at X, the tag
+# signature below the cutover, exactly our builds attached) before publishing. Every job runs on a self-hosted runner,
 # [self-hosted, rh-linux] (ADR 0079); a tag push is never a fork pull request.
 # Besides the four binaries a release carries a CycloneDX SBOM per binary (mash-<os>-<arch>.cdx.json, attested with
-# actions/attest-sbom) and build provenance for the four binaries (mash.intoto.jsonl, the Sigstore bundle of the
+# actions/attest-sbom), SHA256SUMS (made by the sums job before the attestation and attested with the binaries) and build
+# provenance for the binaries and SHA256SUMS (mash.intoto.jsonl, the Sigstore bundle of the
 # actions/attest-build-provenance attestation the attest job makes in-job, on our self-hosted runner: no reusable workflow
-# of another repository is called, ADR 0079); mash meets SLSA v1.0 Build L2, not L3 (ADR 0051). `release-check --assets`
-# verifies all of it before the maintainer signs SHA256SUMS.
-# A workflow_dispatch run on main is a DRY RUN (docs/release.md, "Dry run"): it builds, makes the SBOMs, attests and makes
+# of another repository is called, ADR 0079); mash meets SLSA Build L2, not L3 (ADR 0051). `release-check --assets`
+# verifies all of it. Below the cutover the maintainer also signs SHA256SUMS; at or above it the attestation is the proof.
+# A workflow_dispatch run on main is a DRY RUN (docs/release.md, "Dry run"): it builds, makes the SBOMs and SHA256SUMS, attests and makes
 # the provenance exactly as a tag does, then the dry-run-verify job verifies all of it. It has no guard, no draft, no
 # release, no tag and uploads nothing to a release; its version is 0.0.0-dryrun and its commit is the dispatched HEAD.
 on:
@@ -40,9 +43,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: The tag is v<N.N.N>, annotated, and carries a signature
-        # Shape, not validity: the runner holds no key. It stops a malformed name, a lightweight tag or a plainly
-        # unsigned one from producing a draft; `release-check --assets` runs `git verify-tag` with the maintainer's keyring.
+      - name: The tag is v<N.N.N>, annotated, and (below the cutover) carries a signature
+        # Shape, not validity: the runner holds no key. It stops a malformed name or a lightweight tag from producing a draft.
+        # Below the cutover version (docs/release-cutover at the tag's commit) it also stops a plainly unsigned tag; at or
+        # above it the tag is unsigned by design (the minting service pushes it) and release-check --assets judges it.
+        # An absent cutover file keeps the signature check (the behaviour before the cutover existed); a present one that is
+        # not exactly one vN.N.N line fails closed.
         run: |
           # In an `if`, not bare: bash 3.2 (macOS, where the tests run this script) does not stop `set -e` on a lone [[ ]].
           if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "not a version tag: $GITHUB_REF_NAME" >&2; exit 1; fi
@@ -50,7 +56,26 @@ jobs:
           # the tag object itself is fetched from origin before it is judged.
           git fetch -q --force --no-tags origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]
-          git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
+          # ge succeeds when version $1 is >= version $2 (both vN.N.N), compared field by field as numbers.
+          ge() {
+            local i x y
+            IFS=. read -r -a x <<<"${1#v}"
+            IFS=. read -r -a y <<<"${2#v}"
+            for i in 0 1 2; do
+              if (( 10#${x[i]} > 10#${y[i]} )); then return 0; fi
+              if (( 10#${x[i]} < 10#${y[i]} )); then return 1; fi
+            done
+            return 0
+          }
+          need_signature=yes
+          if raw="$(git show "$(git rev-parse "$GITHUB_REF_NAME^{commit}"):docs/release-cutover" 2>/dev/null)"; then
+            cutover="$(printf '%s\n' "$raw" | awk '!/^[[:space:]]*#/ && !/^[[:space:]]*$/')"
+            if ! [[ "$cutover" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "docs/release-cutover is not exactly one vN.N.N line" >&2; exit 1; fi
+            if ge "$GITHUB_REF_NAME" "$cutover"; then need_signature=no; fi
+          fi
+          if [ "$need_signature" = yes ]; then
+            git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
+          fi
       - name: The candidate is on main
         # The commit comes from the tag: what GITHUB_SHA holds on an annotated-tag push (commit or tag object) is not
         # relied on anywhere in this workflow.
@@ -106,10 +131,10 @@ jobs:
     # A draft exists only once the provenance, the SBOMs and their attestations do, so publishing can never precede or outlive a
     # failed attestation.
     # Attestation requires a public repository (or GitHub Enterprise Cloud); this repository is public.
-    needs: [build, attest, sbom, attest-sbom]
+    needs: [build, sums, attest, sbom, attest-sbom]
     # An explicit status function: a skipped guard (a dry run) would otherwise skip every job downstream of build. On a push
     # the guard succeeds and every need must have succeeded.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' }} # never on a dry run: it creates the release
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result == 'success' && needs.sums.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' }} # never on a dry run: it creates the release
     timeout-minutes: 30
     runs-on: [self-hosted, rh-linux]
     permissions:
@@ -122,7 +147,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums and changelog
+      - name: Quickstart script and changelog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -131,13 +156,10 @@ jobs:
           # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
           [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $GITHUB_REF_NAME" >&2; exit 1; }
           cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
-          # The maintainer's signature on SHA256SUMS covers every asset: the binaries, the script, the SBOMs and the
-          # build provenance. Named, not globbed, so a missing file fails here and a stray one is never listed.
-          (cd dist && sha256sum \
-            mash-darwin-amd64 mash-darwin-arm64 mash-linux-amd64 mash-linux-arm64 \
-            quickstart-synadia.sh \
-            mash-darwin-amd64.cdx.json mash-darwin-arm64.cdx.json mash-linux-amd64.cdx.json mash-linux-arm64.cdx.json \
-            mash.intoto.jsonl > SHA256SUMS)
+          # SHA256SUMS was made by the sums job and attested with the binaries: it is attached unchanged. It must list the
+          # script just copied, byte for byte.
+          [ -f dist/SHA256SUMS ] || { echo "the sums artifact brought no SHA256SUMS" >&2; exit 1; }
+          (cd dist && grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c -)
           # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: commits of
           # an unpublished tag belong in these notes. None (the first release) means the whole history.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
@@ -163,13 +185,51 @@ jobs:
           # release makes THIS run fail, naming it. The guard never deletes: the draft stays for the maintainer to resolve
           # (`gh release delete <tag>` after checking its state, or publish the lower one first, then rerun; ADR 0001, rule 5).
           scripts/draft-guard --after-create "$GITHUB_REF_NAME"
+  sums:
+    # SHA256SUMS lists every asset except the provenance bundle (which cannot list itself): the binaries, the quickstart script
+    # and the SBOMs. It is made here, before the attestation, so the attest job can attest it. Named, not globbed, so a missing
+    # file fails here and a stray one is never listed.
+    needs: [build, sbom]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sbom.result == 'success' }} # explicit: see build
+    timeout-minutes: 15
+    runs-on: [self-hosted, rh-linux]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mash-* # the four binaries
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: sbom-* # the four SBOMs
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: |
+          set -euo pipefail
+          # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
+          [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $RELEASE_REF" >&2; exit 1; }
+          cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
+          (cd dist && sha256sum \
+            mash-darwin-amd64 mash-darwin-arm64 mash-linux-amd64 mash-linux-arm64 \
+            quickstart-synadia.sh \
+            mash-darwin-amd64.cdx.json mash-darwin-arm64.cdx.json mash-linux-amd64.cdx.json mash-linux-arm64.cdx.json \
+            > SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sums
+          path: dist/SHA256SUMS
+          if-no-files-found: error
   attest:
     # Build provenance for the four binaries, made in-job on the self-hosted runner that holds them: actions/attest-build-provenance
     # signs with this workflow's own identity, so no reusable workflow of another repository runs (ADR 0079). The Sigstore
-    # bundle it writes is kept as mash.intoto.jsonl, which the draft job attaches and SHA256SUMS covers. The three permissions
-    # belong to this job only.
-    needs: build
-    if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
+    # bundle it writes is kept as mash.intoto.jsonl, which the draft job attaches. SHA256SUMS (made by the sums job, which lists
+    # the binaries, the script and the SBOMs, not this bundle) is attested here too. The three permissions belong to this job only.
+    needs: [build, sums]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sums.result == 'success' }} # explicit: see build
     timeout-minutes: 15
     runs-on: [self-hosted, rh-linux]
     permissions:
@@ -182,18 +242,24 @@ jobs:
           pattern: mash-* # the binaries only: never an SBOM artifact (sbom-*) another job may already have uploaded
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sums
+          path: dist
       - name: Attest build provenance
-        # Provenance for the four binaries (what consumers download); SHA256SUMS is a derived listing, not a subject.
+        # Provenance for the four binaries (what consumers download) and for SHA256SUMS, which covers every other asset.
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/mash-*
+          subject-path: |
+            dist/mash-*
+            dist/SHA256SUMS
       - name: Keep the provenance bundle as mash.intoto.jsonl
         env:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           set -euo pipefail
-          [ "$(find dist -mindepth 1 -maxdepth 1 ! -name '.*' | wc -l | tr -d ' ')" = 4 ] || { echo "dist does not hold exactly the four binaries" >&2; ls dist >&2; exit 1; }
+          [ "$(find dist -mindepth 1 -maxdepth 1 ! -name '.*' | wc -l | tr -d ' ')" = 5 ] || { echo "dist does not hold exactly the four binaries and SHA256SUMS" >&2; ls dist >&2; exit 1; }
           [ -s "$BUNDLE" ] || { echo "the attestation wrote no bundle" >&2; exit 1; }
           mkdir -p provenance
           cp "$BUNDLE" provenance/mash.intoto.jsonl
@@ -278,8 +344,8 @@ jobs:
     # The dry run's verdict: everything the release gate checks about the attestations and provenance, here, with nothing
     # published. Only a dispatch on main runs it; on a tag push the draft job takes its place. It reads and verifies, and
     # holds no id-token.
-    needs: [build, attest, sbom, attest-sbom]
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.build.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' }}
+    needs: [build, sums, attest, sbom, attest-sbom]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.build.result == 'success' && needs.sums.result == 'success' && needs.attest.result == 'success' && needs.sbom.result == 'success' && needs['attest-sbom'].result == 'success' }}
     timeout-minutes: 20
     runs-on: [self-hosted, rh-linux]
     permissions:
@@ -287,7 +353,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: dist # the four binaries, the four SBOMs and mash.intoto.jsonl
+          path: dist # the four binaries, the four SBOMs, SHA256SUMS and mash.intoto.jsonl
           merge-multiple: true
       - name: Verify the build provenance, the build attestations and the SBOM attestations
         env:
@@ -302,13 +368,17 @@ jobs:
             echo "$p" | base64 -d | jq -e '(.predicate.invocation.configSource.entryPoint // .predicate.buildDefinition.externalParameters.workflow.path) == ".github/workflows/release.yml"' > /dev/null \
               || { echo "mash.intoto.jsonl was not made by .github/workflows/release.yml" >&2; exit 1; }
           done
+          [ -f SHA256SUMS ] || { echo "no SHA256SUMS was downloaded" >&2; ls >&2; exit 1; }
+          # SHA256SUMS is a subject of the same attestation as the binaries.
+          gh attestation verify SHA256SUMS -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"
+          gh attestation verify SHA256SUMS -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"
           for n in mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64; do
             echo "== $n"
             # The provenance was made from a branch ref (main), not a tag, so no source tag applies: the signer workflow and
             # source ref pin it. The attached bundle must verify offline for this binary, as must the attestation GitHub holds.
-            gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main
-            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main
-            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --predicate-type https://cyclonedx.org/bom --format json > "$RUNNER_TEMP/$n.sbom-verify.json"
+            gh attestation verify "$n" -R "${{ github.repository }}" --bundle mash.intoto.jsonl --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA"
+            gh attestation verify "$n" -R "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --predicate-type https://cyclonedx.org/bom --format json > "$RUNNER_TEMP/$n.sbom-verify.json"
             # actions/attest-sbom stores the SBOM verbatim as the predicate: a verified statement about THIS binary must
             # carry exactly the attached .cdx.json (`jq -S` sorts keys, so only content is compared).
             sum="$(sha256sum "$n" | cut -d' ' -f1)"

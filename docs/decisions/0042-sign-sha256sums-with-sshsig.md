@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0095
 date: 2026-10-31
 decision-makers: the release maintainer (lead), 2026-10-31
 ---
 
 # A release's SHA256SUMS is signed with SSHSIG, namespace mash-release, after a maintainer-side rebuild
+Superseded by [0095](0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md).
 
 ## Context and Problem Statement
 

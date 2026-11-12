@@ -129,7 +129,7 @@ func TestSums_checkEntries(t *testing.T) {
 		f(&s, h)
 		return s, h
 	}
-	if err := checkSumEntries([]byte(good), have, hashes, script); err != nil {
+	if err := checkSumEntries([]byte(good), have, hashes, script, false); err != nil {
 		t.Fatalf("good sums refused: %v", err)
 	}
 	first := release.Targets[0].AssetName()
@@ -169,7 +169,7 @@ func TestSums_checkEntries(t *testing.T) {
 	}
 	for name, f := range cases {
 		s, h := mod(f)
-		if err := checkSumEntries([]byte(s), h, hashes, script); err == nil {
+		if err := checkSumEntries([]byte(s), h, hashes, script, false); err == nil {
 			t.Errorf("%s: passed", name)
 		}
 	}
@@ -573,7 +573,7 @@ func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 		other[tg] = strings.Repeat(string(rune('a'+i)), 64) // binaries that were never built from X
 		assets = append(assets, map[string]string{"name": tg.AssetName(), "digest": "sha256:" + other[tg]})
 	}
-	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"), nil)
+	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"), nil, false)
 	sig := mustSign(t, keyOfFixture(t, f), sums) // validly signed by the release key
 	files := filepath.Join(f.ghDir(), "files")
 	write(t, files, release.SumsName, sums)
@@ -747,7 +747,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 			if !strings.Contains(log, "/"+n+" -R bogworks/mash ") || !strings.Contains(log, "--predicate-type https://cyclonedx.org/bom") {
 				t.Errorf("the SBOM attestation of %s was not verified:\n%s", n, log)
 			}
-			if !strings.Contains(log, "/"+n+" -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --bundle ") {
+			if !strings.Contains(log, "/"+n+" -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.1.0 --source-digest "+f.x+" --bundle ") {
 				t.Errorf("the provenance bundle was not verified for %s against the release workflow, tag and runners:\n%s", n, log)
 			}
 		}

@@ -44,6 +44,9 @@ type world interface {
 	// Order re-runs the ordering checks of the pre-tag gate (the version is strictly above the latest published
 	// release; every earlier release is published or recorded as skipped), without the rest of the gate.
 	Order(x string) error
+	// Keyless is the cutover version recorded at x and whether tag is at or above it: such a tag is pushed by the
+	// minting service, never made here.
+	Keyless(tag, x string) (cutover string, keyless bool, err error)
 	// Publish turns the draft into a published release.
 	Publish(tag string) error
 	Now() time.Time
@@ -111,6 +114,13 @@ func runPublish(o Options, w world, x string) error {
 		return fmt.Errorf("refused: tag %s is at %s, not the candidate %s; nothing was changed", tag, at, x)
 	}
 	if !exists {
+		cv, kl, err := w.Keyless(tag, x)
+		if err != nil {
+			return stepErr(err)
+		}
+		if kl {
+			return fmt.Errorf("refused: %s is at or above the cutover %s: its tag is pushed by the minting service, not made here; nothing was changed", tag, cv)
+		}
 		say("no tag %s: running the pre-tag gate", tag)
 		// A release without its tag is not a state this command made: refuse rather than guess.
 		st, err := w.Release(tag)
@@ -285,6 +295,8 @@ func (r realWorld) RemoteTag(tag string) (bool, string, error) {
 	return true, c, nil
 }
 
+func (r realWorld) Keyless(tag, x string) (string, bool, error) { return cutoverMode(r.o, x, tag) }
+
 func (r realWorld) Release(tag string) (string, error) {
 	b, err := gh(r.o, "release", "view", tag, "--repo", r.o.GHRepo, "--json", "isDraft")
 	if err != nil {
@@ -404,10 +416,10 @@ func (r realWorld) Publish(tag string) error {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
 	// Provenance is checked again right before the irreversible step, as the gate may have run earlier in this process.
-	if err := verifyAttestations(r.o, tag); err != nil {
+	if err := verifyAttestations(r.o, tag, x); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
-	if err := verifySupplyChain(r.o, tag); err != nil {
+	if err := verifySupplyChain(r.o, tag, x); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
 	_, err = gh(r.o, "release", "edit", tag, "--repo", r.o.GHRepo, "--draft=false")

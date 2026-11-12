@@ -24,6 +24,7 @@
         "scripts/release-check",
         "scripts/build-twice",
         "docs/allowed_signers",
+        "docs/release-cutover",
         "ci/release.allowed_signers",
         "internal/natsauth/**",
         "internal/mint/**",

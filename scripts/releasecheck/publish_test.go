@@ -25,6 +25,8 @@ type fakeWorld struct {
 	now        time.Time
 	calls      []string
 	polls      int
+	cutover    string // the cutover version Keyless reports ("": none)
+	keyless    bool   // the tag is at or above the cutover: its tag is pushed by the minting service
 }
 
 func newFake() *fakeWorld { return &fakeWorld{release: relNone, now: time.Unix(1000, 0)} }
@@ -52,6 +54,10 @@ func (f *fakeWorld) CreateTag(tag, x string) error {
 		f.tagAt = x
 	}
 	return f.tagErr
+}
+func (f *fakeWorld) Keyless(tag, x string) (string, bool, error) {
+	f.calls = append(f.calls, "keyless")
+	return f.cutover, f.keyless, nil
 }
 func (f *fakeWorld) Assets() error {
 	f.calls = append(f.calls, "assets")

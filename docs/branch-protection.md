@@ -162,8 +162,19 @@ is a setting only if that section says so. Settings > Branches > Add branch rule
 
 ## Releases
 
-Releases are **signed annotated tags** `vN.N.N` pushed by the maintainer at a commit on `main` (see `release.md`).
-Optionally add a tag ruleset for `v*` that restricts creation to the maintainer and blocks deletion and updates.
+Below the cutover version (`docs/release-cutover`) releases are **signed annotated tags** `vN.N.N` pushed by the
+maintainer at a commit on `main` (see `release.md`). From the cutover the tag is annotated and unsigned, pushed by the
+minting service, and the tag rulesets below carry the trust that the SSH tag signature carried before.
+
+**Tag rulesets.** Two rulesets on `v*` tags:
+
+- **Ruleset A (creation):** only deploy keys may create a `v*` tag.
+- **Ruleset B (update and deletion):** updating and deleting a `v*` tag are blocked, with no bypass actor.
+
+There is a single write deploy key, held by the minting service; no person and no other automation holds it.
+**Immutable releases** are on, so a published release's assets cannot change. These are set by the maintainer (an
+admin) in GitHub. They are not applied or checked by this repository: the gate cannot read them, and this
+repository's tests do not yet verify they are applied, so treat them as the maintainer's report until a check exists.
 
 ## Security features
 

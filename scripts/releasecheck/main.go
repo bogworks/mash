@@ -582,7 +582,9 @@ func tagRefs(repo, remote, tag string) (object, commit string, err error) {
 // verifyTag fetches exactly the tag object that was listed (object) and has git verify its signature against
 // o.Signers (docs/allowed_signers): a lightweight tag has no signature, a signature by a key git does not trust fails, and a tag
 // that was swapped after the listing is not the object that was listed. The signed object must lead to commit x.
-func verifyTag(o Options, tag, object, x string) error {
+// With keyless (the release is at or above the cutover) the tag carries no signature and none is checked: it must
+// still be annotated, unchanged between listing and fetching, and lead to x.
+func verifyTag(o Options, tag, object, x string, keyless bool) error {
 	ref := "refs/mash/release-check/tags/" + tag
 	if _, err := git(o.Repo, "fetch", "-q", o.Remote, "+refs/tags/"+tag+":"+ref); err != nil {
 		return op(err)
@@ -591,10 +593,16 @@ func verifyTag(o Options, tag, object, x string) error {
 		return fmt.Errorf("tag %s changed between listing and fetching it (listed %s, fetched %s %v)", tag, object, got, err)
 	}
 	if kind, err := git(o.Repo, "cat-file", "-t", object); err != nil || kind != "tag" {
+		if keyless {
+			return fmt.Errorf("tag %s is a %q, not an annotated tag (%v)", tag, kind, err)
+		}
 		return fmt.Errorf("tag %s is a %q, not an annotated tag, so it has no signature (%v)", tag, kind, err)
 	}
 	if c, err := git(o.Repo, "rev-parse", object+"^{commit}"); err != nil || c != x {
-		return fmt.Errorf("the signed tag object %s leads to %s, not the candidate %s (%v)", object, c, x, err)
+		return fmt.Errorf("the tag object %s leads to %s, not the candidate %s (%v)", object, c, x, err)
+	}
+	if keyless {
+		return nil
 	}
 	// allowedSignersFile governs SSH signatures only: git would verify a PGP or X.509 signature with this machine's
 	// own keyrings, so only an SSH-signed tag is let through to verify-tag (codex H1 on #24).
@@ -631,6 +639,10 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	}
 	r := &report{out: o.Out}
 	tag := "v" + o.Version
+	cutover, kl, kerr := cutoverMode(o, x, tag)
+	if !r.step("the release cutover record at X", kerr) {
+		return r.result("release " + tag + " assets")
+	}
 	tagObj, c, terr := tagRefs(o.Repo, o.Remote, tag)
 	if terr != nil {
 		r.step("tag "+tag+" exists in the release repository", terr)
@@ -643,7 +655,11 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 		if o.afterTagList != nil {
 			o.afterTagList()
 		}
-		r.step("tag "+tag+" is signed by a trusted key", verifyTag(o, tag, tagObj, x))
+		if kl {
+			r.step("tag "+tag+" is annotated and at X (keyless: no signature, trust is the tag rulesets, cutover "+cutover+")", verifyTag(o, tag, tagObj, x, true))
+		} else {
+			r.step("tag "+tag+" is signed by a trusted key", verifyTag(o, tag, tagObj, x, false))
+		}
 	}
 
 	// Our own build of X for every target.
@@ -704,18 +720,23 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 		}
 	}
 	if buildOK && scriptHash != "" {
-		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash)) && terr == nil && r.ok() {
+		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash, kl)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
 			// Attestations, SBOMs and the build provenance are verified first, so no maintainer signature is ever made over
 			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
 			// saw, including one that already carries a verifying SHA256SUMS.sig.
-			r.step("build provenance is attested for every binary", verifyAttestations(o, tag))
+			r.step("build provenance is attested for every binary", verifyAttestations(o, tag, x))
 			if r.ok() {
-				r.step("every binary has an attested CycloneDX SBOM and build provenance that verifies", verifySupplyChain(o, tag))
+				r.step("every binary has an attested CycloneDX SBOM and build provenance that verifies", verifySupplyChain(o, tag, x))
 			}
 			// The signature is made (or an attached one verified) only after all of the above passed.
+			// A keyless release has none: its SHA256SUMS is an attested subject instead.
 			if r.ok() {
-				r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, have, hashes, scriptHash, rec))
+				if kl {
+					r.step("SHA256SUMS is checked against our builds and the script at X, and its attestation verifies (keyless: no SHA256SUMS.sig)", signedSums(o, tag, x, resp.IsDraft, true, have, hashes, scriptHash, rec))
+				} else {
+					r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, false, have, hashes, scriptHash, rec))
+				}
 			}
 		}
 	}
@@ -759,6 +780,57 @@ func remoteTags(o Options) ([]string, error) {
 // skippedReleases is where a candidate records the earlier tags that were never published, one `vX.Y.Z reason` per line
 // (# comments allowed; a line without a reason does not count); the file is read at X, so a skip is reviewed on main like any other change.
 const skippedReleases = "docs/skipped-releases.txt"
+
+// cutoverFile is where the repository records the first version released keyless: at X it holds one line, a version
+// vMAJOR.MINOR.PATCH (blank lines and # comments allowed). A version below it keeps the SSH-signed tag and
+// SHA256SUMS.sig; at or above it the tag is annotated and unsigned, there is no SHA256SUMS.sig, and SHA256SUMS is an
+// attested subject. A file that is absent means no cutover.
+const cutoverFile = "docs/release-cutover"
+
+// cutoverAt is the cutover version recorded at x (ok false when X has no cutoverFile). The file must hold exactly one
+// version line; anything else is an error, so a malformed record fails closed.
+func cutoverAt(o Options, x string) (version string, ok bool, err error) {
+	body, has, err := fileAt(o.Repo, x, cutoverFile)
+	if err != nil {
+		return "", false, err
+	}
+	if !has {
+		return "", false, nil
+	}
+	var lines []string
+	for _, ln := range strings.Split(body, "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" && !strings.HasPrefix(ln, "#") {
+			lines = append(lines, ln)
+		}
+	}
+	if len(lines) != 1 {
+		return "", false, fmt.Errorf("%s at %s must hold exactly one version line, it has %d", cutoverFile, x, len(lines))
+	}
+	if _, ok := parseSemver(lines[0]); !ok {
+		return "", false, fmt.Errorf("%s at %s: %q is not a version vMAJOR.MINOR.PATCH", cutoverFile, x, lines[0])
+	}
+	return lines[0], true, nil
+}
+
+// cutoverMode is the cutover version recorded at x and whether tag is at or above it (keyless).
+func cutoverMode(o Options, x, tag string) (cutover string, keyless bool, err error) {
+	cutover, ok, err := cutoverAt(o, x)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	c, _ := parseSemver(cutover) // cutoverAt vouched for it
+	t, ok := parseSemver(tag)
+	if !ok {
+		return "", false, fmt.Errorf("%q is not a release tag vMAJOR.MINOR.PATCH, so it cannot be held to the cutover %s", tag, cutover)
+	}
+	return cutover, !semverLess(t, c), nil
+}
+
+// keyless is whether tag is released keyless: x records a cutover and tag is at or above it.
+func keyless(o Options, x, tag string) (bool, error) {
+	_, kl, err := cutoverMode(o, x, tag)
+	return kl, err
+}
 
 type releaseRow struct {
 	TagName string `json:"tagName"`
