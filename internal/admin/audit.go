@@ -68,6 +68,9 @@ type AuditSnapshot struct {
 	Streams    []AuditStream // every inbox-* stream, sorted by name
 	Leases     []AuditLease  // every lease key except the admin locks, sorted by key
 	Retired    AuditRetired  // the retired-name bucket
+
+	LeaseRollup bool   // the lease bucket exists and its stream still allows rollup writes (it has not been hardened)
+	LeaseError  string // the lease bucket exists and its stream configuration could not be read; empty otherwise
 }
 
 // AuditRetiredMarker is one key of the retired-name bucket: the marker, or why its value could not be read.
@@ -186,6 +189,13 @@ func (a *Admin) Audit(ctx context.Context) (AuditSnapshot, error) {
 	}
 	if err != nil {
 		return snap, fmt.Errorf("mash: lease bucket: %w", err)
+	}
+	switch verr := store.VerifyLeaseBucket(ctx, a.js); {
+	case verr == nil:
+	case errors.Is(verr, store.ErrLeaseBucketRollup):
+		snap.LeaseRollup = true
+	default:
+		snap.LeaseError = verr.Error()
 	}
 	lkeys, err := lease.Keys(ctx)
 	if err != nil && !errors.Is(err, jetstream.ErrNoKeysFound) {

@@ -183,7 +183,7 @@ func TestCrashAfterPurgeLeavesPendingAndRerunFinalizes(t *testing.T) {
 			admin.SetAfterDeprovisionPurge(prev)
 			b, js := initOn(t, e)
 			lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-			_ = lease.Purge(ctx, admin.LockKey(id.Flat())) // the dead admin's lock would otherwise wait out its TTL
+			_ = lease.Delete(ctx, admin.LockKey(id.Flat())) // the dead admin's lock would otherwise wait out its TTL
 			dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
 			if _, err := dir.Get(ctx, id.Flat()); !errors.Is(err, jetstream.ErrKeyNotFound) {
 				t.Fatalf("the record should be purged: %v", err)

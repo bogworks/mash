@@ -69,7 +69,7 @@ func holdLease(t *testing.T, kv jetstream.KeyValue, name string) {
 // freeLease removes it, which is what the bucket TTL does 90 s after the last refresh.
 func freeLease(t *testing.T, kv jetstream.KeyValue, name string) {
 	t.Helper()
-	if err := kv.Purge(context.Background(), name); err != nil {
+	if err := kv.Delete(context.Background(), name); err != nil {
 		t.Fatal(err)
 	}
 }

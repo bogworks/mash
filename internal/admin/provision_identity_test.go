@@ -359,7 +359,7 @@ func TestProvisionIdentityWaitsNameLockThenAdmissionLock(t *testing.T) {
 		t.Fatalf("with both held the name lock is waited on first, got %v", err)
 	}
 	kv, _ := js.KeyValue(ctx, store.LeaseBucket)
-	if err := kv.Purge(ctx, admin.LockKey(id.Flat())); err != nil {
+	if err := kv.Delete(ctx, admin.LockKey(id.Flat())); err != nil {
 		t.Fatal(err)
 	}
 	_, err = a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
@@ -485,7 +485,7 @@ func TestProvisionIdentityRetiredCheckedUnderAdmissionLock(t *testing.T) {
 		t.Fatalf("with the admission lock held the call waits on it before reading the marker, got %v", err)
 	}
 	kv, _ := js.KeyValue(ctx, store.LeaseBucket)
-	if err := kv.Purge(ctx, admin.LockKey(admin.AdmissionLockName)); err != nil {
+	if err := kv.Delete(ctx, admin.LockKey(admin.AdmissionLockName)); err != nil {
 		t.Fatal(err)
 	}
 	var held bool
@@ -564,7 +564,7 @@ func TestDeprovisionIfUserCrashAfterPurgeIsRecoverable(t *testing.T) {
 	admin.SetAfterDeprovisionPurge(prev)
 	b, js := initOn(t, e)
 	kv, _ := js.KeyValue(ctx, store.LeaseBucket)
-	_ = kv.Purge(ctx, admin.LockKey(id.Flat())) // the dead admin's lock would otherwise wait out its TTL
+	_ = kv.Delete(ctx, admin.LockKey(id.Flat())) // the dead admin's lock would otherwise wait out its TTL
 	if err := b.DeprovisionIfUser(ctx, id.Flat(), user); err != nil {
 		t.Fatal(err)
 	}

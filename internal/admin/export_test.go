@@ -3,7 +3,14 @@ package admin
 import (
 	"context"
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 )
+
+// ClearLease runs clearLease on lease for name.
+func ClearLease(ctx context.Context, lease jetstream.KeyValue, name string) error {
+	return clearLease(ctx, lease, name)
+}
 
 // SetAfterMetaGet installs a hook that runs between SetMeta's read and its write; it returns the previous one.
 func SetAfterMetaGet(f func()) (prev func()) { prev, afterMetaGet = afterMetaGet, f; return }

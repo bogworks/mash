@@ -138,9 +138,17 @@ func (a *Admin) Conn() *nats.Conn { return a.nc }
 
 // Init creates the directory, lease and retired-name buckets. It is idempotent. A bucket from before buckets had a size cap (no
 // MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
-// configured limit is raised to it; a larger one is kept (a limit is never lowered), and nothing is purged.
+// configured limit is raised to it; a larger one is kept (a limit is never lowered), and nothing is purged. The lease
+// bucket does not allow rollup: Init creates it hardened and hardens an existing one (see store.HardenLeaseBucket),
+// and fails if it cannot.
 func (a *Admin) Init(ctx context.Context) error {
 	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
+		if cfg.Bucket == store.LeaseBucket {
+			if err := a.initLease(ctx, cfg); err != nil {
+				return err
+			}
+			continue
+		}
 		if kv, err := a.js.KeyValue(ctx, cfg.Bucket); err == nil {
 			st, err := kv.Status(ctx)
 			if err != nil {
@@ -162,6 +170,65 @@ func (a *Admin) Init(ctx context.Context) error {
 	}
 	return nil
 }
+
+// initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An
+// existing bucket is updated through its stream (never CreateOrUpdateKeyValue, which would set rollup back on), so
+// there is no moment at which an updated bucket allows rollup. A new bucket is created with rollup off from the start
+// (store.CreateLeaseBucket).
+func (a *Admin) initLease(ctx context.Context, cfg jetstream.KeyValueConfig) error {
+	if _, err := a.js.KeyValue(ctx, cfg.Bucket); errors.Is(err, jetstream.ErrBucketNotFound) {
+		if _, err := store.CreateLeaseBucket(ctx, a.js, cfg); err != nil {
+			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
+	} else {
+		sc, err := store.LeaseStreamConfig(ctx, a.js)
+		if err != nil {
+			return err
+		}
+		if sc.MaxBytes > cfg.MaxBytes {
+			cfg.MaxBytes = sc.MaxBytes
+		}
+		sc.MaxBytes = cfg.MaxBytes
+		sc.AllowRollup = false
+		if _, err := a.js.UpdateStream(ctx, sc); err != nil {
+			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
+		}
+	}
+	if err := store.HardenLeaseBucket(ctx, a.js); err != nil {
+		return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
+	}
+	return nil
+}
+
+// clearLease removes a deprovisioned name's lease tombstone, or a lease left in the key. The lease bucket does not
+// allow rollup, so it is a revision-aware delete, never a purge. A key that is absent or already deleted needs
+// nothing. Otherwise it deletes the key's current value by its revision. If the key changed between the read and the
+// delete (a revision conflict), it reads and deletes again. It returns an error only if the key changed on all
+// clearLeaseTries attempts, so Provision stops rather than proceed over a lease that is being refreshed.
+func clearLease(ctx context.Context, lease jetstream.KeyValue, name string) error {
+	for attempt := 0; attempt < clearLeaseTries; attempt++ {
+		e, err := lease.Get(ctx, name)
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		err = lease.Delete(ctx, name, jetstream.LastRevision(e.Revision()))
+		switch {
+		case err == nil, errors.Is(err, jetstream.ErrKeyNotFound):
+			return nil
+		case !isRevisionConflict(err):
+			return err
+		}
+	}
+	return fmt.Errorf("lease key %q keeps changing; it is held by a live endpoint", name)
+}
+
+// clearLeaseTries bounds clearLease's read-and-delete attempts on a revision conflict.
+const clearLeaseTries = 3
 
 func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
@@ -259,7 +326,7 @@ func (a *Admin) Provision(ctx context.Context, name, user, account, note string,
 	}
 	// A deprovisioned name's lease key holds a tombstone until it expires: clear it, so the name works at once.
 	if lease, err := a.js.KeyValue(ctx, store.LeaseBucket); err == nil {
-		if err := lease.Purge(ctx, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
+		if err := clearLease(ctx, lease, name); err != nil {
 			return store.Record{}, fmt.Errorf("mash: lease: %w", err)
 		}
 	}
