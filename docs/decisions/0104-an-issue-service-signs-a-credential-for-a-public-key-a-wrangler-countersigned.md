@@ -36,7 +36,7 @@ wrangler on the sender's host countersigns)?
 
 Chosen option: the countersigned request and reply, because DEC-002 settled on it.
 
-**The service.** `mashctl issue serve [--list-set FILE] [--registry FILE]` registers a NATS micro service named
+**The service.** `mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE]` registers a NATS micro service named
 `mash-issue` on the admin connection `mashctl` already uses, and answers on `agents.issue.<range>.*`. A wrangler asks on
 `agents.issue.<range>.<owner>`, the owner group of the address. The second token, `issue`, is none of the verbs `mail`,
 `prompt`, `status` and `hb`, and no permission template the list set compiles has a line that reaches it (a test pins
@@ -62,7 +62,8 @@ mash-issue-v1\n<address>\n<public_key>\n<host>\n<nonce>\n<expires>
 The reply is `{"jwt": "..."}` or `{"error": "...", "code": "..."}`. The codes are stable: `malformed_request`,
 `request_too_large`, `invalid_public_key`, `expired`, `expiry_too_far`, `replayed_nonce`, `wrangler_not_registered`,
 `bad_proof`, `address_not_listed`, `key_revoked`, `key_bound_elsewhere`, `signing_key_unavailable`, `no_list_set`,
-`record_failed`, `address_subject_mismatch`, `busy`, `internal`. Any other field in the request, such as tags,
+`record_failed`, `address_subject_mismatch`, `busy`, `internal`, and two for the signing key's scope, `signing_key_not_scoped` and
+`template_mismatch`. Any other field in the request, such as tags,
 permissions, limits, a name or a JWT expiry, is not decoded and never read.
 
 **The checks.** All must pass; the first that fails refuses, writes one structured log line (code, address, public key,
@@ -73,17 +74,33 @@ and signs nothing:
 2. `expires` is in the future and no more than five minutes ahead (`MaxWindow`).
 3. The wrangler key is registered for exactly this host and this owner group, and the proof verifies against it over the
    canonical bytes. The address is inside the signed bytes, so a proof valid for `foo.c.core` fails for `foo.c.sdk`.
-4. The nonce has not been seen. It is taken only after the proof verifies, so a forged request cannot use up a real
-   nonce.
+4. The nonce has not been seen. It is reserved only after the proof verifies, so a forged request cannot use up a real
+   nonce, and it is released again by every refusal below, so a corrected request with the same nonce (the proof covers
+   the nonce, so the wrangler signs the corrected request afresh) is not a replay and refusals cannot fill the replay
+   set. Only a request that returns a credential keeps its nonce used.
 5. The address is a sender in the list set in force.
-6. The public key is not marked revoked in the issue record and is not bound there to a different address.
+6. The public key is not marked revoked in the issue record and is not bound there to a different address. This read is
+   an early refusal; the write in the next paragraph decides.
 7. The owner group's scoped signing key is available and is an account signing key other than the account identity key.
+8. That key is published in the account JWT as a scoped signer whose template equals the list set's template for the
+   group (`signing_key_not_scoped` when it is absent or published unscoped, `template_mismatch` when its template
+   differs). A key published unscoped, or with another template, would give the issued user more than the list set
+   allows, because a user JWT with no limits takes whatever the signer's template says. The account JWT is the newest
+   one the servers hold, verified against the operator key as `policy apply` reads it, which is why `issue serve` takes
+   system account credentials (`--sys-creds`, `MASH_SYS_CREDS`). A verdict is kept per owner group for `ScopeTTL` (3
+   seconds) and is dropped sooner if the key or the list set's template changes, so a change of the account JWT is seen
+   within that time at the latest and the service does not read it on every request.
 
 Then the service signs with the JWT shape `mint` uses for scoped-key users (name is the address's name part, issuer
 account is the account public key, no permissions or limits, no expiry, tags from the table's compiled user) and writes
-the issue record (kind `endpoint`, purpose `issue`, the full address, the owner group as zone) **before** it replies. If
-the write fails nothing is returned. One issue runs at a time per service, so two requests for one key cannot both pass
-the binding check; two services on one account are not supported.
+the issue record (kind `endpoint`, purpose `issue`, the full address, the owner group as zone) **before** it replies. The
+write is the arbiter: a compare-and-set that, at the revision it writes at and on every retry, refuses a key whose record
+has `revoked_at` set (`key_revoked`) or is bound to another address (`key_bound_elsewhere`). The token is returned only
+after that write succeeded; a token signed before a refused or failed write is discarded and never returned or logged.
+A revocation that lands after the early read, or a second issuer writing for the same key, is therefore seen by the
+write, and of two requests for one key and two addresses exactly one succeeds. The service holds its lock for the replay
+set only, never across signing or I/O, and the replay set is a heap ordered by expiry, so a request at the cap of 65536
+is refused without scanning the set.
 
 **What the countersignature proves, and what it trusts.** It proves that the holder of the wrangler's private key asked
 for this public key to be bound to this address, from this host name, now. It trusts the wrangler to tell its senders
@@ -96,7 +113,11 @@ restart forgets the set, so a request captured before a restart can be replayed 
 refused as expired. The expiry window is the bound on a replay across a restart, and the test named for it checks both
 halves.
 
-**The registry is a test account's.** How a real wrangler's key is registered for a host and an owner group is not
+**The registry is a test account's.** `issue serve` also needs `--test-account`, the operator's own declaration that the
+account is a test account, and it starts only when the registry file says `test_account: true` as well: the file alone
+cannot turn the service on. The registry file, at the default path or one given with `--registry`, is held to the key
+store's custody: the file is a regular file owned by the effective user that no group or other user can write, and its
+directory is not a symlink, is owned by the effective user and is not writable by every user. How a real wrangler's key is registered for a host and an owner group is not
 decided; decision 206 does not say, and this is DEC-002's open part. Until it is, mash ships only a static registry: the
 file `wranglers.json` in the key store directory (`{"account", "test_account": true, "entries": [{"host", "group",
 "wrangler_key"}]}`, 0600, replaced atomically), managed by `mashctl wrangler init --test-account`, `add`, `list` and
@@ -106,7 +127,7 @@ another account, or one not flagged `test_account`, and so does every later look
 registry. The file is read at each request, so a removal takes effect without a restart. This is not a statement that
 wrangler keys should be registered this way on a real account.
 
-**What is left open behind interfaces.** `WranglerRegistry` (host and group to wrangler keys) is filled by the static
+**What is left open behind interfaces.** Real registration of wrangler keys stays open. `AccountClaims` (the account JWT, read over the system account) is filled by the same lookup `policy apply` uses. `WranglerRegistry` (host and group to wrangler keys) is filled by the static
 registry only. `ListSetInForce` (the compiled list set and a generation) is filled by a JSON file shaped like
 `listset.ListSet`, since DEC-004 leaves the file format open; the generation is 0 until the policy gate lands. `Signer`
 (owner group to scoped signing key) is filled by the key store, which now keeps an owner group's key in
@@ -120,7 +141,9 @@ issue core is a Go function, `Issuer.Issue(ctx, request, purpose)`, so the rotat
 * Good, because tags come only from mash's own table; a request that carries tags gets the table's.
 * Good, because a proof is bound to one address and a revoked key is never issued to again.
 * Good, because the pieces whose design is open sit behind three small interfaces.
-* Bad, because on a real account the service cannot run until wrangler registration is decided.
+* Bad, because on a real account the service cannot run until wrangler registration is decided; the operator's flag says so, and a file cannot override it.
+* Good, because a signing key that is not published scoped with the list set's template signs nothing, and a revocation or a second issuer cannot slip between the check and the record.
+* Bad, because a change of the account JWT is seen after up to `ScopeTTL` (3 seconds), and the service needs system account credentials as well as admin ones.
 * Bad, because the replay set does not survive a restart; the expiry window bounds the exposure to five minutes.
 * Bad, because the service runs with the admin user's credentials until a dedicated user exists.
 * Bad, because a compromised wrangler can have any address registered to its host and group signed for a key it chooses.
@@ -130,7 +153,7 @@ issue core is a Go function, `Issuer.Issue(ctx, request, purpose)`, so the rotat
 `cmd/mashctl/issuecmd_test.go` runs the service against an in-process nats-server in operator mode (AT-012): a JWT that
 connects with its own private key, tags equal to the table's, every refusal named above logged with nothing signed and
 nothing recorded, a scan of the NATS payloads and the log for seeds, the issue record's purpose and kind, and the refusal
-to start. `internal/issue` tests the replay set, the restart and the record failure with a fake clock.
+to start (without `--test-account`, and for a registry whose directory or file is open to others), and a group key published unscoped or with another template. `internal/issue` tests the replay set, the restart and the record failure with a fake clock.
 
 ## Pros and Cons of the Options
 

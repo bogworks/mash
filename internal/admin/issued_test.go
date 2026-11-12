@@ -477,3 +477,70 @@ func TestInitRaisesAnOldIssuedBucketHistory(t *testing.T) {
 		t.Fatalf("records after the raise: %d %v", len(h), err)
 	}
 }
+
+// RecordIssuedChecked tests its conditions against the record it writes after, on every attempt: a revoked key and a
+// key bound to another address are refused and nothing is written; the same address is a normal re-issue.
+func TestRecordIssuedCheckedRefusesRevokedAndBoundElsewhere(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	rec := func(addr string) store.Issued {
+		return store.Issued{PublicKey: key, Address: addr, Kind: store.IssuedEndpoint}
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); err != nil {
+		t.Fatalf("a re-issue to the same address: %v", err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("y")); !errors.Is(err, admin.ErrKeyBoundElsewhere) {
+		t.Fatalf("bound elsewhere: %v", err)
+	}
+	if err := a.MarkRevoked(ctx, key, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); !errors.Is(err, admin.ErrKeyRevoked) {
+		t.Fatalf("revoked: %v", err)
+	}
+	kv, err := js.KeyValue(ctx, store.IssuedBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := kv.History(ctx, key); err != nil || len(h) != 3 { // x, x, the revocation: nothing else was written
+		t.Fatalf("history %d %v", len(h), err)
+	}
+}
+
+// Racing issuers of one key for two addresses, over the real record: exactly one is recorded, the other refused.
+func TestRecordIssuedCheckedRacingAddressesExactlyOneWins(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	for round := 0; round < 10; round++ {
+		key := userKey(t)
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, addr := range []string{"x", "y"} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- a.RecordIssuedChecked(ctx, store.Issued{PublicKey: key, Address: addr, Kind: store.IssuedEndpoint})
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		var ok, bound int
+		for err := range errs {
+			switch {
+			case err == nil:
+				ok++
+			case errors.Is(err, admin.ErrKeyBoundElsewhere):
+				bound++
+			default:
+				t.Fatal(err)
+			}
+		}
+		if ok != 1 || bound != 1 {
+			t.Fatalf("round %d: %d recorded, %d refused", round, ok, bound)
+		}
+	}
+}

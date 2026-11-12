@@ -12,9 +12,11 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
@@ -24,7 +26,9 @@ import (
 	"github.com/bogworks/mash/internal/wranglerreg"
 )
 
-const issueUsage = `usage: mashctl issue serve [--list-set FILE] [--registry FILE]
+const issueUsage = `usage: mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE]
+  --test-account  the operator's own declaration that this account is a test account; the static wrangler registry is
+                  a test-account facility, and the service starts only if the registry file says so too
 `
 
 const wranglerUsage = `usage: mashctl wrangler init --test-account
@@ -73,8 +77,20 @@ type adminRecord struct{ a *admin.Admin }
 func (r adminRecord) Lookup(ctx context.Context, key string) (*store.Issued, error) {
 	return r.a.IssuedByKey(ctx, key)
 }
-func (r adminRecord) Record(ctx context.Context, rec store.Issued) error {
-	return r.a.RecordIssued(ctx, rec)
+func (r adminRecord) RecordChecked(ctx context.Context, rec store.Issued) error {
+	return r.a.RecordIssuedChecked(ctx, rec)
+}
+
+// liveClaims is the issue.AccountClaims over the system account: the newest account JWT the servers hold, verified
+// against the operator key and its signing keys, as policy apply reads it.
+type liveClaims struct {
+	res     apply.Resolver
+	account string
+	trust   apply.Trust
+}
+
+func (c liveClaims) Fetch(ctx context.Context) (*jwt.AccountClaims, error) {
+	return apply.CurrentAccountClaims(ctx, c.res, c.account, c.trust)
 }
 
 // groupSigner is the issue.Signer over the key store: owner group "range.owner" keys (ctlkeys.GroupKey), never created
@@ -90,9 +106,22 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprint(stderr, "mashctl: issue: serve\n"+issueUsage)
 		return 2
 	}
-	var listFile, regFile string
-	if err := flagArgs(args[1:], map[string]*string{"--list-set": &listFile, "--registry": &regFile}); err != nil {
+	var listFile, regFile, sysCreds string
+	testAccount := false
+	rest := make([]string, 0, len(args)-1)
+	for _, a := range args[1:] {
+		if a == "--test-account" {
+			testAccount = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	if err := flagArgs(rest, map[string]*string{"--list-set": &listFile, "--registry": &regFile, "--sys-creds": &sysCreds}); err != nil {
 		fmt.Fprintf(stderr, "mashctl: issue serve: %v\n%s", err, issueUsage)
+		return 2
+	}
+	if !testAccount {
+		fmt.Fprintf(stderr, "mashctl: issue serve: the static wrangler registry is a test-account facility and real wrangler registration is not decided yet: pass --test-account to declare this a test account\n%s", issueUsage)
 		return 2
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
@@ -135,14 +164,23 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 	if err != nil {
 		return fail("%v", err)
 	}
-	announceTarget(cfg, env, stderr, nil)
+	trust, err := apply.LoadTrust(keys)
+	if err != nil {
+		return fail("%v", err)
+	}
+	announceTarget(cfg, env, stderr, &sysTarget{sysCreds})
+	sys, err := connectSys(cfg, sysCreds, env)
+	if err != nil {
+		return fail("%v", err)
+	}
+	defer sys.Close()
 	adm, _, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("%v", err)
 	}
 	defer closeAdmin()
 	log := slog.New(slog.NewTextHandler(stderr, nil))
-	is := &issue.Issuer{Registry: reg, ListSet: ls, Signer: groupSigner{keys}, Record: adminRecord{adm}, AccountPub: account, Log: log}
+	is := &issue.Issuer{Registry: reg, ListSet: ls, Signer: groupSigner{keys}, Record: adminRecord{adm}, Claims: liveClaims{apply.NATS{Conn: sys}, account, trust}, AccountPub: account, Log: log}
 	stop, err := issue.Serve(adm.Conn(), is, compiled.Range, endpoint.CurrentVersion())
 	if err != nil {
 		return fail("%v", err)

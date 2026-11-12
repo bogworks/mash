@@ -35,8 +35,10 @@ type Signer interface {
 type Record interface {
 	// Lookup returns the record of publicKey, nil when there is none.
 	Lookup(ctx context.Context, publicKey string) (*store.Issued, error)
-	// Record writes the entry; an error means nothing may be issued.
-	Record(ctx context.Context, r store.Issued) error
+	// RecordChecked writes the entry as a compare-and-set that refuses, at the revision it writes at, a key whose
+	// record has revoked_at set (store.ErrKeyRevoked) or is bound to another address (store.ErrKeyBoundElsewhere).
+	// An error means nothing may be issued: the write is the arbiter, the Lookup before it only an early refusal.
+	RecordChecked(ctx context.Context, r store.Issued) error
 }
 
 // MaxNonces caps the replay set; a service holding that many unexpired nonces refuses more (CodeBusy). A wrangler issues
@@ -47,17 +49,20 @@ const MaxNonces = 65536
 // restart is refused all the same once the request's expiry has passed, and the expiry is at most MaxWindow ahead of the
 // moment the request was made, so a restart opens a replay window of at most MaxWindow.
 type Issuer struct {
-	Registry   WranglerRegistry
-	ListSet    ListSetInForce
-	Signer     Signer
-	Record     Record
+	Registry WranglerRegistry
+	ListSet  ListSetInForce
+	Signer   Signer
+	Record   Record
+	// Claims reads the account JWT the signing key is verified against (see ScopeTTL).
+	Claims     AccountClaims
 	AccountPub string
 	Log        *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 
-	mu     sync.Mutex // serialises the check of the record and its write, and guards nonces
-	nonces map[string]time.Time
+	mu     sync.Mutex // guards nonces and nothing else: it is never held across signing or I/O
+	nonces nonceSet
+	scopes scopeCache
 }
 
 // Issued is a successful issue: the signed JWT and what mash recorded.
@@ -151,10 +156,18 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if !r.verifyProof() {
 		return nil, refuse(CodeBadProof, "the proof does not verify over the request")
 	}
-	// The nonce is taken only now, for a request that proved itself, so a forged request cannot use up a real nonce.
+	// The nonce is reserved only now, for a request that proved itself, so a forged request cannot use one up, and so a
+	// duplicate that arrives meanwhile is refused. It stays reserved only if a credential is returned: every refusal
+	// below releases it, so a corrected request with the same nonce (the proof covers it) is not a replay.
 	if rf := is.takeNonce(r.Nonce, exp, now); rf != nil {
 		return nil, rf
 	}
+	issued := false
+	defer func() {
+		if !issued {
+			is.releaseNonce(r.Nonce)
+		}
+	}()
 
 	compiled, gen, err := is.ListSet.InForce(ctx)
 	if err != nil || compiled == nil {
@@ -170,21 +183,24 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if user == nil {
 		return nil, refuse(CodeUnlisted, "that address is not a sender in the list set in force")
 	}
+	var tpl *listset.Template
+	for i := range compiled.Templates {
+		if compiled.Templates[i].Group == group {
+			tpl = &compiled.Templates[i]
+			break
+		}
+	}
+	if tpl == nil {
+		return nil, refuse(CodeTemplate, "the list set has no template for this owner group")
+	}
 
-	// From here to the write, one issue at a time: two requests for one key must not both pass the binding check.
-	is.mu.Lock()
-	defer is.mu.Unlock()
+	// An early refusal, so a revoked or bound key costs no signing. The record write below decides.
 	cur, err := is.Record.Lookup(ctx, r.PublicKey)
 	if err != nil {
 		return nil, refuse(CodeRecordFailed, "the issue record could not be read")
 	}
-	if cur != nil {
-		if cur.RevokedAt != "" {
-			return nil, refuse(CodeRevoked, "that public key has been revoked")
-		}
-		if cur.Address != r.Address {
-			return nil, refuse(CodeBound, "that public key is already bound to another address")
-		}
+	if rf := bindingRefusal(cur, r.Address); rf != nil {
+		return nil, rf
 	}
 
 	kp, err := is.Signer.GroupKey(group)
@@ -196,6 +212,17 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if err != nil || !nkeys.IsValidPublicAccountKey(pub) || pub == is.AccountPub {
 		// A user signed by the account identity key would carry no restrictions: never.
 		return nil, refuse(CodeNoSigningKey, "the signing key of this owner group is not a scoped signing key")
+	}
+	// The key must be published in the account JWT as a scoped signer with this group's template: an unscoped key, or
+	// one with another template, would let the user carry more than the list set allows.
+	switch is.checkScope(ctx, group, pub, tpl.Permissions) {
+	case "":
+	case CodeNoScope:
+		return nil, refuse(CodeNoScope, "the signing key of this owner group is not published in the account JWT as a scoped signing key")
+	case CodeTemplate:
+		return nil, refuse(CodeTemplate, "the scoped signing key of this owner group has a template other than the list set's")
+	default:
+		return nil, refuse(CodeNoSigningKey, "the account JWT could not be read to verify the signing key")
 	}
 
 	uc := jwt.NewUserClaims(r.PublicKey)
@@ -212,40 +239,59 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		Tags: append([]string{}, user.Tags...), Generation: gen, Purpose: purpose,
 		IssuedAt: time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339),
 	}
-	if err := is.Record.Record(ctx, rec); err != nil {
+	// The token leaves this function only if the checked write succeeded; on any error it is dropped here.
+	if err := is.Record.RecordChecked(ctx, rec); err != nil {
+		switch {
+		case errors.Is(err, store.ErrKeyRevoked):
+			return nil, refuse(CodeRevoked, "that public key has been revoked")
+		case errors.Is(err, store.ErrKeyBoundElsewhere):
+			return nil, refuse(CodeBound, "that public key is already bound to another address")
+		}
 		return nil, refuse(CodeRecordFailed, "the issue could not be recorded, so nothing is issued")
 	}
+	issued = true
 	return &Issued{JWT: token, Tags: rec.Tags, Record: rec}, nil
 }
 
-// takeNonce records nonce until exp and refuses one already held. Expired nonces are dropped as it goes.
-func (is *Issuer) takeNonce(nonce string, exp, now time.Time) *Refusal {
-	is.mu.Lock()
-	defer is.mu.Unlock()
-	if is.nonces == nil {
-		is.nonces = map[string]time.Time{}
+// bindingRefusal is the refusal for a key whose record cur is revoked or bound to another address than address.
+func bindingRefusal(cur *store.Issued, address string) *Refusal {
+	if cur == nil {
+		return nil
 	}
-	for n, e := range is.nonces {
-		if !e.After(now) {
-			delete(is.nonces, n)
-		}
+	if cur.RevokedAt != "" {
+		return refuse(CodeRevoked, "that public key has been revoked")
 	}
-	if _, seen := is.nonces[nonce]; seen {
-		return refuse(CodeReplay, "that nonce has been used")
+	if cur.Address != address {
+		return refuse(CodeBound, "that public key is already bound to another address")
 	}
-	if len(is.nonces) >= MaxNonces {
-		return refuse(CodeBusy, "too many requests in flight; try again later")
-	}
-	is.nonces[nonce] = exp
 	return nil
 }
 
+// takeNonce reserves nonce until exp and refuses one already held or a full set (see nonceSet).
+func (is *Issuer) takeNonce(nonce string, exp, now time.Time) *Refusal {
+	is.mu.Lock()
+	defer is.mu.Unlock()
+	switch is.nonces.take(nonce, exp, now) {
+	case CodeReplay:
+		return refuse(CodeReplay, "that nonce has been used")
+	case CodeBusy:
+		return refuse(CodeBusy, "too many requests in flight; try again later")
+	}
+	return nil
+}
+
+func (is *Issuer) releaseNonce(nonce string) {
+	is.mu.Lock()
+	defer is.mu.Unlock()
+	is.nonces.release(nonce)
+}
+
 // ErrNotConfigured is returned by Validate for an Issuer with a part missing.
-var ErrNotConfigured = errors.New("issue: the issuer is missing a registry, list set, signer, record or account key")
+var ErrNotConfigured = errors.New("issue: the issuer is missing a registry, list set, signer, record, account claims or account key")
 
 // Check refuses an Issuer that cannot work.
 func (is *Issuer) Check() error {
-	if is.Registry == nil || is.ListSet == nil || is.Signer == nil || is.Record == nil || !nkeys.IsValidPublicAccountKey(is.AccountPub) {
+	if is.Registry == nil || is.ListSet == nil || is.Signer == nil || is.Record == nil || is.Claims == nil || !nkeys.IsValidPublicAccountKey(is.AccountPub) {
 		return ErrNotConfigured
 	}
 	return nil

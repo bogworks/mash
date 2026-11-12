@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,27 +36,82 @@ func (f fakeSigner) GroupKey(string) (nkeys.KeyPair, error) {
 }
 
 type fakeRecord struct {
-	recs map[string]store.Issued
-	fail bool
+	mu          sync.Mutex
+	recs        map[string]store.Issued
+	fail        bool
+	beforeWrite func()
+	afterLookup func()
 }
 
 func (f *fakeRecord) Lookup(_ context.Context, k string) (*store.Issued, error) {
+	if f.afterLookup != nil {
+		defer f.afterLookup()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if r, ok := f.recs[k]; ok {
 		return &r, nil
 	}
 	return nil, nil
 }
 
-func (f *fakeRecord) Record(_ context.Context, r store.Issued) error {
+// RecordChecked is the real arbiter's rule over a map: the conditions are tested at the write, under the fake's lock.
+// beforeWrite, when set, runs first and stands for another process's write landing after the issuer's lookup.
+func (f *fakeRecord) RecordChecked(_ context.Context, r store.Issued) error {
+	if f.beforeWrite != nil {
+		f.beforeWrite()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.fail {
 		return errors.New("down")
+	}
+	if cur, ok := f.recs[r.PublicKey]; ok {
+		if cur.RevokedAt != "" {
+			return store.ErrKeyRevoked
+		}
+		if cur.Address != r.Address {
+			return store.ErrKeyBoundElsewhere
+		}
 	}
 	f.recs[r.PublicKey] = r
 	return nil
 }
 
+// fakeClaims is the account JWT the service verifies the signing key against.
+type fakeClaims struct {
+	mu sync.Mutex
+	ac *jwt.AccountClaims
+	n  int
+}
+
+func (f *fakeClaims) Fetch(context.Context) (*jwt.AccountClaims, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n++
+	return f.ac, nil
+}
+
+// publish sets the account JWT to carry pub as a scoped signer with the permissions p (nil p: an unscoped signer).
+func (f *fakeClaims) publish(pub string, p *jwt.Permissions) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ac = jwt.NewAccountClaims("A")
+	if p == nil {
+		f.ac.SigningKeys.Add(pub)
+		return
+	}
+	us := jwt.NewUserScope()
+	us.Key = pub
+	us.Template.Permissions = *p
+	f.ac.SigningKeys.AddScopedSigner(us)
+}
+
 type fixture struct {
 	is       *Issuer
+	claims   *fakeClaims
+	tpl      jwt.Permissions
+	gpub     string
 	rec      *fakeRecord
 	wrangler nkeys.KeyPair
 	wpub     string
@@ -80,9 +137,18 @@ func newFixture(t *testing.T) *fixture {
 	acct, _ := nkeys.CreateAccount()
 	apub, _ := acct.PublicKey()
 	gk, _ := nkeys.CreateAccount()
-	f := &fixture{rec: &fakeRecord{recs: map[string]store.Issued{}}, wrangler: w, wpub: wpub, now: time.Now(), logs: &bytes.Buffer{}}
+	gpub, _ := gk.PublicKey()
+	fc := &fakeClaims{}
+	var tpl jwt.Permissions
+	for _, t := range c.Templates {
+		if t.Group == "foo.c" {
+			tpl = t.Permissions
+		}
+	}
+	fc.publish(gpub, &tpl)
+	f := &fixture{claims: fc, tpl: tpl, gpub: gpub, rec: &fakeRecord{recs: map[string]store.Issued{}}, wrangler: w, wpub: wpub, now: time.Now(), logs: &bytes.Buffer{}}
 	f.is = &Issuer{
-		Registry: fakeRegistry{"h|foo.c": {wpub}}, ListSet: fakeSet{c}, Signer: fakeSigner{gk}, Record: f.rec, AccountPub: apub,
+		Registry: fakeRegistry{"h|foo.c": {wpub}}, ListSet: fakeSet{c}, Signer: fakeSigner{gk}, Record: f.rec, Claims: fc, AccountPub: apub,
 		Log: slog.New(slog.NewTextHandler(f.logs, nil)), Now: func() time.Time { return f.now },
 	}
 	return f
@@ -163,7 +229,7 @@ func TestRestartForgetsNoncesAndExpiryBoundsTheReplay(t *testing.T) {
 		t.Fatalf("same service: %v", err)
 	}
 	restart := func() *Issuer {
-		return &Issuer{Registry: f.is.Registry, ListSet: f.is.ListSet, Signer: f.is.Signer, Record: f.is.Record,
+		return &Issuer{Registry: f.is.Registry, ListSet: f.is.ListSet, Signer: f.is.Signer, Record: f.is.Record, Claims: f.is.Claims,
 			AccountPub: f.is.AccountPub, Log: f.is.Log, Now: f.is.Now}
 	}
 	restarted := restart()
@@ -184,16 +250,16 @@ func TestNoncesAreDroppedAtExpiryAndCapped(t *testing.T) {
 	if _, err := f.is.Issue(ctx, r, store.PurposeIssue); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.is.nonces) != 1 {
-		t.Fatalf("%d", len(f.is.nonces))
+	if f.is.nonces.len() != 1 {
+		t.Fatalf("%d", f.is.nonces.len())
 	}
 	f.now = f.now.Add(2 * time.Minute)
-	if _, err := f.is.Issue(ctx, f.req(t, "foo.c.lead", time.Minute), store.PurposeIssue); err != nil || len(f.is.nonces) != 1 {
-		t.Fatalf("%v %d", err, len(f.is.nonces))
+	if _, err := f.is.Issue(ctx, f.req(t, "foo.c.lead", time.Minute), store.PurposeIssue); err != nil || f.is.nonces.len() != 1 {
+		t.Fatalf("%v %d", err, f.is.nonces.len())
 	}
 	exp := f.now.Add(time.Minute)
-	for i := 0; len(f.is.nonces) < MaxNonces; i++ {
-		f.is.nonces[strings.Repeat("a", 5)+string(rune('A'+i%26))+time.Duration(i).String()] = exp
+	for i := 0; f.is.nonces.len() < MaxNonces; i++ {
+		f.is.nonces.take("fill"+strconv.Itoa(i), exp, f.now)
 	}
 	if _, err := f.is.Issue(ctx, f.req(t, "foo.c.core", time.Minute), store.PurposeIssue); code(err) != CodeBusy {
 		t.Fatalf("full set: %v", err)

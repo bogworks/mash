@@ -41,6 +41,12 @@ func (a *Admin) issuedKV(ctx context.Context) (jetstream.KeyValue, error) {
 // record's bucket does not exist). A caller that revokes a key mash may not have issued treats it as no finding.
 var ErrNotRecorded = errors.New("mash: issue record: key not recorded")
 
+// ErrKeyRevoked and ErrKeyBoundElsewhere are the refusals of RecordIssuedChecked.
+var (
+	ErrKeyRevoked        = store.ErrKeyRevoked
+	ErrKeyBoundElsewhere = store.ErrKeyBoundElsewhere
+)
+
 // issuedCASTries is how many times a read-modify-write of one record retries after losing a race.
 const issuedCASTries = 8
 
@@ -51,6 +57,20 @@ const issuedCASTries = 8
 // set. Callers record before they hand the creds out, so a user that can connect is always in the record; an error
 // means the user must not be issued.
 func (a *Admin) RecordIssued(ctx context.Context, r store.Issued) error {
+	return a.recordIssued(ctx, r, false)
+}
+
+// RecordIssuedChecked is RecordIssued with the issue service's conditions made part of every compare-and-set attempt:
+// when the record the write would follow has revoked_at set it fails with store.ErrKeyRevoked, and when that record is
+// bound to another address it fails with store.ErrKeyBoundElsewhere; in both cases nothing is written. The conditions
+// are tested against the revision the write is made at, so a MarkRevoked or a second issuer's write that lands between
+// a caller's earlier lookup and this write is seen, not overwritten. A caller hands a credential out only after this
+// returns nil.
+func (a *Admin) RecordIssuedChecked(ctx context.Context, r store.Issued) error {
+	return a.recordIssued(ctx, r, true)
+}
+
+func (a *Admin) recordIssued(ctx context.Context, r store.Issued, checked bool) error {
 	if !nkeys.IsValidPublicUserKey(r.PublicKey) {
 		return fmt.Errorf("mash: issue record: %q is not a user public key", r.PublicKey)
 	}
@@ -78,6 +98,14 @@ func (a *Admin) RecordIssued(ctx context.Context, r store.Issued) error {
 		return err
 	}
 	return casIssued(ctx, kv, r.PublicKey, func(cur *store.Issued) (store.Issued, bool, error) {
+		if checked && cur != nil {
+			if cur.RevokedAt != "" {
+				return store.Issued{}, false, store.ErrKeyRevoked
+			}
+			if cur.Address != r.Address {
+				return store.Issued{}, false, store.ErrKeyBoundElsewhere
+			}
+		}
 		next := r
 		if cur != nil && cur.RevokedAt != "" {
 			next.RevokedAt = cur.RevokedAt

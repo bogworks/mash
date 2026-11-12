@@ -189,3 +189,17 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 	}
 	return last
 }
+
+// CurrentAccountClaims is the account's newest JWT as the resolver's servers hold it, verified against trust: the
+// highest iat of the copies that answered (see lookupBase, which refuses a copy that does not verify and two different
+// copies with the same iat). An account none of them has a JWT for is an error.
+func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Trust) (*jwt.AccountClaims, error) {
+	b, err := lookupBase(ctx, r, acct, trust, 0, "account JWT lookup")
+	if err != nil {
+		return nil, err
+	}
+	if b.claims == nil {
+		return nil, fmt.Errorf("no server holds a JWT for account %s", acct)
+	}
+	return b.claims, nil
+}

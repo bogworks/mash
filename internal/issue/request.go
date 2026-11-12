@@ -75,6 +75,8 @@ const (
 	CodeRevoked      = "key_revoked"
 	CodeBound        = "key_bound_elsewhere"
 	CodeNoSigningKey = "signing_key_unavailable"
+	CodeNoScope      = "signing_key_not_scoped"
+	CodeTemplate     = "template_mismatch"
 	CodeNoListSet    = "no_list_set"
 	CodeRecordFailed = "record_failed"
 	CodeSubject      = "address_subject_mismatch"

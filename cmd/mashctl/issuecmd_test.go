@@ -173,7 +173,7 @@ func (e *issueEnv) start() {
 	e.done = make(chan int, 1)
 	go func() {
 		var out bytes.Buffer
-		e.done <- runEnv([]string{"issue", "serve", "--list-set", e.lsPath}, func(k string) string { return e.env[k] }, &out, e.logs)
+		e.done <- runEnv([]string{"issue", "serve", "--test-account", "--list-set", e.lsPath}, func(k string) string { return e.env[k] }, &out, e.logs)
 	}()
 	select {
 	case <-ready:
@@ -526,7 +526,7 @@ func TestIssueServeRefusesToStartWithoutATestRegistry(t *testing.T) {
 	e := newIssueEnvNoService(t)
 	run := func() (int, string) {
 		var out, errb bytes.Buffer
-		code := runEnv([]string{"issue", "serve", "--list-set", e.lsPath}, func(k string) string { return e.env[k] }, &out, &errb)
+		code := runEnv([]string{"issue", "serve", "--test-account", "--list-set", e.lsPath}, func(k string) string { return e.env[k] }, &out, &errb)
 		return code, errb.String()
 	}
 	const want = "no wrangler registry for this account: the static registry is for test accounts only; real wrangler registration is not decided yet"
@@ -560,6 +560,56 @@ func TestIssueServeRefusesToStartWithoutATestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("a registry others can write")
+}
+
+// The registry file alone cannot turn the service on: the operator's own --test-account must agree with it.
+func TestIssueServeRequiresTheOperatorsTestAccountFlag(t *testing.T) {
+	e := newIssueEnvNoService(t)
+	e.registerWrangler()
+	var out, errb bytes.Buffer
+	code := runEnv([]string{"issue", "serve", "--list-set", e.lsPath}, func(k string) string { return e.env[k] }, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "--test-account") || !strings.Contains(errb.String(), "test-account facility") {
+		t.Fatalf("without the flag: %d %s", code, errb.String())
+	}
+	e.start() // with the flag and the matching file it starts
+}
+
+// An overridden registry path is held to the same custody as the default one.
+func TestIssueServeChecksTheCustodyOfAnOverriddenRegistry(t *testing.T) {
+	e := newIssueEnvNoService(t)
+	e.registerWrangler()
+	serve := func(path string) (int, string) {
+		var out, errb bytes.Buffer
+		code := runEnv([]string{"issue", "serve", "--test-account", "--list-set", e.lsPath, "--registry", path}, func(k string) string { return e.env[k] }, &out, &errb)
+		return code, errb.String()
+	}
+	src := wranglerreg.Path(e.keyDir)
+	open := filepath.Join(e.root, "open")
+	if err := os.Mkdir(open, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(open, "w.json"), mustT(os.ReadFile(src)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if code, errb := serve(filepath.Join(open, "w.json")); code != 1 || !strings.Contains(errb, "writable by every user") {
+		t.Fatalf("world-writable parent: %d %s", code, errb)
+	}
+	link := filepath.Join(e.root, "link")
+	if err := os.Symlink(e.keyDir, link); err != nil {
+		t.Fatal(err)
+	}
+	if code, errb := serve(filepath.Join(link, wranglerreg.FileName)); code != 1 || !strings.Contains(errb, "is a symlink") {
+		t.Fatalf("symlinked parent: %d %s", code, errb)
+	}
+	if err := os.Chmod(src, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if code, errb := serve(src); code != 1 || !strings.Contains(errb, "others can write it") {
+		t.Fatalf("group-writable file: %d %s", code, errb)
+	}
 }
 
 func TestWranglerCommandsRoundTrip(t *testing.T) {
@@ -695,4 +745,51 @@ func TestIssueSubjectIsNotReachableByATemplate(t *testing.T) {
 func madminSubjectsOf() []string {
 	p := madmin.Permissions("c", "core")
 	return append(append([]string{}, p.Pub.Allow...), p.Sub.Allow...)
+}
+
+// pushIssueScope replaces the owner group's signing key in the account JWT: unscoped when unscoped is set, else scoped
+// with a template that is not the list set's.
+func (e *issueEnv) pushIssueScope(unscoped bool) {
+	e.t.Helper()
+	gk := mustT(e.ks.GroupKey(issueGroup, false))
+	gpub := mustT(gk.PublicKey())
+	ac := e.claims()
+	delete(ac.SigningKeys, gpub)
+	if unscoped {
+		ac.SigningKeys.Add(gpub)
+	} else {
+		us := jwt.NewUserScope()
+		us.Key = gpub
+		us.Template.Permissions.Pub.Allow.Add(">")
+		ac.SigningKeys.AddScopedSigner(us)
+	}
+	opkp, _, err := e.ks.Operator()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	time.Sleep(issueIatTick) // a pushed account JWT must be newer than the one it replaces
+	tok := mustT(ac.Encode(opkp))
+	sys := mustT(nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"])))
+	defer sys.Close()
+	msg, err := sys.Request("$SYS.REQ.CLAIMS.UPDATE", []byte(tok), issueWait)
+	if err != nil || strings.Contains(string(msg.Data), `"error"`) {
+		e.t.Fatalf("push: %v %v", err, msg)
+	}
+}
+
+const issueIatTick = 1100 * time.Millisecond
+
+// The live service reads the account JWT: a group key published unscoped, or scoped with another template, signs nothing.
+func TestIssueServiceRefusesAGroupKeyThatIsNotScopedWithTheTable(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		unscoped bool
+		code     string
+	}{{"unscoped", true, issue.CodeNoScope}, {"another template", false, issue.CodeTemplate}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newIssueEnv(t)
+			e.pushIssueScope(c.unscoped)
+			e.refused(c.name, e.newReq("foo.c.core").sign(t), c.code)
+		})
+	}
 }

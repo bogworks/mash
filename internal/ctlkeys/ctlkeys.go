@@ -133,6 +133,11 @@ func ownerErr(fi fs.FileInfo, path, what string) error {
 	return nil
 }
 
+// CheckOwned refuses a file or directory (described by fi, named path, called what in the error) that the effective
+// uid does not own: the owner check the key store applies to its own files, for a caller that holds a file of the same
+// custody. It is a no-op where the platform reports no owner.
+func CheckOwned(fi fs.FileInfo, path, what string) error { return ownerErr(fi, path, what) }
+
 // CheckParentDir refuses a directory that is not a real directory (a symlink is refused), is not owned by the
 // effective uid, or is writable by other users (group-writable is allowed: under the usual user-private-group umask 002 a config directory is 0775 and the group is the owner alone): a place where a creds file may be created without another user
 // being able to swap or replace it. A missing directory is an error wrapping fs.ErrNotExist.

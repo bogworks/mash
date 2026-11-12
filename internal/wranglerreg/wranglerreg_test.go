@@ -92,3 +92,50 @@ func TestAddValidates(t *testing.T) {
 		}
 	}
 }
+
+// The registry file is held to the key store's custody: its directory may not be a symlink or writable by every user,
+// and the file may not be writable by group or others.
+func TestRegistryCustodyOfTheFileAndItsDirectory(t *testing.T) {
+	a := acct()
+	write := func(dir string) string {
+		p := filepath.Join(dir, FileName)
+		if err := (&File{Account: a, TestAccount: true}).Save(p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	t.Run("sound", func(t *testing.T) {
+		if _, err := OpenStatic(write(t.TempDir()), a); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("world-writable directory", func(t *testing.T) {
+		dir := t.TempDir()
+		p := write(dir)
+		if err := os.Chmod(dir, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := OpenStatic(p, a); !errors.Is(err, ErrNoRegistry) {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("symlinked directory", func(t *testing.T) {
+		real, link := t.TempDir(), filepath.Join(t.TempDir(), "link")
+		write(real)
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := OpenStatic(filepath.Join(link, FileName), a); !errors.Is(err, ErrNoRegistry) {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("group-writable file", func(t *testing.T) {
+		p := write(t.TempDir())
+		if err := os.Chmod(p, 0o660); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := OpenStatic(p, a); !errors.Is(err, ErrNoRegistry) {
+			t.Fatalf("%v", err)
+		}
+	})
+}

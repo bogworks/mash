@@ -3,7 +3,9 @@
 //
 // It is for test accounts only. How a real wrangler's key comes to be registered for a host and an owner group is not
 // decided (DEC-002 leaves it open), so this registry refuses to serve any account that is not flagged as a test
-// account in the file, and any account the file does not name. It holds public keys only; nothing in it is secret,
+// account in the file, and any account the file does not name. The flag in the file is a declaration and nothing
+// more: the operator makes a second one, `mashctl issue serve --test-account`, and the service starts only when both
+// agree. It holds public keys only; nothing in it is secret,
 // but it decides who may have a credential signed, so it is written 0600 and read only if no one else can write it.
 package wranglerreg
 
@@ -52,8 +54,16 @@ type File struct {
 func Path(keyDir string) string { return filepath.Join(keyDir, FileName) }
 
 // Load reads the registry at path. A missing file wraps os.ErrNotExist. The file is opened once, without following a
-// symlink, and checked on the descriptor: it must be a regular file no other user can write.
+// symlink, and checked on the descriptor: it must be a regular file owned by the effective uid that no other user can
+// write. Its directory must be a real directory (not a symlink) that the effective uid owns and no other user can write,
+// the checks the key store makes for the directory of a file that decides who may be issued a credential.
 func Load(path string) (*File, error) {
+	if err := ctlkeys.CheckParentDir(filepath.Dir(path)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("wrangler registry %s: %w", path, err)
+	}
 	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
 	if err != nil {
 		if config.IsSymlinkRefusal(err) {
@@ -71,6 +81,9 @@ func Load(path string) (*File, error) {
 	}
 	if fi.Mode().Perm()&0o022 != 0 {
 		return nil, fmt.Errorf("wrangler registry %s has mode %04o: others can write it. Run: chmod 600 %s", path, fi.Mode().Perm(), path)
+	}
+	if err := ctlkeys.CheckOwned(fi, path, "wrangler registry"); err != nil {
+		return nil, err
 	}
 	if fi.Size() > maxFile {
 		return nil, fmt.Errorf("wrangler registry %s is too large", path)
