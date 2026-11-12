@@ -2148,3 +2148,62 @@ func TestADRLint_skipsOnlyMergifyQueueDrafts(t *testing.T) {
 		}
 	}
 }
+
+// test (macos) uses the host's shared module cache: it exports neither GOPATH nor GOMODCACHE, verifies the cache with
+// `go mod verify` after setup-go and before go vet, and never removes the toolchain cache under RUNNER_TOOL_CACHE.
+func TestCI_macosUsesTheSharedModuleCacheAndVerifiesIt(t *testing.T) {
+	j := load(t, "ci.yml").Jobs["test-macos"]
+	setup, verify, vet := -1, -1, -1
+	for i, st := range j.Steps {
+		if strings.Contains(st.Run, "GOMODCACHE") || strings.Contains(st.Run, "GOPATH") || strings.Contains(st.Run, "gomod") {
+			t.Errorf("step %d (%q) touches GOPATH or GOMODCACHE; the job must use the host's shared module cache", i+1, st.Name)
+		}
+		if _, ok := st.Env["GOMODCACHE"]; ok {
+			t.Errorf("step %d sets GOMODCACHE", i+1)
+		}
+		if _, ok := st.Env["GOPATH"]; ok {
+			t.Errorf("step %d sets GOPATH", i+1)
+		}
+		if strings.Contains(st.Run, "RUNNER_TOOL_CACHE") {
+			t.Errorf("step %d (%q) touches RUNNER_TOOL_CACHE; the job must not remove Go from the tool cache", i+1, st.Name)
+		}
+		switch {
+		case strings.HasPrefix(st.Uses, "actions/setup-go@"):
+			setup = i
+		case strings.Contains(st.Run, "go mod verify"):
+			verify = i
+			if !strings.Contains(st.Run, "set -euo pipefail") {
+				t.Errorf("the go mod verify step must set -euo pipefail: %q", st.Run)
+			}
+		case strings.Contains(st.Run, "go vet"):
+			vet = i
+		}
+	}
+	for _, e := range []string{"GOPATH", "GOMODCACHE"} {
+		if _, ok := j.Env[e]; ok {
+			t.Errorf("job env sets %s", e)
+		}
+	}
+	if setup < 0 || verify < 0 || vet < 0 || !(setup < verify && verify < vet) {
+		t.Errorf("want setup-go < go mod verify < go vet, got steps %d, %d, %d (0 is missing)", setup+1, verify+1, vet+1)
+	}
+}
+
+// Every artifact the release workflow hands between jobs expires after one day.
+func TestRelease_everyUploadArtifactKeepsOneDay(t *testing.T) {
+	n := 0
+	for id, j := range load(t, "release.yml").Jobs {
+		for i, st := range j.Steps {
+			if !strings.HasPrefix(st.Uses, "actions/upload-artifact@") {
+				continue
+			}
+			n++
+			if got := fmt.Sprint(st.With["retention-days"]); got != "1" {
+				t.Errorf("release.yml job %s step %d: upload-artifact retention-days is %q, want 1", id, i+1, got)
+			}
+		}
+	}
+	if n == 0 {
+		t.Error("release.yml has no upload-artifact step")
+	}
+}
