@@ -73,11 +73,7 @@ holder of the admin creds can add a record: the record guards against signing-ke
 The check. `mashctl issued check` connects with the system account creds and sends `$SYS.REQ.SERVER.PING.CONNZ` with auth
 on and the MASH account as filter. The server reports a JWT user's public key as `authorized_user`, with the connection
 name, the signing key and the tags. It asks for a page large enough that a typical scan is one reply, and pages through
-a server with more connections (further requests on the server's own subject). Each page is a fresh snapshot, so a
-connection that closes or opens between two pages can repeat one connection and skip another. mash collects the
-connections of a server into a set keyed by connection id and accepts the scan only when the set is as large as the total
-the server reported on its first and on its last page and no connection came twice; otherwise it scans that server again,
-up to 3 times, and then treats the server like one that did not answer (incomplete). It reports every connected key that
+a server with more connections (further requests on the server's own subject). A scan of one page is one snapshot and is accepted when its count matches the server's total. Each page of a longer scan is a fresh snapshot, so a connection that closes and another that opens between two pages can repeat or skip connections, even while the total stays the same and no id repeats. mash collects the connections of a server into a set keyed by connection id; a multi-page scan is accepted only when the set is as large as the total the server reported on its first and on its last page, no connection came twice, and the scan before it (also complete) collected exactly the same set. Otherwise it scans that server again, up to 3 scans in all, and then treats the server like one that did not answer (incomplete). It reports every connected key that
 is not in the record. No key is exempt: the admin user the command connects with is in the account and must be recorded
 (by `init` or `adopt --mint-admin`), and the system account's users, the system creds among them, are never in the MASH
 account's connection list. Recorded keys that are not connected are informational. A connected key that the record
