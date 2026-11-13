@@ -130,6 +130,8 @@ MASH_NAME=design mash prompt review "Are you still on the auth bug?"
 MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
 ```
 
+A live prompt is at most 32768 bytes; a longer one is refused with an error, so send the longer text as mail.
+
 ### Sessions and resume
 
 The endpoint name belongs to the launch, not to the conversation. It comes only from `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
