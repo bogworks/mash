@@ -147,7 +147,7 @@ func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
 	sub = append(sub, "agents.hb."+rng+"."+allowT)
 
 	flat := rng + "_" + owner + "_" + nameFn
-	pub = append(pub, fixedPub(selfSubj(Heartbeat), flat)...)
+	pub = append(pub, fixedPub(selfSubj(Heartbeat), PolicySubject(rng), flat)...)
 	sub = append(sub,
 		"_INBOX."+flat+".>",
 		selfSubj(Prompt),
@@ -163,17 +163,23 @@ func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
 	return p
 }
 
+// PolicySubject is the subject of the policy responder of range rng: "agents.policy.<range>". Every sender may publish
+// to it, so `mash policy show` and `mash policy explain` can ask it; the answer returns on the sender's own _INBOX
+// prefix. It has three tokens, so it is no address subject and no reach.
+func PolicySubject(rng string) string { return "agents.policy." + rng }
+
 // fixedPub is the part of a sender's publish allow list that names only the sender itself and the shared plumbing:
 // its heartbeat, replies, the service API, and the JetStream and KV subjects of its own inbox, the directory and its
-// lease. hb is the sender's own heartbeat subject and flat its flat key (range_owner_name). The lines and their order
+// lease, and the range's policy responder. hb is the sender's own heartbeat subject, policy the responder's subject and flat its flat key (range_owner_name). The lines and their order
 // are those of internal/admin fixedPubKeyed (the unexported source); this copy lets the template name the sender
 // through {{name()}}. It never names another address's inbox, stream or consumer (REQ-001), and has no tag.
-func fixedPub(hb, flat string) []string {
+func fixedPub(hb, policy, flat string) []string {
 	inbox := "inbox-" + flat
 	dir := "KV_" + store.DirectoryBucket
 	lease := "KV_" + store.LeaseBucket
 	return []string{
 		hb,
+		policy,
 		"_INBOX.>", // replies (SAP prompt chunks, $SRV answers) go to callers' inboxes only
 		"$SRV.>",
 		"$JS.API.INFO",

@@ -99,7 +99,8 @@
             "$JS.API.STREAM.INFO.inbox-r_o_a",
             "$KV.mash-leases.r_o_a",
             "$SRV.\u003e",
-            "_INBOX.\u003e"
+            "_INBOX.\u003e",
+            "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -152,7 +153,8 @@
             "$JS.API.STREAM.INFO.inbox-r_o_b",
             "$KV.mash-leases.r_o_b",
             "$SRV.\u003e",
-            "_INBOX.\u003e"
+            "_INBOX.\u003e",
+            "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -211,7 +213,8 @@
             "$JS.API.STREAM.INFO.inbox-r_o_c",
             "$KV.mash-leases.r_o_c",
             "$SRV.\u003e",
-            "_INBOX.\u003e"
+            "_INBOX.\u003e",
+            "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -271,7 +274,8 @@
             "$JS.API.STREAM.INFO.inbox-r_p_x",
             "$KV.mash-leases.r_p_x",
             "$SRV.\u003e",
-            "_INBOX.\u003e"
+            "_INBOX.\u003e",
+            "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -328,7 +332,8 @@
           "$JS.API.STREAM.INFO.inbox-r_o_b",
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
-          "_INBOX.\u003e"
+          "_INBOX.\u003e",
+          "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -382,7 +387,8 @@
           "$JS.API.STREAM.INFO.inbox-r_o_a",
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
-          "_INBOX.\u003e"
+          "_INBOX.\u003e",
+          "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -436,7 +442,8 @@
           "$JS.API.STREAM.INFO.inbox-r_o_a",
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
-          "_INBOX.\u003e"
+          "_INBOX.\u003e",
+          "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -490,7 +497,8 @@
           "$JS.API.STREAM.INFO.inbox-r_o_b",
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
-          "_INBOX.\u003e"
+          "_INBOX.\u003e",
+          "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",

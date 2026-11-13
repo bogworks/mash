@@ -324,6 +324,19 @@ func (l *KVLedger) InForceListSet() (listset.ListSet, bool, error) {
 	return ls, true, nil
 }
 
+// LatestStatus returns the latest Status the ledger holds; ok is false when no run has written one. It is the read
+// side `mash policy show` answers from.
+func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return Status{}, false, err
+	}
+	if v.Status == nil {
+		return Status{}, false, nil
+	}
+	return *v.Status, true, nil
+}
+
 // Pending implements Ledger.
 func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	ctx, cancel := l.opCtx()

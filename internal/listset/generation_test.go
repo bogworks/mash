@@ -193,8 +193,8 @@ func TestDigestCompiled_UserPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pinned from before user permissions were covered: a Compiled with none digests as it always did.
-	if got, want := DigestCompiled(c).String(), "sha256:bed48aca4c672c3ad6e6813a1f35b244d24c735cd66c2fc912c71c47beaaefe6"; got != want {
+	// Pinned: a Compiled with no user permissions digests as this. The pin moved when the policy responder grant joined the template.
+	if got, want := DigestCompiled(c).String(), "sha256:962836c55117c8d5645fff84ecb3973eb3bed08328b4b6f6113e315dccd00192"; got != want {
 		t.Fatalf("digest of a normal Compile output changed: %s", got)
 	}
 	d := DigestCompiled(c)
