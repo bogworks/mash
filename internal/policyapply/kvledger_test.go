@@ -763,7 +763,7 @@ func TestKVLedgerWriteRefusal(t *testing.T) {
 	if err := l.WriteRefusal(ctx, refusalStatus()); err != nil {
 		t.Fatal(err)
 	}
-	st, ok, err := l.LatestStatus()
+	st, ok, err := l.LatestStatus(context.Background())
 	if err != nil || !ok || st.State != StateRefused || st.Generation != 0 || len(st.Refusals) != 1 {
 		t.Fatalf("%+v %v %v", st, ok, err)
 	}
@@ -802,7 +802,7 @@ func TestKVLedgerWriteRefusalWaitsForLease(t *testing.T) {
 	if err := b.WriteRefusal(short, refusalStatus()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("while held: %v", err)
 	}
-	if _, ok, _ := b.LatestStatus(); ok {
+	if _, ok, _ := b.LatestStatus(context.Background()); ok {
 		t.Fatal("a refusal was written without the lease")
 	}
 	got := make(chan error, 1)
@@ -817,7 +817,7 @@ func TestKVLedgerWriteRefusalWaitsForLease(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("WriteRefusal did not finish after the lease was released")
 	}
-	if st, ok, _ := b.LatestStatus(); !ok || st.State != StateRefused {
+	if st, ok, _ := b.LatestStatus(context.Background()); !ok || st.State != StateRefused {
 		t.Fatalf("%+v %v", st, ok)
 	}
 }
@@ -833,7 +833,7 @@ func TestKVLedgerWriteRefusalRejectsOthers(t *testing.T) {
 			t.Errorf("%+v: err = %v", st, err)
 		}
 	}
-	if _, ok, _ := l.LatestStatus(); ok {
+	if _, ok, _ := l.LatestStatus(context.Background()); ok {
 		t.Error("a status was written")
 	}
 }

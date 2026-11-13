@@ -189,7 +189,7 @@ type statusLedger struct {
 	st *Status
 }
 
-func (l statusLedger) LatestStatus() (Status, bool, error) {
+func (l statusLedger) LatestStatus(context.Context) (Status, bool, error) {
 	if l.st == nil {
 		return Status{}, false, nil
 	}
