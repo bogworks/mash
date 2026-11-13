@@ -173,7 +173,7 @@ type at013Revoker struct {
 	first time.Time
 }
 
-func (r *at013Revoker) Revoke(ctx context.Context, pubs []string) error {
+func (r *at013Revoker) Revoke(ctx context.Context, pubs []string) (string, error) {
 	r.mu.Lock()
 	if r.first.IsZero() {
 		r.first = time.Now()
@@ -347,7 +347,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 				return tok, nil
 			},
 		},
-		AfterPush: func(ctx context.Context) (map[string][]string, []string, error) {
+		AfterPush: func(ctx context.Context) (map[string][]string, []string, string, error) {
 			s.plan.Deadline = time.Now().Add(deadline)
 			return after(ctx)
 		},

@@ -243,7 +243,12 @@ func Converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if signPrevious == nil || in.Previous == nil {
 		return failRollback("servers hold different generations and there is no previous generation to push back")
 	}
-	revoked := slices.Compact(slices.Sorted(slices.Values(in.Expect.RevokedKeys)))
+	// The target JWT may carry revocations beyond the run's list (the keys AfterPush revoked): the rollback keeps those too.
+	keep := in.Expect.RevokedKeys
+	if tc, terr := jwt.DecodeAccountClaims(targetJWT); terr == nil {
+		keep = slices.Concat(keep, slices.Collect(maps.Keys(tc.Revocations)))
+	}
+	revoked := slices.Compact(slices.Sorted(slices.Values(keep)))
 	prevTok, err := signPrevious(slices.Clone(revoked))
 	if err != nil {
 		return failRollback(fmt.Sprintf("servers hold different generations and the previous generation could not be signed: %v", err))
@@ -343,7 +348,7 @@ type RunInput struct {
 	// its old-key inventory (OldKeys), so a sender listed here needs no entry there; an address present with no keys
 	// has an empty inventory. A sender in notConnected never showed a connection with its new key by the deadline: the Status lists it,
 	// holds the state at partial and nothing is committed. See RotationsAfterPush.
-	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, err error)
+	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
 	// OnStatus, if set, receives the applying status before the push.
 	OnStatus func(Status)
 	// BeforeCommit, if set, runs after the gate reports applied (and so with no sender not connected) and before the generation is committed, still under
@@ -506,7 +511,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	pushed(ctx, gi, tok)
 	var notConnected []string
 	if in.AfterPush != nil {
-		revoked, nc, aerr := in.AfterPush(ctx)
+		revoked, nc, finalJWT, aerr := in.AfterPush(ctx)
 		notConnected = slices.Compact(slices.Sorted(slices.Values(nc)))
 		// Whatever AfterPush revoked stays revoked, even when it also failed: it joins the gate's revoked keys, and
 		// the keys of each sender are that sender's old keys, so the gate checks them too (merged into OldKeys; a
@@ -530,6 +535,15 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 				aerr = errors.Join(aerr, perr)
 			}
 			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+		}
+		if finalJWT != "" {
+			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
+			// what Converge pushes again. It must still be the target and carry every revocation.
+			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
+				perr := in.Ledger.SetPending(rec)
+				return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations does not carry generation %d with every revoked key", ErrSignedMismatch, rec.Generation), perr)
+			}
+			tok = finalJWT
 		}
 	}
 	var signPrevious func(revoked []string) (string, error)

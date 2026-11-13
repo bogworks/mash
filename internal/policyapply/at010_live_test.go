@@ -287,40 +287,40 @@ func (e *at010Env) pushTo(ctx context.Context, tok string, names ...string) {
 
 // Revoke is the test's Revoker: it adds the keys to the revocation list of the JWT last pushed, signs it with the
 // operator key and pushes it to every server.
-func (e *at010Env) Revoke(ctx context.Context, pubs []string) error {
+func (e *at010Env) Revoke(ctx context.Context, pubs []string) (string, error) {
 	e.waitNewSecond()
 	e.mu.Lock()
 	cur := e.cur
 	e.mu.Unlock()
 	claims, err := jwt.DecodeAccountClaims(cur)
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, p := range pubs {
 		claims.Revoke(p)
 	}
 	tok, err := claims.Encode(e.op)
 	if err != nil {
-		return err
+		return "", err
 	}
 	set, err := e.cluster.Servers(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	acks, err := e.cluster.Push(ctx, tok, set.Names)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(acks) != len(set.Names) {
-		return fmt.Errorf("%d acknowledgements for %d servers", len(acks), len(set.Names))
+		return "", fmt.Errorf("%d acknowledgements for %d servers", len(acks), len(set.Names))
 	}
 	for _, a := range acks {
 		if !a.OK() {
-			return fmt.Errorf("refused by %s: %d %s", a.Server, a.Code, a.Message)
+			return "", fmt.Errorf("refused by %s: %d %s", a.Server, a.Code, a.Message)
 		}
 	}
 	e.setCurrent(tok)
-	return nil
+	return tok, nil
 }
 
 // realUser mints a real user of the sender, as its host would have: a key pair whose seed mash never sees. Only the

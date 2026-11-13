@@ -165,9 +165,9 @@ type fakeRevoker struct {
 	err error
 }
 
-func (f *fakeRevoker) Revoke(_ context.Context, pubs []string) error {
+func (f *fakeRevoker) Revoke(_ context.Context, pubs []string) (string, error) {
 	f.got = append(f.got, pubs...)
-	return f.err
+	return "", f.err
 }
 
 func TestRevokeProbes(t *testing.T) {
