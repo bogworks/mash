@@ -351,8 +351,12 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   permission on the bucket or its stream subjects, and a test asserts it.
 - Held by: the outside system.
 - A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a zone key, change the
-  account JWT directly or write the marker. mash refuses a list set signed by any other key (the intake that enforces
-  that is not in this version; until it exists an adopted account takes no list set at all).
+  account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
+  refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
+  name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key
+  mash holds or its own key, and the rotation completes only after a list set signed by the new key is applied. A list
+  set cannot touch the marker in any other way, the exempt set among them. Until a command runs the intake an adopted
+  account takes no list set at all.
 - If it leaks: run `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once
   and the marker's history records the recovery. Whoever holds the admin credentials can replace the submitter, so the
   marker protects against the submitter's key and against direct policy commands, not against the admin credentials.
