@@ -41,8 +41,9 @@ creates it, and `mashctl policy adopt` creates it when it is missing. No permiss
 anything on the bucket or its stream subjects, and tests assert that and a live refusal.
 
 The value is JSON: `v` (1), `account` (the account public key), `submitter` (an nkey public key), `next_submitter`
-(optional, written only by the later list-set intake), `adopted_at` (RFC 3339, UTC), `by` (the admin user's public key)
-and `action` (`adopt`, `rotate` or `recover`). A reader refuses a value it cannot parse, a schema other than 1 and a
+(optional, written only by the later list-set intake), `adopted_at` (RFC 3339, UTC), `by` (the admin user's public key),
+`action` (`adopt`, `rotate` or `recover`) and `exempt` (a sorted list of user public keys, described below; a marker
+written without it reads as an empty list). A reader refuses a value it cannot parse, a schema other than 1 and a
 submitter that is not an nkey public key.
 
 `mashctl policy adopt --submitter KEY` is run with the account's admin credentials. It accepts any valid nkey public key
@@ -52,7 +53,30 @@ signing key) or the admin user's key. The first run creates the marker (`adopt`)
 nothing and says so. A run with a different key replaces the marker by a compare-and-set on its last revision and
 records `recover`: the recovery rotation, which refuses the old key at once because readers read the marker each time
 and keep no copy. `mashctl policy adopt --show` prints it. There is no un-adopt command: un-adoption is not supported
-yet, and whether it should be is an open question for the maintainer.
+yet (see the deferred option below).
+
+**Exempt keys.** The later first-list-set reconcile will revoke user credentials that are not issued under the list
+set, and it must never touch mash's own admin and system users or the service users an operator made by hand. So the
+marker records them, by public key and never by "whatever is connected as admin", at adoption. `policy adopt` records
+the admin user's key (read from the admin credentials in use), the system user's key (read from the system credentials
+the push uses: `--sys-creds`, `MASH_SYS_CREDS`, or the `sys.creds` beside the admin credentials) and each `--exempt KEY`
+given (repeatable; an operator-named service user; it must be an nkey user public key, and the operator, system,
+account and zone keys are refused). Only the JWT's subject is read: a seed is never printed or kept. When the system
+credentials cannot be found adopt refuses and writes nothing, because the reconcile could otherwise revoke the
+credentials the push needs. Running adopt again with the same submitter and the same set writes nothing; with the same
+submitter and another set it writes a new revision (action `adopt`, "exempt keys updated"); with a different submitter
+it is the recovery rotation and refreshes the set too. `--show` prints the exempt keys (public keys only; `--json`
+includes them), and for an older marker without any it says `exempt: none recorded: run adopt again before the
+reconcile`.
+
+What the reconcile will do with them is the plan for a later change and is not built here: it removes signing keys
+that are not mash's, revokes the recorded issued users that are not in the first list set and the connected keys that
+are neither recorded nor exempt, reports anything else it cannot name as a finding with the status `reconciled:
+partial (N unknown)`, prints a dry run first and acts only with `--yes`. Exempt keys are skipped by every one of those
+steps.
+
+**Adopting a real account is a live-account step**, taken only on an explicit go from the maintainers. This change was
+built and tested on test accounts only.
 
 `ctl.RefuseIfAdopted` is the guard. It reads the marker and returns `mashctl: <command> is refused: this account is
 adopted by an outside system (submitter <first 8 characters>...): list sets come only through the list-set path; nothing
@@ -60,7 +84,7 @@ was changed`, or, when the marker cannot be read for any reason other than not e
 account is adopted: <error>; nothing was changed`. It is the first thing a command does, before any write, signing, key
 creation or file change, in `policy apply`, `policy repair` (both also with `--dry-run`), `add`, `reissue`, `label`,
 `unlabel` (with or without `--sync`: the policy-file edit is the policy change), `retire`, `set-meta` when it sets a
-label, and `set-zone`. Read-only commands are never refused. `deprovision`, `provision`, `suspend`, `resume`, `limits`
+label, `provision` and `mash admin provision` when they set a label or a zone, and `set-zone`. Read-only commands are never refused. `deprovision`, a `provision` without a label or a zone, `suspend`, `resume`, `limits`
 and a `set-meta` without labels are operator housekeeping of one endpoint, not list sets, and are not refused. A `label`
 or `unlabel` run with no server configured at all is a pure edit of the policy file, mash has nothing to ask, and it is
 allowed; with a server configured and no way to read the marker it refuses.
@@ -85,7 +109,8 @@ Running one account both ways is not supported, and the operations guide says so
 
 Tests cover the bucket's hardening and its creation by init and by adopt; the marker's fields; the same key as a no-op,
 a different key as `recover`, and `--show` after it; refusal of an invalid key, a seed, the account's key and each key
-the key store holds; a live endpoint connection refused every read, write and listing of the bucket and its stream
+the key store holds; the exempt set (admin and system keys recorded, `--exempt` validated, a missing system credentials file refusing with
+nothing written, the re-adopt cases and a marker without the field); a live endpoint connection refused every read, write and listing of the bucket and its stream
 subjects, with the marker unchanged; every guarded command refused on an adopted account with the policy file, the key
 store, the creds directory, the account JWT, the directory and the issue record unchanged, and each run once on an
 account that is not adopted; read-only commands and `deprovision` working on an adopted account; and every guarded
@@ -114,4 +139,6 @@ command refusing when the marker's value or bucket is not as mash reads it.
 ## More Information
 
 * Related: [ADR 0101](0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md), [ADR 0093](0093-the-lease-bucket-does-not-allow-rollup-writes.md).
-* Not in this change: the list-set intake, the reconcile of the account against the first list set, and un-adoption.
+* Not in this change: the list-set intake and the reconcile of the account against the first list set.
+* Deferred option, un-adopt: not built. If it is ever built it is admin-only, is logged in the marker's revision
+  history, and never goes through a list set. Today the way back is an operator acting on the account directly.

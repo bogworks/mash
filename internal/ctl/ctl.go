@@ -276,6 +276,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return usage(err)
 		}
+		if len(meta.Labels) > 0 || meta.Zone != "" { // a label or a zone is the policy's; a plain provision of an inbox is not
+			if err := refuseIfAdopted(ctx, a, pfx, "provision"); err != nil {
+				return fail(err)
+			}
+		}
 		if nf != nil {
 			if err := provisionKeyArgs(prog, opt("--user"), opt("--account"), meta.Zone); err != nil {
 				return usage(err)

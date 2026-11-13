@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -19,14 +20,20 @@ var (
 	ErrSubmitterInvalid = errors.New("mash: adoption: the submitter is not an nkey public key")
 	// ErrSubmitterIsAccount is returned for a submitter equal to the account's own public key.
 	ErrSubmitterIsAccount = errors.New("mash: adoption: the submitter is the account's own key; it must be a key mash does not hold")
+	// ErrExemptInvalid is returned for an exempt key that is not an nkey user public key.
+	ErrExemptInvalid = errors.New("mash: adoption: an exempt key is not an nkey user public key")
 	// ErrAdoptionChanged is returned when another writer changed the marker too often for the write to land.
 	ErrAdoptionChanged = errors.New("mash: adoption: the marker was changed by another writer; run the command again")
 )
 
 // The values of Adopt's action result when it writes nothing.
 const (
-	// AdoptUnchanged is Adopt's action when the marker already names the submitter: nothing is written.
+	// AdoptUnchanged is Adopt's action when the marker already names the submitter and the same exempt set: nothing
+	// is written.
 	AdoptUnchanged = "unchanged"
+	// AdoptExemptUpdated is Adopt's action when the marker names the submitter and only the exempt set changed: a new
+	// revision is written (marker action adopt).
+	AdoptExemptUpdated = "exempt-updated"
 )
 
 // adoptionCASTries is how many times Adopt retries after losing a race for the marker.
@@ -95,13 +102,29 @@ func (a *Admin) Adoption(ctx context.Context) (m store.Marker, found bool, err e
 	return m, found, err
 }
 
+// normalizeExempt validates every key as an nkey user public key and returns them sorted and de-duplicated (nil for
+// none). It never echoes a key.
+func normalizeExempt(keys []string) ([]string, error) {
+	var out []string
+	for _, k := range keys {
+		if !nkeys.IsValidPublicUserKey(k) {
+			return nil, ErrExemptInvalid
+		}
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
+}
+
 // Adopt registers submitter as the one key that may hand in list sets for account, over the admin connection. by is
 // the public key of the admin user running the command. The first call creates the marker (action adopt). A call with
 // a different submitter is the recovery rotation: it replaces the marker at the revision it read (action recover),
 // clears any pending next_submitter, and the old submitter is refused from then on. A call with the submitter
-// already registered writes nothing and returns AdoptUnchanged. The write is a compare-and-set on the marker's last
+// already registered and the same exempt set writes nothing and returns AdoptUnchanged; with another exempt set it
+// writes a new revision (action adopt) and returns AdoptExemptUpdated. A recovery rotation also refreshes the exempt
+// set. exempt is the public keys of the users the later reconcile must never touch (see store.Marker.Exempt). The write is a compare-and-set on the marker's last
 // revision, retried when another writer got there first. The bucket is created, hardened, when it does not exist.
-func (a *Admin) Adopt(ctx context.Context, account, submitter, by string) (store.Marker, string, error) {
+func (a *Admin) Adopt(ctx context.Context, account, submitter, by string, exempt []string) (store.Marker, string, error) {
 	if _, err := nkeys.FromPublicKey(submitter); err != nil {
 		return store.Marker{}, "", ErrSubmitterInvalid
 	}
@@ -114,6 +137,10 @@ func (a *Admin) Adopt(ctx context.Context, account, submitter, by string) (store
 	if _, err := nkeys.FromPublicKey(by); err != nil {
 		return store.Marker{}, "", errors.New("mash: adoption: the admin user key is not an nkey public key")
 	}
+	exempt, err := normalizeExempt(exempt)
+	if err != nil {
+		return store.Marker{}, "", err
+	}
 	kv, err := a.adoptionKV(ctx)
 	if err != nil {
 		return store.Marker{}, "", err
@@ -123,13 +150,20 @@ func (a *Admin) Adopt(ctx context.Context, account, submitter, by string) (store
 		if err != nil {
 			return store.Marker{}, "", err
 		}
-		if found && cur.Submitter == submitter {
+		sameSubmitter := found && cur.Submitter == submitter
+		if sameSubmitter && slices.Equal(cur.Exempt, exempt) {
 			return cur, AdoptUnchanged, nil
 		}
 		next := store.Marker{V: store.AdoptionSchema, Account: account, Submitter: submitter,
-			AdoptedAt: time.Now().UTC().Format(time.RFC3339), By: by, Action: store.ActionAdopt}
-		if found {
+			AdoptedAt: time.Now().UTC().Format(time.RFC3339), By: by, Action: store.ActionAdopt, Exempt: exempt}
+		result := store.ActionAdopt
+		switch {
+		case sameSubmitter:
+			result = AdoptExemptUpdated
+			next.NextSubmitter = cur.NextSubmitter // only the exempt set changes: a pending rotation stays
+		case found:
 			next.Action = store.ActionRecover
+			result = store.ActionRecover
 		}
 		b, err := json.Marshal(next)
 		if err != nil {
@@ -141,7 +175,7 @@ func (a *Admin) Adopt(ctx context.Context, account, submitter, by string) (store
 			_, err = kv.Create(ctx, store.AdoptionKey, b)
 		}
 		if err == nil {
-			return next, next.Action, nil
+			return next, result, nil
 		}
 		if errors.Is(err, jetstream.ErrKeyExists) || isWrongLastSeq(err) {
 			continue

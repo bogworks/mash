@@ -16,15 +16,20 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const policyAdoptUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY
+const policyAdoptUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY [--sys-creds FILE] [--exempt USER_KEY]...
        mashctl policy adopt --show [--json]
        (adopt registers the one key allowed to hand in list sets and marks the account as owned by an outside system;
-       running it again with a different key is the recovery rotation; there is no un-adopt command)
+       it also records, by public key, the admin user, the system user and every --exempt user key: the users the
+       later reconcile never touches; the system credentials are --sys-creds, MASH_SYS_CREDS or the sys.creds beside
+       the admin credentials, and adopt refuses without them; running it again with a different key is the recovery
+       rotation, and with the same key and another exempt set it updates the exempt keys; there is no un-adopt command.
+       ADOPTING A REAL ACCOUNT IS A LIVE-ACCOUNT STEP: do it only on an explicit go from the maintainers)
 `
 
 // runPolicyAdopt is `mashctl policy adopt`: it needs the account's admin credentials and, to write, the key store.
 func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	var submitter string
+	var submitter, sysFlag string
+	var exemptArgs []string
 	var show, asJSON bool
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
@@ -43,12 +48,38 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 				fmt.Fprintf(stderr, "mashctl: policy adopt: --submitter needs a key\n%s", policyAdoptUsage)
 				return 2
 			}
+		case a == "--sys-creds" || strings.HasPrefix(a, "--sys-creds="):
+			if v, has := strings.CutPrefix(a, "--sys-creds="); has {
+				sysFlag = v
+			} else if i+1 < len(args) {
+				i++
+				sysFlag = args[i]
+			}
+			if sysFlag == "" {
+				fmt.Fprintf(stderr, "mashctl: policy adopt: --sys-creds needs a file\n%s", policyAdoptUsage)
+				return 2
+			}
+		case a == "--exempt" || strings.HasPrefix(a, "--exempt="):
+			v, has := strings.CutPrefix(a, "--exempt=")
+			switch {
+			case has:
+			case i+1 < len(args):
+				i++
+				v = args[i]
+			default:
+				v = ""
+			}
+			if v == "" {
+				fmt.Fprintf(stderr, "mashctl: policy adopt: --exempt needs a user public key\n%s", policyAdoptUsage)
+				return 2
+			}
+			exemptArgs = append(exemptArgs, v)
 		default: // a mistyped argument may be a secret: it is named, never printed
 			fmt.Fprintf(stderr, "mashctl: policy adopt: unknown %s\n%s", config.RejectedArg(a), policyAdoptUsage)
 			return 2
 		}
 	}
-	if show == (submitter != "") || (asJSON && !show) { // exactly one of --show and --submitter; --json only with --show
+	if show == (submitter != "") || (asJSON && !show) || (show && (sysFlag != "" || len(exemptArgs) > 0)) { // exactly one of --show and --submitter; --json only with --show
 		fmt.Fprint(stderr, policyAdoptUsage)
 		return 2
 	}
@@ -70,6 +101,12 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 		fmt.Fprintf(stderr, "mashctl: policy adopt: --submitter is not an nkey public key (the value is not shown)\n%s", policyAdoptUsage)
 		return 2
 	}
+	for _, k := range exemptArgs { // a seed or a mistyped key: never echoed
+		if !nkeys.IsValidPublicUserKey(k) {
+			fmt.Fprintf(stderr, "mashctl: policy adopt: --exempt is not an nkey user public key (the value is not shown); nothing was changed\n%s", policyAdoptUsage)
+			return 2
+		}
+	}
 	keys, err := openKeys(cfg, env)
 	if err != nil {
 		return fail("%v", err)
@@ -87,6 +124,25 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 		return fail("the submitter must be a key mash does not hold, and this is %s (the value is not shown); nothing was changed", what)
 	}
 
+	for _, k := range exemptArgs {
+		if what, bad := held[k]; bad {
+			return fail("--exempt must be a user key, and this is %s (the value is not shown); nothing was changed", what)
+		}
+	}
+	// The system user is exempt too, and the push needs it: without its credentials the reconcile could revoke them.
+	sysPath, err := sysCredsPath(sysFlag, env, cfg)
+	if err != nil {
+		return fail("%v; the system user must be recorded as exempt, so adopt refused and nothing was changed", err)
+	}
+	sysUser, err := credsUserKey(sysPath)
+	if err != nil {
+		return fail("system account credentials: %s; nothing was changed", config.Clean(err.Error()))
+	}
+	if !nkeys.IsValidPublicUserKey(sysUser) {
+		return fail("system account credentials hold no user JWT; nothing was changed")
+	}
+	exempt := append([]string{by, sysUser}, exemptArgs...)
+
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
@@ -97,7 +153,7 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 	if err != nil {
 		return fail("%v; nothing was changed", err)
 	}
-	m, action, err := adm.Adopt(ctx, account, submitter, by)
+	m, action, err := adm.Adopt(ctx, account, submitter, by, exempt)
 	switch {
 	case errors.Is(err, admin.ErrSubmitterInvalid), errors.Is(err, admin.ErrSubmitterIsAccount):
 		return fail("%v; nothing was changed", err)
@@ -106,14 +162,17 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 	}
 	switch action {
 	case admin.AdoptUnchanged:
-		fmt.Fprintf(stdout, "this account is already adopted with that submitter %s: nothing was changed\n", m.Submitter)
+		fmt.Fprintf(stdout, "this account is already adopted with that submitter %s and those exempt keys: nothing was changed\n", m.Submitter)
+		return 0
+	case admin.AdoptExemptUpdated:
+		fmt.Fprintf(stdout, "exempt keys updated: the submitter %s is unchanged; %d exempt keys are now recorded\n", m.Submitter, len(m.Exempt))
 		return 0
 	case store.ActionRecover:
 		if wasAdopted {
-			fmt.Fprintf(stdout, "recovery rotation: the submitter was %s and is now %s; the old key is refused from now on\n", prev.Submitter, m.Submitter)
+			fmt.Fprintf(stdout, "recovery rotation: the submitter was %s and is now %s; the old key is refused from now on; %d exempt keys are recorded\n", prev.Submitter, m.Submitter, len(m.Exempt))
 		}
 	default:
-		fmt.Fprintf(stdout, "adopted this account: the one submitter allowed to hand in list sets is %s\n", m.Submitter)
+		fmt.Fprintf(stdout, "adopted this account: the one submitter allowed to hand in list sets is %s; %d exempt keys are recorded\n", m.Submitter, len(m.Exempt))
 	}
 	fmt.Fprintln(stdout, adoptedNote)
 	return 0
@@ -197,6 +256,14 @@ func showAdoption(cfg config.Config, asJSON bool, env func(string) string, stdou
 	fmt.Fprintf(stdout, "adopted: list sets come only from the submitter %s\n  account %s\n  action %s at %s by %s\n", m.Submitter, m.Account, m.Action, m.AdoptedAt, m.By)
 	if m.NextSubmitter != "" {
 		fmt.Fprintf(stdout, "  next submitter %s\n", m.NextSubmitter)
+	}
+	if !m.ExemptRecorded() {
+		fmt.Fprintln(stdout, "  exempt: none recorded: run adopt again before the reconcile")
+	} else {
+		fmt.Fprintln(stdout, "  exempt (never touched by the reconcile):")
+		for _, k := range m.Exempt {
+			fmt.Fprintf(stdout, "    %s\n", k)
+		}
 	}
 	return 0
 }

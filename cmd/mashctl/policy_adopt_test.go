@@ -8,10 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
@@ -20,6 +22,36 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/store"
 )
+
+// writeUserCreds writes a creds file of a fresh user (signed by a fresh account key) into dir, mode 0600, and returns
+// its path. It stands in for the system credentials of a test server that has none.
+func writeUserCreds(t *testing.T, dir string) string {
+	t.Helper()
+	path, _ := writeUserCredsKey(t, dir)
+	return path
+}
+
+// writeUserCredsKey is writeUserCreds that also returns the user's public key.
+func writeUserCredsKey(t *testing.T, dir string) (path, pub string) {
+	t.Helper()
+	akp, _ := nkeys.CreateAccount()
+	ukp, _ := nkeys.CreateUser()
+	pub, _ = ukp.PublicKey()
+	seed, _ := ukp.Seed()
+	tok, err := jwt.NewUserClaims(pub).Encode(akp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := jwt.FormatUserConfig(tok, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(dir, "sys.creds")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, pub
+}
 
 // userPub is a fresh nkey public key of the kind an outside system would hold.
 func userPub(t *testing.T) string {
@@ -77,7 +109,7 @@ func (h *addEnv) adminOf() *admin.Admin {
 // adoptAs runs `policy adopt --submitter key` and requires it to succeed.
 func (h *addEnv) adoptAs(key string) string {
 	h.t.Helper()
-	out, errb, code := h.run("policy", "adopt", "--submitter", key)
+	out, errb, code := h.run("policy", "adopt", "--submitter", key, "--sys-creds", writeUserCreds(h.t, h.t.TempDir()))
 	if code != 0 {
 		h.t.Fatalf("policy adopt: %d %q %q", code, out, errb)
 	}
@@ -146,7 +178,7 @@ func TestPolicyAdoptWritesTheMarker(t *testing.T) {
 		Adopted bool
 		Marker  store.Marker
 	}
-	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || !v.Adopted || v.Marker != m {
+	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || !v.Adopted || !reflect.DeepEqual(v.Marker, m) {
 		t.Fatalf("show --json: %d %q %+v", code, out, v)
 	}
 
@@ -252,21 +284,33 @@ type guarded struct {
 	// failsLater is true for a command that, on an account that is not adopted, still stops for a reason of its own
 	// after the guard (reissue here has no system credentials to check revocation with).
 	failsLater bool
+	// build, when set, makes the arguments from the prepared account (provision needs a minted user key).
+	build func(h *addEnv) []string
+}
+
+// provisionWith is the arguments of `provision a2 <extra>` with a user minted on the account.
+func provisionWith(extra ...string) func(h *addEnv) []string {
+	return func(h *addEnv) []string {
+		_, u := h.e.Mint(h.t, "a2")
+		return append([]string{"provision", "a2", "--user", u, "--account", h.e.Account}, extra...)
+	}
 }
 
 func provisionB(h *addEnv) { h.provisionDeclared("b") }
 
 func addEnvGuarded() []guarded {
 	return []guarded{
-		{"add", []string{"add", "c", "--zone", "red"}, nil, false},
-		{"reissue", []string{"reissue", "a"}, func(h *addEnv) { h.seed("a") }, true},
-		{"label", []string{"label", "a", "env=prod"}, nil, false},
-		{"label --sync", []string{"label", "a", "env=prod", "--sync"}, nil, false},
-		{"label --dry-run", []string{"label", "a", "env=prod", "--dry-run"}, nil, false},
-		{"unlabel", []string{"unlabel", "a", "team"}, nil, false},
-		{"retire", []string{"retire", "b"}, provisionB, false},
-		{"set-meta --label", []string{"set-meta", "b", "--label", "k=v"}, provisionB, false},
-		{"set-zone", []string{"set-zone", "b", "blue"}, provisionB, false},
+		{"add", []string{"add", "c", "--zone", "red"}, nil, false, nil},
+		{"reissue", []string{"reissue", "a"}, func(h *addEnv) { h.seed("a") }, true, nil},
+		{"label", []string{"label", "a", "env=prod"}, nil, false, nil},
+		{"label --sync", []string{"label", "a", "env=prod", "--sync"}, nil, false, nil},
+		{"label --dry-run", []string{"label", "a", "env=prod", "--dry-run"}, nil, false, nil},
+		{"unlabel", []string{"unlabel", "a", "team"}, nil, false, nil},
+		{"retire", []string{"retire", "b"}, provisionB, false, nil},
+		{"set-meta --label", []string{"set-meta", "b", "--label", "k=v"}, provisionB, false, nil},
+		{"set-zone", []string{"set-zone", "b", "blue"}, provisionB, false, nil},
+		{"provision --label", []string{"provision"}, nil, false, provisionWith("--label", "k=v")},
+		{"provision --zone", []string{"provision"}, nil, false, provisionWith("--zone", "red")},
 	}
 }
 
@@ -282,8 +326,12 @@ func TestAdoptedAccountRefusesEveryGuardedCommand(t *testing.T) {
 			sub := userPub(t)
 			h.adoptAs(sub)
 			before := h.state()
-			out, errb, code := h.run(g.args...)
-			verb := g.args[0]
+			args := g.args
+			if g.build != nil {
+				args = g.build(h)
+			}
+			out, errb, code := h.run(args...)
+			verb := args[0]
 			want := "mashctl: " + verb + " is refused: this account is adopted by an outside system (submitter " + sub[:8] + "...): list sets come only through the list-set path; nothing was changed"
 			if code != 1 || !strings.Contains(errb, want) || strings.Contains(out, "added") || strings.Contains(out, "labeled") {
 				t.Fatalf("%d\nstdout %q\nstderr %q\nwant %q", code, out, errb, want)
@@ -306,7 +354,11 @@ func TestUnadoptedAccountRunsEveryGuardedCommand(t *testing.T) {
 			if g.pre != nil {
 				g.pre(h)
 			}
-			out, errb, code := h.run(g.args...)
+			args := g.args
+			if g.build != nil {
+				args = g.build(h)
+			}
+			out, errb, code := h.run(args...)
 			if (code != 0 && !g.failsLater) || strings.Contains(out+errb, "adopted by an outside system") || strings.Contains(out+errb, "is refused") {
 				t.Fatalf("%d %q %q", code, out, errb)
 			}
@@ -423,7 +475,11 @@ func TestUnreadableMarkerRefusesGuardedCommands(t *testing.T) {
 				h.adoptAs(userPub(t))
 				breakIt(h)
 				before := h.state()
-				out, errb, code := h.run(g.args...)
+				args := g.args
+				if g.build != nil {
+					args = g.build(h)
+				}
+				out, errb, code := h.run(args...)
 				if code != 1 || !strings.Contains(errb, "is refused: cannot tell whether this account is adopted") || !strings.Contains(errb, "nothing was changed") {
 					t.Fatalf("%d %q %q", code, out, errb)
 				}
@@ -454,5 +510,170 @@ func TestGuardWithoutAConnection(t *testing.T) {
 	out, errb, code := h.run("label", "a", "env=prod")
 	if code != 0 || strings.Contains(out+errb, "adopted by an outside system") || !strings.Contains(h.policyText(), "env: prod") {
 		t.Fatalf("an offline policy-file edit: %d %q %q\n%s", code, out, errb, h.policyText())
+	}
+}
+
+// The marker records the admin user's and the system user's keys, by public key, and every --exempt key; a second run
+// behaves as the maintainers ruled; the marker's JSON holds no seed.
+func TestPolicyAdoptRecordsTheExemptKeys(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	sub := userPub(t)
+	adminUser, err := ctl.AdminUserKey(config.Config{AdminCreds: e.env["MASH_ADMIN_CREDS"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sysUser, err := credsUserKey(e.env["MASH_SYS_CREDS"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc1, svc2 := userPub(t), userPub(t)
+	exempt := func() []string {
+		out, _, code := e.run("policy", "adopt", "--show", "--json")
+		var v struct{ Marker store.Marker }
+		if code != 0 || json.Unmarshal([]byte(out), &v) != nil {
+			t.Fatalf("show --json: %d %q", code, out)
+		}
+		if strings.Contains(out, "SU") || strings.Contains(out, "seed") {
+			t.Errorf("the marker output mentions a seed: %q", out)
+		}
+		return v.Marker.Exempt
+	}
+	sorted := func(k ...string) []string { slices.Sort(k); return slices.Compact(k) }
+
+	if out, errb, code := e.run("policy", "adopt", "--submitter", sub, "--exempt", svc2, "--exempt="+svc1, "--exempt", svc1); code != 0 {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if got, want := exempt(), sorted(adminUser, sysUser, svc1, svc2); !slices.Equal(got, want) {
+		t.Fatalf("exempt %v, want %v", got, want)
+	}
+	out, _, _ := e.run("policy", "adopt", "--show")
+	for _, k := range []string{adminUser, sysUser, svc1, svc2} {
+		if !strings.Contains(out, k) {
+			t.Errorf("--show lacks the exempt key %s: %q", k, out)
+		}
+	}
+
+	// The same submitter and the same set: nothing written.
+	out, _, code := e.run("policy", "adopt", "--submitter", sub, "--exempt", svc1, "--exempt", svc2)
+	if code != 0 || !strings.Contains(out, "nothing was changed") {
+		t.Fatalf("same: %d %q", code, out)
+	}
+	// The same submitter and another set: a new adopt revision.
+	out, _, code = e.run("policy", "adopt", "--submitter", sub, "--exempt", svc1)
+	if code != 0 || !strings.Contains(out, "exempt keys updated") {
+		t.Fatalf("updated: %d %q", code, out)
+	}
+	if got, want := exempt(), sorted(adminUser, sysUser, svc1); !slices.Equal(got, want) {
+		t.Fatalf("exempt %v, want %v", got, want)
+	}
+	if out, _, _ := e.run("policy", "adopt", "--show"); !strings.Contains(out, "action adopt") {
+		t.Errorf("an exempt update is an adopt revision: %q", out)
+	}
+	// A different submitter is a recovery and refreshes the set.
+	out, _, code = e.run("policy", "adopt", "--submitter", userPub(t), "--exempt", svc2)
+	if code != 0 || !strings.Contains(out, "recovery rotation") {
+		t.Fatalf("recover: %d %q", code, out)
+	}
+	if got, want := exempt(), sorted(adminUser, sysUser, svc2); !slices.Equal(got, want) {
+		t.Fatalf("exempt %v, want %v", got, want)
+	}
+}
+
+// A missing system creds file refuses with nothing written; a malformed --exempt and the keys mash holds are refused
+// without being echoed.
+func TestPolicyAdoptExemptRefusals(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	sub := userPub(t)
+	_, op, err := e.ks.Operator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedKP, _ := nkeys.CreateUser()
+	seed, _ := seedKP.Seed()
+	bad := func(args ...string) (string, int) {
+		out, errb, code := e.run(append([]string{"policy", "adopt", "--submitter", sub}, args...)...)
+		if out != "" {
+			t.Errorf("%v wrote %q", args, out)
+		}
+		return errb, code
+	}
+
+	for name, c := range map[string]struct {
+		args []string
+		code int
+		text string
+	}{
+		"a missing sys creds": {[]string{"--sys-creds", filepath.Join(t.TempDir(), "none.creds")}, 1, "system account credentials"},
+		"not a key":           {[]string{"--exempt", "hello"}, 2, "--exempt is not an nkey user public key"},
+		"a seed":              {[]string{"--exempt", string(seed)}, 2, "--exempt is not an nkey user public key"},
+		"an operator key":     {[]string{"--exempt", op}, 2, "--exempt is not an nkey user public key"},
+		"the account key":     {[]string{"--exempt", e.acctPub}, 2, "--exempt is not an nkey user public key"},
+		"no value":            {[]string{"--exempt"}, 2, "--exempt needs"},
+	} {
+		errb, code := bad(c.args...)
+		if code != c.code || !strings.Contains(errb, c.text) {
+			t.Errorf("%s: %d %q", name, code, errb)
+		}
+		for _, v := range c.args {
+			if (v == op || v == string(seed) || v == "hello") && strings.Contains(errb, v) {
+				t.Errorf("%s: the refusal echoes the value", name)
+			}
+		}
+	}
+	// No system creds anywhere: neither the flag, the environment nor a sys.creds beside the admin creds.
+	e.env["MASH_SYS_CREDS"] = ""
+	raw, err := os.ReadFile(e.env["MASH_ADMIN_CREDS"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lone := filepath.Join(t.TempDir(), "admin.creds") // the admin creds with no sys.creds beside them
+	if err := os.WriteFile(lone, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.env["MASH_ADMIN_CREDS"] = lone
+	if errb, code := bad(); code != 1 || !strings.Contains(errb, "no system account credentials") || !strings.Contains(errb, "nothing was changed") {
+		t.Errorf("no system creds: %d %q", code, errb)
+	}
+	if out, _, _ := e.run("policy", "adopt", "--show"); strings.TrimSpace(out) == "" || strings.Contains(out, "adopted: ") {
+		t.Errorf("a refused adopt wrote a marker: %q", out)
+	}
+}
+
+// A marker written before the exempt field existed is read as empty and --show says what to do.
+func TestPolicyAdoptShowsAnOlderMarker(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	sub := userPub(t)
+	if _, errb, code := e.run("policy", "adopt", "--submitter", sub); code != 0 {
+		t.Fatal(errb)
+	}
+	cfg := config.Config{URL: e.srv.ClientURL(), Owner: "alice", AdminCreds: e.env["MASH_ADMIN_CREDS"], InsecureLoopback: true}
+	a, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAdmin()
+	m, _, _ := a.Adoption(ctx)
+	old := fmt.Sprintf(`{"v":1,"account":%q,"submitter":%q,"adopted_at":%q,"by":%q,"action":"adopt"}`, m.Account, m.Submitter, m.AdoptedAt, m.By)
+	kv, _ := jsOf(t, a).KeyValue(ctx, store.AdoptionBucket)
+	if _, err := kv.Put(ctx, store.AdoptionKey, []byte(old)); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := e.run("policy", "adopt", "--show")
+	if code != 0 || !strings.Contains(out, "exempt: none recorded: run adopt again before the reconcile") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	// Running adopt again with the same submitter records the set.
+	if out, errb, code := e.run("policy", "adopt", "--submitter", sub); code != 0 || !strings.Contains(out, "exempt keys updated") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+}
+
+// provision without --label and --zone stays allowed on an adopted account.
+func TestAdoptedAccountAllowsAPlainProvision(t *testing.T) {
+	h := newFleetEnv(t, addPolicy)
+	h.adoptAs(userPub(t))
+	out, errb, code := h.run(provisionWith()(h)...)
+	if code != 0 || strings.Contains(out+errb, "is refused") {
+		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }

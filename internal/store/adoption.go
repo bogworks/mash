@@ -48,7 +48,15 @@ type Marker struct {
 	// By is the public key of the admin user that ran the command.
 	By     string `json:"by"`
 	Action string `json:"action"`
+	// Exempt is the public keys of the users the later first-list-set reconcile must never touch: mash's own admin
+	// and system users and the operator's hand-made service users. Sorted, no duplicates, each an nkey user public
+	// key. A marker written before this field existed has none (nil): see ExemptRecorded.
+	Exempt []string `json:"exempt,omitempty"`
 }
+
+// ExemptRecorded reports whether the marker records an exempt set. A marker written before the field existed does
+// not; the operator must run adopt again before the reconcile.
+func (m Marker) ExemptRecorded() bool { return len(m.Exempt) > 0 }
 
 // AdoptionConfig is the adoption bucket: one key, written only over the admin connection, no TTL, a history of
 // AdoptionHistory.

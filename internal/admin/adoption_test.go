@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -89,7 +90,7 @@ func TestLiveEndpointCannotTouchAdoptionMarker(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
 	acct, sub, by := pubKey(t, nkeys.CreateAccount), pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateUser)
-	if _, _, err := a.Adopt(ctx, acct, sub, by); err != nil {
+	if _, _, err := a.Adopt(ctx, acct, sub, by, nil); err != nil {
 		t.Fatal(err)
 	}
 	creds, _ := e.Mint(t, "alpha")
@@ -175,7 +176,7 @@ func TestInitCreatesHardenedAdoptionBucket(t *testing.T) {
 		t.Fatalf("stream config %+v", c)
 	}
 	acct, sub, by := pubKey(t, nkeys.CreateAccount), pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateUser)
-	if _, _, err := a.Adopt(ctx, acct, sub, by); err != nil {
+	if _, _, err := a.Adopt(ctx, acct, sub, by, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Purge(ctx); err == nil {
@@ -201,12 +202,12 @@ func TestAdoptWritesTheMarkerAndRecovers(t *testing.T) {
 	acct, by := pubKey(t, nkeys.CreateAccount), pubKey(t, nkeys.CreateUser)
 	s1, s2 := pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateOperator)
 
-	m, action, err := a.Adopt(ctx, acct, s1, by)
+	m, action, err := a.Adopt(ctx, acct, s1, by, nil)
 	if err != nil || action != store.ActionAdopt {
 		t.Fatalf("%+v %q %v", m, action, err)
 	}
 	got, found, err := a.Adoption(ctx)
-	if err != nil || !found || got != m || got.V != 1 || got.Account != acct || got.Submitter != s1 || got.By != by || got.Action != "adopt" || got.NextSubmitter != "" {
+	if err != nil || !found || !reflect.DeepEqual(got, m) || got.V != 1 || got.Account != acct || got.Submitter != s1 || got.By != by || got.Action != "adopt" || got.NextSubmitter != "" {
 		t.Fatalf("%+v %v %v", got, found, err)
 	}
 	if _, err := time.Parse(time.RFC3339, got.AdoptedAt); err != nil || !strings.HasSuffix(got.AdoptedAt, "Z") {
@@ -216,7 +217,7 @@ func TestAdoptWritesTheMarkerAndRecovers(t *testing.T) {
 	// The same key again writes nothing.
 	kv, _ := js.KeyValue(ctx, store.AdoptionBucket)
 	before, _ := kv.Get(ctx, store.AdoptionKey)
-	if _, action, err := a.Adopt(ctx, acct, s1, by); err != nil || action != admin.AdoptUnchanged {
+	if _, action, err := a.Adopt(ctx, acct, s1, by, nil); err != nil || action != admin.AdoptUnchanged {
 		t.Fatalf("again: %q %v", action, err)
 	}
 	if after, _ := kv.Get(ctx, store.AdoptionKey); after.Revision() != before.Revision() {
@@ -224,7 +225,7 @@ func TestAdoptWritesTheMarkerAndRecovers(t *testing.T) {
 	}
 
 	// A different key is the recovery rotation: the old key is refused at once (the next read names the new one).
-	m2, action, err := a.Adopt(ctx, acct, s2, by)
+	m2, action, err := a.Adopt(ctx, acct, s2, by, nil)
 	if err != nil || action != store.ActionRecover || m2.Submitter != s2 {
 		t.Fatalf("%+v %q %v", m2, action, err)
 	}
@@ -247,7 +248,7 @@ func TestAdoptRefusals(t *testing.T) {
 		return string(s)
 	}()
 	for name, sub := range map[string]string{"empty": "", "garbage": "UABC", "a seed": seed} {
-		_, _, err := a.Adopt(ctx, acct, sub, by)
+		_, _, err := a.Adopt(ctx, acct, sub, by, nil)
 		if !errors.Is(err, admin.ErrSubmitterInvalid) {
 			t.Errorf("%s: %v", name, err)
 		}
@@ -255,7 +256,7 @@ func TestAdoptRefusals(t *testing.T) {
 			t.Errorf("%s: the error echoes the value", name)
 		}
 	}
-	if _, _, err := a.Adopt(ctx, acct, acct, by); !errors.Is(err, admin.ErrSubmitterIsAccount) {
+	if _, _, err := a.Adopt(ctx, acct, acct, by, nil); !errors.Is(err, admin.ErrSubmitterIsAccount) {
 		t.Errorf("the account's own key: %v", err)
 	}
 	if _, found, err := a.Adoption(ctx); err != nil || found {
@@ -263,7 +264,7 @@ func TestAdoptRefusals(t *testing.T) {
 	}
 	// Any nkey public key type is accepted.
 	for _, mk := range []func() (nkeys.KeyPair, error){nkeys.CreateUser, nkeys.CreateOperator, nkeys.CreateServer} {
-		if _, _, err := a.Adopt(ctx, acct, pubKey(t, mk), by); err != nil {
+		if _, _, err := a.Adopt(ctx, acct, pubKey(t, mk), by, nil); err != nil {
 			t.Errorf("%v", err)
 		}
 	}
@@ -285,7 +286,7 @@ func TestAdoptRacesAreCompareAndSet(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := a.Adopt(ctx, acct, s, by); err != nil {
+			if _, _, err := a.Adopt(ctx, acct, s, by, nil); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -314,7 +315,7 @@ func TestAdoptionFailsClosed(t *testing.T) {
 	_, a, js := setup(t)
 	ctx := context.Background()
 	acct, sub, by := pubKey(t, nkeys.CreateAccount), pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateUser)
-	if _, _, err := a.Adopt(ctx, acct, sub, by); err != nil {
+	if _, _, err := a.Adopt(ctx, acct, sub, by, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A closed context.
@@ -345,7 +346,7 @@ func TestAdoptionFailsClosed(t *testing.T) {
 	if _, found, err := e2.a.Adoption(ctx); err == nil || found || !errors.Is(err, store.ErrAdoptionBucket) {
 		t.Errorf("an unhardened bucket: %v %v", found, err)
 	}
-	if _, _, err := e2.a.Adopt(ctx, acct, sub, by); !errors.Is(err, store.ErrAdoptionBucket) {
+	if _, _, err := e2.a.Adopt(ctx, acct, sub, by, nil); !errors.Is(err, store.ErrAdoptionBucket) {
 		t.Errorf("adopt into an unhardened bucket: %v", err)
 	}
 }
@@ -366,4 +367,66 @@ func setupBare(t *testing.T) bareEnv {
 	}
 	js, _ := jetstream.New(nc)
 	return bareEnv{a, js}
+}
+
+// The exempt set is sorted, de-duplicated and validated; the same submitter with the same set writes nothing, with
+// another set writes an adopt revision, a different submitter is a recovery that refreshes the set; an older marker
+// without the field reads as empty.
+func TestAdoptRecordsTheExemptSet(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	acct, by := pubKey(t, nkeys.CreateAccount), pubKey(t, nkeys.CreateUser)
+	s1, s2 := pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateUser)
+	u1, u2 := pubKey(t, nkeys.CreateUser), pubKey(t, nkeys.CreateUser)
+	kv, _ := js.KeyValue(ctx, store.AdoptionBucket)
+
+	for _, bad := range []string{"hello", pubKey(t, nkeys.CreateOperator), pubKey(t, nkeys.CreateAccount), ""} {
+		if _, _, err := a.Adopt(ctx, acct, s1, by, []string{u1, bad}); !errors.Is(err, admin.ErrExemptInvalid) {
+			t.Errorf("exempt %q: %v", bad, err)
+		}
+	}
+	if _, found, _ := a.Adoption(ctx); found {
+		t.Fatal("a refused adopt wrote a marker")
+	}
+
+	m, action, err := a.Adopt(ctx, acct, s1, by, []string{u2, u1, u2})
+	want := []string{u1, u2}
+	slices.Sort(want)
+	if err != nil || action != store.ActionAdopt || !slices.Equal(m.Exempt, want) || !m.ExemptRecorded() {
+		t.Fatalf("%+v %q %v", m, action, err)
+	}
+	r1, _ := kv.Get(ctx, store.AdoptionKey)
+	// Same submitter, same set (in another order): nothing written.
+	if _, action, err := a.Adopt(ctx, acct, s1, by, []string{u1, u2}); err != nil || action != admin.AdoptUnchanged {
+		t.Fatalf("%q %v", action, err)
+	}
+	if r2, _ := kv.Get(ctx, store.AdoptionKey); r2.Revision() != r1.Revision() {
+		t.Error("the same set wrote a revision")
+	}
+	// Same submitter, another set: a new adopt revision.
+	m, action, err = a.Adopt(ctx, acct, s1, by, []string{u1})
+	if err != nil || action != admin.AdoptExemptUpdated || m.Action != store.ActionAdopt || !slices.Equal(m.Exempt, []string{u1}) {
+		t.Fatalf("%+v %q %v", m, action, err)
+	}
+	// A different submitter is a recovery and refreshes the set.
+	m, action, err = a.Adopt(ctx, acct, s2, by, []string{u2})
+	if err != nil || action != store.ActionRecover || !slices.Equal(m.Exempt, []string{u2}) {
+		t.Fatalf("%+v %q %v", m, action, err)
+	}
+	if hist, _ := kv.History(ctx, store.AdoptionKey); len(hist) != 3 {
+		t.Errorf("history %d, want 3", len(hist))
+	}
+
+	// An older marker without the field is readable, with an empty set; the same submitter and a set updates it.
+	old := `{"v":1,"account":"` + acct + `","submitter":"` + s2 + `","adopted_at":"2026-01-01T00:00:00Z","by":"` + by + `","action":"adopt"}`
+	if _, err := kv.Put(ctx, store.AdoptionKey, []byte(old)); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := a.Adoption(ctx)
+	if err != nil || !found || got.Submitter != s2 || len(got.Exempt) != 0 || got.ExemptRecorded() {
+		t.Fatalf("%+v %v %v", got, found, err)
+	}
+	if _, action, err := a.Adopt(ctx, acct, s2, by, []string{u1}); err != nil || action != admin.AdoptExemptUpdated {
+		t.Fatalf("%q %v", action, err)
+	}
 }
