@@ -182,3 +182,58 @@ func TestSignerFuncs(t *testing.T) {
 		t.Error("nil SignPreviousFn did not fail")
 	}
 }
+
+// statusLedger is a MemLedger that also holds a latest status.
+type statusLedger struct {
+	*MemLedger
+	st *Status
+}
+
+func (l statusLedger) LatestStatus() (Status, bool, error) {
+	if l.st == nil {
+		return Status{}, false, nil
+	}
+	return *l.st, true, nil
+}
+
+func TestApplyReplayIsNoOp(t *testing.T) {
+	w, l, deps := applyWorld(t)
+	deps.Signer = withSign(deps.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
+		return w.k.build(t, c, w.k.revoked), nil
+	})
+	if st, err := Apply(context.Background(), applyReq(), deps); err != nil || st.State != StateApplied {
+		t.Fatalf("%+v %v", st, err)
+	}
+	pushes := len(w.cluster.pushes)
+	signed := false
+	deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	// The same bytes again: the base is now stale, but the document is the one in force.
+	st, err := Apply(context.Background(), applyReq(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != StateApplied || !st.InForce || st.Generation != 2 {
+		t.Fatalf("%+v", st)
+	}
+	if signed || len(w.cluster.pushes) != pushes {
+		t.Errorf("signed %v, pushes %d -> %d", signed, pushes, len(w.cluster.pushes))
+	}
+	// With a stored status, that status is returned.
+	stored := Status{Generation: 2, State: StateApplied, InForce: true, UpdatedAt: "stored"}
+	deps.Ledger = statusLedger{MemLedger: l, st: &stored}
+	if got, err := Apply(context.Background(), applyReq(), deps); err != nil || got.UpdatedAt != "stored" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// A different document on the stale base is still stale.
+	req := applyReq()
+	req.Received = []byte("other-bytes")
+	if _, err := Apply(context.Background(), req, deps); !errors.Is(err, listset.ErrStaleBase) {
+		t.Fatalf("err = %v", err)
+	}
+	if signed || len(w.cluster.pushes) != pushes {
+		t.Errorf("signed %v, pushes %d", signed, len(w.cluster.pushes))
+	}
+}
