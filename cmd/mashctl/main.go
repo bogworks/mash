@@ -47,9 +47,11 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, lookup, stdout, stderr)
+	case "unzone": // zones are removed (ADR 0091): makes a zoned record five-token, keeping its mail
+		return runUnzone(args[1:], env, lookup, stdout, stderr)
 	case "reissue": // needs the key directory and creds files, no server
 		return runReissue(args[1:], env, lookup, stdout, stderr)
-	case "init", "limits", "permissions", "provision", "set-meta", "set-zone", "suspend", "resume", "suspended", "deprovision", "list":
+	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
