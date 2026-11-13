@@ -19,7 +19,7 @@ func TestReissueChangedSelectsRevokedKey(t *testing.T) {
 	calls := fakeRevoke(t, nil)
 	revCalls := fakeKeyRevoked(t, true, nil)
 
-	out, errb, code := h.run("reissue", "--changed")
+	out, errb, code := h.run("reissue", "--changed", "--yes")
 	if code != 0 || !strings.Contains(out, "reissued a (new user key, old key revoked)\n") || strings.Contains(out, "nothing to reissue") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -71,7 +71,7 @@ func TestReissueChangedFinishesStagedRotation(t *testing.T) {
 		t.Fatalf("records %v", recs)
 	}
 
-	out, errb, code := h.run("reissue", "--changed")
+	out, errb, code := h.run("reissue", "--changed", "--yes")
 	if code != 0 || !strings.Contains(out, "reissued a (") || strings.Contains(out, "nothing to reissue") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -94,7 +94,7 @@ func TestReissueChangedRevocationUnknown(t *testing.T) {
 	fakeRevoke(t, nil)
 	fakeKeyRevoked(t, false, errors.New("no system account credentials: x"))
 
-	out, errb, code := h.run("reissue", "--changed")
+	out, errb, code := h.run("reissue", "--changed", "--yes")
 	if code != 1 || !strings.Contains(errb, "mashctl: reissue a: cannot tell whether its user key is revoked: no system account credentials") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

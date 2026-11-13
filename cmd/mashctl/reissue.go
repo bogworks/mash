@@ -23,9 +23,9 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const reissueUsage = `usage: mashctl reissue NAME...
-       mashctl reissue --all
-       mashctl reissue --changed
+const reissueUsage = `usage: mashctl reissue NAME... [--widen]
+       mashctl reissue --all --yes
+       mashctl reissue --changed --yes
 `
 
 // runReissue is `mashctl reissue`. Every reissue signs with the creds file's stored user seed, so it first connects
@@ -40,13 +40,17 @@ const reissueUsage = `usage: mashctl reissue NAME...
 // The new creds are staged in <creds>.next before anything irreversible, so an interrupted rotation is finished by running the reissue again.
 func runReissue(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var names []string
-	changed, all := false, false
+	changed, all, yes, widen := false, false, false, false
 	for _, a := range args {
 		switch {
 		case a == "--changed":
 			changed = true
 		case a == "--all":
 			all = true
+		case a == "--yes":
+			yes = true
+		case a == "--widen":
+			widen = true
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "mashctl: reissue: unknown %s\n%s", config.RejectedArg(a), reissueUsage)
 			return 2
@@ -54,7 +58,12 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 			names = append(names, a)
 		}
 	}
-	if (changed && all) || (changed || all) == (len(names) > 0) { // exactly one of NAME..., --all and --changed
+	bulk := changed || all
+	if (changed && all) || bulk == (len(names) > 0) { // exactly one of NAME..., --all and --changed
+		fmt.Fprint(stderr, reissueUsage)
+		return 2
+	}
+	if (yes && !bulk) || (widen && bulk) { // --yes confirms a bulk run; --widen applies to endpoints named on the command line
 		fmt.Fprint(stderr, reissueUsage)
 		return 2
 	}
@@ -70,67 +79,85 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 	}
 
 	code := 0
-	var endpoints []string // --all and --changed: the endpoints of the directory
-	if changed || all {
-		if endpoints, err = directoryEndpoints(cfg, stderr); err != nil {
+	if bulk {
+		endpoints, err := directoryEndpoints(cfg, stderr)
+		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue: %v\n", err)
 			return 1
 		}
-	}
-	if all {
-		names = endpoints
-		if len(names) == 0 {
-			fmt.Fprintln(stdout, "nothing to reissue")
-			return 0
-		}
-	}
-	if changed {
-		servers, serversErr := parseServers(env) // read lazily below: only an endpoint that needs the revocation check uses it
-		for _, name := range endpoints {
-			stale, err := staleCreds(keys, cfg, cfg.Owner, name)
-			switch {
-			case errors.Is(err, fs.ErrNotExist):
-				fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: no creds file here\n", name)
-				continue
-			case err != nil:
-				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
-				return 1
-			case stale:
-				names = append(names, name)
-				continue
+		var plan []reissuePlan
+		if all {
+			for _, name := range endpoints {
+				plan = append(plan, reissuePlan{name, allReason(keys, cfg, name)})
 			}
-			// The JWT matches what a mint issues now; the endpoint still needs a reissue when a rotation was interrupted (its staged
-			// file is there: the reissue resumes it or refuses a stale one) or when its user key is revoked.
-			p, err := credsFileFor(cfg, name)
-			if err != nil {
-				fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
-				return 1
-			}
-			if _, err := os.Lstat(stagePath(p)); err == nil {
-				names = append(names, name)
-				continue
-			}
-			pub, err := credsUserKey(p)
-			if err == nil && serversErr != nil {
-				err = serversErr
-			}
-			revoked := false
-			if err == nil {
-				revoked, err = keyRevoked(context.Background(), cfg, env, servers, pub)
-			}
-			switch {
-			case err != nil:
-				fmt.Fprintf(stderr, "mashctl: reissue %s: cannot tell whether its user key is revoked: %v\n", name, err)
-				code = 1
-			case revoked:
-				names = append(names, name)
+		} else {
+			servers, serversErr := parseServers(env) // read lazily below: only an endpoint that needs the revocation check uses it
+			for _, name := range endpoints {
+				p, err := credsFileFor(cfg, name)
+				if err != nil {
+					fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
+					return 1
+				}
+				d, err := compareCreds(keys, p, cfg.Owner, name)
+				switch {
+				case errors.Is(err, fs.ErrNotExist):
+					fmt.Fprintf(stderr, "mashctl: reissue: skipped %s: no creds file here\n", name)
+					continue
+				case err != nil:
+					fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
+					return 1
+				case d.stale():
+					plan = append(plan, reissuePlan{name, d.text()})
+					continue
+				}
+				// The JWT matches what a mint issues now; the endpoint still needs a reissue when a rotation was interrupted (its staged
+				// file is there: the reissue resumes it or refuses a stale one) or when its user key is revoked.
+				if _, err := os.Lstat(stagePath(p)); err == nil {
+					plan = append(plan, reissuePlan{name, "an interrupted rotation is staged in " + stagePath(p)})
+					continue
+				}
+				pub, err := credsUserKey(p)
+				if err == nil && serversErr != nil {
+					err = serversErr
+				}
+				revoked := false
+				if err == nil {
+					revoked, err = keyRevoked(context.Background(), cfg, env, servers, pub)
+				}
+				switch {
+				case err != nil:
+					fmt.Fprintf(stderr, "mashctl: reissue %s: cannot tell whether its user key is revoked: %v\n", name, err)
+					code = 1
+				case revoked:
+					plan = append(plan, reissuePlan{name, "its user key is revoked"})
+				}
 			}
 		}
-		if len(names) == 0 {
+		// A reissue never widens silently: an endpoint whose current permissions are narrower than the owner-wide set is
+		// left out of a bulk run (it is named with --widen to widen it).
+		var act []reissuePlan
+		for _, pl := range plan {
+			if p, err := credsFileFor(cfg, pl.name); err == nil {
+				if w, err := credsWiden(p, cfg.Owner, pl.name); err == nil && w {
+					fmt.Fprintf(stderr, "skipped %s: its permissions are narrower than the owner-wide set; name it with --widen to widen it\n", pl.name)
+					continue
+				}
+			}
+			act = append(act, pl)
+		}
+		if len(act) == 0 {
 			if code == 0 {
 				fmt.Fprintln(stdout, "nothing to reissue")
 			}
 			return code
+		}
+		for _, pl := range act {
+			fmt.Fprintf(stdout, "will reissue %s: %s\n", pl.name, pl.reason)
+			names = append(names, pl.name)
+		}
+		if !yes {
+			fmt.Fprintln(stderr, "mashctl: reissue: nothing was changed; rerun with --yes to reissue the endpoints listed above")
+			return 2
 		}
 	}
 	// The applied-zone-policy check (ADR 0091) runs once per invocation, lazily: right before the first mint or rotation
@@ -144,6 +171,15 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		return guardErr
 	}
 	for _, name := range names {
+		if !bulk && !widen {
+			if p, err := credsFileFor(cfg, name); err == nil {
+				if w, err := credsWiden(p, cfg.Owner, name); err == nil && w {
+					fmt.Fprintf(stderr, "mashctl: reissue %s: its current JWT permissions are narrower than the owner-wide set, so a reissue would widen them; nothing was changed; name it with --widen to widen it\n", name)
+					code = 1
+					continue
+				}
+			}
+		}
 		rotated, err := reissueOne(keys, cfg, env, guard, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
@@ -157,6 +193,89 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		}
 	}
 	return code
+}
+
+// reissuePlan is one endpoint a bulk reissue would act on and why.
+type reissuePlan struct{ name, reason string }
+
+// allReason is why `reissue --all` lists name: what differs in its creds file, or that it is re-signed as it is.
+func allReason(keys mint.Keys, cfg config.Config, name string) string {
+	p, err := credsFileFor(cfg, name)
+	if err == nil {
+		var d credsDiff
+		if d, err = compareCreds(keys, p, cfg.Owner, name); err == nil {
+			if d.stale() {
+				return d.text()
+			}
+			return "re-signed as it is"
+		}
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return "no creds file here (it will fail)"
+	}
+	return err.Error()
+}
+
+// credsWiden reports whether re-minting name now (admin.Permissions) would grant more than the creds file at p does
+// today. The comparison is conservative: the new set is not widening only when every allow subject in it is covered by
+// the current allow list (a wildcard covers what it matches) and every deny entry the current JWT has is still in the
+// new set. A JWT with no permissions at all is not narrower (it is unrestricted, or a signing key's template governs it:
+// the applied-zone-policy check covers that case).
+func credsWiden(p, owner, name string) (bool, error) {
+	raw, err := readCreds(p)
+	if err != nil {
+		return false, err
+	}
+	token, err := jwt.ParseDecoratedJWT(raw)
+	clear(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", p, err)
+	}
+	uc, err := jwt.DecodeUserClaims(token)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", p, err)
+	}
+	return widensPermissions(uc.Permissions, admin.Permissions(owner, name)), nil
+}
+
+// widensPermissions is credsWiden's comparison of the current permissions with the new set.
+func widensPermissions(cur, next jwt.Permissions) bool {
+	if len(cur.Pub.Allow)+len(cur.Pub.Deny)+len(cur.Sub.Allow)+len(cur.Sub.Deny) == 0 && cur.Resp == nil {
+		return false
+	}
+	list := func(curAllow, curDeny, newAllow, newDeny jwt.StringList) bool {
+		if len(curAllow) == 0 && len(curDeny) == 0 {
+			return false // this side is unrestricted today
+		}
+		for _, s := range newAllow {
+			if !slices.ContainsFunc(curAllow, func(c string) bool { return subjectCovers(c, s) }) {
+				return true
+			}
+		}
+		for _, d := range curDeny {
+			if !slices.Contains(newDeny, d) {
+				return true
+			}
+		}
+		return false
+	}
+	return list(cur.Pub.Allow, cur.Pub.Deny, next.Pub.Allow, next.Pub.Deny) ||
+		list(cur.Sub.Allow, cur.Sub.Deny, next.Sub.Allow, next.Sub.Deny) ||
+		(next.Resp != nil && cur.Resp == nil)
+}
+
+// subjectCovers reports whether the subject pattern covers every subject sub matches (sub may carry wildcards).
+func subjectCovers(pattern, sub string) bool {
+	pt, st := strings.Split(pattern, "."), strings.Split(sub, ".")
+	for i, t := range pt {
+		if t == ">" {
+			return i < len(st)
+		}
+		if i >= len(st) || (t != "*" && t != st[i]) {
+			return false
+		}
+	}
+	return len(pt) == len(st)
 }
 
 // credsUserKey is the user public key (the JWT's subject) of the creds file at p; no seed is kept.
@@ -238,17 +357,6 @@ func (d credsDiff) text() string {
 		parts = append(parts, "carries another name")
 	}
 	return strings.Join(parts, "; ")
-}
-
-// staleCreds reports whether e's creds file holds a JWT that differs from what a mint now would issue: another signer,
-// other permissions, another issuer account or another name. A missing file wraps fs.ErrNotExist.
-func staleCreds(keys mint.Keys, cfg config.Config, owner, name string) (bool, error) {
-	p, err := credsFileFor(cfg, name)
-	if err != nil {
-		return false, err
-	}
-	d, err := compareCreds(keys, p, owner, name)
-	return d.stale(), err
 }
 
 // compareCreds is the comparison behind `reissue --changed` for the creds file at p.

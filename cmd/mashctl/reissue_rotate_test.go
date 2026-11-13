@@ -192,7 +192,7 @@ func TestReissueChangedRotatesPerEndpoint(t *testing.T) {
 	h.seed("b") // up to date: not selected, keeps its key
 	_, oldB := h.credsClaims("b")
 	calls := fakeRevoke(t, nil)
-	out, errb, code := h.run("reissue", "--changed")
+	out, errb, code := h.run("reissue", "--changed", "--yes")
 	if code != 0 || !strings.Contains(out, "reissued a (new user key, old key revoked)\n") || strings.Contains(out, "reissued b") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

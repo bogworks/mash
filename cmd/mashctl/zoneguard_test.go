@@ -32,7 +32,7 @@ func TestAddAndReissueRefuseWhileAZonePolicyIsApplied(t *testing.T) {
 	if _, err := os.Lstat(e.credsPath("z")); err == nil {
 		t.Fatal("a refused add wrote a creds file")
 	}
-	for _, args := range [][]string{{"reissue", "x"}, {"reissue", "--all"}, {"reissue", "--changed"}} {
+	for _, args := range [][]string{{"reissue", "x"}, {"reissue", "--all", "--yes"}, {"reissue", "--changed"}} {
 		out, errb, code = e.run(args...)
 		if args[1] == "--changed" { // nothing is stale and no key is revoked: nothing would be minted
 			if code != 0 || !strings.Contains(out, "nothing to reissue") {
