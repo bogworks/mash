@@ -19,6 +19,7 @@ Set `MASH_CI_WARM=1` in the runner's environment (its service environment or `.e
 | `check` | `conformance` in ci.yml, `lint` in lint.yml, `govulncheck` in security.yml |
 
 The release jobs, `reproducible`, `adr-lint`, `publish-check`, `codeql` and `test (macos)` never call it.
+`test (macos)` uses the host's shared module cache (it leaves `GOPATH` and `GOMODCACHE` at the host's defaults and keeps only `GOCACHE` and `TMPDIR` job-local), and runs `go mod verify` after `actions/setup-go` so the shared cache is checked against `go.sum` on every run.
 
 ## What the seed must look like
 

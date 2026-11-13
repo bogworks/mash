@@ -2,6 +2,7 @@ package listset
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -469,5 +470,149 @@ func TestAT001TemplateNamesNoPeer(t *testing.T) {
 	}
 	if len(p.Pub.Deny)+len(p.Sub.Deny) != 0 {
 		t.Error("a key with no deny entry has deny lines")
+	}
+}
+
+// Every required fixed grant, removed from the template or denied, is refused by Check.
+func TestCheckRequiresFixedGrants(t *testing.T) {
+	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", "foo_c_{{name()}}")
+	subLines := []string{
+		"_INBOX.foo_c_{{name()}}.>",
+		"agents.prompt.foo.c.{{name()}}",
+		"agents.status.foo.c.{{name()}}",
+		"$SRV.>",
+	}
+	type cas struct {
+		dir, line string
+	}
+	var cases []cas
+	for _, l := range pubLines {
+		cases = append(cases, cas{"pub", l})
+	}
+	for _, l := range subLines {
+		cases = append(cases, cas{"sub", l})
+	}
+	for _, mode := range []string{"removed", "denied"} {
+		for _, tc := range cases {
+			t.Run(mode+" "+tc.dir+" "+tc.line, func(t *testing.T) {
+				ls := at001()
+				c, err := Compile(ls)
+				if err != nil {
+					t.Fatalf("Compile: %v", err)
+				}
+				var p *jwt.Permissions
+				for i := range c.Templates {
+					if c.Templates[i].Group == "foo.c" {
+						p = &c.Templates[i].Permissions
+					}
+				}
+				if p == nil {
+					t.Fatal("no template foo.c")
+				}
+				allow, deny := &p.Pub.Allow, &p.Pub.Deny
+				if tc.dir == "sub" {
+					allow, deny = &p.Sub.Allow, &p.Sub.Deny
+				}
+				if !slices.Contains(*allow, tc.line) {
+					t.Fatalf("template has no line %q", tc.line)
+				}
+				if mode == "removed" {
+					*allow = slices.DeleteFunc(*allow, func(s string) bool { return s == tc.line })
+				} else {
+					deny.Add(tc.line)
+				}
+				err = Check(ls, c)
+				var ce *CheckError
+				if !errors.As(err, &ce) {
+					t.Fatalf("want *CheckError, got %T %v", err, err)
+				}
+				if !strings.Contains(err.Error(), "required ") || !strings.Contains(err.Error(), "is missing or denied") {
+					t.Fatalf("error does not report a missing required grant: %v", err)
+				}
+			})
+		}
+	}
+}
+
+// allowTags returns n distinct allow tags and the no-deny tag a deny key requires of every user.
+func allowTags(n int) []string {
+	tags := make([]string, n, n+1)
+	for i := range tags {
+		tags[i] = fmt.Sprintf("%s:foo.c.p%d", AllowTag, i)
+	}
+	return append(tags, NoDenyTag)
+}
+
+// The server counts expansions per list and cumulatively over its lines (auth.go, maxPermTemplateSubjectExpansions):
+// the publish allow list holds the owner lines of the shared verbs and one allow-tag line per verb, so the third tag
+// line is refused when 3N + (shared publish verbs) exceeds 4096. The subscribe list holds N + one owner line.
+func TestExpansionLimitBoundary(t *testing.T) {
+	cases := []struct {
+		name   string
+		ls     ListSet
+		shared int // shared publish verbs of group foo.c
+		max    int // the largest allow-tag count the server accepts
+	}{
+		{"status shared", at001(), 1, 1365},              // 3*1365+1 = 4096
+		{"mail and prompt shared", at003Deny(), 2, 1364}, // 3*1364+2 = 4094; 1365 gives 4097
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := 3*tc.max + tc.shared; got > maxTemplateExpansions || got+3 <= maxTemplateExpansions {
+				t.Fatalf("boundary %d is not the largest that fits (%d)", tc.max, got)
+			}
+			c, err := Compile(tc.ls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tpl jwt.Permissions
+			for _, x := range c.Templates {
+				if x.Group == "foo.c" {
+					tpl = x.Permissions
+				}
+			}
+			if _, err := expandPermissions(tpl, "core", allowTags(tc.max)); err != nil {
+				t.Fatalf("%d tags: %v", tc.max, err)
+			}
+			_, err = expandPermissions(tpl, "core", allowTags(tc.max+1))
+			if !errors.Is(err, errTemplateExpansionLimit) {
+				t.Fatalf("%d tags: want the expansion limit, got %v", tc.max+1, err)
+			}
+			for i := range c.Users {
+				if c.Users[i].Sender == "foo.c.core" {
+					c.Users[i].Tags = allowTags(tc.max + 1)
+				}
+			}
+			err = Check(tc.ls, c)
+			if err == nil || !strings.Contains(err.Error(), "cannot connect") || !strings.Contains(err.Error(), "template expansion exceeds limit") {
+				t.Fatalf("Check with %d tags: want cannot connect, got %v", tc.max+1, err)
+			}
+		})
+	}
+}
+
+// The limit is per list and counts lines cumulatively; a line without a tag token is emitted unchecked.
+func TestExpandListLimitCounting(t *testing.T) {
+	tags := allowTags(2048)
+	two := []string{"a.{{tag(allow)}}", "b.{{tag(allow)}}"}
+	if out, err := expandList(two, "n", tags, false); err != nil || len(out) != 4096 {
+		t.Fatalf("2x2048: %d lines, %v", len(out), err)
+	}
+	if _, err := expandList(append(slices.Clone(two), "c.{{tag(allow)}}"), "n", allowTags(1366), false); err == nil {
+		t.Fatal("3x1366 is accepted")
+	}
+	// A fixed line first counts toward the budget; one after the tag lines does not.
+	if _, err := expandList(append([]string{"fixed"}, two...), "n", tags, false); !errors.Is(err, errTemplateExpansionLimit) {
+		t.Fatalf("fixed line first: %v", err)
+	}
+	if _, err := expandList(append(slices.Clone(two), "fixed.{{name()}}"), "n", tags, false); err != nil {
+		t.Fatalf("fixed line last: %v", err)
+	}
+	// Two tokens on one line multiply.
+	if _, err := expandList([]string{"{{tag(allow)}}.{{tag(allow)}}"}, "n", allowTags(65), false); !errors.Is(err, errTemplateExpansionLimit) {
+		t.Fatalf("65x65: %v", err)
+	}
+	if _, err := expandList([]string{"{{tag(allow)}}.{{tag(allow)}}"}, "n", allowTags(64), false); err != nil {
+		t.Fatalf("64x64: %v", err)
 	}
 }
