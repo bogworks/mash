@@ -43,7 +43,7 @@ type StatusWriter interface {
 // one, to answer a replay of the document in force.
 type StatusReader interface {
 	// LatestStatus returns the latest stored Status; ok is false when none was written.
-	LatestStatus() (st Status, ok bool, err error)
+	LatestStatus(ctx context.Context) (st Status, ok bool, err error)
 }
 
 // RefusalWriter is what the apply intake needs to record a refusal it makes before Apply. KVLedger implements it.
@@ -397,9 +397,7 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 var ErrNotRefusal = errors.New("the status is not a refusal")
 
 // LatestStatus implements StatusReader.
-func (l *KVLedger) LatestStatus() (Status, bool, error) {
-	ctx, cancel := l.opCtx()
-	defer cancel()
+func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
 	v, _, err := l.read(ctx)
 	if err != nil {
 		return Status{}, false, err

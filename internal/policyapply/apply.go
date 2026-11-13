@@ -88,7 +88,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	}
 	if cur.Generation > 0 && sha256.Sum256(req.Received) == cur.Received {
 		if sr, ok := deps.Ledger.(StatusReader); ok {
-			st, ok, err := sr.LatestStatus()
+			st, ok, err := sr.LatestStatus(ctx)
 			if err != nil {
 				return Status{}, err
 			}
