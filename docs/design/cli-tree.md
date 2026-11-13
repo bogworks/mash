@@ -414,8 +414,9 @@ locations, with the facts of this code that decide between them:
 
 **Recommendation: D.**
 
-1. **`mash` (serve, hook, message, endpoint, prompt)**, which only reads configuration: if `~/.mash` does not exist and the
-   old layout does, read the old `config.json`, creds and `policy.md` through the old lookup, and print one stderr
+1. **`mash` (serve, hook, message, endpoint, prompt)**, which only reads configuration: while the new layout has not been adopted (there is no
+   `~/.mash/config/config.yaml`; the test is that file, never the directory `~/.mash`, because the first run creates
+   `~/.mash/state`) and the old layout has a configuration, read the old `config.json`, creds and `policy.md` through the old lookup, and print one stderr
    warning per run (`mash: reading the old layout under ~/.config/mash; run "mash home adopt"`; in `status`, a line). Spool
    and `hook.log` are written under `~/.mash/state/` from the first run: they are scratch the new binary can create. This is
    safe by design, not luck: undrained mail is not acked, so it stays in the JetStream inbox and is delivered again
@@ -423,6 +424,17 @@ locations, with the facts of this code that decide between them:
    loses nothing. The relay counters restart at zero (diagnostic only; not verified beyond reading `relay.go`).
 2. **`mashctl`**, which writes keys, creds and records: refuse with exit 2 and the same one-line message until the
    layout is adopted. An admin tool run by a person is the place to stop.
+   **Credentials lookup.** The default credentials path moves with the files: in the new layout an endpoint's default
+   creds file is looked up under `~/.mash/state/creds/<name>.creds` (not under `config/`), so a migrated endpoint
+   authenticates with the copy `adopt` made; while the old layout is read through, the old default path
+   (`<old config dir>/<name>.creds`) is still the default. A path named with `creds` / `MASH_CREDS` is unchanged.
+   **Source paths.** Neither the read-through nor `adopt` assumes `~/.config/mash`: both resolve the OLD locations through
+   the lookup today's code uses, in its order: `MASH_CONFIG_DIR` (an explicit choice, no fallback), else an absolute
+   `XDG_CONFIG_HOME/mash` that holds a `config.json`, else `~/.config/mash`, for configuration, creds and keys; `MASH_STATE_DIR`, else `XDG_STATE_HOME/mash`, else `~/.local/state/mash` for the spool
+   and `hook.log`; and the key store from `MASH_KEYS_DIR` when set, else `<old config dir>/keys`. `--from DIR` names the
+   old configuration directory explicitly (and `--keys-from DIR` the key store when it lives elsewhere); `adopt` prints
+   each resolved source before it copies anything, and refuses (changing nothing) when a source it needs cannot be
+   found or is a symlink it does not own.
 3. **The explicit step**: a one-time command, `mash home adopt [--from DIR] [--dry-run]` (the noun `home` and the verb
    `adopt`, "take an existing object under management", are a suggestion: OP-12). It
    - **copies** `config.json` to `config/config.yaml`, `policy.md`, and the creds files (so sessions of the previous
