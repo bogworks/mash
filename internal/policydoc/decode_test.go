@@ -138,3 +138,40 @@ func TestDecodeRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestNextSubmitter(t *testing.T) {
+	d, err := Decode(doc(7, 6, nil), DecodeOptions{})
+	if err != nil || d.NextSubmitter != "" {
+		t.Fatalf("absent: %+v, %v", d, err)
+	}
+	_, next := submitter(t)
+	d, err = Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = next }), DecodeOptions{})
+	if err != nil || d.NextSubmitter != next {
+		t.Fatalf("valid key: %+v, %v", d, err)
+	}
+	for name, v := range map[string]any{"invalid": "not a key", "empty": "", "number": 5, "null-ish prefix": "ACXTEST"} {
+		if _, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = v }), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	if _, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = next; m["other"] = 1 }), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
+		t.Errorf("other unknown field beside next_submitter: %v", err)
+	}
+}
+
+func TestNextSubmitterSigned(t *testing.T) {
+	kp, pub := submitter(t)
+	_, next := submitter(t)
+	tok := sign(t, kp, doc(7, 6, func(m map[string]any) { m["next_submitter"] = next }))
+	d, err := Decode(tok, DecodeOptions{Submitter: pub})
+	if err != nil || !d.Verified || d.NextSubmitter != next {
+		t.Fatalf("signed: %+v, %v", d, err)
+	}
+	// Swapping the field after signing breaks the signature.
+	_, other := submitter(t)
+	parts := strings.Split(string(tok), ".")
+	parts[1] = base64.RawURLEncoding.EncodeToString(doc(7, 6, func(m map[string]any) { m["next_submitter"] = other }))
+	if _, err := Decode([]byte(strings.Join(parts, ".")), DecodeOptions{Submitter: pub}); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("tampered next_submitter: %v", err)
+	}
+}

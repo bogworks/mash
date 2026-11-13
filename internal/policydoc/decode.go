@@ -47,6 +47,12 @@ type DecodeOptions struct {
 }
 
 // Document is a decoded list-set document.
+//
+// NextSubmitter is the optional planned-rotation field (wire "next_submitter"): a list set signed by the current
+// submitter MAY name the nkeys public key that signs the next generation. It is "" when the field is absent; when
+// present it must be a valid nkeys public key (an explicit empty string is malformed). Decode only validates and
+// returns it, covered by the JWS signature like the rest of the payload. Requiring the next generation to be signed by
+// that key, and refusing the old key from then on, is the intake's job, not this package's.
 type Document struct {
 	Schema         string
 	Account        string
@@ -54,6 +60,7 @@ type Document struct {
 	Generation     uint64
 	BaseGeneration uint64
 	IssuedAt       time.Time
+	NextSubmitter  string
 	ListSet        listset.ListSet
 	// Raw is the exact bytes received (the JWS when it was one).
 	Raw []byte
@@ -82,6 +89,7 @@ type wireDoc struct {
 	Groups         map[string]*wireGroup  `json:"groups"`
 	Senders        map[string]*wireSender `json:"senders"`
 	IssuedAt       *string                `json:"issued_at"`
+	NextSubmitter  *string                `json:"next_submitter"`
 }
 
 func bad(format string, a ...any) error {
@@ -89,6 +97,8 @@ func bad(format string, a ...any) error {
 }
 
 // Decode decodes b: raw JSON, or a compact JWS (three base64url parts, header alg EdDSA) whose payload is the JSON.
+// The optional next_submitter field is validated and returned in Document.NextSubmitter; any other unknown field is
+// refused.
 func Decode(b []byte, opts DecodeOptions) (Document, error) {
 	trimmed := bytes.TrimSpace(b)
 	payload := trimmed
@@ -183,8 +193,15 @@ func decodePayload(p []byte) (Document, error) {
 	if err != nil {
 		return Document{}, bad("issued_at: %v", err)
 	}
+	var next string
+	if w.NextSubmitter != nil {
+		if _, err := nkeys.FromPublicKey(*w.NextSubmitter); err != nil {
+			return Document{}, bad("next_submitter %q is not an nkeys public key: %v", *w.NextSubmitter, err)
+		}
+		next = *w.NextSubmitter
+	}
 	d := Document{Schema: *w.Schema, Account: *w.Account, Range: *w.Range, Generation: *w.Generation,
-		BaseGeneration: *w.BaseGeneration, IssuedAt: at}
+		BaseGeneration: *w.BaseGeneration, IssuedAt: at, NextSubmitter: next}
 	d.ListSet = listset.ListSet{Range: d.Range, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
 
 	owners := make([]string, 0, len(w.Groups))
