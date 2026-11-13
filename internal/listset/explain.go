@@ -262,7 +262,7 @@ func openSubjects(c *Compiled, sender string) (OpenSubjects, error) {
 	pick := func(lines []string) []string {
 		out := []string{}
 		for _, l := range lines {
-			if !strings.HasPrefix(l, "agents.") {
+			if !strings.HasPrefix(l, "agents.") || isPolicySubject(l) {
 				out = append(out, l)
 			}
 		}
