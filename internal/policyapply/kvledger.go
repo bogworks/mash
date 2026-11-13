@@ -136,6 +136,8 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 var (
 	_ Ledger       = (*KVLedger)(nil)
 	_ StatusWriter = (*KVLedger)(nil)
+	_ DetailLedger = (*KVLedger)(nil)
+	_ DetailLedger = (*MemLedger)(nil)
 )
 
 // recordValue is a listset.Record in the status value: digests are their strings.
@@ -150,8 +152,12 @@ type recordValue struct {
 type statusValue struct {
 	Schema  string       `json:"schema"`
 	InForce *recordValue `json:"in_force,omitempty"`
-	Pending *recordValue `json:"pending,omitempty"`
-	Status  *Status      `json:"status,omitempty"`
+	// InForceJWT is the signed account JWT pushed for the record in force; InForceListSet is its list set as JSON.
+	// Both are written with the record by CompareAndCommitDetail and cleared by CompareAndCommit.
+	InForceJWT     string          `json:"in_force_jwt,omitempty"`
+	InForceListSet json.RawMessage `json:"in_force_listset,omitempty"`
+	Pending        *recordValue    `json:"pending,omitempty"`
+	Status         *Status         `json:"status,omitempty"`
 }
 
 // leaseValue is the value at the lease key.
@@ -289,6 +295,35 @@ func (l *KVLedger) InForce() (listset.Record, error) {
 	return v.InForce.record()
 }
 
+// InForceJWT implements DetailLedger.
+func (l *KVLedger) InForceJWT() (string, error) {
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return "", err
+	}
+	return v.InForceJWT, nil
+}
+
+// InForceListSet implements DetailLedger.
+func (l *KVLedger) InForceListSet() (listset.ListSet, bool, error) {
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return listset.ListSet{}, false, err
+	}
+	if len(v.InForceListSet) == 0 {
+		return listset.ListSet{}, false, nil
+	}
+	var ls listset.ListSet
+	if err := json.Unmarshal(v.InForceListSet, &ls); err != nil {
+		return listset.ListSet{}, false, fmt.Errorf("policy ledger %s: in_force_listset: %w", l.key, err)
+	}
+	return ls, true, nil
+}
+
 // Pending implements Ledger.
 func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	ctx, cancel := l.opCtx()
@@ -354,10 +389,29 @@ func (l *KVLedger) fenceLease(ctx context.Context) error {
 	return l.checkLease(ctx)
 }
 
-// CompareAndCommit implements Ledger. It first checks that the lease is still this ledger's (ErrLeaseLost), then
+// CompareAndCommit implements Ledger. It stores no JWT or list set and clears those of the generation it replaces
+// (see CompareAndCommitDetail). It first checks that the lease is still this ledger's (ErrLeaseLost), then
 // commits at the revision it read, and only if the generation in force is still base; a lost compare-and-set is read
 // again, so only a different generation in force is a stale base.
 func (l *KVLedger) CompareAndCommit(base uint64, rec listset.Record) error {
+	return l.commit(base, rec, InForceDetail{})
+}
+
+// CompareAndCommitDetail implements DetailLedger: CompareAndCommit that also stores d.JWT as in_force_jwt and
+// d.ListSet as in_force_listset (json.Marshal of listset.ListSet), in the same write as the record.
+func (l *KVLedger) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
+	return l.commit(base, rec, d)
+}
+
+func (l *KVLedger) commit(base uint64, rec listset.Record, d InForceDetail) error {
+	var lsb json.RawMessage
+	if d.ListSet != nil {
+		b, err := json.Marshal(*d.ListSet)
+		if err != nil {
+			return fmt.Errorf("policy ledger %s: %w", l.key, err)
+		}
+		lsb = b
+	}
 	ctx, cancel := l.opCtx()
 	defer cancel()
 	if err := l.checkLease(ctx); err != nil {
@@ -375,7 +429,7 @@ func (l *KVLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 		if cur.Generation != base {
 			return &listset.StaleBaseError{Stated: base, InForce: cur.Generation}
 		}
-		v.InForce = recordToValue(rec)
+		v.InForce, v.InForceJWT, v.InForceListSet = recordToValue(rec), d.JWT, lsb
 		err = l.write(ctx, v, rev)
 		if err == nil {
 			return nil

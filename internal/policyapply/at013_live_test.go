@@ -338,12 +338,14 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		Cluster: e.cluster, Prober: s.prober, Witnesses: wit, Ledger: s.ledger,
 		Account: e.acctPub, Inventory: 2, ListSet: target, Received: []byte("at013"),
 		Previous: s.c1, Signers: e.signers(s.c2), PreviousSigners: e.signers(s.c1),
-		SignPrevious: func(revoked []string) (string, error) { return e.account(s.c1, revoked...), nil },
-		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
-			e.waitNewSecond()
-			tok := e.account(c)
-			e.setCurrent(tok)
-			return tok, nil
+		Signer: SignerFuncs{
+			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return e.account(s.c1, revoked...), nil },
+			SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
+				e.waitNewSecond()
+				tok := e.account(c)
+				e.setCurrent(tok)
+				return tok, nil
+			},
 		},
 		AfterPush: func(ctx context.Context) (map[string][]string, []string, error) {
 			s.plan.Deadline = time.Now().Add(deadline)

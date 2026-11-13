@@ -26,13 +26,19 @@ func TestRollbackKeepsAfterPushRevocations(t *testing.T) {
 	w := newWorld(t)
 	extra := freshUserPub(t)
 	w.cluster.failPush["s2"] = true
-	in := w.run(NewMemLedger(w.rec1()), set2(), "bytes-2")
+	in := w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2")
 	in.AfterPush = func(context.Context) (map[string][]string, []string, error) {
 		return map[string][]string{"": {extra}}, nil, nil
 	}
 	var got []string
-	sign := in.SignPrevious
-	in.SignPrevious = func(revoked []string) (string, error) { got = revoked; return sign(revoked) }
+	sign := in.Signer.SignPrevious
+	in.Signer = withSignPrevious(in.Signer, func(prev PreviousClaims, revoked []string) (string, error) {
+		got = revoked
+		if prev.JWT != w.j1 {
+			t.Errorf("SignPrevious got prev %q, want the JWT in force", prev.JWT)
+		}
+		return sign(prev, revoked)
+	})
 	st, err := Run(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -67,12 +73,12 @@ func TestRollbackDroppedRevocationIsNotPushed(t *testing.T) {
 	w := newWorld(t)
 	extra := freshUserPub(t)
 	w.cluster.failPush["s2"] = true
-	in := w.run(NewMemLedger(w.rec1()), set2(), "bytes-2")
+	in := w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2")
 	in.AfterPush = func(context.Context) (map[string][]string, []string, error) {
 		return map[string][]string{"": {extra}}, nil, nil
 	}
 	bad := w.k.build(t, w.c1, w.k.revoked) // lacks extra
-	in.SignPrevious = func([]string) (string, error) { return bad, nil }
+	in.Signer = withSignPrevious(in.Signer, func(PreviousClaims, []string) (string, error) { return bad, nil })
 	st, err := Run(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -99,21 +105,22 @@ func TestRollbackDroppedRevocationIsNotPushed(t *testing.T) {
 }
 
 func TestRollbackSignErrorAndWrongGeneration(t *testing.T) {
-	cases := map[string]func(w *world) func([]string) (string, error){
-		"error": func(*world) func([]string) (string, error) {
-			return func([]string) (string, error) { return "", context.Canceled }
+	type fn = func(PreviousClaims, []string) (string, error)
+	cases := map[string]func(w *world) fn{
+		"error": func(*world) fn {
+			return func(PreviousClaims, []string) (string, error) { return "", context.Canceled }
 		},
-		"wrong": func(w *world) func([]string) (string, error) {
-			return func([]string) (string, error) { return w.j2, nil }
+		"wrong": func(w *world) fn {
+			return func(PreviousClaims, []string) (string, error) { return w.j2, nil }
 		},
-		"not a jwt": func(*world) func([]string) (string, error) { return func([]string) (string, error) { return "x", nil } },
+		"not a jwt": func(*world) fn { return func(PreviousClaims, []string) (string, error) { return "x", nil } },
 	}
 	for name, sp := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			w.cluster.failPush["s2"] = true
-			in := w.run(NewMemLedger(w.rec1()), set2(), "bytes-2")
-			in.SignPrevious = sp(w)
+			in := w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2")
+			in.Signer = withSignPrevious(in.Signer, sp(w))
 			st, err := Run(context.Background(), in)
 			if err != nil || st.State != StatePartial || !hasFailure(st, "", "", CheckRollback) {
 				t.Fatalf("%+v %v", st, err)

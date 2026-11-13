@@ -707,3 +707,39 @@ func TestPolicyBucket(t *testing.T) {
 		}
 	}
 }
+
+func TestKVLedgerInForceDetail(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	if jwt, err := l.InForceJWT(); err != nil || jwt != "" {
+		t.Fatalf("empty: %q %v", jwt, err)
+	}
+	if _, ok, err := l.InForceListSet(); err != nil || ok {
+		t.Fatalf("empty list set: %v %v", ok, err)
+	}
+	ls := set2()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &ls}); err != nil {
+		t.Fatal(err)
+	}
+	other := e.ledger(KVLedgerOptions{})
+	if jwt, err := other.InForceJWT(); err != nil || jwt != "jwt-1" {
+		t.Fatalf("jwt: %q %v", jwt, err)
+	}
+	got, ok, err := other.InForceListSet()
+	if err != nil || !ok || listset.DigestListSet(got) != listset.DigestListSet(ls) {
+		t.Fatalf("list set: %+v %v %v", got, ok, err)
+	}
+	// A status write keeps them; a plain commit clears them, as they would describe the wrong generation.
+	if err := l.WriteStatus(context.Background(), Status{State: StatePartial}); err == nil {
+		t.Fatal("status written without the lease")
+	}
+	if err := l.CompareAndCommit(1, testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if jwt, _ := l.InForceJWT(); jwt != "" {
+		t.Errorf("jwt after a plain commit = %q", jwt)
+	}
+	if _, ok, _ := l.InForceListSet(); ok {
+		t.Error("list set after a plain commit")
+	}
+}
