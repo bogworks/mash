@@ -18,7 +18,7 @@ const clockBehind = time.Hour
 // creds with the clock right retire normally.
 func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
 	before, _ := os.ReadFile(h.creds("c"))
@@ -55,7 +55,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 // revoker, even when the clock moves between the two.
 func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
 	calls := fakeRevoke(t, nil)
@@ -121,7 +121,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFleetEnv(t, addPolicy)
-			if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+			if _, errb, code := h.run("add", "c"); code != 0 {
 				t.Fatal(errb)
 			}
 			tc.damage(t, h.creds("c"))
@@ -154,7 +154,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 
 	t.Run("missing file proceeds", func(t *testing.T) {
 		h := newFleetEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}
 		if err := os.Remove(h.creds("c")); err != nil {
@@ -172,7 +172,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 // directory read and before the revoke still refuse the retire, with nothing revoked or removed.
 func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
 	recs := h.records()
@@ -207,7 +207,7 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 	t.Run("future-dated target refuses", func(t *testing.T) {
 		h := newFleetEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}
 		target := filepath.Join(t.TempDir(), "mounted.creds")
@@ -252,7 +252,7 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 
 	t.Run("dangling link proceeds", func(t *testing.T) {
 		h := newFleetEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}
 		if err := os.Remove(h.creds("c")); err != nil {

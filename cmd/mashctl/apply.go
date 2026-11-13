@@ -16,9 +16,11 @@ import (
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policy"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // connectTimeout bounds the connection to the server; applyDeadline bounds a whole apply.
@@ -250,6 +252,19 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	} else if c, err = policy.Compile(f, cfg.Owner); err != nil {
 		return fail("%v", err)
 	}
+	// the directory checks come first: they refuse whatever the file says, so they are reachable with any policy.
+	if verb == "apply" {
+		if zerr := refuseZonedDirectory(cfg); zerr != nil {
+			return fail("refusing: %v (nothing was changed)", zerr)
+		}
+	}
+	if what := zoneConstructs(c); what != "" {
+		msg := fmt.Sprintf("the policy compiles zone constructs (%s): zones are removed (ADR 0091); apply is refused until the label policy model ships", what)
+		if verb == "apply" {
+			return fail("refusing: %s (nothing was changed)", msg)
+		}
+		fmt.Fprintf(stdout, "warning: %s\n\n", msg)
+	}
 	if snap == nil { // repair (which passes a snapshot) has announced already
 		announceTarget(cfg, env, stderr, &sysTarget{o.sysCreds})
 	}
@@ -267,6 +282,15 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	}
 	defer nc.Close()
 
+	if verb == "apply" { // zones are removed (ADR 0091): an applied zone policy is not applied over or extended
+		ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
+		err := apply.RefuseZonePolicy(ctx, apply.NATS{Conn: nc, Inventory: servers}, ks, servers, store.ErrZonePolicyApplied)
+		cancel()
+		if err != nil {
+			return fail("refusing: %v (nothing was changed)", err)
+		}
+	}
+
 	mode := apply.Apply
 	switch {
 	case verb == "diff":
@@ -278,4 +302,40 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	defer cancel()
 	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
 		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
+}
+
+// refuseZonedDirectory is the preflight of apply (ADR 0091): the first directory record that carries a zone. It fails
+// safe: a directory that cannot be opened or listed (no admin credentials, no directory yet, unreachable) cannot be
+// shown to hold no zoned record, so apply is refused rather than let through.
+func refuseZonedDirectory(cfg config.Config) error {
+	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	if err != nil {
+		return fmt.Errorf("cannot read the directory to check for zoned records: %w", err)
+	}
+	defer closeAdmin()
+	recs, err := adm.List(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot read the directory to check for zoned records: %w", err)
+	}
+	return store.FirstZonedRecord(recs)
+}
+
+// zoneConstructs names what in the compiled policy is a zone construct (ADR 0091), or "" when there is none. Compile
+// derives a zone for every declared endpoint (its subject-label value, else the default zone), so any policy that
+// declares an endpoint compiles zones, and with them zone signing keys and six-token grants. A subject label other
+// than the default is a zone construct of its own. (Parse fills the default label in, so an explicit "zone" is
+// indistinguishable from none, and is covered by the zones it yields.)
+func zoneConstructs(c *policy.Compiled) string {
+	var what []string
+	if len(c.Zones) > 0 {
+		names := make([]string, len(c.Zones))
+		for i, z := range c.Zones {
+			names[i] = z.Name
+		}
+		what = append(what, fmt.Sprintf("%d zone signing keys and six-token grants for zones %s", len(c.Zones), strings.Join(names, ", ")))
+	}
+	if c.SubjectLabel != policy.DefaultSubjectLabel {
+		what = append(what, fmt.Sprintf("subject_label %q", c.SubjectLabel))
+	}
+	return strings.Join(what, "; ")
 }

@@ -436,7 +436,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("%s exists, left as it is", st.polPath)
 	}
 
-	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl add NAME ...                          declare an endpoint and mint its creds\n  3. mashctl policy apply                          push the policy's zone keys to the account\n")
+	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl add NAME ...                          declare an endpoint and mint its creds\n  3. mashctl policy apply                          push the policy's signing keys to the account\n")
 	if adminPath == "" {
 		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `add` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}

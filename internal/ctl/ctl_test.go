@@ -56,8 +56,8 @@ func TestShortKey(t *testing.T) {
 func TestListFieldsAreEscaped(t *testing.T) {
 	hostile := "x\x1b[2K\r\nREFUSED"
 	want := `x\x1b[2K\x0d\x0aREFUSED`
-	r := store.Record{Name: "a", Zone: hostile, Description: hostile, Caps: []string{hostile}}
-	for _, got := range []string{zoneSuffix(r), metaSuffix(r), labelList(map[string]string{hostile: hostile}), NoRevokeWarning("a", hostile)} {
+	r := store.Record{Name: "a", Description: hostile, Caps: []string{hostile}}
+	for _, got := range []string{metaSuffix(r), labelList(map[string]string{hostile: hostile}), NoRevokeWarning("a", hostile)} {
 		if strings.ContainsAny(got, "\x1b\r") || !strings.Contains(got, want) {
 			t.Errorf("not escaped: %q", got)
 		}
