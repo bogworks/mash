@@ -80,12 +80,12 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 
 	ident := ep.EndpointIdentity()
 	if ident.IsLegacy() { // a legacy name has no range, so no list set can name it
-		return localOpen(stdout, asJSON, ep.Display())
+		return localOpen(stdout, asJSON, ep.Display(), req)
 	}
 	// Only a list-set credential may publish to the policy subject; any other has no grant there, and a publish
 	// would be a permissions violation, not "no responders". Decide from the client's own credential.
 	if !listSetCreds(cfg.Creds) {
-		return localOpen(stdout, asJSON, ep.Display())
+		return localOpen(stdout, asJSON, ep.Display(), req)
 	}
 	subject := policyview.Subject(ident.Agent)
 	payload, err := json.Marshal(req)
@@ -101,8 +101,9 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	m.Header.Set(sap.HeaderName, h.Encode())
 	rctx, rcancel := context.WithTimeout(ctx, cfg.CallTimeout)
 	defer rcancel()
-	// A permissions violation on this subject (and only this one) means no list set reaches this account: treat it
-	// as no responders. The handler replaces the endpoint's, which only logs.
+	// A permissions violation on this subject (and only this one) is reported as a refusal: a list-set credential
+	// should be able to ask, so it must not look like an open account. The handler replaces the endpoint's, which only
+	// logs.
 	var mu sync.Mutex
 	denied := false
 	ep.Conn().SetErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
@@ -119,8 +120,13 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	mu.Lock()
 	wasDenied := denied
 	mu.Unlock()
-	if wasDenied || errors.Is(err, nats.ErrNoResponders) {
-		return localOpen(stdout, asJSON, ep.Display())
+	// This credential holds a list set, so silence is not "open": a stopped responder or an older template must not
+	// make an applied policy look absent.
+	if wasDenied {
+		return fail(errors.New("policy view refused: this credential may not ask the policy responder"))
+	}
+	if errors.Is(err, nats.ErrNoResponders) {
+		return fail(fmt.Errorf("policy view unavailable: no responder on %s", subject))
 	}
 	if err != nil {
 		return fail(fmt.Errorf("mash policy: no answer from the policy responder: %w", err))
@@ -172,8 +178,30 @@ func listSetCreds(path string) bool {
 	return uc.IssuerAccount != "" && uc.Issuer != uc.IssuerAccount && noPerms
 }
 
-// localOpen prints the answer of an account with no responder: no lists, so the owner line only.
-func localOpen(stdout io.Writer, asJSON bool, sender string) int {
+// noListSetReason marks a verb whose answer is not knowable locally: no list set was consulted.
+const noListSetReason listset.Reason = "no_list_set"
+
+// localOpen prints the answer of an account with no list-set credential: no lists, so the owner line only. It
+// answers in the shape of the op asked: show gets a ShowReply, explain an ExplainReply whose every verb says the
+// answer needs a list set (what the owner line allows for that receiver is not knowable here).
+func localOpen(stdout io.Writer, asJSON bool, sender string, req policyview.Request) int {
+	if req.Op == policyview.OpExplain {
+		r := policyview.ExplainReply{
+			Describes: listset.DescribesListSet, State: "none", Notice: noResponderText, Sender: sender, Receiver: req.Receiver,
+			Verbs:        []listset.VerbExplanation{},
+			OpenSubjects: listset.OpenSubjects{Publish: []string{}, Subscribe: []string{}}, RawClientLimit: listset.RawClientLimit,
+		}
+		for _, v := range listset.Verbs {
+			r.Verbs = append(r.Verbs, listset.VerbExplanation{Verb: v, Reason: noListSetReason, Detail: noResponderText})
+		}
+		if asJSON {
+			b, _ := json.Marshal(r)
+			fmt.Fprintln(stdout, string(b))
+			return 0
+		}
+		fmt.Fprint(stdout, explainText(r))
+		return 0
+	}
 	if asJSON {
 		b, _ := json.Marshal(policyview.ShowReply{
 			Describes: listset.DescribesListSet, State: "none", Notice: noResponderText, Sender: sender,
@@ -198,6 +226,13 @@ func policyStatusLine(generation uint64, state string, inForce bool) string {
 	return fmt.Sprintf("list set: generation %d, %s, %s", generation, state, f)
 }
 
+func latestLine(l *policyview.Latest) string {
+	if l == nil {
+		return ""
+	}
+	return fmt.Sprintf("latest attempt: generation %d, %s\n", l.Generation, l.State)
+}
+
 func joinOr(items []string, none string) string {
 	if len(items) == 0 {
 		return none
@@ -213,6 +248,7 @@ func showText(r policyview.ShowReply) string {
 		return b.String()
 	}
 	fmt.Fprintf(&b, "%s\n", policyStatusLine(r.Generation, r.State, r.InForce))
+	b.WriteString(latestLine(r.Latest))
 	if r.Notice != "" {
 		fmt.Fprintf(&b, "note: %s\n", r.Notice)
 	}
@@ -230,6 +266,7 @@ func explainText(r policyview.ExplainReply) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "sender: %s\nreceiver: %s\n", r.Sender, r.Receiver)
 	fmt.Fprintf(&b, "%s\n", policyStatusLine(r.Generation, r.State, r.InForce))
+	b.WriteString(latestLine(r.Latest))
 	if r.Notice != "" {
 		fmt.Fprintf(&b, "note: %s\n", r.Notice)
 	}
@@ -237,6 +274,8 @@ func explainText(r policyview.ExplainReply) string {
 		word := "refused"
 		if v.Allowed {
 			word = "allowed"
+		} else if v.Reason == noListSetReason {
+			word = "unknown"
 		}
 		fmt.Fprintf(&b, "  %s: %s (%s): %s\n", v.Verb, word, v.Reason, v.Detail)
 	}

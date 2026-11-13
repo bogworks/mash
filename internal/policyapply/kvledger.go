@@ -324,6 +324,29 @@ func (l *KVLedger) InForceListSet() (listset.ListSet, bool, error) {
 	return ls, true, nil
 }
 
+// InForceView returns the record and the list set in force from one read of the status value, so they are the same
+// generation; ok is false when no list set is in force. It is what the policy view responder reads.
+func (l *KVLedger) InForceView() (listset.Record, listset.ListSet, bool, error) {
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return listset.Record{}, listset.ListSet{}, false, err
+	}
+	if len(v.InForceListSet) == 0 {
+		return listset.Record{}, listset.ListSet{}, false, nil
+	}
+	rec, err := v.InForce.record()
+	if err != nil {
+		return listset.Record{}, listset.ListSet{}, false, err
+	}
+	var ls listset.ListSet
+	if err := json.Unmarshal(v.InForceListSet, &ls); err != nil {
+		return listset.Record{}, listset.ListSet{}, false, fmt.Errorf("policy ledger %s: in_force_listset: %w", l.key, err)
+	}
+	return rec, ls, true, nil
+}
+
 // LatestStatus returns the latest Status the ledger holds; ok is false when no run has written one. It is the read
 // side `mash policy show` answers from.
 func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {

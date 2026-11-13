@@ -36,8 +36,9 @@ const NoListSetNotice = "no list set in force: owner line only"
 
 // Store is the read side of the policy ledger.
 type Store interface {
-	// InForceListSet returns the list set in force; ok is false when none is.
-	InForceListSet() (listset.ListSet, bool, error)
+	// InForceView returns the record and the list set in force, read together so they are one generation; ok is
+	// false when no list set is in force.
+	InForceView() (rec listset.Record, ls listset.ListSet, ok bool, err error)
 	// LatestStatus returns the latest applied-policy status; ok is false when none was written.
 	LatestStatus(ctx context.Context) (policyapply.Status, bool, error)
 }
@@ -71,12 +72,20 @@ type ErrorReply struct {
 	Error string `json:"error"`
 }
 
-// ShowReply is the answer of show: the caller's own entry and the status header. Every slice is non-nil.
-type ShowReply struct {
-	Describes  string `json:"describes"`
+// Latest is the latest attempt to apply a generation, reported when it is not the generation in force.
+type Latest struct {
 	Generation uint64 `json:"generation"`
 	State      string `json:"state"`
-	InForce    bool   `json:"in_force"`
+}
+
+// ShowReply is the answer of show: the caller's own entry and the status header. Every slice is non-nil.
+// Generation is the generation in force, whose reach this is; Latest is the latest attempt when it differs.
+type ShowReply struct {
+	Describes  string  `json:"describes"`
+	Generation uint64  `json:"generation"`
+	State      string  `json:"state"`
+	InForce    bool    `json:"in_force"`
+	Latest     *Latest `json:"latest,omitempty"`
 	// Notice is empty when the list set is in force and applied; otherwise one plain sentence.
 	Notice         string               `json:"notice,omitempty"`
 	Sender         string               `json:"sender"`
@@ -91,6 +100,7 @@ type ExplainReply struct {
 	Generation     uint64                    `json:"generation"`
 	State          string                    `json:"state"`
 	InForce        bool                      `json:"in_force"`
+	Latest         *Latest                   `json:"latest,omitempty"`
 	Notice         string                    `json:"notice,omitempty"`
 	Sender         string                    `json:"sender"`
 	Receiver       string                    `json:"receiver"`
@@ -199,29 +209,41 @@ func (r *responder) handle(req micro.Request) {
 	}
 }
 
-// header is the status part of every answer.
+// header is the status part of every answer. generation is the one in force; latest is set when the latest attempt
+// is another generation.
 type header struct {
 	generation uint64
 	state      string
 	inForce    bool
 	notice     string
+	latest     *Latest
 }
 
-func (r *responder) header(ctx context.Context) (header, error) {
+// header labels the in-force record rec with the latest status. The reach is always that of rec's generation: a
+// later attempt that was refused or is partial is reported beside it, never in its place.
+func (r *responder) header(ctx context.Context, rec listset.Record) (header, error) {
 	st, ok, err := r.opts.Store.LatestStatus(ctx)
 	if err != nil {
 		return header{}, fmt.Errorf("cannot read the policy status: %w", err)
 	}
 	if !ok {
-		return header{state: "unknown", inForce: true, notice: "no status is recorded for the list set in force"}, nil
+		return header{generation: rec.Generation, state: "unknown", inForce: true, notice: "no status is recorded for the list set in force"}, nil
 	}
-	h := header{generation: st.Generation, state: string(st.State), inForce: st.InForce}
+	if st.Generation != rec.Generation {
+		// The status of the generation in force is not the latest; it was applied when it was committed.
+		return header{
+			generation: rec.Generation, state: string(policyapply.StateApplied), inForce: true,
+			latest: &Latest{Generation: st.Generation, State: string(st.State)},
+			notice: fmt.Sprintf("the latest attempt, generation %d, is %s; the reach shown is generation %d's, which is in force", st.Generation, st.State, rec.Generation),
+		}, nil
+	}
+	h := header{generation: rec.Generation, state: string(st.State), inForce: true}
 	switch st.State {
 	case policyapply.StateApplied:
 	case policyapply.StatePartial:
 		h.notice = fmt.Sprintf("generation %d is partial: not every server holds it, so what is shown may not hold everywhere", st.Generation)
 	default:
-		h.notice = fmt.Sprintf("generation %d is %s: it is not in force", st.Generation, st.State)
+		h.notice = fmt.Sprintf("generation %d is %s", st.Generation, st.State)
 	}
 	return h, nil
 }
@@ -254,7 +276,7 @@ func emptyOpen() listset.OpenSubjects {
 }
 
 func (r *responder) show(ctx context.Context, caller string) (ShowReply, error) {
-	ls, inForce, err := r.opts.Store.InForceListSet()
+	rec, ls, inForce, err := r.opts.Store.InForceView()
 	if err != nil {
 		return ShowReply{}, fmt.Errorf("cannot read the list set in force: %w", err)
 	}
@@ -270,11 +292,11 @@ func (r *responder) show(ctx context.Context, caller string) (ShowReply, error) 
 		out.Notice = NoListSetNotice
 		return out, nil
 	}
-	h, err := r.header(ctx)
+	h, err := r.header(ctx, rec)
 	if err != nil {
 		return ShowReply{}, err
 	}
-	out.Generation, out.State, out.InForce, out.Notice = h.generation, h.state, h.inForce, h.notice
+	out.Generation, out.State, out.InForce, out.Notice, out.Latest = h.generation, h.state, h.inForce, h.notice, h.latest
 	_, view, err := r.snapshot(ls, h.generation)
 	if err != nil {
 		return ShowReply{}, err
@@ -292,14 +314,14 @@ func (r *responder) show(ctx context.Context, caller string) (ShowReply, error) 
 }
 
 func (r *responder) explain(ctx context.Context, caller, receiver string) (ExplainReply, error) {
-	ls, inForce, err := r.opts.Store.InForceListSet()
+	rec, ls, inForce, err := r.opts.Store.InForceView()
 	if err != nil {
 		return ExplainReply{}, fmt.Errorf("cannot read the list set in force: %w", err)
 	}
 	if !inForce {
 		return ExplainReply{}, errors.New(NoListSetNotice)
 	}
-	h, err := r.header(ctx)
+	h, err := r.header(ctx, rec)
 	if err != nil {
 		return ExplainReply{}, err
 	}
@@ -312,7 +334,7 @@ func (r *responder) explain(ctx context.Context, caller, receiver string) (Expla
 		return ExplainReply{}, err
 	}
 	return ExplainReply{
-		Describes: e.Describes, Generation: h.generation, State: h.state, InForce: h.inForce, Notice: h.notice,
+		Describes: e.Describes, Generation: h.generation, State: h.state, InForce: h.inForce, Latest: h.latest, Notice: h.notice,
 		Sender: e.Sender, Receiver: e.Receiver, Verbs: e.Verbs, OpenSubjects: e.OpenSubjects, RawClientLimit: e.RawClientLimit,
 	}, nil
 }
