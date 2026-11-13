@@ -168,7 +168,10 @@ func (a *Admin) Init(ctx context.Context) error {
 			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 		}
 	}
-	return a.initIssued(ctx)
+	if err := a.initIssued(ctx); err != nil {
+		return err
+	}
+	return a.initAdoption(ctx)
 }
 
 // initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An

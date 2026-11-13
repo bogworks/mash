@@ -110,6 +110,9 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if adoptedRefusal(cfg, verb, stderr) { // the file edit is a policy change on an adopted account, with or without --sync
+		return 1
+	}
 	path, err := policyPath(o.file, env, cfg)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)

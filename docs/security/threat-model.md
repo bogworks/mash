@@ -344,6 +344,19 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
 
+**The submitter key** (held by an outside system; its public half is in the adoption marker, `mash-adoption` bucket)
+- Lives: the private half with the outside system that owns the account's list sets, never on the operator host and
+  never in mash's key store (`mashctl policy adopt` refuses a key the store holds). The public half is in the adoption
+  marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
+  permission on the bucket or its stream subjects, and a test asserts it.
+- Held by: the outside system.
+- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a zone key, change the
+  account JWT directly or write the marker. mash refuses a list set signed by any other key (the intake that enforces
+  that is not in this version; until it exists an adopted account takes no list set at all).
+- If it leaks: run `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once
+  and the marker's history records the recovery. Whoever holds the admin credentials can replace the submitter, so the
+  marker protects against the submitter's key and against direct policy commands, not against the admin credentials.
+
 ## 11. Keeping it current
 
 - Update this file in the same pull request as any change to: `internal/admin/permissions.go`, `internal/ctlkeys/`, `internal/mint/`, the issue record (`internal/store/issued.go`),

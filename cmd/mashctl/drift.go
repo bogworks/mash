@@ -591,6 +591,9 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	if !ok {
 		return 1
 	}
+	if adoptedRefusal(l.cfg, "policy repair", stderr) { // before the first step writes anything
+		return 1
+	}
 	pf := func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }
 	pf("policy repair: %s\n", l.path)
 	if o.dryRun {

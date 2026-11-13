@@ -68,6 +68,9 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if adoptedRefusal(cfg, "reissue", stderr) {
+		return 1
+	}
 	path, err := policyPath(file, env, cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: reissue: no policy file: use --policy FILE or MASH_POLICY (%v)\n", err)

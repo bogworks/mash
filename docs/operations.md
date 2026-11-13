@@ -298,6 +298,20 @@ Adding an endpoint to the policy and minting its user (`mashctl add`, `mashctl r
 - **Revoked keys.** `retire`, `deprovision` and a rotating `reissue` set `revoked_at` on the key's entry after the revocation succeeds (best effort: a failure is a warning on stderr, and the revocation stands). A key that is recorded as revoked and still connected is reported as `revoked key still connected` and exits 1, because the revocation did not take effect: check that every server holds the account JWT with the revocation, and revoke the key again. Exit codes of `mashctl issued check`: 0 clean; 1 an unrecorded key or a revoked key is connected; 2 the check could not be made. A key revoked outside `mashctl` (nsc) is not marked, so it is not reported this way.
 - **After a finding.** The finding names the key and the signer. If the signer is a zone key, replace that key (`mashctl policy apply --replace-zone-key ZONE`), reissue the zone's endpoints, and revoke the unknown key in the account JWT. A key that is yours but predates the record is recorded by `mashctl reissue NAME`.
 
+## An account whose list sets belong to an outside system
+
+An outside system, rather than an operator running `mashctl`, may own the account's list sets. `mashctl policy adopt --submitter KEY` (see [mashctl.md](mashctl.md#adopting-the-account-an-outside-owner-of-the-list-sets)) marks the account that way and registers the one public key allowed to hand them in. From then on `mashctl` refuses on that account every change to policy that does not come through the list-set path: `policy apply`, `policy repair`, `add`, `reissue`, `label`, `unlabel`, `retire`, `set-meta --label` and `set-zone`. Reads, and the housekeeping of one endpoint, still work.
+
+**One account run both ways is not supported.** Running mash with an outside system as the owner of an account's list sets and also with operators changing that account's policy directly through mash is not supported, and mash does not try to make it work: on an adopted account the direct changes are refused, and an operator who works around the refusal (for example with `nsc` or another tool that writes the account JWT) leaves the account in a state mash makes no promise about. An account without the marker runs open or owner-line-only for now, as it did before.
+
+How to adopt: run `mashctl policy adopt --submitter KEY` with the account's admin credentials, where KEY is the public key of the outside system's submitter (it holds the private half; mash never does). Check it with `mashctl policy adopt --show`. To replace a lost or leaked submitter key, run it again with the new key (the recovery rotation); the old key is refused at once. The marker's revisions are the audit trail.
+
+What is not done yet, and the account is stuck with until it is:
+
+- **The list-set intake.** Nothing yet reads a list set from the submitter, checks its signature and base generation, or logs a refusal. An adopted account's policy cannot be changed at all until the intake exists.
+- **The first-list-set reconcile.** Adoption does not yet remove signing keys that are not mash's scoped keys or revoke user credentials issued outside the first list set. Adopting an account does not change what is already in it.
+- **Un-adoption.** There is no command, and none is planned in this version: an open question for the maintainer. The marker's bucket refuses deletes and purges, even to the admin.
+
 ## Removing an endpoint
 
 ```sh

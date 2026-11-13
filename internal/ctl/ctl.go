@@ -150,6 +150,7 @@ func policyLines(line func(left, right string)) {
 	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
 	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
 	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
+	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
 	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: zone keys, the account push, directory zone and labels; lists stale creds")
 }
 
@@ -319,6 +320,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return usage(err)
 		}
+		if len(u.Labels) > 0 { // labels are the policy's; a role, host, description or capability is not
+			if err := refuseIfAdopted(ctx, a, pfx, "set-meta"); err != nil {
+				return fail(err)
+			}
+		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {
 			return fail(err)
@@ -333,6 +339,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		if !sap.ValidZone(args[2]) {
 			return usage(fmt.Errorf("%s: set-zone: the zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", pfx, sap.MaxZoneLen))
+		}
+		if err := refuseIfAdopted(ctx, a, pfx, "set-zone"); err != nil {
+			return fail(err)
 		}
 		rec, err := a.SetZone(ctx, args[1], args[2])
 		if err != nil {

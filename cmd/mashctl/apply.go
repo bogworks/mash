@@ -204,6 +204,9 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if verb != "diff" && adoptedRefusal(cfg, "policy "+verb, stderr) { // first: before the file is read, any key made or anything pushed
+		return 1
+	}
 	fail := func(format string, a ...any) int { fmt.Fprintf(stderr, pfx+format+"\n", a...); return 1 }
 	var path string
 	var f *policy.File

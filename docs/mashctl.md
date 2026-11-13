@@ -90,6 +90,38 @@ Every user JWT `mashctl` issues is written to the issue record, the `mash-issued
 
 `issued check` asks every server, through the system account (`--sys-creds FILE`, else `MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `policy apply` does). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
 
+## Adopting the account: an outside owner of the list sets
+
+```sh
+mashctl policy adopt --submitter NKEY_PUBLIC_KEY
+mashctl policy adopt --show [--json]
+```
+
+An outside system may own the account's list sets (who may mail whom). `policy adopt` is how the operator tells mash so ([ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md)). Run it with the account's admin credentials and key store, like the other verbs that write to the server. It writes the adoption marker, one key (`account`) in the `mash-adoption` bucket, holding the submitter's public key, the account's public key, the time, the admin user that ran the command and the action (`adopt`, `recover`; `rotate` is reserved for the list-set intake). The bucket is made as the issue record's is: file storage, no TTL, history 64 (the revisions are the audit trail), rollup, delete and purge refused, no endpoint permission on it. `mashctl init` creates it, and `policy adopt` creates it when it is missing.
+
+- `--submitter` takes any valid nkey public key; the contract says an Ed25519 nkey public key and does not fix the prefix, so mash checks that it is a public key (a seed is refused, and neither is echoed) and nothing about its type. It must be a key mash does not hold: the account's own key, the operator and system keys, a zone signing key and the admin user's key are refused, and nothing is written.
+- The first run adopts the account. A second run with the same key writes nothing and says so. A run with a **different** key is the recovery rotation: it records the action `recover`, and the old key is refused from then on, at once, because mash reads the marker each time and keeps no copy.
+- `--show` prints the marker (`--json`: `adopted`, `marker`), or `not adopted`. It exits 1 when the marker cannot be read; it never calls an unreadable marker "not adopted".
+- There is no un-adopt command. Un-adoption is not supported yet; whether and how it should be is an open question for the maintainer. `next_submitter` is in the marker's schema, `--show` prints it, and only the list-set intake (not in this version) writes it.
+- This version has no list-set intake: nothing yet takes a list set from the submitter. An adopted account's policy therefore cannot be changed through mashctl until it does. Adopt only when you mean to hand the list sets over.
+
+### What an adopted account refuses
+
+On an adopted account these refuse before they touch anything (no policy-file edit, no key, no signing, no push, no creds file, no directory or issue record) with `mashctl: <command> is refused: this account is adopted by an outside system (submitter UABCDEFG...): list sets come only through the list-set path; nothing was changed` and exit 1. A marker that cannot be read (the server answers with an error, the bucket is not as mash makes it, the value is not one this version understands) refuses too, with `cannot tell whether this account is adopted: ...` instead: the guard fails closed.
+
+| Command | On an adopted account |
+|---|---|
+| `policy apply` (also `--dry-run`), `policy repair` (also `--dry-run`) | refused |
+| `add`, `reissue` | refused |
+| `label`, `unlabel` (also `--dry-run` and `--sync`: the policy-file edit is the policy change) | refused |
+| `retire` | refused (it edits the policy file and revokes in the account JWT) |
+| `set-meta` with `--label` | refused (labels are the policy's) |
+| `set-zone` | refused |
+| `set-meta` without `--label` (role, host, description, capabilities), `provision`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
+| `policy diff`, `drift`, `check`, `test`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
+
+The guard needs the server: it reads the marker over the admin connection first. So `policy apply` and `policy repair`, which until now needed only the system credentials, also need the admin credentials. Where no server is configured at all (no `url`, no `MASH_URL`), the one command that can run that way, a `label` or `unlabel` that only edits the policy file, is allowed and says nothing about adoption: mash has nothing to ask. With a server configured and the marker unreadable (no admin credentials, no connection), it refuses.
+
 ## Labels
 
 ```sh

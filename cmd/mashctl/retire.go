@@ -119,6 +119,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if adoptedRefusal(cfg, "retire", stderr) {
+		return 1
+	}
 	path, err := policyPath(file, env, cfg)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
