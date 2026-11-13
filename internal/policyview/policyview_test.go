@@ -46,21 +46,26 @@ func testSet() listset.ListSet {
 
 type fakeStore struct {
 	mu     sync.Mutex
+	gen    uint64 // the generation in force; 0 means 3, the generation the rig starts with
 	ls     *listset.ListSet
 	status *policyapply.Status
 	err    error
 }
 
-func (f *fakeStore) InForceListSet() (listset.ListSet, bool, error) {
+func (f *fakeStore) InForceView() (listset.Record, listset.ListSet, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
-		return listset.ListSet{}, false, f.err
+		return listset.Record{}, listset.ListSet{}, false, f.err
 	}
 	if f.ls == nil {
-		return listset.ListSet{}, false, nil
+		return listset.Record{}, listset.ListSet{}, false, nil
 	}
-	return *f.ls, true, nil
+	g := f.gen
+	if g == 0 {
+		g = 3
+	}
+	return listset.Record{Generation: g}, *f.ls, true, nil
 }
 
 func (f *fakeStore) LatestStatus(context.Context) (policyapply.Status, bool, error) {
@@ -243,8 +248,34 @@ func TestShowPartialSaysSo(t *testing.T) {
 	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpShow}), &v); err != nil {
 		t.Fatal(err)
 	}
-	if v.State != "partial" || v.InForce || !strings.Contains(v.Notice, "partial") {
+	if v.Generation != 3 || v.State != "applied" || !v.InForce || v.Latest == nil || *v.Latest != (Latest{4, "partial"}) || !strings.Contains(v.Notice, "partial") {
 		t.Fatalf("%+v", v)
+	}
+}
+
+func TestShowLabelsTheReachWithTheGenerationInForce(t *testing.T) {
+	r := newRig(t)
+	r.store.gen = 2
+	r.store.status = &policyapply.Status{Generation: 3, State: policyapply.StateRefused}
+	var v ShowReply
+	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpShow}), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Generation != 2 || !v.InForce || v.Latest == nil || *v.Latest != (Latest{3, "refused"}) || len(v.Reach) == 0 {
+		t.Fatalf("%+v", v)
+	}
+	var e ExplainReply
+	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "r.o.c"}), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Generation != 2 || e.Latest == nil || *e.Latest != (Latest{3, "refused"}) {
+		t.Fatalf("%+v", e)
+	}
+	// The same generation as the latest attempt: no latest block.
+	r.store.status = &policyapply.Status{Generation: 2, State: policyapply.StateApplied, InForce: true}
+	v = ShowReply{}
+	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpShow}), &v); err != nil || v.Latest != nil || v.Generation != 2 {
+		t.Fatalf("%v %+v", err, v)
 	}
 }
 

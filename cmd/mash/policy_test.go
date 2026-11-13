@@ -26,7 +26,9 @@ type policyStore struct {
 	status policyapply.Status
 }
 
-func (p policyStore) InForceListSet() (listset.ListSet, bool, error) { return p.ls, true, nil }
+func (p policyStore) InForceView() (listset.Record, listset.ListSet, bool, error) {
+	return listset.Record{Generation: p.status.Generation}, p.ls, true, nil
+}
 func (p policyStore) LatestStatus(context.Context) (policyapply.Status, bool, error) {
 	return p.status, true, nil
 }
@@ -163,21 +165,14 @@ func TestPolicyShowAndExplainAgainstAResponder(t *testing.T) {
 	}
 }
 
-func TestPolicyWithNoResponderIsOwnerLineOnly(t *testing.T) {
+func TestPolicyListSetCredentialWithNoResponderIsAnError(t *testing.T) {
 	e, adm := policyWorld(t)
 	a := policyEndpoint(t, e, adm, "r", "o", "a")
-	out, errs, code := policyRun(a, "policy", "show")
-	if code != 0 || strings.TrimSpace(out) != "open: owner line only, no list set in force" {
-		t.Fatalf("show: %d %q %q", code, out, errs)
-	}
-	out, _, code = policyRun(a, "policy", "explain", "r.o.b")
-	if code != 0 || strings.TrimSpace(out) != "open: owner line only, no list set in force" {
-		t.Fatalf("explain: %d %q", code, out)
-	}
-	out, _, code = policyRun(a, "policy", "show", "--json")
-	var v policyview.ShowReply
-	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.InForce || !strings.Contains(v.Notice, "owner line only") {
-		t.Fatalf("show --json: %d %s", code, out)
+	for _, args := range [][]string{{"policy", "show"}, {"policy", "show", "--json"}, {"policy", "explain", "r.o.b"}} {
+		out, errs, code := policyRun(a, args...)
+		if code != 1 || out != "" || !strings.Contains(errs, "policy view unavailable: no responder on agents.policy.r") {
+			t.Fatalf("%v: %d %q %q", args, code, out, errs)
+		}
 	}
 }
 
@@ -204,14 +199,21 @@ func TestPolicyOwnerLineCredentialAsksNothing(t *testing.T) {
 	if code != 0 || strings.TrimSpace(out) != want {
 		t.Fatalf("show: %d %q %q", code, out, errs)
 	}
-	out, _, code = policyRun(a, "policy", "explain", "r.o.b")
-	if code != 0 || strings.TrimSpace(out) != want {
-		t.Fatalf("explain: %d %q", code, out)
-	}
 	out, _, code = policyRun(a, "policy", "show", "--json")
 	var v policyview.ShowReply
 	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.State != "none" || !strings.Contains(v.Notice, "owner line only") {
 		t.Fatalf("show --json: %d %s", code, out)
+	}
+	out, _, code = policyRun(a, "policy", "explain", "r.o.b")
+	if code != 0 || !strings.Contains(out, "receiver: r.o.b") || !strings.Contains(out, "mail: unknown (no_list_set): "+want) {
+		t.Fatalf("explain: %d %q", code, out)
+	}
+	out, _, code = policyRun(a, "policy", "explain", "r.o.b", "--json")
+	var x policyview.ExplainReply
+	if code != 0 || json.Unmarshal([]byte(out), &x) != nil || x.Receiver != "r.o.b" || x.State != "none" || len(x.Verbs) != 4 ||
+		x.Verbs[0].Reason != "no_list_set" || x.Verbs[0].Allowed || !strings.Contains(x.Verbs[0].Detail, "owner line only") ||
+		strings.Contains(out, `"reach"`) {
+		t.Fatalf("explain --json: %d %s", code, out)
 	}
 	mu.Lock()
 	defer mu.Unlock()
