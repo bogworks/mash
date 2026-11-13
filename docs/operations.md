@@ -48,7 +48,7 @@ Adopt first runs read-only checks, in this order, and writes nothing until all p
 
 Then it writes, or with `--dry-run` prints exactly what it would write: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything, fsynced; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where a revocation looks for them); with `--admin-creds FILE`, that path as `admin_creds` in `config.json` (the file is checked to connect and not copied), or with `--mint-admin` a `mashadmin` user of the account, signed by the account identity key with full access as `init --local` makes it, as `<config dir>/server/mashadmin.creds` (0600; one already there that is valid for this account and connects is kept, not replaced); `config.json` (`url`, `owner`, `admin_creds`, and `tls_ca`, `tls_cert`, `tls_key` when the loaded configuration sets them) only if there is none (otherwise the settings are printed); and the open `policy.yaml` only if there is none. Running adopt again with the same inputs changes nothing.
 
-Adopt connect-tests whatever admin creds it ends with before it prints "All checks passed", and the summary says which it tested (`admin creds ok: connected (given)`, `(minted)` or `(kept)`). A `--mint-admin` user is made in memory and connected with in the read-only phase, so `--dry-run` reports a failure too and a failure writes nothing. An existing `mashadmin.creds` that parses but cannot connect is refused, not kept: move it aside to mint a new one. On an operator with strict signing key usage (`strict_signing_key_usage: true`), the server accepts only users signed by an account signing key, and the account identity key cannot sign users, so a minted `mashadmin` is rejected and adopt refuses with that explanation and the server's error text. mashctl does not fall back to one of its zone keys: they are scoped keys that impose a permission template, which is not admin access. The way out is `--admin-creds FILE` with a user signed by one of the account's signing keys.
+Adopt connect-tests whatever admin creds it ends with before it prints "All checks passed", and the summary says which it tested (`admin creds ok: connected (given)`, `(minted)` or `(kept)`). A `--mint-admin` user is made in memory and connected with in the read-only phase, so `--dry-run` reports a failure too and a failure writes nothing. An existing `mashadmin.creds` that parses but cannot connect is refused, not kept: move it aside to mint a new one. On an operator with strict signing key usage (`strict_signing_key_usage: true`), the server accepts only users signed by an account signing key, and the account identity key cannot sign users, so a minted `mashadmin` is rejected and adopt refuses with that explanation and the server's error text. mashctl does not fall back to another signing key. The way out is `--admin-creds FILE` with a user signed by one of the account's signing keys.
 
 The `mashadmin` creds that `--mint-admin` writes carry no permission limits on the account (when the server accepts them: see the strict-signing note above): whoever holds `mashadmin.creds` can publish and subscribe on every subject of the account, read every inbox and change the directory. Keep the file at 0600 on the machine that runs `mashctl`, and give endpoints their own creds, never these.
 
@@ -258,7 +258,7 @@ mashctl provision recv --agent acme --owner team1 --alias oldowner/oldname --use
 mashctl deprovision acme.team1.recv      # or: deprovision recv --agent acme --owner team1; the flat acme_team1_recv works too
 ```
 
-`--alias OWNER/NAME` names the legacy endpoint the new one answers to during the transition ([ADR 0076](decisions/0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md)); the admin layer verifies it (the legacy endpoint must exist, be unzoned and not already be claimed). Provisioning prints `provisioned acme.team1.recv: ...` with each token as typed. A bad token is a usage error (exit 2); a refusal (the name rule, an alias, an identity already provisioned, a retired identity, the setting off) exits 1 with the reason, nothing changed. A retired identity is refused with `endpoint acme.team1.recv is retired ... never reassigned (INV-002)`. `deprovision` of a new-form identity runs the retired-marker path described below, with the same `--user`, `--drained-to` and `--no-revoke` options as for a legacy name. `set-meta`, `set-zone`, `suspend`, `resume` and `suspended` still take a legacy name only.
+`--alias OWNER/NAME` names the legacy endpoint the new one answers to during the transition ([ADR 0076](decisions/0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md)); the admin layer verifies it (the legacy endpoint must exist and not already be claimed). Provisioning prints `provisioned acme.team1.recv: ...` with each token as typed. A bad token is a usage error (exit 2); a refusal (the name rule, an alias, an identity already provisioned, a retired identity, the setting off) exits 1 with the reason, nothing changed. A retired identity is refused with `endpoint acme.team1.recv is retired ... never reassigned (INV-002)`. `deprovision` of a new-form identity runs the retired-marker path described below, with the same `--user`, `--drained-to` and `--no-revoke` options as for a legacy name. `set-meta`, `suspend`, `resume` and `suspended` still take a legacy name only.
 
 ### A retired agent/owner/name is never reassigned
 
@@ -289,7 +289,7 @@ mashctl deprovision design --suspension 9f3c... --drained-to 41
 
 `--suspension ID --drained-to N` (both are required together) is the check that makes this safe: under the name's lock it refuses, touching nothing, unless the inbox is still suspended under that id and its last sequence is exactly N, and the directory record still belongs to the user key it had when `suspend` ran (a record that is missing, was missing at suspend time, or was replaced by another user key is refused; use plain `deprovision` for a leftover). The id, a random token `suspend` stores and prints, ties the drain to that one suspension, so an endpoint re-provisioned under the same name (which can have the same last sequence, commonly 0) cannot be removed by an old command. If another admin ran `resume` meanwhile, or mail arrived after it, the command fails instead of deleting mail you have not read. A plain `mashctl deprovision design` does not check, so use it only when you do not need the mail. `--drained-to` cannot be combined with `--user`.
 
-`suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl resume design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; `set-zone` refuses on a suspended endpoint, and so does provisioning over its stream. Suspend does not revoke: it prints `new mail parked; the endpoint's credentials are still valid`, and the endpoint can still connect and send. Revocation happens in `deprovision`. Both `suspend` and `resume` can be repeated safely. `mash admin` carries the same three verbs. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
+`suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl resume design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; provisioning over a suspended endpoint's stream refuses. Suspend does not revoke: it prints `new mail parked; the endpoint's credentials are still valid`, and the endpoint can still connect and send. Revocation happens in `deprovision`. Both `suspend` and `resume` can be repeated safely. `mash admin` carries the same three verbs. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
 
 ## Topologies
 
@@ -500,6 +500,74 @@ These timings are not configurable: peers and the server must agree on them, so 
 | Signed message age | 5 min | `endpoint.MaxSignedAge` (`mail.go`) | A message signed longer than this before it was stored is labelled `[stale]`: the replay defence. |
 | MCP ping | every 30 s, 10 s to answer | `mcpPingEvery`, `mcpPingWait` (`cmd/mash/serve.go`) | Serve's liveness check of its MCP client, recorded in the lease. |
 | Channel grace and fallback | 500 ms, 3 s | `mcp.ChannelGrace`, `mcp.ChannelFallback` (`internal/mcp/server.go`) | Claude Code drops channel events sent before it registers the channel; these bound that wait. |
+
+## Upgrading admin tooling across zone removal
+
+This is the reference for operators who run `mashctl` or `mash admin` from `main` and are upgrading across the zone removal ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)). The removal landed in five steps, Z1 to Z5. Each table gives the surface, what it did before, what it does after, and what you must do first.
+
+Before any step, on the release you run now:
+
+1. Run `mashctl audit`. A zoned record shows as an error (`audit --strict` exits 1). Run `unzone` for every record it names.
+2. A zone policy is applied when the account JWT carries a scoped signing key. With one applied, stay on the last release that has zones: mash builds no migration for a policy deployment, and `unzone`, `add` and `reissue` refuse with `a zone policy is applied: zones are removed (ADR 0091); stay on the last release that has zones until the label policy model ships`.
+3. Run `mashctl unzone NAME` for each zoned record BEFORE upgrading, and for a live account only on a go from the maintainer's coordinators.
+4. Make the system credentials available to anything that runs `add`, `reissue` or `unzone` (`MASH_SYS_CREDS`, `--sys-creds FILE` on `unzone`, or `sys.creds` beside the admin creds).
+5. Stop scripts that call a verb or flag removed below, and make scripts that parse `who --json` stop expecting `zone`.
+
+### Z1 (#411): the guards and `unzone`
+
+| Surface | Before | After | Do first |
+|---|---|---|---|
+| `mashctl set-zone` | set an endpoint's zone | removed | stop scripts that call it |
+| `mashctl provision`, `mashctl add` with `--zone` | placed the endpoint in a zone | flag removed (an unknown option, exit 2) | drop the flag |
+| zone output, six-token publish line in `mashctl permissions` | printed | gone | none |
+| `mashctl unzone NAME [--sys-creds FILE]` | did not exist | makes a zoned record five-token: needs the system credentials (no bypass), validates the inbox stream before it rewrites the record, is idempotent, and keeps stored mail. It does not reissue the user: afterwards run `mashctl permissions NAME --nsc` | run it for each zoned record while the endpoint receives no mail; a sender that cached the six-token address gets a no-responders error, never a silent loss, until it refreshes the directory |
+| `mashctl audit`, drift | a zoned record was valid | a zoned record is an error; `audit --strict` fails | run `unzone` |
+| `mash serve` | started with a zoned record | refuses to start while this endpoint's record or any record it reads is zoned, naming `mashctl unzone NAME` | run `unzone` first |
+| `mashctl policy apply`, `unzone` | applied or ran over any account | refuse an account whose JWT carries a zone policy (a scoped signing key) | stay on the last zoned release |
+
+### Z2 (#504): minting without zones
+
+| Surface | Before | After | Do first |
+|---|---|---|---|
+| `mashctl add`, `mashctl reissue` signing | a zone key and the policy file's rules shaped the permissions and tags | the account key signs, with the owner-wide set `admin.Permissions(owner, name)`; no zone key, no tags | none |
+| `mashctl policy show`, `explain`, `diff` | worked | removed | stop scripts that call them |
+| `mashctl policy apply`, `--dry-run`, `repair` | worked | refuse (exit 1) | stop scripts that call them |
+| policy file naming a zone, `subject_label` or a `zone` label | accepted | refused | edit or drop the file |
+| `drift --json` | had a `keys` object | `keys` removed | do not read it |
+| `--budget` and the `--*-zone` flags | accepted | removed | drop them |
+| `mashctl reissue` | kept creds signed by an old zone key | rotates them (new user key, old key revoked) | give `reissue` the system credentials |
+| issue record (`mash-issued`) | written by the policy path | written by `add` and `reissue` | none |
+
+### Z3 (#519): the policy file and its verbs are deleted
+
+| Surface | Before | After | Do first |
+|---|---|---|---|
+| `mashctl policy check`, `test`, `apply`, `drift`, `repair`; top-level `mashctl drift` | worked | deleted; `mashctl policy` has no subcommands and exits 2 | stop scripts that call them |
+| `--policy`, `MASH_POLICY`, `label --sync` | read or wrote the policy file | removed (`--policy` is an unknown option) | drop them |
+| `mashctl add NAME [--label k=v]...` | read the policy file | declares the endpoint in the directory; refuses a name the directory already holds | use `reissue` to rotate an existing endpoint |
+| `mashctl reissue NAME... \| --all \| --changed` | walked the policy file | walks the directory: this owner's legacy-form records; a three-token record or another owner's record is named on stderr and skipped | none |
+| `mashctl retire`, `label`, `unlabel` | acted on the policy file | act on the directory record | none |
+| `add`, `reissue` | needed no system credentials | need the system credentials (`MASH_SYS_CREDS`, or `sys.creds` beside the admin creds); no bypass flag; refuse while a zone policy is applied | provide them to every runner of these verbs |
+| `mashctl init --local`, `mashctl adopt` | wrote `policy.yaml` | no longer write it | none |
+| `mint.Mint` (Go library) | old signature | changed | rebuild callers |
+
+### Z4 (#534): the wire
+
+| Surface | Before | After | Do first |
+|---|---|---|---|
+| mail subject | `agents.mail.<agent>.<owner>.<name>`, or six tokens with a zone | always `agents.mail.<agent>.<owner>.<name>`; a six-token subject is not mail | `unzone` every zoned record |
+| `mash who --json` | had a `zone` key | no `zone` key | scripts must not expect it |
+| `mash who` text | zone suffix | no suffix | none |
+| inbox streams | a zoned inbox took two mail subjects | one mail subject (`unzone` moves a zoned stream to it) | none |
+| zoned records | normal | still readable, but only by the guards and `unzone` | none |
+
+### Z5 (this change): documentation only
+
+No behaviour changes. The documents no longer describe zones, except for this section, the upgrade guards and the zoned-record finding in [audit](audit.md).
+
+### Order of upgrade
+
+Do the steps in this order. Z1 first: its guards and `unzone` tell you what is still zoned, and the other steps assume nothing is. Then Z2 and Z3, which change minting and the verbs (give the system credentials to whatever runs `add` and `reissue`, and retire any script that uses the policy file or its verbs). Z4 last: it changes the wire, the mail subject and `who --json`, and a six-token subject stops being mail, so every record must be five-token by then.
 
 ## Troubleshooting
 

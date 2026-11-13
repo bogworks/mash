@@ -58,7 +58,7 @@ It gates the final mash release (card #129: "a gate on the final mash release").
 
 ### Non-goals
 
-- A mash SDK. Nothing of mash goes in it: no `mail` verb, no zones, no mash signatures (`SignInstance`, `SignUrgent`,
+- A mash SDK. The subject shape is the SAP-0.3 five-token shape `agents.<verb>.<agent>.<owner>.<name>` (mash mail is `agents.mail.<agent>.<owner>.<name>`); there is no zone token. Nothing of mash goes in it: no `mail` verb, no mash signatures (`SignInstance`, `SignUrgent`,
   `SignInReplyTo`, `SignVia`), no mash token rule, no JetStream inboxes.
 - Rebuilding mash on the SDK. That is a follow-on contract, and card #129's done-when needs it: "mash's main branch
   uses the SDK". This contract only requires that mash can (REQ-016). The follow-on is tracked as Q11.
@@ -121,7 +121,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 ### REQ-001: The protocol only, nothing of mash
 - Source: Confirmed. "it should just be building that not a mash SDK" (Randy, card #129 log, 2026-11-10).
 - MUST: the SDK implements SAP 0.3 and its optional §13 extension, and no other protocol.
-- MUST NOT: mash's `mail` verb, zone token, signature variants, token rule, directory or JetStream inboxes appear in
+- MUST NOT: mash's `mail` verb, signature variants, token rule, directory or JetStream inboxes appear in
   the SDK's code, API or docs.
 - Acceptance: AT-009.
 
@@ -373,7 +373,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   SAP neither requires nor forbids it, so it is SDK policy; it may not set or override any header SAP defines.
 - MUST: no extension point is named for, or shaped around, one consumer.
 - MUST: a written mapping from mash's `internal/sap` to the SDK's API shows which SDK call replaces each SAP piece,
-  and lists each mash-only piece (the `mail` verb, zones, the mash signature variants, the stricter token rule) as
+  and lists each mash-only piece (the `mail` verb, the mash signature variants, the stricter token rule) as
   staying in mash for the follow-on rebuild, with the extension point it would use, if any. That
   is the evidence a later consumer can build on it. The mapping is context for the follow-on contract, not a
   requirement on the SDK's API. It lives in one file, `docs/mash-mapping.md`, the only file AT-009 exempts. That file
@@ -462,7 +462,7 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
 ### Evidence from existing systems (not requirements)
 
 - **mash `internal/sap/`.** It has the only Go implementation of §13 (`sender.go`). It also has mash-only signatures, a
-  `mail` verb, zones (`subjects.go`) and a stricter token rule (`identity.go`). It has no generic caller and no
+  `mail` verb (`subjects.go`) and a stricter token rule (`identity.go`). It has no generic caller and no
   conformance table, and it pins the spec at `c48cea5f`.
 - **`henomis/phero` `nats/`** (Go, v2.3.0). It has a caller and a host and shows Go idioms for `micro`, error mapping
   and the heartbeat tracker. It lacks §13, its client cannot answer a query, and it is coupled to Phero's types.
@@ -632,7 +632,7 @@ The contract is accepted on these five lines. The checks below are how each is s
 ### AT-009: No mash (runnable check, plus a review)
 - A CI check fails on any import of a `github.com/bogworks/` package outside the SDK's own module (its own
   subpackages are allowed), and on the identifiers or subjects named in REQ-001 (`mail`
-  verb, zone, `SignInstance`, `SignUrgent`, `SignInReplyTo`, `SignVia`) in code or docs.
+  verb, `SignInstance`, `SignUrgent`, `SignInReplyTo`, `SignVia`) in code or docs.
 - One file is exempt: `docs/mash-mapping.md`, the REQ-016 mapping that AT-010 requires, which has to name mash's
   pieces. The check names that exact path and exempts nothing else, and the file is left out of the upstream landing.
 - The adversarial review of each release inspects the exported API (`go doc -all` output) for any concept not in SAP
