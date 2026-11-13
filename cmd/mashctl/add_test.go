@@ -217,7 +217,7 @@ func TestAddAndReissue(t *testing.T) {
 	if _, errb, code := h.run("reissue", "a"); code != 1 || !strings.Contains(errb, "mode 0644") {
 		t.Fatalf("open mode: %d %q", code, errb)
 	}
-	for _, args := range [][]string{{"reissue"}, {"reissue", "--changed", "a"}, {"reissue", "--all", "a"}, {"reissue", "--all", "--changed"}, {"reissue", "--bogus"}, {"reissue", "a", "--policy", "x.yaml"}} {
+	for _, args := range [][]string{{"reissue"}, {"reissue", "--changed", "a"}, {"reissue", "--all", "a"}, {"reissue", "--all", "--changed"}, {"reissue", "--bogus"}, {"reissue", "a", "--yes"}, {"reissue", "--all", "--widen"}, {"reissue", "--changed", "--widen"}, {"reissue", "a", "--policy", "x.yaml"}} {
 		if _, _, code := h.run(args...); code != 2 {
 			t.Errorf("%v: exit %d", args, code)
 		}
@@ -477,8 +477,8 @@ func TestReissueChangedFindsCredsSignedByAnotherKey(t *testing.T) {
 	})
 	calls := fakeRevoke(t, nil)
 	_, oldPub := h.credsClaims("a2")
-	out, errb, code := h.run("reissue", "--changed")
-	if code != 0 || out != "reissued a2 (new user key, old key revoked)\n" {
+	out, errb, code := h.run("reissue", "--changed", "--yes")
+	if code != 0 || !strings.HasSuffix(out, "\nreissued a2 (new user key, old key revoked)\n") || strings.Contains(out, "will reissue b") {
 		t.Fatalf("--changed: %d %q %q", code, out, errb)
 	}
 	uc, newPub := h.credsClaims("a2")
@@ -499,14 +499,14 @@ func TestReissueAllCoversTheDirectory(t *testing.T) {
 	h := newAddEnv(t)
 	h.seed("a")
 	h.seed("b")
-	out, errb, code := h.run("reissue", "--all")
-	if code != 0 || out != "reissued a\nreissued b\n" {
+	out, errb, code := h.run("reissue", "--all", "--yes")
+	if code != 0 || !strings.HasSuffix(out, "reissued a\nreissued b\n") {
 		t.Fatalf("--all: %d %q %q", code, out, errb)
 	}
 	// an endpoint with a record but no creds file here is reported by name and the rest are still done
 	os.Remove(h.creds("b"))
-	out, errb, code = h.run("reissue", "--all")
-	if code != 1 || out != "reissued a\n" || !strings.Contains(errb, "reissue b: no creds file for b") {
+	out, errb, code = h.run("reissue", "--all", "--yes")
+	if code != 1 || !strings.HasSuffix(out, "reissued a\n") || !strings.Contains(errb, "reissue b: no creds file for b") {
 		t.Fatalf("--all with b's creds gone: %d %q %q", code, out, errb)
 	}
 }

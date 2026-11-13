@@ -125,7 +125,7 @@ func adoptLines(line func(left, right string)) {
 
 func mintLines(line func(left, right string)) {
 	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
-	line("reissue NAME... | --all | --changed", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
+	line("reissue NAME... [--widen] | --all --yes | --changed --yes", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
 }
 
 func issuedLines(line func(left, right string)) {
