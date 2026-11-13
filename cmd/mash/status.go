@@ -125,6 +125,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	if l := spoolFaultLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	if l := legacyInboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
@@ -132,6 +135,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	if l := legacyInboxEvictionLine(src); l != "" {
+		lines = append(lines, l)
+	}
+	if l := leaseBucketLine(src); l != "" {
 		lines = append(lines, l)
 	}
 	lines = append(lines, relayLine(src))
@@ -471,6 +477,23 @@ func legacyInboxLine(src *statusSource) string {
 	return ""
 }
 
+// spoolFaultLine says that mail is held because the spool is failing (MASH_SPOOL_REQUIRED). Empty when the spool works,
+// when the setting is off, from a shell (nothing is connected) and with no running endpoint. While no spool has yet
+// bound there is no endpoint state to read it from, so serve keeps the endpoint in the state and the line comes from it.
+func spoolFaultLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.SpoolFaultLine(); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
 // inboxLine says when the endpoint's own inbox has evicted mail it never received, or is near full. Empty when there is
 // nothing to say, from a shell (nothing is connected), with no running endpoint, and whenever the server will not or
 // cannot show the inbox: it is advice, and status never fails over it.
@@ -483,6 +506,22 @@ func inboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.InboxEvictionLine(context.Background()); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// leaseBucketLine says when the lease bucket still allows rollup writes. Empty when there is nothing to say, from a
+// shell (nothing is connected), with no running endpoint, and whenever the server will not or cannot show the stream.
+func leaseBucketLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.LeaseRollupLine(context.Background()); ok {
 		return redactText(l)
 	}
 	return ""

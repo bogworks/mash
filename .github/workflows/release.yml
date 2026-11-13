@@ -105,6 +105,11 @@ jobs:
           - {goos: darwin, goarch: amd64}
           - {goos: darwin, goarch: arm64}
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -127,6 +132,7 @@ jobs:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
+          retention-days: 1
   draft:
     # A draft exists only once the provenance, the SBOMs and their attestations do, so publishing can never precede or outlive a
     # failed attestation.
@@ -140,14 +146,23 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
-      - name: Quickstart script and changelog
+      - name: Quickstart script and release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -160,16 +175,23 @@ jobs:
           # script just copied, byte for byte.
           [ -f dist/SHA256SUMS ] || { echo "the sums artifact brought no SHA256SUMS" >&2; exit 1; }
           (cd dist && grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c -)
-          # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: commits of
-          # an unpublished tag belong in these notes. None (the first release) means the whole history.
+          # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: the compare link
+          # runs from it. None means the first release.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
           prev="$(scripts/notes-base "$GITHUB_REF_NAME" "$commit" "$RUNNER_TEMP/releases.json")"
+          # The notes are the change log section of the released version, the same text (ADR 0105, release standard rule 23):
+          # prose first, then the lists, never raw commit subjects. `section` fails when the version has no section, and
+          # `check-notes` (internal/releasenotes, the test the release gate applies too) fails when the notes do not open with a
+          # Summary and an Upgrading section, still hold the REPLACE THIS placeholder, or end a line in a commit hash. Both run
+          # before the draft exists. The compare link is the last paragraph; the first release has no previous one.
+          version="${GITHUB_REF_NAME#v}"
+          go run ./scripts/changelog section --version "$version" > dist/CHANGELOG.md
           if [ -n "$prev" ]; then
-            range="$prev..$commit"
+            printf '\nFull changes: [%s...%s](%s/%s/compare/%s...%s)\n' "$prev" "$GITHUB_REF_NAME" "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY}" "$prev" "$GITHUB_REF_NAME" >> dist/CHANGELOG.md
+            go run ./scripts/changelog check-notes dist/CHANGELOG.md --version "$version" --prev "${prev#v}"
           else
-            range="$commit"
+            go run ./scripts/changelog check-notes dist/CHANGELOG.md
           fi
-          { echo "# $GITHUB_REF_NAME"; echo; git log --no-merges --format='- %s (%h)' "$range"; } > dist/CHANGELOG.md
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -196,6 +218,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -223,6 +250,7 @@ jobs:
           name: sums
           path: dist/SHA256SUMS
           if-no-files-found: error
+          retention-days: 1
   attest:
     # Build provenance for the four binaries, made in-job on the self-hosted runner that holds them: actions/attest-build-provenance
     # signs with this workflow's own identity, so no reusable workflow of another repository runs (ADR 0079). The Sigstore
@@ -237,6 +265,11 @@ jobs:
       attestations: write
       contents: read
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mash-* # the binaries only: never an SBOM artifact (sbom-*) another job may already have uploaded
@@ -252,7 +285,10 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/mash-*
+            dist/mash-linux-amd64
+            dist/mash-linux-arm64
+            dist/mash-darwin-amd64
+            dist/mash-darwin-arm64
             dist/SHA256SUMS
       - name: Keep the provenance bundle as mash.intoto.jsonl
         env:
@@ -268,6 +304,7 @@ jobs:
           name: provenance
           path: provenance/mash.intoto.jsonl
           if-no-files-found: error
+          retention-days: 1
   sbom:
     # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
     # exactly the bytes a consumer downloads. The tool version is pinned; the job reads and uploads, nothing else.
@@ -286,6 +323,11 @@ jobs:
           - {goos: darwin, goarch: amd64}
           - {goos: darwin, goarch: arm64}
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -310,6 +352,7 @@ jobs:
           name: sbom-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json
           if-no-files-found: error
+          retention-days: 1
   attest-sbom:
     needs: sbom
     if: ${{ !cancelled() && needs.sbom.result == 'success' }} # explicit: see build
@@ -327,6 +370,11 @@ jobs:
           - {goos: darwin, goarch: amd64}
           - {goos: darwin, goarch: arm64}
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -351,6 +399,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The runners are persistent: a file an earlier job left in dist or provenance must never reach this one.
+      - name: Start from empty dist
+        run: |
+          set -euo pipefail
+          rm -rf dist provenance && mkdir -p dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist # the four binaries, the four SBOMs, SHA256SUMS and mash.intoto.jsonl
@@ -390,3 +443,36 @@ jobs:
               exit 1
             fi
           done
+  dry-run-notes:
+    # The dry run's proof of the release-notes path (ADR 0105): the draft job builds the notes only on a tag push, so a change
+    # to `scripts/changelog section`, `check-notes` or the compare line would otherwise first run at a real release. This job
+    # runs the same commands on the latest released change log section, in $RUNNER_TEMP: no dist, no draft, no release, no token.
+    # It needs no other job, and no job needs it.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 20
+    runs-on: [self-hosted, rh-linux]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Release notes for the latest released section
+        run: |
+          set -euo pipefail
+          # The latest released version is the first numbered heading of the change log (`## [Unreleased]` is skipped).
+          version="$(sed -n 's/^## \[\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\] - .*/\1/p' CHANGELOG.md | head -n 1)"
+          [ -n "$version" ] || { echo "CHANGELOG.md has no released version section (## [X.Y.Z] - date)" >&2; exit 1; }
+          go run ./scripts/changelog section --version "$version" > "$RUNNER_TEMP/notes.md"
+          # The base is the highest release tag strictly below the version, as the draft job finds one. None is fine.
+          prev="$({ git tag --list 'v[0-9]*.[0-9]*.[0-9]*'; echo "v$version"; } | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | sort -Vu | awk -v v="v$version" '$0 == v { exit } { p = $0 } END { print p }')"
+          if [ -n "$prev" ]; then
+            printf '\nFull changes: [%s...%s](%s/%s/compare/%s...%s)\n' "$prev" "v$version" "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY}" "$prev" "v$version" >> "$RUNNER_TEMP/notes.md"
+            go run ./scripts/changelog check-notes "$RUNNER_TEMP/notes.md" --version "$version" --prev "${prev#v}"
+          else
+            go run ./scripts/changelog check-notes "$RUNNER_TEMP/notes.md"
+          fi

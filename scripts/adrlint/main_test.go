@@ -145,7 +145,7 @@ func TestDocs(t *testing.T) {
 		{"c: two PRs that took the same number are refused as a duplicate", with(good(), "0002-first.md", goodADR, "0002-second.md", goodADR), []string{"number 0002 is used by more than one"}},
 		{"n: no NEXT file and consistent numbers", with(good(), "0002-new.md", goodADR), nil},
 		{"n: no ADRs and no NEXT", map[string]string{"README.md": "# Decisions\n"}, nil},
-		{"n: a NEXT file is retired", with(good(), "NEXT", "0002\n"), []string{"NEXT:1: docs/decisions/NEXT is retired (ADR 0089)", "greater than the highest at"}},
+		{"n: a NEXT file is retired", with(good(), "NEXT", "0002\n"), []string{"NEXT:1: docs/decisions/NEXT is retired (ADR 0089)", "no ADR file at"}},
 		{"c: gap allowed", with(good(), "0003-three.md", goodADR, "README.md", goodReadme+"- [x](0003-three.md)\n"), nil},
 		{"a: extra front matter key ok", with(good(), adr, edit(goodADR, "status: accepted", "status: accepted\nrecorded: 2026-10-31")), nil},
 		{"b: heading with parenthetical suffix", with(good(), adr, edit(goodADR, "## Considered Options", "## Considered Options (reconstructed 2026-10-31; not recorded at the time)")), nil},
@@ -728,7 +728,7 @@ func TestIndex_usage(t *testing.T) {
 	}
 }
 
-// TestDocs_newNumber covers rule f: an ADR the pull request adds takes a number greater than the highest at the base tip.
+// TestDocs_newNumber covers rule f: an ADR the pull request adds takes a number no ADR file at the base tip uses.
 func TestDocs_newNumber(t *testing.T) {
 	const mbSHA = "1234567"
 	pth := func(n string) string { return "docs/decisions/" + n }
@@ -741,8 +741,10 @@ func TestDocs_newNumber(t *testing.T) {
 		want    []string
 	}{
 		{"a: adds 0090, highest 0088", "0090-new.md", nil, false, nil},
-		{"b: adds 0088, taken at the tip", "0088-mine.md", nil, false, []string{"0088-mine.md", "number 0088", "highest at good is 0088", "take any number greater than 0088"}},
-		{"c: adds 0087, lower than the tip's highest", "0087-mine.md", nil, false, []string{"number 0087", "take any number greater than 0088"}},
+		{"b: adds 0088, taken at the tip", "0088-mine.md", nil, false, []string{"0088-mine.md", "number 0088", "0088-top.md at good already uses", "take another number that is free"}},
+		{"c: adds 0087, below the tip's highest but unused", "0087-mine.md", nil, false, nil},
+		{"i: adds 0001, taken by an older ADR at the tip", "0001-mine.md", nil, false, []string{"0001-use-one-way.md at good already uses"}},
+		{"j: adds 0200, a gap above the tip", "0200-new.md", nil, false, nil},
 		{"d: adds 0089, consecutive", "0089-new.md", nil, false, nil},
 		{"e: adds nothing", "", nil, false, nil},
 		{"f: NEXT present with --base", "0090-new.md", nil, true, []string{"NEXT is retired"}},

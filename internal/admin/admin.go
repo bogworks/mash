@@ -136,7 +136,7 @@ func New(nc *nats.Conn, owner string) (*Admin, error) {
 // Conn is the connection the Admin was made with. The caller owns it.
 func (a *Admin) Conn() *nats.Conn { return a.nc }
 
-// Init creates the directory, lease and retired-name buckets. It is idempotent. A bucket from before buckets had a size cap (no
+// Init creates the directory, lease, retired-name and issue-record buckets. It is idempotent. A bucket from before buckets had a size cap (no
 // MaxBytes) is bounded in place with a stream update, keeping its keys; a bucket whose MaxBytes is smaller than the
 // configured limit is raised to it; a larger one is kept (a limit is never lowered), and nothing is purged. The lease
 // bucket does not allow rollup: Init creates it hardened and hardens an existing one (see store.HardenLeaseBucket),
@@ -168,7 +168,7 @@ func (a *Admin) Init(ctx context.Context) error {
 			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 		}
 	}
-	return nil
+	return a.initIssued(ctx)
 }
 
 // initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An

@@ -28,8 +28,9 @@
 //	   absent at the merge-base (the pull request added it) is free. When git cannot find a merge-base, <ref> itself
 //	   is the comparison point (stricter)
 //	f  with --base: an ADR file the pull request adds (in its diff, absent at the merge-base) must have a number
-//	   greater than the highest ADR number at the tip of <ref> (ADR 0089); there is no counter file, and two pull
-//	   requests that took the same number are caught by the duplicate check of rule c on the queue's combined tree
+//	   that no ADR file at the tip of <ref> uses (ADR 0106, amending ADR 0089); a number below the tip's highest is
+//	   fine when unused, gaps and out-of-order merges are allowed, there is no counter file, and two pull requests
+//	   that took the same number are caught by the duplicate check of rule c on the queue's combined tree
 //
 // pr reads PR_BODY and PR_LABELS (comma-separated) from the environment and the changed paths, one per line, from
 // --files. The body needs exactly one "Decision: none" or "Decision: ADR-NNNN" line; the ADR must exist and be among
@@ -354,7 +355,7 @@ func lintDocs(dir string, extra *regexp.Regexp) ([]string, error) {
 
 	// The counter file NEXT is retired (ADR 0089): a file by that name is a violation.
 	if _, err := os.Stat(filepath.Join(dir, "NEXT")); err == nil {
-		vs = append(vs, viol(filepath.Join(dir, "NEXT"), 1, "docs/decisions/NEXT is retired (ADR 0089): delete it; a new ADR takes any number greater than the highest at <base>"))
+		vs = append(vs, viol(filepath.Join(dir, "NEXT"), 1, "docs/decisions/NEXT is retired (ADR 0089): delete it; a new ADR takes any number no ADR file at <base> uses"))
 	}
 
 	// c: README links.
@@ -644,7 +645,7 @@ func lintImmutableAt(dir, rel, point, base string, git gitFunc) ([]string, error
 	return append(vs, nv...), nil
 }
 
-// lintNewNumbers is rule f: each added ADR file's number must be greater than the highest ADR number at base.
+// lintNewNumbers is rule f: each added ADR file's number must not be used by any ADR file at base (ADR 0106).
 func lintNewNumbers(dir, rel, base string, added []string, git gitFunc) ([]string, error) {
 	if len(added) == 0 {
 		return nil, nil
@@ -653,18 +654,18 @@ func lintNewNumbers(dir, rel, base string, added []string, git gitFunc) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("git ls-tree %s: %w", base, err)
 	}
-	highest := 0
+	used := map[string]string{} // number -> the file at base that holds it
 	for _, p := range strings.Split(string(out), "\n") {
 		if n := filepath.Base(strings.TrimSpace(p)); nameRE.MatchString(n) {
-			if num, err := strconv.Atoi(n[:4]); err == nil {
-				highest = max(highest, num)
+			if _, ok := used[n[:4]]; !ok {
+				used[n[:4]] = n
 			}
 		}
 	}
 	var vs []string
 	for _, n := range added {
-		if num, _ := strconv.Atoi(n[:4]); num <= highest {
-			vs = append(vs, viol(filepath.Join(dir, n), 1, "new ADR %s has number %04d but the highest at %s is %04d: renumber it, take any number greater than %04d", n, num, base, highest, highest))
+		if ex, ok := used[n[:4]]; ok {
+			vs = append(vs, viol(filepath.Join(dir, n), 1, "new ADR %s has number %s, which %s at %s already uses: take another number that is free on the base and in the pull request", n, n[:4], ex, base))
 		}
 	}
 	return vs, nil
