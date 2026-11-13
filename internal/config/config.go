@@ -65,6 +65,7 @@ type Config struct {
 	LaunchToken      string       // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
 	Host             string       // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart   bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	SpoolRequired    bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
 	Dir              string       // the config directory (ConfigDir); "" when none can be found
 	Legacy           string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
@@ -116,6 +117,7 @@ type file struct {
 	TLSKey  string `json:"tls_key"`
 
 	SpoolFromStart *bool `json:"spool_from_start"`
+	SpoolRequired  *bool `json:"spool_required"`
 
 	InsecureLoopback *bool `json:"insecure_loopback"`
 
@@ -356,6 +358,9 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if f.SpoolFromStart != nil {
 		c.SpoolFromStart = *f.SpoolFromStart
 	}
+	if f.SpoolRequired != nil {
+		c.SpoolRequired = *f.SpoolRequired
+	}
 	if f.InsecureLoopback != nil {
 		c.InsecureLoopback = *f.InsecureLoopback
 	}
@@ -435,6 +440,17 @@ func Load(lookup Lookup, home string) (Config, error) {
 		c.SpoolFromStart = false
 	default:
 		return c, fmt.Errorf("mash: MASH_SPOOL_FROM_START=%q is not 1, true, 0 or false", v)
+	}
+
+	// Only "1" and "true" turn it on and "0" and "false" off: a typo must not silently keep mail on the channel path.
+	switch v := env("MASH_SPOOL_REQUIRED"); v {
+	case "":
+	case "1", "true":
+		c.SpoolRequired = true
+	case "0", "false":
+		c.SpoolRequired = false
+	default:
+		return c, fmt.Errorf("mash: MASH_SPOOL_REQUIRED=%q is not 1, true, 0 or false", v)
 	}
 
 	switch v := env("MASH_INSECURE_LOOPBACK"); v {

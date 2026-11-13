@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/releasenotes"
 )
 
 func tree(t *testing.T, files map[string]string) string {
@@ -39,6 +41,9 @@ func read(t *testing.T, root, name string) string {
 }
 
 const header = "# Changelog\n\nIntro.\n\n"
+
+// opening is what assemble writes under a new section's heading.
+const opening = "### Summary\n\n" + SummaryPlaceholder + "\n\n### Upgrading\n\n" + UpgradingPlaceholder + "\n\n"
 
 const prior = "## [0.3.2] - 2026-11-02\n\n### Added\n\n- Old one.\n- Old two.\n\n### Fixed\n\n- Old fix.\n"
 
@@ -102,7 +107,7 @@ func TestAssemble_order_bulletsAndFragments(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errs)
 	}
-	want := header + "## [Unreleased]\n\n## [0.4.0] - 2026-11-03\n\n" +
+	want := header + "## [Unreleased]\n\n## [0.4.0] - 2026-11-03\n\n" + opening +
 		"### Added\n\n- Existing add.\n- Existing add two,\n  continued.\n- Existing add three.\n- Alpha entry,\n  second line.\n\n  third after blank.\n- Zeta entry.\n\n" +
 		"### Changed\n\n- A change.\n\n### Deprecated\n\n- Soon gone.\n\n### Removed\n\n- A removal.\n\n" +
 		"### Fixed\n\n- Existing fix.\n\n### Security\n\n- A security note.\n\n### Docs\n\n- A docs line.\n\n" + prior
@@ -123,7 +128,7 @@ func TestAssemble_emptyUnreleasedAndOnlyFragments(t *testing.T) {
 	if code, out, _ := cli("assemble", "--version", "0.3.3", "--date", "2026-11-03", "--root", root); code != 0 {
 		t.Fatal(code, out)
 	}
-	want := header + "## [Unreleased]\n\n## [0.3.3] - 2026-11-03\n\n### Fixed\n\n- Fix.\n\n" + prior
+	want := header + "## [Unreleased]\n\n## [0.3.3] - 2026-11-03\n\n" + opening + "### Fixed\n\n- Fix.\n\n" + prior
 	if got := read(t, root, "CHANGELOG.md"); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -137,7 +142,7 @@ func TestAssemble_unreleasedIsLast(t *testing.T) {
 	if code, out, _ := cli("assemble", "--version", "0.1.0", "--date", "2026-11-03", "--root", root); code != 0 {
 		t.Fatal(code, out)
 	}
-	want := header + "## [Unreleased]\n\n## [0.1.0] - 2026-11-03\n\n### Added\n\n- One.\n\n### Fixed\n\n- Fix.\n"
+	want := header + "## [Unreleased]\n\n## [0.1.0] - 2026-11-03\n\n" + opening + "### Added\n\n- One.\n\n### Fixed\n\n- Fix.\n"
 	if got := read(t, root, "CHANGELOG.md"); got != want {
 		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -197,7 +202,7 @@ func TestAssemble_dryRunPrintsTheSectionOnly(t *testing.T) {
 	cl := header + "## [Unreleased]\n\n### Added\n\n- One.\n\n" + prior
 	root := tree(t, map[string]string{"CHANGELOG.md": cl, "changelog.d/a.fixed.md": "Fix.\n"})
 	code, out, _ := cli("assemble", "--version", "0.4.0", "--date", "2026-11-03", "--dry-run", "--root", root)
-	want := "## [0.4.0] - 2026-11-03\n\n### Added\n\n- One.\n\n### Fixed\n\n- Fix.\n\n"
+	want := "## [0.4.0] - 2026-11-03\n\n" + opening + "### Added\n\n- One.\n\n### Fixed\n\n- Fix.\n\n"
 	if code != 0 || out != want {
 		t.Fatalf("%d %q", code, out)
 	}
@@ -214,13 +219,13 @@ func TestAssemble_customPaths(t *testing.T) {
 	if code, out, _ := cli("assemble", "--version", "1.0.0", "--date", "2026-11-03", "--root", root, "--dir", "frag", "--changelog", "docs/CL.md"); code != 0 {
 		t.Fatal(code, out)
 	}
-	if !strings.Contains(read(t, root, "docs/CL.md"), "## [1.0.0] - 2026-11-03\n\n### Added\n\n- x\n") {
+	if !strings.Contains(read(t, root, "docs/CL.md"), "## [1.0.0] - 2026-11-03\n\n"+opening+"### Added\n\n- x\n") {
 		t.Error("not assembled")
 	}
 }
 
 func TestUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"nope"}, {"assemble"}, {"assemble", "--version", "1.0.0"}, {"check", "extra"}} {
+	for _, args := range [][]string{nil, {"nope"}, {"assemble"}, {"assemble", "--version", "1.0.0"}, {"check", "extra"}, {"section"}, {"check-notes"}, {"check-notes", "--version", "1.0.0"}} {
 		if code, _, _ := cli(args...); code != 2 {
 			t.Errorf("%v: %d, want 2", args, code)
 		}
@@ -245,7 +250,7 @@ func TestRepositoryChangelogAssembles(t *testing.T) {
 		}
 		return
 	}
-	if !strings.HasPrefix(section, "## [9.9.9] - 2026-01-01\n\n### ") {
+	if !strings.HasPrefix(section, "## [9.9.9] - 2026-01-01\n\n### Summary\n\nREPLACE THIS PARAGRAPH:") {
 		t.Fatalf("section starts %q", section[:60])
 	}
 }
@@ -253,5 +258,88 @@ func TestRepositoryChangelogAssembles(t *testing.T) {
 func TestRepositoryFragmentsPass(t *testing.T) {
 	if code, out, errs := cli("check", "--root", filepath.Join("..", "..")); code != 0 {
 		t.Fatalf("%d %s %s", code, out, errs)
+	}
+}
+
+func TestAssemble_writesThePlaceholdersTheGatesRefuse(t *testing.T) {
+	root := tree(t, map[string]string{"CHANGELOG.md": header + "## [Unreleased]\n\n" + prior, "changelog.d/a.fixed.md": "Fix.\n"})
+	if code, out, _ := cli("assemble", "--version", "0.4.0", "--date", "2026-11-03", "--root", root); code != 0 {
+		t.Fatal(code, out)
+	}
+	got := read(t, root, "CHANGELOG.md")
+	if !strings.Contains(got, "## [0.4.0] - 2026-11-03\n\n### Summary\n\nREPLACE THIS PARAGRAPH: ") || !strings.Contains(got, "### Upgrading\n\nREPLACE THIS: say what an operator must do after upgrading, or write \"Nothing to do.\"\n\n### Fixed") {
+		t.Fatalf("placeholders missing:\n%s", got)
+	}
+	// The fresh section fails the notes check on the marker; once replaced with real prose it passes.
+	if code, out, _ := cli("section", "--version", "0.4.0", "--root", root); code != 0 || releasenotes.NoPlaceholder(out) == nil {
+		t.Fatalf("the placeholder section was not refused: %d %q", code, out)
+	}
+	words := strings.TrimSpace(strings.Repeat("word ", 45))
+	fixed := strings.Replace(got, SummaryPlaceholder, words+".", 1)
+	fixed = strings.Replace(fixed, UpgradingPlaceholder, "Nothing to do.", 1)
+	_, body, _ := strings.Cut(fixed, "## [0.4.0] - 2026-11-03\n")
+	if err := releasenotes.Opening(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := releasenotes.NoPlaceholder(body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSection(t *testing.T) {
+	cl := header + "## [Unreleased]\n\n## [0.4.0] - 2026-11-03\n\n### Summary\n\nProse.\n\n### Added\n\n- One.\n\n" + prior
+	root := tree(t, map[string]string{"CHANGELOG.md": cl})
+	code, out, _ := cli("section", "--version", "0.4.0", "--root", root)
+	if code != 0 || out != "### Summary\n\nProse.\n\n### Added\n\n- One.\n" {
+		t.Fatalf("%d %q", code, out)
+	}
+	if code, out, _ = cli("section", "--version", "0.3.2", "--root", root); code != 0 || !strings.HasPrefix(out, "### Added\n\n- Old one.") || strings.Contains(out, "0.4.0") {
+		t.Fatalf("last section: %d %q", code, out)
+	}
+	// 0.4 is not 0.4.0, and 0.4.00 is not 0.4.0.
+	for _, v := range []string{"0.5.0", "0.4.1", "4.0"} {
+		code, out, errs := cli("section", "--version", v, "--root", root)
+		if code != 1 || out != "" || (!strings.Contains(errs, "no section") && !strings.Contains(errs, "must be X.Y.Z")) {
+			t.Errorf("%s: %d %q %q", v, code, out, errs)
+		}
+	}
+	if code, _, _ := cli("section", "--version", "0.4.0", "--root", t.TempDir()); code != 2 {
+		t.Errorf("a missing change log: want 2")
+	}
+}
+
+func TestCheckNotes(t *testing.T) {
+	prose := strings.TrimSpace(strings.Repeat("word ", 45)) + "."
+	good := "### Summary\n\n" + prose + "\n\n### Upgrading\n\nNothing to do.\n\n### Added\n\n- One.\n\nFull changes: [v0.3.3...v0.4.1](https://github.com/o/r/compare/v0.3.3...v0.4.1)\n"
+	tests := []struct {
+		name, text string
+		args       []string
+		want       string // "" passes
+	}{
+		{"good", good, nil, ""},
+		{"good with the link", good, []string{"--version", "0.4.1", "--prev", "0.3.3"}, ""},
+		{"wrong previous", good, []string{"--version", "0.4.1", "--prev", "0.3.2"}, "no link to the full changes"},
+		{"link required with a version", strings.Replace(good, "compare", "x", 2), []string{"--version", "0.4.1"}, "no link to the full changes"},
+		{"commit list", "### Summary\n\n" + prose + "\n\n### Upgrading\n\nNothing to do.\n\n- fix it (a1b2c3d)\n", nil, "commit hash"},
+		{"placeholder", strings.Replace(good, prose, "REPLACE THIS PARAGRAPH: "+prose, 1), nil, "REPLACE THIS"},
+		{"no summary", "- fix it\n", nil, "start with a list"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := tree(t, map[string]string{"notes.md": tc.text})
+			code, out, errs := cli(append([]string{"check-notes", filepath.Join(root, "notes.md")}, tc.args...)...)
+			if tc.want == "" {
+				if code != 0 || out != "" {
+					t.Fatalf("%d %q %q", code, out, errs)
+				}
+				return
+			}
+			if code != 1 || !strings.Contains(out, tc.want) {
+				t.Fatalf("want exit 1 with %q, got %d %q %q", tc.want, code, out, errs)
+			}
+		})
+	}
+	if code, _, _ := cli("check-notes", filepath.Join(t.TempDir(), "none.md")); code != 2 {
+		t.Errorf("a missing file: want 2")
 	}
 }
