@@ -75,6 +75,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Verify the module cache against go.sum
+        run: |
+          set -euo pipefail
+          go mod verify
       - run: go vet ./...
       # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
       # on a slow one. A real hang still fails.
@@ -99,14 +103,14 @@ jobs:
     timeout-minutes: 30
     runs-on: [self-hosted, rh-macos]
     steps:
-      # Keep every Go cache and temp dir under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused between jobs).
-      - name: Job-local Go and temp dirs
+      # The build cache and temp dir are job-local under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused
+      # between jobs). The module cache is the host's shared one (GOPATH and GOMODCACHE stay at the host's defaults), checked
+      # against go.sum on every run by `go mod verify` below.
+      - name: Job-local Go build cache and temp dir
         run: |
-          mkdir -p "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
+          mkdir -p "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
           {
-            echo "GOPATH=$RUNNER_TEMP/go"
             echo "GOCACHE=$RUNNER_TEMP/gocache"
-            echo "GOMODCACHE=$RUNNER_TEMP/gomod"
             echo "TMPDIR=$RUNNER_TEMP/tmp"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,6 +118,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Verify the module cache against go.sum
+        run: |
+          set -euo pipefail
+          go mod verify
       - run: go vet ./...
       # -timeout 20m: under -race, scripts/releasecheck takes about 4x as long on the macOS runner (2 vCPU, Intel x64) as
       # on Linux, past go test's default 10 m (run 41292329623). A real hang still fails.
@@ -129,10 +137,8 @@ jobs:
       - name: Leave nothing behind
         if: always()
         run: |
-          # Go's module cache is read-only, so make it writable before removing it.
           chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
-          rm -rf "$RUNNER_TEMP/go" "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/gomod" "$RUNNER_TEMP/tmp"
-          rm -rf "$RUNNER_TOOL_CACHE/go"
+          rm -rf "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
           git clean -ffdx || true
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push

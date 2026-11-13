@@ -125,6 +125,23 @@ func Check(ls ListSet, c *Compiled) error {
 				bad(who, "subscribe line %q: %s", line, r)
 			}
 		}
+		// Every fixed grant the sender needs must be present and survive the deny lines.
+		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), flat) {
+			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
+				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
+			}
+		}
+		for _, line := range []string{
+			"_INBOX." + flat + ".>",
+			subj(s.addr.String(), Prompt),
+			subj(s.addr.String(), Status),
+			"$SRV.>",
+		} {
+			if !slices.Contains(p.subAllow, line) || !p.canSub(concrete(line)) {
+				bad(who, "required subscribe grant %q is missing or denied: %s", line, fixedBreaks(line))
+			}
+		}
 		// The addresses its own expanded lines name join the universe, so a tag that names an address no list gives is
 		// compared too.
 		uni := slices.Clone(universe)
@@ -169,6 +186,32 @@ func Check(ls ListSet, c *Compiled) error {
 		return &CheckError{Problems: ps}
 	}
 	return nil
+}
+
+// concrete is a literal subject that line matches: a final '>' becomes one token.
+func concrete(line string) string {
+	if strings.HasSuffix(line, ".>") {
+		return strings.TrimSuffix(line, ">") + "x"
+	}
+	return line
+}
+
+// fixedBreaks says what stops working without the fixed grant line.
+func fixedBreaks(line string) string {
+	switch {
+	case strings.HasPrefix(line, "agents.hb."):
+		return "the sender's own heartbeat is not published"
+	case strings.HasPrefix(line, "agents.prompt."), strings.HasPrefix(line, "agents.status."):
+		return "the sender cannot serve its own " + strings.Split(line, ".")[1] + " subject"
+	case strings.HasPrefix(line, "_INBOX."):
+		return "replies and inbox deliveries to the sender do not work"
+	case strings.HasPrefix(line, "$SRV."):
+		return "the sender cannot use or answer the service API"
+	case strings.HasPrefix(line, "$KV.") || strings.Contains(line, "KV_"):
+		return "the directory or lease cannot be read or renewed"
+	default:
+		return "inbox delivery through JetStream breaks"
+	}
 }
 
 func reachWord(v Verb) string {
@@ -408,6 +451,16 @@ func expandPermissions(tpl jwt.Permissions, name string, tags []string) (*expand
 	return &e, nil
 }
 
+// maxTemplateExpansions is nats-server's maxPermTemplateSubjectExpansions (server/auth.go, v2.15.1): the most subjects
+// one permission list may expand to. The server counts per list (sub allow, sub deny, pub allow, pub deny each have
+// their own budget) and cumulatively over the list's lines: before a line with a tag token expands, its product of tag
+// value counts must not exceed the limit, and the subjects already emitted for the list plus that product must not
+// either. Lines without a tag token are emitted unchecked, so a list can end above the limit when they come last.
+const maxTemplateExpansions = 4096
+
+// errTemplateExpansionLimit is the server's errPermTemplateExpansionLimit; the connection is refused with it.
+var errTemplateExpansionLimit = errors.New("template expansion exceeds limit")
+
 func expandList(list []string, name string, tags []string, failOnBadSubject bool) ([]string, error) {
 	var out []string
 	for _, line := range list {
@@ -417,12 +470,14 @@ func expandList(list []string, name string, tags []string, failOnBadSubject bool
 			continue
 		}
 		values := make([][]string, len(toks))
+		hasTag := false
 		for i, tk := range toks {
 			op := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tk, "{{"), "}}"))
 			switch {
 			case strings.EqualFold(op, "name()"):
 				values[i] = []string{name}
 			case len(op) >= 4 && strings.EqualFold(op[:4], "tag(") && strings.HasSuffix(op, ")"):
+				hasTag = true
 				prefix := strings.ToLower(strings.TrimSuffix(op[4:], ")")) + ":"
 				for _, t := range tags {
 					if strings.HasPrefix(t, prefix) {
@@ -437,6 +492,18 @@ func expandList(list []string, name string, tags []string, failOnBadSubject bool
 				}
 			default:
 				return nil, fmt.Errorf("template operation in %q: %q is not defined", line, op)
+			}
+		}
+		if hasTag {
+			n := 1
+			for _, v := range values {
+				if n > maxTemplateExpansions/len(v) {
+					return nil, fmt.Errorf("%w: %d", errTemplateExpansionLimit, maxTemplateExpansions)
+				}
+				n *= len(v)
+			}
+			if len(out) > maxTemplateExpansions-n {
+				return nil, fmt.Errorf("%w: %d", errTemplateExpansionLimit, maxTemplateExpansions)
 			}
 		}
 		for _, combo := range product(values) {
