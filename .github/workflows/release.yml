@@ -132,6 +132,7 @@ jobs:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
+          retention-days: 1
   draft:
     # A draft exists only once the provenance, the SBOMs and their attestations do, so publishing can never precede or outlive a
     # failed attestation.
@@ -249,6 +250,7 @@ jobs:
           name: sums
           path: dist/SHA256SUMS
           if-no-files-found: error
+          retention-days: 1
   attest:
     # Build provenance for the four binaries, made in-job on the self-hosted runner that holds them: actions/attest-build-provenance
     # signs with this workflow's own identity, so no reusable workflow of another repository runs (ADR 0079). The Sigstore
@@ -302,6 +304,7 @@ jobs:
           name: provenance
           path: provenance/mash.intoto.jsonl
           if-no-files-found: error
+          retention-days: 1
   sbom:
     # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
     # exactly the bytes a consumer downloads. The tool version is pinned; the job reads and uploads, nothing else.
@@ -349,6 +352,7 @@ jobs:
           name: sbom-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json
           if-no-files-found: error
+          retention-days: 1
   attest-sbom:
     needs: sbom
     if: ${{ !cancelled() && needs.sbom.result == 'success' }} # explicit: see build
