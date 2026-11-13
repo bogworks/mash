@@ -265,6 +265,8 @@ The `created` fields are additive, so the report `version` stays 1.
 With `--strict`, `--compare` fails (exit 1) when `moved`, `vanished`, `recreated` or `creation_unknown` is above 0 or `account_unverified` is true, and on every other finding: any
 orphan, any alias whose legacy inbox is not drained, any problem.
 
+To see the stored messages of one inbox and their delivery state, use [`mashctl inbox inspect`](mashctl.md#mashctl-inbox-inspect).
+
 ## What it cannot see
 
 The audit reads the state of the server: the directory, the streams, the consumers, the leases and the creds files.
