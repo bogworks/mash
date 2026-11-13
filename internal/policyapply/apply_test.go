@@ -18,8 +18,8 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 	return w, l, ApplyDeps{
 		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
-		AfterPush: func(context.Context) (map[string][]string, []string, error) {
-			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, nil
+		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
+			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, "", nil
 		},
 	}
 }
@@ -64,6 +64,12 @@ func TestApplyStaleBaseRefusedBeforePush(t *testing.T) {
 	req := applyReq()
 	req.BaseGeneration, req.Generation, req.ListSet.Base = 0, 1, 0
 	if _, err := Apply(context.Background(), req, deps); !errors.Is(err, listset.ErrStaleBase) {
+		t.Fatalf("err = %v", err)
+	}
+	// A stale base is refused first, even with bad generation arithmetic.
+	req = applyReq()
+	req.BaseGeneration, req.Generation, req.ListSet.Base = 0, 5, 7
+	if _, err := Apply(context.Background(), req, deps); !errors.Is(err, listset.ErrStaleBase) || errors.Is(err, ErrBadGeneration) {
 		t.Fatalf("err = %v", err)
 	}
 	req = applyReq()

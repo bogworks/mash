@@ -57,16 +57,16 @@ type ApplyDeps struct {
 	// Provisioner, if set, provisions new addresses inside the run (RunOrdered); if nil, Run is used.
 	Provisioner Provisioner
 	// AfterPush is RunInput.AfterPush.
-	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, err error)
+	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
 	// Now is the clock for the Status; nil means time.Now.
 	Now func() time.Time
 }
 
 // Apply is Run for the intake: it takes what the document states and reads the rest from the ledger.
 //
-// It first checks, before anything else is pushed, that req.Generation is req.BaseGeneration+1 and that
-// req.ListSet.Base is req.BaseGeneration (ErrBadGeneration), and that req.BaseGeneration is the generation in force
-// in the ledger (*listset.StaleBaseError, matching listset.ErrStaleBase). It then builds RunInput: Previous is the
+// It first checks, before anything else is pushed, that req.BaseGeneration is the generation in force in the ledger
+// (*listset.StaleBaseError, matching listset.ErrStaleBase; the stale base is refused before anything else), then that
+// req.Generation is req.BaseGeneration+1 and that req.ListSet.Base is req.BaseGeneration (ErrBadGeneration). It then builds RunInput: Previous is the
 // compiled list set of the generation in force, read from the ledger (DetailLedger.InForceListSet; none when nothing
 // is in force; ErrNoInForceListSet when something is and the ledger holds no list set), and PreviousSigners is
 // deps.Signers. The reads happen before Run takes the ledger's lock; if the generation in force changes in between,
@@ -75,15 +75,15 @@ type ApplyDeps struct {
 // run. Apply does not set RunInput.RevokedKeys, PreviousRevoked or OldKeys: keys a narrowing revokes are reported by
 // deps.AfterPush.
 func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error) {
-	if req.Generation != req.BaseGeneration+1 || req.ListSet.Base != req.BaseGeneration {
-		return Status{}, fmt.Errorf("%w: generation %d, base %d, list set base %d", ErrBadGeneration, req.Generation, req.BaseGeneration, req.ListSet.Base)
-	}
 	cur, err := deps.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
 	}
 	if cur.Generation != req.BaseGeneration {
 		return Status{}, &listset.StaleBaseError{Stated: req.BaseGeneration, InForce: cur.Generation}
+	}
+	if req.Generation != req.BaseGeneration+1 || req.ListSet.Base != req.BaseGeneration {
+		return Status{}, fmt.Errorf("%w: generation %d, base %d, list set base %d", ErrBadGeneration, req.Generation, req.BaseGeneration, req.ListSet.Base)
 	}
 	var prev *listset.Compiled
 	if cur.Generation > 0 {
