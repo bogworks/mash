@@ -38,7 +38,7 @@ func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	provisionFor(t, e, a, "alpha")
-	if _, err := js.Publish(ctx, "agents.mail.cc.o.default.alpha", []byte("before")); err != nil {
+	if _, err := js.Publish(ctx, "agents.mail.cc.o.alpha", []byte("before")); err != nil {
 		t.Fatal(err)
 	}
 	st, err := a.Suspend(ctx, "alpha")
@@ -49,7 +49,7 @@ func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 		t.Fatalf("subjects %v", got)
 	}
 	publishRefused(t, js, "agents.mail.cc.o.alpha")
-	publishRefused(t, js, "agents.mail.cc.o.default.alpha")
+	publishRefused(t, js, "agents.mail.cc.o.alpha")
 	// The message stored before the suspension is still read through the durable consumer.
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	c, err := s.Consumer(ctx, store.Consumer)
@@ -218,7 +218,7 @@ func TestApplyLimitsKeepsSuspension(t *testing.T) {
 	if err := a.Resume(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.default.alpha"}) {
+	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha"}) {
 		t.Fatalf("subjects after resume %v", got)
 	}
 }

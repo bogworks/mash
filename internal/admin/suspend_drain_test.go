@@ -19,7 +19,7 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	provisionFor(t, e, a, "alpha")
-	const subj = "agents.mail.cc.o.default.alpha"
+	const subj = "agents.mail.cc.o.alpha"
 
 	var (
 		acked, refused atomic.Int64
