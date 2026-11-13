@@ -173,6 +173,11 @@ func (l evLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 	return l.MemLedger.CompareAndCommit(base, rec)
 }
 
+func (l evLedger) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
+	l.ev.add("commit")
+	return l.MemLedger.CompareAndCommitDetail(base, rec, d)
+}
+
 type recProv struct {
 	ev      *events
 	mu      sync.Mutex
@@ -240,16 +245,18 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	servers := []string{"s1", "s2"}
 	cl := newCluster(w.j1, servers...)
 	prober := fakeProber{cluster: cl, byGen: map[uint64]*listset.Compiled{1: w.c1, 2: w.c2}, allow: map[string]bool{}}
-	w.ledger = NewMemLedger(listset.Record{Generation: 1})
+	w.ledger = NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
 	w.prov = &recProv{ev: w.ev}
 	w.in = RunInput{
 		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
 		Ledger: evLedger{w.ledger, w.ev}, Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
 		Previous: w.c1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
-		SignPrevious: func(revoked []string) (string, error) { return w.k.build(t, w.c1, revoked...), nil },
-		Signers:      w.k.signers, PreviousSigners: w.k.signers,
+		Signers: w.k.signers, PreviousSigners: w.k.signers,
 		OldKeys: map[string][]string{"foo.c.core": {w.k.revoked}, "foo.c.docs": {}},
-		Sign:    func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.build(t, c, w.k.revoked), nil },
+		Signer: SignerFuncs{
+			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return w.k.build(t, w.c1, revoked...), nil },
+			SignFn:         func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.build(t, c, w.k.revoked), nil },
+		},
 	}
 	return w
 }

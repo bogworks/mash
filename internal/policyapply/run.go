@@ -31,6 +31,46 @@ var ErrPendingGeneration = errors.New("a generation is pending: resubmit the sam
 // pushed.
 var ErrAccountJWTTooLarge = errors.New("the signed account JWT is over the size limit")
 
+// ErrNoSigner is returned by Run when RunInput.Signer is nil. Nothing is pushed.
+var ErrNoSigner = errors.New("no signer")
+
+// PreviousClaims is what SignPrevious is given about the generation in force.
+type PreviousClaims struct {
+	// JWT is the previous signed account JWT in force: the one the ledger stored when that generation was committed.
+	JWT string
+}
+
+// Signer signs account JWTs. Signing is the caller's: Run never holds a key.
+type Signer interface {
+	// Sign builds the target account JWT for rec from c (its own copy).
+	Sign(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
+	// SignPrevious re-signs the previous generation's account JWT (prev, the one in force) with every key in revoked
+	// also revoked, with the same keys. It must not read the servers.
+	SignPrevious(prev PreviousClaims, revoked []string) (accountJWT string, err error)
+}
+
+// SignerFuncs adapts two functions to a Signer. A nil function fails with an error when called.
+type SignerFuncs struct {
+	SignFn         func(rec listset.Record, c *listset.Compiled) (string, error)
+	SignPreviousFn func(prev PreviousClaims, revoked []string) (string, error)
+}
+
+// Sign implements Signer.
+func (s SignerFuncs) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
+	if s.SignFn == nil {
+		return "", errors.New("SignerFuncs: no SignFn")
+	}
+	return s.SignFn(rec, c)
+}
+
+// SignPrevious implements Signer.
+func (s SignerFuncs) SignPrevious(prev PreviousClaims, revoked []string) (string, error) {
+	if s.SignPreviousFn == nil {
+		return "", errors.New("SignerFuncs: no SignPreviousFn")
+	}
+	return s.SignPreviousFn(prev, revoked)
+}
+
 // Ledger holds the record in force. It changes only after the gate passes.
 type Ledger interface {
 	// Lock takes the exclusive run lock, or fails when ctx is done first. Run holds it across reading the record in
@@ -50,11 +90,35 @@ type Ledger interface {
 	ClearPending() error
 }
 
+// InForceDetail is what a DetailLedger keeps next to the record in force: the signed account JWT that was pushed for
+// it and the list set it was accepted from. A zero value means none is stored.
+type InForceDetail struct {
+	// JWT is the signed account JWT pushed for the generation in force.
+	JWT string
+	// ListSet is the list set of the generation in force; nil when not stored.
+	ListSet *listset.ListSet
+}
+
+// DetailLedger is a Ledger that also keeps the signed JWT and the list set of the generation in force. Run uses it,
+// when the ledger is one, to commit them with the record and to read the JWT in force for a rollback (it is what
+// PreviousClaims carries); Apply reads the list set to compile the previous generation. A ledger that is not one
+// cannot roll back: Run reports a rollback failure, as for nothing in force. MemLedger and KVLedger are.
+type DetailLedger interface {
+	Ledger
+	// CompareAndCommitDetail is CompareAndCommit that stores d with rec.
+	CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error
+	// InForceJWT returns the signed JWT of the generation in force; empty when none is stored.
+	InForceJWT() (string, error)
+	// InForceListSet returns the list set of the generation in force; ok is false when none is stored.
+	InForceListSet() (ls listset.ListSet, ok bool, err error)
+}
+
 // MemLedger is an in-memory Ledger, safe for concurrent use. It is process-local: see the package comment.
 type MemLedger struct {
 	mu      sync.Mutex // guards rec, pending, hasPend
 	run     chan struct{}
 	rec     listset.Record
+	detail  InForceDetail
 	pending listset.Record
 	hasPend bool
 }
@@ -62,6 +126,13 @@ type MemLedger struct {
 // NewMemLedger returns a MemLedger with rec in force; the zero Record means nothing is in force.
 func NewMemLedger(rec listset.Record) *MemLedger {
 	return &MemLedger{rec: rec, run: make(chan struct{}, 1)}
+}
+
+// NewMemLedgerWith returns a MemLedger with rec in force and d, the signed JWT and list set of that generation.
+func NewMemLedgerWith(rec listset.Record, d InForceDetail) *MemLedger {
+	l := NewMemLedger(rec)
+	l.detail = d
+	return l
 }
 
 // InForce returns the record in force.
@@ -78,8 +149,36 @@ func (l *MemLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 	if l.rec.Generation != base {
 		return &listset.StaleBaseError{Stated: base, InForce: l.rec.Generation}
 	}
-	l.rec = rec
+	l.rec, l.detail = rec, InForceDetail{}
 	return nil
+}
+
+// CompareAndCommitDetail implements DetailLedger.
+func (l *MemLedger) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rec.Generation != base {
+		return &listset.StaleBaseError{Stated: base, InForce: l.rec.Generation}
+	}
+	l.rec, l.detail = rec, d
+	return nil
+}
+
+// InForceJWT implements DetailLedger.
+func (l *MemLedger) InForceJWT() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.detail.JWT, nil
+}
+
+// InForceListSet implements DetailLedger.
+func (l *MemLedger) InForceListSet() (listset.ListSet, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.detail.ListSet == nil {
+		return listset.ListSet{}, false, nil
+	}
+	return *l.detail.ListSet, true, nil
 }
 
 // Lock implements Ledger. It is exclusive within this process only.
@@ -224,10 +323,11 @@ type RunInput struct {
 	// Previous is the Compiled of the generation in force (nil when none); PreviousRevoked are the keys it revokes.
 	Previous        *listset.Compiled
 	PreviousRevoked []string
-	// SignPrevious signs the rollback: the previous generation's account JWT with every key in revoked also revoked.
-	// Run calls it only when a rollback is needed, with the union of RevokedKeys and the keys AfterPush revoked
-	// (sorted, unique). Converge refuses to push a result that lacks the previous generation or any of those keys.
-	SignPrevious func(revoked []string) (accountJWT string, err error)
+	// Signer signs the target (Sign) and the rollback (SignPrevious). Required. Run calls SignPrevious only when a
+	// rollback is needed, with the previous JWT in force from the ledger (see DetailLedger) and the union of
+	// RevokedKeys and the keys AfterPush revoked (sorted, unique). Converge refuses to push a result that lacks the
+	// previous generation or any of those keys. With no previous JWT stored the rollback fails closed.
+	Signer Signer
 	// RevokedKeys are the user public keys this change revokes.
 	RevokedKeys []string
 	// Signers are the expected scoped signing keys of the target, and PreviousSigners of the previous generation
@@ -236,9 +336,7 @@ type RunInput struct {
 	PreviousSigners map[string]string
 	// OldKeys are the public keys of each sender's credentials issued before this change (see GateInput.OldKeys).
 	OldKeys map[string][]string
-	// Sign builds the account JWT for the record and a copy of the Compiled. Signing is the caller's.
-	Sign func(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
-	Now  func() time.Time
+	Now     func() time.Time
 	// AfterPush, if set, is called after the target is pushed and before the gate. It revokes keys (REQ-014: a
 	// narrowed sender's old keys, a removed sender's keys) and reports them by sender address (the key "" is for keys
 	// that belong to no sender). They are added to the gate's revoked keys, and each sender's keys are merged into
@@ -323,9 +421,19 @@ func writeStatus(ctx context.Context, l Ledger, st Status, err error) error {
 
 // runLocked is the body of a run; the caller holds the ledger lease.
 func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
+	if in.Signer == nil {
+		return Status{}, ErrNoSigner
+	}
 	base, err := in.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
+	}
+	dl, hasDetail := in.Ledger.(DetailLedger)
+	var prevJWT string
+	if hasDetail && base.Generation > 0 {
+		if prevJWT, err = dl.InForceJWT(); err != nil {
+			return Status{}, err
+		}
 	}
 	rec, compiled, err := listset.Accept(base, in.ListSet, in.Received)
 	if err != nil {
@@ -364,7 +472,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 
 	frozen := cloneCompiled(compiled)
 	signCopy := cloneCompiled(frozen)
-	tok, err := in.Sign(rec, signCopy)
+	tok, err := in.Signer.Sign(rec, signCopy)
 	if err != nil {
 		return Status{}, fmt.Errorf("sign generation %d: %w", rec.Generation, err)
 	}
@@ -424,7 +532,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
 		}
 	}
-	st, err := Converge(ctx, gi, tok, in.SignPrevious)
+	var signPrevious func(revoked []string) (string, error)
+	if prevJWT != "" {
+		signPrevious = func(revoked []string) (string, error) {
+			return in.Signer.SignPrevious(PreviousClaims{JWT: prevJWT}, revoked)
+		}
+	}
+	st, err := Converge(ctx, gi, tok, signPrevious)
 	if len(notConnected) > 0 && err == nil {
 		st.NotConnected = notConnected
 		for _, s := range notConnected {
@@ -459,7 +573,14 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return st, fmt.Errorf("before committing generation %d: %w", rec.Generation, err)
 		}
 	}
-	if err := in.Ledger.CompareAndCommit(base.Generation, rec); err != nil {
+	var cerr error
+	if hasDetail {
+		ls := in.ListSet
+		cerr = dl.CompareAndCommitDetail(base.Generation, rec, InForceDetail{JWT: tok, ListSet: &ls})
+	} else {
+		cerr = in.Ledger.CompareAndCommit(base.Generation, rec)
+	}
+	if err := cerr; err != nil {
 		return st, fmt.Errorf("commit generation %d: %w", rec.Generation, err)
 	}
 	if err := in.Ledger.ClearPending(); err != nil {
