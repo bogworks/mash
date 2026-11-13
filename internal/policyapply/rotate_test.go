@@ -66,12 +66,12 @@ type rotRevoker struct {
 	hook func(pubs []string) error
 }
 
-func (r rotRevoker) Revoke(_ context.Context, pubs []string) error {
+func (r rotRevoker) Revoke(_ context.Context, pubs []string) (string, error) {
 	r.ev.add("revoke:" + strings.Join(pubs, ","))
 	if r.hook != nil {
-		return r.hook(pubs)
+		return "", r.hook(pubs)
 	}
-	return nil
+	return "", nil
 }
 
 func userPub(t *testing.T) string {
@@ -401,7 +401,7 @@ func TestRotationsAfterPushLeavingAndOrder(t *testing.T) {
 		Leaving:  []string{"foo.c.docs"}, Generation: 2, Issuer: e.in.Issuer, Deliverer: e.in.Deliverer, Conns: e.in.Conns,
 		Record: e.in.Record, Revoker: e.in.Revoker, Deadline: e.in.Deadline, Poll: e.in.Poll,
 	}
-	revoked, nc, err := RotationsAfterPush(plan)(context.Background())
+	revoked, nc, _, err := RotationsAfterPush(plan)(context.Background())
 	if err != nil || len(nc) != 0 {
 		t.Fatalf("%v %v", nc, err)
 	}
