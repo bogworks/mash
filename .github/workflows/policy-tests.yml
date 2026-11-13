@@ -2,7 +2,7 @@ name: policy-tests
 # REQ-020: the policy tests (AT-001, AT-003, AT-004, AT-011, AT-020, and AT-005 and AT-010 once they exist; the list is
 # scripts/releasecheck/policytests.txt) run on every release and on every change of the NATS server version mash ships
 # with. The release gate runs the same step (scripts/release-check). This workflow covers the other half:
-#   - a pull request that changes go.mod's github.com/nats-io/nats-server/v2 line, or the list or the step itself
+#   - a pull request that changes go.mod, go.sum, go.work, go.work.sum or vendor/ at all, or the list or the step itself
 #     (scripts/ci-nats-version-changed decides), runs `scripts/release-check --policy-tests`;
 #   - every push to main or a release/* branch runs it, so a version change that landed is still gated.
 # Any other pull request gets the job as a skipped no-op: the check name still reports. A pull request from a fork

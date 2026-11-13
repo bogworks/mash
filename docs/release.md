@@ -330,7 +330,8 @@ test on main, so it is `pending`: the step prints a notice and does not fail. It
 harness (pull request 488) lands, and the REQ-020 promise of an applied-gate run on two servers is not met before then.
 Every other AT of REQ-020 is `required`.
 
-The step refuses (exit 3) when a required test fails, when it did not run (a renamed or deleted test has no started and
+The step refuses (exit 3) when `go test` itself exits nonzero for a required test's package (a panic after the pass, a build failure, a timeout,
+a data race report: the refusal names the package, the exit status and the last lines of stderr), when a required test fails, when it did not run (a renamed or deleted test has no started and
 passed event in the `go test -json` stream, and a skip is not a pass), or when a `pending` row has a `func TestAT<NNN>`
 in the tree: that row must be promoted to `required`. A unit test checks that every required row names a test that
 exists, so a rename fails CI, not the release.
@@ -342,8 +343,10 @@ Run it alone, from a checkout of the commit you want to judge:
 It prints one `policy pass|FAIL|pending` line per AT and exits 0, 3 (refused) or 4 (go itself could not run).
 
 When the NATS server version changes, `.github/workflows/policy-tests.yml` runs the same command: on a pull request that
-changes the `github.com/nats-io/nats-server/v2` line of `go.mod` (or the list or the step; `scripts/ci-nats-version-changed`
-compares go.mod at the base and at HEAD), and on every push to `main` or a `release/*` branch, so a version change that
+changes, at all, a file that can alter module resolution (`go.mod`, `go.sum`, `go.work`, `go.work.sum` or anything under
+`vendor/`: a `require` bump, a `replace`, an `exclude`, a toolchain line or a checksum can each change the NATS server the
+build uses), or the list or the step; `scripts/ci-nats-version-changed` reads the changed file names, and runs the tests
+when it cannot read them or the base. It also runs on every push to `main` or a `release/*` branch, so a version change that
 landed is still gated. A pull request from a fork runs it too, held for a person's approval by the repository setting as for the other jobs. The job is named `policy-tests`; making it a required
 status check is a repository setting a maintainer changes ([branch-protection.md](branch-protection.md)).
 

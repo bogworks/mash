@@ -161,7 +161,37 @@ func testsForAT(dir, at string) []string {
 	return found
 }
 
-// policyRunner runs `go test -json` for one entry in dir and returns the JSON stream. A seam for the tests.
+// goTestExit is a `go test` that ran and exited nonzero: the stream is still returned beside it. It is a judgment about
+// the candidate (a refusal), where any other error from a policyRunner means go itself could not run.
+type goTestExit struct {
+	Pkg    string
+	Status string // the process's end: "exit status 2", "signal: killed"
+	Tail   string // the last lines of stderr, bounded
+}
+
+func (e *goTestExit) Error() string {
+	msg := fmt.Sprintf("go test %s ended with %s", e.Pkg, e.Status)
+	if e.Tail != "" {
+		msg += ": " + e.Tail
+	}
+	return msg
+}
+
+// stderrTail is the last few lines of s, at most 600 bytes, on one line.
+func stderrTail(s []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(s)), "\n")
+	if len(lines) > 5 {
+		lines = lines[len(lines)-5:]
+	}
+	t := strings.Join(lines, " | ")
+	if len(t) > 600 {
+		t = "..." + t[len(t)-600:]
+	}
+	return t
+}
+
+// policyRunner runs `go test -json` for one entry in dir and returns the JSON stream. A nonzero exit of go test comes
+// back as the stream and a *goTestExit; any other error means go could not run. A seam for the tests.
 type policyRunner func(ctx context.Context, dir string, e policyEntry) ([]byte, error)
 
 // runGoTest runs the entry under the gate's pinned Go settings. -race needs cgo, so CGO_ENABLED is the one setting
@@ -177,11 +207,15 @@ func runGoTest(ctx context.Context, dir string, e policyEntry) ([]byte, error) {
 	if err != nil && !errors.As(err, &ee) {
 		return nil, op(fmt.Errorf("go test %s: %w", e.Pkg, err))
 	}
-	return append(stdout.Bytes(), stderr.Bytes()...), nil
+	stream := append(stdout.Bytes(), stderr.Bytes()...)
+	if ee != nil {
+		return stream, &goTestExit{Pkg: e.Pkg, Status: ee.String(), Tail: stderrTail(stderr.Bytes())}
+	}
+	return stream, nil
 }
 
 // judgePolicy decides every row from the stream its run gave, prints one summary line per AT, and returns the problems.
-func judgePolicy(out io.Writer, entries []policyEntry, streams map[int][]byte, tests func(at string) []string) error {
+func judgePolicy(out io.Writer, entries []policyEntry, streams map[int][]byte, exits map[int]error, tests func(at string) []string) error {
 	var order []string
 	status := map[string]string{} // AT -> pass | FAIL | pending
 	detail := map[string][]string{}
@@ -205,7 +239,11 @@ func judgePolicy(out io.Writer, entries []policyEntry, streams map[int][]byte, t
 		if status[e.AT] == "pending" {
 			status[e.AT] = "pass"
 		}
-		if why := outcome(streams[i], e.Test); why != "" {
+		if x := exits[i]; x != nil { // the process failed, whatever the stream says of this test
+			status[e.AT] = "FAIL"
+			detail[e.AT] = append(detail[e.AT], e.Pkg+" "+e.Test+": "+x.Error())
+			problems = append(problems, fmt.Sprintf("%s %s %s: %v", e.AT, e.Pkg, e.Test, x))
+		} else if why := outcome(streams[i], e.Test); why != "" {
 			status[e.AT] = "FAIL"
 			detail[e.AT] = append(detail[e.AT], e.Pkg+" "+e.Test+": "+why)
 			problems = append(problems, fmt.Sprintf("%s %s %s: %s", e.AT, e.Pkg, e.Test, why))
@@ -223,7 +261,7 @@ func judgePolicy(out io.Writer, entries []policyEntry, streams map[int][]byte, t
 }
 
 // policyTests runs the required rows of policytests.txt under dir and judges them. A failure to start go is an
-// operational error (exit 4); a test that failed, did not run or a list that rotted is a refusal.
+// operational error (exit 4); a go test that exits nonzero, a test that failed, did not run or a list that rotted is a refusal.
 func policyTests(ctx context.Context, o Options, dir string) error {
 	f, err := os.Open(filepath.Join(dir, filepath.FromSlash(policyListFile)))
 	if err != nil {
@@ -239,17 +277,21 @@ func policyTests(ctx context.Context, o Options, dir string) error {
 		run = runGoTest
 	}
 	streams := map[int][]byte{}
+	exits := map[int]error{}
 	for i, e := range entries {
 		if !e.Required {
 			continue
 		}
 		b, err := run(ctx, dir, e)
-		if err != nil {
+		var ge *goTestExit
+		if errors.As(err, &ge) {
+			exits[i] = err // the test run failed: a refusal, judged below
+		} else if err != nil {
 			return err
 		}
 		streams[i] = b
 	}
-	return judgePolicy(o.Out, entries, streams, func(at string) []string { return testsForAT(dir, at) })
+	return judgePolicy(o.Out, entries, streams, exits, func(at string) []string { return testsForAT(dir, at) })
 }
 
 // policyTestsStep is the gate's step: the tests run in a fresh clone of x, so they judge the candidate, not the

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -45,7 +46,7 @@ func judge(t *testing.T, streams map[int][]byte, tests func(string) []string) (s
 	if tests == nil {
 		tests = func(string) []string { return nil }
 	}
-	err := judgePolicy(&out, fakeEntries(t), streams, tests)
+	err := judgePolicy(&out, fakeEntries(t), streams, nil, tests)
 	return out.String(), err
 }
 
@@ -157,6 +158,47 @@ func TestPolicyTestsStepWithFakeRunner(t *testing.T) {
 	}
 }
 
+// A nonzero exit of go test refuses even when every required test passed in the stream.
+func TestPolicyNonzeroGoTestExitRefuses(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, filepath.FromSlash(policyListFile), fakeList)
+	runWith := func(exit error, trunc bool) error {
+		var out bytes.Buffer
+		o := Options{Out: &out, policyRun: func(_ context.Context, _ string, e policyEntry) ([]byte, error) {
+			if trunc {
+				return []byte(`{"Action":"run","Package":"p","Test":"` + e.Test + `"}` + "\npanic: boom\n"), exit
+			}
+			return passing(e.Test), exit
+		}}
+		r := &report{out: &out}
+		r.step("the policy tests", policyTests(context.Background(), o, dir))
+		return r.result("the policy tests") // the exit code is the gate's: 3 refused, 4 could not decide
+	}
+	crash := &goTestExit{Pkg: "./internal/a", Status: "exit status 2", Tail: "WARNING: DATA RACE"}
+	if err := runWith(crash, false); err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "./internal/a") || !strings.Contains(err.Error(), "exit status 2") || !strings.Contains(err.Error(), "DATA RACE") {
+		t.Fatalf("all pass but exit 2: err = %v", err)
+	}
+	if err := runWith(nil, false); err != nil {
+		t.Fatalf("all pass and clean exit: %v", err)
+	}
+	if err := runWith(&goTestExit{Pkg: "./internal/a", Status: "signal: killed"}, true); err == nil || exitCode(err) != 3 {
+		t.Fatalf("truncated stream: err = %v", err)
+	}
+	if err := runWith(op(errors.New("go not found")), false); err == nil || exitCode(err) != 4 {
+		t.Fatalf("go not runnable: err = %v", err)
+	}
+}
+
+func TestStderrTailIsBounded(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	if got := stderrTail([]byte("a\nb\nc\nd\ne\nf\ng\n")); got != "c | d | e | f | g" {
+		t.Errorf("tail = %q", got)
+	}
+	if got := stderrTail([]byte(long)); len(got) > 610 {
+		t.Errorf("tail is %d bytes", len(got))
+	}
+}
+
 // The real list names tests that exist in the tree, so a rename breaks CI, not the release day; and no pending row
 // has a test (the gate would refuse), and every required AT of REQ-020 is listed.
 func TestRealPolicyListNamesTestsThatExist(t *testing.T) {
@@ -233,7 +275,7 @@ func TestRealPolicyListNamesTestsThatExist(t *testing.T) {
 	}
 }
 
-// scripts/ci-nats-version-changed decides, from go.mod at the base and at HEAD, whether a pull request runs the policy
+// scripts/ci-nats-version-changed decides, from the files a pull request changes, whether a pull request runs the policy
 // tests.
 func TestCINatsVersionChanged(t *testing.T) {
 	script, err := filepath.Abs(filepath.Join("..", "ci-nats-version-changed"))
@@ -273,8 +315,8 @@ func TestCINatsVersionChanged(t *testing.T) {
 		t.Errorf("unchanged: %s", got)
 	}
 	commit("other dependency", map[string]string{"go.mod": strings.Replace(gomod("v2.15.1"), "v2.8.0", "v2.9.0", 1)})
-	if got := decide("pull_request", base); got != "run=false" {
-		t.Errorf("another module bumped: %s", got)
+	if got := decide("pull_request", base); got != "run=true" {
+		t.Errorf("another module bumped (any go.mod change runs the tests): %s", got)
 	}
 	commit("docs", map[string]string{"x.txt": "x"})
 	commit("bump nats-server", map[string]string{"go.mod": gomod("v2.15.2")})
@@ -357,5 +399,28 @@ func TestCINatsVersionChangedEdgeCases(t *testing.T) {
 	gitT(t, repo, "commit", "-q", "-m", "bump")
 	if got := decide("pull_request", mid); got != "run=true" {
 		t.Errorf("version line changed: %s", got)
+	}
+
+	// Anything that can change module resolution runs the tests, not only the requirement line.
+	for _, c := range []struct{ name, file, body string }{
+		{"replace directive", "go.mod", gomod("v2.15.2") + "replace github.com/nats-io/nats-server/v2 => ../fork\n"},
+		{"go.sum only", "go.sum", "github.com/nats-io/nats-server/v2 v2.15.2 h1:x\n"},
+		{"go.work added", "go.work", "go 1.27\nuse .\n"},
+		{"go.work.sum", "go.work.sum", "x\n"},
+		{"vendor", "vendor/modules.txt", "# x\n"},
+		{"exclude directive", "go.mod", gomod("v2.15.2") + "exclude github.com/nats-io/nats-server/v2 v2.15.3\n"},
+	} {
+		before := gitT(t, repo, "rev-parse", "HEAD")
+		write(t, repo, c.file, c.body)
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", c.name)
+		if got := decide("pull_request", before); got != "run=true" {
+			t.Errorf("%s: %s", c.name, got)
+		}
+	}
+	after := gitT(t, repo, "rev-parse", "HEAD")
+	commit("unrelated again", 2, "docs2")
+	if got := decide("pull_request", after); got != "run=false" {
+		t.Errorf("unrelated after resolution files: %s", got)
 	}
 }
