@@ -13,3 +13,5 @@ again at every request: a list set swapped or loosened while the service runs is
 signed.
 
 `mashctl wrangler init`, `add` and `remove` now hold a lock file (`wranglers.json.lock`, 0600, the key store's lock) from reading the registry to replacing it, so two edits at once cannot undo each other and a removed wrangler's key cannot come back. `wrangler list` and the issue service take no lock and always read a complete file.
+
+`issue serve` takes the declared server count (`--servers N` or `MASH_SERVERS`, as `policy apply`) and signs only when the account JWT was read from every expected server: a silent server may hold a newer JWT that removed or narrowed the signing key. With fewer answers than servers, a lookup error on any server, or a named cluster and no count, it answers `signing_key_unavailable` with a reason, signs and records nothing, and does not keep the failed read.

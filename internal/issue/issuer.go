@@ -225,7 +225,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	case CodeTemplate:
 		return nil, refuse(CodeTemplate, "the scoped signing key of this owner group has a template other than the list set's")
 	default:
-		return nil, refuse(CodeNoSigningKey, "the account JWT could not be read to verify the signing key")
+		return nil, refuse(CodeNoSigningKey, "the account JWT could not be read from every expected server, so the signing key could not be verified")
 	}
 
 	uc := jwt.NewUserClaims(r.PublicKey)

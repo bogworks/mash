@@ -577,6 +577,29 @@ func TestIssueServeRequiresTheOperatorsTestAccountFlag(t *testing.T) {
 	e.start() // with the flag and the matching file it starts
 }
 
+// The declared server count is read as policy apply reads it: a whole number, 1 or more.
+func TestIssueServeRefusesABadServerCount(t *testing.T) {
+	e := newIssueEnvNoService(t)
+	e.registerWrangler()
+	for _, args := range [][]string{{"--servers", "0"}, {"--servers=x"}} {
+		var out, errb bytes.Buffer
+		code := runEnv(append([]string{"issue", "serve", "--test-account", "--list-set", e.lsPath}, args...), func(k string) string { return e.env[k] }, &out, &errb)
+		if code != 2 || !strings.Contains(errb.String(), "--servers must be a whole number") {
+			t.Fatalf("%v: %d %s", args, code, errb.String())
+		}
+	}
+	var out, errb bytes.Buffer
+	code := runEnv([]string{"issue", "serve", "--test-account", "--list-set", e.lsPath}, func(k string) string {
+		if k == "MASH_SERVERS" {
+			return "-1"
+		}
+		return e.env[k]
+	}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "MASH_SERVERS must be a whole number") {
+		t.Fatalf("env: %d %s", code, errb.String())
+	}
+}
+
 // An overridden registry path is held to the same custody as the default one.
 func TestIssueServeChecksTheCustodyOfAnOverriddenRegistry(t *testing.T) {
 	e := newIssueEnvNoService(t)

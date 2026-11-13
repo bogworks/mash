@@ -83,12 +83,17 @@ type fakeClaims struct {
 	mu sync.Mutex
 	ac *jwt.AccountClaims
 	n  int
+	// err, when set, is what Fetch returns: the account JWT could not be read from every expected server.
+	err error
 }
 
 func (f *fakeClaims) Fetch(context.Context) (*jwt.AccountClaims, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.ac, nil
 }
 

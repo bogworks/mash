@@ -36,7 +36,7 @@ wrangler on the sender's host countersigns)?
 
 Chosen option: the countersigned request and reply, because DEC-002 settled on it.
 
-**The service.** `mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE]` registers a NATS micro service named
+**The service.** `mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE] [--servers N]` registers a NATS micro service named
 `mash-issue` on the admin connection `mashctl` already uses, and answers on `agents.issue.<range>.*`. A wrangler asks on
 `agents.issue.<range>.<owner>`, the owner group of the address. The second token, `issue`, is none of the verbs `mail`,
 `prompt`, `status` and `hb`, and no permission template the list set compiles has a line that reaches it (a test pins
@@ -87,7 +87,12 @@ and signs nothing:
    differs). A key published unscoped, or with another template, would give the issued user more than the list set
    allows, because a user JWT with no limits takes whatever the signer's template says. The account JWT is the newest
    one the servers hold, verified against the operator key as `policy apply` reads it, which is why `issue serve` takes
-   system account credentials (`--sys-creds`, `MASH_SYS_CREDS`). A verdict is kept per owner group for `ScopeTTL` (3
+   system account credentials (`--sys-creds`, `MASH_SYS_CREDS`) and the declared server count (`--servers N`,
+   `MASH_SERVERS`, as `policy apply`). A silent server may hold a newer JWT that removed or narrowed the signing key, so
+   the check is made only when the server set is complete (`ServerSet.Complete`) and every expected server answered
+   the lookup; the newest verified copy then decides. Otherwise (fewer answers than servers, a lookup error on any
+   server, or a named cluster with no count declared) the service answers `signing_key_unavailable` with a reason,
+   signs nothing and records nothing, and the failed read is not cached. A verdict is kept per owner group for `ScopeTTL` (3
    seconds) and is dropped sooner if the key or the list set's template changes, so a change of the account JWT is seen
    within that time at the latest and the service does not read it on every request.
 
@@ -143,7 +148,7 @@ issue core is a Go function, `Issuer.Issue(ctx, request, purpose)`, so the rotat
 * Good, because the pieces whose design is open sit behind three small interfaces.
 * Bad, because on a real account the service cannot run until wrangler registration is decided; the operator's flag says so, and a file cannot override it.
 * Good, because a signing key that is not published scoped with the list set's template signs nothing, and a revocation or a second issuer cannot slip between the check and the record.
-* Bad, because a change of the account JWT is seen after up to `ScopeTTL` (3 seconds), and the service needs system account credentials as well as admin ones.
+* Bad, because a change of the account JWT is seen after up to `ScopeTTL` (3 seconds), and the service needs system account credentials as well as admin ones, and refuses to issue whenever any expected server does not answer the account JWT lookup.
 * Bad, because the replay set does not survive a restart; the expiry window bounds the exposure to five minutes.
 * Bad, because the service runs with the admin user's credentials until a dedicated user exists.
 * Bad, because a compromised wrangler can have any address registered to its host and group signed for a key it chooses.

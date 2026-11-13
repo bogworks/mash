@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -26,7 +27,9 @@ import (
 	"github.com/bogworks/mash/internal/wranglerreg"
 )
 
-const issueUsage = `usage: mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE]
+const issueUsage = `usage: mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE] [--servers N]
+  --servers       the number of servers in the deployment (or MASH_SERVERS); the service reads the account JWT from every
+                  one and refuses to issue when any does not answer
   --test-account  the operator's own declaration that this account is a test account; the static wrangler registry is
                   a test-account facility, and the service starts only if the registry file says so too
 `
@@ -87,10 +90,11 @@ type liveClaims struct {
 	res     apply.Resolver
 	account string
 	trust   apply.Trust
+	servers int // the declared server count; 0 none given
 }
 
 func (c liveClaims) Fetch(ctx context.Context) (*jwt.AccountClaims, error) {
-	return apply.CurrentAccountClaims(ctx, c.res, c.account, c.trust)
+	return apply.CurrentAccountClaims(ctx, c.res, c.account, c.trust, c.servers)
 }
 
 // groupSigner is the issue.Signer over the key store: owner group "range.owner" keys (ctlkeys.GroupKey), never created
@@ -106,7 +110,7 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprint(stderr, "mashctl: issue: serve\n"+issueUsage)
 		return 2
 	}
-	var listFile, regFile, sysCreds string
+	var listFile, regFile, sysCreds, serversFlag string
 	testAccount := false
 	rest := make([]string, 0, len(args)-1)
 	for _, a := range args[1:] {
@@ -116,13 +120,24 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 		}
 		rest = append(rest, a)
 	}
-	if err := flagArgs(rest, map[string]*string{"--list-set": &listFile, "--registry": &regFile, "--sys-creds": &sysCreds}); err != nil {
+	if err := flagArgs(rest, map[string]*string{"--list-set": &listFile, "--registry": &regFile, "--sys-creds": &sysCreds, "--servers": &serversFlag}); err != nil {
 		fmt.Fprintf(stderr, "mashctl: issue serve: %v\n%s", err, issueUsage)
 		return 2
 	}
 	if !testAccount {
 		fmt.Fprintf(stderr, "mashctl: issue serve: the static wrangler registry is a test-account facility and real wrangler registration is not decided yet: pass --test-account to declare this a test account\n%s", issueUsage)
 		return 2
+	}
+	servers := 0
+	if sv, src := serversFlag, "--servers"; sv != "" || env("MASH_SERVERS") != "" {
+		if sv == "" {
+			sv, src = env("MASH_SERVERS"), "MASH_SERVERS"
+		}
+		var aerr error
+		if servers, aerr = strconv.Atoi(strings.TrimSpace(sv)); aerr != nil || servers < 1 {
+			fmt.Fprintf(stderr, "mashctl: issue serve: %s must be a whole number of servers, 1 or more, got %q\n%s", src, sv, issueUsage)
+			return 2
+		}
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
@@ -180,7 +195,7 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	defer closeAdmin()
 	log := slog.New(slog.NewTextHandler(stderr, nil))
-	is := &issue.Issuer{Registry: reg, ListSet: ls, Signer: groupSigner{keys}, Record: adminRecord{adm}, Claims: liveClaims{apply.NATS{Conn: sys}, account, trust}, AccountPub: account, Log: log}
+	is := &issue.Issuer{Registry: reg, ListSet: ls, Signer: groupSigner{keys}, Record: adminRecord{adm}, Claims: liveClaims{apply.NATS{Conn: sys, Inventory: servers}, account, trust, servers}, AccountPub: account, Log: log}
 	stop, err := issue.Serve(adm.Conn(), is, compiled.Range, endpoint.CurrentVersion())
 	if err != nil {
 		return fail("%v", err)

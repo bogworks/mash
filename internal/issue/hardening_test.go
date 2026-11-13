@@ -2,8 +2,10 @@ package issue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -311,5 +313,57 @@ func TestNonceSetOrdersByExpiryAndReleases(t *testing.T) {
 	}
 	if s.take("late", now, now.Add(hardenTTL)) != CodeReplay {
 		t.Fatal("late dropped with early")
+	}
+}
+
+// When the account JWT cannot be read from every expected server (a server silent, a lookup error, an incomplete set)
+// the service answers signing_key_unavailable, signs and records nothing, and does not cache the failure: the request
+// after the servers are back is issued.
+func TestIncompleteAccountJWTReadRefusesAndIsNotCached(t *testing.T) {
+	f := newFixture(t)
+	f.claims.err = errors.New("only 1 of 2 servers answered the account JWT lookup")
+	for i := 0; i < 3; i++ {
+		_, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue)
+		var r *Refusal
+		if code(err) != CodeNoSigningKey || !errors.As(err, &r) || !strings.Contains(r.Error(), "every expected server") {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if f.claims.n != 3 {
+		t.Fatalf("%d reads for 3 refused requests: a failed read was cached", f.claims.n)
+	}
+	if len(f.rec.recs) != 0 {
+		t.Fatalf("%d records after refusals", len(f.rec.recs))
+	}
+	if !strings.Contains(f.logs.String(), "only 1 of 2 servers answered") {
+		t.Fatalf("the reason is not logged: %s", f.logs.String())
+	}
+	f.claims.err = nil
+	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); err != nil {
+		t.Fatalf("after the servers are back: %v", err)
+	}
+	if len(f.rec.recs) != 1 {
+		t.Fatalf("%d records", len(f.rec.recs))
+	}
+}
+
+// A silent server holds a newer JWT that removed the signer: while it is silent the claims lookup fails and nothing is
+// issued (the older JWT that does answer is not used); once it answers, the newer JWT is used and the missing signer
+// is refused.
+func TestSilentServerWithANewerJWTThatRemovedTheSignerRefuses(t *testing.T) {
+	f := newFixture(t)
+	f.claims.err = errors.New("only 1 of 2 servers answered the account JWT lookup")
+	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoSigningKey {
+		t.Fatalf("silent: %v", err)
+	}
+	f.claims.err = nil
+	f.claims.mu.Lock()
+	f.claims.ac = jwt.NewAccountClaims("A") // the newer JWT: the signer is gone
+	f.claims.mu.Unlock()
+	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoScope {
+		t.Fatalf("answering: %v", err)
+	}
+	if len(f.rec.recs) != 0 {
+		t.Fatalf("%d records", len(f.rec.recs))
 	}
 }

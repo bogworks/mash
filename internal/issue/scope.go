@@ -60,7 +60,7 @@ func wantTemplate(p jwt.Permissions) jwt.UserPermissionLimits {
 
 // checkScope verifies, before anything is signed, that pub is published in the account JWT as a scoped signer whose
 // template equals want. It returns CodeNoScope (absent, or published unscoped), CodeTemplate (scoped with another
-// template) or CodeNoSigningKey (the account JWT could not be read), "" when the key is fit to sign with.
+// template) or CodeNoSigningKey (the account JWT could not be read from every expected server), "" when the key is fit to sign with.
 func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Permissions) string {
 	wk := templateKey(wantTemplate(want))
 	now := is.now()
@@ -75,7 +75,11 @@ func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Pe
 	claims, err := is.Claims.Fetch(ctx)
 	switch {
 	case err != nil || claims == nil:
-		return CodeNoSigningKey // not cached: the next request asks again
+		// Not cached: the next request asks again. An error is a refusal, never a verdict from the answers that came.
+		if err != nil {
+			is.log().Warn("account JWT not available", "reason", err.Error())
+		}
+		return CodeNoSigningKey
 	default:
 		sc, found := claims.SigningKeys.GetScope(pub)
 		us, scoped := sc.(*jwt.UserScope)
