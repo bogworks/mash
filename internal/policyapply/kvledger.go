@@ -361,8 +361,8 @@ func (l *KVLedger) InForceView() (listset.Record, listset.ListSet, bool, error) 
 	return rec, ls, true, nil
 }
 
-// LatestStatus returns the latest Status the ledger holds; ok is false when no run has written one. It is the read
-// side `mash policy show` answers from.
+// LatestStatus implements StatusReader: the latest Status the ledger holds; ok is false when none was written. It is
+// the read side `mash policy show` answers from.
 func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
 	v, _, err := l.read(ctx)
 	if err != nil {
@@ -431,18 +431,6 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 // ErrNotRefusal is returned by WriteRefusal when the status is not a refusal: its State is not StateRefused or it
 // names no refusal.
 var ErrNotRefusal = errors.New("the status is not a refusal")
-
-// LatestStatus implements StatusReader.
-func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
-	v, _, err := l.read(ctx)
-	if err != nil {
-		return Status{}, false, err
-	}
-	if v.Status == nil {
-		return Status{}, false, nil
-	}
-	return *v.Status, true, nil
-}
 
 // WriteRefusal stores st as the latest status for a refusal the intake makes before Apply (a bad signature, the wrong
 // submitter, an account or range mismatch, an unknown schema, an account not adopted). It takes the ledger's lease, as
