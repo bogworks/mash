@@ -234,6 +234,86 @@ func (a *Admin) IssuedByKey(ctx context.Context, publicKey string) (rec store.Is
 	return rec, true, nil
 }
 
+// IssuedTimes is every issue time the record keeps of one key.
+type IssuedTimes struct {
+	// Latest is the newest revision's issued_at; Max is the greatest issued_at over all retained revisions. They differ
+	// when a re-record of the same key (a reissue that keeps the key) carries an earlier time than a revision before it,
+	// as after a clock rollback.
+	Latest, Max time.Time
+	// Revisions is how many revisions the bucket still holds of the key.
+	Revisions int
+	// Truncated is true when the history is at the bucket's cap: the oldest revisions may have been dropped, so Max
+	// may not cover every credential ever recorded for the key.
+	Truncated bool
+}
+
+// MalformedIssuedAtError is returned by IssuedHistoryByKey for a revision whose issued_at is missing or not an RFC 3339
+// time.
+type MalformedIssuedAtError struct {
+	Key, Value string
+	Revision   uint64
+}
+
+func (e *MalformedIssuedAtError) Error() string {
+	return fmt.Sprintf("mash: issue record %s: revision %d has a missing or malformed issued_at (%q)", e.Key, e.Revision, e.Value)
+}
+
+// IssuedHistoryByKey reads every retained revision of publicKey's issue record (up to the bucket's history cap,
+// store.IssuedHistory) and returns the issue times they hold. found is false when the key is not recorded or the bucket
+// does not exist (jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean absent). Any other failure, a
+// revision that cannot be decoded or names another key, a revision that is not a plain write, and a revision whose
+// issued_at is missing or not a time (*MalformedIssuedAtError) is an error: a check must not pass over a revision it
+// cannot read.
+func (a *Admin) IssuedHistoryByKey(ctx context.Context, publicKey string) (t IssuedTimes, found bool, err error) {
+	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return IssuedTimes{}, false, nil
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record bucket: %w", err)
+	}
+	hist, err := kv.History(ctx, publicKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return IssuedTimes{}, false, nil
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: %w", publicKey, err)
+	}
+	if len(hist) == 0 {
+		return IssuedTimes{}, false, nil
+	}
+	limit := store.IssuedHistory
+	if st, err := kv.Status(ctx); err == nil && st.History() > 0 && int(st.History()) < limit {
+		limit = int(st.History()) // a bucket from before `mash admin init` raised it keeps fewer
+	}
+	for i, e := range hist {
+		if e.Operation() != jetstream.KeyValuePut {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: revision %d is not a plain write", publicKey, e.Revision())
+		}
+		var rec store.Issued
+		if err := json.Unmarshal(e.Value(), &rec); err != nil {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: unreadable entry", publicKey)
+		}
+		if rec.PublicKey != publicKey {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: the entry names another key", publicKey)
+		}
+		at, perr := time.Parse(time.RFC3339, rec.IssuedAt)
+		if perr != nil {
+			return IssuedTimes{}, false, &MalformedIssuedAtError{Key: publicKey, Value: rec.IssuedAt, Revision: e.Revision()}
+		}
+		at = at.UTC()
+		if at.After(t.Max) {
+			t.Max = at
+		}
+		if i == len(hist)-1 {
+			t.Latest = at
+		}
+	}
+	t.Revisions = len(hist)
+	t.Truncated = len(hist) >= limit
+	return t, true, nil
+}
+
 // initIssued creates the issue record's bucket, or verifies an existing one. An existing bucket is altered in one way
 // only: a per-key history below store.IssuedHistory (the first version kept 8) is raised to it, a stream update that
 // loses no record. Everything else about it is only verified.

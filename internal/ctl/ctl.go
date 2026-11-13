@@ -816,14 +816,22 @@ type RevokeTarget struct {
 }
 
 // CheckNotFutureIssued refuses a revocation at time at when the issue record shows a user's JWT issued after at: NATS
-// honours a revocation only for JWTs issued at or before it, so that JWT would stay valid. Every target is checked
-// before the caller writes anything, and one future-dated key refuses them all; nothing has been changed when it
-// returns an error. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did
-// not issue) gets one warning line on stderr and the revocation goes on. A record that exists but cannot be read, or
-// whose issued_at is missing or not a time, cannot be ruled out and refuses the whole command.
+// honours a revocation only for JWTs issued at or before it, so that JWT would stay valid. It looks at every issue
+// time the record retains of the key, not only the latest: a reissue that keeps the key writes a new revision with a
+// new time, and after a clock rollback the newer revision can be the earlier time while an older, future-dated JWT is
+// still held. A key whose history is at the bucket's cap (store.IssuedHistory) may have lost its oldest revisions, so
+// it is refused unless a retained revision is already future-dated (the usual refusal). Every target is checked before
+// the caller writes anything, and one refused key refuses them all; nothing has been changed when it returns an
+// error. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did not issue)
+// gets one warning line on stderr and the revocation goes on. A record that exists but cannot be read, or whose
+// issued_at is missing or not a time in any retained revision, cannot be ruled out and refuses the whole command.
 func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []RevokeTarget, at time.Time, stderr io.Writer) error {
 	for _, t := range targets {
-		rec, found, err := a.IssuedByKey(ctx, t.Key)
+		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
+		var bad *madmin.MalformedIssuedAtError
+		if errors.As(err, &bad) {
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+		}
 		if err != nil {
 			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl reissue NAME` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
 		}
@@ -831,16 +839,18 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
 			continue
 		}
-		iat, err := time.Parse(time.RFC3339, rec.IssuedAt)
-		if err != nil {
-			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q), so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), rec.IssuedAt)
+		who := t.Name
+		if who == "" {
+			who = ShortKey(t.Key) + "..."
 		}
-		if iat.UTC().After(at) {
-			who := t.Name
-			if who == "" {
-				who = ShortKey(t.Key) + "..."
+		if times.Max.After(at) {
+			if times.Max.Equal(times.Latest) {
+				return fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", who, times.Max.Format(time.RFC3339))
 			}
-			return fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", who, iat.UTC().Format(time.RFC3339))
+			return fmt.Errorf("%s: an earlier credential of this key was dated in the future (%s): the revocation would not cover it; wait until the revocation time is past that time, or fix this machine's clock (or the machine that minted it), and run again; nothing was changed", who, times.Max.Format(time.RFC3339))
+		}
+		if times.Truncated {
+			return fmt.Errorf("%s: the key has been re-recorded %d times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future; run again once this machine's clock is known to be right and the revocation time is well past the newest recorded issue time (%s), or fix the clock; nothing was changed", who, store.IssuedHistory, times.Max.Format(time.RFC3339))
 		}
 	}
 	return nil

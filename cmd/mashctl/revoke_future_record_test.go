@@ -55,10 +55,10 @@ func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 		t.Fatalf("something changed: calls %+v records %v", *calls, h.records())
 	}
 
-	// Control: with the record dated in the past the same command revokes and removes.
+	// Re-recording the key with a time in the past does not clear the future-dated revision: still refused.
 	h.recordIssuedAt(pub, time.Now().Add(-clockBehind))
 	out, errb, code = h.run("deprovision", "n")
-	if code != 0 || len(*calls) != 1 || (*calls)[0].users[0] != pub || h.issued()[pub].RevokedAt == "" {
+	if code != 1 || len(*calls) != 0 || !strings.Contains(errb, "an earlier credential of this key was dated in the future") {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
 }
@@ -215,4 +215,116 @@ func testenvKey(t *testing.T, e *testenv.Env) string {
 	t.Helper()
 	_, pub := e.Mint(t, "x")
 	return pub
+}
+
+// recordRevisions writes one revision of pub's issue record per issued_at, in order, through the admin helper.
+func (h *addEnv) recordRevisions(pub string, ats ...time.Time) {
+	h.t.Helper()
+	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	rec := h.issued()[pub]
+	for _, at := range ats {
+		rec.IssuedAt = at.UTC().Format(time.RFC3339)
+		if err := adm.RecordIssued(context.Background(), rec); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+}
+
+func deprovisionAfterRevisions(t *testing.T, ats func() []time.Time) (h *addEnv, pub string, calls *[]revokeCall, out, errb string, code int) {
+	t.Helper()
+	h = newAddEnv(t, addPolicy)
+	if _, e, c := h.run("add", "n", "--zone", "green"); c != 0 {
+		t.Fatal(e)
+	}
+	_, pub = h.credsClaims("n")
+	h.recordRevisions(pub, ats()...)
+	calls = fakeRevoke(t, nil)
+	out, errb, code = h.run("deprovision", "n")
+	return
+}
+
+// A reissue that keeps the key after a clock rollback leaves the latest revision in the past while an older JWT is
+// dated in the future: deprovision still refuses.
+func TestDeprovisionRefusesWhenAnEarlierRevisionIsFutureDated(t *testing.T) {
+	h, pub, calls, out, errb, code := deprovisionAfterRevisions(t, func() []time.Time {
+		return []time.Time{time.Now().Add(clockBehind), time.Now().Add(-clockBehind)}
+	})
+	if code != 1 || out != "" || !strings.Contains(errb, "n: an earlier credential of this key was dated in the future (") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if len(*calls) != 0 || h.issued()[pub].RevokedAt != "" {
+		t.Fatalf("something changed: %+v", *calls)
+	}
+}
+
+func TestDeprovisionRevokesWhenEveryRevisionIsPast(t *testing.T) {
+	h, pub, calls, out, errb, code := deprovisionAfterRevisions(t, func() []time.Time {
+		return []time.Time{time.Now().Add(-3 * time.Hour), time.Now().Add(-2 * time.Hour), time.Now().Add(-time.Hour)}
+	})
+	if code != 0 || len(*calls) != 1 || (*calls)[0].users[0] != pub || h.issued()[pub].RevokedAt == "" {
+		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
+	}
+}
+
+// At the history cap the oldest revisions are gone: all retained past cannot show the older ones were not future-dated.
+func TestDeprovisionRefusesAtTheHistoryCap(t *testing.T) {
+	past := func() []time.Time {
+		var ats []time.Time
+		for i := 0; i < store.IssuedHistory+1; i++ {
+			ats = append(ats, time.Now().Add(-time.Hour))
+		}
+		return ats
+	}
+	h, pub, calls, out, errb, code := deprovisionAfterRevisions(t, past)
+	if h.issuedHistory(pub) != store.IssuedHistory {
+		t.Fatalf("history holds %d, want the cap", h.issuedHistory(pub))
+	}
+	if code != 1 || out != "" || !strings.Contains(errb, "the key has been re-recorded 64 times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future") || !strings.Contains(errb, "nothing was changed") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if len(*calls) != 0 || h.issued()[pub].RevokedAt != "" {
+		t.Fatalf("something changed: %+v", *calls)
+	}
+
+	// With a retained future-dated revision the usual message is given instead.
+	_, _, _, out, errb, code = deprovisionAfterRevisions(t, func() []time.Time {
+		ats := past()
+		ats[10] = time.Now().Add(clockBehind)
+		return ats
+	})
+	if code != 1 || out != "" || !strings.Contains(errb, "an earlier credential of this key was dated in the future (") || strings.Contains(errb, "re-recorded") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+}
+
+// A malformed older revision refuses even when the latest is fine.
+func TestDeprovisionRefusesAMalformedOlderRevision(t *testing.T) {
+	h := newAddEnv(t, addPolicy)
+	if _, errb, code := h.run("add", "n", "--zone", "green"); code != 0 {
+		t.Fatal(errb)
+	}
+	_, pub := h.credsClaims("n")
+	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := js.KeyValue(context.Background(), store.IssuedBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := h.issued()[pub]
+	rec.IssuedAt = "yesterday-ish"
+	raw, _ := json.Marshal(rec)
+	if _, err := kv.Put(context.Background(), pub, raw); err != nil {
+		t.Fatal(err)
+	}
+	h.recordRevisions(pub, time.Now().Add(-time.Hour))
+	calls := fakeRevoke(t, nil)
+	out, errb, code := h.run("deprovision", "n")
+	if code != 1 || out != "" || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "nothing was changed") || len(*calls) != 0 {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
 }

@@ -477,3 +477,36 @@ func TestInitRaisesAnOldIssuedBucketHistory(t *testing.T) {
 		t.Fatalf("records after the raise: %d %v", len(h), err)
 	}
 }
+
+// IssuedHistoryByKey reports the maximum issued_at over every retained revision, not only the latest, and marks a
+// history at the cap as truncated.
+func TestIssuedHistoryByKey(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	if _, found, err := a.IssuedHistoryByKey(ctx, key); err != nil || found {
+		t.Fatalf("absent: found=%v err=%v", found, err)
+	}
+	rec := func(at string) {
+		t.Helper()
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("2030-01-01T00:00:00Z")
+	rec("2026-01-01T00:00:00Z") // a later write with an earlier time
+	got, found, err := a.IssuedHistoryByKey(ctx, key)
+	if err != nil || !found || got.Revisions != 2 || got.Truncated {
+		t.Fatalf("%+v found=%v err=%v", got, found, err)
+	}
+	if got.Max.Format(time.RFC3339) != "2030-01-01T00:00:00Z" || got.Latest.Format(time.RFC3339) != "2026-01-01T00:00:00Z" {
+		t.Fatalf("max %v latest %v", got.Max, got.Latest)
+	}
+	for i := 0; i < store.IssuedHistory; i++ {
+		rec("2026-01-01T00:00:00Z")
+	}
+	got, _, err = a.IssuedHistoryByKey(ctx, key)
+	if err != nil || got.Revisions != store.IssuedHistory || !got.Truncated || got.Max.Year() != 2026 {
+		t.Fatalf("at the cap: %+v err=%v", got, err)
+	}
+}
