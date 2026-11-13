@@ -2,6 +2,7 @@ package policyapply
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -64,6 +65,12 @@ type ApplyDeps struct {
 
 // Apply is Run for the intake: it takes what the document states and reads the rest from the ledger.
 //
+// A replay is a no-op: if the digest of req.Received (the one Record.Received is computed with, SHA-256) equals the
+// Received of the record in force, that exact document is already applied. Apply then signs and pushes nothing, and
+// returns the latest stored status (when the ledger is a StatusReader and holds one) or a minimal applied Status for
+// the generation in force, with a nil error. This check comes before the stale-base check, so a replayed document
+// whose base is now behind is not reported stale. A different document on a stale base is still a StaleBaseError.
+//
 // It first checks, before anything else is pushed, that req.BaseGeneration is the generation in force in the ledger
 // (*listset.StaleBaseError, matching listset.ErrStaleBase; the stale base is refused before anything else), then that
 // req.Generation is req.BaseGeneration+1 and that req.ListSet.Base is req.BaseGeneration (ErrBadGeneration). It then builds RunInput: Previous is the
@@ -78,6 +85,20 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	cur, err := deps.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
+	}
+	if cur.Generation > 0 && sha256.Sum256(req.Received) == cur.Received {
+		if sr, ok := deps.Ledger.(StatusReader); ok {
+			st, ok, err := sr.LatestStatus(ctx)
+			if err != nil {
+				return Status{}, err
+			}
+			if ok {
+				return st, nil
+			}
+		}
+		st := newStatus(cur, StateApplied, deps.Now)
+		st.InForce = true
+		return st, nil
 	}
 	if cur.Generation != req.BaseGeneration {
 		return Status{}, &listset.StaleBaseError{Stated: req.BaseGeneration, InForce: cur.Generation}

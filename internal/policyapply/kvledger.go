@@ -39,6 +39,18 @@ type StatusWriter interface {
 	WriteStatus(ctx context.Context, st Status) error
 }
 
+// StatusReader is implemented by a Ledger that can return the latest stored Status. Apply uses it, when the ledger is
+// one, to answer a replay of the document in force.
+type StatusReader interface {
+	// LatestStatus returns the latest stored Status; ok is false when none was written.
+	LatestStatus(ctx context.Context) (st Status, ok bool, err error)
+}
+
+// RefusalWriter is what the apply intake needs to record a refusal it makes before Apply. KVLedger implements it.
+type RefusalWriter interface {
+	WriteRefusal(ctx context.Context, st Status) error
+}
+
 // KVLedgerOptions configures a KVLedger. Only Bucket is required.
 type KVLedgerOptions struct {
 	// Bucket is the resolved name of the policy bucket (see PolicyBucket). Required.
@@ -134,10 +146,12 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 }
 
 var (
-	_ Ledger       = (*KVLedger)(nil)
-	_ StatusWriter = (*KVLedger)(nil)
-	_ DetailLedger = (*KVLedger)(nil)
-	_ DetailLedger = (*MemLedger)(nil)
+	_ Ledger        = (*KVLedger)(nil)
+	_ StatusWriter  = (*KVLedger)(nil)
+	_ StatusReader  = (*KVLedger)(nil)
+	_ RefusalWriter = (*KVLedger)(nil)
+	_ DetailLedger  = (*KVLedger)(nil)
+	_ DetailLedger  = (*MemLedger)(nil)
 )
 
 // recordValue is a listset.Record in the status value: digests are their strings.
@@ -412,6 +426,40 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 		}
 	}
 	return fmt.Errorf("policy ledger %s: changed by other writers too often; try again", l.key)
+}
+
+// ErrNotRefusal is returned by WriteRefusal when the status is not a refusal: its State is not StateRefused or it
+// names no refusal.
+var ErrNotRefusal = errors.New("the status is not a refusal")
+
+// LatestStatus implements StatusReader.
+func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return Status{}, false, err
+	}
+	if v.Status == nil {
+		return Status{}, false, nil
+	}
+	return *v.Status, true, nil
+}
+
+// WriteRefusal stores st as the latest status for a refusal the intake makes before Apply (a bad signature, the wrong
+// submitter, an account or range mismatch, an unknown schema, an account not adopted). It takes the ledger's lease, as
+// a run does (waiting for another holder until ctx is done), writes st with the fenced WriteStatus and releases the
+// lease. st.State must be StateRefused and st must carry at least one refusal, else ErrNotRefusal and nothing is
+// taken or written. st.Generation 0 means the generation is unknown. It never changes the record in force, the
+// pending record or the stored list set and JWT.
+func (l *KVLedger) WriteRefusal(ctx context.Context, st Status) error {
+	if st.State != StateRefused || len(st.Refusals) == 0 {
+		return fmt.Errorf("%w: state %q, %d refusals", ErrNotRefusal, st.State, len(st.Refusals))
+	}
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return l.WriteStatus(ctx, st)
 }
 
 // fenceLease is checkLease for a caller that must hold the lease: a ledger that holds none gets ErrLeaseLost.
