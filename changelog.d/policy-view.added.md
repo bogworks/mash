@@ -1,0 +1,1 @@
+`mash policy show` and `mash policy explain RECEIVER` print what the endpoint may reach under the list set in force, asking a policy responder on `agents.policy.<range>` with a signed request; every list-set template now grants publish to that subject, and an endpoint sees only its own reach.

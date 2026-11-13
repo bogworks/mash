@@ -130,6 +130,16 @@ MASH_NAME=design mash prompt review "Are you still on the auth bug?"
 MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
 ```
 
+When a list set is applied to the range, `mash policy` shows what the endpoint may reach under it. It asks the range's policy responder over a signed request on `agents.policy.<range>`, and the answer holds only the asking endpoint's own entry, never another endpoint's lists or reach:
+
+```sh
+MASH_NAME=design mash policy show                        # generation, state, reach per verb, open subjects
+MASH_NAME=design mash policy explain agent.owner.review  # for one receiver: allowed or refused per verb, and why
+MASH_NAME=design mash policy show --json                 # the same answer as stable JSON
+```
+
+`explain` takes the receiver as `range.owner.name`. Both commands exit 1 when the responder refuses the request, for example for a request that is not signed or for a key that names no endpoint of the range. When no responder answers, the range has no list set in force, and `mash policy` prints `open: owner line only, no list set in force` and exits 0. The answer does not close the reply and plumbing subjects (`_INBOX`, `$SRV`, the JetStream and directory subjects): the lists govern who may mail, prompt, probe and watch whom, not who may communicate at all.
+
 ### Sessions and resume
 
 The endpoint name belongs to the launch, not to the conversation. It comes only from `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).

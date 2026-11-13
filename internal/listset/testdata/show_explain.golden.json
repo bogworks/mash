@@ -1,0 +1,511 @@
+{
+  "show": {
+    "describes": "list_set",
+    "generation": 4,
+    "range": "r",
+    "switches": [
+      {
+        "group": "r.o",
+        "verb": "mail",
+        "switch": "shared"
+      },
+      {
+        "group": "r.o",
+        "verb": "prompt",
+        "switch": "closed"
+      },
+      {
+        "group": "r.o",
+        "verb": "status",
+        "switch": "closed"
+      },
+      {
+        "group": "r.o",
+        "verb": "heartbeat",
+        "switch": "shared"
+      },
+      {
+        "group": "r.p",
+        "verb": "mail",
+        "switch": "closed"
+      },
+      {
+        "group": "r.p",
+        "verb": "prompt",
+        "switch": "closed"
+      },
+      {
+        "group": "r.p",
+        "verb": "status",
+        "switch": "closed"
+      },
+      {
+        "group": "r.p",
+        "verb": "heartbeat",
+        "switch": "closed"
+      }
+    ],
+    "senders": [
+      {
+        "sender": "r.o.a",
+        "allow": [
+          "r.p.x"
+        ],
+        "deny": [
+          "r.o.c"
+        ],
+        "reach": [
+          {
+            "verb": "mail",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.p.x"
+            ]
+          },
+          {
+            "verb": "prompt",
+            "receivers": [
+              "r.p.x"
+            ]
+          },
+          {
+            "verb": "status",
+            "receivers": [
+              "r.p.x"
+            ]
+          },
+          {
+            "verb": "heartbeat",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.p.x"
+            ]
+          }
+        ],
+        "open_subjects": {
+          "publish": [
+            "$JS.ACK.inbox-r_o_a.deliver.\u003e",
+            "$JS.API.CONSUMER.INFO.inbox-r_o_a.deliver",
+            "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_a.deliver",
+            "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+            "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_a",
+            "$JS.API.DIRECT.GET.inbox-r_o_a",
+            "$JS.API.DIRECT.GET.inbox-r_o_a.\u003e",
+            "$JS.API.INFO",
+            "$JS.API.STREAM.INFO.KV_mash-directory",
+            "$JS.API.STREAM.INFO.KV_mash-leases",
+            "$JS.API.STREAM.INFO.inbox-r_o_a",
+            "$KV.mash-leases.r_o_a",
+            "$SRV.\u003e",
+            "_INBOX.\u003e",
+            "agents.policy.r"
+          ],
+          "subscribe": [
+            "$SRV.\u003e",
+            "_INBOX.r_o_a.\u003e"
+          ]
+        }
+      },
+      {
+        "sender": "r.o.b",
+        "allow": [],
+        "deny": [],
+        "reach": [
+          {
+            "verb": "mail",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.o.c"
+            ]
+          },
+          {
+            "verb": "prompt",
+            "receivers": []
+          },
+          {
+            "verb": "status",
+            "receivers": []
+          },
+          {
+            "verb": "heartbeat",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.o.c"
+            ]
+          }
+        ],
+        "open_subjects": {
+          "publish": [
+            "$JS.ACK.inbox-r_o_b.deliver.\u003e",
+            "$JS.API.CONSUMER.INFO.inbox-r_o_b.deliver",
+            "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_b.deliver",
+            "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+            "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_b",
+            "$JS.API.DIRECT.GET.inbox-r_o_b",
+            "$JS.API.DIRECT.GET.inbox-r_o_b.\u003e",
+            "$JS.API.INFO",
+            "$JS.API.STREAM.INFO.KV_mash-directory",
+            "$JS.API.STREAM.INFO.KV_mash-leases",
+            "$JS.API.STREAM.INFO.inbox-r_o_b",
+            "$KV.mash-leases.r_o_b",
+            "$SRV.\u003e",
+            "_INBOX.\u003e",
+            "agents.policy.r"
+          ],
+          "subscribe": [
+            "$SRV.\u003e",
+            "_INBOX.r_o_b.\u003e"
+          ]
+        }
+      },
+      {
+        "sender": "r.o.c",
+        "allow": [
+          "r.o.a"
+        ],
+        "deny": [],
+        "reach": [
+          {
+            "verb": "mail",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.o.c"
+            ]
+          },
+          {
+            "verb": "prompt",
+            "receivers": [
+              "r.o.a"
+            ]
+          },
+          {
+            "verb": "status",
+            "receivers": [
+              "r.o.a"
+            ]
+          },
+          {
+            "verb": "heartbeat",
+            "receivers": [
+              "r.o.a",
+              "r.o.b",
+              "r.o.c"
+            ]
+          }
+        ],
+        "open_subjects": {
+          "publish": [
+            "$JS.ACK.inbox-r_o_c.deliver.\u003e",
+            "$JS.API.CONSUMER.INFO.inbox-r_o_c.deliver",
+            "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_c.deliver",
+            "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+            "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_c",
+            "$JS.API.DIRECT.GET.inbox-r_o_c",
+            "$JS.API.DIRECT.GET.inbox-r_o_c.\u003e",
+            "$JS.API.INFO",
+            "$JS.API.STREAM.INFO.KV_mash-directory",
+            "$JS.API.STREAM.INFO.KV_mash-leases",
+            "$JS.API.STREAM.INFO.inbox-r_o_c",
+            "$KV.mash-leases.r_o_c",
+            "$SRV.\u003e",
+            "_INBOX.\u003e",
+            "agents.policy.r"
+          ],
+          "subscribe": [
+            "$SRV.\u003e",
+            "_INBOX.r_o_c.\u003e"
+          ]
+        }
+      },
+      {
+        "sender": "r.p.x",
+        "allow": [
+          "r.o.a",
+          "r.o.b"
+        ],
+        "deny": [],
+        "reach": [
+          {
+            "verb": "mail",
+            "receivers": [
+              "r.o.a",
+              "r.o.b"
+            ]
+          },
+          {
+            "verb": "prompt",
+            "receivers": [
+              "r.o.a",
+              "r.o.b"
+            ]
+          },
+          {
+            "verb": "status",
+            "receivers": [
+              "r.o.a",
+              "r.o.b"
+            ]
+          },
+          {
+            "verb": "heartbeat",
+            "receivers": [
+              "r.o.a",
+              "r.o.b"
+            ]
+          }
+        ],
+        "open_subjects": {
+          "publish": [
+            "$JS.ACK.inbox-r_p_x.deliver.\u003e",
+            "$JS.API.CONSUMER.INFO.inbox-r_p_x.deliver",
+            "$JS.API.CONSUMER.MSG.NEXT.inbox-r_p_x.deliver",
+            "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+            "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_p_x",
+            "$JS.API.DIRECT.GET.inbox-r_p_x",
+            "$JS.API.DIRECT.GET.inbox-r_p_x.\u003e",
+            "$JS.API.INFO",
+            "$JS.API.STREAM.INFO.KV_mash-directory",
+            "$JS.API.STREAM.INFO.KV_mash-leases",
+            "$JS.API.STREAM.INFO.inbox-r_p_x",
+            "$KV.mash-leases.r_p_x",
+            "$SRV.\u003e",
+            "_INBOX.\u003e",
+            "agents.policy.r"
+          ],
+          "subscribe": [
+            "$SRV.\u003e",
+            "_INBOX.r_p_x.\u003e"
+          ]
+        }
+      }
+    ],
+    "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
+  },
+  "explains": [
+    {
+      "describes": "list_set",
+      "sender": "r.o.b",
+      "receiver": "r.o.a",
+      "verbs": [
+        {
+          "verb": "mail",
+          "allowed": true,
+          "reason": "owner_line",
+          "detail": "owner group \"r.o\" shares mail"
+        },
+        {
+          "verb": "prompt",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "owner group \"r.o\" keeps prompt closed and \"r.o.a\" is on no list"
+        },
+        {
+          "verb": "status",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "owner group \"r.o\" keeps status closed and \"r.o.a\" is on no list"
+        },
+        {
+          "verb": "heartbeat",
+          "allowed": true,
+          "reason": "owner_line",
+          "detail": "owner group \"r.o\" shares heartbeat"
+        }
+      ],
+      "open_subjects": {
+        "publish": [
+          "$JS.ACK.inbox-r_o_b.deliver.\u003e",
+          "$JS.API.CONSUMER.INFO.inbox-r_o_b.deliver",
+          "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_b.deliver",
+          "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+          "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_b",
+          "$JS.API.DIRECT.GET.inbox-r_o_b",
+          "$JS.API.DIRECT.GET.inbox-r_o_b.\u003e",
+          "$JS.API.INFO",
+          "$JS.API.STREAM.INFO.KV_mash-directory",
+          "$JS.API.STREAM.INFO.KV_mash-leases",
+          "$JS.API.STREAM.INFO.inbox-r_o_b",
+          "$KV.mash-leases.r_o_b",
+          "$SRV.\u003e",
+          "_INBOX.\u003e",
+          "agents.policy.r"
+        ],
+        "subscribe": [
+          "$SRV.\u003e",
+          "_INBOX.r_o_b.\u003e"
+        ]
+      },
+      "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
+    },
+    {
+      "describes": "list_set",
+      "sender": "r.o.a",
+      "receiver": "r.o.c",
+      "verbs": [
+        {
+          "verb": "mail",
+          "allowed": false,
+          "reason": "deny_tag",
+          "detail": "\"r.o.c\" is on the deny list"
+        },
+        {
+          "verb": "prompt",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "owner group \"r.o\" keeps prompt closed and \"r.o.c\" is on no list"
+        },
+        {
+          "verb": "status",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "owner group \"r.o\" keeps status closed and \"r.o.c\" is on no list"
+        },
+        {
+          "verb": "heartbeat",
+          "allowed": false,
+          "reason": "deny_tag",
+          "detail": "\"r.o.c\" is on the deny list"
+        }
+      ],
+      "open_subjects": {
+        "publish": [
+          "$JS.ACK.inbox-r_o_a.deliver.\u003e",
+          "$JS.API.CONSUMER.INFO.inbox-r_o_a.deliver",
+          "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_a.deliver",
+          "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+          "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_a",
+          "$JS.API.DIRECT.GET.inbox-r_o_a",
+          "$JS.API.DIRECT.GET.inbox-r_o_a.\u003e",
+          "$JS.API.INFO",
+          "$JS.API.STREAM.INFO.KV_mash-directory",
+          "$JS.API.STREAM.INFO.KV_mash-leases",
+          "$JS.API.STREAM.INFO.inbox-r_o_a",
+          "$KV.mash-leases.r_o_a",
+          "$SRV.\u003e",
+          "_INBOX.\u003e",
+          "agents.policy.r"
+        ],
+        "subscribe": [
+          "$SRV.\u003e",
+          "_INBOX.r_o_a.\u003e"
+        ]
+      },
+      "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
+    },
+    {
+      "describes": "list_set",
+      "sender": "r.o.a",
+      "receiver": "r.p.x",
+      "verbs": [
+        {
+          "verb": "mail",
+          "allowed": true,
+          "reason": "allow_tag",
+          "detail": "\"r.p.x\" is on the allow list"
+        },
+        {
+          "verb": "prompt",
+          "allowed": true,
+          "reason": "allow_tag",
+          "detail": "\"r.p.x\" is on the allow list"
+        },
+        {
+          "verb": "status",
+          "allowed": true,
+          "reason": "allow_tag",
+          "detail": "\"r.p.x\" is on the allow list"
+        },
+        {
+          "verb": "heartbeat",
+          "allowed": true,
+          "reason": "allow_tag",
+          "detail": "\"r.p.x\" is on the allow list"
+        }
+      ],
+      "open_subjects": {
+        "publish": [
+          "$JS.ACK.inbox-r_o_a.deliver.\u003e",
+          "$JS.API.CONSUMER.INFO.inbox-r_o_a.deliver",
+          "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_a.deliver",
+          "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+          "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_a",
+          "$JS.API.DIRECT.GET.inbox-r_o_a",
+          "$JS.API.DIRECT.GET.inbox-r_o_a.\u003e",
+          "$JS.API.INFO",
+          "$JS.API.STREAM.INFO.KV_mash-directory",
+          "$JS.API.STREAM.INFO.KV_mash-leases",
+          "$JS.API.STREAM.INFO.inbox-r_o_a",
+          "$KV.mash-leases.r_o_a",
+          "$SRV.\u003e",
+          "_INBOX.\u003e",
+          "agents.policy.r"
+        ],
+        "subscribe": [
+          "$SRV.\u003e",
+          "_INBOX.r_o_a.\u003e"
+        ]
+      },
+      "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
+    },
+    {
+      "describes": "list_set",
+      "sender": "r.o.b",
+      "receiver": "r.q.z",
+      "verbs": [
+        {
+          "verb": "mail",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+        },
+        {
+          "verb": "prompt",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+        },
+        {
+          "verb": "status",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+        },
+        {
+          "verb": "heartbeat",
+          "allowed": false,
+          "reason": "no_entry",
+          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+        }
+      ],
+      "open_subjects": {
+        "publish": [
+          "$JS.ACK.inbox-r_o_b.deliver.\u003e",
+          "$JS.API.CONSUMER.INFO.inbox-r_o_b.deliver",
+          "$JS.API.CONSUMER.MSG.NEXT.inbox-r_o_b.deliver",
+          "$JS.API.DIRECT.GET.KV_mash-directory.\u003e",
+          "$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.r_o_b",
+          "$JS.API.DIRECT.GET.inbox-r_o_b",
+          "$JS.API.DIRECT.GET.inbox-r_o_b.\u003e",
+          "$JS.API.INFO",
+          "$JS.API.STREAM.INFO.KV_mash-directory",
+          "$JS.API.STREAM.INFO.KV_mash-leases",
+          "$JS.API.STREAM.INFO.inbox-r_o_b",
+          "$KV.mash-leases.r_o_b",
+          "$SRV.\u003e",
+          "_INBOX.\u003e",
+          "agents.policy.r"
+        ],
+        "subscribe": [
+          "$SRV.\u003e",
+          "_INBOX.r_o_b.\u003e"
+        ]
+      },
+      "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
+    }
+  ]
+}

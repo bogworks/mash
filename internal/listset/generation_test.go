@@ -188,6 +188,27 @@ func TestDigestCompiled(t *testing.T) {
 	_ = DigestCompiled(nil)
 }
 
+func TestDigestCompiled_UserPermissions(t *testing.T) {
+	c, err := Compile(at001())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pinned: a Compiled with no user permissions digests as this. The pin moved when the policy responder grant joined the template.
+	if got, want := DigestCompiled(c).String(), "sha256:962836c55117c8d5645fff84ecb3973eb3bed08328b4b6f6113e315dccd00192"; got != want {
+		t.Fatalf("digest of a normal Compile output changed: %s", got)
+	}
+	d := DigestCompiled(c)
+	c.Users[0].Permissions.Pub.Allow = []string{"x.y"}
+	d2 := DigestCompiled(c)
+	if d2 == d {
+		t.Fatal("a user permission claim did not change the digest")
+	}
+	c.Users[0].Permissions.Pub.Allow = []string{"x.z"}
+	if DigestCompiled(c) == d2 {
+		t.Fatal("a different user permission claim did not change the digest")
+	}
+}
+
 func TestAccept_ReceivedDigests(t *testing.T) {
 	a1, _, err := Accept(Record{}, at001(), []byte("encoding one"))
 	if err != nil {

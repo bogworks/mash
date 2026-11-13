@@ -127,7 +127,7 @@ func Check(ls ListSet, c *Compiled) error {
 		}
 		// Every fixed grant the sender needs must be present and survive the deny lines.
 		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), flat) {
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), flat) {
 			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
 				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
 			}
@@ -199,6 +199,8 @@ func concrete(line string) string {
 // fixedBreaks says what stops working without the fixed grant line.
 func fixedBreaks(line string) string {
 	switch {
+	case isPolicySubject(line):
+		return "the sender cannot ask the policy responder what it may reach"
 	case strings.HasPrefix(line, "agents.hb."):
 		return "the sender's own heartbeat is not published"
 	case strings.HasPrefix(line, "agents.prompt."), strings.HasPrefix(line, "agents.status."):
@@ -226,6 +228,12 @@ func reachVerb(v Verb) string {
 		return "watch the heartbeat of"
 	}
 	return "publish " + string(v) + " to"
+}
+
+// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range>: three tokens, no address.
+func isPolicySubject(line string) bool {
+	toks := strings.Split(line, ".")
+	return len(toks) == 3 && toks[0] == "agents" && toks[1] == "policy"
 }
 
 func subj(address string, v Verb) string { return "agents." + v.subject() + "." + address }
@@ -324,8 +332,8 @@ func universeOf(m *model) []string {
 // fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
 func fixedLines(s sender) (pub, sub []string) {
 	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", flat) {
-		if !strings.HasPrefix(l, "agents.") && l != "" {
+	for _, l := range fixedPub("", PolicySubject(s.addr.rng), flat) {
+		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
 			pub = append(pub, l)
 		}
 	}
@@ -335,7 +343,7 @@ func fixedLines(s sender) (pub, sub []string) {
 // lineRefusal says why an expanded allow line is not one the lists could have asked for, or "".
 func (m *model) lineRefusal(s sender, dir, line string) string {
 	toks := strings.Split(line, ".")
-	if toks[0] != "agents" {
+	if toks[0] != "agents" || isPolicySubject(line) {
 		pub, sub := fixedLines(s)
 		fixed := pub
 		if dir == "sub" {
@@ -598,6 +606,31 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	if err != nil {
 		return nil, err
 	}
+	return reachOver(c, sender, universeNamed(m))
+}
+
+// reachOver is the simulation behind effective and DryRun: the addresses of universe that sender reaches per verb
+// once its tags are expanded through its group's template, the way nats-server does it (expandPermissions and
+// expanded.reach, the same code Check uses). Each slice is sorted.
+func reachOver(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
+	p, err := expandSender(c, sender)
+	if err != nil {
+		return nil, err
+	}
+	out := map[Verb][]string{}
+	for _, v := range Verbs {
+		for _, addr := range universe {
+			if p.reach(v, []string{addr})[addr] {
+				out[v] = append(out[v], addr)
+			}
+		}
+		slices.Sort(out[v])
+	}
+	return out, nil
+}
+
+// expandSender finds sender's user and group template in c and expands the template with the user's name and tags.
+func expandSender(c *Compiled, sender string) (*expanded, error) {
 	var tpl *Template
 	var user *User
 	for i := range c.Users {
@@ -620,20 +653,7 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	if tpl == nil {
 		return nil, fmt.Errorf("no template %s", a.group())
 	}
-	p, err := expandPermissions(tpl.Permissions, user.Name, user.Tags)
-	if err != nil {
-		return nil, err
-	}
-	out := map[Verb][]string{}
-	for _, v := range Verbs {
-		for _, addr := range universeNamed(m) {
-			if p.reach(v, []string{addr})[addr] {
-				out[v] = append(out[v], addr)
-			}
-		}
-		slices.Sort(out[v])
-	}
-	return out, nil
+	return expandPermissions(tpl.Permissions, user.Name, user.Tags)
 }
 
 // universeNamed is the addresses the list set names, sorted.
@@ -645,3 +665,14 @@ func universeNamed(m *model) []string {
 	slices.Sort(out)
 	return out
 }
+
+// ReachOf returns, for sender in c, the addresses of universe it reaches per verb once its tags are expanded through
+// its group's template, the way nats-server does it: the simulation behind DryRun. Each slice is sorted. It is an error
+// for c to have no user or no template for sender.
+func ReachOf(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
+	return reachOver(c, sender, universe)
+}
+
+// Subject returns the subject a sender uses for verb v towards address: a publish subject for mail, prompt and status,
+// and the subject a sender subscribes to for heartbeat.
+func Subject(v Verb, address string) string { return subj(address, v) }
