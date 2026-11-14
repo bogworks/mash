@@ -88,7 +88,7 @@ const unprovableText = "its issued history cannot be shown to be complete"
 // retire refuses a key whose issue history cannot be shown complete, with nothing changed; a provable one retires.
 func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h.run("add", "c", "--label", "env=red"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub := h.credsClaims("c")
@@ -109,7 +109,7 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 
 	// Control: the same bucket with 7 revisions of the key is provable.
 	h2 := newFleetEnv(t, addPolicy)
-	if _, errb, code := h2.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h2.run("add", "c", "--label", "env=red"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub2 := h2.credsClaims("c")
