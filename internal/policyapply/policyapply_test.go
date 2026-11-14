@@ -719,7 +719,7 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 func TestRunRequiresOKAckFromEveryServer(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.badAck["s2"] = true // s2 holds the target but did not acknowledge it
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State == StateApplied || !hasFailure(st, "s2", "", CheckPush) {
 		t.Fatalf("%+v %v", st, err)
@@ -803,7 +803,7 @@ func TestGateRevocationOlderThanCredentialIssue(t *testing.T) {
 
 func TestRunRefusesOversizedListSet(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.ServerLimits = []listset.ServerLimits{{Server: "tiny", MaxConnectLine: 400}}
 	signed := false
@@ -873,7 +873,7 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
-			l := NewMemLedger(w.rec1())
+			l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 			in := w.run(l, set2(), "bytes-2")
 			mutate(w, &in, &l)
 			in.Ledger = l
@@ -890,7 +890,7 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 		})
 	}
 	w := newWorld(t)
-	st, err := Run(context.Background(), w.run(NewMemLedger(w.rec1()), set2(), "bytes-2"))
+	st, err := Run(context.Background(), w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2"))
 	if err != nil || st.State != StateApplied {
 		t.Fatalf("matching previous: %+v %v", st, err)
 	}
@@ -899,7 +899,7 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 // TestRunBeforeCommitFailureIsPartial (M): a failed hook leaves the Status partial and not in force, and pending.
 func TestRunBeforeCommitFailureIsPartial(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.BeforeCommit = func(context.Context, Accepted, Status) error { return errors.New("hook failed") }
 	st, err := Run(context.Background(), in)
