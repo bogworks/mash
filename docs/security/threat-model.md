@@ -384,7 +384,7 @@ Custody rule: the account signing key, and every key above it, stay with the min
   marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
   permission on the bucket or its stream subjects, and a test asserts it.
 - Held by: the outside system.
-- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a zone key, change the
+- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a signing key, change the
   account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
   refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
   name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key
