@@ -1,0 +1,1 @@
+The refused-send error no longer tells every sender to ask for `mashctl reissue --changed`: it now says the credentials may be older than the permissions mash issues now or the permissions were narrowed, to ask the admin to check them, and that on an adopted account reissue is refused and the admin changes the permissions where they are set.
