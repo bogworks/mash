@@ -103,7 +103,11 @@ func (e *listSetEnv) seed(doc []byte, gen uint64, st *policyapply.Status) {
 		if err != nil {
 			e.t.Fatal(err)
 		}
-		rec := listset.Record{Generation: gen, Received: listset.Digest{1}, Content: listset.Digest{2}, Signed: listset.Digest{3}}
+		c, err := listset.Compile(d.ListSet)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		rec := listset.Record{Generation: gen, Received: listset.Digest{1}, Content: listset.Digest{2}, Signed: listset.DigestCompiled(c)}
 		if err := l.CompareAndCommitDetail(0, rec, policyapply.InForceDetail{JWT: "jwt", ListSet: &d.ListSet}); err != nil {
 			e.t.Fatal(err)
 		}
@@ -183,6 +187,15 @@ func (e *listSetEnv) seedInForce() {
 	e.seed(listSetDoc(e.t, e.acctPub, 7, 6, nil), 7, appliedStatus(7))
 }
 
+// seedAdopted is seedInForce on an adopted account: the intake refuses every submission to one that is not.
+func (e *listSetEnv) seedAdopted() {
+	e.t.Helper()
+	e.seedInForce()
+	if o, eb, c := e.applyEnv.run("policy", "adopt", "--submitter", userPub(e.t)); c != 0 {
+		e.t.Fatalf("adopt: %d %q %q", c, o, eb)
+	}
+}
+
 func TestListSetShow(t *testing.T) {
 	e := newListSetEnv(t)
 	e.seedInForce()
@@ -252,9 +265,9 @@ func TestListSetBucketSetting(t *testing.T) {
 	if _, errb, code := e.run("show"); code != 1 || !strings.Contains(errb, "other_foo_policy") {
 		t.Fatalf("setting names another bucket: %d %q", code, errb)
 	}
-	// A setting without {range} needs no --range, and refuses one.
+	// A setting without {range} needs no --range, and accepts one (it fills nothing).
 	e.env[policyapply.PolicyBucketEnv] = listSetBucket
-	if _, errb, code := e.run("show", "--range", "foo"); code != 1 || !strings.Contains(errb, "{range}") {
+	if _, errb, code := e.run("show", "--range", "foo"); code != 0 || errb != "" {
 		t.Fatalf("range without placeholder: %d %q", code, errb)
 	}
 	if _, errb, code := e.run("show", "--bucket", listSetBucket); code != 0 || errb != "" {
@@ -310,7 +323,7 @@ func TestListSetExplainInvalidArgumentIsNotEchoed(t *testing.T) {
 
 func TestListSetDiffNarrowing(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 	next := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
 		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
 	})
@@ -331,7 +344,7 @@ func TestListSetDiffNarrowing(t *testing.T) {
 // A valid document for another range than the one selected is refused at stage range, with both ranges named.
 func TestListSetDiffOtherRange(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 	f := e.file("bar.json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) { m["range"] = "bar" }))
 	out, errb, code := e.run("diff", f)
 	if code != 1 || !strings.Contains(out, "[range]") || !strings.Contains(out, "bar") || !strings.Contains(out, listSetRange) || strings.Contains(out, "accepted") {
@@ -364,7 +377,7 @@ func TestListSetBadScopeIsUsageError(t *testing.T) {
 
 func TestListSetDiffRefused(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 	// An entry naming an address outside the range is refused by the checker.
 	next := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
 		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{"bar.d.build"}, "deny": []string{}}
@@ -378,7 +391,7 @@ func TestListSetDiffRefused(t *testing.T) {
 
 func TestListSetDiffStaleBase(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 	out, errb, code := e.run("diff", e.file("stale.json", listSetDoc(t, e.acctPub, 4, 3, nil)))
 	if code != 1 || !strings.Contains(out, "[base]") {
 		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
@@ -422,7 +435,7 @@ func (e *listSetEnv) runPolicyVia(args ...string) (string, string, int) {
 // The verbs are reached through runPolicy, not only through their handlers.
 func TestRunPolicyListSetVerbs(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 
 	out, errb, code := e.runPolicyVia("show")
 	if code != 0 || errb != "" || e.masked(out) != e.masked(mustRun(t, e, "show")) {
@@ -484,13 +497,14 @@ func TestRunPolicyNoArgsListsListSetVerbs(t *testing.T) {
 	}
 }
 
-// A diff of a list set identical in content to the one in force says nothing would change, and says nothing else.
+// A diff of a list set identical in content to the one in force is refused at stage unchanged, as the apply refuses it,
+// and exits 1.
 func TestListSetDiffNothingWouldChange(t *testing.T) {
 	e := newListSetEnv(t)
-	e.seedInForce()
+	e.seedAdopted()
 	f := e.file("same.json", listSetDoc(t, e.acctPub, 8, 7, nil))
 	out, errb, code := e.run("diff", f)
-	if code != 0 || errb != "" || out != "accepted: nothing would change\n"+policydoc.SizeLimitsLine+"\nsignature not checked: give --submitter to check it against the adoption marker\n" {
+	if code != 1 || errb != "" || out != "refused: nothing would change\n  [unchanged] list_set: same content as generation 7 in force; nothing to apply\n" {
 		t.Fatalf("diff: %d\n%q\n%s", code, out, errb)
 	}
 	e.golden("diff_unchanged", out)
@@ -544,7 +558,7 @@ func TestListSetDiffNextSubmitter(t *testing.T) {
 
 	// Not adopted: refused at stage adoption.
 	out, errb, code := e.run("diff", withNext(next))
-	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] next_submitter: the account is not adopted: a next_submitter cannot be recorded") {
+	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] adoption: this account is not adopted: list sets are ignored") {
 		t.Fatalf("unadopted: %d\n%q\n%s", code, out, errb)
 	}
 
@@ -591,11 +605,13 @@ func TestListSetDiffSubmitterAgainstMarker(t *testing.T) {
 	}
 	good, goodPub := key()
 	bad, badPub := key()
-	payload := listSetDoc(t, e.acctPub, 8, 7, nil)
+	payload := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+	})
 	goodF, badF := e.file("good.jwt", listSetSigned(t, good, payload)), e.file("bad.jwt", listSetSigned(t, bad, payload))
 
 	out, errb, code := e.run("diff", goodF, "--submitter", goodPub)
-	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] signature: the account is not adopted") || strings.Contains(out, "accepted") {
+	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] adoption: this account is not adopted") || strings.Contains(out, "accepted") {
 		t.Fatalf("not adopted: %d\n%q\n%s", code, out, errb)
 	}
 	if o, eb, c := e.applyEnv.run("policy", "adopt", "--submitter", goodPub); c != 0 {
@@ -619,5 +635,36 @@ func TestListSetDiffNeedsRangeForFirstSet(t *testing.T) {
 	_, errb, code := e.run("diff", f, "--bucket", listSetBucket)
 	if code != 2 || !strings.Contains(errb, "--range is needed to check a first list set's range when nothing is in force") {
 		t.Fatalf("%d %q", code, errb)
+	}
+}
+
+// With a literal bucket name --range fills nothing but is the range the first list set is validated against.
+func TestListSetDiffLiteralBucketWithRange(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seed(nil, 0, nil)
+	if o, eb, c := e.applyEnv.run("policy", "adopt", "--submitter", userPub(t)); c != 0 {
+		t.Fatalf("adopt: %d %q %q", c, o, eb)
+	}
+	f := e.file("first.json", listSetDoc(t, e.acctPub, 1, 0, nil))
+	out, errb, code := e.run("diff", f, "--bucket", listSetBucket, "--range", listSetRange)
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted: this would change\n") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	// The range is checked: another range is a refusal at stage range.
+	out, _, code = e.run("diff", f, "--bucket", listSetBucket, "--range", "bar")
+	if code != 1 || !strings.Contains(out, "[range]") {
+		t.Fatalf("%d\n%s", code, out)
+	}
+}
+
+// An account that is not adopted is refused at stage adoption without --submitter too.
+func TestListSetDiffNotAdoptedWithoutSubmitter(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	out, errb, code := e.run("diff", e.file("next.json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+	})))
+	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] adoption: this account is not adopted: list sets are ignored") || strings.Contains(out, "accepted") {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
 }

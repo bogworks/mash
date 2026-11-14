@@ -20,7 +20,8 @@ const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY | -
        (show, explain and diff read the list set in force from the policy bucket and change nothing;
         SENDER and RECEIVER are three-part addresses; FILE is a list-set document, canonical JSON or a compact JWS;
         the policy bucket is named by the MASH_POLICY_BUCKET setting, a bucket name that may contain {range};
-        --range fills {range} and is required only when the setting has it; --bucket NAME overrides the setting;
+        --range fills {range} and is required only when the setting has it; with a literal bucket name, diff uses --range
+        as the range to validate the document against when nothing is in force; --bucket NAME overrides the setting;
         --account defaults to the key store's account key;
         diff checks the signature only when --submitter is given, and exits 1 when the plan is refused)
 `

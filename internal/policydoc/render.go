@@ -135,8 +135,12 @@ func RenderPlan(p DiffPlan) string {
 
 // signatureNote is the line that says the document's signature was not checked, when no --submitter was given.
 func (p DiffPlan) signatureNote() string {
-	if !p.unsigned {
-		return ""
+	var s string
+	if p.adoptionUnchecked {
+		s = "adoption not checked: the adoption marker was not read\n"
 	}
-	return "signature not checked: give --submitter to check it against the adoption marker\n"
+	if p.unsigned {
+		s += "signature not checked: give --submitter to check it against the adoption marker\n"
+	}
+	return s
 }

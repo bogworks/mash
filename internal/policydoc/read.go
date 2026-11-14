@@ -122,6 +122,8 @@ type loaded struct {
 	// pending is the pending record; hasPending is false when no generation is pending.
 	pending    listset.Record
 	hasPending bool
+	// rec is the committed record (its Signed digest is what the unchanged check compares with).
+	rec listset.Record
 }
 
 // load reads the list set in force, the pending record and the latest status in one read.
@@ -137,7 +139,7 @@ func load(ctx context.Context, r Reader) (*loaded, StateHeader, error) {
 	if !ok || rec.Generation < 1 {
 		return &loaded{pending: pending, hasPending: hasPending}, header(0, sp), nil
 	}
-	return &loaded{ls: ls, gen: rec.Generation, committed: true, pending: pending, hasPending: hasPending}, header(rec.Generation, sp), nil
+	return &loaded{ls: ls, gen: rec.Generation, rec: rec, committed: true, pending: pending, hasPending: hasPending}, header(rec.Generation, sp), nil
 }
 
 // Show describes the list set in force (REQ-010) with the state of its application (REQ-011). Nothing in force is
@@ -205,6 +207,8 @@ type DiffPlan struct {
 	completes bool
 	// unsigned is true when no --submitter was given, so the document's signature was not checked.
 	unsigned bool
+	// adoptionUnchecked is true when the caller passed no marker source, so the adoption was not checked.
+	adoptionUnchecked bool
 }
 
 // RotationContext is what the intake would check a document's next_submitter against: the adoption marker and the keys
@@ -241,23 +245,30 @@ func shortKey(k string) string {
 	return k
 }
 
-// checkSigner is the intake's rule on who may sign: the adoption marker's next submitter when a rotation is pending,
-// else its submitter. It applies only when the caller named the signer.
-func checkSigner(rc *RotationContext) []listset.Refusal {
-	if rc == nil || rc.Signer == "" {
+// checkAdoption is the intake's first check: an account that is not adopted has every list set ignored, so no
+// submission to it is accepted. A marker that cannot be read is a refusal too. A nil rc means the caller read no marker:
+// nothing is checked and the plan says so.
+func checkAdoption(rc *RotationContext) []listset.Refusal {
+	if rc == nil {
 		return nil
 	}
-	refuse := func(stage, reason string) []listset.Refusal {
-		return []listset.Refusal{{Stage: stage, Entry: "signature", Reason: reason}}
+	refuse := func(reason string) []listset.Refusal {
+		return []listset.Refusal{{Stage: StageAdoption, Entry: "adoption", Reason: reason}}
 	}
 	if rc.MarkerErr != nil {
-		return refuse(StageSignature, "the adoption marker cannot be read: "+rc.MarkerErr.Error())
-	}
-	if rc.Err != nil && !rc.Adopted && rc.Marker.Submitter == "" && rc.Marker.NextSubmitter == "" {
-		return nil // the held keys could not be read; the signer needs only the marker
+		return refuse("the adoption marker cannot be read: " + rc.MarkerErr.Error())
 	}
 	if !rc.Adopted {
-		return refuse(StageAdoption, "the account is not adopted: a next_submitter cannot be recorded")
+		return refuse("this account is not adopted: list sets are ignored")
+	}
+	return nil
+}
+
+// checkSigner is the intake's rule on who may sign: the adoption marker's next submitter when a rotation is pending,
+// else its submitter. It applies only when the caller named the signer and the account is adopted (checkAdoption).
+func checkSigner(rc *RotationContext) []listset.Refusal {
+	if rc == nil || rc.Signer == "" || rc.MarkerErr != nil || !rc.Adopted {
+		return nil
 	}
 	expected, pending := rc.Marker.Submitter, rc.Marker.NextSubmitter != ""
 	if pending {
@@ -270,13 +281,14 @@ func checkSigner(rc *RotationContext) []listset.Refusal {
 	if pending {
 		reason += " (a rotation is pending: only the next submitter's key is accepted)"
 	}
-	return refuse(StageSignature, reason)
+	return []listset.Refusal{{Stage: StageSignature, Entry: "signature", Reason: reason}}
 }
 
 // StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
 const StageDocument = "document"
 
-// StageAdoption is the stage of the refusal Diff reports for a next_submitter on an account that is not adopted.
+// StageAdoption is the stage of the refusal Diff reports for an account that is not adopted or whose adoption marker
+// cannot be read.
 const StageAdoption = "adoption"
 
 // rotate adds what the document's next_submitter would do to p, the way policyintake checks it before an apply. A nil
@@ -291,6 +303,9 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 	}
 	refuse := func(stage, reason string) []listset.Refusal {
 		return []listset.Refusal{{Stage: stage, Entry: "next_submitter", Reason: reason}}
+	}
+	if rc.MarkerErr != nil || !rc.Adopted && rc.Err == nil {
+		return nil // checkAdoption refuses the plan
 	}
 	if rc.Err != nil {
 		if next.NextSubmitter == "" {
@@ -311,9 +326,6 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 		p.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending"
 		return nil
 	}
-	if !rc.Adopted {
-		return refuse(StageAdoption, "the account is not adopted: a next_submitter cannot be recorded")
-	}
 	if err := admin.ValidateNextSubmitter(next.Account, rc.Marker, next.NextSubmitter, rc.Held); err != nil {
 		detail := "next_submitter is not acceptable: " + err.Error()
 		if errors.Is(err, admin.ErrNextIsMashKey) {
@@ -331,7 +343,9 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 // one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
 // that of the pending generation as a refusal with stage "pending", and one whose next_submitter the intake would
 // refuse as a refusal with stage "document" or "adoption" (checked against rc; see RotationContext): a submission of
-// any would be refused. A document with a next_submitter is never "nothing would change".
+// any would be refused. A document whose content is that in force is refused as the apply refuses it, with stage "unchanged", unless it starts or
+// completes a submitter rotation; one with no adoption marker (rc nil: not checked) or an account that is not adopted or
+// whose marker cannot be read is refused with stage "adoption".
 func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
@@ -372,8 +386,23 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	}
 	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
 	dp.unsigned = rc == nil || rc.Signer == ""
+	dp.adoptionUnchecked = rc == nil
+	pre = append(pre, checkAdoption(rc)...)
 	pre = append(pre, checkSigner(rc)...)
 	pre = append(pre, rotate(&dp, next, rc)...)
+	// The apply refuses a list set whose compiled content is that in force (ADR 0119), unless the submission starts or
+	// completes a submitter rotation: it asks listset.Accept, or AcceptRotationStep for a rotation step.
+	if cur.committed {
+		pendingRotation := rc != nil && rc.Adopted && rc.Marker.NextSubmitter != ""
+		accept := listset.Accept
+		if dp.completes || next.NextSubmitter != "" && !pendingRotation {
+			accept = listset.AcceptRotationStep
+		}
+		if _, _, err := accept(cur.rec, next.ListSet, file); errors.Is(err, listset.ErrUnchanged) {
+			pre = append(pre, listset.Refusal{Stage: policyapply.StageUnchanged, Entry: "list_set",
+				Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", gen)})
+		}
+	}
 	p = dp.Plan
 	if len(pre) > 0 {
 		p.Refusals = append(pre, p.Refusals...)

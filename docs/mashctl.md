@@ -109,13 +109,13 @@ These three verbs read the list set in force, and the status of its application,
 
 - `show` prints the list set in force and how far it is applied: its generation, its state, and the generation each server holds. With nothing in force it says so.
 - `explain SENDER RECEIVER` says whether the sender may mail the receiver under the list set in force, and which entries decide it. SENDER and RECEIVER are three-part addresses (`range.owner.name`).
-- `diff FILE` reads a list-set document (canonical JSON or a compact JWS) and prints what applying it would do to the list set in force, without applying it. The plan is accepted or refused, and a refusal names the reasons. A document whose content is the same as the list set in force prints `accepted: nothing would change` and nothing else. `diff` checks the signature only when `--submitter` is given; without it the file is read as it is.
+- `diff FILE` reads a list-set document (canonical JSON or a compact JWS) and prints what applying it would do to the list set in force, without applying it. The plan is accepted or refused, and a refusal names the reasons. A document whose content is the same as the list set in force is refused at stage `unchanged` (`same content as generation N in force; nothing to apply`), as the apply refuses it, unless it starts or completes a submitter rotation. An account that is not adopted, or whose adoption marker cannot be read, is refused at stage `adoption`. `diff` checks the signature only when `--submitter` is given; without it the file is read as it is.
 
 Flags:
 
 - `--json` prints the result as JSON in place of the text.
 - `--bucket NAME` names the policy bucket and overrides the setting below.
-- `--range RANGE` fills `{range}` in the bucket name. It is required when the bucket name has `{range}` and refused when it does not.
+- `--range RANGE` fills `{range}` in the bucket name and is required when the bucket name has `{range}`. With a literal bucket name it fills nothing; `diff` uses it only as the range to validate the document against, which a first list set needs when nothing is in force.
 - `--account KEY` is the account public key. It defaults to the account key in the key store.
 - `--submitter PUBKEY` (`diff` only) is the public key that must have signed FILE.
 

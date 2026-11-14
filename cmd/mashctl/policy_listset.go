@@ -74,7 +74,8 @@ func parseListSetArgs(args []string, allowSubmitter bool) (listSetOpts, error) {
 }
 
 // resolveListSetBucket names the policy bucket: --bucket, else the MASH_POLICY_BUCKET setting as a pattern with
-// --range filling {range}. It prints its own errors and never prints a value it was given.
+// --range filling {range}. With a literal name --range does not fill anything (diff uses it as the range to validate
+// the document against). It prints its own errors and never prints a value it was given.
 func resolveListSetBucket(pfx string, o listSetOpts, env func(string) string, stderr io.Writer) (string, bool) {
 	pattern, source := o.bucket, "--bucket"
 	if pattern == "" {
@@ -84,13 +85,8 @@ func resolveListSetBucket(pfx string, o listSetOpts, env func(string) string, st
 		fmt.Fprintf(stderr, "%sno policy bucket: set %s to the bucket name (it may contain {range}) or pass --bucket NAME\n", pfx, policyapply.PolicyBucketEnv)
 		return "", false
 	}
-	hasRange := strings.Contains(pattern, "{range}")
-	switch {
-	case hasRange && o.rng == "":
+	if strings.Contains(pattern, "{range}") && o.rng == "" {
 		fmt.Fprintf(stderr, "%sno range: %s has {range}, so pass --range RANGE\n", pfx, source)
-		return "", false
-	case !hasRange && o.rng != "":
-		fmt.Fprintf(stderr, "%s--range is given but %s has no {range} (the value is not shown)\n", pfx, source)
 		return "", false
 	}
 	name, err := policyapply.PolicyBucket(pattern, o.rng)
