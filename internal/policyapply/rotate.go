@@ -279,8 +279,8 @@ type RotationPlan struct {
 
 // lockedRevoker serialises Revoke calls: each revocation reads, extends and pushes one account JWT, so two at once
 // would lose one of them.
-// It keeps the JWT of the last successful Revoke in *last: each revocation extends the one before, so it is the one
-// the servers hold at the end.
+// It keeps the last JWT a Revoke attempted in *last, whether or not the push succeeded: each revocation extends the
+// one before, so it is the one the servers hold at the end, or the one an interrupted push may have left on some.
 type lockedRevoker struct {
 	mu   *sync.Mutex
 	r    Revoker
@@ -300,7 +300,7 @@ func (l lockedRevoker) Revoke(ctx context.Context, pubs []string) (string, error
 		return "", err
 	}
 	tok, err := l.r.Revoke(ctx, pubs)
-	if err == nil && tok != "" {
+	if tok != "" {
 		*l.last = tok
 	}
 	return tok, err
@@ -310,7 +310,8 @@ func (l lockedRevoker) Revoke(ctx context.Context, pubs []string) (string, error
 // senders share one deadline; the revocations are serialised) and RemoveSender for each leaving sender. It returns the
 // keys revoked, by address (an entry for every narrowed and leaving sender, empty when it had none to revoke; they are
 // that sender's whole old-key inventory from the issue record), the senders not seen connected, sorted, and the account
-// JWT the last revocation pushed (empty when nothing was revoked): the JWT the servers hold. Every sender is handled
+// JWT the last revocation attempted (empty when nothing was attempted; with an error it may have reached only some
+// servers): the JWT the servers hold. Every sender is handled
 // even when one fails; the errors are joined. Each revocation is preceded by the RunInput.BeforeWrite hook of the run
 // (label FenceRevoke, through the ctx AfterPush gets); a refusal stops every later revocation.
 func RotationsAfterPush(p *RotationPlan) func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error) {

@@ -573,9 +573,23 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return Status{}, err
 		}
 	}
+	// While a generation is pending, an earlier attempt may have pushed revocations whose JWT was lost (an interrupted
+	// revocation that reached some servers): the JWTs the servers hold are the ground truth, so every revocation on any
+	// server is kept too. A failed read or an incomplete server set refuses the run before anything is pushed.
+	var serverJWTs []string
+	if hasPend {
+		if serverJWTs, err = serverRevocationJWTs(ctx, in); err != nil {
+			return Status{}, err
+		}
+	}
 	keeps := func(target string) error {
 		if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, target); err != nil {
 			return err
+		}
+		for _, sj := range serverJWTs {
+			if err := keepsRevocations(sj, true, target); err != nil {
+				return fmt.Errorf("%w (the revocations a server holds)", err)
+			}
 		}
 		if pendJWT != "" {
 			if err := keepsRevocations(pendJWT, true, target); err != nil {
@@ -632,6 +646,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		gi.Expect.RevokedKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(gi.Expect.RevokedKeys, all))))
 		if aerr != nil {
 			// The target is on the servers: pending, so only a resubmission of the same content may follow.
+			// An interrupted revocation may have reached some servers: the JWT it attempted is what to keep.
 			pj := tok
 			if finalJWT != "" {
 				if _, derr := jwt.DecodeAccountClaims(finalJWT); derr == nil {
@@ -734,6 +749,38 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		return st, fmt.Errorf("clear pending after committing generation %d: %w", rec.Generation, err)
 	}
 	return st, nil
+}
+
+// serverRevocationJWTs reads the account JWT of every server and returns the non-empty ones, so a retry can keep
+// every revocation any server holds. It fails closed: an error reading the server set or the JWTs, an incomplete
+// server set, a server missing from the answer or a JWT that does not decode is an error wrapping ErrSignedMismatch.
+func serverRevocationJWTs(ctx context.Context, in RunInput) ([]string, error) {
+	set, err := in.Cluster.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the server set before retrying the pending generation: %w", ErrSignedMismatch, err)
+	}
+	if !set.Complete(in.Inventory) {
+		return nil, fmt.Errorf("%w: the server set is incomplete, so the revocations on the servers cannot be read: %s", ErrSignedMismatch, set.Why(in.Inventory))
+	}
+	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the servers' account JWTs before retrying the pending generation: %w", ErrSignedMismatch, err)
+	}
+	var out []string
+	for _, n := range slices.Sorted(slices.Values(set.Names)) {
+		tok, ok := jwts[n]
+		if !ok {
+			return nil, fmt.Errorf("%w: no account JWT was read from server %s", ErrSignedMismatch, n)
+		}
+		if tok == "" {
+			continue
+		}
+		if _, derr := jwt.DecodeAccountClaims(tok); derr != nil {
+			return nil, fmt.Errorf("%w: the account JWT of server %s does not decode: %w", ErrSignedMismatch, n, derr)
+		}
+		out = append(out, tok)
+	}
+	return out, nil
 }
 
 // keepsRevocations checks that target revokes every key the in-force JWT prev revokes, each at a time no earlier than
