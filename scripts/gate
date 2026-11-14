@@ -145,7 +145,7 @@ if [ "$prepr" = 1 ]; then # the fast pre-PR guards; see the header. Exits here: 
 	}
 	pp_adrlint() { go run ./scripts/adrlint docs; }
 	pp_shellcheck() { xargs -r shellcheck --severity=error <"$out/changed-shell.txt"; }
-	pp_actionlint() { SHELLCHECK_OPTS=--severity=error actionlint; }  # as CI runs it: shellcheck errors only, no style or info notes
+	pp_actionlint() { SHELLCHECK_OPTS=--severity=error actionlint -ignore 'unexpected key "queue" for "concurrency" section'; }  # shellcheck errors only, no style or info notes; -ignore: actionlint 1.7.7 predates the concurrency `queue` key GitHub accepts (adr-lint.yml)
 
 	if [ "$gochg" = 1 ]; then
 		pp_run gofmt pp_gofmt
