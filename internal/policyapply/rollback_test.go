@@ -495,3 +495,62 @@ func TestFinalAndRollbackJWTSizeLimit(t *testing.T) {
 		t.Fatalf("rollback: %+v %v", st, err)
 	}
 }
+
+// After a confirmed rollback the JWT in force is the rollback JWT, which may carry revocations the earlier JWT in
+// force lacked: the next submission, signed from it, passes the server-revocation check.
+func TestRollbackBecomesJWTInForce(t *testing.T) {
+	w := newWorld(t)
+	extra := freshUserPub(t)
+	w.cluster.failPush["s2"] = true
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
+		return map[string][]string{"": {extra}}, nil, w.k.build(t, w.c2, w.k.revoked, extra), nil
+	}
+	st, err := Run(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := gens(st); g["s1"] != "1" || g["s2"] != "1" {
+		t.Fatalf("servers = %v", g)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Fatal("pending left after the rollback")
+	}
+	stored, _ := l.InForceJWT()
+	if last := w.cluster.pushes[len(w.cluster.pushes)-1]; stored != last || stored == w.j1 {
+		t.Fatalf("stored JWT in force is not the rollback JWT")
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("record in force changed: %+v", rec)
+	}
+	claims, err := jwt.DecodeAccountClaims(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := claims.Revocations[extra]; !has {
+		t.Fatal("the stored JWT lacks the revocation the rollback carries")
+	}
+	// The next submission builds from the stored JWT in force.
+	w.cluster.failPush["s2"] = false
+	next := w.run(l, set2(), "bytes-2")
+	next.Signer = withSign(next.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
+		cur, _ := l.InForceJWT()
+		pc, err := jwt.DecodeAccountClaims(cur)
+		if err != nil {
+			return "", err
+		}
+		var keys []string
+		for k := range pc.Revocations {
+			keys = append(keys, k)
+		}
+		return w.k.build(t, c, keys...), nil
+	})
+	st, err = Run(context.Background(), next)
+	if err != nil {
+		t.Fatalf("next submission: %v", err)
+	}
+	if st.State != StateApplied {
+		t.Fatalf("next submission: %+v", st)
+	}
+}

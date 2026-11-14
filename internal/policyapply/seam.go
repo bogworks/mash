@@ -46,5 +46,9 @@ func PolicyBucket(pattern, rng string) (string, error) {
 // StatusKey is the key of the status value of account (its public key).
 func StatusKey(account string) string { return "status." + account }
 
+// PendingJWTKey is the key of the last account JWT pushed for the pending generation of account. It is a key of its
+// own so the status value never holds a second account JWT (the server's payload limit is about one JWT's size).
+func PendingJWTKey(account string) string { return StatusKey(account) + ".pending" }
+
 // LeaseKey is the key of the run lease of account. It sits beside the status value, under the same prefix.
 func LeaseKey(account string) string { return StatusKey(account) + ".lease" }

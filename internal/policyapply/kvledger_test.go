@@ -837,3 +837,118 @@ func TestKVLedgerWriteRefusalRejectsOthers(t *testing.T) {
 		t.Error("a status was written")
 	}
 }
+
+// The pending JWT has a key of its own: a JWT near the account limit does not enlarge the status value.
+func TestKVLedgerPendingJWTOwnKey(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	big := strings.Repeat("x", 900<<10)
+	if err := l.SetPendingJWT(testRecord(2), big); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.PendingJWT(); err != nil || got != big {
+		t.Fatalf("pending JWT: %d bytes, %v", len(got), err)
+	}
+	st, err := e.kv.Get(ctx, StatusKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Value()) > 1024 || strings.Contains(string(st.Value()), "xxxx") {
+		t.Errorf("the status value holds the pending JWT: %d bytes", len(st.Value()))
+	}
+	pk, err := e.kv.Get(ctx, PendingJWTKey(kvAccount))
+	if err != nil || len(pk.Value()) < len(big) {
+		t.Fatalf("pending key: %v", err)
+	}
+	if err := l.SetPending(testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != big {
+		t.Error("SetPending of the same record lost the JWT")
+	}
+	if err := l.SetPending(testRecord(3)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != "" {
+		t.Error("a JWT for another record is returned")
+	}
+	if err := l.SetPendingJWT(testRecord(3), "small"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.CommitRollback("rolled"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != "" {
+		t.Error("pending JWT after CommitRollback")
+	}
+	if got, _ := l.InForceJWT(); got != "rolled" {
+		t.Errorf("in force JWT = %q", got)
+	}
+	if v, _ := e.kv.Get(ctx, PendingJWTKey(kvAccount)); strings.Contains(string(v.Value()), "small") {
+		t.Error("pending key not cleared")
+	}
+}
+
+// A value over the limit is refused with a clear error, before anything is written.
+func TestKVLedgerValueOverLimitRefused(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{MaxValue: 4096})
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := l.SetPendingJWT(testRecord(2), strings.Repeat("x", 5000)); !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("pending JWT over the limit: %v", err)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("a pending record was written")
+	}
+	err = l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: strings.Repeat("x", 5000)})
+	if !errors.Is(err, ErrValueTooLarge) || !strings.Contains(err.Error(), "limit 4096") {
+		t.Fatalf("status value over the limit: %v", err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 0 {
+		t.Error("committed")
+	}
+}
+
+// A target whose JWT fits the account JWT limit but whose status value does not fit the ledger is refused before any
+// push: nothing is pushed and nothing is pending.
+func TestRunRefusesStatusValueOverLimitBeforePush(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	w := newWorld14(t)
+	seed := e.ledger(KVLedgerOptions{})
+	prevLS := at014Prev()
+	if err := seed.CompareAndCommitDetail(0, listset.Record{Generation: 1}, InForceDetail{JWT: w.j1, ListSet: &prevLS}); err != nil {
+		t.Fatal(err)
+	}
+	ent, err := e.kv.Get(ctx, StatusKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The seeded value fits; the value with the target's JWT, list set and pending record does not.
+	l := e.ledger(KVLedgerOptions{MaxValue: len(ent.Value()) + 40})
+	w.in.Ledger = l
+	_, err = Run(ctx, w.in)
+	if !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("err = %v, want ErrValueTooLarge", err)
+	}
+	if n := len(w.cl.pushes); n != 0 {
+		t.Errorf("pushes = %d, want 0", n)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("a pending record was written")
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d", rec.Generation)
+	}
+}
