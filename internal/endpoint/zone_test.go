@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -62,4 +63,43 @@ func TestOpenRefusesZonedRecord(t *testing.T) {
 	if _, err := Open(ctx, f.cfg("other")); err == nil || !strings.Contains(err.Error(), "zones are removed (ADR 0091)") {
 		t.Fatalf("own zoned record: %v", err)
 	}
+}
+
+// A directory record that cannot be read stops a start that takes a lease (it may be a zoned one); a one-shot client
+// tolerates the partial load.
+func TestOpenRefusesWhenADirectoryRecordCannotBeRead(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	setFetchHook(t, func(key string) error {
+		if key == "b" {
+			return errors.New("timeout")
+		}
+		return nil
+	})
+	if _, err := Open(ctx, f.cfg("a")); err == nil || !strings.Contains(err.Error(), "1 of 2 records could not be read; refusing to start") {
+		t.Fatalf("open with an unreadable record: %v", err)
+	}
+	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk, err := js.KeyValue(ctx, store.LeaseBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lk.Get(ctx, "a"); !errors.Is(err, jetstream.ErrKeyNotFound) {
+		t.Fatalf("a lease was taken: %v", err)
+	}
+	c, err := OpenClientWith(ctx, f.cfg("a"), ClientOptions{FullDirectory: true})
+	if err != nil {
+		t.Fatalf("a non-holding client must tolerate it: %v", err)
+	}
+	c.Close()
+
+	setFetchHook(t, func(string) error { return nil })
+	ep, err := Open(ctx, f.cfg("a"))
+	if err != nil {
+		t.Fatalf("a clean directory: %v", err)
+	}
+	ep.Close()
 }
