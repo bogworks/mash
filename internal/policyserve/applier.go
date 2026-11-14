@@ -283,6 +283,9 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		signers[tpl.Group] = pub
 	}
 	deps.Signers = signers
+	if deps.KeptSigners, err = KeptSigners(a.Keys, a.Range); err != nil {
+		return policyintake.Result{}, err
+	}
 	deps.ServerLimits = Limits(servers)
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}
@@ -415,4 +418,21 @@ func detailOf(st policyapply.Status) string {
 		parts = append(parts, r.Stage+": "+r.Reason)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// KeptSigners is the scoped signing keys the account JWT keeps beside this range's: the key store's owner group
+// keys whose group is not one of the range's ("range." prefix), the same split Issuer.Sign makes. It maps group to
+// public key.
+func KeptSigners(keys Keys, rng string) (map[string]string, error) {
+	pubs, err := keys.GroupPublics()
+	if err != nil {
+		return nil, fmt.Errorf("owner group keys: %w", err)
+	}
+	out := map[string]string{}
+	for g, pub := range pubs {
+		if !strings.HasPrefix(g, rng+".") {
+			out[g] = pub
+		}
+	}
+	return out, nil
 }
