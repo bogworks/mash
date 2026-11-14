@@ -165,3 +165,76 @@ func TestLockedRevokerRecordsAttemptedJWT(t *testing.T) {
 		t.Errorf("last = %q", last)
 	}
 }
+
+// A crash between a revocation and the pending update leaves a ledger with no pending record while s1 holds K revoked:
+// a fresh run whose target lacks K is refused before any push, and leaves no pending record.
+func TestNoPendingRecordServerRevocationRefusesBeforePush(t *testing.T) {
+	w := newWorld(t)
+	k := freshUserPub(t)
+	w.cluster.set("s1", w.k.build(t, w.c2, w.k.revoked, k))
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	before := len(w.cluster.pushes)
+	_, err := Run(context.Background(), retryRun(w, l, k, false))
+	if !errors.Is(err, ErrSignedMismatch) || !strings.Contains(err.Error(), "a server holds") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.cluster.pushes) != before {
+		t.Error("a push was made")
+	}
+	if _, has, _ := l.Pending(); has {
+		t.Error("a pre-push refusal left a pending record")
+	}
+	// The same state with a target that keeps K proceeds.
+	if _, err := Run(context.Background(), retryRun(w, l, k, true)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A normal first run with no prior state proceeds and commits, clearing the pending record.
+func TestFirstRunWithoutPriorStateProceeds(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	if _, err := Run(context.Background(), w.run(l, set2(), "bytes-2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, has, _ := l.Pending(); has {
+		t.Error("pending after a commit")
+	}
+}
+
+// The pending record exists, with the target, once the target is pushed, even if AfterPush panics.
+func TestPendingRecordedBeforeFirstPush(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
+		if _, has, _ := l.Pending(); !has {
+			t.Error("no pending record when AfterPush started")
+		}
+		panic("crash")
+	}
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = Run(context.Background(), in)
+	}()
+	if _, has, _ := l.Pending(); !has {
+		t.Fatal("no pending record after the crash")
+	}
+	if j, err := l.PendingJWT(); err != nil || j == "" {
+		t.Errorf("pending JWT = %q, %v; want the target", j, err)
+	}
+}
+
+// A fence refusal at "push" leaves no pending record.
+func TestFenceRefusalAtPushLeavesNoPending(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.BeforeWrite = func(context.Context, string) error { return errors.New("lease lost") }
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("want an error")
+	}
+	if _, has, _ := l.Pending(); has {
+		t.Error("a fence refusal left a pending record")
+	}
+}

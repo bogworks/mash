@@ -573,14 +573,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return Status{}, err
 		}
 	}
-	// While a generation is pending, an earlier attempt may have pushed revocations whose JWT was lost (an interrupted
+	// An earlier run may have pushed or revoked and died before its pending record was written (an interrupted
 	// revocation that reached some servers): the JWTs the servers hold are the ground truth, so every revocation on any
-	// server is kept too. A failed read or an incomplete server set refuses the run before anything is pushed.
-	var serverJWTs []string
-	if hasPend {
-		if serverJWTs, err = serverRevocationJWTs(ctx, in); err != nil {
-			return Status{}, err
-		}
+	// server is kept too, on every run. Read once, before the fence and the first push. A failed read or an incomplete
+	// server set refuses the run before anything is pushed.
+	serverJWTs, err := serverRevocationJWTs(ctx, in)
+	if err != nil {
+		return Status{}, err
 	}
 	keeps := func(target string) error {
 		if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, target); err != nil {
@@ -622,6 +621,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	ctx = withBeforeWrite(ctx, in.BeforeWrite)
 	if err := CheckBeforeWrite(ctx, FencePush); err != nil {
 		return Status{}, err // nothing was pushed
+	}
+	// The generation is pending from before the first push, so a crash at any later point leaves it pending with at
+	// least the target. A retry keeps the JWT already stored with an existing pending record.
+	if !hasPend {
+		if err := setPending(tok); err != nil {
+			return Status{}, fmt.Errorf("record generation %d as pending before pushing it: %w", rec.Generation, err)
+		}
 	}
 	pushed(ctx, gi, tok)
 	var notConnected []string
@@ -757,14 +763,14 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 func serverRevocationJWTs(ctx context.Context, in RunInput) ([]string, error) {
 	set, err := in.Cluster.Servers(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read the server set before retrying the pending generation: %w", ErrSignedMismatch, err)
+		return nil, fmt.Errorf("%w: read the server set before pushing: %w", ErrSignedMismatch, err)
 	}
 	if !set.Complete(in.Inventory) {
 		return nil, fmt.Errorf("%w: the server set is incomplete, so the revocations on the servers cannot be read: %s", ErrSignedMismatch, set.Why(in.Inventory))
 	}
 	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read the servers' account JWTs before retrying the pending generation: %w", ErrSignedMismatch, err)
+		return nil, fmt.Errorf("%w: read the servers' account JWTs before pushing: %w", ErrSignedMismatch, err)
 	}
 	var out []string
 	for _, n := range slices.Sorted(slices.Values(set.Names)) {
