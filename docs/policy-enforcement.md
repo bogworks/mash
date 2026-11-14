@@ -508,11 +508,12 @@ address without the range, so a tag costs the length of the receiver's owner par
 `deny:_none` is a tag but not an exception. It costs one tag (13 bytes of JSON) on a sender whose group has a deny entry
 and who has none of its own.
 
-**The headline** (contract REQ-008, measured correction, 2026-11-12): about 100 exceptions per sender at names of 10
-characters or less. The tables below are the measure. Between the 7-character and 14-character columns of the first
-table (114 and 85 at an owner part of 4), about 100 at 10 characters is an interpolation and is not itself a measured
-row. An earlier figure in the contract's first drafts (151 tags at 7 characters, 105 at 14, 59 at 32) counted bare tag
-values and does not hold for real credentials.
+**The headline** (contract REQ-008, measured correction, 2026-11-14): about 100 exceptions per sender fit only at short
+names. At an owner part of 4 characters, 100 exceptions fit at names of 9 characters or less (102 at 9, 106 at 8, 97 at
+10). At 14-character names the figure is 83 at an owner part of 4, and it falls from there. The tables below are the
+measure: each cell is the largest number of exceptions for which the real `Compile` and `SizeCheck` report no problem at
+the default connect line of 4,096 bytes, with a range of 3 characters. An earlier figure in the contract's first drafts
+(151 tags at 7 characters, 105 at 14, 59 at 32) counted bare tag values and does not hold for real credentials.
 
 At the default connect line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile.
 The columns are the length of every name (the sender's and each receiver's); the rows are the length of the receiver's
@@ -523,38 +524,37 @@ Allow exceptions on a closed verb (no sentinel):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 114 | 85 | 51 |
-| 8 | 95 | 74 | 47 |
-| 14 | 77 | 62 | 42 |
-| 24 | 58 | 49 | 35 |
+| 4 | 111 | 83 | 50 |
+| 8 | 93 | 73 | 46 |
+| 14 | 75 | 61 | 41 |
+| 24 | 57 | 48 | 35 |
 
 The same allow exceptions for a sender that also carries the sentinel (its group has a deny entry and the sender has none):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 113 | 84 | 50 |
-| 8 | 95 | 74 | 46 |
-| 14 | 76 | 62 | 41 |
-| 24 | 58 | 49 | 35 |
+| 4 | 111 | 83 | 50 |
+| 8 | 93 | 72 | 46 |
+| 14 | 75 | 61 | 41 |
+| 24 | 56 | 48 | 35 |
 
 Deny exceptions on a shared verb (the sender has its own denies, so no sentinel):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 119 | 88 | 52 |
-| 8 | 99 | 76 | 48 |
-| 14 | 79 | 64 | 42 |
-| 24 | 59 | 50 | 36 |
+| 4 | 117 | 86 | 51 |
+| 8 | 97 | 75 | 47 |
+| 14 | 78 | 63 | 42 |
+| 24 | 58 | 49 | 35 |
 
-A worked example. A sender that may mail 60 receivers in an owner group of 14 characters, each with a 14-character
-name, fits (the limit is 62). At 63 it does not, and mash says so:
+A worked example. A sender that may mail 61 receivers in an owner group of 14 characters, each with a 14-character
+name, fits (the limit is 61). At 62 it does not, and mash says so:
 
 ```text
-sender "rng.sxx.r0000000000000" (group "rng.sxx"): its connect line would be 4,106 bytes with 63 exceptions (63 tags); server "default server limit" allows 4,096 (max_control_line)
-Use a shared verb instead of a long list of exceptions.
+sender abc.oooooooooooooo.saaaaaaaaaaaaa, server "default": its connect line would be 4116 bytes (user JWT 3770 bytes with 62 tags, plus 346 bytes of connect options), over the 4096 byte limit of server "default": fewer exceptions for that sender, or a shared verb instead of a long list
 ```
 
-The same sender with owner parts of 4 characters and names of 7 characters fits 114. The bytes are the rule, not the
+The same sender with owner parts of 4 characters and names of 7 characters fits 111. The bytes are the rule, not the
 count. A cluster is limited by its smallest server, and the message names the server that would not take the credential.
 An account JWT that does not fit a server is refused the same way, naming the account. It grows with the number of owner
 groups and the shared verbs they hold, never with the number of senders. The measure is conservative by at most 6 bytes:
