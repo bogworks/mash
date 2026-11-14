@@ -429,8 +429,12 @@ func TestGoodDocAppliesOnceWithTheRightDoc(t *testing.T) {
 func TestTwoDocsApplyInOrder(t *testing.T) {
 	r := newRig(t, true)
 	r.start(r.intake())
+	// One document at a time: a put that lands before the previous one is read can replace it, so a slow runner would
+	// skip a generation and the next base would not match.
 	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	r.waitApplied(1)
 	r.put(sign(t, r.submitter, r.doc(2, 1)))
+	r.waitApplied(2)
 	r.put(sign(t, r.submitter, r.doc(3, 2)))
 	r.waitApplied(3)
 	for i, d := range r.app.applied() {
