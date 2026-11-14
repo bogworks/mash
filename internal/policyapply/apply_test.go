@@ -146,9 +146,13 @@ func TestRollbackWithoutStoredJWTFailsClosed(t *testing.T) {
 		t.Error("SignPrevious called with nothing stored")
 		return "", errors.New("called")
 	})
-	st, err := Run(context.Background(), in)
-	if err != nil || st.State != StatePartial || !hasFailure(st, "", "", CheckRollback) {
-		t.Fatalf("%+v %v", st, err)
+	pushes := len(w.cluster.pushes)
+	// A generation in force with no stored JWT: its revocations cannot be kept, so the run is refused before any push.
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrSignedMismatch) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.cluster.pushes) != pushes {
+		t.Errorf("pushes %d -> %d", pushes, len(w.cluster.pushes))
 	}
 }
 
@@ -221,10 +225,11 @@ func TestApplyReplayIsNoOp(t *testing.T) {
 	if signed || len(w.cluster.pushes) != pushes {
 		t.Errorf("signed %v, pushes %d -> %d", signed, pushes, len(w.cluster.pushes))
 	}
-	// With a stored status, that status is returned.
-	stored := Status{Generation: 2, State: StateApplied, InForce: true, UpdatedAt: "stored"}
+	// A stored refusal of another submission is not what a replay returns: the status is built from the record in force.
+	stored := Status{Generation: 3, State: StateRefused, Refusals: []listset.Refusal{{Stage: "check", Reason: "no"}}, UpdatedAt: "stored"}
 	deps.Ledger = statusLedger{MemLedger: l, st: &stored}
-	if got, err := Apply(context.Background(), applyReq(), deps); err != nil || got.UpdatedAt != "stored" {
+	got, err := Apply(context.Background(), applyReq(), deps)
+	if err != nil || got.State != StateApplied || !got.InForce || got.Generation != 2 || got.UpdatedAt == "stored" || len(got.Refusals) != 0 {
 		t.Fatalf("%+v %v", got, err)
 	}
 	// A different document on the stale base is still stale.
