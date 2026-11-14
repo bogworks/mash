@@ -1,5 +1,5 @@
 name: policy-tests
-# REQ-020: the policy tests (AT-001, AT-003, AT-004, AT-011, AT-020, and AT-005 and AT-010 once they exist; the list is
+# REQ-020: the policy tests (AT-001, AT-003, AT-004, AT-005, AT-010, AT-011 and AT-020; the list is
 # scripts/releasecheck/policytests.txt) run on every release and on every change of the NATS server version mash ships
 # with. The release gate runs the same step (scripts/release-check). This workflow covers the other half:
 #   - a pull request that changes go.mod, go.sum, go.work, go.work.sum or vendor/ at all, or the list or the step itself

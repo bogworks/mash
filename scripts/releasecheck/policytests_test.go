@@ -249,29 +249,25 @@ func TestRealPolicyListNamesTestsThatExist(t *testing.T) {
 			t.Errorf("%s (REQ-020) is not in %s", at, policyListFile)
 		}
 	}
-	// The statuses and tests the gap closing set: only AT-010 is pending, and its reason names the missing harness.
+	// The statuses and tests the gap closing set: every row is required, and AT-010 runs the live two-server test.
 	want := map[string][]string{
 		"AT-003": {"TestLiveMatchesCheck/deny_key_(AT-003)", "TestAT003OwnerLineDroppedAndDenyHolds"},
 		"AT-005": {"TestAT005DenyAllSenderIsRefused"},
 		"AT-020": {"TestLiveMatchesCheck", "TestAT020OpenReplyAndPlumbingSubjectsArePinned"},
+		"AT-010": {"TestAT010Live"},
 	}
 	got := map[string][]string{}
 	for _, e := range entries {
 		if e.Required {
 			got[e.AT] = append(got[e.AT], e.Test)
-		} else if e.AT != "AT-010" {
-			t.Errorf("%s is pending: only AT-010 may be", e.AT)
-		} else if !strings.Contains(e.Note, "sdk") || !strings.Contains(e.Note, "not on main") {
-			t.Errorf("AT-010 pending note %q must say the sdk harness is not on main", e.Note)
+		} else {
+			t.Errorf("%s is pending: every REQ-020 AT is required", e.AT)
 		}
 	}
 	for at, tests := range want {
 		if !reflect.DeepEqual(got[at], tests) {
 			t.Errorf("%s required tests = %v, want %v", at, got[at], tests)
 		}
-	}
-	if got["AT-010"] != nil {
-		t.Errorf("AT-010 has required tests %v: the two-server harness is not on main", got["AT-010"])
 	}
 }
 

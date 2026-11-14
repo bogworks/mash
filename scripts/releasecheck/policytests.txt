@@ -23,8 +23,9 @@ AT-004  ./internal/listset  TestAT004_Corpus    required
 AT-004  ./internal/listset  TestAT004_ZeroTags  required
 # AT-005: a deny-all sender (no allow entry; tags removed by a new list set) is refused everywhere, and keeps its own inbox.
 AT-005  ./internal/listset  TestAT005DenyAllSenderIsRefused  required
-# AT-010: needs a cluster of two or more servers; sdk's harness is in an open pull request, not on main.
-AT-010  -  -  pending  the two-server applied-gate harness (sdk, pull request 488) is not on main yet; no test is invented here
+# AT-010: the applied gate runs against a live two-server cluster, with an in-process nats-server pair: the policy
+# applied on both, and a server held back.
+AT-010  ./internal/policyapply  TestAT010Live  required
 # AT-011: does a template change reach open connections, per shipped NATS server version (checks the committed record).
 AT-011  ./internal/policy  TestAT011TemplateChangeReachesOpenConnections  required
 # AT-020: a raw client (tags-only credentials, a plain NATS client) gets no more than its lists. The whole live run:

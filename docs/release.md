@@ -343,12 +343,11 @@ The list is `scripts/releasecheck/policytests.txt`, one row per test: AT id, pac
 | AT-005 | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
 | AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
 | AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
-| AT-010 | the applied gate on a cluster of two or more servers | pending: sdk's two-server harness is not on main yet |
+| AT-010 | the applied gate runs against a live two-server cluster, an in-process nats-server pair, with the policy applied and with a server held back (`TestAT010Live`, subtests `applied` and `held_back`) | required |
 
-The step is honest about what it cannot yet do. AT-010, the applied gate on a cluster of two or more servers, has no
-test on main, so it is `pending`: the step prints a notice and does not fail. It stays pending until sdk's two-server
-harness (pull request 488) lands, and the REQ-020 promise of an applied-gate run on two servers is not met before then.
-Every other AT of REQ-020 is `required`.
+Every AT of REQ-020 is `required` now. The step can still print `pending` for a row whose test does not exist yet: it
+prints a notice and does not fail, and it refuses once a test for that AT exists in the tree, so the row must then be
+promoted to `required`.
 
 The step refuses (exit 3) when `go test` itself exits nonzero for a required test's package (a panic after the pass, a build failure, a timeout,
 a data race report: the refusal names the package, the exit status and the last lines of stderr), when a required test fails, when it did not run (a renamed or deleted test has no started and

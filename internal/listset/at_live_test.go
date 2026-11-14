@@ -396,11 +396,11 @@ type openRow struct {
 	why   string
 }
 
-// openSubjects is the pinned result of AT-020's open-subject half, for the raw client of foo.c.core: every fixed line
+// pinnedOpenSubjects is the pinned result of AT-020's open-subject half, for the raw client of foo.c.core: every fixed line
 // of the template that is not the sender's own policy, and the neighbouring subjects it must not reach. The table in
 // docs/security/threat-model.md section 5.3.1 is this table; change one and change the other. A widening or a
 // narrowing fails the test, and the maintainer who changes the table updates the document with it.
-func openSubjects() []openRow {
+func pinnedOpenSubjects() []openRow {
 	const doc = "ADR 0007, 0009"
 	return []openRow{
 		{"_INBOX.foo_c_lead.nuid1", true, []string{"foo.c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
@@ -435,7 +435,7 @@ func openSubjects() []openRow {
 }
 
 // TestAT020OpenReplyAndPlumbingSubjectsArePinned records what a raw client (the creds file of foo.c.core and a plain
-// NATS client) reaches on the always-open reply and plumbing subjects, and pins it to openSubjects (documented in
+// NATS client) reaches on the always-open reply and plumbing subjects, and pins it to pinnedOpenSubjects (documented in
 // docs/security/threat-model.md section 5.3.1). It also asserts the contract's positive half: another address's inbox,
 // prompt and status subjects cannot be subscribed, and its inbox stream cannot be consumed (the rows above).
 func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
@@ -476,7 +476,7 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 		}
 	}
 
-	for _, r := range openSubjects() {
+	for _, r := range pinnedOpenSubjects() {
 		if canPublish(t, core, obs, r.subject) != r.permitted {
 			t.Errorf("%s: permitted=%v, pinned %v (%s)", r.subject, !r.permitted, r.permitted, r.why)
 		}
