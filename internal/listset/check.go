@@ -598,6 +598,13 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	if err != nil {
 		return nil, err
 	}
+	return reachOver(c, sender, universeNamed(m))
+}
+
+// reachOver is the simulation behind effective and DryRun: the addresses of universe that sender reaches per verb
+// once its tags are expanded through its group's template, the way nats-server does it (expandPermissions and
+// expanded.reach, the same code Check uses). Each slice is sorted.
+func reachOver(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
 	var tpl *Template
 	var user *User
 	for i := range c.Users {
@@ -626,7 +633,7 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	}
 	out := map[Verb][]string{}
 	for _, v := range Verbs {
-		for _, addr := range universeNamed(m) {
+		for _, addr := range universe {
 			if p.reach(v, []string{addr})[addr] {
 				out[v] = append(out[v], addr)
 			}
@@ -645,3 +652,14 @@ func universeNamed(m *model) []string {
 	slices.Sort(out)
 	return out
 }
+
+// ReachOf returns, for sender in c, the addresses of universe it reaches per verb once its tags are expanded through
+// its group's template, the way nats-server does it: the simulation behind DryRun. Each slice is sorted. It is an error
+// for c to have no user or no template for sender.
+func ReachOf(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
+	return reachOver(c, sender, universe)
+}
+
+// Subject returns the subject a sender uses for verb v towards address: a publish subject for mail, prompt and status,
+// and the subject a sender subscribes to for heartbeat.
+func Subject(v Verb, address string) string { return subj(address, v) }
