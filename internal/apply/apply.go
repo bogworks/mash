@@ -147,6 +147,11 @@ type Params struct {
 	Servers int
 	// LockWait is how long an apply waits for the key directory lock (default 5s).
 	LockWait time.Duration
+	// BeforeWrite, when set, is called in Apply mode immediately before each write apply makes (the creation of a
+	// zone's signing key file, the push of the account JWT) with a name for the step; an error stops the apply there
+	// and that step and the later ones are not taken. mashctl uses it to check that the account lock is still held
+	// (ADR 0111).
+	BeforeWrite func(ctx context.Context, step string) error
 
 	// collectAll (drift only, with Mode Diff) makes build go on past a refusal and describe every zone, so a drift
 	// report lists everything at once; the zones with a conflict are skipped, the conflict being their finding.
@@ -391,6 +396,11 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	// re-signed: the JWT the resolver already has (same token, same iat) is sent again, so that every server
 	// acknowledges it or is named. One resolver answering with the new claims does not show that the others hold
 	// them, and a retry after a partial push is how a lagging server is repaired.
+	if p.BeforeWrite != nil {
+		if err := p.BeforeWrite(ctx, "the push of the account JWT"); err != nil {
+			return fail(fmt.Errorf("%w (nothing was pushed)", err))
+		}
+	}
 	what := "the claims update"
 	if !changed {
 		what = "the re-send of the unchanged claims"
@@ -595,6 +605,11 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
 			zp.keyIsNew = true
 			if p.Mode == Apply {
+				if p.BeforeWrite != nil {
+					if err := p.BeforeWrite(context.Background(), "the creation of the signing key of zone "+z.Name); err != nil {
+						return nil, fmt.Errorf("%w (no key was created for it and nothing was pushed)", err)
+					}
+				}
 				kp, kerr = p.Keys.ZoneKey(z.Name, true)
 				if kerr != nil {
 					return nil, kerr

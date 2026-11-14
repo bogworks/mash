@@ -591,6 +591,11 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	if !ok {
 		return 1
 	}
+	guard, ok := accountGuard(l.cfg, "policy repair", stderr) // before the first step writes anything
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	pf := func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }
 	pf("policy repair: %s\n", l.path)
 	if o.dryRun {
@@ -610,7 +615,7 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	}
 	var applyOut bytes.Buffer
 	repairHook("snapshot")
-	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c}, env, lookup, &applyOut, stderr)
+	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c, guard: guard}, env, lookup, &applyOut, stderr)
 	repairHook("applied")
 	after, _ := l.keys.Zones()
 	var created []string
@@ -658,12 +663,13 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 			exit = 1
 		} else {
 			findings, fixes := directoryFindings(l.c, recs)
-			if rc := repairDirectory(actx, adm, fixes, o.dryRun, pf); rc != 0 {
+			rc, notDone := repairDirectory(actx, adm, guard, fixes, o.dryRun, pf)
+			if rc != 0 {
 				exit = 1
 			}
 			fixed := map[string]bool{}
 			for _, f := range fixes {
-				fixed[f.Name] = true
+				fixed[f.Name] = !notDone[f.Name]
 			}
 			var left []apply.Finding
 			for _, f := range findings {
@@ -720,16 +726,42 @@ func shellQuote(s string) string {
 
 // repairDirectory applies fixes, or with dryRun only prints them: SetZone for a record with no zone, SetMeta for labels.
 // Each change is one line, the same text either way, and a line is printed when the write succeeded (a real run) or would
-// be made (a dry run). It returns 1 when a write failed. A dry run makes no call that writes.
-func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryRun bool, pf func(string, ...any)) int {
+// be made (a dry run). It returns 1 when a write failed or the account lock was lost. A dry run makes no call that writes.
+//
+// The account lock is checked (guard.Before) immediately before EACH write. When it fails the remaining writes are not
+// made: the output names what was done and what was not, and notDone is the set of records with a fix that was not
+// fully made (the caller reports those as left).
+func repairDirectory(ctx context.Context, adm *admin.Admin, guard *ctl.Guard, fixes []dirFix, dryRun bool, pf func(string, ...any)) (rc int, notDone map[string]bool) {
 	if len(fixes) == 0 {
 		pf("  nothing to do\n")
-		return 0
+		return 0, nil
 	}
-	rc := 0
-	for _, f := range fixes {
+	var done []string
+	stop := func(i int, step string) bool {
+		if dryRun {
+			return false
+		}
+		err := guard.Before(step)
+		if err == nil {
+			return false
+		}
+		notDone = map[string]bool{fixes[i].Name: true}
+		var left []string
+		left = append(left, fixes[i].Name)
+		for _, f := range fixes[i+1:] {
+			notDone[f.Name] = true
+			left = append(left, f.Name)
+		}
+		pf("  stopped, the account lock was lost: %v\n", err)
+		pf("  done: %s; not done: %s (the write of %s and every later one was not made); run `mashctl policy repair` again\n", listOrNone(done), strings.Join(left, ", "), step)
+		return true
+	}
+	for i, f := range fixes {
 		n := 0 // the lines of f: the zone line first, then the labels
 		if f.Zone != "" {
+			if stop(i, "the zone change of "+f.Name) {
+				return 1, notDone
+			}
 			if !dryRun {
 				if _, err := adm.SetZone(ctx, f.Name, f.Zone); err != nil {
 					pf("  %s: set zone %s failed: %v\n", f.Name, f.Zone, err)
@@ -737,25 +769,37 @@ func repairDirectory(ctx context.Context, adm *admin.Admin, fixes []dirFix, dryR
 					n = 1
 					goto labels
 				}
+				done = append(done, f.Name+" zone")
 			}
 			pf("  %s\n", f.Lines[0])
 			n = 1
 		}
 	labels:
 		if len(f.Labels) > 0 {
+			if stop(i, "the label change of "+f.Name) {
+				return 1, notDone
+			}
 			if !dryRun {
 				if _, err := adm.SetMeta(ctx, f.Name, admin.MetaUpdate{Labels: f.Labels}); err != nil {
 					pf("  %s: set labels failed: %v\n", f.Name, err)
 					rc = 1
 					continue
 				}
+				done = append(done, f.Name+" labels")
 			}
 			for _, l := range f.Lines[n:] {
 				pf("  %s\n", l)
 			}
 		}
 	}
-	return rc
+	return rc, nil
+}
+
+func listOrNone(l []string) string {
+	if len(l) == 0 {
+		return "nothing"
+	}
+	return strings.Join(l, ", ")
 }
 
 // shownIdentity is the canonical agent.owner.name of a three-token directory key, and "" for anything else.

@@ -124,6 +124,10 @@ type Endpoint struct {
 	fromStart bool
 	// noChannel: the host takes no channel delivery, so mail is held, never channel-delivered (NoChannel).
 	noChannel bool
+	// fault and faultOn: the spool failure report of fail-closed delivery (spoolrequired.go); spoolReq carries a late BindSpool to the deliver loop.
+	fault    spoolFault
+	faultOn  bool
+	spoolReq chan spoolBind
 
 	// hl is the hookless detector's state (hookless.go), guarded by its own mutex: tool calls and the read tool reach
 	// it from other goroutines than Run's.
@@ -331,6 +335,17 @@ func SpoolDir(cfg config.Config) (string, error) {
 	return spool.Dir(cfg.StateDir, o, n), nil
 }
 
+// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal. With require_tls
+// off (the default) it is none and nil. With it on, a plain nats:// or ws:// URL to a host that is not loopback is
+// refused here, before anything is connected, and a tls:// or wss:// URL is made to require TLS (natsauth.RequireEndpointTLS).
+// Every endpoint connection, serve and the CLI commands, goes through OpenClientWith, which calls it first.
+func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
+	if !cfg.RequireTLS {
+		return nil, nil
+	}
+	return natsauth.RequireEndpointTLS(cfg.URL)
+}
+
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
 // anything else that classifies mail from every sender wants that.
 func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
@@ -342,6 +357,10 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) (*Endpoint, error) {
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
+	}
+	tlsReq, err := EndpointTLS(cfg)
+	if err != nil {
+		return nil, err
 	}
 	ident, key, subj, err := identityOf(cfg)
 	if err != nil {
@@ -364,7 +383,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, err
 	}
 	refs := newRefusals()
-	nc, err := connect(ctx, cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+	nc, err := connect(ctx, cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
 		nats.CustomInboxPrefix(sap.InboxPrefix(key)),
@@ -382,8 +401,8 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
 		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
-		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")),
-		dir:           map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
+		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),
+		dir: map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
 	if opts.Presence {
 		// Asked before anything else, so the answers arrive while the rest of the open is under way.
 		e.pre.probe = e.startPresence()

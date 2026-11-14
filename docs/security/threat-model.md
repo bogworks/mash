@@ -109,7 +109,7 @@ interface mash uses, and the internals of the NATS server.
 
 | Threat | STRIDE | Today | Gap | Rating |
 |---|---|---|---|---|
-| Plaintext connection lets a network attacker read mail and obtain signatures | I, S | Docs say "Use TLS: SAP identity is only meaningful over a verified connection" (`docs/install.md:55`). nats.go verifies a `tls://` server against system roots (inferred). | mash accepts any URL, including `nats://` with no TLS (`internal/endpoint/endpoint.go:236-246`). No CA pin option. SAP warns that the connect handshake signs a server-chosen nonce with the same seed, so a man in the middle without TLS can obtain a valid `Agent-Sender` signature over input it chooses (`SAP:L1056`); nats.go signs the nonce bytes as given (nats.go v1.54.0 `nats.go:3135`). | M |
+| Plaintext connection lets a network attacker read mail and obtain signatures | I, S | Docs say "Use TLS: SAP identity is only meaningful over a verified connection" (`docs/install.md:55`). nats.go verifies a `tls://` server against system roots (inferred). | By default mash accepts any URL, including `nats://` with no TLS, and `mash status` only warns; `require_tls` (`MASH_REQUIRE_TLS=1`, [ADR 0108](../decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md)) makes endpoint connections refuse plain text to a non-loopback host, and is off until the deployment sets it. No CA pin option. SAP warns that the connect handshake signs a server-chosen nonce with the same seed, so a man in the middle without TLS can obtain a valid `Agent-Sender` signature over input it chooses (`SAP:L1056`); nats.go signs the nonce bytes as given (nats.go v1.54.0 `nats.go:3135`). | M |
 | Forged sender | S | Every mail carries an ed25519 `Agent-Sender` signature over account, user, subject, time, nonce and the body hash (`internal/sap/sender.go:120-124`). A bad signature or a `sub` that differs from the stored subject is `forged` and never shown (`sender.go:266-276`, `mail.go:78-79`). Only a directory match makes `[verified]` (`mail.go:85-90`). | The signed `account` is never compared with the directory record (`mail.go:85-96`); harmless while user keys are unique (`SAP:L965`). | L |
 | Replay of a captured signed mail | S, R | Signatures older than 5 minutes at store time are `[stale]` (`mail.go:48,91-94`). The recipient drops a repeat `(user, nonce)` seen within 2 minutes (`mail.go:138-150`). | Between 2 and 5 minutes a replay showed `[verified]` again (raised by research, confirmed). Only someone who already holds the message can replay it, and only to the same recipient, since `sub` is signed. Fix open in [#185](https://github.com/bogworks/mash/pull/185): the recipient keeps the signed timestamp and drops an exact copy for as long as its signature could read as fresh; a `send --id` re-send re-signs and is still shown. | L, fix open (#185) |
 | Inbox flood evicts unread mail | D | Any endpoint may publish to any peer's mail subject (`permissions.go:22`). Inbox: 16 MiB, `DiscardOld`, deny delete and purge (`internal/store/store.go:19,57,59-60`). Documented (`SECURITY.md:52`). | No per-sender quota or rate limit. Forged mail is acked but still fills the stream (inferred). | M |
@@ -222,7 +222,7 @@ its next tool call. No signature covers plugin content. Rating M.
    for a single operator's own fleet? Mitigation 1 changes the product's feel.
 2. Should a hostile or compromised server stay out of scope (`SECURITY.md:44`) now that the quickstart starts on a
    hosted service? If yes, the README should say what `[verified]` does not cover.
-3. Should mash refuse plaintext `nats://` outright, or warn?
+3. Should mash refuse plaintext `nats://` outright, or warn? (Partly settled 2026-11-12: admin and system connections refuse it, and endpoint connections refuse it when `MASH_REQUIRE_TLS=1`; the default stays a warning, [ADR 0108](../decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md).)
 4. Release key: keep one key across projects and purposes, or create a mash-only key, ideally hardware-backed, with a
    rotation plan?
 5. (Settled 2026-10-31: the two new findings were fixed before publication, [#178](https://github.com/bogworks/mash/pull/178)
@@ -364,6 +364,23 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
   issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
+
+**The submitter key** (held by an outside system; its public half is in the adoption marker, `mash-adoption` bucket)
+- Lives: the private half with the outside system that owns the account's list sets, never on the operator host and
+  never in mash's key store (`mashctl policy adopt` refuses a key the store holds). The public half is in the adoption
+  marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
+  permission on the bucket or its stream subjects, and a test asserts it.
+- Held by: the outside system.
+- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a zone key, change the
+  account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
+  refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
+  name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key
+  mash holds or its own key, and the rotation completes only after a list set signed by the new key is applied. A list
+  set cannot touch the marker in any other way, the exempt set among them. Until a command runs the intake an adopted
+  account takes no list set at all.
+- If it leaks: run `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once
+  and the marker's history records the recovery. Whoever holds the admin credentials can replace the submitter, so the
+  marker protects against the submitter's key and against direct policy commands, not against the admin credentials.
 
 ## 11. Keeping it current
 
