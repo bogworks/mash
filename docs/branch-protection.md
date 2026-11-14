@@ -69,7 +69,7 @@ so that check proves nothing against a pull request author who controls workflow
 changes to `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `scripts/adrlint/`, `internal/release/` and this file
 are protected paths (judged on `git diff --no-renames`, so a rename out of one counts), so `Decision: none` on them
 needs the reviewer's `decision-confirmed` label and otherwise an ADR is required; `label-reset` runs from the base
-branch (`pull_request_target`), not from the pull request; and the lead's approval or `lead-approved` label is still
+branch (`pull_request_target`), not from the pull request; and the lead's approval or `lead-approved` label (and, from 2026-11-14, the `lead-review` status, ADR 0116) is still
 required for entry.
 
 **What would close it:** require the remaining check, `codex-review`, in the ruleset with an expected source, that is a
@@ -156,6 +156,18 @@ is a setting only if that section says so. Settings > Branches > Add branch rule
   from the pull request. If no runner with the label is online, label-reset never starts and the check never appears, so the queue keeps the
   pull request out (fail closed).
   See [ADR 0078](decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
+- **The `lead-review` status** (migration week, 2026-11-14 to 2026-11-21; [ADR 0116](decisions/0116-the-maintainers-review-is-a-commit-status-on-the-exact-head-and-the-queue-requires-it-beside-the-label-for-one-week.md)). The lead's approval is also a
+  commit status `lead-review` = success on the exact head SHA the lead reviewed, posted by `scripts/lead-approve <pr>`
+  (it needs `LEAD_LOGIN`, and refuses unless `codex-review` and `label-reset` are success on that head, the caller is
+  `LEAD_LOGIN` and `hold` is absent). `.mergify.yml` requires it as a plain `queue_conditions` entry **alongside** the
+  approval-or-`lead-approved` gate, so for the week it adds a requirement. A new head has no such status, so a push
+  drops it by itself; `label-reset` still strips `lead-approved` and `decision-confirmed`. It is a queue condition only,
+  never a `merge_protections` one (the queue draft's commit has no such status; #424). On 2026-11-21 the entry `or`
+  becomes the status or the approval and the `lead-approved` alternative drops (files: `.mergify.yml`,
+  `internal/release/mergify_test.go`, `.github/workflows/label-reset.yml`, this file). **It is not authentication:**
+  `check-success` matches a status whoever posted it and Mergify cannot filter by creator, so any token with status
+  access can post `lead-review`, as it could apply the label. `scripts/lead-approve --audit <pr>` flags statuses from any
+  creator other than `LEAD_LOGIN`.
 - **Require linear history** (squash or rebase merges only).
 - **Block force pushes and deletions** of `main`.
 - **Code owners review is not required** (no CODEOWNERS file).
