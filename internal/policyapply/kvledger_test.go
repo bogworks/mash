@@ -541,7 +541,7 @@ func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
 	w := newWorld(t)
 	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
 	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
-	if err := first.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := first.CompareAndCommit(0, w.rec1()); err != nil {
 		t.Fatal(err)
 	}
 	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}
