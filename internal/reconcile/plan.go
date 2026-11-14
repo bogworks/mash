@@ -369,6 +369,8 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			finding(k, "a list-set credential without its record")
 		case !proven:
 			finding(k, "connected, not in the issue record, and the record cannot prove no record was lost (%s): not revoked", why)
+		case badIssuer(cs, in.Account, in.Claims) != "":
+			finding(k, "connection with no reported issuer: cannot tell whether a list-set key signed it (%s): not revoked", badIssuer(cs, in.Account, in.Claims))
 		default:
 			p.Revocations = append(p.Revocations, Revocation{Key: k, Reason: ReasonUntracked,
 				At: revokeAt(cs).Format(time.RFC3339), Connections: connsOf(cs)})
@@ -421,6 +423,22 @@ func issuersOf(cs []conn) []string {
 		out = append(out, c.issuer)
 	}
 	return out
+}
+
+// badIssuer says why a connection's issuer cannot be trusted to rule out a list-set key: it is empty, or it is neither
+// the account key nor a signing key of the account JWT. "" when every connection's issuer is consistent.
+func badIssuer(cs []conn, account string, claims *jwt.AccountClaims) string {
+	for _, c := range cs {
+		switch {
+		case c.issuer == "":
+			return "issuer empty"
+		case c.issuer == account:
+		case claims != nil && claims.SigningKeys.Contains(c.issuer):
+		default:
+			return "issuer " + c.issuer + " is not the account key or a signing key of the account JWT"
+		}
+	}
+	return ""
 }
 
 func anyIn(keys []string, set map[string]bool) bool {

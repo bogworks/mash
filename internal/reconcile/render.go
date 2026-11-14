@@ -25,6 +25,9 @@ func connText(c Conn) string {
 	return strings.Join(parts, ", ")
 }
 
+// OneWayLine ends every text dry run that lists a revoke.
+const OneWayLine = "a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way"
+
 // Text is the plan as the dry run prints it.
 func (p Plan) Text() string {
 	var b strings.Builder
@@ -69,11 +72,18 @@ func (p Plan) Text() string {
 	for _, ip := range p.IssuerProblems {
 		fmt.Fprintf(&b, "issuer check failed: %s user %s is signed by %s, which does not stay: reissue it under the account key first\n", ip.Role, ip.User, ip.Issuer)
 	}
+	if len(p.Revocations) > 0 {
+		fmt.Fprintln(&b, OneWayLine)
+	}
 	fmt.Fprintln(&b, p.Status)
 	return b.String()
 }
 
 // JSON is the plan as the stable JSON the dry run prints with --json.
 func (p Plan) JSON() ([]byte, error) {
-	return json.MarshalIndent(p, "", "  ")
+	out := struct {
+		Plan
+		OneWay bool `json:"one_way,omitempty"`
+	}{p, len(p.Revocations) > 0}
+	return json.MarshalIndent(out, "", "  ")
 }

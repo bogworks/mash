@@ -944,6 +944,12 @@ func rollbackLacking(ctx context.Context, in RunInput, rollbackJWT string) (lack
 	return lacking, ""
 }
 
+// ServerRevocationJWTs is serverRevocationJWTs for a caller that is not Run (the first-list-set reconcile): the
+// non-empty account JWTs of every server, failing closed.
+func ServerRevocationJWTs(ctx context.Context, c Cluster, account string, inventory int) ([]string, error) {
+	return serverRevocationJWTs(ctx, RunInput{Cluster: c, Account: account, Inventory: inventory})
+}
+
 // serverRevocationJWTs reads the account JWT of every server and returns the non-empty ones, so a retry can keep
 // every revocation any server holds. It fails closed: an error reading the server set or the JWTs, an incomplete
 // server set, a server missing from the answer or a JWT that does not decode is an error wrapping ErrSignedMismatch.

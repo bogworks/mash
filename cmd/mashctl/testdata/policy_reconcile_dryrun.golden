@@ -4,4 +4,5 @@ signing key AA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCS47C: removed by
 revoke UCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZJPJO: connected, untracked [at <TIME>] connected: user "plain-lane", client "client-of-UCAT", host 127.0.0.1, server mash-local, cid <CID>
 revoke UCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVZ45L: connected, untracked [at <TIME>] connected: user "legacy-lane", client "client-of-UCFI", host 127.0.0.1, server mash-local, cid <CID>
 revoke UDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435C2U4 (sender foo.alice.gone): recorded, sender not in the list set [at <TIME>] connected: user "gone-lane", client "client-of-UDWU", host 127.0.0.1, server mash-local, cid <CID>
+a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way
 reconciled: 3 actions

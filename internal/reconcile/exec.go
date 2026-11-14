@@ -21,6 +21,8 @@ var (
 	ErrNotExecutable = errors.New("reconcile: the plan cannot be executed")
 	// ErrStalePlan: the generation in force is no longer the one the plan was computed against.
 	ErrStalePlan = errors.New("reconcile: the generation in force changed since the plan was computed")
+	// ErrPlanChanged: the plan rebuilt under the lock revokes something other than the plan the person saw.
+	ErrPlanChanged = errors.New("reconcile: the plan changed since the dry run: run it again")
 	// ErrPending: a generation is pending, pushed and not applied or rolled back: finish or roll it back first.
 	ErrPending = errors.New("reconcile: a generation is pending")
 	// ErrNotApplied: the gate did not pass with every server on the revoking JWT. The JWT in force is unchanged; the
@@ -41,7 +43,12 @@ type IssueMarker interface {
 
 // ExecInput is what Execute needs.
 type ExecInput struct {
-	Plan   Plan
+	// Build computes the plan. Execute calls it under the ledger lease, after the generation in force is read again,
+	// and executes what it returns: never a plan computed earlier. The caller holds the account lock around Execute.
+	Build func(ctx context.Context) (Plan, error)
+	// Seen, when set, is the plan the person saw (the dry run): Execute refuses with ErrPlanChanged when the rebuilt
+	// plan's revocations differ from it by key or reason (times may differ).
+	Seen   *Plan
 	Ledger policyapply.DetailLedger
 	// Cluster, Account and Inventory are the push and the gate of policyapply, unchanged.
 	Cluster   policyapply.Cluster
@@ -59,6 +66,8 @@ type ExecInput struct {
 
 // Result is what Execute did.
 type Result struct {
+	// Plan is the plan that was executed (the one built under the lease); zero when Execute refused before building it.
+	Plan Plan
 	// Status is the gate's report of the revoking JWT.
 	Status policyapply.Status
 	// Revoked is the keys now revoked on every server, sorted; Marked the ones marked revoked in the issue record (an
@@ -67,7 +76,7 @@ type Result struct {
 	Marked  []string
 }
 
-// Execute revokes the keys of in.Plan. It holds the ledger lease, signs the in-force account claims with the keys
+// Execute revokes the keys of the plan in.Build returns under the lease. It holds the ledger lease, signs the in-force account claims with the keys
 // also revoked (Signer.SignPrevious), checks that the result is the generation in force with every earlier revocation
 // kept and each new one at its planned time, pushes it to every server and gates it with policyapply.Converge (the
 // same push and gate a list set uses, with no previous generation: there is no rollback of a revocation), commits it
@@ -77,15 +86,8 @@ type Result struct {
 // The account lock (admin.Admin.LockAccount) is the caller's, taken before the plan is recomputed; pass its Held as
 // BeforeWrite. Execute never signs anything itself and never reads a key.
 func Execute(ctx context.Context, in ExecInput) (Result, error) {
-	p := in.Plan
-	if p.Source != SourceInForce || len(p.IssuerProblems) > 0 {
-		return Result{}, ErrNotExecutable
-	}
-	if len(p.Revocations) == 0 {
-		return Result{}, nil
-	}
-	if in.Ledger == nil || in.Cluster == nil || in.Signer == nil || in.Marker == nil || in.Signers == nil {
-		return Result{}, errors.New("reconcile: Execute needs a ledger, a cluster, signers, a signer and an issue-record marker")
+	if in.Build == nil || in.Ledger == nil || in.Cluster == nil || in.Signer == nil || in.Marker == nil || in.Signers == nil {
+		return Result{}, errors.New("reconcile: Execute needs a plan builder, a ledger, a cluster, signers, a signer and an issue-record marker")
 	}
 	now := time.Now
 	if in.Now != nil {
@@ -108,38 +110,54 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if rec.Generation == 0 || rec.Generation != p.Generation {
-		return Result{}, fmt.Errorf("%w: plan for generation %d, in force %d", ErrStalePlan, p.Generation, rec.Generation)
-	}
 	if _, pending, err := in.Ledger.Pending(); err != nil {
 		return Result{}, err
 	} else if pending {
 		return Result{}, ErrPending
 	}
-	prevJWT, err := in.Ledger.InForceJWT()
+	// Rebuild the plan now, under the account lock and the lease and right before signing: what is revoked is what is
+	// true now, not what was true at the dry run.
+	p, err := in.Build(ctx)
 	if err != nil {
 		return Result{}, err
 	}
+	res0 := Result{Plan: p}
+	if p.Source != SourceInForce || len(p.IssuerProblems) > 0 {
+		return res0, ErrNotExecutable
+	}
+	if rec.Generation == 0 || rec.Generation != p.Generation {
+		return res0, fmt.Errorf("%w: plan for generation %d, in force %d", ErrStalePlan, p.Generation, rec.Generation)
+	}
+	if in.Seen != nil && !sameRevocations(*in.Seen, p) {
+		return res0, ErrPlanChanged
+	}
+	if len(p.Revocations) == 0 {
+		return res0, nil
+	}
+	prevJWT, err := in.Ledger.InForceJWT()
+	if err != nil {
+		return res0, err
+	}
 	if prevJWT == "" {
-		return Result{}, errors.New("reconcile: the ledger stores no account JWT for the generation in force, so its revocations cannot be kept")
+		return res0, errors.New("reconcile: the ledger stores no account JWT for the generation in force, so its revocations cannot be kept")
 	}
 	ls, ok, err := in.Ledger.InForceListSet()
 	if err != nil {
-		return Result{}, err
+		return res0, err
 	}
 	if !ok {
-		return Result{}, policyapply.ErrNoInForceListSet
+		return res0, policyapply.ErrNoInForceListSet
 	}
 	compiled, err := listset.Compile(ls)
 	if err != nil {
-		return Result{}, fmt.Errorf("compile the list set in force (generation %d): %w", rec.Generation, err)
+		return res0, fmt.Errorf("compile the list set in force (generation %d): %w", rec.Generation, err)
 	}
 	keys := make([]string, 0, len(p.Revocations))
 	at := map[string]time.Time{}
 	for _, r := range p.Revocations {
 		t, err := time.Parse(time.RFC3339, r.At)
 		if err != nil {
-			return Result{}, fmt.Errorf("reconcile: the plan's revocation time of %s is not a time", r.Key)
+			return res0, fmt.Errorf("reconcile: the plan's revocation time of %s is not a time", r.Key)
 		}
 		keys = append(keys, r.Key)
 		at[r.Key] = t
@@ -147,24 +165,28 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	slices.Sort(keys)
 
 	if g, ok := policyapply.GenerationOf(prevJWT, []policyapply.Candidate{{Generation: rec.Generation, Compiled: compiled, Signers: in.Signers}}); !ok || g != rec.Generation {
-		return Result{}, fmt.Errorf("reconcile: the JWT in force does not carry generation %d with the expected signers", rec.Generation)
+		return res0, fmt.Errorf("reconcile: the JWT in force does not carry generation %d with the expected signers", rec.Generation)
+	}
+	serverJWTs, err := policyapply.ServerRevocationJWTs(ctx, in.Cluster, in.Account, in.Inventory)
+	if err != nil {
+		return res0, err
 	}
 	tok, err := in.Signer.SignPrevious(policyapply.PreviousClaims{JWT: prevJWT}, slices.Clone(keys))
 	if err != nil {
-		return Result{}, fmt.Errorf("reconcile: sign: %w", err)
+		return res0, fmt.Errorf("reconcile: sign: %w", err)
 	}
-	if err := checkSigned(tok, prevJWT, keys, at, rec, compiled, in.Signers); err != nil {
-		return Result{}, err
+	if err := checkSigned(tok, prevJWT, serverJWTs, keys, at, rec, compiled, in.Signers); err != nil {
+		return res0, err
 	}
 	if cc, ok := in.Ledger.(policyapply.CommitSizeChecker); ok {
 		if err := cc.CheckCommitSize(rec, tok, ls); err != nil {
-			return Result{}, err
+			return res0, err
 		}
 	}
 
 	expect, err := policyapply.NewExpect(nil, compiled, keys)
 	if err != nil {
-		return Result{}, err
+		return res0, err
 	}
 	// Each key carries its issue time, which only the plan knows for a connected one: the gate then requires the
 	// revocation on every server to be at or after it.
@@ -179,10 +201,10 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 		OldKeys: map[string][]policyapply.OldKey{"reconcile": old},
 	}
 	if err := fence(policyapply.FencePush); err != nil {
-		return Result{}, &policyapply.FenceError{What: policyapply.FencePush, Err: err}
+		return res0, &policyapply.FenceError{What: policyapply.FencePush, Err: err}
 	}
 	st, err := policyapply.Converge(ctx, gi, tok, nil)
-	res := Result{Status: st}
+	res := Result{Plan: p, Status: st}
 	if err != nil {
 		return res, err
 	}
@@ -210,7 +232,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 }
 
 // checkSigned is what Execute requires of the signed JWT before it pushes it.
-func checkSigned(tok, prev string, keys []string, at map[string]time.Time, rec listset.Record, c *listset.Compiled, signers map[string]string) error {
+func checkSigned(tok, prev string, serverJWTs []string, keys []string, at map[string]time.Time, rec listset.Record, c *listset.Compiled, signers map[string]string) error {
 	if len(tok) > policy.AccountJWTLimit {
 		return policyapply.ErrAccountJWTTooLarge
 	}
@@ -223,6 +245,11 @@ func checkSigned(tok, prev string, keys []string, at map[string]time.Time, rec l
 	}
 	if err := policyapply.KeepsRevocations(prev, true, tok); err != nil {
 		return fmt.Errorf("reconcile: %w, not pushed", err)
+	}
+	for _, sj := range serverJWTs {
+		if err := policyapply.KeepsRevocations(sj, true, tok); err != nil {
+			return fmt.Errorf("reconcile: %w (the revocations a server holds), not pushed", err)
+		}
 	}
 	for _, k := range keys {
 		if got, has := claims.Revocations[k]; !has || got < at[k].Unix() {
@@ -238,4 +265,17 @@ func failing(st policyapply.Status) string {
 	}
 	f := st.Failing[0]
 	return fmt.Sprintf("%s: %s (%d failures)", f.Check, f.Detail, len(st.Failing))
+}
+
+// sameRevocations is true when both plans revoke the same keys for the same reasons; the times may differ.
+func sameRevocations(a, b Plan) bool {
+	set := func(p Plan) []string {
+		out := make([]string, 0, len(p.Revocations))
+		for _, r := range p.Revocations {
+			out = append(out, r.Key+"\x00"+r.Reason)
+		}
+		slices.Sort(out)
+		return out
+	}
+	return slices.Equal(set(a), set(b))
 }

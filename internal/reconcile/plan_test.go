@@ -238,8 +238,25 @@ func TestUnrecordedKeyIssuedByAScopedKeyIsAFindingNotARevocation(t *testing.T) {
 	}
 }
 
+func TestUnrecordedKeyWithNoOrInconsistentIssuerIsAFindingNotARevocation(t *testing.T) {
+	w := newWorld(t)
+	empty, stranger := userKey(t), userKey(t)
+	_, other := acctKey(t)
+	w.connect(w.conn(empty, "", "empty", 1), w.conn(stranger, other, "stranger", 1))
+	p := w.build()
+	if len(p.Revocations) != 0 {
+		t.Fatalf("revoked: %+v", p.Revocations)
+	}
+	for _, k := range []string{empty, stranger} {
+		if f, ok := finding(p, k); !ok || !strings.Contains(f.Detail, "connection with no reported issuer: cannot tell whether a list-set key signed it") {
+			t.Errorf("no finding for %s: %+v", k, p.Findings)
+		}
+	}
+}
+
 func TestWithoutBucketProofEveryUnrecordedConnectedKeyIsAFinding(t *testing.T) {
 	w := newWorld(t)
+	w.claims.SigningKeys.Add(w.plain)
 	w.issued.proven, w.issued.why = false, "the issue record's stream has no "+store.IssuedMarkerKey+" marker"
 	a, b := userKey(t), userKey(t)
 	w.connect(w.conn(a, w.acct, "a", 1), w.conn(b, w.plain, "b", 1))

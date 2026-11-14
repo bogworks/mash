@@ -71,5 +71,6 @@
   "issuer_problems": [],
   "actions": 3,
   "unknown": 0,
-  "status": "reconciled: 3 actions"
+  "status": "reconciled: 3 actions",
+  "one_way": true
 }

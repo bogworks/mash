@@ -145,7 +145,7 @@ func (f *first) plan(keys ...string) Plan {
 }
 
 func (f *first) exec(p Plan) (Result, error) {
-	return Execute(context.Background(), ExecInput{Plan: p, Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
+	return Execute(context.Background(), ExecInput{Build: func(context.Context) (Plan, error) { return p, nil }, Seen: &p, Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
 		Signers: f.signers, Signer: f.signer, Marker: f.marker, Now: func() time.Time { return f.now }})
 }
 
@@ -344,7 +344,7 @@ func TestExecuteStopsAtTheFence(t *testing.T) {
 	for _, at := range []string{policyapply.FencePush, policyapply.FenceCommit} {
 		t.Run(at, func(t *testing.T) {
 			f := newFirst(t)
-			_, err := Execute(context.Background(), ExecInput{Plan: f.plan(k), Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
+			_, err := Execute(context.Background(), ExecInput{Build: func(context.Context) (Plan, error) { return f.plan(k), nil }, Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
 				Signers: f.signers, Signer: f.signer, Marker: f.marker,
 				BeforeWrite: func(_ context.Context, what string) error {
 					if what == at {
@@ -364,4 +364,55 @@ func TestExecuteStopsAtTheFence(t *testing.T) {
 		})
 	}
 	_ = f
+}
+
+// The plan is rebuilt under the lease: a plan that differs from the one the person saw is refused before any push,
+// and one that differs only in time is executed as rebuilt.
+func TestExecuteRebuildsThePlanAndRefusesOneThatChanged(t *testing.T) {
+	a, b := userKey(t), userKey(t)
+	f := newFirst(t)
+	seen := f.plan(a)
+	_, err := Execute(context.Background(), ExecInput{Build: func(context.Context) (Plan, error) { return f.plan(a, b), nil }, Seen: &seen,
+		Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2, Signers: f.signers, Signer: f.signer, Marker: f.marker})
+	if !errors.Is(err, ErrPlanChanged) {
+		t.Fatalf("err = %v", err)
+	}
+	if f.cluster.pushes != 0 || f.inForceJWT() != f.jwt || len(f.marker.marked) != 0 {
+		t.Error("something was changed")
+	}
+
+	// same keys, later time: executed, and the executed plan is the rebuilt one
+	f = newFirst(t)
+	seen = f.plan(a)
+	rebuilt := f.plan(a)
+	f.signer = f.signerAt(func(string) int64 { return f.now.Add(time.Minute).Unix() })
+	rebuilt.Revocations[0].At = f.now.Add(time.Minute).Truncate(time.Second).Format(time.RFC3339)
+	res, err := Execute(context.Background(), ExecInput{Build: func(context.Context) (Plan, error) { return rebuilt, nil }, Seen: &seen,
+		Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2, Signers: f.signers, Signer: f.signer, Marker: f.marker,
+		Now: func() time.Time { return f.now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Plan.Revocations[0].At != rebuilt.Revocations[0].At {
+		t.Errorf("executed plan %+v", res.Plan)
+	}
+}
+
+// A server holding a revocation the ledger's JWT lacks must keep it: a signed JWT without it is refused before the push.
+func TestExecuteRefusesToDropARevocationAServerHolds(t *testing.T) {
+	f := newFirst(t)
+	extra, k := userKey(t), userKey(t)
+	c, _ := jwt.DecodeAccountClaims(f.jwt)
+	c.RevokeAt(extra, time.Now())
+	tok, err := c.Encode(f.acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.cluster.jwts["s2"] = tok
+	if _, err := f.exec(f.plan(k)); !errors.Is(err, policyapply.ErrSignedMismatch) {
+		t.Fatalf("err = %v", err)
+	}
+	if f.cluster.pushes != 0 || f.inForceJWT() != f.jwt {
+		t.Error("pushed or committed")
+	}
 }

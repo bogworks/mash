@@ -73,10 +73,13 @@ configured: run without --yes to see the plan" and changes nothing.
 
 ### Consequences
 
-* **A recorded user whose sender is not in the list set in force is revoked.** Once an account is adopted and its
-  first list set applied, every credential mash issued to a sender the list set leaves out stops working when the
-  operator runs `mashctl policy reconcile --yes`. An endpoint the outside system forgot to list loses its credential;
-  the dry run names each one first, and the way back is a list set that names it and a new credential.
+* **A recorded user whose sender is not in the list set in force is revoked, and in this release there is no way back
+  inside mash.** Once an account is adopted and its first list set applied, every credential mash issued to a sender
+  the list set leaves out stops working when the operator runs `mashctl policy reconcile --yes`. An endpoint the outside
+  system forgot to list, or a credential revoked by mistake, loses its credential for good: an adopted account refuses
+  `mashctl reissue`, `mashctl policy serve` issues nothing, and the issue service is for test accounts only (ADR 0104).
+  So `--yes` is one-way. The dry run names each credential first and ends with "a revoked credential cannot be reissued
+  on an adopted account in this release: --yes is one-way".
 * Good, because the account ends with only mash's scoped keys and the credentials the list set accounts for.
 * Good, because nothing is revoked on a doubt: an incomplete record, an unprovable bucket or a scoped-key credential
   without a record is reported, not revoked.

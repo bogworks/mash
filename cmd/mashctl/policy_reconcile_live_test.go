@@ -243,7 +243,7 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := reconcile.Execute(ctx, reconcile.ExecInput{Plan: plan, Ledger: ledger, Cluster: cluster, Account: e.acctPub, Inventory: 1,
+	res, err := reconcile.Execute(ctx, reconcile.ExecInput{Build: func(context.Context) (reconcile.Plan, error) { return plan, nil }, Seen: &plan, Ledger: ledger, Cluster: cluster, Account: e.acctPub, Inventory: 1,
 		Signers: signers, Signer: signer, Marker: a})
 	if err != nil {
 		t.Fatalf("execute: %v %+v", err, res.Status)

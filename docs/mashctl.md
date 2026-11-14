@@ -184,10 +184,11 @@ Each revoke line names the key, the sender or the connection (the user's name, t
 
 - a recorded key whose issue-record history cannot be shown complete (ADR 0115: the bucket's `mash_issued_history` marker, no revision at the history cap) or that has a future-dated revision;
 - a connected user with no record whose JWT was signed by one of the list set's scoped keys: `a list-set credential without its record`;
+- a connected user with no record whose connection reports no issuer, or an issuer that is neither the account key nor a signing key of the account JWT: `connection with no reported issuer: cannot tell whether a list-set key signed it`;
 - every connected user with no record, when the issue bucket cannot prove that no record was lost (it must deny deletes and purges and carry the history marker `full` or `raised:N:S`);
 - a recorded admin user that is not exempt, a revoked key still connected, and a connection scan that was incomplete (a server that did not answer).
 
-Exempt keys are in no action and no finding. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed, 1 the issuer check failed or a failure (including `--yes`), 2 usage.
+Exempt keys are in no action and no finding. A dry run that lists at least one revoke ends, before the status line, with `a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way`; `--json` then carries `"one_way": true`. The executor rebuilds the plan under the account lock and the ledger lease right before signing, refuses (`the plan changed since the dry run: run it again`) when the revocations differ from the dry run's, and keeps every revocation any server holds. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed, 1 the issuer check failed or a failure (including `--yes`), 2 usage.
 
 Sample, before the first apply (`--listset first.json`):
 
