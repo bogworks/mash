@@ -111,10 +111,19 @@ func (u unknownKey) describe() string {
 	return fmt.Sprintf("scoped signing key %s (role %s)", config.Clean(u.key), config.Clean(u.role))
 }
 
-// knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key. There are
-// no per-zone signing keys any more (ADR 0091), so a scoped signer in the account JWT is never one of mashctl's own.
+// knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
+// public key of every owner group signer (the issue service's) in the key store. There are no per-zone signing keys any
+// more (ADR 0091).
 func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, error) {
-	return map[string]bool{acctPub: true}, nil
+	known := map[string]bool{acctPub: true}
+	groups, err := ks.GroupPublics()
+	if err != nil {
+		return nil, err
+	}
+	for _, pub := range groups {
+		known[pub] = true
+	}
+	return known, nil
 }
 
 // unknownKeyNote is the one explanation printed with every unknown signing key.

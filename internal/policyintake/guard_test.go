@@ -22,6 +22,9 @@ func TestHeldNextSubmitterIsRefusedBeforeApply(t *testing.T) {
 		p := r.doc(uint64(i+1), 0)
 		p.NextSubmitter = k
 		r.put(sign(t, r.submitter, p))
+		// The bucket keeps one revision per key: a put that lands before the intake has read the previous one replaces
+		// it, so each document waits for its own refusal and a slow runner cannot skip one.
+		r.waitRefused(i + 1)
 	}
 	rs := r.waitRefused(len(classes))
 	for _, x := range rs {
