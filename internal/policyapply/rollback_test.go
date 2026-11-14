@@ -250,7 +250,7 @@ func TestFinalJWTMissingRevocationIsNotCommitted(t *testing.T) {
 func TestRevokedKeysWithoutFinalJWTIsNotCommitted(t *testing.T) {
 	w := newWorld(t)
 	extra := freshUserPub(t)
-	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.AfterPush = afterPushRevoking(w, extra, "")
 	_, err := Run(context.Background(), in)
