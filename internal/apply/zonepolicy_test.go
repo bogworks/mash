@@ -1,6 +1,9 @@
 package apply
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nats-io/jwt/v2"
@@ -43,4 +46,55 @@ func TestHasZoneScopeExemptsOwnerGroupSigners(t *testing.T) {
 	if HasZoneScope(nil, groups) {
 		t.Fatal("no JWT has no policy")
 	}
+}
+
+// AppliedZonePolicy checks every server's copy of the account JWT, not only the newest (ADR 0091).
+func TestAppliedZonePolicyChecksEveryCopy(t *testing.T) {
+	ks, op, acct := baseEnv(t)
+	zone := newPub(t)
+	zoned := tokenAt(t, op, scopedClaims2(acct, zone), 1000)
+	clean := tokenAt(t, op, jwt.NewAccountClaims(acct), 2000)
+	two := ServerSet{Names: []string{"s1", "s2"}, Expected: 2}
+	ask := func(fk *fake) (bool, error) { return AppliedZonePolicy(context.Background(), fk, ks, 2) }
+
+	if got, err := ask(&fake{servers: two, all: []string{clean, zoned}}); err != nil || !got {
+		t.Fatalf("older copy with a zone scope: %v %v", got, err)
+	}
+	if got, err := ask(&fake{servers: two, all: []string{clean, clean}}); err != nil || got {
+		t.Fatalf("clean copies: %v %v", got, err)
+	}
+	if got, err := ask(&fake{servers: two, all: []string{clean, ""}}); err != nil || got {
+		t.Fatalf("an empty reply is fine: %v %v", got, err)
+	}
+	foreign, _ := nkeys.CreateOperator()
+	bad := tokenAt(t, foreign, jwt.NewAccountClaims(acct), 1)
+	if got, err := ask(&fake{servers: two, all: []string{clean, bad}}); err == nil || got {
+		t.Fatalf("an unverifiable copy: %v %v", got, err)
+	}
+	if got, err := ask(&fake{servers: two, all: []string{zoned}}); err == nil || got || !strings.Contains(err.Error(), "not every server was checked: only 1 of 2 servers answered the account lookup") {
+		t.Fatalf("fewer replies than servers: %v %v", got, err)
+	}
+	if got, err := ask(&fake{servers: two, serversErr: errors.New("boom"), all: []string{zoned, zoned}}); err == nil || got {
+		t.Fatalf("servers error: %v %v", got, err)
+	}
+	// an owner group signer alone is not a zone policy
+	kp, err := ks.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grp := tokenAt(t, op, scopedClaims2(acct, pubOf(t, kp)), 3000)
+	kp.Wipe()
+	if got, err := ask(&fake{servers: two, all: []string{grp, grp}}); err != nil || got {
+		t.Fatalf("group-key-only copy: %v %v", got, err)
+	}
+}
+
+func scopedClaims2(acct string, keys ...string) *jwt.AccountClaims {
+	cl := jwt.NewAccountClaims(acct)
+	for _, k := range keys {
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = k, "r"
+		cl.SigningKeys.AddScopedSigner(sc)
+	}
+	return cl
 }

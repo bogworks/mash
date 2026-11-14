@@ -354,7 +354,11 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 				delete(got, k) // read in the first wave, but no longer (or never) in the directory
 			}
 		}
-		e.installDirectory(got)
+		// A record that could not be read is missing from Who(). A start that takes a lease must not go on: that record
+		// may be a zoned one, which refuseZoned (ADR 0091) could then not see. One-shot readers tolerate a partial load.
+		if failed := e.installDirectory(got); opts.holding && failed > 0 {
+			return fmt.Errorf("mash: directory: %d of %d records could not be read; refusing to start because a zoned record may be among them (ADR 0091); try again", failed, len(got))
+		}
 		return nil
 	}
 	e.learn(got)
