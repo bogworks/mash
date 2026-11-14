@@ -704,6 +704,7 @@ func TestInvalidNextSubmitterIsRefusedBeforeApply(t *testing.T) {
 		p := r.doc(uint64(i+1), 0)
 		p.NextSubmitter = b
 		r.put(sign(t, r.submitter, p))
+		r.waitRefused(i + 1) // one document at a time: a put that lands before the previous one is read can replace it
 	}
 	rs := r.waitRefused(len(bad))
 	for _, x := range rs {
