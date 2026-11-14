@@ -56,8 +56,13 @@ func TestAccept_FirstAndChain(t *testing.T) {
 	if rec.Generation != 1 || rec.Content != DigestListSet(at001()) || rec.Received != sha256.Sum256(recv(at001())) || rec.Signed != DigestCompiled(c) || rec.Content.IsZero() || rec.Received.IsZero() || rec.Signed.IsZero() {
 		t.Fatalf("unexpected first record %+v", rec)
 	}
+	// Each submission changes the content (identical content is refused as unchanged, ADR 0119), so alternate two sets.
 	for want := uint64(2); want <= 4; want++ {
-		next, _, err := Accept(rec, based(at001(), rec.Generation), recv(based(at001(), rec.Generation)))
+		ls := at003Deny()
+		if want%2 == 1 {
+			ls = at001()
+		}
+		next, _, err := Accept(rec, based(ls, rec.Generation), recv(based(ls, rec.Generation)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -244,5 +249,68 @@ func TestAccept_NoReceivedBytesRefused(t *testing.T) {
 	bad.Range = ""
 	if _, _, err := Accept(Record{}, bad, nil); !errors.Is(err, ErrNoReceivedBytes) {
 		t.Fatalf("want ErrNoReceivedBytes, got %v", err)
+	}
+}
+
+// A submission with the content in force is refused as unchanged: no record, no compiled output, and it does not
+// matter how the entries are ordered or encoded (so Received differs while the content does not).
+func TestAccept_SameContentRefusedAsUnchanged(t *testing.T) {
+	rec, _, err := Accept(Record{}, at001(), recv(at001()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := based(at001(), 1)
+	reordered := based(at001(), 1)
+	reordered.Switches = append([]SwitchEntry(nil), reordered.Switches...)
+	for i, j := 0, len(reordered.Switches)-1; i < j; i, j = i+1, j-1 {
+		reordered.Switches[i], reordered.Switches[j] = reordered.Switches[j], reordered.Switches[i]
+	}
+	reordered.Senders = []SenderLists{at001().Senders[2], at001().Senders[1], at001().Senders[0]}
+	if sha256.Sum256(recv(reordered)) == sha256.Sum256(recv(same)) {
+		t.Fatal("the reordered submission should have different bytes")
+	}
+	for name, ls := range map[string]ListSet{"same": same, "reordered": reordered} {
+		got, gc, err := Accept(rec, ls, recv(ls))
+		if got != (Record{}) || gc != nil {
+			t.Fatalf("%s: Accept returned output for unchanged content", name)
+		}
+		var ue *UnchangedError
+		if !errors.Is(err, ErrUnchanged) || !errors.As(err, &ue) || ue.InForce != 1 {
+			t.Fatalf("%s: want *UnchangedError{1}, got %v", name, err)
+		}
+		if errors.Is(err, ErrStaleBase) {
+			t.Fatalf("%s: an unchanged error must not match ErrStaleBase", name)
+		}
+	}
+}
+
+// A first submission is not unchanged, and a content change still gets the next generation.
+func TestAccept_ChangedContentStillAccepted(t *testing.T) {
+	first, _, err := Accept(Record{}, at001(), recv(at001()))
+	if err != nil || first.Generation != 1 {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	next := based(at003Deny(), 1)
+	got, c, err := Accept(first, next, recv(next))
+	if err != nil || c == nil || got.Generation != 2 {
+		t.Fatalf("changed content: %+v %v", got, err)
+	}
+}
+
+func TestAcceptRotationStep_SameContentAccepted(t *testing.T) {
+	first, _, err := Accept(Record{}, at001(), recv(at001()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := based(at001(), first.Generation)
+	if _, _, err := Accept(first, same, recv(same)); !errors.Is(err, ErrUnchanged) {
+		t.Fatalf("Accept err = %v, want ErrUnchanged", err)
+	}
+	rec, c, err := AcceptRotationStep(first, same, recv(same))
+	if err != nil || c == nil || rec.Generation != first.Generation+1 || rec.Signed != first.Signed {
+		t.Fatalf("rec %+v err %v", rec, err)
+	}
+	if _, _, err := AcceptRotationStep(first, at001(), recv(at001())); !errors.Is(err, ErrStaleBase) {
+		t.Errorf("a stale base is still refused: %v", err)
 	}
 }
