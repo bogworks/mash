@@ -68,7 +68,7 @@ func (g *Guard) Release() {
 // lock for the whole wait. On an error nothing is held. Call it first, before any write; defer the lock's Release.
 //
 // It fails closed: a marker that cannot be read for any reason other than "there is none" refuses too. what names the
-// command as it reads in "mashctl: <what> is refused", for example "add" or "policy apply".
+// command as it reads in "mashctl: <what> is refused", for example "add" or "provision".
 func GuardAccount(ctx context.Context, a *madmin.Admin, what string) (*madmin.AccountLock, error) {
 	return guardAccount(ctx, a, "mashctl", what)
 }
@@ -148,7 +148,7 @@ func AdminUserKey(cfg config.Config) (string, error) {
 }
 
 // HeldPublicKeys is every public key mash holds for the account of cfg: the key store's operator, system, account
-// and zone keys and the admin user's key. A next submitter of a planned rotation must be none of them. Any failure
+// and the admin user's key. A next submitter of a planned rotation must be none of them. Any failure
 // to read the key store or the admin credentials is an error, so a caller refuses (fail closed).
 func HeldPublicKeys(cfg config.Config, ks *ctlkeys.Authority) ([]string, error) {
 	_, held, err := ks.HeldKeys()

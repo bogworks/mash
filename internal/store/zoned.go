@@ -5,7 +5,7 @@ import (
 )
 
 // ZonePolicyAppliedMessage is the refusal of every command that would run over an applied zone policy (ADR 0091):
-// `mashctl policy apply` and `mashctl unzone`. mash builds no migration for a policy deployment.
+// `mashctl unzone`, `add` and `reissue`. mash builds no migration for a policy deployment.
 const ZonePolicyAppliedMessage = "a zone policy is applied: zones are removed (ADR 0091); stay on the last release that has zones until the label policy model ships"
 
 // ErrZonePolicyApplied is ZonePolicyAppliedMessage as an error.

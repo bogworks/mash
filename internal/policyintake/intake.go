@@ -186,7 +186,7 @@ type Intake struct {
 	InForce func(ctx context.Context) (receivedSHA256 string, err error)
 	Apply   Applier
 	Report  Reporter
-	// HeldKeys returns the public keys mash holds (operator, system, account, zone and admin keys). A planned
+	// HeldKeys returns the public keys mash holds (operator, system, account and admin keys). A planned
 	// rotation's next submitter among them is refused. An error refuses the rotation: the intake fails closed.
 	HeldKeys func() ([]string, error)
 	// GuardTimeout bounds one Guard.Before call; zero is GuardTimeoutDefault.
