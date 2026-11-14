@@ -17,6 +17,7 @@ const policyUsage = `usage: mashctl policy check [--policy FILE]
        mashctl policy apply [--dry-run] [--policy FILE] [--sys-creds FILE]
        mashctl policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]
        mashctl policy repair [--dry-run] [--policy FILE] [--sys-creds FILE] [--servers N]
+       mashctl policy adopt --submitter NKEY_PUBLIC_KEY | --show [--json]
        (repair is additive EXCEPT that it clears labels the file does not name on endpoints the file declares)
 `
 
@@ -80,6 +81,8 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 		return runPolicyDrift(rest, env, lookup, stdout, stderr)
 	case "repair":
 		return runPolicyRepair(rest, env, lookup, stdout, stderr)
+	case "adopt": // needs the admin credentials: the marker lives on the server
+		return runPolicyAdopt(rest, env, lookup, stdout, stderr)
 	default:
 		return usage()
 	}

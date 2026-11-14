@@ -8,7 +8,12 @@
 # It is kept out of this file because this file is embedded in the mash binary; pinning it would change the binary.
 # Resolution order: $MASH_BIN; the managed copy for the pinned version; if pinned, download it (and only if that fails,
 # fall back to `mash` on PATH, logging it) so an older install on PATH never overrides the pin; if unpinned, `mash` on
-# PATH only. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
+# PATH only. One concrete setting, MASH_PLUGIN_REQUIRE_VERIFIED (see require_verified), decides whether the launcher
+# may run a binary it has not verified against mash.pins. ON, it never does: it exits 127 when the plugin is unpinned,
+# when the cached managed binary's sha256 does not match mash.pins (re-checked on every run, no re-fetch) and when the
+# pinned binary cannot be fetched or verified. OFF (the default), it warns and uses PATH mash for an unpinned plugin or
+# a failed pinned download, and does not re-hash the cached binary. MASH_BIN is an
+# explicit operator choice, trusted as given and never verified, ON or OFF. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
 # failed one leaves $BIN_DIR/.dl-failed-<version> and hooks skip the download for 300 s, going straight to PATH. Serve
 # keeps its 60 s fetch and prefetch 20 s, and neither honours the marker. A missing or empty mash.pins, or one without a version line, means unpinned: the launcher never downloads.
 case "$0" in
@@ -25,6 +30,25 @@ REPO_URL="https://github.com/bogworks/mash"
 HINT="mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)"
 
 log() { printf '%s\n' "mash launcher: $*" >&2; }
+
+# Why the pinned binary could not be fetched or verified; set by dlfail (and the hook skip), named in the refusal message.
+FAILWHY=""
+dlfail() { FAILWHY=$1; log "${2:-$1}"; }
+
+# Whether the launcher must verify every binary it runs against mash.pins. Prints `1` (ON: refuse, exit 127, rather than
+# run an unverified binary; never fall back to `mash` on PATH) or `0` (OFF: fall back to PATH with a warning, and use
+# the cached managed binary as is). This is the ONLY place the setting is read, and the default is the one assignment
+# below. Values: 1/true/yes/on = on; 0/false/no/off = off; unset = the default; any other value, including empty, fails
+# closed (ON) with a note on stderr. MASH_BIN is never affected: an explicit operator choice, trusted as given.
+# PROVISIONAL: the variable name and its source (an environment variable) may change.
+require_verified() {
+  _s=${MASH_PLUGIN_REQUIRE_VERIFIED-0}   # the default: change `0` here to make verification the default
+  case "$_s" in
+    1|true|yes|on) printf '1\n' ;;
+    0|false|no|off) printf '0\n' ;;
+    *) log "unrecognised MASH_PLUGIN_REQUIRE_VERIFIED value '$_s' (want 1, true, yes, on, 0, false, no or off); treating it as on"; printf '1\n' ;;
+  esac
+}
 
 PREFETCH=0
 [ "${1:-}" = "__prefetch" ] && PREFETCH=1
@@ -54,7 +78,7 @@ dl_recently_failed() {
   [ "$_n" -ge "$_t" ] && [ $((_n - _t)) -lt 300 ]
 }
 
-# True when the managed binary for the pinned version exists.
+# True when the managed binary for the pinned version exists (not yet verified; see cached_verified).
 managed_ok() {
   [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
 }
@@ -84,6 +108,39 @@ sha256_of() {
   else
     return 1
   fi
+}
+
+# Set _asset to this platform's release asset name and _want to its sha256 from mash.pins. Returns 1 for an unsupported
+# OS or architecture (FAILWHY set), 2 when mash.pins has no sha256 for the asset.
+asset_want() {
+  case "$(uname -s)" in
+    Linux) _os=linux ;;
+    Darwin) _os=darwin ;;
+    *) FAILWHY="unsupported OS $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _arch=amd64 ;;
+    aarch64|arm64) _arch=arm64 ;;
+    *) FAILWHY="unsupported architecture $(uname -m)"; return 1 ;;
+  esac
+  _asset="mash-$_os-$_arch"
+  _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
+  [ -n "$_want" ] || return 2
+}
+
+# True when the cached managed binary's sha256 equals the pinned one. Used only when MASH_PLUGIN_REQUIRE_VERIFIED is on. Otherwise sets CACHEWHY.
+CACHEWHY=""
+cached_verified() {
+  asset_want
+  case $? in
+    0) ;;
+    1) CACHEWHY=$FAILWHY; return 1 ;;
+    *) CACHEWHY="no pinned sha256 for $_asset in mash.pins"; return 1 ;;
+  esac
+  _got=$(sha256_of "$BIN") || { CACHEWHY="no sha256sum or shasum available to verify it"; return 1; }
+  [ "$_got" = "$_want" ] && return 0
+  CACHEWHY="sha256 does not match mash.pins"
+  return 1
 }
 
 fetch() { # url dest
@@ -120,23 +177,13 @@ fetch() { # url dest
 
 # Download, verify and install the pinned binary into $BIN. Non-zero on any failure; installs nothing then.
 download() {
-  case "$(uname -s)" in
-    Linux) _os=linux ;;
-    Darwin) _os=darwin ;;
-    *) log "unsupported OS $(uname -s)"; return 1 ;;
+  asset_want
+  case $? in
+    0) ;;
+    1) dlfail "$FAILWHY"; return 1 ;;
+    *) dlfail "no pinned sha256 for $_asset" "no pinned sha256 for $_asset; refusing to download"; return 1 ;;
   esac
-  case "$(uname -m)" in
-    x86_64|amd64) _arch=amd64 ;;
-    aarch64|arm64) _arch=arm64 ;;
-    *) log "unsupported architecture $(uname -m)"; return 1 ;;
-  esac
-  _asset="mash-$_os-$_arch"
-  _want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_asset\$/\1/p" "$PINS" 2>/dev/null | head -n 1)
-  if [ -z "$_want" ]; then
-    log "no pinned sha256 for $_asset; refusing to download"
-    return 1
-  fi
-  mkdir -p "$BIN_DIR" || { log "cannot create $BIN_DIR"; return 1; }
+  mkdir -p "$BIN_DIR" || { dlfail "cannot create $BIN_DIR"; return 1; }
   _tmp="$BIN_DIR/.mash.$$.tmp"
   rm -f "$_tmp"
   _base="${MASH_RELEASE_BASE:-$REPO_URL/releases/download}"
@@ -144,22 +191,22 @@ download() {
   log "downloading $_url"
   if ! fetch "$_url" "$_tmp"; then
     rm -f "$_tmp"
-    log "download failed (offline?)"
+    dlfail "download failed" "download failed (offline?)"
     return 1
   fi
-  _got=$(sha256_of "$_tmp") || { rm -f "$_tmp"; log "no sha256sum or shasum available"; return 1; }
+  _got=$(sha256_of "$_tmp") || { rm -f "$_tmp"; dlfail "no sha256sum or shasum available"; return 1; }
   if [ "$_got" != "$_want" ]; then
     rm -f "$_tmp"
-    log "sha256 mismatch for $_asset (want $_want, got $_got); refusing"
+    dlfail "sha256 mismatch for $_asset" "sha256 mismatch for $_asset (want $_want, got $_got); refusing"
     return 1
   fi
   chmod +x "$_tmp"
-  _out=$("$_tmp" version 2>/dev/null) || { rm -f "$_tmp"; log "downloaded binary failed to run"; return 1; }
+  _out=$("$_tmp" version 2>/dev/null) || { rm -f "$_tmp"; dlfail "downloaded binary failed to run"; return 1; }
   case "$_out" in
     *"$MASH_VERSION"*) ;;
-    *) rm -f "$_tmp"; log "downloaded binary reports '$_out', expected $MASH_VERSION"; return 1 ;;
+    *) rm -f "$_tmp"; dlfail "downloaded binary reports the wrong version" "downloaded binary reports '$_out', expected $MASH_VERSION"; return 1 ;;
   esac
-  mv -f "$_tmp" "$BIN" || { rm -f "$_tmp"; log "cannot install $BIN"; return 1; }
+  mv -f "$_tmp" "$BIN" || { rm -f "$_tmp"; dlfail "cannot install $BIN"; return 1; }
   rm -f "$MARKER"
   return 0
 }
@@ -170,12 +217,37 @@ resolve() {
     printf '%s\n' "$MASH_BIN"
     return 0
   fi
+  if [ -z "$MASH_VERSION" ]; then
+    # Unpinned: there is no sha256 to verify anything against.
+    if [ -f "$PINS" ]; then _why="$PINS has no valid version= line (it is empty, unreadable or malformed)"
+    else _why="there is no $PINS"; fi
+    if [ "$(require_verified)" = 1 ]; then
+      log "refusing to run an unverified mash: this plugin is unpinned ($_why) and MASH_PLUGIN_REQUIRE_VERIFIED is on; to allow mash from PATH set MASH_PLUGIN_REQUIRE_VERIFIED=0"
+      return 2
+    fi
+    log "warning: this plugin is unpinned ($_why); using mash from PATH unverified"
+    if _p=$(path_mash); then
+      printf '%s\n' "$_p"
+      return 0
+    fi
+    return 1
+  fi
   if managed_ok; then
+    # Re-hashed on every run only when MASH_PLUGIN_REQUIRE_VERIFIED is on; off, the cached copy is used as is.
+    if [ "$(require_verified)" = 1 ]; then
+      if cached_verified; then
+        printf '%s\n' "$BIN"
+        return 0
+      fi
+      log "refusing to run the cached mash $BIN: $CACHEWHY and MASH_PLUGIN_REQUIRE_VERIFIED is on; to run it anyway set MASH_PLUGIN_REQUIRE_VERIFIED=0"
+      return 2
+    fi
     printf '%s\n' "$BIN"
     return 0
   fi
   if [ -n "$MASH_VERSION" ]; then
     if [ "$HOOK" = 1 ] && dl_recently_failed; then
+      FAILWHY="hook download skipped (failed recently)"
       log "hook: skipping download (failed recently)"
     elif download; then
       printf '%s\n' "$BIN"
@@ -183,8 +255,13 @@ resolve() {
     elif [ "$HOOK" = 1 ]; then
       mkdir -p "$BIN_DIR" 2>/dev/null && date +%s > "$MARKER" 2>/dev/null
     fi
+    if [ "$(require_verified)" = 1 ]; then
+      log "refusing to use any other mash: the pinned binary $MASH_VERSION is unavailable ($FAILWHY) and MASH_PLUGIN_REQUIRE_VERIFIED is on; to allow a fallback to mash on PATH set MASH_PLUGIN_REQUIRE_VERIFIED=0"
+      return 2
+    fi
     if _p=$(path_mash); then
       log "pinned download failed; falling back to $_p"
+      log "warning: pinned mash $MASH_VERSION unavailable ($FAILWHY); using $_p instead (MASH_PLUGIN_REQUIRE_VERIFIED is off)"
       printf '%s\n' "$_p"
       return 0
     fi
@@ -205,8 +282,9 @@ if [ "$PREFETCH" = 1 ]; then
   exit 0
 fi
 
-if ! TARGET=$(resolve); then
-  log "$HINT"
+TARGET=$(resolve); _rc=$?
+if [ "$_rc" != 0 ]; then
+  [ "$_rc" = 2 ] || log "$HINT"   # 2: MASH_PLUGIN_REQUIRE_VERIFIED already said why
   exit 127
 fi
 exec "$TARGET" "$@"

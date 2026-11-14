@@ -177,42 +177,22 @@ func TestLabelSyncWithNoRecord(t *testing.T) {
 	}
 }
 
-func TestLabelSyncServerFailureAfterSave(t *testing.T) {
+// With a server configured that cannot be reached, label refuses before it edits the file: it cannot tell whether the
+// account is adopted (REQ-016, ADR 0111). The edit and the directory step are never split by an unreachable server.
+func TestLabelSyncWithAnUnreachableServerRefusesFirst(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
-	out, errb, code := h.run("label", "b", "note=hello", "--sync")
-	if code != 1 || !strings.Contains(errb, "policy file is saved") || !strings.Contains(errb, "Retry: mashctl set-meta b --label note=hello\n") ||
-		strings.Contains(out, "directory labels updated") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if !strings.Contains(h.policyText(), "note: hello") {
-		t.Error("policy was not saved before the directory")
-	}
-	_, errb2, code := h.run("unlabel", "b", "note", "--sync")
-	if code != 1 || !strings.Contains(errb2, "Retry: mashctl set-meta b --label note=-\n") {
-		t.Fatalf("%d %q", code, errb2)
-	}
-	noSecrets(t, out, errb, errb2)
-}
-
-func TestLabelSyncDryRunTouchesNothing(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
-	h.provisionDeclared("b")
 	orig := h.policyText()
-	h.env["MASH_URL"] = "nats://127.0.0.1:1" // a connection would fail
-	out, errb, code := h.run("label", "b", "note=hello", "--dry-run", "--sync")
-	if code != 0 || !strings.Contains(out, "dry run: would have labeled b") ||
-		!strings.Contains(out, "dry run: would then update the directory labels for b (connected to nothing)") || errb != "" {
-		t.Fatalf("%d %q %q", code, out, errb)
+	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
+	for _, args := range [][]string{{"label", "b", "note=hello", "--sync"}, {"unlabel", "b", "note", "--sync"}, {"label", "b", "note=hello", "--dry-run", "--sync"}} {
+		out, errb, code := h.run(args...)
+		if code != 1 || !strings.Contains(errb, "is refused: cannot tell whether this account is adopted") || !strings.Contains(errb, "nothing was changed") || out != "" {
+			t.Fatalf("%v: %d %q %q", args, code, out, errb)
+		}
+		noSecrets(t, out, errb)
 	}
 	if h.policyText() != orig {
-		t.Error("dry run wrote the policy")
+		t.Error("a refused label wrote the policy")
 	}
-	h.env["MASH_URL"] = h.e.URL
-	if l, _ := h.recordLabels("b"); l["note"] != "" {
-		t.Errorf("dry run changed the record: %v", l)
-	}
-	noSecrets(t, out, errb)
 }
 
 func TestLabelSurfacesConcurrentEdit(t *testing.T) {

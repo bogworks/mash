@@ -103,6 +103,8 @@ func newApplyEnvOpts(t *testing.T, policyYAML string, tweak func(e *applyEnv), o
 	e.env = map[string]string{
 		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_INSECURE_LOOPBACK": "1", "MASH_OWNER": "alice",
 		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds), "MASH_POLICY": e.policy,
+		// policy apply and repair read the adoption marker over the admin connection (REQ-016, ADR 0111).
+		"MASH_ADMIN_CREDS": pl.Creds,
 	}
 	return e
 }
@@ -262,9 +264,13 @@ func TestPolicyApplyRefusesAFileThatCarriesAZone(t *testing.T) {
 		"subject_label": "subject_label: site\nendpoints:\n  x: {labels: {site: red}}\n",
 	} {
 		e := newApplyEnv(t, file).withDirectory()
-		e.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens: a refusal that connects would say so
 		e.env["MASH_SYS_CREDS"] = filepath.Join(e.root, "absent.creds")
 		for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "check"}} {
+			// The account guard (adoption marker) of apply connects first; only check runs with nothing listening.
+			e.env["MASH_URL"] = e.srv.ClientURL()
+			if args[1] == "check" {
+				e.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens: a refusal that connects would say so
+			}
 			out, errb, code := e.run(args...)
 			all := out + errb
 			if code != 1 || !strings.Contains(all, "ADR 0091") || !strings.Contains(all, "remove") || strings.Contains(all, "connect") || strings.Contains(all, "system account credentials") {
