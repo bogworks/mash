@@ -173,7 +173,7 @@ type at013Revoker struct {
 	first time.Time
 }
 
-func (r *at013Revoker) Revoke(ctx context.Context, pubs []string) error {
+func (r *at013Revoker) Revoke(ctx context.Context, pubs []string) (string, error) {
 	r.mu.Lock()
 	if r.first.IsZero() {
 		r.first = time.Now()
@@ -222,7 +222,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		t.Fatal(err)
 	}
 	s.c2 = c2
-	s.ledger = NewMemLedger(listset.Record{Generation: 1, Signed: listset.DigestCompiled(s.c1)})
+	s.ledger = NewMemLedgerWith(listset.Record{Generation: 1, Signed: listset.DigestCompiled(s.c1)}, InForceDetail{JWT: e.account(s.c1)})
 
 	// The old credentials, as their hosts made them: only the public key is known to the record.
 	for _, addr := range oldFor {
@@ -338,14 +338,16 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		Cluster: e.cluster, Prober: s.prober, Witnesses: wit, Ledger: s.ledger,
 		Account: e.acctPub, Inventory: 2, ListSet: target, Received: []byte("at013"),
 		Previous: s.c1, Signers: e.signers(s.c2), PreviousSigners: e.signers(s.c1),
-		SignPrevious: func(revoked []string) (string, error) { return e.account(s.c1, revoked...), nil },
-		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
-			e.waitNewSecond()
-			tok := e.account(c)
-			e.setCurrent(tok)
-			return tok, nil
+		Signer: SignerFuncs{
+			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return e.account(s.c1, revoked...), nil },
+			SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
+				e.waitNewSecond()
+				tok := e.account(c)
+				e.setCurrent(tok)
+				return tok, nil
+			},
 		},
-		AfterPush: func(ctx context.Context) (map[string][]string, []string, error) {
+		AfterPush: func(ctx context.Context) (map[string][]string, []string, string, error) {
 			s.plan.Deadline = time.Now().Add(deadline)
 			return after(ctx)
 		},

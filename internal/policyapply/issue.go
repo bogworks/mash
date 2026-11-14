@@ -130,9 +130,10 @@ func copyEntry(e IssueEntry) IssueEntry {
 	return e
 }
 
-// Revoker revokes user keys on every server.
+// Revoker revokes user keys on every server. It returns the account JWT it pushed: the one the servers hold once the
+// revocation succeeded.
 type Revoker interface {
-	Revoke(ctx context.Context, pubs []string) error
+	Revoke(ctx context.Context, pubs []string) (accountJWT string, err error)
 }
 
 // MintedSource is anything that minted probe credentials and can say which keys.
@@ -150,7 +151,7 @@ func RevokeProbes(ctx context.Context, revoker Revoker, record IssueRecord, pubs
 	if len(pubs) == 0 {
 		return nil
 	}
-	if err := revoker.Revoke(ctx, pubs); err != nil {
+	if _, err := revoker.Revoke(ctx, pubs); err != nil {
 		return err
 	}
 	var errs []error

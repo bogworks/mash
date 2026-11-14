@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -35,6 +36,46 @@ var ErrAccountJWTTooLarge = errors.New("the signed account JWT is over the size 
 // is. The gate and the ordering derive what must be refused from Previous, so Run refuses before any sign or push.
 var ErrPreviousMismatch = errors.New("the previous compiled output is not the generation in force")
 
+// ErrNoSigner is returned by Run when RunInput.Signer is nil. Nothing is pushed.
+var ErrNoSigner = errors.New("no signer")
+
+// PreviousClaims is what SignPrevious is given about the generation in force.
+type PreviousClaims struct {
+	// JWT is the previous signed account JWT in force: the one the ledger stored when that generation was committed.
+	JWT string
+}
+
+// Signer signs account JWTs. Signing is the caller's: Run never holds a key.
+type Signer interface {
+	// Sign builds the target account JWT for rec from c (its own copy).
+	Sign(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
+	// SignPrevious re-signs the previous generation's account JWT (prev, the one in force) with every key in revoked
+	// also revoked, with the same keys. It must not read the servers.
+	SignPrevious(prev PreviousClaims, revoked []string) (accountJWT string, err error)
+}
+
+// SignerFuncs adapts two functions to a Signer. A nil function fails with an error when called.
+type SignerFuncs struct {
+	SignFn         func(rec listset.Record, c *listset.Compiled) (string, error)
+	SignPreviousFn func(prev PreviousClaims, revoked []string) (string, error)
+}
+
+// Sign implements Signer.
+func (s SignerFuncs) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
+	if s.SignFn == nil {
+		return "", errors.New("SignerFuncs: no SignFn")
+	}
+	return s.SignFn(rec, c)
+}
+
+// SignPrevious implements Signer.
+func (s SignerFuncs) SignPrevious(prev PreviousClaims, revoked []string) (string, error) {
+	if s.SignPreviousFn == nil {
+		return "", errors.New("SignerFuncs: no SignPreviousFn")
+	}
+	return s.SignPreviousFn(prev, revoked)
+}
+
 // Ledger holds the record in force. It changes only after the gate passes.
 type Ledger interface {
 	// Lock takes the exclusive run lock, or fails when ctx is done first. Run holds it across reading the record in
@@ -54,11 +95,35 @@ type Ledger interface {
 	ClearPending() error
 }
 
+// InForceDetail is what a DetailLedger keeps next to the record in force: the signed account JWT that was pushed for
+// it and the list set it was accepted from. A zero value means none is stored.
+type InForceDetail struct {
+	// JWT is the signed account JWT pushed for the generation in force.
+	JWT string
+	// ListSet is the list set of the generation in force; nil when not stored.
+	ListSet *listset.ListSet
+}
+
+// DetailLedger is a Ledger that also keeps the signed JWT and the list set of the generation in force. Run uses it,
+// when the ledger is one, to commit them with the record and to read the JWT in force for a rollback (it is what
+// PreviousClaims carries); Apply reads the list set to compile the previous generation. A ledger that is not one
+// cannot roll back: Run reports a rollback failure, as for nothing in force. MemLedger and KVLedger are.
+type DetailLedger interface {
+	Ledger
+	// CompareAndCommitDetail is CompareAndCommit that stores d with rec.
+	CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error
+	// InForceJWT returns the signed JWT of the generation in force; empty when none is stored.
+	InForceJWT() (string, error)
+	// InForceListSet returns the list set of the generation in force; ok is false when none is stored.
+	InForceListSet() (ls listset.ListSet, ok bool, err error)
+}
+
 // MemLedger is an in-memory Ledger, safe for concurrent use. It is process-local: see the package comment.
 type MemLedger struct {
 	mu      sync.Mutex // guards rec, pending, hasPend
 	run     chan struct{}
 	rec     listset.Record
+	detail  InForceDetail
 	pending listset.Record
 	hasPend bool
 }
@@ -66,6 +131,13 @@ type MemLedger struct {
 // NewMemLedger returns a MemLedger with rec in force; the zero Record means nothing is in force.
 func NewMemLedger(rec listset.Record) *MemLedger {
 	return &MemLedger{rec: rec, run: make(chan struct{}, 1)}
+}
+
+// NewMemLedgerWith returns a MemLedger with rec in force and d, the signed JWT and list set of that generation.
+func NewMemLedgerWith(rec listset.Record, d InForceDetail) *MemLedger {
+	l := NewMemLedger(rec)
+	l.detail = d
+	return l
 }
 
 // InForce returns the record in force.
@@ -82,8 +154,36 @@ func (l *MemLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 	if l.rec.Generation != base {
 		return &listset.StaleBaseError{Stated: base, InForce: l.rec.Generation}
 	}
-	l.rec = rec
+	l.rec, l.detail = rec, InForceDetail{}
 	return nil
+}
+
+// CompareAndCommitDetail implements DetailLedger.
+func (l *MemLedger) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rec.Generation != base {
+		return &listset.StaleBaseError{Stated: base, InForce: l.rec.Generation}
+	}
+	l.rec, l.detail = rec, d
+	return nil
+}
+
+// InForceJWT implements DetailLedger.
+func (l *MemLedger) InForceJWT() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.detail.JWT, nil
+}
+
+// InForceListSet implements DetailLedger.
+func (l *MemLedger) InForceListSet() (listset.ListSet, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.detail.ListSet == nil {
+		return listset.ListSet{}, false, nil
+	}
+	return *l.detail.ListSet, true, nil
 }
 
 // Lock implements Ledger. It is exclusive within this process only.
@@ -140,6 +240,9 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 		return st, err
 	}
+	if ferr := CheckBeforeWrite(ctx, FencePush); ferr != nil {
+		return withFence(st, ferr), ferr
+	}
 	if pushed(ctx, in, targetJWT, acked) {
 		if st, err = Gate(ctx, in); err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 			return st, err
@@ -153,7 +256,12 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if signPrevious == nil || in.Previous == nil {
 		return failRollback("servers hold different generations and there is no previous generation to push back")
 	}
-	revoked := slices.Compact(slices.Sorted(slices.Values(in.Expect.RevokedKeys)))
+	// The target JWT may carry revocations beyond the run's list (the keys AfterPush revoked): the rollback keeps those too.
+	keep := in.Expect.RevokedKeys
+	if tc, terr := jwt.DecodeAccountClaims(targetJWT); terr == nil {
+		keep = slices.Concat(keep, slices.Collect(maps.Keys(tc.Revocations)))
+	}
+	revoked := slices.Compact(slices.Sorted(slices.Values(keep)))
 	prevTok, err := signPrevious(slices.Clone(revoked))
 	if err != nil {
 		return failRollback(fmt.Sprintf("servers hold different generations and the previous generation could not be signed: %v", err))
@@ -175,8 +283,10 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 		return failRollback("rollback JWT would un-revoke keys, not pushed; missing revocations: " + strings.Join(missing, ", "))
 	}
 	// A server holding the rollback carries the previous generation plus extra revocations; GenerationOf needs the
-	// candidate's own revocations to be a subset, so in.Previous still matches it. A failed push back shows in the gate
-	// below: servers keep the generations they hold.
+	// candidate's own revocations to be a subset, so in.Previous still matches it. A failed push back shows in the gate below: servers keep the generations they hold.
+	if ferr := CheckBeforeWrite(ctx, FenceRollback); ferr != nil {
+		return withFence(st, ferr), ferr
+	}
 	pushed(ctx, in, prevTok, nil)
 	return Gate(ctx, in)
 }
@@ -228,6 +338,15 @@ func pushed(ctx context.Context, in GateInput, tok string, acked map[string]bool
 	return true
 }
 
+// The labels RunInput.BeforeWrite is called with.
+const (
+	FencePush      = "push"
+	FenceRevoke    = "revoke"
+	FenceProvision = "provision"
+	FenceCommit    = "commit"
+	FenceRollback  = "rollback"
+)
+
 // RunInput is one submission.
 type RunInput struct {
 	Cluster   Cluster
@@ -243,10 +362,11 @@ type RunInput struct {
 	// Previous is the Compiled of the generation in force (nil when none); PreviousRevoked are the keys it revokes.
 	Previous        *listset.Compiled
 	PreviousRevoked []string
-	// SignPrevious signs the rollback: the previous generation's account JWT with every key in revoked also revoked.
-	// Run calls it only when a rollback is needed, with the union of RevokedKeys and the keys AfterPush revoked
-	// (sorted, unique). Converge refuses to push a result that lacks the previous generation or any of those keys.
-	SignPrevious func(revoked []string) (accountJWT string, err error)
+	// Signer signs the target (Sign) and the rollback (SignPrevious). Required. Run calls SignPrevious only when a
+	// rollback is needed, with the previous JWT in force from the ledger (see DetailLedger) and the union of
+	// RevokedKeys and the keys AfterPush revoked (sorted, unique). Converge refuses to push a result that lacks the
+	// previous generation or any of those keys. With no previous JWT stored the rollback fails closed.
+	Signer Signer
 	// RevokedKeys are the user public keys this change revokes.
 	RevokedKeys []string
 	// Signers are the expected scoped signing keys of the target, and PreviousSigners of the previous generation
@@ -257,16 +377,26 @@ type RunInput struct {
 	OldKeys map[string][]OldKey
 	// ServerLimits are the servers' size limits for listset.SizeCheck; nil means the defaults.
 	ServerLimits []listset.ServerLimits
-	// Sign builds the account JWT for the record and a copy of the Compiled. Signing is the caller's.
-	Sign func(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
-	Now  func() time.Time
+	Now          func() time.Time
 	// AfterPush, if set, is called after the target is pushed and before the gate. It revokes keys (REQ-014: a
 	// narrowed sender's old keys, a removed sender's keys) and reports them by sender address (the key "" is for keys
 	// that belong to no sender). They are added to the gate's revoked keys, and each sender's keys are merged into
 	// its old-key inventory (OldKeys), so a sender listed here needs no entry there; an address present with no keys
 	// has an empty inventory. A sender in notConnected never showed a connection with its new key by the deadline: the Status lists it,
 	// holds the state at partial and nothing is committed. See RotationsAfterPush.
-	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, err error)
+	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
+	// BeforeWrite, if set, is the fencing hook of a caller that holds a lock which could expire during a long run
+	// (the apply intake's account lock). It is called immediately before each protected write with its label:
+	// FencePush ("push": the target account JWT push, and any re-push of it in Converge), FenceRevoke ("revoke":
+	// each revocation push, made through the Revoker of RotationsAfterPush; a custom AfterPush calls
+	// CheckBeforeWrite itself), FenceProvision ("provision": before Provisioner.CreateInbox and before
+	// IssueCredential), FenceCommit ("commit": before the ledger commit) and FenceRollback ("rollback": before the
+	// rollback push in Converge). If it returns an error the write is not made, nothing later is, and the run
+	// returns an error wrapping a *FenceError (errors.Is matches the hook's error). Before the first push nothing
+	// happened and the Status is empty. After the target was pushed the generation is pending, as for any other
+	// post-push failure, and the Status is partial, not in force, with a CheckFence failure naming the step. The
+	// status write is not gated: the ledger lease fences it. nil means no hook.
+	BeforeWrite func(ctx context.Context, what string) error
 	// OnStatus, if set, receives the applying status before the push.
 	OnStatus func(Status)
 	// BeforeCommit, if set, runs after the gate reports applied (and so with no sender not connected) and before the generation is committed, still under
@@ -350,6 +480,9 @@ func writeStatus(ctx context.Context, l Ledger, st Status, err error) error {
 
 // runLocked is the body of a run; the caller holds the ledger lease.
 func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
+	if in.Signer == nil {
+		return Status{}, ErrNoSigner
+	}
 	base, err := in.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
@@ -362,6 +495,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		return Status{}, fmt.Errorf("%w: generation %d is in force and no previous was given", ErrPreviousMismatch, base.Generation)
 	} else if d := listset.DigestCompiled(in.Previous); d != base.Signed {
 		return Status{}, fmt.Errorf("%w: the previous does not digest to what generation %d signed", ErrPreviousMismatch, base.Generation)
+	}
+	dl, hasDetail := in.Ledger.(DetailLedger)
+	var prevJWT string
+	if hasDetail && base.Generation > 0 {
+		if prevJWT, err = dl.InForceJWT(); err != nil {
+			return Status{}, err
+		}
 	}
 	rec, compiled, err := listset.Accept(base, in.ListSet, in.Received)
 	if err != nil {
@@ -406,7 +546,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 
 	frozen := cloneCompiled(compiled)
 	signCopy := cloneCompiled(frozen)
-	tok, err := in.Sign(rec, signCopy)
+	tok, err := in.Signer.Sign(rec, signCopy)
 	if err != nil {
 		return Status{}, fmt.Errorf("sign generation %d: %w", rec.Generation, err)
 	}
@@ -426,6 +566,9 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
+	if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, tok); err != nil {
+		return Status{}, err
+	}
 
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
@@ -437,11 +580,15 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if in.OnStatus != nil {
 		in.OnStatus(newStatus(rec, StateApplying, in.Now))
 	}
+	ctx = withBeforeWrite(ctx, in.BeforeWrite)
+	if err := CheckBeforeWrite(ctx, FencePush); err != nil {
+		return Status{}, err // nothing was pushed
+	}
 	acked := map[string]bool{}
 	pushed(ctx, gi, tok, acked)
 	var notConnected []string
 	if in.AfterPush != nil {
-		revoked, nc, aerr := in.AfterPush(ctx)
+		revoked, nc, finalJWT, aerr := in.AfterPush(ctx)
 		notConnected = slices.Compact(slices.Sorted(slices.Values(nc)))
 		// Whatever AfterPush revoked stays revoked, even when it also failed: it joins the gate's revoked keys, and
 		// the keys of each sender are that sender's old keys, so the gate checks them too (merged into OldKeys; a
@@ -474,10 +621,41 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			if perr := in.Ledger.SetPending(rec); perr != nil {
 				aerr = errors.Join(aerr, perr)
 			}
-			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+			var fe *FenceError
+			var fst Status
+			if errors.As(aerr, &fe) {
+				fst = withFence(newStatus(rec, StatePartial, in.Now), aerr)
+			}
+			return fst, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+		}
+		if finalJWT == "" && len(all) > 0 {
+			// Committing tok would store a JWT without the revocations that were pushed, and a later generation could
+			// restore those keys.
+			perr := in.Ledger.SetPending(rec)
+			return Status{}, errors.Join(fmt.Errorf("%w: revocations were pushed but no final account JWT was returned", ErrSignedMismatch), perr)
+		}
+		if finalJWT != "" {
+			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
+			// what Converge pushes again. It must still be the target and carry every revocation.
+			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
+				perr := in.Ledger.SetPending(rec)
+				return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations does not carry generation %d with every revoked key", ErrSignedMismatch, rec.Generation), perr)
+			}
+			if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, finalJWT); err != nil {
+				perr := in.Ledger.SetPending(rec)
+				return Status{}, errors.Join(err, perr)
+			}
+			tok = finalJWT
+			gi.TargetJWT = finalJWT // the servers hold exactly this token
 		}
 	}
-	st, err := converge(ctx, gi, tok, in.SignPrevious, acked)
+	var signPrevious func(revoked []string) (string, error)
+	if prevJWT != "" {
+		signPrevious = func(revoked []string) (string, error) {
+			return in.Signer.SignPrevious(PreviousClaims{JWT: prevJWT}, revoked)
+		}
+	}
+	st, err := converge(ctx, gi, tok, signPrevious, acked)
 	if err == nil && st.State == StateApplied {
 		// Holding the target is not enough: every server must have acknowledged it.
 		for _, sv := range st.Servers {
@@ -513,7 +691,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		if err == nil {
 			err = perr
 		}
-		return st, err
+		return withFence(st, err), err
 	}
 	if in.BeforeCommit != nil {
 		if err := in.BeforeCommit(ctx, Accepted{Record: rec, Compiled: frozen, Expect: expect}, st); err != nil {
@@ -528,10 +706,24 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			} else {
 				bc.pending = true
 			}
-			return st, fmt.Errorf("before committing generation %d: %w", rec.Generation, bc)
+			return withFence(st, err), fmt.Errorf("before committing generation %d: %w", rec.Generation, bc)
 		}
 	}
-	if err := in.Ledger.CompareAndCommit(base.Generation, rec); err != nil {
+	if ferr := CheckBeforeWrite(ctx, FenceCommit); ferr != nil {
+		// The target is on the servers and not committed: pending, so a later run can finish or roll back.
+		if perr := in.Ledger.SetPending(rec); perr != nil {
+			ferr = errors.Join(ferr, perr)
+		}
+		return withFence(st, ferr), fmt.Errorf("before committing generation %d: %w", rec.Generation, ferr)
+	}
+	var cerr error
+	if hasDetail {
+		ls := in.ListSet
+		cerr = dl.CompareAndCommitDetail(base.Generation, rec, InForceDetail{JWT: tok, ListSet: &ls})
+	} else {
+		cerr = in.Ledger.CompareAndCommit(base.Generation, rec)
+	}
+	if err := cerr; err != nil {
 		return st, fmt.Errorf("commit generation %d: %w", rec.Generation, err)
 	}
 	if err := in.Ledger.ClearPending(); err != nil {
@@ -548,6 +740,38 @@ type beforeCommitError struct {
 
 func (e *beforeCommitError) Error() string { return e.err.Error() }
 func (e *beforeCommitError) Unwrap() error { return e.err }
+
+// keepsRevocations checks that target revokes every key the in-force JWT prev revokes, each at a time no earlier than
+// in prev: a revocation is never lowered or removed, so a later generation cannot restore an old key. tracked says
+// the ledger stores the in-force JWT and a generation is in force; an empty prev then fails closed. It returns an
+// error wrapping ErrSignedMismatch naming the keys that are missing or lowered.
+func keepsRevocations(prev string, tracked bool, target string) error {
+	if !tracked {
+		return nil
+	}
+	if prev == "" {
+		return fmt.Errorf("%w: the ledger stores no account JWT for the generation in force, so its revocations cannot be kept", ErrSignedMismatch)
+	}
+	pc, err := jwt.DecodeAccountClaims(prev)
+	if err != nil {
+		return fmt.Errorf("%w: the stored account JWT does not decode: %w", ErrSignedMismatch, err)
+	}
+	tc, err := jwt.DecodeAccountClaims(target)
+	if err != nil {
+		return fmt.Errorf("%w: the account JWT does not decode: %w", ErrSignedMismatch, err)
+	}
+	var missing []string
+	for k, at := range pc.Revocations {
+		if got, has := tc.Revocations[k]; !has || got < at {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("%w: the account JWT does not keep the revocations in force (missing or lowered): %s", ErrSignedMismatch, strings.Join(missing, ", "))
+	}
+	return nil
+}
 
 func refusals(stage string, ps []listset.Problem) []listset.Refusal {
 	out := make([]listset.Refusal, 0, len(ps))
@@ -576,4 +800,61 @@ func cloneCompiled(c *listset.Compiled) *listset.Compiled {
 		out.Users = append(out.Users, u)
 	}
 	return out
+}
+
+// FenceError is the error of a protected write that the BeforeWrite hook refused. What is the step label ("push",
+// "revoke", "provision", "commit" or "rollback"); Err is the hook's error. It wraps Err, so errors.Is matches it.
+type FenceError struct {
+	What string
+	Err  error
+}
+
+func (e *FenceError) Error() string { return "fenced before " + e.What + ": " + e.Err.Error() }
+func (e *FenceError) Unwrap() error { return e.Err }
+
+type beforeWriteKey struct{}
+
+// withBeforeWrite returns ctx carrying fn, so the code that writes deep inside a run (Converge, the Revoker that
+// RotationsAfterPush hands to Rotate) asks it first. A nil fn returns ctx.
+func withBeforeWrite(ctx context.Context, fn func(ctx context.Context, what string) error) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, beforeWriteKey{}, fn)
+}
+
+// CheckBeforeWrite calls the RunInput.BeforeWrite hook of the run ctx belongs to with what, and returns its refusal
+// as a *FenceError; it is nil when there is no hook or the hook allows the write. A custom AfterPush calls it
+// immediately before each revocation push, with "revoke" (RotationsAfterPush does).
+func CheckBeforeWrite(ctx context.Context, what string) error {
+	fn, _ := ctx.Value(beforeWriteKey{}).(func(context.Context, string) error)
+	if fn == nil {
+		return nil
+	}
+	if err := fn(ctx, what); err != nil {
+		var fe *FenceError
+		if errors.As(err, &fe) {
+			return err
+		}
+		return &FenceError{What: what, Err: err}
+	}
+	return nil
+}
+
+// withFence returns st with a CheckFence failure for err, when err is a refusal of the hook and st does not name one
+// yet; the state is then partial and not in force. Any other err leaves st as it is.
+func withFence(st Status, err error) Status {
+	var fe *FenceError
+	if !errors.As(err, &fe) {
+		return st
+	}
+	for _, f := range st.Failing {
+		if f.Check == CheckFence {
+			return st
+		}
+	}
+	st.Failing = append(slices.Clone(st.Failing), Failure{Check: CheckFence, Detail: "refused before " + fe.What + ": " + fe.Err.Error()})
+	sortFailures(st.Failing)
+	st.State, st.InForce = StatePartial, false
+	return st
 }
