@@ -354,3 +354,52 @@ func TestStartServiceFailureLeavesNoService(t *testing.T) {
 		t.Fatal("the failed service still answers $SRV.INFO")
 	}
 }
+
+func TestPromptLimit(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	got := make(chan PromptEvent, 4)
+	a := f.serve(t, "a", func(ep *Endpoint, p PromptEvent) { got <- p; _ = ep.Reply(p.RequestID, "ok", true) })
+	b := f.client(t, "b")
+
+	at := strings.Repeat("x", MaxPromptBytes)
+	var out bytes.Buffer
+	if err := Prompt(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", at, &out); err != nil || out.String() != "ok" {
+		t.Fatalf("at the limit: %q %v", out.String(), err)
+	}
+	if p := <-got; p.Text != at {
+		t.Fatalf("delivered %d bytes, want %d", len(p.Text), len(at))
+	}
+
+	over := at + "x"
+	// Raw, past the client's own check: the service answers the error and nothing else, with no ack.
+	if r := promptRaw(t, b, "agents.prompt.cc.o.a", []byte(over), true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
+		t.Fatalf("over the limit: %q", r)
+	}
+	// The same in an envelope.
+	env, _ := json.Marshal(map[string]string{"prompt": over})
+	if r := promptRaw(t, b, "agents.prompt.cc.o.a", env, true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
+		t.Fatalf("envelope over the limit: %q", r)
+	}
+	// What the caller's Prompt returns for the service's refusal.
+	err := promptSend(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", over, &out)
+	want := "prompt_too_large: a live prompt is at most 32768 bytes; send the longer text as mail"
+	if err == nil || !strings.Contains(err.Error(), PromptTooLargeCode) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("service refusal: %v", err)
+	}
+	// And the client's pre-check says the same before sending.
+	if err := Prompt(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", over, &out); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("client pre-check: %v", err)
+	}
+	select {
+	case p := <-got:
+		t.Fatalf("the session was told of an oversized prompt (%d bytes)", len(p.Text))
+	case <-time.After(200 * time.Millisecond):
+	}
+	svc := a.svc()
+	svc.mu.Lock()
+	open := len(svc.prompts)
+	svc.mu.Unlock()
+	if open != 0 {
+		t.Fatalf("%d request ids are open after refused prompts", open)
+	}
+}

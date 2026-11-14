@@ -110,6 +110,11 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	guard, ok := accountGuard(cfg, verb, stderr) // the file edit is a policy change on an adopted account, with or without --sync
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	path, err := policyPath(o.file, env, cfg)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
@@ -167,7 +172,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		fmt.Fprintf(stdout, "%s: nothing to change\n", o.name)
 		if o.sync && !o.dry {
 			// The policy already says it; --sync still reconciles the record (this is the re-run the follow-up names).
-			return syncLabels(o, verb, setMeta, cfg, env, stdout, stderr)
+			return syncLabels(guard, o, verb, setMeta, cfg, env, stdout, stderr)
 		}
 		return 0
 	}
@@ -185,6 +190,9 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 			fmt.Fprintf(stdout, "dry run: would then update the directory labels for %s (connected to nothing)\n", o.name)
 		}
 	} else {
+		if !heldOrStop(guard, verb, "the policy file edit", stderr) {
+			return 1
+		}
 		if err := doc.Save(); err != nil {
 			if errors.Is(err, policyfile.ErrChanged) {
 				return fail("%v: nothing was changed. Re-run: mashctl %s %s", err, verb, strings.Join(args, " "))
@@ -200,7 +208,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		fmt.Fprintln(stdout, l)
 	}
 	if o.sync && !o.dry {
-		return syncLabels(o, verb, setMeta, cfg, env, stdout, stderr)
+		return syncLabels(guard, o, verb, setMeta, cfg, env, stdout, stderr)
 	}
 	return 0
 }
@@ -208,7 +216,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 // syncLabels applies the label change to the endpoint's directory record, after the policy file is saved. The file
 // is the source of truth and the record a compiled output, so a failure here leaves the file saved and says how to
 // retry.
-func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, env func(string) string, stdout, stderr io.Writer) int {
+func syncLabels(guard *ctl.Guard, o labelOpts, verb, setMeta string, cfg config.Config, env func(string) string, stdout, stderr io.Writer) int {
 	retry := func(err error) int {
 		fmt.Fprintf(stderr, "mashctl: %s %s: the policy file is saved but the directory labels were not updated: %v. Retry: %s\n", verb, o.name, err, setMeta)
 		return 1
@@ -233,6 +241,9 @@ func syncLabels(o labelOpts, verb, setMeta string, cfg config.Config, env func(s
 	}
 	for _, k := range o.unset {
 		labels[k] = ""
+	}
+	if err := guard.Before("the update of the directory labels"); err != nil {
+		return retry(err)
 	}
 	if _, err := adm.SetMeta(ctx, o.name, admin.MetaUpdate{Labels: labels}); err != nil {
 		return retry(err)

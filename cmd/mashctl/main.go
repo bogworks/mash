@@ -38,6 +38,8 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
 		return runAudit(args[1:], env, lookup, stdout, stderr)
+	case "inbox": // read-only: `inbox inspect` shows one inbox's stored messages and their delivery state; writes nothing
+		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
 	case "add":

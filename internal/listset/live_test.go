@@ -47,7 +47,8 @@ func newLiveEnv(t *testing.T, c *Compiled) *liveEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := &server.Options{Port: -1, NoLog: true, NoSigs: true, TrustedKeys: []string{opPub}}
+	// MaxControlLine is raised so the CONNECT line can carry a user JWT with over a thousand tags.
+	o := &server.Options{Port: -1, NoLog: true, NoSigs: true, TrustedKeys: []string{opPub}, MaxControlLine: 1 << 20}
 	mr := &server.MemAccResolver{}
 	if err := mr.Store(accPub, ajwt); err != nil {
 		t.Fatal(err)
@@ -267,5 +268,41 @@ func TestLiveMatchesCheck(t *testing.T) {
 				sc.nc.Close()
 			}
 		})
+	}
+}
+
+// The server's template expansion limit (maxPermTemplateSubjectExpansions) at its boundary: for AT-001's key the
+// publish allow list is 3N+1 subjects, so 1365 allow tags connect and 1366 are refused, as Check simulates.
+func TestLiveExpansionLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live nats-server cross-check")
+	}
+	ls := at001()
+	c, err := Compile(ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := newLiveEnv(t, c)
+	var tpl jwt.Permissions
+	for _, x := range c.Templates {
+		if x.Group == "foo.c" {
+			tpl = x.Permissions
+		}
+	}
+	for _, n := range []int{1365, 1366} {
+		_, simErr := expandPermissions(tpl, "core", allowTags(n))
+		sc, err := env.connect(env.scoped["foo.c"], "core", allowTags(n), true)
+		if sc != nil && sc.nc != nil {
+			defer sc.nc.Close()
+		}
+		if (simErr != nil) != (err != nil) {
+			t.Errorf("%d tags: server connect error %v, Check simulates %v", n, err, simErr)
+		}
+		if n == 1365 && err != nil {
+			t.Errorf("%d tags: server refused: %v", n, err)
+		}
+		if n == 1366 && err == nil {
+			t.Errorf("%d tags: server accepted", n)
+		}
 	}
 }

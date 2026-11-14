@@ -337,7 +337,7 @@ A `workflow_dispatch` run on `main` builds the four binaries twice and compares 
 the SBOMs, and keeps the provenance bundle, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
 a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
 `--signer-workflow` and `--source-ref refs/heads/main`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
-`release-check --assets` does. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
+`release-check --assets` does. The `dry-run-notes` job also runs the release-notes step (`scripts/changelog section` and `check-notes`, with the compare line) against the latest released change log section, so a change to the notes path is proven before a tag. It creates no release and no tag and uploads nothing to a release. A dispatch from any other
 ref builds nothing.
 
 A dry run is only meaningful if the verify job ran: check that `dry-run-verify` shows success, not skipped. A skipped job anywhere

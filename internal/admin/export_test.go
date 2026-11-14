@@ -114,3 +114,19 @@ func SetIssuedStatusFault(f func() error) (prev func() error) {
 	prev, issuedStatusFault = issuedStatusFault, f
 	return
 }
+
+// SetLockRefresh sets how often a refreshing lock extends its expiry; it returns a func that restores it.
+func SetLockRefresh(d time.Duration) (restore func()) {
+	old := lockRefresh
+	lockRefresh = d
+	return func() { lockRefresh = old }
+}
+
+// SetMarkerWriteFault installs a hook that wraps a rotation's marker write: it gets the write and returns what the
+// caller sees, so a test can run the write and report a lost answer, or not run it. It returns a func that restores
+// the previous one.
+func SetMarkerWriteFault(f func(write func() (uint64, error)) (uint64, error)) (restore func()) {
+	prev := markerWriteFault
+	markerWriteFault = f
+	return func() { markerWriteFault = prev }
+}

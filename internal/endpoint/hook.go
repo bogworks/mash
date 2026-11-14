@@ -32,7 +32,7 @@ import (
 // is hooked from the start: mail is spooled from the first message and acked only once a hook has drained it, never on a
 // channel write; a wake is a hint, not a receipt. Claude opts in (MASH_SPOOL_FROM_START) because it drops channel events
 // that arrive before its first user message, so an early channel ack loses the mail. A host that also takes no channel
-// delivery at all (NoChannel: Pi) never falls back to the channel: mail the spool cannot take is held unacked.
+// delivery at all (NoChannel: Pi), or whose operator set MASH_SPOOL_REQUIRED (spoolrequired.go), never falls back to the channel: mail the spool cannot take is held unacked.
 
 var (
 	// SpoolCheck is how often serve looks for messages the hook has drained.
@@ -200,7 +200,8 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 				continue
 			}
 			if err != nil {
-				if !h.failed {
+				e.NoteSpoolFault(err)
+				if !h.failed && !e.faultOn {
 					h.failed = true
 					e.log.Printf("spool #%s: %v (retried, then delivered by the channel)", FormatMsgRef(seq), err)
 				}
@@ -213,6 +214,9 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 				continue
 			}
 			h.failed = false
+			if e.faultOn {
+				e.ClearSpoolFault()
+			}
 			delete(h.fails, seq)
 			h.msgs[seq] = p
 			if ep != 0 {
