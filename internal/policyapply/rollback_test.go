@@ -496,6 +496,38 @@ func TestFinalAndRollbackJWTSizeLimit(t *testing.T) {
 	}
 }
 
+// A server that keeps the previous generation because the rollback push failed lacks the rollback's revocations: the
+// rollback is not confirmed, nothing is committed, the generation stays pending and the failure names the server.
+func TestRollbackNotConfirmedWhenServerLacksRevocations(t *testing.T) {
+	w := newWorld(t)
+	extra := freshUserPub(t)
+	w.cluster.failPush["s2"] = true
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
+		return map[string][]string{"": {extra}}, nil, w.k.build(t, w.c2, w.k.revoked, extra), nil
+	}
+	st, err := Run(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := gens(st); g["s1"] != "1" || g["s2"] != "1" {
+		t.Fatalf("servers = %v", g)
+	}
+	if !hasFailure(st, "s2", "", CheckRollback) || hasFailure(st, "s1", "", CheckRollback) {
+		t.Fatalf("failures = %+v", st.Failing)
+	}
+	if st.State == StateApplied || st.InForce {
+		t.Fatalf("state = %+v", st)
+	}
+	if _, ok, _ := l.Pending(); !ok {
+		t.Fatal("pending cleared")
+	}
+	if stored, _ := l.InForceJWT(); stored != w.j1 {
+		t.Fatal("the rollback JWT was committed as in force")
+	}
+}
+
 // After a confirmed rollback the JWT in force is the rollback JWT, which may carry revocations the earlier JWT in
 // force lacked: the next submission, signed from it, passes the server-revocation check.
 func TestRollbackBecomesJWTInForce(t *testing.T) {
@@ -507,6 +539,12 @@ func TestRollbackBecomesJWTInForce(t *testing.T) {
 	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
 		return map[string][]string{"": {extra}}, nil, w.k.build(t, w.c2, w.k.revoked, extra), nil
 	}
+	// s2 refuses the target but takes the rollback push.
+	orig := in.Signer
+	in.Signer = withSignPrevious(orig, func(pc PreviousClaims, r []string) (string, error) {
+		w.cluster.failPush["s2"] = false
+		return orig.(SignerFuncs).SignPrevious(pc, r)
+	})
 	st, err := Run(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -530,6 +568,17 @@ func TestRollbackBecomesJWTInForce(t *testing.T) {
 	}
 	if _, has := claims.Revocations[extra]; !has {
 		t.Fatal("the stored JWT lacks the revocation the rollback carries")
+	}
+	for n, held := range w.cluster.jwts {
+		hc, err := jwt.DecodeAccountClaims(held)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k := range claims.Revocations {
+			if _, has := hc.Revocations[k]; !has {
+				t.Fatalf("server %s lacks the revocation of %s", n, k)
+			}
+		}
 	}
 	// The next submission builds from the stored JWT in force.
 	w.cluster.failPush["s2"] = false

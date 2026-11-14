@@ -615,7 +615,14 @@ func TestRunRollbackClearsPending(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.failPush["s2"] = true
 	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
-	if _, err := Run(context.Background(), w.run(l, set2(), "bytes-2")); err != nil {
+	in := w.run(l, set2(), "bytes-2")
+	// s2 refuses the target but takes the rollback push, so every server holds the rollback's revocations.
+	orig := in.Signer
+	in.Signer = withSignPrevious(orig, func(pc PreviousClaims, r []string) (string, error) {
+		w.cluster.failPush["s2"] = false
+		return orig.(SignerFuncs).SignPrevious(pc, r)
+	})
+	if _, err := Run(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := l.Pending(); ok {

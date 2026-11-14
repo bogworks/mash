@@ -764,6 +764,26 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		// generation is not a place to return to.
 		var perr error
 		if err == nil && len(notConnected) == 0 && backOn(st, base.Generation) {
+			// Generation alone does not confirm the rollback: a server that kept the previous generation because the
+			// rollback push failed lacks the rollback's revocations.
+			if rollbackJWT != "" {
+				if lacking, why := rollbackLacking(ctx, in, rollbackJWT); len(lacking) > 0 || why != "" {
+					if len(lacking) == 0 {
+						st.Failing = append(st.Failing, Failure{Check: CheckRollback, Detail: why})
+					}
+					for _, n := range lacking {
+						st.Failing = append(st.Failing, Failure{Server: n, Check: CheckRollback,
+							Detail: "holds the previous generation without every revocation of the rollback JWT"})
+					}
+					sortFailures(st.Failing)
+					st.State, st.InForce = StatePartial, false
+					perr = setPending(rollbackJWT)
+					if perr != nil {
+						err = perr
+					}
+					return withFence(st, err), err
+				}
+			}
 			// The servers may hold the rollback JWT, which can carry revocations the JWT in force lacks: it becomes the
 			// JWT in force (record and list set unchanged), so the next submission is signed from it.
 			if rl, ok := in.Ledger.(RollbackLedger); ok && rollbackJWT != "" {
@@ -809,6 +829,29 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		return st, fmt.Errorf("clear pending after committing generation %d: %w", rec.Generation, err)
 	}
 	return st, nil
+}
+
+// rollbackLacking reads the servers' account JWTs after a rollback and returns the servers whose JWT does not revoke
+// every key rollbackJWT revokes, each at a time no earlier. why is set when the servers could not be read completely.
+func rollbackLacking(ctx context.Context, in RunInput, rollbackJWT string) (lacking []string, why string) {
+	set, err := in.Cluster.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Sprintf("the server set could not be read to confirm the rollback: %v", err)
+	}
+	if !set.Complete(in.Inventory) {
+		return nil, "the server set is incomplete, so the rollback cannot be confirmed: " + set.Why(in.Inventory)
+	}
+	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
+	if err != nil {
+		return nil, fmt.Sprintf("the servers' account JWTs could not be read to confirm the rollback: %v", err)
+	}
+	for _, n := range slices.Sorted(slices.Values(set.Names)) {
+		tok, ok := jwts[n]
+		if !ok || tok == "" || keepsRevocations(rollbackJWT, true, tok) != nil {
+			lacking = append(lacking, n)
+		}
+	}
+	return lacking, ""
 }
 
 // serverRevocationJWTs reads the account JWT of every server and returns the non-empty ones, so a retry can keep
