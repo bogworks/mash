@@ -298,7 +298,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 			acct = lk
 		}
-		if err := acct.Held(ctx); err != nil {
+		if err := acct.Before(ctx, "the provision"); err != nil {
 			return fail(err)
 		}
 		if nf != nil {
@@ -352,7 +352,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 			acct = lk
 		}
-		if err := acct.Held(ctx); err != nil {
+		if err := acct.Before(ctx, "the record's update"); err != nil {
 			return fail(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
@@ -375,7 +375,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		acct = lk
-		if err := acct.Held(ctx); err != nil {
+		if err := acct.Before(ctx, "the record's zone change"); err != nil {
 			return fail(err)
 		}
 		rec, err := a.SetZone(ctx, args[1], args[2])

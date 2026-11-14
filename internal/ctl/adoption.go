@@ -38,6 +38,18 @@ func (g *Guard) Held() error {
 	return g.lock.Held(ctx)
 }
 
+// Before is Held for a named step: the command calls it immediately before each write or irreversible step and
+// stops, changing nothing further, when it returns an error. The error names the step that was not taken. A nil Guard
+// is a no-op.
+func (g *Guard) Before(step string) error {
+	if g == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), guardHeldTimeout)
+	defer cancel()
+	return g.lock.Before(ctx, step)
+}
+
 // Release gives up the lock (and closes the connection the guard opened). Call it once, by defer.
 func (g *Guard) Release() {
 	if g == nil {
