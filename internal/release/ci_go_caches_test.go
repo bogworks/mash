@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // runGoCaches runs scripts/ci-go-caches kind with the given environment and returns its stdout and the lines it wrote
@@ -174,7 +176,6 @@ const goCacheCall = "if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches %
 // 2026-11-11). This pins workflow steps only: the script's own unit tests above run under `go test ./...` on every
 // platform CI tests, macOS included, and the script avoids GNU-only find options for that reason.
 var goCacheJobs = map[string]string{
-	"ci.yml/test":              "race",
 	"ci.yml/conformance":       "check",
 	"lint.yml/lint":            "check",
 	"security.yml/govulncheck": "check",
@@ -220,6 +221,50 @@ func TestWorkflows_goCacheStepsCallCIGoCaches(t *testing.T) {
 	for key := range goCacheJobs {
 		if !seen[key] {
 			t.Errorf("%s: job not found", key)
+		}
+	}
+}
+
+// The two Linux test jobs (test, test-eph) run their steps through the local action .github/actions/go-test, so the
+// race warm-up step lives in that action: the action runs ci-go-caches race, exactly as pinned, before its setup-go step,
+// and each job checks out first (a local action is read from the checkout) and calls the action.
+func TestWorkflows_goCacheStepInTheSharedTestAction(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile("../../.github/actions/go-test/action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		Runs struct {
+			Steps []step `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(b, &a); err != nil {
+		t.Fatal(err)
+	}
+	called, setupGo := -1, -1
+	for i, st := range a.Runs.Steps {
+		if strings.Contains(st.Run, "ci-go-caches") {
+			called = i
+			if st.Run != fmt.Sprintf(goCacheCall, "race") {
+				t.Errorf("go-test action: step runs %q, want %q", st.Run, fmt.Sprintf(goCacheCall, "race"))
+			}
+		}
+		if strings.HasPrefix(st.Uses, "actions/setup-go@") && setupGo < 0 {
+			setupGo = i
+		}
+	}
+	if called < 0 || setupGo < 0 || called > setupGo {
+		t.Errorf("go-test action: ci-go-caches race must run before setup-go (step %d, setup-go %d)", called, setupGo)
+	}
+	for _, jn := range []string{"test", "test-eph"} {
+		steps := load(t, "ci.yml").Jobs[jn].Steps
+		if len(steps) != 2 || !strings.HasPrefix(steps[0].Uses, "actions/checkout@") || steps[1].Uses != "./.github/actions/go-test" {
+			t.Errorf("ci.yml/%s: steps must be actions/checkout then ./.github/actions/go-test, got %+v", jn, steps)
+			continue
+		}
+		if steps[1].With["forbidden-words"] != "${{ vars.MASH_FORBIDDEN_WORDS }}" {
+			t.Errorf("ci.yml/%s: the action must be given the forbidden words from vars: %v", jn, steps[1].With)
 		}
 	}
 }
