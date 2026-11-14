@@ -132,7 +132,7 @@ func (h *addEnv) records() []string {
 	}
 	var out []string
 	for _, r := range recs {
-		out = append(out, r.Name+"/"+r.Zone+"/"+r.User)
+		out = append(out, r.Name+"//"+r.User)
 	}
 	return out
 }

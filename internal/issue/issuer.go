@@ -245,7 +245,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		return nil, refuse(CodeInternal, "signing failed")
 	}
 	rec := store.Issued{
-		PublicKey: r.PublicKey, Address: r.Address, Owner: id.Owner, Zone: group, Kind: store.IssuedEndpoint,
+		PublicKey: r.PublicKey, Address: r.Address, Owner: id.Owner, Kind: store.IssuedEndpoint,
 		Tags: append([]string{}, user.Tags...), Generation: gen, Purpose: purpose,
 		IssuedAt: time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339),
 	}

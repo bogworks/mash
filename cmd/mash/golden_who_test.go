@@ -10,13 +10,13 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// The who --json contract (ADR 0049): every field, in order, for a fully populated zoned record with a live lease,
+// The who --json contract (ADR 0049): every field, in order, for a fully populated record with a live lease,
 // and the smallest legacy record.
 func TestGoldenWhoJSONShape(t *testing.T) {
 	const n48 = "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl"
 	full := endpoint.Presence{
 		Record: store.Record{
-			Name: n48, Owner: n48, Zone: "z0123456789abcdefghijklmnopqrstu", Role: "r", Host: "h", Note: "n",
+			Name: n48, Owner: n48, Role: "r", Host: "h", Note: "n",
 			Description: "d", Caps: []string{"c1", "c2"}, Labels: map[string]string{"b": "2", "a": "1"},
 		},
 		Online:   true,
@@ -42,7 +42,6 @@ func TestGoldenWhoJSONShape(t *testing.T) {
       "a": "1",
       "b": "2"
     },
-    "zone": "z0123456789abcdefghijklmnopqrstu",
     "lease": {
       "host": "lh",
       "version": "1.0"

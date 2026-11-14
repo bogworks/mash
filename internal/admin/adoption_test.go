@@ -64,10 +64,9 @@ func TestEndpointPermissionsGrantNothingOnAdoptionMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	lists := map[string]jwt.Permissions{
-		"Permissions":     admin.Permissions("o", "a"),
-		"PermissionsTo":   admin.PermissionsTo("o", "a", []string{"b", "c"}),
-		"ZonePermissions": admin.ZonePermissions("o", "red", []string{"blue"}),
-		"NewForm":         nf,
+		"Permissions":   admin.Permissions("o", "a"),
+		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
+		"NewForm":       nf,
 	}
 	for name, p := range lists {
 		allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)

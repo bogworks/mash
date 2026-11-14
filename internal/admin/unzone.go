@@ -66,14 +66,14 @@ func (a *Admin) Unzone(ctx context.Context, name string) (changed bool, err erro
 			}
 			// Relaxing to the five-token identity is an admission decision like any other: refuse before
 			// anything changes if it could not coexist with the directory's records.
-			if err := a.admit(ctx, kv, name, ""); err != nil {
+			if err := a.admit(ctx, kv, name); err != nil {
 				return false, err
 			}
 			var obj map[string]json.RawMessage
 			if err := json.Unmarshal(e.Value(), &obj); err != nil {
 				return false, fmt.Errorf("mash: directory %s: %w", name, err)
 			}
-			mb, _ := json.Marshal(store.MailSubjectFor(rec.Owner, "", name))
+			mb, _ := json.Marshal(store.MailSubjectFor(rec.Owner, name))
 			delete(obj, "zone")
 			obj["mail_subject"] = mb
 			val, err := json.Marshal(obj)
@@ -126,7 +126,7 @@ func (a *Admin) inboxForUnzoneLocked(ctx context.Context, name string) (jetstrea
 		if sub == five {
 			continue
 		}
-		if _, ok := sap.ZoneOfMailFilter(sub, a.owner, name); !ok {
+		if _, ok := sap.LegacyZoneOfMailFilter(sub, a.owner, name); !ok {
 			return cfg, false, firstInboxDiff("stream", name, []inboxField{{"subjects", sortedCopy(cfg.Subjects), []string{five}}})
 		}
 	}

@@ -25,7 +25,7 @@ import (
 //   - id is not a valid new-form identity;
 //   - the alias owner or name fails the legacy name rule (sap.Legacy);
 //   - the alias owner equals id's owner (the legacy wildcard filter would reach id), or the alias overlaps id;
-//   - no unzoned legacy record has exactly that owner and name (a zoned one is named in the refusal);
+//   - no legacy record has exactly that owner and name;
 //   - another new-form record, one not keyed by id's own flat key, already claims the alias.
 //
 // The record under id's own flat key is id itself, so verifying an already provisioned record passes.
@@ -46,24 +46,17 @@ func VerifyAlias(id sap.EndpointIdentity, alias store.Alias, existing []store.Re
 	if sap.Overlaps(id, leg) {
 		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: %s overlaps the alias %s/%s", id, alias.Owner, alias.Name)
 	}
-	named, zoned := false, false
+	named := false
 	for _, r := range existing {
 		if r.Owner == alias.Owner && r.Name == alias.Name && r.Key() == r.Name { // a legacy-keyed record
-			if r.Zone == "" {
-				named = true
-			} else {
-				zoned = true
-			}
+			named = true
 		}
 		if r.Alias != nil && *r.Alias == alias && r.KeyOrName() != id.Flat() {
 			return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: %s/%s is already claimed by %s", alias.Owner, alias.Name, r.KeyOrName())
 		}
 	}
-	switch {
-	case named:
+	if named {
 		return leg, nil
-	case zoned:
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: the legacy endpoint %s/%s is zoned (zone-bound subjects cannot be proved disjoint)", alias.Owner, alias.Name)
 	}
 	return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: no legacy endpoint %s/%s in the directory", alias.Owner, alias.Name)
 }
@@ -97,7 +90,7 @@ func (a *Admin) directoryRecords(ctx context.Context, kv jetstream.KeyValue) ([]
 // three tokens of id (not to alias), before the keys are validated and before anything is read or written. It creates the directory record keyed by id's flat identity,
 // the inbox stream inbox-<flat> filtered on id's exact mail subject, and the durable consumer. alias, when set, is
 // the legacy identity the endpoint answers to during the transition window (ADR 0076); it is verified by VerifyAlias
-// before anything is written. A new-form identity is never zoned, so meta.Zone must be empty.
+// before anything is written.
 //
 // Discipline is Provision's: the flat key's lock, then the directory-wide admission lock (a leaf), held while the
 // directory is listed, admitted against and written, with both re-checked before the record. The record is written
@@ -127,9 +120,6 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 	}
 	if !nkeys.IsValidPublicAccountKey(account) {
 		return store.Record{}, errors.New("mash: the account is not an account public key (A, then 55 base32 characters; the value is not shown)")
-	}
-	if meta.Zone != "" {
-		return store.Record{}, fmt.Errorf("mash: provision identity: %s is a new-form identity and takes no zone", id)
 	}
 	if err := meta.validate(); err != nil {
 		return store.Record{}, err
@@ -224,7 +214,7 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 		}
 		aliasID = &leg
 	}
-	if err := store.AdmitWithAlias(id, aliasID, "", recs); err != nil {
+	if err := store.AdmitWithAlias(id, aliasID, recs); err != nil {
 		return store.Record{}, err
 	}
 	held := []*streamLock{adm}
@@ -275,8 +265,7 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 }
 
 // NewFormUserPermissions is the permission set of a new-form endpoint's user: NewFormPermissions(id, extra), plus
-// WindowBridge for the alias when there is one, allow lists merged and deduplicated. It takes no policy input, so a
-// policy-compiled set cannot reach it (RefuseCompiledForNewForm is for the caller that holds that flag).
+// WindowBridge for the alias when there is one, allow lists merged and deduplicated. It takes no policy input.
 //
 // existing is the directory's records. A non-nil alias is verified here with VerifyAlias against existing, and refused
 // on error before WindowBridge is called, so verification cannot be skipped. The caller passes a directory read made

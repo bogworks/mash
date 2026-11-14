@@ -188,18 +188,10 @@ func TestRecordZone(t *testing.T) {
 	}
 }
 
-func TestInboxConfigZoned(t *testing.T) {
-	legacy := InboxConfigFor("o", "a", DefaultLimits())
-	if !reflect.DeepEqual(legacy.Subjects, []string{"agents.mail.*.o.a"}) {
-		t.Fatalf("%v", legacy.Subjects)
-	}
-	z := InboxConfigZoned("o", "z1", "a", DefaultLimits())
-	if !reflect.DeepEqual(z.Subjects, []string{"agents.mail.*.o.a", "agents.mail.*.o.z1.a"}) {
-		t.Fatalf("%v", z.Subjects)
-	}
-	z.Subjects = legacy.Subjects
-	if !reflect.DeepEqual(z, legacy) {
-		t.Fatal("a zoned inbox differs from a legacy one in more than its subjects")
+func TestInboxConfigIsOneSubject(t *testing.T) {
+	c := InboxConfigFor("o", "a", DefaultLimits())
+	if !reflect.DeepEqual(c.Subjects, []string{"agents.mail.*.o.a"}) {
+		t.Fatalf("%v", c.Subjects)
 	}
 }
 

@@ -53,7 +53,7 @@ func issuedSubjects(key string) []string {
 }
 
 // No permission list mash gives an endpoint grants anything on the issue record: not the legacy or the new-form
-// endpoint list, not a recipient-narrowed one, and not the template of a zone's scoped signing key.
+// endpoint list, not a recipient-narrowed one.
 func TestEndpointPermissionsGrantNothingOnIssuedRecord(t *testing.T) {
 	id, err := sap.New("claude", "o", "a")
 	if err != nil {
@@ -64,10 +64,9 @@ func TestEndpointPermissionsGrantNothingOnIssuedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	lists := map[string]jwt.Permissions{
-		"Permissions":     admin.Permissions("o", "a"),
-		"PermissionsTo":   admin.PermissionsTo("o", "a", []string{"b", "c"}),
-		"ZonePermissions": admin.ZonePermissions("o", "red", []string{"blue"}),
-		"NewForm":         nf,
+		"Permissions":   admin.Permissions("o", "a"),
+		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
+		"NewForm":       nf,
 	}
 	for name, p := range lists {
 		allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)

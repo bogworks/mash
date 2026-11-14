@@ -2,20 +2,16 @@
 
 package sap
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-// goldenN48 is a 48-character name or owner; goldenZ32 is a 32-character zone.
+// goldenN48 is a 48-character name or owner.
 const (
 	goldenN48 = "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl"
-	goldenZ32 = "z0123456789abcdefghijklmnopqrstu"
 )
 
 func TestGoldenVectorLengths(t *testing.T) {
-	if len(goldenN48) != 48 || len(goldenZ32) != 32 {
-		t.Fatalf("vector lengths %d %d", len(goldenN48), len(goldenZ32))
+	if len(goldenN48) != 48 {
+		t.Fatalf("vector length %d", len(goldenN48))
 	}
 }
 
@@ -38,60 +34,51 @@ func TestGoldenSubjectsLegacy(t *testing.T) {
 		if got := MailFilter(c.owner, c.name); got != c.filter {
 			t.Errorf("MailFilter(%q,%q) = %q", c.owner, c.name, got)
 		}
-		if o, z, n, ok := SplitMail(c.mail); !ok || o != c.owner || z != "" || n != c.name {
-			t.Errorf("SplitMail(%q) = %q %q %q %v", c.mail, o, z, n, ok)
+		if o, n, ok := SplitMail(c.mail); !ok || o != c.owner || n != c.name {
+			t.Errorf("SplitMail(%q) = %q %q %v", c.mail, o, n, ok)
 		}
 	}
 }
 
-func TestGoldenSubjectsZoned(t *testing.T) {
-	for _, c := range []struct{ owner, zone, name, mail, filter string }{
-		{"o", "z", "a", "agents.mail.cc.o.z.a", "agents.mail.*.o.z.a"},
-		{"acme-corp", "default", "build-1", "agents.mail.cc.acme-corp.default.build-1", "agents.mail.*.acme-corp.default.build-1"},
-		{"o", "9-z-", "a", "agents.mail.cc.o.9-z-.a", "agents.mail.*.o.9-z-.a"},
-		{goldenN48, goldenZ32, goldenN48,
-			"agents.mail.cc." + goldenN48 + "." + goldenZ32 + "." + goldenN48,
-			"agents.mail.*." + goldenN48 + "." + goldenZ32 + "." + goldenN48},
+func TestGoldenLegacyZoneParsing(t *testing.T) {
+	// Legacy parsing for unzone and the upgrade guards: a six-token filter or subject of an older release is read, never built.
+	for _, c := range []struct{ owner, zone, name string }{
+		{"o", "z", "a"},
+		{"acme-corp", "default", "build-1"},
+		{"o", "9-z-", "a"},
+		{goldenN48, "z0123456789abcdefghijklmnopqrstu", goldenN48},
 	} {
-		s := ForZone(c.owner, c.zone, c.name)
-		legacy := For(c.owner, c.name)
-		if s.Mail != c.mail {
-			t.Errorf("ForZone mail = %q, want %q", s.Mail, c.mail)
+		filter := "agents.mail.*." + c.owner + "." + c.zone + "." + c.name
+		if z, ok := LegacyZoneOfMailFilter(filter, c.owner, c.name); !ok || z != c.zone {
+			t.Errorf("LegacyZoneOfMailFilter(%q) = %q %v", filter, z, ok)
 		}
-		// only mail carries the zone token
-		if s.Prompt != legacy.Prompt || s.Status != legacy.Status || s.HB != legacy.HB {
-			t.Errorf("ForZone changed a non-mail subject: %+v", s)
+		subj := "agents.mail.cc." + c.owner + "." + c.zone + "." + c.name
+		if z, ok := LegacyZoneOfMailSubject(subj, c.owner, c.name); !ok || z != c.zone {
+			t.Errorf("LegacyZoneOfMailSubject(%q) = %q %v", subj, z, ok)
 		}
-		if got := MailFilterZone(c.owner, c.zone, c.name); got != c.filter {
-			t.Errorf("MailFilterZone = %q, want %q", got, c.filter)
+		if _, ok := LegacyZoneOfMailFilter(MailFilter(c.owner, c.name), c.owner, c.name); ok {
+			t.Errorf("five-token filter parsed as zoned")
 		}
-		if o, z, n, ok := SplitMail(c.mail); !ok || o != c.owner || z != c.zone || n != c.name {
-			t.Errorf("SplitMail(%q) = %q %q %q %v", c.mail, o, z, n, ok)
-		}
-		if z, ok := ZoneOfMailFilter(c.filter, c.owner, c.name); !ok || z != c.zone {
-			t.Errorf("ZoneOfMailFilter(%q) = %q %v", c.filter, z, ok)
-		}
-		// the legacy filter is not an exact-zone filter
-		if _, ok := ZoneOfMailFilter(MailFilter(c.owner, c.name), c.owner, c.name); ok {
-			t.Errorf("legacy filter parsed as zoned")
+		if _, ok := LegacyZoneOfMailSubject(For(c.owner, c.name).Mail, c.owner, c.name); ok {
+			t.Errorf("five-token subject parsed as zoned")
 		}
 	}
 }
 
 func TestGoldenSplitMailRefusals(t *testing.T) {
 	for _, s := range []string{
-		"", "agents.mail.cc.o", "agents.mail.cc.o.z.a.x", "agents.prompt.cc.o.a", "agent.mail.cc.o.a",
+		"", "agents.mail.cc.o", "agents.mail.cc.o.z.a", "agents.mail.cc.o.z.a.x", "agents.prompt.cc.o.a", "agent.mail.cc.o.a",
 		"agents.mail.cc..a", "agents.mail.cc.o.", "agents.mail.cc.o.z.",
 	} {
-		if _, _, _, ok := SplitMail(s); ok {
+		if _, _, ok := SplitMail(s); ok {
 			t.Errorf("SplitMail(%q) accepted", s)
 		}
 	}
-	if _, ok := ZoneOfMailFilter("agents.mail.*.o.Z.a", "o", "a"); ok {
-		t.Error("ZoneOfMailFilter accepted an invalid zone")
+	if _, ok := LegacyZoneOfMailFilter("agents.mail.*.o.Z.a", "o", "a"); ok {
+		t.Error("LegacyZoneOfMailFilter accepted an invalid zone")
 	}
-	if _, ok := ZoneOfMailFilter("agents.mail.*.o.z.b", "o", "a"); ok {
-		t.Error("ZoneOfMailFilter accepted another name")
+	if _, ok := LegacyZoneOfMailFilter("agents.mail.*.o.z.b", "o", "a"); ok {
+		t.Error("LegacyZoneOfMailFilter accepted another name")
 	}
 }
 
@@ -112,22 +99,7 @@ func TestGoldenInboxNames(t *testing.T) {
 
 func TestGoldenProtocolConstants(t *testing.T) {
 	if AgentToken != "cc" || AgentName != "claude-code" || ServiceName != "agents" || QueueGroup != "agents" ||
-		ProtocolVersion != "0.3" || DefaultZone != "default" || MaxZoneLen != 32 {
+		ProtocolVersion != "0.3" {
 		t.Error("a protocol constant changed")
-	}
-}
-
-func TestGoldenValidZone(t *testing.T) {
-	for _, z := range []string{"a", "z", "default", "0", "9abc", "-", "-a", "a-", "a--b", goldenZ32, strings.Repeat("0", 32), strings.Repeat("-", 32)} {
-		if !ValidZone(z) {
-			t.Errorf("ValidZone(%q) = false, today it accepts it", z)
-		}
-	}
-	for _, z := range []string{
-		"", goldenZ32 + "a", strings.Repeat("a", 33), "a.b", ".", "*", ">", "a*", "a>", " ", "a b", "a\tb", "a\nb", "A", "aB", "a_b", "é",
-	} {
-		if ValidZone(z) {
-			t.Errorf("ValidZone(%q) = true, today it refuses it", z)
-		}
 	}
 }

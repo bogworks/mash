@@ -85,7 +85,7 @@ func gone(t *testing.T, js jetstream.JetStream, name string) {
 
 func TestWithRevokerLeavesTheOriginalAlone(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	h := &hookRec{}
 	_ = a.WithRevoker(h.hook(t, js, "w"))
 	if err := a.Deprovision(context.Background(), "w"); err != nil || len(h.users) != 0 {
@@ -95,7 +95,7 @@ func TestWithRevokerLeavesTheOriginalAlone(t *testing.T) {
 
 func TestDeprovisionRevokesRecordUserUnderLock(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{}
 	if err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w"); err != nil {
@@ -107,7 +107,7 @@ func TestDeprovisionRevokesRecordUserUnderLock(t *testing.T) {
 
 func TestDeprovisionHookErrorRemovesNothing(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	h := &hookRec{err: errors.New("resolver down")}
 	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w")
 	if err == nil || !errors.Is(err, h.err) || !admin.IsRefusal(err) {
@@ -119,7 +119,7 @@ func TestDeprovisionHookErrorRemovesNothing(t *testing.T) {
 
 func TestDeprovisionWithoutRecordDoesNotCallHook(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
 	if err := kv.Purge(context.Background(), "w"); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestDeprovisionWithoutRecordDoesNotCallHook(t *testing.T) {
 
 func TestDeprovisionIfUserRevokesOnceAfterGuard(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{}
 	if err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user); err != nil {
@@ -148,7 +148,7 @@ func TestDeprovisionIfUserRevokesOnceAfterGuard(t *testing.T) {
 
 func TestDeprovisionIfUserHookErrorRemovesNothing(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{err: errors.New("resolver down")}
 	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user)
@@ -161,7 +161,7 @@ func TestDeprovisionIfUserHookErrorRemovesNothing(t *testing.T) {
 
 func TestDeprovisionIfUserRefusalsNeverCallHook(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	_, other := e.Mint(t, "other")
 	h := &hookRec{}
 	ra := a.WithRevoker(h.hook(t, js, "w"))
@@ -186,7 +186,7 @@ func TestDeprovisionIfUserRefusalsNeverCallHook(t *testing.T) {
 
 func TestDeprovisionIfUserReplacedRecordNeverRevokesTheOtherKey(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	_, other := e.Mint(t, "other")
 	done := false
@@ -214,7 +214,7 @@ func TestDeprovisionIfUserReplacedRecordNeverRevokesTheOtherKey(t *testing.T) {
 
 func TestDeprovisionDrainedRevokesAfterEveryGuard(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	st, err := a.Suspend(context.Background(), "w")
 	if err != nil {
@@ -267,7 +267,7 @@ func corruptRecord(t *testing.T, js jetstream.JetStream, name string) {
 
 func TestDeprovisionUnparseableRecordWithRevokerFailsClosed(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	corruptRecord(t, js, "w")
 	h := &hookRec{}
 	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w")
@@ -289,7 +289,7 @@ func TestDeprovisionUnparseableRecordWithRevokerFailsClosed(t *testing.T) {
 
 func TestDeprovisionUnparseableRecordWithoutRevokerRemoves(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	corruptRecord(t, js, "w")
 	if err := a.Deprovision(context.Background(), "w"); err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestDeprovisionUnparseableRecordWithoutRevokerRemoves(t *testing.T) {
 
 func TestHookWrappingErrNotConfirmedIsARefusalThatSaysItMayBeInForce(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{err: fmt.Errorf("servers: %w", apply.ErrNotConfirmed)}
 	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user)
@@ -332,7 +332,7 @@ func wantPartial(t *testing.T, err error, user string) {
 
 func TestRecordChangedAfterTheHookIsPartialNotARefusal(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	_, other := e.Mint(t, "other")
 	h := &hookRec{}
@@ -355,7 +355,7 @@ func TestRecordChangedAfterTheHookIsPartialNotARefusal(t *testing.T) {
 
 func TestDrainedRecordChangedAfterTheHookIsPartial(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	st, err := a.Suspend(context.Background(), "w")
 	if err != nil {
@@ -378,7 +378,7 @@ func TestDrainedRecordChangedAfterTheHookIsPartial(t *testing.T) {
 
 func TestLockLostAfterTheHookIsPartial(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	hook := func(ctx context.Context, u string) error {
 		putLock(t, js, "w", time.Now().Add(time.Minute)) // another admin took the lock
@@ -392,7 +392,7 @@ func TestLockLostAfterTheHookIsPartial(t *testing.T) {
 
 func TestLockExpiringDuringTheHookIsPartial(t *testing.T) {
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	st, err := a.Suspend(context.Background(), "w")
 	if err != nil {
