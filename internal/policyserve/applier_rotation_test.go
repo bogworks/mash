@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policyintake"
@@ -89,3 +92,53 @@ func TestApplierStaleBaseStillRefused(t *testing.T) {
 		t.Fatalf("want a stale base, got %v", err)
 	}
 }
+
+// newAddressApplier is an Applier with nothing in force and the document of generation 1 that lists one address.
+func newAddressApplier(t *testing.T, inboxes InboxChecker) (*Applier, policyintake.Doc, *bool) {
+	t.Helper()
+	a, d := sameContentApplier(t)
+	a.Ledger = memLedger{policyapply.NewMemLedger(listset.Record{})}
+	a.Inboxes = inboxes
+	a.Keys = makeKeys{memKeys{}}
+	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
+		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1"))
+	called := new(bool)
+	a.applyFn = func(_ context.Context, req policyapply.ApplyRequest, _ policyapply.ApplyDeps) (policyapply.Status, error) {
+		*called = true
+		return policyapply.Status{State: policyapply.StateApplied, Generation: req.Generation}, nil
+	}
+	return a, d, called
+}
+
+// A change that adds an address with no inbox is refused before Apply runs, with the plain reason.
+func TestApplierRefusesAnAddressWithNoInboxBeforeAnythingIsPushed(t *testing.T) {
+	a, d, called := newAddressApplier(t, &fakeInboxes{})
+	_, err := a.Apply(context.Background(), d, okGuard{})
+	if err == nil || !strings.Contains(err.Error(), "foo.c.core") || !strings.Contains(err.Error(), "no inbox yet") {
+		t.Fatalf("want the no-inbox refusal, got %v", err)
+	}
+	if *called {
+		t.Fatal("Apply ran for an address with no inbox")
+	}
+	a, d, called = newAddressApplier(t, nil)
+	if _, err := a.Apply(context.Background(), d, okGuard{}); err == nil || *called {
+		t.Fatalf("no inbox checker: the change was not refused (%v, called %v)", err, *called)
+	}
+}
+
+// A change whose new address has an inbox is applied.
+func TestApplierAppliesAnAddressWhoseInboxExists(t *testing.T) {
+	a, d, called := newAddressApplier(t, &fakeInboxes{answers: map[string]admin.InboxCheck{"foo.c.core": {Stream: "inbox-core", Consumer: true, Legacy: true}}})
+	if _, err := a.Apply(context.Background(), d, okGuard{}); err != nil {
+		t.Fatal(err)
+	}
+	if !*called {
+		t.Fatal("Apply did not run")
+	}
+}
+
+// makeKeys is memKeys that makes a key for any owner group.
+type makeKeys struct{ memKeys }
+
+func (makeKeys) GroupKey(string, bool) (nkeys.KeyPair, error) { return nkeys.CreateAccount() }
