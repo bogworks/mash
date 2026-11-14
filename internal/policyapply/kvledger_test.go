@@ -167,6 +167,11 @@ func TestKVLedgerUnknownSchemaRefused(t *testing.T) {
 	if err := l.CompareAndCommit(0, testRecord(1)); !errors.Is(err, ErrUnknownSchema) {
 		t.Errorf("commit: %v", err)
 	}
+	unlock, err := l.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
 	if err := l.WriteStatus(context.Background(), Status{}); !errors.Is(err, ErrUnknownSchema) {
 		t.Errorf("status: %v", err)
 	}
@@ -437,6 +442,139 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	}
 	if s, _ := e.statusOf()["status"].(map[string]any); s["state"] != "refused" {
 		t.Fatalf("status = %v", s)
+	}
+}
+
+func statusGen(g uint64, updated time.Time) Status {
+	return Status{State: StatePartial, Generation: g, UpdatedAt: updated.UTC().Format(time.RFC3339)}
+}
+
+func (e *kvEnv) storedGeneration() float64 {
+	e.t.Helper()
+	s, _ := e.statusOf()["status"].(map[string]any)
+	return s["generation"].(float64)
+}
+
+// A later run on a host whose clock is behind still has its status stored: recency is the lease, not updated_at.
+func TestKVLedgerWriteStatusSlowerClockNotDropped(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	now := time.Now()
+	first := e.ledger(KVLedgerOptions{Holder: "a"})
+	unlock, err := first.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.WriteStatus(ctx, statusGen(5, now)); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	second := e.ledger(KVLedgerOptions{Holder: "b", Now: func() time.Time { return now.Add(-time.Hour) }})
+	unlock, err = second.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := second.WriteStatus(ctx, statusGen(6, now.Add(-time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.storedGeneration(); got != 6 {
+		t.Fatalf("stored generation %v, want 6", got)
+	}
+}
+
+// A run whose lease expired and was taken over cannot overwrite the new run's status; a ledger with no lease writes none.
+func TestKVLedgerWriteStatusFencedByLease(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	if err := e.ledger(KVLedgerOptions{}).WriteStatus(ctx, statusGen(1, time.Now())); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("no lease held: %v", err)
+	}
+	a := e.ledger(KVLedgerOptions{Holder: "a", LeaseTTL: 300 * time.Millisecond})
+	unlockA, err := a.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlockA()
+	// The lease expires and b takes it over.
+	entry, err := e.kv.Get(ctx, LeaseKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.kv.Update(ctx, LeaseKey(kvAccount), a.leaseBytes("x", time.Unix(0, 0)), entry.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	b := e.ledger(KVLedgerOptions{Holder: "b", Poll: 20 * time.Millisecond})
+	unlockB, err := b.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlockB()
+	if err := b.WriteStatus(ctx, statusGen(2, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.WriteStatus(ctx, statusGen(1, time.Now())); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("old run: %v", err)
+	}
+	if got := e.storedGeneration(); got != 2 {
+		t.Fatalf("stored generation %v, want 2", got)
+	}
+}
+
+// slowPush signals when the push starts and holds it until released.
+type slowPush struct {
+	Cluster
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *slowPush) Push(ctx context.Context, jwt string, expect []string) ([]apply.ServerAck, error) {
+	close(p.entered)
+	<-p.release
+	return p.Cluster.Push(ctx, jwt, expect)
+}
+
+// A run slowed after its gate holds the lease until its status is written, so a run that started later and finishes
+// later leaves its status, not the earlier run's.
+func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
+	e := newKVEnv(t)
+	w := newWorld(t)
+	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
+	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
+	if err := first.CompareAndCommit(0, w.rec1()); err != nil {
+		t.Fatal(err)
+	}
+	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}
+	w.prober.allow["s1"] = true // the first run ends partial: nothing is committed
+	in1 := w.run(first, set2(), "bytes-2")
+	in1.Cluster = slow
+	in1.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC) }
+	done := make(chan error, 1)
+	go func() { _, err := Run(context.Background(), in1); done <- err }()
+	<-slow.entered
+
+	w2 := newWorld(t)
+	in2 := w2.run(second, set2(), "bytes-2")
+	in2.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 9, 0, time.UTC) }
+	done2 := make(chan Status, 1)
+	go func() {
+		st, err := Run(context.Background(), in2)
+		if err != nil {
+			t.Error(err)
+		}
+		done2 <- st
+	}()
+	time.Sleep(100 * time.Millisecond) // the second run waits for the lease
+	close(slow.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if st := <-done2; st.State != StateApplied {
+		t.Fatalf("second run: %+v", st)
+	}
+	s, _ := e.statusOf()["status"].(map[string]any)
+	if s["state"] != "applied" || s["updated_at"] != "2026-01-01T00:00:09Z" {
+		t.Fatalf("stored status = %v, want the second run's", s)
 	}
 }
 

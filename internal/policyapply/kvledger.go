@@ -314,11 +314,21 @@ func (l *KVLedger) ClearPending() error {
 	return l.mutate(func(v *statusValue) error { v.Pending = nil; return nil })
 }
 
-// WriteStatus stores st as the latest status, keeping the record in force and the pending record.
+// WriteStatus stores st as the latest status, keeping the record in force and the pending record. Only a run under
+// the lease writes status: a ledger that holds no lease gets ErrLeaseLost and writes nothing. The write is fenced:
+// the status key is read, then the lease key is read and must still have this ledger's revision and holder (as in
+// CompareAndCommit), and only then is the status key updated at the revision read. The window between the lease read
+// and the update is a few milliseconds and remains: the lease can expire and be taken over inside it. A run that
+// took over reads and writes the status key too, so the status key's own compare-and-set serializes the two: the
+// update fails and is retried, with the lease read again, rather than overwriting. No clock of any host is
+// compared: recency is the lease fence plus that compare-and-set.
 func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 	for range casTries {
 		v, rev, err := l.read(ctx)
 		if err != nil {
+			return err
+		}
+		if err := l.fenceLease(ctx); err != nil {
 			return err
 		}
 		v.Status = &st
@@ -331,6 +341,17 @@ func (l *KVLedger) WriteStatus(ctx context.Context, st Status) error {
 		}
 	}
 	return fmt.Errorf("policy ledger %s: changed by other writers too often; try again", l.key)
+}
+
+// fenceLease is checkLease for a caller that must hold the lease: a ledger that holds none gets ErrLeaseLost.
+func (l *KVLedger) fenceLease(ctx context.Context) error {
+	l.mu.Lock()
+	held := l.held
+	l.mu.Unlock()
+	if !held {
+		return ErrLeaseLost
+	}
+	return l.checkLease(ctx)
 }
 
 // CompareAndCommit implements Ledger. It first checks that the lease is still this ledger's (ErrLeaseLost), then

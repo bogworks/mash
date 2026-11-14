@@ -341,6 +341,23 @@ func TestRunOrderedNoRefuserIsProvisioned(t *testing.T) {
 	}
 }
 
+// failingStatus is a ledger whose status write fails.
+type failingStatus struct{ *MemLedger }
+
+var errStatusDown = errors.New("status store down")
+
+func (failingStatus) WriteStatus(context.Context, Status) error { return errStatusDown }
+
+// A status write that fails on the provisioning-failure path is returned, not hidden behind the provisioning error.
+func TestRunOrderedProvisionFailureStatusWriteError(t *testing.T) {
+	w := newWorld14(t)
+	w.in.Ledger = failingStatus{w.ledger}
+	w.prov.fail("create:foo.c.new", true)
+	if _, err := RunOrdered(context.Background(), w.in, w.prov); !errors.Is(err, errStatusDown) {
+		t.Fatalf("err = %v, want the status write error", err)
+	}
+}
+
 // TestRunOrderedProvisionFailureResumes (H2): a failed provisioning step commits nothing and leaves the generation
 // pending; resubmitting the same content runs the steps again and commits.
 func TestRunOrderedProvisionFailureResumes(t *testing.T) {

@@ -251,14 +251,14 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 		}
 		return nil
 	}
-	st, err := run(ctx, in, &acc)
-	out.Status = st
+	// A provisioning failure turns the applied status into partial; that happens under the lease, before the write.
 	var bc *beforeCommitError
-	switch {
-	case errors.As(err, &bc) && bc.pending && errors.Is(bc.err, errProvisioning):
-		// Provisioning failed and the generation is recorded as pending: a partial status, not an error. If pending
-		// could not be recorded the ledger error is returned below instead.
-		failing := out.Status.Failing[:0:0]
+	st, err := run(ctx, in, &acc, func(st Status, err error) Status {
+		if !errors.As(err, &bc) || !bc.pending || !errors.Is(bc.err, errProvisioning) {
+			return st
+		}
+		st.State, st.InForce = StatePartial, false
+		failing := st.Failing[:0:0]
 		for _, f := range st.Failing {
 			if f.Check != CheckProvision {
 				failing = append(failing, f)
@@ -268,8 +268,18 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 			failing = append(failing, Failure{Check: CheckProvision, Detail: pe.Address + ": " + pe.Step + ": " + pe.Detail})
 		}
 		sortFailures(failing)
-		out.Status.Failing = failing
-		return out, writeStatus(ctx, in.Ledger, out.Status, nil)
+		st.Failing = failing
+		return st
+	})
+	out.Status = st
+	var swe *statusWriteError
+	switch {
+	case errors.As(err, &swe): // a failed status write is never hidden behind the provisioning failure
+		return out, err
+	case errors.As(err, &bc) && bc.pending && errors.Is(bc.err, errProvisioning):
+		// Provisioning failed and the generation is recorded as pending: a partial status, not an error; run already
+		// wrote that status under the lease. If pending could not be recorded the ledger error is returned below instead.
+		return out, nil
 	case err != nil:
 		return out, err
 	case st.State == StateApplied:

@@ -307,14 +307,31 @@ type Accepted struct {
 // is returned, and the Status is partial, not in force, with a CheckProvision failure. The Compiled
 // is deep-copied before Sign; Sign gets its own copy, and both the copy and the frozen original must still digest to
 // Record.Signed, and the JWT must decode to the target generation, before anything is pushed.
-func Run(ctx context.Context, in RunInput) (Status, error) { return run(ctx, in, nil) }
+func Run(ctx context.Context, in RunInput) (Status, error) { return run(ctx, in, nil, nil) }
 
 // run is Run; when acc is not nil it is filled with what was accepted once the Expect is derived, before any push.
-// When the ledger is a StatusWriter, the Status of the run is written to it at the end (see writeStatus).
-func run(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
+// When the ledger is a StatusWriter, the Status of the run is written to it at the end (see writeStatus), while the
+// run still holds the ledger lease, so a later run's status is never overwritten by an earlier run's. When adjust is
+// not nil it is given the outcome under the lease, before the status is written, and returns the Status to write and
+// return.
+func run(ctx context.Context, in RunInput, acc *Accepted, adjust func(Status, error) Status) (Status, error) {
+	unlock, err := in.Ledger.Lock(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	defer unlock()
 	st, err := runLocked(ctx, in, acc)
+	if adjust != nil {
+		st = adjust(st, err)
+	}
 	return st, writeStatus(ctx, in.Ledger, st, err)
 }
+
+// statusWriteError is a failed write of the status; RunOrdered never suppresses it.
+type statusWriteError struct{ err error }
+
+func (e *statusWriteError) Error() string { return "write status: " + e.err.Error() }
+func (e *statusWriteError) Unwrap() error { return e.err }
 
 // writeStatus writes st to l if l is a StatusWriter and st is a status of this run: applied, partial or refused. A run
 // that failed before it had a status (the zero Status), and an applied status that came with an error (the commit or a
@@ -326,17 +343,13 @@ func writeStatus(ctx context.Context, l Ledger, st Status, err error) error {
 		return err
 	}
 	if werr := sw.WriteStatus(ctx, st); werr != nil {
-		return errors.Join(err, fmt.Errorf("write status: %w", werr))
+		return errors.Join(err, &statusWriteError{werr})
 	}
 	return err
 }
 
+// runLocked is the body of a run; the caller holds the ledger lease.
 func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
-	unlock, err := in.Ledger.Lock(ctx)
-	if err != nil {
-		return Status{}, err
-	}
-	defer unlock()
 	base, err := in.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
