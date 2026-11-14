@@ -1,0 +1,123 @@
+{
+  "refused": false,
+  "refusals": [],
+  "receivers": [
+    {
+      "sender": "foo.c.core",
+      "verb": "mail",
+      "added": [],
+      "removed": [
+        "foo.c.sdk"
+      ]
+    },
+    {
+      "sender": "foo.c.core",
+      "verb": "prompt",
+      "added": [],
+      "removed": [
+        "foo.c.sdk"
+      ]
+    },
+    {
+      "sender": "foo.c.core",
+      "verb": "status",
+      "added": [],
+      "removed": [
+        "foo.c.core",
+        "foo.c.sdk"
+      ]
+    },
+    {
+      "sender": "foo.c.core",
+      "verb": "heartbeat",
+      "added": [],
+      "removed": [
+        "foo.c.sdk"
+      ]
+    },
+    {
+      "sender": "foo.c.lead",
+      "verb": "mail",
+      "added": [
+        "foo.c.sdk"
+      ],
+      "removed": []
+    },
+    {
+      "sender": "foo.c.lead",
+      "verb": "prompt",
+      "added": [
+        "foo.c.sdk"
+      ],
+      "removed": []
+    },
+    {
+      "sender": "foo.c.lead",
+      "verb": "status",
+      "added": [],
+      "removed": [
+        "foo.c.lead"
+      ]
+    },
+    {
+      "sender": "foo.c.lead",
+      "verb": "heartbeat",
+      "added": [
+        "foo.c.sdk"
+      ],
+      "removed": []
+    },
+    {
+      "sender": "foo.c.sdk",
+      "verb": "status",
+      "added": [],
+      "removed": [
+        "foo.c.core",
+        "foo.c.lead",
+        "foo.c.sdk"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "group": "foo.c",
+      "change": "changed",
+      "disconnects": true,
+      "disconnected_senders": [
+        "foo.c.core",
+        "foo.c.lead",
+        "foo.c.sdk"
+      ]
+    }
+  ],
+  "tags": [
+    {
+      "sender": "foo.c.core",
+      "old": [
+        "allow:c.lead",
+        "allow:c.sdk"
+      ],
+      "new": [
+        "allow:c.lead"
+      ]
+    },
+    {
+      "sender": "foo.c.lead",
+      "old": [
+        "allow:c.core"
+      ],
+      "new": [
+        "allow:c.core",
+        "allow:c.sdk"
+      ]
+    }
+  ],
+  "rotate_and_revoke": [
+    "foo.c.core"
+  ],
+  "new_credential": [
+    "foo.c.lead"
+  ],
+  "revoke": [],
+  "first_credential": []
+}

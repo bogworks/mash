@@ -46,8 +46,7 @@ type Report struct {
 //
 // Warnings: label values that differ only in case across endpoints for one key (Finance and finance); an allow rule, or a deny
 // rule with allow_empty, whose from or to selector matches no declared endpoint (a misspelled label matches nothing and
-// the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); an endpoint whose user JWT
-// would need more than MaxTagsWarn tags (the connect line); under default deny, an endpoint that can neither send
+// the pair silently falls to the default); a rule selecting a zone that has no endpoints (said in the same warning); under default deny, an endpoint that can neither send
 // nor receive.
 // Labels no rule uses are not reported. Warnings are only computed for a file without errors.
 func (f *File) Check() Report {
@@ -182,13 +181,6 @@ func (f *File) Check() Report {
 		return r
 	}
 	r.Warnings = append(r.Warnings, f.caseVariantWarnings(names)...)
-	p := f.plan()
-	for _, n := range names {
-		if len(p.tags[n]) > MaxTagsWarn {
-			r.Warnings = append(r.Warnings, Diagnostic{"endpoint " + n + lineSuffix(f.lines.endpoints[n]),
-				fmt.Sprintf("its user JWT needs %d tags; about %d fit the default connect line (see UserJWTLimit)", len(p.tags[n]), MaxTagsWarn)})
-		}
-	}
 	if !f.defaultAllow() {
 		m := f.matrix(names)
 		for i, n := range names {

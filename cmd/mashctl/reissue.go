@@ -147,16 +147,21 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		}
 	}
 	warned := false
+	limits, lerr := credentialLimits("reissue", cfg, env, stderr)
+	if lerr != nil {
+		fmt.Fprintf(stderr, "mashctl: reissue: refused: %v; nothing was changed, signed or pushed\n", lerr)
+		return 1
+	}
+	// Every name is measured before any is touched: one oversize name refuses the whole command.
+	var oversize []string
 	for _, name := range names {
 		if ep, ok := findEndpoint(c, name); ok {
 			// Measure this endpoint alone: Budget reports only the worst user.
 			one := *c
 			one.Endpoints = []policy.CompiledEndpoint{ep}
-			rep, berr := policy.Budget(&one)
-			if berr != nil && rep.WorstUserJWTBytes > rep.UserLimit {
-				fmt.Fprintf(stderr, "mashctl: reissue %s: its user JWT would be %d bytes with %d tags, over the %d byte limit of the connect line; nothing was changed\n",
-					name, rep.WorstUserJWTBytes, len(ep.Tags), rep.UserLimit)
-				code = 1
+			rep, berr := policy.BudgetFor(&one, limits)
+			if berr != nil && len(rep.Refusals) > 0 {
+				oversize = append(oversize, fmt.Sprintf("mashctl: reissue %s: refused: %s", name, strings.TrimPrefix(berr.Error(), "policy: ")))
 				continue
 			}
 			if w := budgetWarning(rep); w != "" && berr == nil && !warned {
@@ -164,6 +169,12 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 				warned = true
 			}
 		}
+	}
+	if len(oversize) > 0 {
+		fmt.Fprintf(stderr, "%s\nnothing was changed, signed or pushed (no name was reissued)\n", strings.Join(oversize, "\n"))
+		return 1
+	}
+	for _, name := range names {
 		tags, rotated, err := reissueOne(keys, cfg, env, c, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)

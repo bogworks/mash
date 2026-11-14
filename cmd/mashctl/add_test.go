@@ -459,7 +459,7 @@ func TestBudgetRefusal(t *testing.T) {
 		t.Errorf("ok report: %v", err)
 	}
 	err := budgetRefusal("x", policy.BudgetReport{}, errors.New("policy: the user JWT of x would be 9000 bytes with 300 tags"))
-	want := "adding x would make the policy unusable: the user JWT of x would be 9000 bytes with 300 tags; nothing was changed"
+	want := "refused: adding x would make the policy unusable:\n  the user JWT of x would be 9000 bytes with 300 tags\nnothing was changed, signed or pushed"
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
@@ -469,16 +469,16 @@ func TestBudgetRefusal(t *testing.T) {
 }
 
 func TestBudgetWarning(t *testing.T) {
-	ok := policy.BudgetReport{OK: true, UserLimit: 3750, AccountLimit: 1 << 20, WorstUserJWTBytes: 2950, AccountJWTBytes: 1000, WorstUser: "w"}
+	ok := policy.BudgetReport{OK: true, UserLimit: 4000, AccountLimit: 1 << 20, WorstConnectBytes: 3200, AccountJWTBytes: 1000, WorstUser: "w"}
 	if w := budgetWarning(ok); w != "" {
 		t.Errorf("exactly 80%%: %q", w)
 	}
-	ok.WorstUserJWTBytes = 3050
-	if w := budgetWarning(ok); !strings.HasPrefix(w, "warning: ") || !strings.Contains(w, "user JWT of w") || strings.Contains(w, "account") {
+	ok.WorstConnectBytes = 3300
+	if w := budgetWarning(ok); !strings.HasPrefix(w, "warning: ") || !strings.Contains(w, "connect line of w") || strings.Contains(w, "account") {
 		t.Errorf("user: %q", w)
 	}
 	ok.AccountJWTBytes = (1 << 20) * 9 / 10
-	if w := budgetWarning(ok); !strings.Contains(w, "account JWT") || !strings.Contains(w, "user JWT") {
+	if w := budgetWarning(ok); !strings.Contains(w, "account JWT") || !strings.Contains(w, "connect line") {
 		t.Errorf("both: %q", w)
 	}
 }
@@ -498,7 +498,7 @@ func TestAddRefusedOverBudget(t *testing.T) {
 	before, _ := os.ReadFile(h.policy)
 	_, errb, code := h.run("add", "big", "--zone", "red", "--label", "id=big")
 	if code != 1 || !strings.Contains(errb, "adding big would make the policy unusable") ||
-		!strings.Contains(errb, "user JWT of big") || !strings.Contains(errb, "nothing was changed") {
+		!strings.Contains(errb, `sender "big"`) || !strings.Contains(errb, policy.DefaultServer) || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("add: %d %q", code, errb)
 	}
 	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
@@ -524,7 +524,7 @@ func TestReissueRefusedOverBudget(t *testing.T) {
 	h.seed("big")
 	before, _ := os.ReadFile(h.creds("big"))
 	_, errb, code := h.run("reissue", "big")
-	if code != 1 || !strings.Contains(errb, "reissue big: its user JWT would be") || !strings.Contains(errb, "nothing was changed") {
+	if code != 1 || !strings.Contains(errb, `reissue big: refused: sender "big"`) || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("reissue: %d %q", code, errb)
 	}
 	if after, _ := os.ReadFile(h.creds("big")); !bytes.Equal(before, after) {

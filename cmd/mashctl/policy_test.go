@@ -207,12 +207,12 @@ func TestPolicyShowBudget(t *testing.T) {
 	p := filepath.Join(policyFiles(t), "enterprise.yaml")
 	env := map[string]string{"MASH_OWNER": "acme"}
 	out, errb, code := policyRun(t, env, "policy", "show", "--budget", "--policy", p)
-	if code != 0 || errb != "" || !strings.Contains(out, "budget: account JWT ") || !strings.Contains(out, "worst user JWT ") {
+	if code != 0 || errb != "" || !strings.Contains(out, "budget (default server limit): account JWT ") || !strings.Contains(out, "worst connect line ") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	// with --json the budget line must not corrupt the JSON on stdout
 	out, errb, code = policyRun(t, env, "policy", "show", "--json", "--budget", "--policy", p)
-	if code != 0 || !strings.HasPrefix(out, "{") || strings.Contains(out, "budget:") || !strings.Contains(errb, "budget: account JWT") {
+	if code != 0 || !strings.HasPrefix(out, "{") || strings.Contains(out, "budget (") || !strings.Contains(errb, "budget (default server limit): account JWT") {
 		t.Fatalf("json: %d %q %q", code, out, errb)
 	}
 	// over budget: a hub that may mail 170 peers one by one needs a tag for each, which overflows its user JWT
@@ -227,7 +227,7 @@ func TestPolicyShowBudget(t *testing.T) {
 	}
 	big := write(t, t.TempDir(), "big.yaml", b.String()+rules.String())
 	out, errb, code = policyRun(t, env, "policy", "show", "--budget", "--policy", big)
-	if code != 1 || !strings.Contains(out, "budget: account JWT") || !strings.Contains(errb, "over the 3750 byte limit") {
+	if code != 1 || !strings.Contains(out, "budget (default server limit): account JWT") || !strings.Contains(errb, `sender "hub"`) || !strings.Contains(errb, "allows 4,096") {
 		t.Fatalf("over budget: %d out-tail %q err %q", code, out[max(0, len(out)-200):], errb)
 	}
 }

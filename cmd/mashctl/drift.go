@@ -408,7 +408,11 @@ func gather(ctx context.Context, l *loaded, env func(string) string, sysCreds, c
 	} else {
 		defer nc.Close()
 		res := apply.NATS{Conn: nc, Inventory: servers}
-		f, err := apply.AccountFindings(ctx, apply.Params{Compiled: l.c, Keys: l.keys, Resolver: res, Servers: servers})
+		mcl, merr := parseMaxControlLine("", env) // drift has no flag for it: MASH_MAX_CONTROL_LINE
+		f, err := apply.AccountFindings(ctx, apply.Params{Compiled: l.c, Keys: l.keys, Resolver: res, Servers: servers, MaxControlLine: mcl})
+		if merr != nil {
+			err = merr
+		}
 		if err != nil {
 			st.account = unknownState(err)
 		} else {

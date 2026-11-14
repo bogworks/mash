@@ -419,3 +419,23 @@ func TestRevokeRefusesShortLookupAndIncompleteSet(t *testing.T) {
 		t.Fatalf("complete: %v pushes %d", err, fk.pushes)
 	}
 }
+
+// A revocation that would grow the account JWT past a server's max_payload is refused whole before the push.
+func TestRevokeRefusesAnAccountJWTOverAServersLimit(t *testing.T) {
+	ks, fk, _ := setup(t)
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	fk.maxPayload = 300 // under the size of the claims with a revocation in them
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, Now: func() time.Time { return revokeAt }}, []string{userKey(t)})
+	if err == nil || !strings.Contains(err.Error(), `account "`) || !strings.Contains(err.Error(), `server "s1"`) ||
+		!strings.Contains(err.Error(), "allows 300 (max_payload)") || !strings.Contains(err.Error(), "nothing was pushed") {
+		t.Fatalf("%v", err)
+	}
+	if fk.pushes != 0 {
+		t.Error("pushed")
+	}
+	// within the limit the same revocation goes through
+	fk.maxPayload = 0
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, Now: func() time.Time { return revokeAt }}, []string{userKey(t)}); err != nil || fk.pushes != 1 {
+		t.Fatalf("%v pushes %d", err, fk.pushes)
+	}
+}

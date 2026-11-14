@@ -60,7 +60,7 @@ type liveEnv struct {
 }
 
 // startLive starts the server and connects the system user; both are closed when the test ends.
-func startLive(t *testing.T) *liveEnv {
+func startLive(t *testing.T, tune ...func(*server.Options)) *liveEnv {
 	t.Helper()
 	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
 	if err != nil {
@@ -116,10 +116,14 @@ func startLive(t *testing.T) *liveEnv {
 	if err := res.Store(acctPub, acctJWT); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := server.NewServer(&server.Options{
+	so := &server.Options{
 		Host: "127.0.0.1", Port: -1, ServerName: "s1", NoLog: true, NoSigs: true,
 		TrustedOperators: []*jwt.OperatorClaims{operator}, SystemAccount: sysPub, AccountResolver: res,
-	})
+	}
+	for _, f := range tune {
+		f(so)
+	}
+	srv, err := server.NewServer(so)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -131,8 +131,11 @@ type Params struct {
 	Compiled *policy.Compiled
 	Keys     *ctlkeys.Authority
 	Resolver Resolver
-	// Budget measures the compile; nil means policy.Budget. A seam for tests.
-	Budget func(*policy.Compiled) (policy.BudgetReport, error)
+	// Budget measures the compile against every server's limits; nil means policy.BudgetFor. A seam for tests.
+	Budget func(*policy.Compiled, []policy.ServerLimits) (policy.BudgetReport, error)
+	// MaxControlLine is the operator's connect-line limit (--max-control-line, MASH_MAX_CONTROL_LINE; 0 none): it
+	// stands for every server that did not report its own, and caps one that did (see LearnLimits).
+	MaxControlLine int
 	// VerifyTries and VerifyWait bound the read-back after a push (defaults 5 and 200ms): a clustered resolver
 	// may take a moment to answer with the new claims everywhere.
 	VerifyTries int
@@ -153,6 +156,12 @@ type Params struct {
 	collectAll bool
 	// trust is the set of accepted issuers of the account JWT, loaded from the key store by Run and AccountFindings.
 	trust Trust
+	// sizeOnly makes build create no zone key: a missing one is a throwaway key, enough to measure the account JWT
+	// (a public key is as long as any other) and to refuse an oversize one before anything is written.
+	sizeOnly bool
+	// limits are the servers' limits, learned by Run and AccountFindings before the budget is measured; build checks
+	// the account JWT it makes against them (the default limits when it is called without).
+	limits []policy.ServerLimits
 }
 
 const (
@@ -245,17 +254,6 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	fail := func(err error) int { fmt.Fprintf(out, "mashctl: %s: %v\n", p.Mode, err); return 1 }
 	c := p.Compiled
 
-	budget := p.Budget
-	if budget == nil {
-		budget = policy.Budget
-	}
-	if rep, err := budget(c); err != nil || !rep.OK {
-		if err == nil {
-			err = errors.New("over budget")
-		}
-		return fail(fmt.Errorf("refusing: the policy does not fit: %w (nothing was changed)", err))
-	}
-
 	replace := map[string]bool{}
 	for _, r := range p.ReplaceZoneKeys {
 		found := false
@@ -313,6 +311,23 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 			why = kerr.Error()
 		}
 		return fail(fmt.Errorf("refusing: %s (nothing was changed)", notCompleteRefusal(why)))
+	}
+
+	// Every credential must fit every server before anything is signed or pushed: the servers say what they take.
+	limits, lerr := Limits(ctx, p.Resolver, set, p.MaxControlLine)
+	if lerr != nil {
+		return fail(fmt.Errorf("refusing: %w (nothing was changed)", lerr))
+	}
+	p.limits = limits
+	budget := p.Budget
+	if budget == nil {
+		budget = policy.BudgetFor
+	}
+	if rep, err := budget(c, limits); err != nil || !rep.OK {
+		if err == nil {
+			err = errors.New("over budget")
+		}
+		return fail(fmt.Errorf("refused: %w\nnothing was changed, signed or pushed", err))
 	}
 
 	created := map[string]bool{}
@@ -481,6 +496,15 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	if desired.SigningKeys == nil {
 		desired.SigningKeys = jwt.SigningKeys{}
 	}
+	if p.Mode == Apply && !p.sizeOnly {
+		// A zone key is a file in the key store, so the JWT is measured first with throwaway keys: an oversize one
+		// is refused before any key is created.
+		sp := p
+		sp.sizeOnly = true
+		if _, err := build(sp, opKP, acctPub, cur, replace, map[string]bool{}); err != nil {
+			return nil, err
+		}
+	}
 	b := &built{cur: cur, desired: desired}
 
 	// A scoped signer on the server under a file zone's role but with another key than the zone key apply holds
@@ -594,7 +618,7 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		case kerr == nil:
 		case errors.Is(kerr, ctlkeys.ErrNoZoneKey):
 			zp.keyIsNew = true
-			if p.Mode == Apply {
+			if p.Mode == Apply && !p.sizeOnly {
 				kp, kerr = p.Keys.ZoneKey(z.Name, true)
 				if kerr != nil {
 					return nil, kerr
@@ -656,11 +680,38 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		if err != nil {
 			return nil, fmt.Errorf("encode the account JWT: %w (nothing was changed)", err)
 		}
-		if len(b.token) > policy.AccountJWTLimit {
-			return nil, fmt.Errorf("the account JWT would be %d bytes, over the %d byte limit: fewer zones, or fewer zone pairs granted (nothing was changed)", len(b.token), policy.AccountJWTLimit)
+		limits := p.limits
+		if len(limits) == 0 {
+			limits = policy.DefaultServerLimits()
+		}
+		over := accountOver(desired.Name, len(b.token), limits)
+		if len(over) > 0 {
+			return nil, fmt.Errorf("refused: %s\nnothing was changed, signed or pushed", strings.Join(over, "\n  "))
 		}
 	}
 	return b, nil
+}
+
+// accountOver is the refusal of each server whose account JWT limit is below size bytes.
+func accountOver(name string, size int, limits []policy.ServerLimits) []string {
+	var over []string
+	for _, l := range limits {
+		if size > l.AccountJWT {
+			over = append(over, policy.Refusal{Kind: "account", Name: name, Bytes: size, Limit: l.AccountJWT,
+				Setting: accountLimitSetting(l.AccountJWT), Server: l.Server,
+				Note: "fewer zones, or fewer zone pairs granted"}.Error())
+		}
+	}
+	return over
+}
+
+// accountLimitSetting names what sets an account JWT limit: the server's max_payload when it is under the decoder
+// cap, else the cap.
+func accountLimitSetting(limit int) string {
+	if limit < policy.AccountJWTLimit {
+		return "max_payload"
+	}
+	return "the jwt decoder cap"
 }
 
 // refuse prints the refusals (public keys only) and the ways out: zone key conflicts, and zones on the server that the
@@ -907,7 +958,11 @@ func report(out io.Writer, p Params, plans []*zonePlan, b *built, before, after 
 	for _, z := range b.kept {
 		fmt.Fprintf(out, "  warning: zone %s is outside the policy and its key stays active (--keep-zone)\n", config.Clean(z))
 	}
-	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, policy.AccountJWTLimit)
+	limit := policy.AccountJWTLimit // the smallest of the servers' limits when they are known
+	for _, l := range p.limits {
+		limit = min(limit, l.AccountJWT)
+	}
+	fmt.Fprintf(out, "account JWT: %d bytes now, %d after, limit %d\n", before, after, limit)
 	tagged := 0
 	for _, e := range p.Compiled.Endpoints {
 		if hasExceptionTags(e) {

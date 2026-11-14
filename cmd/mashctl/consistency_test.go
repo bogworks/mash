@@ -188,7 +188,7 @@ func TestPolicyCheckRunsTheBudget(t *testing.T) {
 	b.WriteString("rules:\n  - {name: everyone, action: allow, from: {all: yes}, to: {all: yes}}\n")
 	big := write(t, dir, "big.yaml", b.String())
 	out, errb, code := policyRun(t, map[string]string{"MASH_OWNER": "acme"}, "policy", "check", "--policy", big)
-	if code != 1 || strings.Contains(out, "check: OK") || !strings.Contains(errb, "mashctl: policy check: policy: the account JWT would be") {
+	if code != 1 || strings.Contains(out, "check: OK") || !strings.Contains(errb, `mashctl: policy check: account "account": its JWT would be`) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	// the same text show --budget prints
@@ -197,7 +197,7 @@ func TestPolicyCheckRunsTheBudget(t *testing.T) {
 		t.Fatalf("show: %d %q", showCode, showErr)
 	}
 	// no owner configured: the placeholder still measures it
-	if _, errb, code := policyRun(t, nil, "policy", "check", "--policy", big); code != 1 || !strings.Contains(errb, "over the 1048576 byte limit") {
+	if _, errb, code := policyRun(t, nil, "policy", "check", "--policy", big); code != 1 || !strings.Contains(errb, "allows 1,048,576") {
 		t.Fatalf("no owner: %d %q", code, errb)
 	}
 	// a small file is still OK

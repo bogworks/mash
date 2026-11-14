@@ -188,6 +188,12 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		}
 	}
 
+	if len(res.Revoked) > 0 {
+		// The enlarged claims go to every server as one message: each must be able to take them.
+		if over := accountOver(claims.Name, len(token), AccountJWTLimits(ctx, p.Resolver, set)); len(over) > 0 {
+			return res, fmt.Errorf("revoke: refused: %s\nnothing was pushed", strings.Join(over, "\n  "))
+		}
+	}
 	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
 	res.Acked = len(acks)
 	if why != "" {

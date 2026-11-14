@@ -147,16 +147,6 @@ func verifyAll(ctx context.Context, p Params, acct string, need int, want string
 func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	p.Mode, p.collectAll = Diff, true
 	var out []Finding
-	budget := p.Budget
-	if budget == nil {
-		budget = policy.Budget
-	}
-	if rep, err := budget(p.Compiled); err != nil || !rep.OK {
-		if err == nil {
-			err = errors.New("over budget")
-		}
-		out = append(out, Finding{Kind: KindBudget, Detail: fmt.Sprintf("the policy does not fit the JWT budgets: %v", err)})
-	}
 	opKP, _, err := p.Keys.Operator()
 	if err != nil {
 		return nil, err
@@ -177,6 +167,22 @@ func AccountFindings(ctx context.Context, p Params) ([]Finding, error) {
 	set, serr := p.Resolver.Servers(ctx)
 	if errors.Is(serr, ErrServerSetRefused) {
 		return nil, fmt.Errorf("refusing: %w", serr)
+	}
+	budget := p.Budget
+	if budget == nil {
+		budget = policy.BudgetFor
+	}
+	limits, lerr := Limits(ctx, p.Resolver, set, p.MaxControlLine)
+	if lerr != nil {
+		out = append(out, Finding{Kind: KindBudget, Detail: fmt.Sprintf("the policy cannot be measured against the servers' limits: %v", lerr)})
+	} else {
+		p.limits = limits
+		if rep, err := budget(p.Compiled, limits); err != nil || !rep.OK {
+			if err == nil {
+				err = errors.New("over budget")
+			}
+			out = append(out, Finding{Kind: KindBudget, Detail: fmt.Sprintf("the policy does not fit the JWT budgets: %v", err)})
+		}
 	}
 	need := max(set.need(p.Servers), len(set.Names), 1)
 	ag, aerr := collectAgreement(ctx, p.Resolver, acctPub, need)
