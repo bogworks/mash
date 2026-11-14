@@ -30,13 +30,13 @@ type ApplyRequest struct {
 	BaseGeneration uint64
 }
 
-// ErrNoProvisionMarkers is returned by Apply when deps.Provisioner is set and neither deps.ProvisionMarkers nor the
-// ledger keeps provisioning markers: without them a rollback could expose an inbox the target refuses (REQ-015), so
+// ErrNoProvisionMarkers is returned by Apply when neither deps.ProvisionMarkers nor the ledger keeps provisioning
+// markers (with or without a Provisioner): without them a rollback could expose an inbox the target refuses (REQ-015), so
 // Apply refuses before anything is pushed.
-var ErrNoProvisionMarkers = errors.New("a provisioner is set but no provisioning markers are kept")
+var ErrNoProvisionMarkers = errors.New("no provisioning markers are kept")
 
-// ApplyDeps is what Apply needs besides the request. Every field but Provisioner, ProvisionMarkers, AfterPush and Now
-// is required.
+// ApplyDeps is what Apply needs besides the request. Every field but Provisioner, AfterPush and Now
+// is required, and so are ProvisionMarkers unless the Ledger implements them.
 type ApplyDeps struct {
 	// Ledger holds the record in force. To apply on top of a generation it must be a DetailLedger, so the previous
 	// Compiled and the JWT for a rollback can be read.
@@ -62,10 +62,11 @@ type ApplyDeps struct {
 	ServerLimits []listset.ServerLimits
 	// Provisioner, if set, provisions new addresses inside the run (RunOrdered); if nil, Run is used.
 	Provisioner Provisioner
-	// ProvisionMarkers keeps the provisioning markers of RunOrdered (see ProvisionMarkers). Required when Provisioner is
-	// set, unless Ledger implements ProvisionMarkers itself (Apply then refuses with ErrNoProvisionMarkers). When markers are
-	// kept (here or in the ledger) Apply installs the rollback guard on the run without a Provisioner too: a marker a
-	// crashed run left then refuses a rollback (ErrProvisioningMarker), though nothing can remove its inbox. Apply gives
+	// ProvisionMarkers keeps the provisioning markers of RunOrdered (see ProvisionMarkers). Always required, with or
+	// without a Provisioner, unless Ledger implements ProvisionMarkers itself; otherwise Apply refuses with
+	// ErrNoProvisionMarkers before anything is pushed. Apply always installs the rollback guard, also on the run without
+	// a Provisioner: a marker a crashed run left then refuses a rollback (ErrProvisioningMarker), though nothing can
+	// remove its inbox. Apply gives
 	// the run the ledger wrapped with WithProvisionMarkers; DetailLedger and StatusWriter are kept, which are the only
 	// optional interfaces Run and RunOrdered use. The caller's own Ledger value is unchanged, so StatusReader and
 	// RefusalWriter stay available on it.
@@ -103,7 +104,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	switch {
 	case deps.ProvisionMarkers != nil:
 		runLedger = WithProvisionMarkers(deps.Ledger, deps.ProvisionMarkers)
-	case deps.Provisioner != nil && !own:
+	case !own:
 		return Status{}, ErrNoProvisionMarkers
 	}
 	cur, err := deps.Ledger.InForce()
@@ -154,6 +155,6 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	}
 	// Without a Provisioner there is no remover, but a marker a crashed run left must still refuse a rollback: a retry
 	// that finds the gate failing would otherwise roll back and expose the inbox that run created.
-	in, _ = withProvisionGuard(in, nil) // a no-op when the ledger keeps no markers
+	in, _ = withProvisionGuard(in, nil)
 	return Run(ctx, in)
 }

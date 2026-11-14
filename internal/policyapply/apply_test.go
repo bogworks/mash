@@ -24,8 +24,8 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 		t.Fatal(err)
 	}
 	return w, l, ApplyDeps{
-		IssueRecord: rec,
-		Ledger:      l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
+		IssueRecord: rec, ProvisionMarkers: NewMemProvisionMarkers(),
+		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
 		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
 			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, w.k.build(t, w.c2, w.k.revoked), nil
@@ -266,6 +266,14 @@ func TestApplyRefusesIncompleteInventory(t *testing.T) {
 			}
 			d.IssueRecord = rec
 		},
+		"a revoked credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
+			rec := &MemIssueRecord{}
+			at := time.Unix(1500, 0)
+			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, RevokedAt: &at}); err != nil {
+				t.Fatal(err)
+			}
+			d.IssueRecord = rec
+		},
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -338,6 +346,7 @@ func TestOldKeysFromRecord(t *testing.T) {
 // only works on a ledger that keeps markers, and Apply's plain ledger does not.
 func TestApplyRefusesProvisionerWithoutMarkers(t *testing.T) {
 	_, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = nil
 	ev := &events{}
 	deps.Provisioner = &recProv{ev: ev}
 	signed := false
@@ -421,8 +430,10 @@ type ownMarkersLedger struct {
 // stays pending, whether the markers come from deps or from the ledger itself.
 func TestApplyWithoutProvisionerRefusesRollbackWhileMarkerStands(t *testing.T) {
 	for name, setup := range map[string]func(deps *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers){
-		"deps markers":   func(d *ApplyDeps, _ *MemLedger, pm *MemProvisionMarkers) { d.ProvisionMarkers = pm },
-		"ledger markers": func(d *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers) { d.Ledger = ownMarkersLedger{l, pm} },
+		"deps markers": func(d *ApplyDeps, _ *MemLedger, pm *MemProvisionMarkers) { d.ProvisionMarkers = pm },
+		"ledger markers": func(d *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers) {
+			d.ProvisionMarkers, d.Ledger = nil, ownMarkersLedger{l, pm}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w, l, deps := applyWorld(t)
@@ -491,5 +502,26 @@ func TestApplyRevokedFutureDatedOldKeyFailsTheGate(t *testing.T) {
 	}
 	if got, _ := l.InForce(); got.Generation != 1 {
 		t.Errorf("in force = %d", got.Generation)
+	}
+}
+
+// Without a Provisioner Apply still needs provisioning markers: a retry on the bare ledger could otherwise roll back
+// after a crashed run left an inbox.
+func TestApplyRefusesNoProvisionerWithoutMarkers(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = nil
+	signed := false
+	deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrNoProvisionMarkers) {
+		t.Fatalf("err = %v, want ErrNoProvisionMarkers", err)
+	}
+	if signed {
+		t.Error("signed before the refusal")
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d, want 1", rec.Generation)
 	}
 }

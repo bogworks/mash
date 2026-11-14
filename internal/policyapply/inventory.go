@@ -87,14 +87,7 @@ func oldKeysFromRecord(ctx context.Context, rec IssueInventory, prev *listset.Co
 		// been dated before a credential issued later (a future-dated one), and a server refuses that credential only
 		// when the revocation is at or after its issue time. The gate checks each key against the revocation each
 		// server holds, and Rotate and RemoveSender hand revoked keys to the Revoker again, which raises an older
-		// revocation to the current time (never lowers one). A revoked key with no issue time is listed with a zero
-		// time, which the gate checks for presence only.
-		if e.RevokedAt != nil && e.IssuedAt.IsZero() {
-			if !slices.ContainsFunc(out[e.Address], func(o OldKey) bool { return o.PublicKey == e.PublicKey }) {
-				out[e.Address] = append(out[e.Address], OldKey{PublicKey: e.PublicKey})
-			}
-			continue
-		}
+		// revocation to the current time (never lowers one). A key with no issue time, revoked or not, is refused.
 		if e.IssuedAt.IsZero() {
 			return nil, fmt.Errorf("%w: the credential %s of %s has no issue time", ErrIncompleteInventory, e.PublicKey, e.Address)
 		}
