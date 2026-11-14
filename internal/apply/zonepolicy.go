@@ -37,15 +37,27 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 	if base.short != "" {
 		return false, fmt.Errorf("not every server was checked: %s", base.short)
 	}
-	return HasZoneScope(base.claims), nil
+	groups, err := ks.GroupPublics()
+	if err != nil {
+		return false, err
+	}
+	groupKeys := map[string]bool{}
+	for _, pub := range groups {
+		groupKeys[pub] = true
+	}
+	return HasZoneScope(base.claims, groupKeys), nil
 }
 
-// HasZoneScope is true when claims lists any scoped signing key. A nil claims (no JWT) has none.
-func HasZoneScope(claims *jwt.AccountClaims) bool {
+// HasZoneScope is true when claims lists a scoped signing key that is not an owner group signer (groupKeys: the issue
+// service's public keys, which are scoped but carry no zone policy). A nil claims (no JWT) has none.
+func HasZoneScope(claims *jwt.AccountClaims, groupKeys map[string]bool) bool {
 	if claims == nil {
 		return false
 	}
 	for k := range claims.SigningKeys {
+		if groupKeys[k] {
+			continue
+		}
 		if sc, ok := claims.SigningKeys.GetScope(k); ok {
 			if _, isUser := sc.(*jwt.UserScope); isUser {
 				return true
