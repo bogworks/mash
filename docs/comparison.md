@@ -189,6 +189,14 @@ the receiving session. The decision is a signed list set:
   an adopted account `mashctl` refuses every other policy change (`add`, `reissue`, `retire`, `label` and the rest), so
   two writers never disagree. The intake takes each revision only if it is signed by that submitter's key. It is
   merged as a package, and the command that runs it, `mashctl policy serve`, is landing (#594), not shipped.
+- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are on `main`
+  (in v0.5.0, not yet released). An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
+  responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
+  generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
+  whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
+  credential, gets the local answer `open: owner line only, no list set in force` without asking. A list-set
+  credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
+  responder is mounted by `mashctl policy serve` (#594, open), so until that lands it is not running anywhere.
 - **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user
   carries only tags, so the server expands the owner group's template with them. Compiling checks its own output against
   the lists and refuses anything the server would not enforce exactly.
@@ -424,9 +432,11 @@ queue, not as the work queue.
   `nats-server` binary on your `PATH`.
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.
 - **Policy enforcement is landing.** The list-set model in section 2a is what `main` has: the compiler, the apply and
-  rotation code and the intake. The command that runs the intake, `mashctl policy serve` (#594), is open and not merged,
-  and so are `mashctl policy show`, `explain` and `diff` (#526) and `mash policy show` (#536). Until they land, treat
-  section 2a as the design the code implements, not as a shipped workflow.
+  rotation code and the intake, and the endpoint side of the view: `mash policy show` and `mash policy explain` (#536,
+  in v0.5.0). The command that runs the intake and the responder the view asks, `mashctl policy serve` (#594), is open
+  and not merged, and so is the operator's `mashctl policy show`, `explain` and `diff` (#526). Until they land, no
+  responder is running, so `mash policy` has nothing to ask; treat section 2a as the design the code implements, not
+  as a shipped workflow.
 - **Maturity.** v0.4.0 (released 2026-11-12; v0.5.0 is next and not released), repository created 2026-11-01, one
   maintainer. Interfaces may change before the next major revision. SAP is a single-vendor 0.3 draft with no licence on
   its spec.
