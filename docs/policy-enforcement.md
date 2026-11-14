@@ -10,9 +10,7 @@
 > | The applied-policy gate: applied, partial and not applied; generations | section 5.1 | nothing: #487, #488, #499 and #489 are on `main` | Written from the contract only, before they merged. Names no code or test beyond section 7. |
 > | Narrowing rotates to a new key with a deadline; removal revokes | section 5.2 | nothing: #498 is on `main` | Written from the contract and ADR 0067 only. Names no code or test beyond section 7. |
 > | Probe-credential evidence for the gate | sections 5.1 and 6.3 | nothing: #488 is on `main` | Written from the contract and the `probe` purpose that ADR 0101 reserves. |
-> | AT-011 on nats-server 2.15.2 | section 4 | the deps-go-group branch (`pr/core/deps-go-group`), ADR 0103 | Figures copied from ADR 0103 on that branch. |
 > | #503 (a sender's lost reach to its own address is checked) | section 5.1 | nothing: #503 is on `main` | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
-> | Mail's lost-publish result at the close (REQ-021) | sections 4 and 6.5 | ADR 0103 in #469 | Pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged). |
 > | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | the adoption marker is on `main` (ADR 0111, `mashctl policy adopt`); `show`, `explain` and the generation numbers: not checked here | Not yet documented beyond the contract text. |
 > | The list set file format (DEC-004) and wiring the compile into `mashctl policy apply` | sections 2 and 5 | a decision and a change not yet made | The compile is used by `internal/policyapply` and `internal/issue`; no `mashctl policy` subcommand takes a list set file yet (`docs/mashctl.md`). |
 
@@ -267,7 +265,7 @@ Three consequences:
 
 ## 4. What a change does to connected senders
 
-<!-- source: docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md; ADR 0103 (open branch); internal/policyapply/at011_test.go; internal/policyapply/testdata/at011-result.json -->
+<!-- source: docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md; internal/policyapply/at011_test.go; internal/policyapply/testdata/at011-result.json -->
 
 A new template reaches a sender by disconnect and reconnect. It does not change a connection that stays open. This was
 measured by AT-011 ([ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md)):
@@ -287,18 +285,15 @@ sequenceDiagram
   N-->>S: permissions violation
 ```
 
-| Measure | nats-server 2.15.1, nats.go 1.54.0 (ADR 0097) | nats-server 2.15.2, nats.go 1.55.0 (ADR 0103) |
-|---|---|---|
-| Server closes the connection at the push | yes, end of stream at 0 ms, no permission violation first | same |
-| Reconnect after the push, with a 10 ms reconnect wait | 13 to 123 ms | 13 to 112 ms |
-| First refused (narrow) or delivered (widen) publish on the new connection | 23 to 123 ms | 24 to 121 ms (123 ms with 12 busy loops under `-race`) |
-| Scenarios, which behaved alike | fixed line narrowed and widened, tag-driven line narrowed and widened | same |
-| A fresh connection opened right after the push | bound by the new template at once | same |
-| Messages lost outside the disconnect window | none | none |
-| Runs | 20 under `-race`, 10 with eight busy loops | 20 under `-race`, 10 with 12 busy loops |
-
-> Pending: the 2.15.2 column describes ADR 0103, not yet merged (`pr/core/deps-go-group`). On `main`, `go.mod` pins
-> nats-server 2.15.1, and `internal/policyapply/testdata/at011-result.json` records 2.15.1.
+| Measure | nats-server 2.15.1, nats.go 1.54.0 (ADR 0097) |
+|---|---|
+| Server closes the connection at the push | yes, end of stream at 0 ms, no permission violation first |
+| Reconnect after the push, with a 10 ms reconnect wait | 13 to 123 ms |
+| First refused (narrow) or delivered (widen) publish on the new connection | 23 to 123 ms |
+| Scenarios, which behaved alike | fixed line narrowed and widened, tag-driven line narrowed and widened |
+| A fresh connection opened right after the push | bound by the new template at once |
+| Messages lost outside the disconnect window | none |
+| Runs | 20 under `-race`, 10 with eight busy loops |
 
 In one phrase: about 0.1 s. That figure is the **test client's**, which waits 10 ms before it reconnects. A mash
 endpoint waits 2 s (`nats.ReconnectWait(2*time.Second)` and `nats.MaxReconnects(-1)` in `internal/endpoint/endpoint.go`),
@@ -314,12 +309,10 @@ What this means for a reader who must defend the policy:
 - **A client that does not reconnect is cut off.** The server closed its connection, so it is closed, not left on the
   old template. A mash endpoint reconnects without limit.
 - **A message in flight at the close can be lost.** In a few runs, one or two messages sent in the instant the server
-  closed the socket were lost (ADR 0097; one message on 2.15.2, ADR 0103). Messages sent while the client was
+  closed the socket were lost (ADR 0097). Messages sent while the client was
   disconnected were held by the client and delivered after the reconnect. The measured loss is only for messages in
   flight at the close.
-- **Mail and prompts differ in what the sender learns.** Measured (nats-server 2.15.2, nats.go 1.55.0, 42 runs, 27 of them losing 1 to 30 mail publishes at the close): every mail publish lost when the server closes a connection on a template change was reported to the publisher as an error (`ErrDisconnected`, `nats.ErrTimeout` or `context.DeadlineExceeded`), and no acknowledged publish was missing from the stream. An error does not prove the message is missing: in 34 of the 42 runs a publish that returned an error was stored, so a sender that retries must tolerate a duplicate. (ADR 0103, subsection "Mail published through JetStream at the close"; contract REQ-021.)
-  > Pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged)
-
+- **Mail and prompts differ in what the sender learns.** A mail publish is durable in the inbox stream, and a publisher that needs it to arrive confirms it (ADR 0097). A publish that returned an error may still have been stored, so a sender that retries must tolerate a duplicate.
   A retry with the same idempotency key is the sender's tool for the duplicate
   ([ADR 0031](decisions/0031-send-at-most-once-with-an-idempotency-key.md)). Plain core NATS publishes (prompts and
   heartbeats) are lost without a report to the sender. ADR 0097 says "mail is durable in the inbox stream and a
@@ -592,9 +585,7 @@ make a security decision on a label. The authority is the signed user JWT. The l
 ### 6.5 Core NATS publishes at the close
 
 A template push closes connections. A prompt, a status probe or a heartbeat that is in flight at that instant can be lost,
-and the sender is not told, because those are core NATS publishes (section 4). Mail's JetStream-backed publish is different. Measured (nats-server 2.15.2, nats.go 1.55.0, 42 runs, 27 of them losing 1 to 30 mail publishes at the close): every mail publish lost when the server closes a connection on a template change was reported to the publisher as an error (`ErrDisconnected`, `nats.ErrTimeout` or `context.DeadlineExceeded`), and no acknowledged publish was missing from the stream. An error does not prove the message is missing: in 34 of the 42 runs a publish that returned an error was stored, so a sender that retries must tolerate a duplicate. (ADR 0103; REQ-021.) A publisher that needs a message to arrive confirms it (ADR 0097).
-
-> Pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged)
+and the sender is not told, because those are core NATS publishes (section 4). Mail's JetStream-backed publish is different: it is durable in the inbox stream, and a publisher that needs it to arrive confirms it. A publish that returned an error may still have been stored, so a sender that retries must tolerate a duplicate. A publisher that needs a message to arrive confirms it (ADR 0097).
 
 ### 6.6 What the policy covers, and running one account both ways
 
@@ -662,7 +653,7 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | AT-008 | The dry run lists exactly the changes and changes nothing | `TestDryRunAT008Golden`, `TestAT008Content`, `TestDryRunDoesNotMutateItsInputs` (`internal/listset/dryrun_test.go`) | on `main`; not in the gate list |
 | AT-009 | `explain` and `show` work without admin rights and name what they describe | not yet documented | no test found |
 | AT-010 | The applied gate, on a cluster of two or more servers | `TestAT010Live` (`internal/policyapply/at010_live_test.go`). The gate's check of a sender's lost reach to its own address (#503) is not yet mapped to AT-010: the contract's AT-010 text does not name a self-only removal. | on `main`; required in the gate list |
-| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policyapply`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md), ADR 0103 | on `main` (2.15.1); ADR 0103 on `pr/core/deps-go-group` (2.15.2); required. ADR 0103 also measured mail published through JetStream at the close (sections 4 and 6.5); pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged). |
+| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policyapply`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md) | on `main` (2.15.1); required. |
 | AT-012 | A credential for a public key, for exactly one address, with no private key anywhere | `TestIssueServiceAT012IssuesAJWTThatConnects`, `TestIssueServiceAT012NoPrivateKeyAnywhere`, `TestIssueServiceAT012Refusals`, `TestIssueServiceIgnoresTagsAndPermissionsInARequest` (`cmd/mashctl`), [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) | on `main`; not in the gate list |
 | AT-013 | Narrowing rotates, revokes and causes no outage | `TestAT013Live` (`internal/policyapply/at013_live_test.go`) | on `main`; not in the gate list |
 | AT-014 | A new receiver is reachable only after the senders that must refuse it | `TestAT014Live` (`internal/policyapply/at014_live_test.go`) | on `main`; not in the gate list |
