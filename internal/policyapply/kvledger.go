@@ -146,12 +146,14 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 }
 
 var (
-	_ Ledger        = (*KVLedger)(nil)
-	_ StatusWriter  = (*KVLedger)(nil)
-	_ StatusReader  = (*KVLedger)(nil)
-	_ RefusalWriter = (*KVLedger)(nil)
-	_ DetailLedger  = (*KVLedger)(nil)
-	_ DetailLedger  = (*MemLedger)(nil)
+	_ Ledger           = (*KVLedger)(nil)
+	_ StatusWriter     = (*KVLedger)(nil)
+	_ StatusReader     = (*KVLedger)(nil)
+	_ RefusalWriter    = (*KVLedger)(nil)
+	_ DetailLedger     = (*KVLedger)(nil)
+	_ DetailLedger     = (*MemLedger)(nil)
+	_ PendingJWTLedger = (*KVLedger)(nil)
+	_ PendingJWTLedger = (*MemLedger)(nil)
 )
 
 // recordValue is a listset.Record in the status value: digests are their strings.
@@ -171,7 +173,9 @@ type statusValue struct {
 	InForceJWT     string          `json:"in_force_jwt,omitempty"`
 	InForceListSet json.RawMessage `json:"in_force_listset,omitempty"`
 	Pending        *recordValue    `json:"pending,omitempty"`
-	Status         *Status         `json:"status,omitempty"`
+	// PendingJWT is the last account JWT pushed for the pending record.
+	PendingJWT string  `json:"pending_jwt,omitempty"`
+	Status     *Status `json:"status,omitempty"`
 }
 
 // leaseValue is the value at the lease key.
@@ -355,12 +359,37 @@ func (l *KVLedger) Pending() (listset.Record, bool, error) {
 
 // SetPending implements Ledger.
 func (l *KVLedger) SetPending(rec listset.Record) error {
-	return l.mutate(func(v *statusValue) error { v.Pending = recordToValue(rec); return nil })
+	return l.mutate(func(v *statusValue) error {
+		if nv := recordToValue(rec); v.Pending == nil || *v.Pending != *nv {
+			v.PendingJWT = ""
+		}
+		v.Pending = recordToValue(rec)
+		return nil
+	})
+}
+
+// SetPendingJWT implements PendingJWTLedger.
+func (l *KVLedger) SetPendingJWT(rec listset.Record, jwt string) error {
+	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = recordToValue(rec), jwt; return nil })
+}
+
+// PendingJWT implements PendingJWTLedger.
+func (l *KVLedger) PendingJWT() (string, error) {
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return "", err
+	}
+	if v.Pending == nil {
+		return "", nil
+	}
+	return v.PendingJWT, nil
 }
 
 // ClearPending implements Ledger.
 func (l *KVLedger) ClearPending() error {
-	return l.mutate(func(v *statusValue) error { v.Pending = nil; return nil })
+	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = nil, ""; return nil })
 }
 
 // WriteStatus stores st as the latest status, keeping the record in force and the pending record. Only a run under
