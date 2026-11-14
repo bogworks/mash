@@ -69,25 +69,24 @@ jobs:
     runs-on: [self-hosted, rh-linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Go caches
-        run: if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches race; fi
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/go-test
         with:
-          go-version-file: go.mod
-          cache: false
-      - name: Verify the module cache against go.sum
-        run: |
-          set -euo pipefail
-          go mod verify
-      - run: go vet ./...
-      # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
-      # on a slow one. A real hang still fails.
-      - name: go test
-        env:
-          # The words internal to the maintainers, from a repository variable (data through env): the standalone
-          # source scan in cmd/mash fails on any of them.
-          MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
-        run: go test -race -timeout 20m ./...
+          forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
+  # test (linux, eph) is ADVISORY like test (macos) (ADR 0079, ADR 0123): the same steps as test (linux), through the same
+  # local action, on the ephemeral one-job runner pilot ([self-hosted, rh-linux-eph], runner group mash-ephemeral), so its
+  # result can be compared with rh-linux. It is not in pr-check's needs, not in release.RequiredChecks and not in
+  # .mergify.yml: it gates no merge and no release. No fallback and no hosted label: with no such runner online it waits.
+  test-eph:
+    name: test (linux, eph)
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
+    timeout-minutes: 30
+    runs-on: [self-hosted, rh-linux-eph]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/go-test
+        with:
+          forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
   # TODO(macos-gate): test (macos) is ADVISORY (ADR 0079): its result is visible on every pull request and push, but it
   # is not in pr-check's needs, not in release.RequiredChecks and not a required status check, so it gates no merge and
   # no release. It goes back into pr-check's needs (and RequiredChecks, docs/branch-protection.md) when x-lead confirms
