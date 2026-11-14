@@ -183,7 +183,7 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 }
 
 // adoptedNote says what an adopted account cannot do yet, so nobody is surprised by it.
-const adoptedNote = "note: from now on mashctl refuses a direct policy apply, add, reissue, label, set-meta labels, set-zone and retire on this account. " +
+const adoptedNote = "note: from now on mashctl refuses add, reissue, retire, label, unlabel, set-meta --label and provision --label on this account. " +
 	"This version has no list-set intake and no un-adopt command (un-adoption is not supported yet), so the account's policy cannot be changed until the intake exists."
 
 // adoptionView is `policy adopt --show --json`.
