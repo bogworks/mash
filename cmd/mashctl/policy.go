@@ -11,7 +11,7 @@ import (
 // policyUsage is the usage of the policy group. The policy file is gone (ADR 0091); the adoption marker and the
 // list-set service are its subcommands.
 const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY | --show [--json]
-       mashctl policy serve --range RANGE [--servers N] [--sys-creds FILE]
+       mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
        mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
 `
 
