@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/listset"
@@ -43,8 +45,10 @@ type Applier struct {
 	// Keys is the key store.
 	Keys  Keys
 	Trust apply.Trust
-	// Record is the issue record.
-	Record policyapply.IssueRecord
+	// Record is the issue record; it also gives the old-key inventory of each apply.
+	Record IssueRecord
+	// KV is the account's policy bucket; the provisioning markers of an apply are kept in it.
+	KV jetstream.KeyValue
 	// Servers is the declared server count (--servers, 1 or more).
 	Servers int
 	// URL is the configured server URL, a comma-separated list when the deployment has several; the client URL of a
@@ -65,9 +69,30 @@ type Applier struct {
 	Provisioner policyapply.Provisioner
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
+
+	markersOnce sync.Once
+	markers     *policyapply.KVProvisionMarkers
+	markersErr  error
 }
 
 var _ policyintake.Applier = (*Applier)(nil)
+
+// IssueRecord is the issue record the Applier needs: the record of what was issued and the inventory of every entry.
+type IssueRecord interface {
+	policyapply.IssueRecord
+	policyapply.IssueInventory
+}
+
+// markersFor builds the provisioning markers of the Applier's account once and keeps them for every document.
+func (a *Applier) markersFor() (policyapply.ProvisionMarkers, error) {
+	a.markersOnce.Do(func() {
+		a.markers, a.markersErr = policyapply.NewKVProvisionMarkers(a.KV, a.Account, policyapply.DefaultProvisionOpTimeout)
+	})
+	if a.markersErr != nil {
+		return nil, a.markersErr
+	}
+	return a.markers, nil
+}
 
 func (a *Applier) errorf(msg string, args ...any) {
 	if a.Log != nil {
@@ -155,11 +180,15 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
 		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
 	}
+	markers, err := a.markersFor()
+	if err != nil {
+		return policyintake.Result{}, fmt.Errorf("provisioning markers: %w", err)
+	}
 	prov := a.Provisioner
 	failClosed := prov == nil
 	deps := policyapply.ApplyDeps{
 		Ledger: a.Ledger, Cluster: issuer.Cluster, Signer: issuer, Account: a.Account, Inventory: a.Servers,
-		Provisioner: prov, BeforeWrite: BeforeWrite(g), Now: a.Now,
+		Provisioner: prov, ProvisionMarkers: markers, IssueRecord: a.Record, BeforeWrite: BeforeWrite(g), Now: a.Now,
 	}
 
 	target, cerr := listset.Compile(doc.ListSet)

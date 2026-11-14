@@ -21,6 +21,8 @@ func (anyRecord) ByAddress(context.Context, string) ([]policyapply.IssueEntry, e
 	return nil, nil
 }
 
+func (anyRecord) AllMaxIssued(context.Context) ([]policyapply.IssueEntry, error) { return nil, nil }
+
 type mintedPubs []string
 
 func (m mintedPubs) Minted() []string { return m }
