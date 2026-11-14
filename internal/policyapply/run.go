@@ -575,6 +575,12 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			}
 			return fst, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
 		}
+		if finalJWT == "" && len(all) > 0 {
+			// Committing tok would store a JWT without the revocations that were pushed, and a later generation could
+			// restore those keys.
+			perr := in.Ledger.SetPending(rec)
+			return Status{}, errors.Join(fmt.Errorf("%w: revocations were pushed but no final account JWT was returned", ErrSignedMismatch), perr)
+		}
 		if finalJWT != "" {
 			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
 			// what Converge pushes again. It must still be the target and carry every revocation.

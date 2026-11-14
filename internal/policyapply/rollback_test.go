@@ -31,7 +31,7 @@ func TestRollbackKeepsAfterPushRevocations(t *testing.T) {
 	w.cluster.failPush["s2"] = true
 	in := w.run(NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1}), set2(), "bytes-2")
 	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
-		return map[string][]string{"": {extra}}, nil, "", nil
+		return map[string][]string{"": {extra}}, nil, w.k.build(t, w.c2, w.k.revoked, extra), nil
 	}
 	var got []string
 	sign := in.Signer.SignPrevious
@@ -78,7 +78,7 @@ func TestRollbackDroppedRevocationIsNotPushed(t *testing.T) {
 	w.cluster.failPush["s2"] = true
 	in := w.run(NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1}), set2(), "bytes-2")
 	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
-		return map[string][]string{"": {extra}}, nil, "", nil
+		return map[string][]string{"": {extra}}, nil, w.k.build(t, w.c2, w.k.revoked, extra), nil
 	}
 	bad := w.k.build(t, w.c1, w.k.revoked) // lacks extra
 	in.Signer = withSignPrevious(in.Signer, func(PreviousClaims, []string) (string, error) { return bad, nil })
@@ -240,6 +240,28 @@ func TestFinalJWTMissingRevocationIsNotCommitted(t *testing.T) {
 	}
 	if rec, _ := l.InForce(); rec.Generation != 1 {
 		t.Errorf("committed generation %d", rec.Generation)
+	}
+	if _, has, _ := l.Pending(); !has {
+		t.Error("not pending")
+	}
+}
+
+// AfterPush that revokes keys but returns no final JWT is not committed: tok would lack the revocations.
+func TestRevokedKeysWithoutFinalJWTIsNotCommitted(t *testing.T) {
+	w := newWorld(t)
+	extra := freshUserPub(t)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.AfterPush = afterPushRevoking(w, extra, "")
+	_, err := Run(context.Background(), in)
+	if !errors.Is(err, ErrSignedMismatch) || !strings.Contains(err.Error(), "no final account JWT") {
+		t.Fatalf("err = %v", err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("committed generation %d", rec.Generation)
+	}
+	if got, _ := l.InForceJWT(); got != w.j1 {
+		t.Error("the stored JWT changed")
 	}
 	if _, has, _ := l.Pending(); !has {
 		t.Error("not pending")
