@@ -92,14 +92,6 @@ signed account JWT larger than `policy.AccountJWTLimit` (1 MiB), naming its size
   by their revocations.
 * Bad, because a server reports an account's JWT only once the account is loaded there (a connection under it). A server
   where it is not loaded reads as an unknown generation and fails the gate; the witnesses, opened first, load it.
-* Good, because a rollback never un-revokes a key: the previous generation is signed on request with every key revoked
-  during the run, and the gate's convergence verifies the rollback JWT carries them before pushing it. A rollback that
-  fails the check is not pushed; the servers stay split and the change stays partial.
-* Good, because the old-key inventory of a rotated or removed sender comes from the issue record: the revoked keys the
-  rotation step reports for each address are merged into the inventory, so a caller cannot omit them, and the gate
-  still checks each is in every server's revocation list. A run where a sender is not connected by the deadline is
-  partial, commits nothing, provisions nothing, and leaves its generation pending (the old keys are already revoked),
-  so only a resubmission of the same content may follow.
 * Neutral, because the in-memory ledger is per process; the persistent compare-and-set store follows the homerange-mash
   seam's status key.
 
