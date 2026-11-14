@@ -1,7 +1,9 @@
 # mash compared with other agent communication mechanisms
 
-Revision 3. Every cell was checked on **2026-11-01** against the mechanism's own spec, docs or repo, unless a footnote
-says otherwise. Versions, host features and licences change fast: re-check them before you rely on them.
+Revision 4. The mash column and mash's own claims were re-checked on **2026-11-14** against `main` (mash v0.4.0, released
+2026-11-12, plus what has merged since). The other columns, and every claim about another tool, were checked on
+**2026-11-01** against the mechanism's own spec, docs or repo and are unchanged, unless a footnote says otherwise.
+Versions, host features and licences change fast: re-check them before you rely on them.
 
 ## 1. In one paragraph
 
@@ -19,8 +21,9 @@ no per-agent server, open port or certificate. It does not mean no setup (see "W
 a speed claim (a model turn takes seconds and dominates; see section 5). The line that matters is trust, not size: two
 teams in one company that must not share an account's credentials are two trust domains, and mash does not span them.
 
-**Up front:** mash is v0.3.0 (created and released 2026-11-01), with one maintainer, one host adapter (Claude Code), an
-idle wake that rests on a Claude Code research preview, and single-replica inboxes. See section 9.
+**Up front:** mash is v0.4.0 (released 2026-11-12; the repository was created 2026-11-01; v0.5.0 is next and is not
+released), with one maintainer, one host adapter (Claude Code), an idle wake that rests on a Claude Code research
+preview, single-replica inboxes and no end-to-end encryption of mail. It is Apache-2.0. See section 9.
 
 ## 2. The comparison
 
@@ -43,7 +46,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 | Wake an idle agent[^wake] | 🟡[^wake-mash] | 🟡[^wake-sap] | 🛑 | 🟡[^wake-a2a] | 🛑[^wake-mam] | ✅[^wake-ccx] | ✅[^wake-sub] | 🛑 |
 | Host independence | 🟡[^host-mash] | ✅[^host-sap] | ✅ | ✅ | ✅[^host-mam] | 🛑[^host-ccx] | 🛑 | ✅ |
 | Spec, licence | Apache-2.0[^lic-mash] | Draft, no licence[^lic-sap] | Apache-2.0, CNCF | Apache-2.0, Linux Foundation | MIT + Rider[^lic-mam] | Proprietary | Proprietary | Mixed[^lic-brk] |
-| Maturity | v0.3.0[^mat-mash] | 0.3.0[^mat-sap] | 2.15.2[^mat-js] | 1.0.0[^mat-a2a] | Rust rewrite[^mat-mam] | 2.1.224+[^mat-ccx] | Experimental[^mat-sub] | Current[^mat-brk] |
+| Maturity | v0.4.0[^mat-mash] | 0.3.0[^mat-sap] | 2.15.2[^mat-js] | 1.0.0[^mat-a2a] | Rust rewrite[^mat-mam] | 2.1.224+[^mat-ccx] | Experimental[^mat-sub] | Current[^mat-brk] |
 | What you run | NATS server[^run-mash] | NATS server[^run-sap] | NATS server[^run-js] | HTTP server per agent[^run-a2a] | HTTP server[^run-mam] | Nothing[^run-ccx] | – | Broker cluster[^run-brk] |
 
 **Also considered**, with the same marks and rows:
@@ -92,7 +95,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^del-mam]: Persisted; explicit ack.
 [^del-ccx]: Messages held for approval expire (5 minutes by default, can be "never"). Only messages held under the default inbound rule expire; an explicit `hold` never expires. Claude Code also throttles message loops and never treats a peer message as consent.
 [^del-brk]: Kafka has exactly-once inside Kafka.
-[^proof-mash]: Every message is signed (SAP §13); it proves the key, not the process. `verified` means the signature checks against a key the directory maps to that endpoint name. Forged mail is never shown; `claimed`, `absent`, `unknown-signer` and `stale` mail is shown with its label.
+[^proof-mash]: Every message is signed (SAP §13); it proves the key, not the process. `verified` means the signature checks against a key the directory maps to that endpoint name. A recipient sees five labels: `verified`, `claimed`, `unknown-signer`, `absent` and `stale`. Forged mail and mail with a malformed header are dropped and never shown. `unknown-signer` and `stale` are mash's additions to SAP's three classes.
 [^proof-sap]: Optional §13 signature.
 [^proof-js]: Connection auth only.
 [^proof-a2a]: Not in the base protocol; Agent Cards may be JWS-signed.
@@ -121,15 +124,15 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^wake-mam]: Agents read the inbox.
 [^wake-ccx]: Starts a turn in an idle live session.
 [^wake-sub]: Within the session.
-[^host-mash]: The core needs no host (tested); one adapter, and the seam is unproven.
+[^host-mash]: The core needs no host (tested); one adapter (Claude Code only), and the seam is unproven.
 [^host-sap]: Plugins for 12 hosts.
 [^host-mam]: Any MCP client.
 [^host-ccx]: Claude Code only.
-[^lic-mash]: A documented SAP extension.
+[^lic-mash]: Apache-2.0 (`LICENSE`). The protocol side is a documented SAP extension.
 [^lic-sap]: Draft; the spec repo has no licence; the SDK is Apache-2.0.
 [^lic-mam]: "MIT + Rider", not OSI-approved. The rider grants no rights to OpenAI, Anthropic or their affiliates.
 [^lic-brk]: Apache-2.0 (Kafka); MPL-2.0 (RabbitMQ); RSALv2/SSPL/AGPLv3 (Redis).
-[^mat-mash]: v0.3.0 (2026-11-01); repo created 2026-11-01; 1 maintainer.
+[^mat-mash]: v0.4.0 (2026-11-12); repo created 2026-11-01; 1 maintainer. Checked 2026-11-14.
 [^mat-sap]: 0.3.0 (2026-09-21).
 [^mat-js]: nats-server 2.15.2 (2026-10-26).
 [^mat-a2a]: 1.0.0; 26k+ repo stars.
@@ -172,6 +175,47 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^out-mail]: Receiving needs an MX.
 [^disc-mail]: DNS MX.
 [^wake-mail]: IMAP IDLE.
+
+### 2a. Authorization: who may reach whom
+
+*This subsection is about mash only, checked 2026-11-14 against `main`. It makes no claim about the other columns,
+whose cells above do not cover authorization.* The table's "Per-message sender proof" row says who sent a message. This
+is the other question: who may send it.
+
+mash lets an operator decide who may mail, prompt, probe and watch whom, and the NATS server enforces that decision, not
+the receiving session. The decision is a signed list set:
+
+- **Source.** The list set is handed in by one registered submitter for an adopted account (`mashctl policy adopt`). On
+  an adopted account `mashctl` refuses every other policy change (`add`, `reissue`, `retire`, `label` and the rest), so
+  two writers never disagree. The intake takes each revision only if it is signed by that submitter's key. It is
+  merged as a package, and the command that runs it, `mashctl policy serve`, is landing (#594), not shipped.
+- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are on `main`
+  (in v0.5.0, not yet released). An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
+  responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
+  generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
+  whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
+  credential, gets the local answer `open: owner line only, no list set in force` without asking. A list-set
+  credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
+  responder is mounted by `mashctl policy serve` (#594, open), so until that lands it is not running anywhere.
+- **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user
+  carries only tags, so the server expands the owner group's template with them. Compiling checks its own output against
+  the lists and refuses anything the server would not enforce exactly.
+- **Model.** Addresses are exact; wildcards are refused. Each owner group has a `shared` or `closed` switch for each of
+  four verbs (mail, prompt, status, heartbeat). A sender's allow list reaches beyond its own group; a deny list works
+  only inside the sender's own owner group, and only against a shared verb.
+- **Narrowing.** When a sender's reach narrows, it is rotated to a new key and its old keys are revoked, so the old
+  credential cannot keep the old reach. A rollback never un-revokes a key.
+- **No zones.** Zones are gone (ADR 0091): mail keeps the five-token subject and the address is the fence. `mashctl
+  unzone` is the upgrade helper for an older record.
+- **A size limit, not a count limit.** A sender's exceptions travel as tags in its connect line, and the server's
+  default limit is 4096 bytes. mash measures the line and refuses what would not fit; it never refuses on a count. With
+  the sender and receiver names L characters long and the receiver's owner part 4 characters, 111 exceptions fit at 7
+  characters, 83 at 14 and 50 at 32. A longer owner part leaves room for fewer: 93, 73 and 46 at an owner part of 8; 75,
+  61 and 41 at 14; 57, 48 and 35 at 24. The refusal names the sender, the count, the size
+  and the limit. The full table is in `internal/listset/at007_size_test.go`.
+
+What this does not do: it does not encrypt mail, and whoever holds the account's keys can still mint credentials
+(see "What you run" in section 2). The model is described in `docs/policy-enforcement.md`.
 
 ## 3. Choose mash when, choose something else when
 
@@ -239,6 +283,9 @@ run with real Claude Code. Turn counts are measured by hand; no automated test c
 | Batching | Grouped after 100 ms of quiet; up to 10 messages and 16 KiB shown in full, larger batches as a digest | A burst of 12: 11 arrived as one digest turn, the slowest sender's in a second turn (2026-10-22) |
 | Urgent | A signed urgent mark from a `verified` sender wakes at once | 1.2 s (2026-10-29); 2.1-2.3 s (2026-10-30) |
 | Backlog wake | 500 held messages or 4 MiB wakes the session to drain, whatever the kinds, before the inbox limit drops mail | Unit tests only |
+
+A kind is the sender's advisory claim: it only decides wake or wait and never changes the trust label. Mail with no kind
+is a `task`, so it wakes.
 
 In the 2026-10-29 run, five messages (two sent before the first prompt, a `task`, an `fyi` and an urgent one) cost four
 turns, and none was lost.
@@ -376,11 +423,23 @@ queue, not as the work queue.
   the next prompt or tool call; it just does not wake an idle session.
 - **Durability is R1.** Single-replica inboxes on default NATS fsync (see section 8). The 16 MiB drop-oldest rule means a
   flood from any endpoint can evict unread mail.
+- **No end-to-end encryption.** Mail is signed, not encrypted at the mail layer. Confidentiality is TLS in transit plus
+  NATS accounts, as in SAP, which leaves end-to-end encryption out of scope. The server operator, or a hosted provider,
+  can read stored mail; see the threat model. For that case use SLIM or your own payload encryption (section 3).
 - **One NATS account.** Delivery between accounts is a non-goal. Setup is not one command: self-hosting needs NATS
-  operator mode, and the hosted path needs a Synadia account.
+  operator mode, and the hosted path needs a Synadia account. mash also runs on hosted Synadia Cloud. On one machine,
+  `mashctl init --local --owner NAME --start` sets up and starts a loopback nats-server in one command, but needs a
+  `nats-server` binary on your `PATH`.
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.
-- **Maturity.** v0.3.0, repository created and released 2026-11-01, one maintainer. Interfaces may change before 1.0. SAP
-  is a single-vendor 0.3 draft with no licence on its spec.
+- **Policy enforcement is landing.** The list-set model in section 2a is what `main` has: the compiler, the apply and
+  rotation code and the intake, and the endpoint side of the view: `mash policy show` and `mash policy explain` (#536,
+  in v0.5.0). The command that runs the intake and the responder the view asks, `mashctl policy serve` (#594), is open
+  and not merged, and so is the operator's `mashctl policy show`, `explain` and `diff` (#526). Until they land, no
+  responder is running, so `mash policy` has nothing to ask; treat section 2a as the design the code implements, not
+  as a shipped workflow.
+- **Maturity.** v0.4.0 (released 2026-11-12; v0.5.0 is next and not released), repository created 2026-11-01, one
+  maintainer. Interfaces may change before the next major revision. SAP is a single-vendor 0.3 draft with no licence on
+  its spec.
 
 ## 10. Sources
 
@@ -388,8 +447,11 @@ The numbered footnotes under the tables in section 2 carry the detail behind eac
 unless a date is given):
 
 - **mash:** `docs/architecture.md` §1-§4 and Appendix B; ADRs 0006, 0010, 0011, 0024, 0026-0029, 0031 and 0037; live
-  receipts `docs/evidence/2026-10-22-live-e2e.md` and `docs/evidence/2026-10-29-default-kind-live-v0.2.6/RECEIPT.md`;
-  `LICENSE` at tag v0.3.0.
+  receipts `docs/evidence/2026-10-22-live-e2e.md` and `docs/evidence/2026-10-29-default-kind-live-v0.2.6/RECEIPT.md`.
+  Re-read on 2026-11-14 for revision 4, on `main`: `LICENSE`; `docs/release.md`; `docs/policy-enforcement.md`;
+  `docs/mashctl.md`; `docs/operations.md`; `docs/install.md`; `docs/security/threat-model.md`; ADRs 0091, 0111, 0112,
+  0114 and 0117; `internal/listset`, `internal/policyapply`, `internal/kind`, `internal/host` and
+  `internal/sap/sender.go`.
 - **SAP:** https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md (0.3.0);
   https://github.com/synadia-ai/synadia-agent-sdk-docs (no licence, 13 stars, 1 contributor);
   https://github.com/synadia-ai/synadia-agents (Apache-2.0, 87 stars; `agents/` lists 12 hosts).
