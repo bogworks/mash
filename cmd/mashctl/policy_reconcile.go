@@ -26,6 +26,7 @@ import (
 	"github.com/bogworks/mash/internal/policydoc"
 	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/bogworks/mash/internal/reconcile"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const policyReconcileUsage = `usage: mashctl policy reconcile [--json] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
@@ -201,16 +202,24 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		return fail("%v", err)
 	}
 	defer closeAdmin()
-	marker, adopted, err := adm.Adoption(ctx)
-	switch {
-	case err != nil:
-		return fail("cannot tell whether this account is adopted: %v", err)
-	case !adopted:
-		return fail("this account is not adopted: there is nothing to reconcile (see `mashctl policy adopt`)")
-	case marker.Account != account:
-		return fail("the adoption marker is for another account than this one; nothing was computed")
-	case !marker.ExemptRecorded():
-		return fail("the adoption marker records no exempt keys: run `mashctl policy adopt` again before the reconcile")
+	// readMarker reads the adoption marker as it is now and checks it: the plan and the exempt issuer check use the
+	// marker of the moment they run, never one read before the account lock.
+	readMarker := func(ctx context.Context) (store.Marker, error) {
+		marker, adopted, err := adm.Adoption(ctx)
+		switch {
+		case err != nil:
+			return marker, fmt.Errorf("cannot tell whether this account is adopted: %v", err)
+		case !adopted:
+			return marker, errors.New("this account is not adopted: there is nothing to reconcile (see `mashctl policy adopt`)")
+		case marker.Account != account:
+			return marker, errors.New("the adoption marker is for another account than this one; nothing was computed")
+		case !marker.ExemptRecorded():
+			return marker, errors.New("the adoption marker records no exempt keys: run `mashctl policy adopt` again before the reconcile")
+		}
+		return marker, nil
+	}
+	if _, err := readMarker(ctx); err != nil {
+		return fail("%v", err)
 	}
 
 	nc, err := connectSys(cfg, o.sysCreds, env)
@@ -226,9 +235,13 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		}
 	}
 	// build computes the plan from what is true now: the list set and the JWT in force (or the file), the connections and
-	// the issue record. The dry run calls it once; --yes calls it before it locks, to take the signers, and again under
+	// the issue record, and the adoption marker (read again on every call). The dry run calls it once; --yes calls it before it locks, to take the signers, and again under
 	// the account lock and the ledger lease (reconcile.Execute).
 	build := func(ctx context.Context) (reconcile.Plan, map[string]string, error) {
+		marker, err := readMarker(ctx)
+		if err != nil {
+			return reconcile.Plan{}, nil, err
+		}
 		in := reconcile.Input{Account: account, Held: held, Now: time.Now(), Exempt: marker.Exempt, Issued: adm, AdminUser: adminUser, AdminIssuer: adminIssuer}
 		sctx, cancel := context.WithTimeout(ctx, applyDeadline)
 		defer cancel()
@@ -266,7 +279,13 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 
 	if o.yes {
 		return runReconcileYes(ctx, o, reconcileYes{
-			account: account, adm: adm, ledger: ledger, sys: nc, keys: keys, exempt: append(slices.Clone(marker.Exempt), adminUser),
+			account: account, adm: adm, ledger: ledger, sys: nc, keys: keys, exempt: func(ctx context.Context) ([]string, error) {
+				m, err := readMarker(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return append(slices.Clone(m.Exempt), adminUser), nil
+			},
 			adminUser: adminUser, adminIssuer: adminIssuer, held: held, build: build,
 		}, stdout, stderr)
 	}
@@ -299,6 +318,9 @@ func validPlanDigest(s string) bool {
 	return strings.Trim(h, "0123456789abcdef") == ""
 }
 
+// reconcileYesAfterFirstBuild is a test seam: it runs after --yes has checked the first plan and before it takes the lock.
+var reconcileYesAfterFirstBuild = func() {}
+
 // reconcileYes is what --yes needs beyond the plan builder.
 type reconcileYes struct {
 	account, adminUser, adminIssuer string
@@ -306,8 +328,8 @@ type reconcileYes struct {
 	ledger                          *policyapply.KVLedger
 	sys                             *nats.Conn
 	keys                            *ctlkeys.Authority
-	// exempt is the adoption marker's exempt users and the admin user.
-	exempt []string
+	// exempt reads the adoption marker's exempt users and the admin user, as they are when it is called.
+	exempt func(ctx context.Context) ([]string, error)
 	// held is the key store's GroupPublics.
 	held  map[string]string
 	build func(ctx context.Context) (reconcile.Plan, map[string]string, error)
@@ -362,6 +384,7 @@ func runReconcileYes(ctx context.Context, o reconcileOpts, y reconcileYes, stdou
 	if plan.PlanDigest != o.plan {
 		return changed()
 	}
+	reconcileYesAfterFirstBuild()
 	trust, err := apply.LoadTrust(y.keys)
 	if err != nil {
 		return fail("%v", err)
@@ -369,7 +392,13 @@ func runReconcileYes(ctx context.Context, o reconcileOpts, y reconcileYes, stdou
 	signer := &policyserve.Issuer{
 		Ctx: ctx, Keys: y.keys, Cluster: policyapply.NATSCluster{Conn: y.sys, Inventory: o.servers},
 		Resolver: apply.NATS{Conn: y.sys, Inventory: o.servers}, Account: y.account, Range: o.rng, Trust: trust, Servers: o.servers,
-		AdminUser: y.adminUser, AdminIssuer: y.adminIssuer, ExemptIssuers: exemptIssuerSource(y.sys, y.account, o.servers, y.exempt),
+		AdminUser: y.adminUser, AdminIssuer: y.adminIssuer, ExemptIssuers: func(ctx context.Context) (map[string][]string, error) {
+			exempt, err := y.exempt(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return exemptIssuerSource(y.sys, y.account, o.servers, exempt)(ctx)
+		},
 	}
 	lock, err := y.adm.LockAccount(ctx)
 	if err != nil {

@@ -384,6 +384,49 @@ func TestPolicyReconcileYesWithAStalePlanIsRefused(t *testing.T) {
 	}
 }
 
+// The adoption marker is read again on every build: a user that `policy adopt --exempt` exempts after the dry run
+// changes the plan, so --yes is refused and the newly exempt user is not revoked.
+func TestPolicyReconcileYesWithAChangedExemptSetIsRefused(t *testing.T) {
+	e := newApplyEnv(t).withDirectory()
+	legacy := e.mintUser(mustAccountKP(t, e), "", "legacy-lane")
+	legacyConn := e.connect(legacy.opt(), nats.Name("legacy-client"), nats.MaxReconnects(-1), nats.ReconnectWait(50*time.Millisecond))
+	submitter := userPub(t)
+	if out, errb, code := e.run("policy", "adopt", "--submitter", submitter); code != 0 {
+		t.Fatalf("adopt: %d %s %s", code, out, errb)
+	}
+	const bucket = "mash_foo_policy"
+	ledger, _, _ := e.applyFirstProduction(t, bucket, at015ListSet(e.acctPub))
+
+	out, errb, code := e.run("policy", "reconcile", "--bucket", bucket, "--json")
+	var old reconcile.Plan
+	if code != 0 || json.Unmarshal([]byte(out), &old) != nil || len(old.Revocations) != 1 {
+		t.Fatalf("dry run: %d %s %s", code, out, errb)
+	}
+	if _, ok := planRevocation(old, legacy.pub); !ok {
+		t.Fatalf("the dry run does not revoke the legacy user: %s", out)
+	}
+	// the legacy user becomes exempt after --yes has read the marker and before it takes the account lock
+	reconcileYesAfterFirstBuild = func() {
+		if out, errb, code := e.run("policy", "adopt", "--submitter", submitter, "--exempt", legacy.pub); code != 0 {
+			t.Errorf("adopt --exempt: %d %s %s", code, out, errb)
+		}
+	}
+	t.Cleanup(func() { reconcileYesAfterFirstBuild = func() {} })
+
+	jwtBefore, _ := ledger.InForceJWT()
+	serverBefore := e.accountJWT()
+	out, errb, code = e.run("policy", "reconcile", "--bucket", bucket, "--yes", "--plan", old.PlanDigest)
+	if code != 1 || out != "" || !strings.Contains(errb, "the plan changed since the dry run: run it again") {
+		t.Errorf("--yes after the exempt set changed: %d %q %q", code, out, errb)
+	}
+	if jwtAfter, _ := ledger.InForceJWT(); jwtAfter != jwtBefore || e.accountJWT() != serverBefore || len(e.claims().Revocations) != 0 {
+		t.Error("a refused --yes changed the account")
+	}
+	if !legacyConn.IsConnected() {
+		t.Error("a refused --yes disconnected the newly exempt user")
+	}
+}
+
 func mustAccountKP(t *testing.T, e *applyEnv) nkeys.KeyPair {
 	t.Helper()
 	kp, _, err := e.ks.Account()
