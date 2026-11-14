@@ -31,6 +31,15 @@
 // RevokeMinted. AT-010 (at010_live_test.go) runs the gate on a live two-server cluster, including a server held back
 // from the push.
 //
+// Ordering (REQ-015, AT-014; order.go). A new receiver is reachable only after the senders that must refuse it. NewOrder
+// derives, from the previous and target generations and Expect, each new address with the senders that must refuse it
+// and each existing address newly denied to a sender. RunOrdered runs Run (the gate is inside it) and only then, for
+// each new address whose senders have all passed (SenderPassed), calls the Provisioner to create its inbox stream and
+// consumer and to issue its credential; any other address is held. A change that newly denies an existing address to
+// a sender is reported applied only after that sender's gate passes (Applied). Cost: each push that finishes a
+// sender's gate disconnects every sender under that owner group's key (ADR 0097). AT-014 (at014_live_test.go) runs
+// this on the live cluster.
+//
 // Ledger caveat. MemLedger is process-local. The Ledger's Lock is mandatory and a persistent implementation MUST make it
 // a cross-process lock (a lease in the shared store); MemLedger's lock is exclusive within one process only, so until
 // the persistent compare-and-set store (the status.<account> key in KV) comes, two processes can still push over each

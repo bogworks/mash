@@ -53,6 +53,11 @@ func newWorld(t *testing.T, onGen1 ...string) *world {
 	return w
 }
 
+// rec1 is the record in force of the first generation: its digest is that of c1.
+func (w *world) rec1() listset.Record {
+	return listset.Record{Generation: 1, Signed: listset.DigestCompiled(w.c1)}
+}
+
 func (w *world) gate() GateInput {
 	rec, _, _ := listset.Accept(listset.Record{Generation: 1}, set2(), []byte("x"))
 	return GateInput{
@@ -303,7 +308,7 @@ func TestGateUnknownGenerationIsNull(t *testing.T) {
 
 func TestRunApplied(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	var seen []State
 	in := w.run(l, set2(), "bytes-2")
 	in.OnStatus = func(s Status) { seen = append(seen, s.State) }
@@ -325,7 +330,7 @@ func TestRunApplied(t *testing.T) {
 func TestRunConvergeFinishesPush(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.dropN["s2"] = 1 // the first push never reaches s2
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StateApplied {
 		t.Fatalf("%+v %v", st, err)
@@ -341,7 +346,7 @@ func TestRunConvergeFinishesPush(t *testing.T) {
 func TestRunConvergeRollsBack(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.failPush["s2"] = true
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil {
 		t.Fatal(err)
@@ -363,7 +368,7 @@ func TestRunConvergeRollsBack(t *testing.T) {
 func TestRunNotCommittedWhenCheckFails(t *testing.T) {
 	w := newWorld(t)
 	w.prober.allow["s1"] = true
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StatePartial || !hasFailure(st, "s1", "foo.c.core", CheckRefused) {
 		t.Fatalf("%+v %v", st, err)
@@ -378,7 +383,7 @@ func TestRunNotCommittedWhenCheckFails(t *testing.T) {
 
 func TestRunConcurrentSingleWinner(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
@@ -394,7 +399,7 @@ func TestRunConcurrentSingleWinner(t *testing.T) {
 		switch {
 		case e == nil:
 			ok++
-		case errors.Is(e, listset.ErrStaleBase):
+		case errors.Is(e, listset.ErrStaleBase), errors.Is(e, ErrPreviousMismatch): // the loser reads generation 2 in force
 			stale++
 		default:
 			t.Errorf("unexpected error %v", e)
@@ -407,7 +412,7 @@ func TestRunConcurrentSingleWinner(t *testing.T) {
 
 func TestRunMutatedCompiledRefusedBeforePush(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	in := w.run(l, set2(), "bytes-2")
 	in.Sign = func(_ listset.Record, c *listset.Compiled) (string, error) {
 		c.Users[0].Tags = append(c.Users[0].Tags, "allow:foo.c.sdk")
@@ -424,7 +429,7 @@ func TestRunMutatedCompiledRefusedBeforePush(t *testing.T) {
 
 func TestRunJWTNotCarryingTargetRefused(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	in := w.run(l, set2(), "bytes-2")
 	in.Sign = func(listset.Record, *listset.Compiled) (string, error) { return w.j1, nil }
 	if _, err := Run(context.Background(), in); !errors.Is(err, ErrSignedMismatch) || len(w.cluster.pushes) != 0 {
@@ -434,7 +439,7 @@ func TestRunJWTNotCarryingTargetRefused(t *testing.T) {
 
 func TestRunRefusedListSet(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	bad := set2()
 	bad.Senders = append(bad.Senders, listset.SenderLists{Sender: "bar.c.x"})
 	st, err := Run(context.Background(), w.run(l, bad, "b"))
@@ -518,7 +523,7 @@ func TestGateRefusesTargetWithoutSigners(t *testing.T) {
 	if st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || st.Failing[0].Detail != NoSignersDetail {
 		t.Fatalf("%+v", st)
 	}
-	r := w.run(NewMemLedger(listset.Record{Generation: 1}), set2(), "bytes-2")
+	r := w.run(NewMemLedger(w.rec1()), set2(), "bytes-2")
 	r.Signers = nil
 	st, err := Run(context.Background(), r)
 	if err != nil || st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || len(w.cluster.pushes) != 0 {
@@ -566,7 +571,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 func TestRunPendingGeneration(t *testing.T) {
 	w := newWorld(t)
 	w.prober.allow["s1"] = true
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StatePartial {
 		t.Fatalf("%+v %v", st, err)
@@ -607,7 +612,7 @@ func TestRunPendingGeneration(t *testing.T) {
 func TestRunRollbackClearsPending(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.failPush["s2"] = true
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	if _, err := Run(context.Background(), w.run(l, set2(), "bytes-2")); err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +623,7 @@ func TestRunRollbackClearsPending(t *testing.T) {
 
 func TestRunRefusesOversizedJWT(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	in := w.run(l, set2(), "bytes-2")
 	in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
 		return strings.Repeat("a", policy.AccountJWTLimit+1), nil
@@ -704,7 +709,7 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 func TestRunRequiresOKAckFromEveryServer(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.badAck["s2"] = true // s2 holds the target but did not acknowledge it
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State == StateApplied || !hasFailure(st, "s2", "", CheckPush) {
 		t.Fatalf("%+v %v", st, err)
@@ -788,7 +793,7 @@ func TestGateRevocationOlderThanCredentialIssue(t *testing.T) {
 
 func TestRunRefusesOversizedListSet(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(listset.Record{Generation: 1})
+	l := NewMemLedger(w.rec1())
 	in := w.run(l, set2(), "bytes-2")
 	in.ServerLimits = []listset.ServerLimits{{Server: "tiny", MaxConnectLine: 400}}
 	signed := false
@@ -843,5 +848,58 @@ func TestGateSelfReachOnlyRemoval(t *testing.T) {
 	in.Prober, in.Witnesses = w.prober, w.wit
 	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s1", "foo.c.solo", CheckWitness) {
 		t.Fatalf("witness open: %+v", st.Failing)
+	}
+}
+
+// TestRunPreviousMustBeInForce (H1): Previous must be the compiled output of the generation in force.
+func TestRunPreviousMustBeInForce(t *testing.T) {
+	cases := map[string]func(w *world, in *RunInput, l **MemLedger){
+		"nil previous": func(_ *world, in *RunInput, _ **MemLedger) { in.Previous = nil },
+		"other compiled": func(w *world, in *RunInput, _ **MemLedger) {
+			in.Previous = compile(t, set2())
+		},
+		"previous with nothing in force": func(_ *world, _ *RunInput, l **MemLedger) { *l = NewMemLedger(listset.Record{}) },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			l := NewMemLedger(w.rec1())
+			in := w.run(l, set2(), "bytes-2")
+			mutate(w, &in, &l)
+			in.Ledger = l
+			in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+				t.Error("signed with a mismatched previous")
+				return "", errors.New("signed")
+			}
+			if _, err := Run(context.Background(), in); !errors.Is(err, ErrPreviousMismatch) {
+				t.Fatalf("err = %v", err)
+			}
+			if len(w.cluster.pushes) != 0 {
+				t.Error("pushed with a mismatched previous")
+			}
+		})
+	}
+	w := newWorld(t)
+	st, err := Run(context.Background(), w.run(NewMemLedger(w.rec1()), set2(), "bytes-2"))
+	if err != nil || st.State != StateApplied {
+		t.Fatalf("matching previous: %+v %v", st, err)
+	}
+}
+
+// TestRunBeforeCommitFailureIsPartial (M): a failed hook leaves the Status partial and not in force, and pending.
+func TestRunBeforeCommitFailureIsPartial(t *testing.T) {
+	w := newWorld(t)
+	l := NewMemLedger(w.rec1())
+	in := w.run(l, set2(), "bytes-2")
+	in.BeforeCommit = func(context.Context, Accepted, Status) error { return errors.New("hook failed") }
+	st, err := Run(context.Background(), in)
+	if err == nil || st.State != StatePartial || st.InForce || !hasFailure(st, "", "", CheckProvision) {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d", rec.Generation)
+	}
+	if pend, ok, _ := l.Pending(); !ok || pend.Generation != 2 {
+		t.Errorf("pending = %+v %v", pend, ok)
 	}
 }

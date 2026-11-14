@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -47,6 +48,7 @@ type at010Env struct {
 	urls    map[string]string
 	sys     *nats.Conn
 	cluster NATSCluster
+	js      bool // JetStream is on, and the account may use it
 
 	mu   sync.Mutex
 	cur  string // the account JWT last pushed
@@ -63,9 +65,15 @@ func at010Must[T any](v T, err error) T {
 	return v
 }
 
-func newAT010Env(t *testing.T) *at010Env {
+func newAT010Env(t *testing.T) *at010Env { return newLiveEnv(t, set1()) }
+
+// newLiveEnv starts the two-server cluster holding the compiled generation 1 of prev. AT-010 and AT-014 share it.
+func newLiveEnv(t *testing.T, prev listset.ListSet) *at010Env { return newLiveEnvJS(t, prev, false) }
+
+// newLiveEnvJS is newLiveEnv with JetStream on every server and enabled for the account when js is true.
+func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	t.Helper()
-	e := &at010Env{t: t, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: &MemIssueRecord{}}
+	e := &at010Env{t: t, js: js, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: &MemIssueRecord{}}
 	e.op = at010Must(nkeys.CreateOperator())
 	opPub := at010Must(e.op.PublicKey())
 	oc := jwt.NewOperatorClaims(opPub)
@@ -82,14 +90,28 @@ func newAT010Env(t *testing.T) *at010Env {
 	e.scoped["foo.c"] = at010Must(nkeys.CreateAccount())
 	e.mint = &ProbeMinter{Signer: e, Account: e.acctPub, Record: e.rec}
 
-	gen1 := e.account(compile(t, set1()))
+	gen1 := e.account(compile(t, prev))
 	e.setCurrent(gen1)
 	for _, n := range []string{"s1", "s2"} {
 		e.dirs[n] = t.TempDir()
 	}
-	s1 := e.start("s1", true, "")
-	routes := fmt.Sprintf("nats-route://127.0.0.1:%d", s1.ClusterAddr().Port)
-	e.start("s2", true, routes)
+	if js {
+		// A JetStream cluster elects its meta leader only with both servers up, so both are started with each
+		// other's route and awaited together.
+		ports := map[string]int{}
+		for _, n := range []string{"s1", "s2"} {
+			l := at010Must(net.Listen("tcp", "127.0.0.1:0"))
+			ports[n] = l.Addr().(*net.TCPAddr).Port
+			_ = l.Close()
+		}
+		routes := fmt.Sprintf("nats-route://127.0.0.1:%d,nats-route://127.0.0.1:%d", ports["s1"], ports["s2"])
+		a, b := e.launch("s1", true, routes, ports["s1"]), e.launch("s2", true, routes, ports["s2"])
+		e.await("s1", a)
+		e.await("s2", b)
+	} else {
+		s1 := e.start("s1", true, "")
+		e.start("s2", true, fmt.Sprintf("nats-route://127.0.0.1:%d", s1.ClusterAddr().Port))
+	}
 	e.waitRoutes()
 
 	sysUser := at010Must(nkeys.CreateUser())
@@ -133,6 +155,9 @@ func (e *at010Env) account(c *listset.Compiled, revoked ...string) string {
 		sc.Template.Permissions = tpl.Permissions
 		ac.SigningKeys.AddScopedSigner(sc)
 	}
+	if e.js {
+		ac.Limits.JetStreamLimits = jwt.JetStreamLimits{MemoryStorage: -1, DiskStorage: -1, Streams: -1, Consumer: -1}
+	}
 	for _, r := range revoked {
 		ac.Revoke(r)
 	}
@@ -151,6 +176,25 @@ func (e *at010Env) waitNewSecond() {
 }
 
 func (e *at010Env) start(name string, fresh bool, routes string) *server.Server {
+	s := e.launch(name, fresh, routes, -1)
+	e.await(name, s)
+	return s
+}
+
+// await waits until the server listens for clients, then registers it.
+func (e *at010Env) await(name string, s *server.Server) {
+	t := e.t
+	t.Helper()
+	if !s.ReadyForConnections(at010Wait * 2) {
+		t.Fatalf("nats-server %s did not start", name)
+	}
+	t.Cleanup(func() { s.Shutdown(); s.WaitForShutdown() })
+	e.srvs[name] = s
+	e.urls[name] = s.ClientURL()
+}
+
+// launch builds the server and starts it in the background; cport is its cluster port (-1 for any).
+func (e *at010Env) launch(name string, fresh bool, routes string, cport int) *server.Server {
 	t := e.t
 	t.Helper()
 	res := at010Must(server.NewDirAccResolver(e.dirs[name], 0, at010Sync, server.NoDelete))
@@ -169,20 +213,17 @@ func (e *at010Env) start(name string, fresh bool, routes string) *server.Server 
 		Host: "127.0.0.1", Port: -1, ServerName: name, NoLog: true, NoSigs: true,
 		TrustedOperators: e.opts, AccountResolver: res, SystemAccount: e.sysPub,
 	}
+	if e.js {
+		o.JetStream, o.StoreDir = true, t.TempDir()
+	}
 	o.Cluster.Name = "at010"
 	o.Cluster.Host = "127.0.0.1"
-	o.Cluster.Port = -1
+	o.Cluster.Port = cport
 	if routes != "" {
 		o.Routes = server.RoutesFromStr(routes)
 	}
 	s := at010Must(server.NewServer(o))
 	go s.Start()
-	if !s.ReadyForConnections(at010Wait) {
-		t.Fatalf("nats-server %s did not start", name)
-	}
-	t.Cleanup(func() { s.Shutdown(); s.WaitForShutdown() })
-	e.srvs[name] = s
-	e.urls[name] = s.ClientURL()
 	return s
 }
 

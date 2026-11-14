@@ -34,6 +34,8 @@ const (
 	CheckRollback         = "rollback"
 	CheckPush             = "push"
 	CheckOldKeyNotRevoked = "old_key_not_revoked"
+	// CheckProvision is a provisioning step that failed after the gate applied (RunOrdered): nothing was committed.
+	CheckProvision = "provision"
 )
 
 // NoSignersDetail is the detail of the generation failure when the target has no expected signing keys.
