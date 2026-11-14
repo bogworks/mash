@@ -267,7 +267,7 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 	if o.yes {
 		return runReconcileYes(ctx, o, reconcileYes{
 			account: account, adm: adm, ledger: ledger, sys: nc, keys: keys, exempt: append(slices.Clone(marker.Exempt), adminUser),
-			adminUser: adminUser, adminIssuer: adminIssuer, build: build,
+			adminUser: adminUser, adminIssuer: adminIssuer, held: held, build: build,
 		}, stdout, stderr)
 	}
 	plan, _, err := build(ctx)
@@ -308,7 +308,9 @@ type reconcileYes struct {
 	keys                            *ctlkeys.Authority
 	// exempt is the adoption marker's exempt users and the admin user.
 	exempt []string
-	build  func(ctx context.Context) (reconcile.Plan, map[string]string, error)
+	// held is the key store's GroupPublics.
+	held  map[string]string
+	build func(ctx context.Context) (reconcile.Plan, map[string]string, error)
 }
 
 // exemptIssuerSource reads, on each call, the issuer of every connection of every connected user in exempt: the
@@ -386,7 +388,7 @@ func runReconcileYes(ctx context.Context, o reconcileOpts, y reconcileYes, stdou
 			return p, nil
 		},
 		Ledger: y.ledger, Cluster: signer.Cluster, Account: y.account, Inventory: o.servers,
-		Signers: signers, Signer: signer, Marker: y.adm, BeforeWrite: func(ctx context.Context, _ string) error { return lock.Held(ctx) },
+		Signers: signers, Held: y.held, Signer: signer, Marker: y.adm, BeforeWrite: func(ctx context.Context, _ string) error { return lock.Held(ctx) },
 	})
 	reasons := map[string]string{}
 	for _, r := range res.Plan.Revocations {

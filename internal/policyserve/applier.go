@@ -72,6 +72,11 @@ type Applier struct {
 	Provisioner policyapply.Provisioner
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
+	// AdminUser, AdminIssuer and ExemptIssuers are set on the Issuer of each apply (see Issuer): with them an apply drops
+	// the account JWT's non-mash signing keys once the exempt users stay signed by a kept key; without them such a key
+	// refuses the apply. ExemptIssuers is read at each Sign, so it can follow a marker that changes.
+	AdminUser, AdminIssuer string
+	ExemptIssuers          func(ctx context.Context) (map[string][]string, error)
 
 	markersOnce sync.Once
 	markers     policyapply.ProvisionMarkers
@@ -207,6 +212,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	issuer := &Issuer{
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
 		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
+		AdminUser: a.AdminUser, AdminIssuer: a.AdminIssuer, ExemptIssuers: a.ExemptIssuers,
 	}
 	markers, err := a.markersFor()
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
+	"github.com/bogworks/mash/internal/policyintake"
 	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/bogworks/mash/internal/reconcile"
 	"github.com/bogworks/mash/internal/store"
@@ -132,7 +132,6 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 		t.Fatal(err)
 	}
 	gpub, _ := gkp.PublicKey()
-	signers := map[string]string{"foo.alice": gpub}
 	raw := at015ListSet(e.acctPub)
 	file := filepath.Join(t.TempDir(), "first.json")
 	if err := os.WriteFile(file, raw, 0o600); err != nil {
@@ -160,7 +159,7 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 	}
 
 	const bucket = "mash_foo_policy"
-	ledger, a, cluster := e.applyFirstProduction(t, bucket, raw, signers)
+	ledger, a, cluster := e.applyFirstProduction(t, bucket, raw)
 	// the plain signing key is gone from the JWT of every server
 	jwts, err := cluster.AccountJWTs(ctx, e.acctPub)
 	if err != nil || len(jwts) != 1 {
@@ -274,11 +273,11 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 	}
 }
 
-// applyFirstProduction applies the first list set (raw, range foo) through policyapply.Run with the production signer,
-// the policyserve Issuer, set with the drop fields `policy serve` will set: it drops a non-mash signing key once the
+// applyFirstProduction applies the first list set (raw, range foo) through policyserve.Applier.Apply, the Applier `policy
+// serve` builds, with the drop fields serve sets (policyServeDropFields): its Issuer drops a non-mash signing key once the
 // admin user and the exempt users are shown to stay under kept keys. It creates the policy bucket and returns its ledger,
 // an admin handle and the cluster.
-func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte, signers map[string]string) (*policyapply.KVLedger, *admin.Admin, policyapply.NATSCluster) {
+func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte) (*policyapply.KVLedger, *admin.Admin, policyapply.NATSCluster) {
 	t.Helper()
 	ctx := context.Background()
 	admConn := e.connect(natsauth.UserCredentials(e.pl.Creds))
@@ -303,10 +302,6 @@ func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte,
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker, _, err := a.Adoption(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	adminUser, err := credsUserKey(e.pl.Creds)
 	if err != nil {
 		t.Fatal(err)
@@ -319,17 +314,26 @@ func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte,
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer := &policyserve.Issuer{Ctx: ctx, Keys: e.ks, Cluster: cluster, Resolver: apply.NATS{Conn: sysConn, Inventory: 1}, Account: e.acctPub,
-		Range: "foo", Trust: trust, Servers: 1, AdminUser: adminUser, AdminIssuer: adminIssuer,
-		ExemptIssuers: exemptIssuerSource(sysConn, e.acctPub, 1, append(slices.Clone(marker.Exempt), adminUser))}
-	kept, err := issuer.Kept(ctx)
+	kv, err := js.KeyValue(ctx, bucket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := policyapply.Run(ctx, policyapply.RunInput{Cluster: cluster, Ledger: ledger, Account: e.acctPub, Inventory: 1,
-		ListSet: doc.ListSet, Received: raw, Signer: issuer, Signers: signers, KeptSigners: kept})
-	if err != nil || st.State != policyapply.StateApplied {
-		t.Fatalf("first apply: %v %+v", err, st)
+	// The Applier `policy serve` runs, with the drop fields set by serve's own helper.
+	app := &policyserve.Applier{
+		Account: e.acctPub, Range: "foo", Ledger: ledger, Sys: sysConn, Keys: e.ks, Trust: trust, Record: policyapply.NewAdminIssueRecord(a), KV: kv,
+		Servers: 1, URL: e.srv.ClientURL(), Inboxes: a, Provisioner: nopProvisioner{},
+		Load: func(_ context.Context, u string) (*nats.Conn, error) {
+			return nats.Connect(u, natsauth.UserCredentials(e.pl.Creds), nats.MaxReconnects(0))
+		},
+	}
+	policyServeDropFields(app, a, sysConn, adminUser, adminIssuer)
+	var d policyintake.Doc
+	d.Raw, d.Account, d.Range, d.Generation, d.BaseGeneration = raw, doc.Account, doc.Range, doc.Generation, doc.BaseGeneration
+	if _, err := app.Apply(ctx, d, nopGuard{}); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if st, err := ledger.InForce(); err != nil || st.Generation != 1 {
+		t.Fatalf("first apply: in force %+v, %v", st, err)
 	}
 	return ledger, a, cluster
 }
@@ -343,13 +347,8 @@ func TestPolicyReconcileYesWithAStalePlanIsRefused(t *testing.T) {
 	if out, errb, code := e.run("policy", "adopt", "--submitter", userPub(t)); code != 0 {
 		t.Fatalf("adopt: %d %s %s", code, out, errb)
 	}
-	gkp, err := e.ks.GroupKey("foo.alice", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gpub, _ := gkp.PublicKey()
 	const bucket = "mash_foo_policy"
-	ledger, _, _ := e.applyFirstProduction(t, bucket, at015ListSet(e.acctPub), map[string]string{"foo.alice": gpub})
+	ledger, _, _ := e.applyFirstProduction(t, bucket, at015ListSet(e.acctPub))
 
 	out, errb, code := e.run("policy", "reconcile", "--bucket", bucket, "--json")
 	var old reconcile.Plan
@@ -411,3 +410,13 @@ func revocationOf(t *testing.T, tok, key string) int64 {
 	}
 	return cl.Revocations[key]
 }
+
+// nopProvisioner provisions nothing: the first list set's addresses need no inbox for this test.
+type nopProvisioner struct{}
+
+func (nopProvisioner) CreateInbox(context.Context, string) error     { return nil }
+func (nopProvisioner) IssueCredential(context.Context, string) error { return nil }
+
+type nopGuard struct{}
+
+func (nopGuard) Before(context.Context, string) error { return nil }

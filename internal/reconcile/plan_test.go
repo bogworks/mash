@@ -577,3 +577,32 @@ func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) 
 		t.Errorf("a preview names a digest:\n%s", pre.Text())
 	}
 }
+
+// A same-range group the incoming list set drops: its held key is removed by the apply (Issuer.Sign rebuilds this
+// range's keys from the list set), so an exempt user it signed is an issuer problem, in a file preview and in force.
+// Another range's held key stays, so a user it signed is not.
+func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
+	for _, src := range []Source{SourceListSetFile, SourceInForce} {
+		t.Run(string(src), func(t *testing.T) {
+			w := newWorld(t)
+			_, dropped := acctKey(t)
+			_, other := acctKey(t)
+			for k, role := range map[string]string{dropped: "foo.old", other: "bar.c"} {
+				sc := jwt.NewUserScope()
+				sc.Key, sc.Role = k, role
+				w.claims.SigningKeys.AddScopedSigner(sc)
+			}
+			svc, svc2 := userKey(t), userKey(t)
+			w.connect(w.conn(svc, dropped, "svc", 1), w.conn(svc2, other, "svc2", 1))
+			p, err := Build(context.Background(), Input{Account: w.acct, Now: w.now, Source: src, Generation: 1, ListSet: testSet(), Claims: w.claims,
+				Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped, "foo.old": dropped, "bar.c": other},
+				Exempt: []string{w.admin, svc, svc2}, Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.IssuerProblems) != 1 || p.IssuerProblems[0].User != svc || p.IssuerProblems[0].Issuer != dropped {
+				t.Errorf("issuer problems = %+v", p.IssuerProblems)
+			}
+		})
+	}
+}
