@@ -24,7 +24,8 @@ const ScopeTTL = 3 * time.Second
 
 type scopeVerdict struct {
 	pub, want string
-	code      string // "" when the key is published as a scoped signer with exactly the want template
+	code      string             // "" when the key is published as a scoped signer with exactly the want template
+	revoked   jwt.RevocationList // the account JWT's revocations when the verdict was made
 	at        time.Time
 }
 
@@ -61,7 +62,7 @@ func wantTemplate(p jwt.Permissions) jwt.UserPermissionLimits {
 // checkScope verifies, before anything is signed, that pub is published in the account JWT as a scoped signer whose
 // template equals want. It returns CodeNoScope (absent, or published unscoped), CodeTemplate (scoped with another
 // template) or CodeNoSigningKey (the account JWT could not be read from every expected server), "" when the key is fit to sign with.
-func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Permissions) string {
+func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Permissions) (string, jwt.RevocationList) {
 	wk := templateKey(wantTemplate(want))
 	now := is.now()
 	c := &is.scopes
@@ -69,9 +70,10 @@ func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Pe
 	v, ok := c.m[group]
 	c.mu.Unlock()
 	if ok && v.pub == pub && v.want == wk && now.Sub(v.at) < ScopeTTL && !now.Before(v.at) {
-		return v.code
+		return v.code, v.revoked
 	}
 	var code string
+	var revoked jwt.RevocationList
 	claims, err := is.Claims.Fetch(ctx)
 	switch {
 	case err != nil || claims == nil:
@@ -79,8 +81,12 @@ func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Pe
 		if err != nil {
 			is.log().Warn("account JWT not available", "reason", err.Error())
 		}
-		return CodeNoSigningKey
+		return CodeNoSigningKey, nil
 	default:
+		revoked = make(jwt.RevocationList, len(claims.Revocations))
+		for k, t := range claims.Revocations {
+			revoked[k] = t
+		}
 		sc, found := claims.SigningKeys.GetScope(pub)
 		us, scoped := sc.(*jwt.UserScope)
 		switch {
@@ -94,7 +100,7 @@ func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Pe
 	if c.m == nil {
 		c.m = map[string]scopeVerdict{}
 	}
-	c.m[group] = scopeVerdict{pub: pub, want: wk, code: code, at: now}
+	c.m[group] = scopeVerdict{pub: pub, want: wk, code: code, revoked: revoked, at: now}
 	c.mu.Unlock()
-	return code
+	return code, revoked
 }

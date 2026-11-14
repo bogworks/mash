@@ -218,7 +218,8 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	}
 	// The key must be published in the account JWT as a scoped signer with this group's template: an unscoped key, or
 	// one with another template, would let the user carry more than the list set allows.
-	switch is.checkScope(ctx, group, pub, tpl.Permissions) {
+	scopeCode, revoked := is.checkScope(ctx, group, pub, tpl.Permissions)
+	switch scopeCode {
 	case "":
 	case CodeNoScope:
 		return nil, refuse(CodeNoScope, "the signing key of this owner group is not published in the account JWT as a scoped signing key")
@@ -226,6 +227,12 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		return nil, refuse(CodeTemplate, "the scoped signing key of this owner group has a template other than the list set's")
 	default:
 		return nil, refuse(CodeNoSigningKey, "the account JWT could not be read from every expected server, so the signing key could not be verified")
+	}
+
+	// A key the account JWT revokes is refused whatever its issue record says (it may have been revoked outside
+	// mashctl, so the record has no revoked_at). Any entry refuses: a newer JWT must not restore the key's access.
+	if _, ok := revoked[r.PublicKey]; ok {
+		return nil, refuse(CodeRevoked, "that public key has been revoked")
 	}
 
 	uc := jwt.NewUserClaims(r.PublicKey)

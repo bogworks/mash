@@ -367,3 +367,22 @@ func TestSilentServerWithANewerJWTThatRemovedTheSignerRefuses(t *testing.T) {
 		t.Fatalf("%d records", len(f.rec.recs))
 	}
 }
+
+// A key revoked only in the account JWT (its record has no revoked_at) is refused, and nothing is signed or recorded.
+func TestKeyRevokedOnlyInAccountJWTIsRefused(t *testing.T) {
+	f := newFixture(t)
+	r := f.req(t, "foo.c.core", hardenTTL)
+	f.claims.mu.Lock()
+	f.claims.ac.Revocations = jwt.RevocationList{}
+	f.claims.ac.Revocations.Revoke(r.PublicKey, f.now.Add(-time.Hour))
+	f.claims.mu.Unlock()
+	out, err := f.is.Issue(bg, r, store.PurposeIssue)
+	if out != nil || code(err) != CodeRevoked {
+		t.Fatalf("%v %v", out, err)
+	}
+	f.rec.mu.Lock()
+	defer f.rec.mu.Unlock()
+	if len(f.rec.recs) != 0 {
+		t.Fatalf("a refused issue recorded %d record(s)", len(f.rec.recs))
+	}
+}

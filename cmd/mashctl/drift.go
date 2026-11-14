@@ -208,10 +208,14 @@ func credsPathFunc(cfg config.Config, dir string) func(name string) (string, err
 	}
 }
 
-// signersByRole is the public keys of the scoped signing keys of the account JWT, by role (zone).
-func signersByRole(ac *jwt.AccountClaims) map[string][]string {
+// signersByRole is the public keys of the scoped signing keys of the account JWT, by role (zone). skip holds keys that
+// are not zone signers (the issue service's owner group signers) and are left out.
+func signersByRole(ac *jwt.AccountClaims, skip map[string]bool) map[string][]string {
 	out := map[string][]string{}
 	for _, k := range ac.SigningKeys.Keys() {
+		if skip[k] {
+			continue
+		}
 		sc, _ := ac.SigningKeys.GetScope(k)
 		if us, ok := sc.(*jwt.UserScope); ok && us != nil {
 			out[us.Role] = append(out[us.Role], k)
@@ -458,7 +462,15 @@ func keysState(ctx context.Context, l *loaded, res apply.Resolver) stateReport {
 	for _, z := range l.c.Zones {
 		pz = append(pz, z.Name)
 	}
-	return newState(keyFindings(pz, files, signersByRole(ac)))
+	groups, err := l.keys.GroupPublics()
+	if err != nil {
+		return unknownState(err)
+	}
+	isGroup := map[string]bool{}
+	for _, pub := range groups {
+		isGroup[pub] = true
+	}
+	return newState(keyFindings(pz, files, signersByRole(ac, isGroup)))
 }
 
 func directoryState(ctx context.Context, l *loaded) (stateReport, []dirFix) {

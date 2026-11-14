@@ -501,6 +501,53 @@ func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
 	return kp, err
 }
 
+// Groups lists the owner groups that have a key file, sorted.
+func (a *Authority) Groups() ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.checkDirsIn(a.groupsPath(), false); err != nil {
+		return nil, err
+	}
+	ents, err := os.ReadDir(a.groupsPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mashctl: list owner groups: %w", err)
+	}
+	var out []string
+	for _, e := range ents {
+		if g, ok := strings.CutSuffix(e.Name(), seedExt); ok && validGroup(g) && !e.IsDir() {
+			out = append(out, g)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// GroupPublics maps every owner group with a key file to the public key of that key. Each key pair is wiped after its
+// public key is read; no seed leaves this function.
+func (a *Authority) GroupPublics() (map[string]string, error) {
+	groups, err := a.Groups()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(groups))
+	for _, g := range groups {
+		kp, err := a.GroupKey(g, false)
+		if err != nil {
+			return nil, err
+		}
+		pub, err := kp.PublicKey()
+		kp.Wipe()
+		if err != nil {
+			return nil, err
+		}
+		out[g] = pub
+	}
+	return out, nil
+}
+
 // ErrDifferentKey is wrapped by ImportOperator and ImportAccount when the store already holds another key.
 var ErrDifferentKey = errors.New("mashctl: the key store already holds a different key")
 

@@ -261,3 +261,102 @@ func TestOutputHoldsNoSeeds(t *testing.T) {
 		}
 	}
 }
+
+// groupSignerSetup registers an owner group signer in the key store and publishes it in the resolver's JWT as a
+// scoped signer, as the issue service needs it.
+func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, c Params, pub string) {
+	t.Helper()
+	ks, fk, comp := setup(t)
+	kp, err := ks.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub = pubOf(t, kp)
+	kp.Wipe()
+	op, _, _ := ks.Operator()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = pub, "foo.c"
+		sc.Template.Permissions.Pub.Allow.Add("foo.c.>")
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	return ks, fk, Params{Compiled: comp}, pub
+}
+
+func TestGroupPublicsListsRegisteredGroupSigners(t *testing.T) {
+	ks, _, _, pub := groupSignerSetup(t)
+	got, err := ks.GroupPublics()
+	if err != nil || len(got) != 1 || got["foo.c"] != pub {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// A registered owner group signer published in the account JWT is not unknown: apply goes through and keeps it, with its
+// scope.
+func TestApplyKeepsARegisteredGroupSigner(t *testing.T) {
+	ks, fk, c, pub := groupSignerSetup(t)
+	var out bytes.Buffer
+	p := c
+	p.Mode, p.Keys, p.Resolver = Apply, ks, fk
+	if code := Run(context.Background(), p, &out); code != 0 {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	if strings.Contains(out.String(), "did not create") || fk.pushes == 0 {
+		t.Fatalf("pushes %d\n%s", fk.pushes, out.String())
+	}
+	cl, err := jwt.DecodeAccountClaims(fk.token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, ok := cl.SigningKeys.GetScope(pub)
+	us, _ := sc.(*jwt.UserScope)
+	if !ok || us == nil || us.Role != "foo.c" || len(us.Template.Pub.Allow) != 1 {
+		t.Fatalf("the group signer is not kept as published: %v %v", ok, sc)
+	}
+	// a second apply has nothing to change and still does not refuse
+	out.Reset()
+	if code := Run(context.Background(), p, &out); code != 0 || !strings.Contains(out.String(), "already up to date") {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+}
+
+// A scoped signer that matches no key-store file stays unknown even when a group signer is registered.
+func TestGroupSignerRegistrationDoesNotExcuseOtherKeys(t *testing.T) {
+	ks, fk, c, _ := groupSignerSetup(t)
+	other, _ := nkeys.CreateAccount()
+	op, _, _ := ks.Operator()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = pubOf(t, other), "foo.c"
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	for _, mode := range []Mode{Apply, DryRun, Diff} {
+		var out bytes.Buffer
+		p := c
+		p.Mode, p.Keys, p.Resolver = mode, ks, fk
+		if code := Run(context.Background(), p, &out); code != 1 || !strings.Contains(out.String(), pubOf(t, other)) || fk.pushes != 0 {
+			t.Fatalf("%s: exit %d\n%s", mode, code, out.String())
+		}
+	}
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})
+	if err == nil || !strings.Contains(err.Error(), pubOf(t, other)) {
+		t.Fatalf("revoke: %v", err)
+	}
+}
+
+// Revocation works with a registered group signer in the account JWT.
+func TestRevokeUsersAcceptsARegisteredGroupSigner(t *testing.T) {
+	ks, fk, _, pub := groupSignerSetup(t)
+	u := userKey(t)
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{u}); err != nil {
+		t.Fatal(err)
+	}
+	if !revokedIn(t, fk.token, u) {
+		t.Fatal("not revoked")
+	}
+	cl, _ := jwt.DecodeAccountClaims(fk.token)
+	if _, ok := cl.SigningKeys.GetScope(pub); !ok {
+		t.Fatal("the group signer was dropped")
+	}
+}
