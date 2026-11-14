@@ -215,7 +215,7 @@ func (u unknownKey) describe() string {
 }
 
 // knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
-// public key of every zone key in the key store.
+// public key of every zone key and every owner group signer (the issue service's) in the key store.
 func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, error) {
 	known := map[string]bool{acctPub: true}
 	zones, err := ks.Zones()
@@ -227,6 +227,13 @@ func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, e
 		if err != nil {
 			return nil, err
 		}
+		known[pub] = true
+	}
+	groups, err := ks.GroupPublics()
+	if err != nil {
+		return nil, err
+	}
+	for _, pub := range groups {
 		known[pub] = true
 	}
 	return known, nil
@@ -518,6 +525,14 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 	if kerr2 != nil {
 		return nil, kerr2
 	}
+	groupPubs, gerr := p.Keys.GroupPublics()
+	if gerr != nil {
+		return nil, gerr
+	}
+	isGroupKey := map[string]bool{}
+	for _, pub := range groupPubs {
+		isGroupKey[pub] = true
+	}
 	oldKeys := map[string][]string{}
 	remove, keep := map[string]bool{}, map[string]bool{}
 	for _, z := range p.RemoveZones {
@@ -534,6 +549,10 @@ func build(p Params, opKP nkeys.KeyPair, acctPub, cur string, replace, created m
 		sc, _ := current.SigningKeys.GetScope(k)
 		us, _ := sc.(*jwt.UserScope)
 		switch {
+		case isGroupKey[k]:
+			// An owner group signer of the issue service, registered in the key store: kept as published (desired
+			// starts as the current JWT), neither unknown nor outside the policy.
+			continue
 		case us != nil && isFileZone[us.Role]:
 			// a zone of the file: handled below (the zone key, a replacement, or a conflict)
 		case !known[k]:

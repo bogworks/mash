@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -355,5 +356,79 @@ func TestApplyUnchangedPathRechecksTheBaseBeforePushing(t *testing.T) {
 			}
 		}
 		_ = acct
+	}
+}
+
+// partialErr answers LookupAll with some replies and an error: the replies that arrived do not stand for the servers
+// that failed.
+type partialErr struct {
+	*fake
+	got []string
+	err error
+}
+
+func (p partialErr) LookupAll(context.Context, string, int) ([]string, error) { return p.got, p.err }
+
+// The issue service signs on the strength of CurrentAccountClaims, so it needs the whole server set: a silent server
+// may hold a newer JWT that removed or narrowed the signer.
+func TestCurrentAccountClaimsNeedsEveryExpectedServer(t *testing.T) {
+	ks, op, acct := baseEnv(t)
+	trust, _ := LoadTrust(ks)
+	sk, _ := nkeys.CreateAccount()
+	signer, _ := sk.PublicKey()
+	withSigner := jwt.NewAccountClaims(acct)
+	withSigner.SigningKeys.Add(signer)
+	older := tokenAt(t, op, withSigner, 1000)
+	newer := tokenAt(t, op, jwt.NewAccountClaims(acct), 2000) // the signer removed
+	two := ServerSet{Names: []string{"s1", "s2"}, Expected: 2}
+	ctx := context.Background()
+
+	// Both servers answer: the newest copy is used and it has no signer.
+	for _, order := range [][]string{{older, newer}, {newer, older}} {
+		cl, err := CurrentAccountClaims(ctx, &multi{fake: &fake{servers: two}, copies: order}, acct, trust, 2)
+		if err != nil || cl.IssuedAt != 2000 || cl.SigningKeys.Contains(signer) {
+			t.Fatalf("both answered: %v %+v", err, cl)
+		}
+	}
+	// The server holding the newer copy is silent: the older copy that answered is not enough, with the count from the
+	// ping or the declared one.
+	for _, declared := range []int{0, 2} {
+		_, err := CurrentAccountClaims(ctx, &multi{fake: &fake{servers: two}, copies: []string{older}}, acct, trust, declared)
+		if err == nil || !strings.Contains(err.Error(), "only 1 of 2 servers answered") {
+			t.Fatalf("declared %d: %v", declared, err)
+		}
+	}
+	// A ping that saw one server while 2 are declared: refused before any lookup.
+	one := &fake{servers: ServerSet{Names: []string{"s1"}, Expected: 1}}
+	if _, err := CurrentAccountClaims(ctx, &multi{fake: one, copies: []string{older}}, acct, trust, 2); err == nil || !strings.Contains(err.Error(), "not complete") {
+		t.Fatalf("declared 2, ping 1: %v", err)
+	}
+	// A named cluster with nothing declared: refused with the hint, like policy apply.
+	named := &fake{servers: ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "c"}}
+	_, err := CurrentAccountClaims(ctx, &multi{fake: named, copies: []string{older, newer}}, acct, trust, 0)
+	if err == nil || !strings.Contains(err.Error(), "MASH_SERVERS") || !strings.Contains(err.Error(), "--servers") {
+		t.Fatalf("named cluster, none declared: %v", err)
+	}
+	if cl, err := CurrentAccountClaims(ctx, &multi{fake: named, copies: []string{older, newer}}, acct, trust, 2); err != nil || cl.IssuedAt != 2000 {
+		t.Fatalf("named cluster, declared: %v", err)
+	}
+	// A lookup error after some replies arrived is an error, not a skipped reply.
+	_, err = CurrentAccountClaims(ctx, partialErr{fake: &fake{servers: two}, got: []string{older}, err: errors.New("reply of 99999 bytes over the limit")}, acct, trust, 2)
+	if err == nil || !strings.Contains(err.Error(), "over the limit") {
+		t.Fatalf("lookup error: %v", err)
+	}
+	// A ping that fails is an error.
+	if _, err := CurrentAccountClaims(ctx, &multi{fake: &fake{serversErr: errors.New("no ping"), servers: two}, copies: []string{older, newer}}, acct, trust, 2); err == nil {
+		t.Fatal("ping error accepted")
+	}
+	// Complete and consistent: used. A standalone server with nothing declared is complete.
+	if cl, err := CurrentAccountClaims(ctx, &multi{fake: &fake{}, copies: []string{older}}, acct, trust, 0); err != nil || !cl.SigningKeys.Contains(signer) {
+		t.Fatalf("standalone: %v", err)
+	}
+	// A copy that does not verify is refused, not skipped.
+	rogue, _ := nkeys.CreateOperator()
+	bad := tokenAt(t, rogue, jwt.NewAccountClaims(acct), 3000)
+	if _, err := CurrentAccountClaims(ctx, &multi{fake: &fake{servers: two}, copies: []string{older, bad}}, acct, trust, 2); err == nil {
+		t.Fatal("unverified copy accepted")
 	}
 }
