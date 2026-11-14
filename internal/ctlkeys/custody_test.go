@@ -4,6 +4,7 @@ package ctlkeys
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,5 +150,68 @@ func TestCheckParentDir(t *testing.T) {
 	otherUser(t)
 	if err := CheckParentDir(d); err == nil || !strings.Contains(err.Error(), "owned by uid") {
 		t.Fatalf("foreign owner: got %v", err)
+	}
+}
+
+func TestCheckStrictParentDir(t *testing.T) {
+	d := t.TempDir()
+	for _, mode := range []os.FileMode{0o700, 0o755, 0o750} {
+		os.Chmod(d, mode)
+		if err := CheckStrictParentDir(d); err != nil {
+			t.Fatalf("mode %04o: %v", mode, err)
+		}
+	}
+	for _, mode := range []os.FileMode{0o770, 0o775, 0o720, 0o777, 0o757} {
+		os.Chmod(d, mode)
+		if err := CheckStrictParentDir(d); err == nil || !strings.Contains(err.Error(), "chmod go-w "+d) {
+			t.Fatalf("mode %04o: got %v", mode, err)
+		}
+	}
+	os.Chmod(d, 0o700)
+	link := filepath.Join(t.TempDir(), "l")
+	os.Symlink(d, link)
+	if err := CheckStrictParentDir(link); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink: got %v", err)
+	}
+	if err := CheckStrictParentDir(filepath.Join(d, "missing")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing: got %v", err)
+	}
+	otherUser(t)
+	if err := CheckStrictParentDir(d); err == nil || !strings.Contains(err.Error(), "owned by uid") {
+		t.Fatalf("foreign owner: got %v", err)
+	}
+}
+
+func TestGroupKeyIsKeptBesideTheZoneKeysAndNeverOverwritten(t *testing.T) {
+	a, err := Open(filepath.Join(t.TempDir(), "keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.GroupKey("foo.c", false); !errors.Is(err, ErrNoGroupKey) {
+		t.Fatalf("missing: %v", err)
+	}
+	k1, err := a.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1, _ := k1.PublicKey()
+	k2, err := a.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2, _ := k2.PublicKey(); p1 != p2 {
+		t.Error("a second create replaced the key")
+	}
+	fi, err := os.Stat(filepath.Join(a.dir, "groups", "foo.c.nk"))
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("%v %v", fi, err)
+	}
+	for _, bad := range []string{"", "foo", "foo.c.core", "../x.c", "foo.", ".c", "Foo.c", "foo/x.c"} {
+		if _, err := a.GroupKey(bad, true); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if zs, _ := a.Zones(); len(zs) != 0 {
+		t.Errorf("a group key shows as a zone: %v", zs)
 	}
 }
