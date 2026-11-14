@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# The lead's approval of a pull request: a commit status `lead-review` = success on the exact head SHA the lead
+# reviewed (ADR 0116; .mergify.yml requires `check-success = lead-review`).
+#   LEAD_LOGIN=<login> bash scripts/lead-approve <pr>
+#   LEAD_LOGIN=<login> bash scripts/lead-approve --audit <pr>
+# LEAD_LOGIN has no default. The script refuses unless `gh` is authenticated as that login, the head's `codex-review`
+# status and `label-reset` check are success, and the `hold` label is absent. After posting it reads the head again:
+# if a push moved it, the status stays on the old SHA, approves nothing new, and the script warns and exits 1.
+# --audit lists every `lead-review` status on the head with its creator and exits 1 if any creator is not LEAD_LOGIN.
+# This is provenance by convention, not authentication: any token with status access can post `lead-review`
+# (ADR 0116 states the residual). GH_REPO (owner/name) overrides the repository gh infers.
+set -euo pipefail
+
+usage() { echo "usage: LEAD_LOGIN=<login> scripts/lead-approve [--audit] <pr>" >&2; exit 2; }
+audit=0
+if [ "${1:-}" = "--audit" ]; then audit=1; shift; fi
+[ $# -eq 1 ] || usage
+pr=$1
+case $pr in '' | *[!0-9]*) usage ;; esac
+
+lead=${LEAD_LOGIN:-}
+[ -n "$lead" ] || { echo "lead-approve: LEAD_LOGIN is not set (it has no default): set it to the lead's GitHub login" >&2; exit 2; }
+repo=${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
+head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+[ -n "$head" ] || { echo "lead-approve: cannot resolve the head of PR #$pr" >&2; exit 1; }
+
+if [ "$audit" = 1 ]; then
+	rows=$(gh api --paginate "repos/$repo/commits/$head/statuses" \
+		--jq '.[] | select(.context == "lead-review") | [.state, .creator.login, .created_at] | @tsv')
+	[ -n "$rows" ] || { echo "PR #$pr head $head: no lead-review status"; exit 0; }
+	foreign=0
+	while IFS=$'\t' read -r state creator at; do
+		if [ "$creator" = "$lead" ]; then
+			echo "ok       $state by $creator at $at"
+		else
+			echo "FOREIGN  $state by $creator at $at (not $lead)"
+			foreign=1
+		fi
+	done <<<"$rows"
+	[ "$foreign" = 0 ] || { echo "lead-approve: a lead-review status on PR #$pr was posted by someone other than $lead" >&2; exit 1; }
+	exit 0
+fi
+
+me=$(gh api user --jq .login)
+[ "$me" = "$lead" ] || { echo "lead-approve: authenticated as $me, not LEAD_LOGIN ($lead): refusing" >&2; exit 1; }
+
+codex=$(gh api "repos/$repo/commits/$head/status" --jq '[.statuses[] | select(.context == "codex-review")][0].state // "none"')
+[ "$codex" = success ] || { echo "lead-approve: codex-review is '$codex' on $head, not success: refusing" >&2; exit 1; }
+reset=$(gh api "repos/$repo/commits/$head/check-runs" --jq '[.check_runs[] | select(.name == "label-reset")] | sort_by(.started_at) | last | .conclusion // "none"')
+[ "$reset" = success ] || { echo "lead-approve: label-reset is '$reset' on $head, not success: refusing" >&2; exit 1; }
+if gh pr view "$pr" --json labels --jq '.labels[].name' | grep -Fxq hold; then
+	echo "lead-approve: PR #$pr has the hold label: refusing" >&2
+	exit 1
+fi
+
+gh api -X POST "repos/$repo/statuses/$head" -f state=success -f context=lead-review \
+	-f description="lead reviewed PR #$pr at this head" >/dev/null
+echo "lead-review = success posted on $head (PR #$pr)"
+
+now=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+if [ "$now" != "$head" ]; then
+	echo "WARNING: PR #$pr moved from $head to $now while this ran. The lead-review status is bound to $head and does NOT approve $now: review the new head and run this again." >&2
+	exit 1
+fi
