@@ -30,30 +30,32 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 		}
 		return p
 	}
+	// `policy drift` is the verb that reads only the system credentials (the others also need the admin connection):
+	// it reports the account as UNKNOWN with the credentials error in its output.
+	drift := func(args ...string) (string, int) {
+		out, errb, code := e.run(append([]string{"policy", "drift"}, args...)...)
+		return out + errb, code
+	}
 	for _, mode := range []os.FileMode{0o644, 0o640} {
 		p := write("loose.creds", mode)
 		e.env["MASH_SYS_CREDS"] = p
-		out, errb, code := e.run("policy", "diff")
-		if code != 1 || !strings.Contains(errb, "system account credentials") || !strings.Contains(errb, "chmod 600 "+p) {
-			t.Fatalf("mode %04o: %d %q %q", mode, code, out, errb)
+		all, code := drift()
+		if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "chmod 600 "+p) {
+			t.Fatalf("mode %04o: %d %q", mode, code, all)
 		}
-		if strings.Contains(errb, string(src[:20])) {
+		if strings.Contains(all, string(src[:20])) {
 			t.Fatal("the refusal printed creds content")
 		}
 		// the flag form is checked too
-		if _, errb, code := e.run("policy", "diff", "--sys-creds", p); code != 1 || !strings.Contains(errb, "chmod 600 "+p) {
-			t.Fatalf("--sys-creds mode %04o: %d %q", mode, code, errb)
-		}
-		// so is every other command that connects with them
-		if dout, errb, code := e.run("policy", "drift", "--sys-creds", p); code == 0 || !strings.Contains(dout+errb, "chmod 600 "+p) {
-			t.Fatalf("drift mode %04o: %d %q %q", mode, code, dout, errb)
+		if all, code := drift("--sys-creds", p); code == 0 || !strings.Contains(all, "chmod 600 "+p) {
+			t.Fatalf("--sys-creds mode %04o: %d %q", mode, code, all)
 		}
 	}
 
 	ok := write("ok.creds", 0o600)
 	e.env["MASH_SYS_CREDS"] = ok
-	if out, errb, code := e.run("policy", "diff"); code != 0 {
-		t.Fatalf("0600: %d %q %q", code, out, errb)
+	if all, _ := drift(); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+		t.Fatalf("0600: %q", all)
 	}
 
 	link := filepath.Join(dir, "link.creds")
@@ -61,15 +63,15 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.env["MASH_SYS_CREDS"] = link
-	if out, errb, code := e.run("policy", "diff"); code != 0 {
-		t.Fatalf("symlink to 0600: %d %q %q", code, out, errb)
+	if all, _ := drift(); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+		t.Fatalf("symlink to 0600: %q", all)
 	}
 
 	missing := filepath.Join(dir, "nope.creds")
 	e.env["MASH_SYS_CREDS"] = missing
-	_, errb, code := e.run("policy", "diff")
-	if code != 1 || !strings.Contains(errb, "system account credentials") || !strings.Contains(errb, "no such file") || strings.Contains(errb, "chmod") {
-		t.Fatalf("missing: %d %q", code, errb)
+	all, code := drift()
+	if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "no such file") || strings.Contains(all, "chmod") {
+		t.Fatalf("missing: %d %q", code, all)
 	}
 }
 

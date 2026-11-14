@@ -54,7 +54,7 @@ func FuzzLoadEdit(f *testing.F) {
 	add := func(b []byte) {
 		f.Add(b, "a", "team", "x")
 		f.Add(b, "new-one", "k", "v")
-		f.Add(b, "b", "zone", "")
+		f.Add(b, "b", "net", "")
 	}
 	for _, name := range []string{"block.yaml", "commented.yaml"} {
 		b, err := os.ReadFile(filepath.Join("testdata", name))
@@ -134,7 +134,7 @@ func FuzzLoadEdit(f *testing.F) {
 		}
 		step("AddEndpoint", err == nil, false, name)
 
-		err = d.SetLabels(name, map[string]string{k: v}, []string{"zone"})
+		err = d.SetLabels(name, map[string]string{k: v}, []string{"net"})
 		step("SetLabels", err == nil, false, name)
 		first := ""
 		for n := range orig.Endpoints {

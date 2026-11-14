@@ -13,16 +13,16 @@ func errTexts(err error) string {
 }
 
 func TestDenyRuleSelectingNobodyIsAnError(t *testing.T) {
-	src := "default: allow\nendpoints:\n  a: {labels: {zone: red}}\n  b: {labels: {zone: red}}\nrules:\n  - {name: block-typo, action: deny, from: {zoen: red}, to: {}}\n"
+	src := "default: allow\nendpoints:\n  a: {labels: {net: red}}\n  b: {labels: {net: red}}\nrules:\n  - {name: block-typo, action: deny, from: {zoen: red}, to: {}}\n"
 	_, err := Parse([]byte(src))
 	for _, want := range []string{"rule block-typo (line 6)", "from selector {zoen=red} matches no endpoint", "set allow_empty: true on the rule if the group is intentionally empty"} {
 		if !strings.Contains(errTexts(err), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}
 	}
-	// a to selector too, with the zone hint kept
-	_, err = Parse([]byte("endpoints:\n  a: {labels: {zone: red}}\nrules:\n  - {name: r, action: deny, from: {}, to: {zone: ghost}}\n"))
-	if !strings.Contains(errTexts(err), "to selector {zone=ghost} matches no endpoint (zone ghost has no endpoints)") {
+	// a to selector too
+	_, err = Parse([]byte("endpoints:\n  a: {labels: {net: red}}\nrules:\n  - {name: r, action: deny, from: {}, to: {net: ghost}}\n"))
+	if !strings.Contains(errTexts(err), "to selector {net=ghost} matches no endpoint") {
 		t.Errorf("%v", err)
 	}
 }
@@ -35,10 +35,10 @@ func TestAllowRuleSelectingNobodyStaysAWarning(t *testing.T) {
 }
 
 func TestAllowEmptyDowngradesADenyToAWarning(t *testing.T) {
-	src := "default: allow\nendpoints:\n  a: {labels: {zone: red}}\nrules:\n  - {name: later, action: deny, from: {zone: blue}, to: {}, allow_empty: true}\n"
+	src := "default: allow\nendpoints:\n  a: {labels: {net: red}}\nrules:\n  - {name: later, action: deny, from: {net: blue}, to: {}, allow_empty: true}\n"
 	f := mustParse(t, src)
 	r := f.Check()
-	if len(r.Errors) != 0 || len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0].Message, "{zone=blue} matches no endpoint (zone blue has no endpoints)") {
+	if len(r.Errors) != 0 || len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0].Message, "{net=blue} matches no endpoint") {
 		t.Fatalf("%+v", r)
 	}
 	if !f.Rules[0].AllowEmpty {
@@ -49,7 +49,7 @@ func TestAllowEmptyDowngradesADenyToAWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f2 := mustParse(t, "default: allow\nendpoints:\n  a: {labels: {zone: red}}\n")
+	f2 := mustParse(t, "default: allow\nendpoints:\n  a: {labels: {net: red}}\n")
 	c2, err := Compile(f2, "o")
 	if err != nil {
 		t.Fatal(err)
@@ -61,18 +61,12 @@ func TestAllowEmptyDowngradesADenyToAWarning(t *testing.T) {
 	}
 }
 
-func TestZoneLabelIsAtMost32Characters(t *testing.T) {
-	zone := func(n int) string { return "z" + strings.Repeat("a", n-1) }
-	src := func(z string) string { return "endpoints:\n  a: {labels: {zone: " + z + "}}\n" }
-	if _, err := Parse([]byte(src(zone(32)))); err != nil {
-		t.Errorf("32 characters refused: %v", err)
-	}
-	_, err := Parse([]byte(src(zone(33))))
-	if err == nil || !strings.Contains(err.Error(), "is the zone, which is one subject token: lower-case letters, digits and single hyphens, starting with a letter, 1-32 characters") {
-		t.Errorf("33 characters: %v", err)
-	}
-	// an endpoint name keeps its 48
-	if _, err := Parse([]byte("endpoints:\n  " + zone(48) + ": {}\n")); err != nil {
+func TestEndpointNameKeeps48Characters(t *testing.T) {
+	name := func(n int) string { return "z" + strings.Repeat("a", n-1) }
+	if _, err := Parse([]byte("endpoints:\n  " + name(48) + ": {}\n")); err != nil {
 		t.Errorf("48-character name refused: %v", err)
+	}
+	if _, err := Parse([]byte("endpoints:\n  " + name(49) + ": {}\n")); err == nil {
+		t.Error("49-character name accepted")
 	}
 }

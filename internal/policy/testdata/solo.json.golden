@@ -1,7 +1,6 @@
 {
   "owner": "acme",
   "default": "allow",
-  "subject_label": "zone",
   "covers": [
     "mail"
   ],
@@ -9,23 +8,9 @@
     "prompt",
     "status"
   ],
-  "zones": [
-    {
-      "name": "default",
-      "wildcards": [
-        "default"
-      ],
-      "endpoints": [
-        "coder",
-        "deploy-bot",
-        "reviewer"
-      ]
-    }
-  ],
   "endpoints": [
     {
       "name": "coder",
-      "zone": "default",
       "labels": {
         "role": "agent"
       },
@@ -33,15 +18,10 @@
         "coder",
         "reviewer"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:default.deploy-bot"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "deploy-bot",
-      "zone": "default",
       "labels": {
         "kind": "tool",
         "risk": "high"
@@ -51,14 +31,10 @@
         "deploy-bot",
         "reviewer"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "reviewer",
-      "zone": "default",
       "labels": {
         "role": "agent"
       },
@@ -66,11 +42,7 @@
         "coder",
         "reviewer"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:default.deploy-bot"
-      ]
+      "may_mail_nobody": false
     }
   ]
 }

@@ -50,42 +50,27 @@ func (c *Compiled) Matrix() string {
 }
 
 type jsonDoc struct {
-	Owner        string         `json:"owner"`
-	Default      string         `json:"default"`
-	SubjectLabel string         `json:"subject_label"`
-	Covers       []string       `json:"covers"`
-	Open         []string       `json:"open"`
-	Zones        []jsonZone     `json:"zones"`
-	Endpoints    []jsonEndpoint `json:"endpoints"`
-}
-
-type jsonZone struct {
-	Name      string   `json:"name"`
-	Wildcards []string `json:"wildcards"`
-	Endpoints []string `json:"endpoints"`
+	Owner     string         `json:"owner"`
+	Default   string         `json:"default"`
+	Covers    []string       `json:"covers"`
+	Open      []string       `json:"open"`
+	Endpoints []jsonEndpoint `json:"endpoints"`
 }
 
 type jsonEndpoint struct {
 	Name          string            `json:"name"`
-	Zone          string            `json:"zone"`
 	Labels        map[string]string `json:"labels"`
 	Recipients    []string          `json:"recipients"`
 	MayMailNobody bool              `json:"may_mail_nobody"`
-	Tags          []string          `json:"tags"`
 }
 
-// JSON is the machine-readable form for `show --json`: owner, default, subject_label, covers (what rules police: mail) and
-// open (what they do not yet: prompt, status), the zones (name, the zones
-// its key grants whole, endpoints) and, per endpoint, name, zone, labels, recipients, may_mail_nobody and the tags
-// of its user. Keys are in a fixed order, maps are sorted, the output is indented and ends in a newline.
+// JSON is the machine-readable form for `show --json`: owner, default, covers (what rules police: mail) and
+// open (what they do not yet: prompt, status) and, per endpoint, name, labels, recipients and may_mail_nobody. Keys are in a fixed order, maps are sorted, the output is indented and ends in a newline.
 // It carries nothing of the JWT.
 func (c *Compiled) JSON() ([]byte, error) {
-	d := jsonDoc{Owner: c.Owner, Default: c.Default, SubjectLabel: c.SubjectLabel,
+	d := jsonDoc{Owner: c.Owner, Default: c.Default,
 		Covers: []string{"mail"}, Open: []string{"prompt", "status"},
-		Zones: make([]jsonZone, len(c.Zones)), Endpoints: make([]jsonEndpoint, len(c.Endpoints))}
-	for i, z := range c.Zones {
-		d.Zones[i] = jsonZone{Name: z.Name, Wildcards: nonNil(z.Wildcards), Endpoints: nonNil(z.Endpoints)}
-	}
+		Endpoints: make([]jsonEndpoint, len(c.Endpoints))}
 	for i, e := range c.Endpoints {
 		labels := e.Labels
 		if labels == nil {
@@ -95,18 +80,11 @@ func (c *Compiled) JSON() ([]byte, error) {
 		if rec == nil {
 			rec = []string{}
 		}
-		d.Endpoints[i] = jsonEndpoint{Name: e.Name, Zone: e.Zone, Labels: labels, Recipients: rec, MayMailNobody: len(rec) == 0, Tags: nonNil(e.Tags)}
+		d.Endpoints[i] = jsonEndpoint{Name: e.Name, Labels: labels, Recipients: rec, MayMailNobody: len(rec) == 0}
 	}
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(b, '\n'), nil
-}
-
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }

@@ -230,10 +230,6 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ks.ZoneKey("a", true); err != nil {
-		t.Fatal(err)
-	}
-	zone, _ := e.ks.ZonePublic("a")
 	cfg := config.Config{AdminCreds: e.env["MASH_ADMIN_CREDS"]}
 	adminUser, err := ctl.AdminUserKey(cfg)
 	if err != nil {
@@ -249,7 +245,6 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 		"the account":    {e.acctPub, 1, "the account's own key"},
 		"the operator":   {op, 1, "the operator key"},
 		"the system":     {sys, 1, "the system account key"},
-		"a zone key":     {zone, 1, "the signing key of zone a"},
 		"the admin user": {adminUser, 1, "the admin user's key"},
 	}
 	for name, c := range cases {
@@ -435,7 +430,7 @@ func TestAdoptedAccountRefusesApplyAndRepair(t *testing.T) {
 	if _, errb, code := e.run("policy", "adopt", "--submitter", userPub(t)); code != 0 {
 		t.Fatal(errb)
 	}
-	for _, args := range [][]string{{"policy", "diff"}, {"policy", "drift"}, {"policy", "check"}, {"policy", "test"}, {"policy", "show"}, {"policy", "explain", "x", "y"}} {
+	for _, args := range [][]string{{"policy", "drift"}, {"policy", "check"}, {"policy", "test"}} {
 		if out, errb, code := e.run(args...); code == 1 && strings.Contains(out+errb, "adopted") {
 			t.Errorf("%v was refused on an adopted account: %q %q", args, out, errb)
 		}
@@ -447,7 +442,7 @@ func TestAdoptedAccountStillAllowsReadsAndDeprovision(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
 	h.adoptAs(userPub(t))
-	for _, args := range [][]string{{"list"}, {"audit"}, {"issued", "list"}, {"policy", "check"}, {"policy", "test"}, {"policy", "show"}, {"policy", "explain", "a", "b"}, {"policy", "adopt", "--show"}, {"suspended", "b"}} {
+	for _, args := range [][]string{{"list"}, {"audit"}, {"issued", "list"}, {"policy", "check"}, {"policy", "test"}, {"policy", "adopt", "--show"}, {"suspended", "b"}} {
 		out, errb, code := h.run(args...)
 		if strings.Contains(out+errb, "adopted by an outside system") || (code != 0 && code != 3) {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)

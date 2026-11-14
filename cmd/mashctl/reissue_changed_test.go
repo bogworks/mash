@@ -20,7 +20,7 @@ func TestReissueChangedSelectsRevokedKey(t *testing.T) {
 	revCalls := fakeKeyRevoked(t, true, nil)
 
 	out, errb, code := h.run("reissue", "--changed")
-	if code != 0 || !strings.Contains(out, "reissued a (tags: deny:_none; new user key, old key revoked)\n") || strings.Contains(out, "nothing to reissue") {
+	if code != 0 || !strings.Contains(out, "reissued a (new user key, old key revoked)\n") || strings.Contains(out, "nothing to reissue") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	noSecrets(t, out, errb)
@@ -65,14 +65,14 @@ func TestReissueChangedFinishesStagedRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := mint.Mint(h.keys(), c, "a", oldSeed, false)
+	m, err := mint.Mint(h.keys(), c, "a", oldSeed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(h.creds("a"), m.Creds, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+stagedPub {
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a//"+stagedPub {
 		t.Fatalf("records %v", recs)
 	}
 

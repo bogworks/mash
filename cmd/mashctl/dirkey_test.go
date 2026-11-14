@@ -25,7 +25,7 @@ func keyedRecords(t *testing.T) (newForm, legacy store.Record) {
 // evidence that it is provisioned.
 func TestDirectoryFindingsNewFormRecordIsNotTheLegacyEndpoint(t *testing.T) {
 	nf, lg := keyedRecords(t)
-	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x", Zone: "z"}}}
+	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x"}}}
 
 	out, _ := directoryFindings(c, []store.Record{nf})
 	kinds := map[string]string{}

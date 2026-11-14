@@ -31,7 +31,7 @@ func (h *addEnv) policyText() string {
 
 func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--label", "zone=red"); code != 0 {
+	if _, errb, code := h.run("add", "c", "--label", "net=red"); code != 0 {
 		t.Fatal(errb)
 	}
 	out, errb, code := h.run("retire", "c")
@@ -154,10 +154,10 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 
 const retirePolicyTests = `default: deny
 endpoints:
-  a: {labels: {zone: red, team: x}}
-  b: {labels: {zone: red}}
+  a: {labels: {net: red, team: x}}
+  b: {labels: {net: red}}
 rules:
-  - {name: ab, action: allow, from: {team: x}, to: {zone: red}}
+  - {name: ab, action: allow, from: {team: x}, to: {net: red}}
 tests:
   - {from: a, to: b, expect: allow}
 `
@@ -286,9 +286,8 @@ func TestRetireSavesNothingWhenPolicyChanged(t *testing.T) {
 func TestRetireConsequencesAndUsage(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
 	h.provisionDeclared("b")
-	// b is the last member of zone blue: the account JWT loses a key
 	out, errb, code := h.run("retire", "b")
-	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
+	if code != 0 || strings.Contains(out, "needed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	for _, args := range [][]string{{"retire"}, {"retire", "a", "b"}, {"retire", "a", "--bogus"}} {
@@ -304,17 +303,10 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 	}
 }
 
-// newFleetEnv is newAddEnv with the signing keys of the zones the policy already declares (an add into an existing
-// zone needs its key to exist: only a new zone gets one made).
+// newFleetEnv is newAddEnv: there are no zone signing keys to make any more (ADR 0091).
 func newFleetEnv(t *testing.T, src string) *addEnv {
 	t.Helper()
-	h := newAddEnv(t, src)
-	for _, z := range []string{"red", "blue"} {
-		if _, err := h.keys().ZoneKey(z, true); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return h
+	return newAddEnv(t, src)
 }
 
 // failAfterPurge makes the guarded removal fail the way a broken lease fence does: the record and inbox are gone.

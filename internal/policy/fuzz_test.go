@@ -54,7 +54,7 @@ func nastySeeds() []string {
 		"endpoints:\n  a:\n    labels: {team: " + strings.Repeat("x", 64<<10) + "}\n",
 		"endpoints:\n  " + strings.Repeat("a", 64<<10) + ": {}\n",
 		"endpoints:\n  \u0430dmin: {}\n  admin: {}\n", "endpoints:\n  \u0430: {}\n",
-		"endpoints:\n  a:\n    labels: {zone: \u0430}\n  b:\n    labels: {zone: a}\n",
+		"endpoints:\n  a:\n    labels: {net: \u0430}\n  b:\n    labels: {net: a}\n",
 		"", "\n", "[]", "{}", "null", "~", "5", "- a\n", "? [a]\n: b\n", "! a\n",
 		"subject_label: team\nendpoints:\n  a:\n    labels: {team: x}\n  b: {}\n",
 		"default: deny\nendpoints:\n  a: {labels: {team: x}}\n  b: {labels: {team: y}}\nrules:\n  - {name: r, action: allow, from: {team: x}, to: {team: y}}\n  - {name: d, action: deny, from: {team: x}, to: {team: y}}\ntests:\n  - {from: a, to: b, expect: deny}\n",
@@ -82,7 +82,7 @@ func addPolicySeeds(f *testing.F, owner ...string) {
 	for _, s := range []string{
 		"endpoints:\n  a: {}\n",
 		"default: deny\nendpoints:\n  a:\n    labels: {team: x}\n  b:\n    labels: {team: y}\nrules:\n  - {name: r, action: allow, from: {team: x}, to: {team: y}}\n",
-		"endpoints:\n  a: {labels: {zone: z}}\nrules:\n  - {name: r, action: deny, from: {}, to: {}}\ntests:\n  - {from: a, to: a, expect: deny}\n",
+		"endpoints:\n  a: {labels: {net: z}}\nrules:\n  - {name: r, action: deny, from: {}, to: {}}\ntests:\n  - {from: a, to: a, expect: deny}\n",
 	} {
 		add([]byte(s))
 	}
@@ -195,9 +195,6 @@ func FuzzParse(f *testing.F) {
 			if _, ok := c.endpoint(name); !ok {
 				t.Fatalf("declared endpoint %q is not compiled", name)
 			}
-			if _, err := c.Effective(name); err != nil {
-				t.Fatalf("Effective(%q): %v", name, err)
-			}
 		}
 		_ = c.Matrix()
 		j, err := c.JSON()
@@ -222,7 +219,7 @@ func FuzzParse(f *testing.F) {
 				if err != nil {
 					t.Fatalf("Explain(%q,%q): %v", a, b, err)
 				}
-				al, bl := file.effectiveLabels(a), file.effectiveLabels(b)
+				al, bl := file.Endpoints[a].Labels, file.Endpoints[b].Labels
 				for _, r := range file.Rules {
 					if r.Action == Deny && r.From.matches(al) && r.To.matches(bl) && x.Allowed {
 						t.Fatalf("deny rule %q matches %q -> %q but Explain allows it", r.Name, a, b)
@@ -255,11 +252,6 @@ func FuzzCheckCompile(f *testing.F) {
 				t.Fatal("Compile returned both a result and an error")
 			}
 			return
-		}
-		for _, e := range c.Endpoints {
-			if _, err := c.Effective(e.Name); err != nil {
-				t.Fatalf("Effective(%q): %v", e.Name, err)
-			}
 		}
 	})
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// HeldKeys lists the operator, system, account and zone public keys with what each is; a store without an account key
+// HeldKeys lists the operator, system and account public keys with what each is; a store without an account key
 // is an error (fail closed), one without an operator or system key is not.
 func TestHeldKeys(t *testing.T) {
 	dir := t.TempDir()
@@ -28,18 +28,11 @@ func TestHeldKeys(t *testing.T) {
 	}
 	op, _, _ := a.InitOperator()
 	sys, _, _ := a.InitSystem()
-	if _, err := a.ZoneKey("z1", true); err != nil {
-		t.Fatal(err)
-	}
-	zpub, err := a.ZonePublic("z1")
-	if err != nil {
-		t.Fatal(err)
-	}
 	_, held, err := a.HeldKeys()
-	if err != nil || len(held) != 4 {
+	if err != nil || len(held) != 3 {
 		t.Fatalf("%v %v", held, err)
 	}
-	for _, k := range []string{op, sys, acct, zpub} {
+	for _, k := range []string{op, sys, acct} {
 		if held[k] == "" {
 			t.Errorf("a held key is missing: %q", k[:8])
 		}

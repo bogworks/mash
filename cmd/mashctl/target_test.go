@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,11 +15,6 @@ import (
 // tests of the lines themselves read them through showTarget.
 func TestMain(m *testing.M) {
 	announceSink = io.Discard
-	// A reissue first asks whether its zone key is published in the account JWT on every server; tests that reach the
-	// network have no system account, so by default the seam says yes, and fakeSignerPublished overrides it.
-	signerPublished = func(context.Context, config.Config, func(string) string, int, string, string) (bool, error) {
-		return true, nil
-	}
 	os.Exit(m.Run())
 }
 

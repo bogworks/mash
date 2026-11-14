@@ -19,17 +19,13 @@ import (
 
 const policyAppliedMsg = "a zone policy is applied: zones are removed (ADR 0091); stay on the last release that has zones until the label policy model ships"
 
-// zonedFixture initialises the directory and provisions "alpha" in zone z1, with admin creds set.
+// zonedFixture initialises the directory and provisions "alpha" in zone z1, with admin creds set; with applyPolicyFirst
+// the account JWT also carries a scoped signing key, as a zone policy of an older release left it.
 func zonedFixture(t *testing.T, e *applyEnv, applyPolicyFirst bool) {
 	t.Helper()
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	if out, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %d %s %s", code, out, errb)
-	}
-	if applyPolicyFirst { // a record is zoned after the policy: apply would refuse a zoned directory
-		if out, errb, code := e.run("policy", "apply"); code != 0 {
-			t.Fatalf("apply: %d %s %s", code, out, errb)
-		}
 	}
 	cfg, err := config.Load(func(k string) (string, bool) { v, ok := e.env[k]; return v, ok }, e.root)
 	if err != nil {
@@ -49,10 +45,12 @@ func zonedFixture(t *testing.T, e *applyEnv, applyPolicyFirst bool) {
 	if _, err := js.Publish(ctx, "agents.mail.cc.alice.z1.alpha", []byte("queued")); err != nil {
 		t.Fatal(err)
 	}
+	if applyPolicyFirst { // a zone policy of an older release: the account JWT carries a scoped signing key
+		e.applyZonePolicy()
+	}
 }
 
 func TestUnzoneRefusesWhileAZonePolicyIsApplied(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
 	e := newApplyEnv(t, twoZones)
 	zonedFixture(t, e, true)
 	out, errb, code := e.run("unzone", "alpha")
@@ -64,26 +62,6 @@ func TestUnzoneRefusesWhileAZonePolicyIsApplied(t *testing.T) {
 	recs, _ := adm.List(context.Background())
 	if err := store.FirstZonedRecord(recs); err == nil || !strings.Contains(err.Error(), "mashctl unzone") {
 		t.Fatalf("record was changed or the guard text lacks the verb: %v", err)
-	}
-}
-
-func TestApplyRefusesAZonedPolicyFirstApplyIncluded(t *testing.T) {
-	e := newApplyEnv(t, twoZones).withDirectory()
-	before := e.accountJWT()
-	out, errb, code := e.run("policy", "apply")
-	if code != 1 || !strings.Contains(errb, "the policy compiles zone constructs") || !strings.Contains(errb, "zones are removed (ADR 0091)") || !strings.Contains(errb, "nothing was changed") {
-		t.Fatalf("first apply: %d\n%s\n%s", code, out, errb)
-	}
-	if e.accountJWT() != before {
-		t.Fatal("a refused apply pushed")
-	}
-	// diff is read-only and still works, with a warning.
-	out, errb, code = e.run("policy", "diff")
-	if code != 0 || !strings.Contains(out, "warning: the policy compiles zone constructs") {
-		t.Fatalf("diff: %d %s %s", code, out, errb)
-	}
-	if e.accountJWT() != before {
-		t.Fatal("diff pushed")
 	}
 }
 
@@ -124,12 +102,13 @@ func TestUnzoneWithNoPolicyMovesTheEndpointAndRerunsAsANoOp(t *testing.T) {
 	if err := store.FirstZonedRecord(recs); err != nil {
 		t.Fatal(err)
 	}
-	// Apply is refused for a zoned policy even now that the directory is five-token (ADR 0091).
-	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "the policy compiles zone constructs") {
+	// Apply now runs: the directory is five-token and there is no zone policy; it gets past the guards to
+	// the refusal that says there is no replacement yet (ADR 0091).
+	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement until the label policy model ships") || strings.Contains(errb, "zone policy is applied") {
 		t.Fatalf("apply: %d %s %s", code, out, errb)
 	}
 	if applied, err := apply.AppliedZonePolicy(context.Background(), applyResolver(t, e), e.ks, 0); err != nil || applied {
-		t.Fatalf("AppliedZonePolicy after refused apply: %v %v", applied, err)
+		t.Fatalf("AppliedZonePolicy after apply: %v %v", applied, err)
 	}
 }
 

@@ -1,7 +1,6 @@
 {
   "owner": "acme",
   "default": "deny",
-  "subject_label": "zone",
   "covers": [
     "mail"
   ],
@@ -9,36 +8,12 @@
     "prompt",
     "status"
   ],
-  "zones": [
-    {
-      "name": "dmz",
-      "wildcards": [],
-      "endpoints": [
-        "web-intake"
-      ]
-    },
-    {
-      "name": "internal",
-      "wildcards": [
-        "internal"
-      ],
-      "endpoints": [
-        "billing-agent",
-        "build-bot",
-        "deploy-tool",
-        "hr-agent",
-        "ledger-agent",
-        "support-bot"
-      ]
-    }
-  ],
   "endpoints": [
     {
       "name": "billing-agent",
-      "zone": "internal",
       "labels": {
-        "team": "finance",
-        "zone": "internal"
+        "net": "internal",
+        "team": "finance"
       },
       "recipients": [
         "billing-agent",
@@ -47,18 +22,13 @@
         "ledger-agent",
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "build-bot",
-      "zone": "internal",
       "labels": {
-        "team": "platform",
-        "zone": "internal"
+        "net": "internal",
+        "team": "platform"
       },
       "recipients": [
         "billing-agent",
@@ -67,19 +37,14 @@
         "ledger-agent",
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "deploy-tool",
-      "zone": "internal",
       "labels": {
         "kind": "tool",
-        "team": "platform",
-        "zone": "internal"
+        "net": "internal",
+        "team": "platform"
       },
       "recipients": [
         "billing-agent",
@@ -88,18 +53,13 @@
         "ledger-agent",
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "hr-agent",
-      "zone": "internal",
       "labels": {
-        "team": "hr",
-        "zone": "internal"
+        "net": "internal",
+        "team": "hr"
       },
       "recipients": [
         "billing-agent",
@@ -108,18 +68,13 @@
         "ledger-agent",
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "ledger-agent",
-      "zone": "internal",
       "labels": {
-        "team": "finance",
-        "zone": "internal"
+        "net": "internal",
+        "team": "finance"
       },
       "recipients": [
         "billing-agent",
@@ -128,18 +83,13 @@
         "ledger-agent",
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "support-bot",
-      "zone": "internal",
       "labels": {
-        "team": "support",
-        "zone": "internal"
+        "net": "internal",
+        "team": "support"
       },
       "recipients": [
         "billing-agent",
@@ -149,29 +99,19 @@
         "support-bot",
         "web-intake"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "allow:dmz.web-intake",
-        "deny:_none",
-        "deny:internal.hr-agent"
-      ]
+      "may_mail_nobody": false
     },
     {
       "name": "web-intake",
-      "zone": "dmz",
       "labels": {
         "internet": "yes",
-        "team": "web",
-        "zone": "dmz"
+        "net": "dmz",
+        "team": "web"
       },
       "recipients": [
         "support-bot"
       ],
-      "may_mail_nobody": false,
-      "tags": [
-        "allow:internal.support-bot",
-        "deny:_none"
-      ]
+      "may_mail_nobody": false
     }
   ]
 }

@@ -41,14 +41,13 @@ func otherOperatorStore(t *testing.T, e *applyEnv) *ctlkeys.Authority {
 }
 
 func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
 	e := newApplyEnv(t, twoZones).withDirectory()
 	ks := otherOperatorStore(t, e)
 	_, opPub, _ := ks.Operator()
 	realOp, _, _ := e.ks.Operator()
 	realPub, _ := realOp.PublicKey()
 	before := e.accountJWT()
-	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "diff"}, {"policy", "repair"}, {"policy", "repair", "--dry-run"}} {
+	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "repair"}, {"policy", "repair", "--dry-run"}} {
 		out, errb, code := e.run(args...)
 		if code != 1 || !strings.Contains(out+errb, "not an accepted issuer") || !strings.Contains(out+errb, realPub) || !strings.Contains(out+errb, opPub) {
 			t.Fatalf("%v: exit %d\n%s\n%s", args, code, out, errb)
@@ -57,9 +56,6 @@ func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
 	}
 	if e.accountJWT() != before {
 		t.Fatal("the account JWT changed")
-	}
-	if z, _ := ks.Zones(); len(z) != 0 {
-		t.Fatalf("zone keys were created: %v", z)
 	}
 	// drift cannot trust the JWT either
 	out, _, code := e.run("policy", "drift", "--json")
@@ -76,8 +72,8 @@ func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
 	if _, err := ks.InstallOperatorJWT(tok); err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := e.run("policy", "diff"); code != 0 {
-		t.Fatalf("diff with operator.jwt: %d\n%s\n%s", code, out, errb)
+	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement") {
+		t.Fatalf("apply with operator.jwt: %d\n%s\n%s", code, out, errb)
 	}
 }
 
@@ -108,12 +104,11 @@ func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 }
 
 func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
 	// a plain loopback server without the opt-in: every admin verb and the system connection are refused
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t, twoZones).withDirectory()
 	e.env["MASH_INSECURE_LOOPBACK"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	for _, args := range [][]string{{"policy", "diff"}, {"policy", "apply"}, {"policy", "drift"}, {"list"}, {"init"}} {
+	for _, args := range [][]string{{"policy", "apply"}, {"policy", "drift"}, {"list"}, {"init"}} {
 		out, errb, code := e.run(args...)
 		if code == 0 || !strings.Contains(out+errb, "secure connection not available") {
 			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
@@ -121,14 +116,14 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	}
 	// with the opt-in the same server works
 	e.env["MASH_INSECURE_LOOPBACK"] = "1"
-	if out, errb, code := e.run("policy", "diff"); code != 0 {
+	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement") {
 		t.Fatalf("with the opt-in: %d\n%s\n%s", code, out, errb)
 	}
 	// a non-loopback plain URL is refused before any connection, with or without the opt-in
 	for _, optIn := range []string{"", "1"} {
 		e.env["MASH_INSECURE_LOOPBACK"] = optIn
 		e.env["MASH_URL"] = "nats://192.0.2.1:4222"
-		for _, args := range [][]string{{"policy", "diff"}, {"list"}} {
+		for _, args := range [][]string{{"policy", "apply"}, {"list"}} {
 			out, errb, code := e.run(args...)
 			if code == 0 || !(strings.Contains(out+errb, "refusing a plain nats://") || strings.Contains(out+errb, "allows a plain connection only to localhost")) {
 				t.Fatalf("%v opt-in %q: %d\n%s\n%s", args, optIn, code, out, errb)

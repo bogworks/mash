@@ -1,35 +1,35 @@
-# An IT department's policy: deny by default, zones by label, a tests section that gates every apply.
+# An IT department's policy: deny by default, networks by label, a tests section that gates every apply.
 default: deny
 
 endpoints:
   web-intake:
-    labels: {zone: dmz, internet: "yes", team: web}
+    labels: {net: dmz, internet: "yes", team: web}
   support-bot:
-    labels: {zone: internal, team: support}
+    labels: {net: internal, team: support}
   billing-agent:
-    labels: {zone: internal, team: finance}
+    labels: {net: internal, team: finance}
   ledger-agent:
-    labels: {zone: internal, team: finance}
+    labels: {net: internal, team: finance}
   hr-agent:
-    labels: {zone: internal, team: hr}
+    labels: {net: internal, team: hr}
   build-bot:
-    labels: {zone: internal, team: platform}
+    labels: {net: internal, team: platform}
   deploy-tool:
-    labels: {zone: internal, team: platform, kind: tool}
+    labels: {net: internal, team: platform, kind: tool}
 
 rules:
   - name: internal-agents-talk
     action: allow
-    from: {zone: internal}
-    to: {zone: internal}
+    from: {net: internal}
+    to: {net: internal}
   - name: dmz-reaches-support
     action: allow
-    from: {zone: dmz}
+    from: {net: dmz}
     to: {team: support}
   - name: support-answers-dmz
     action: allow
     from: {team: support}
-    to: {zone: dmz}
+    to: {net: dmz}
   - name: nothing-internet-facing-reaches-finance
     action: deny
     from: {internet: "yes"}

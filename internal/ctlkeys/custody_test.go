@@ -211,7 +211,4 @@ func TestGroupKeyIsKeptBesideTheZoneKeysAndNeverOverwritten(t *testing.T) {
 			t.Errorf("accepted %q", bad)
 		}
 	}
-	if zs, _ := a.Zones(); len(zs) != 0 {
-		t.Errorf("a group key shows as a zone: %v", zs)
-	}
 }

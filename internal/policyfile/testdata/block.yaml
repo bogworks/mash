@@ -2,5 +2,5 @@ default: allow
 endpoints:
     a:
       labels:
-        zone: x
+        net: x
 rules: []

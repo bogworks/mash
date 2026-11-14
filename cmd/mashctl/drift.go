@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nats-io/jwt/v2"
-
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
@@ -32,7 +30,7 @@ func driftUsage() string {
 }
 
 func repairUsage() string {
-	return "usage: mashctl policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [--keep-zone ZONE]... [--dry-run]\n"
+	return "usage: mashctl policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [--dry-run]\n"
 }
 
 // The states a drift report compares with the policy file, in the order they are printed.
@@ -42,17 +40,14 @@ const (
 	statusUnknown = "unknown" // the state could not be read; it counts as drift for the exit code
 )
 
-// Finding kinds of the keys, directory and issued states (the account state's are in internal/apply).
+// Finding kinds of the directory and issued states (the account state's are in internal/apply).
 const (
-	kindKeyFileMissing = "key-file-missing"
-	kindKeyFileExtra   = "key-file-extra"
-	kindKeyDiffers     = "key-differs"
-	kindRecordMissing  = "record-missing"
-	kindRecordExtra    = "record-extra"
-	kindZonedRecord    = "zoned-record"
-	kindLabelDiffers   = "label-differs"
-	kindCredsStale     = "creds-stale"
-	kindCredsUnread    = "creds-unreadable"
+	kindRecordMissing = "record-missing"
+	kindRecordExtra   = "record-extra"
+	kindZonedRecord   = "zoned-record"
+	kindLabelDiffers  = "label-differs"
+	kindCredsStale    = "creds-stale"
+	kindCredsUnread   = "creds-unreadable"
 )
 
 // stateReport is one compared state. Findings is never nil, so the JSON is stable.
@@ -85,7 +80,6 @@ type driftReport struct {
 	Drift      bool        `json:"drift"`
 	Policy     string      `json:"policy"`
 	Account    stateReport `json:"account"`
-	Keys       stateReport `json:"keys"`
 	Directory  stateReport `json:"directory"`
 	Issued     stateReport `json:"issued"`
 	NotCovered []string    `json:"not_covered"`
@@ -206,64 +200,6 @@ func credsPathFunc(cfg config.Config, dir string) func(name string) (string, err
 	}
 }
 
-// signersByRole is the public keys of the scoped signing keys of the account JWT, by role (zone). skip holds keys that
-// are not zone signers (the issue service's owner group signers) and are left out.
-func signersByRole(ac *jwt.AccountClaims, skip map[string]bool) map[string][]string {
-	out := map[string][]string{}
-	for _, k := range ac.SigningKeys.Keys() {
-		if skip[k] {
-			continue
-		}
-		sc, _ := ac.SigningKeys.GetScope(k)
-		if us, ok := sc.(*jwt.UserScope); ok && us != nil {
-			out[us.Role] = append(out[us.Role], k)
-		}
-	}
-	for r := range out {
-		slices.Sort(out[r])
-	}
-	return out
-}
-
-// keyFindings compares the key store's zone key files (zone -> public key) with the scoped signers of the account JWT
-// (role -> public keys) for the policy's zones.
-func keyFindings(policyZones []string, files map[string]string, signers map[string][]string) []apply.Finding {
-	var out []apply.Finding
-	zones := map[string]bool{}
-	for _, z := range policyZones {
-		zones[z] = true
-	}
-	for z := range files {
-		zones[z] = true
-	}
-	for z := range signers {
-		zones[z] = true
-	}
-	inFile := map[string]bool{}
-	for _, z := range policyZones {
-		inFile[z] = true
-	}
-	for _, z := range slices.Sorted(mapKeys(zones)) {
-		pub, haveFile := files[z]
-		on := signers[z]
-		switch {
-		case !haveFile && (len(on) > 0 || inFile[z]):
-			d := "the key store has no key file for this zone"
-			if len(on) > 0 {
-				d += "; the account JWT has its signing key " + strings.Join(on, ", ")
-			}
-			out = append(out, apply.Finding{Kind: kindKeyFileMissing, Subject: z, Detail: d})
-		case haveFile && len(on) > 0 && !slices.Contains(on, pub):
-			out = append(out, apply.Finding{Kind: kindKeyDiffers, Subject: z,
-				Detail: fmt.Sprintf("the key file's public key is %s, the account JWT's signing key for this zone is %s", pub, strings.Join(on, ", "))})
-		case haveFile && len(on) == 0 && !inFile[z]:
-			out = append(out, apply.Finding{Kind: kindKeyFileExtra, Subject: z,
-				Detail: "a key file for a zone that is neither in the policy file nor in the account JWT (a leftover; repair never deletes it)"})
-		}
-	}
-	return out
-}
-
 func mapKeys[M ~map[string]V, V any](m M) func(func(string) bool) {
 	return func(yield func(string) bool) {
 		for k := range m {
@@ -357,20 +293,17 @@ func sortFindings(f []apply.Finding) {
 
 // issuedFindings compares the creds files found with the compiled endpoints, with the compare `reissue --changed` uses.
 // An endpoint with no creds file here is a note, not drift. The result also lists the stale endpoints, by name.
-func issuedFindings(keys *ctlkeys.Authority, c *policy.Compiled, path func(string) (string, error)) (findings []apply.Finding, notes, stale []string) {
+func issuedFindings(keys *ctlkeys.Authority, c *policy.Compiled, owner string, path func(string) (string, error)) (findings []apply.Finding, notes, stale []string) {
 	for _, e := range c.Endpoints {
 		p, err := path(e.Name)
 		if err != nil {
 			findings = append(findings, apply.Finding{Kind: kindCredsUnread, Subject: e.Name, Detail: err.Error()})
 			continue
 		}
-		d, err := compareCreds(keys, p, e)
+		d, err := compareCreds(keys, p, owner, e)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			notes = append(notes, "no creds file here for "+e.Name)
-		case errors.Is(err, ctlkeys.ErrNoZoneKey):
-			findings = append(findings, apply.Finding{Kind: kindCredsUnread, Subject: e.Name,
-				Detail: fmt.Sprintf("cannot tell whether it is signed by the zone key: the key file of zone %s is missing (see the keys state)", e.Zone)})
 		case err != nil:
 			findings = append(findings, apply.Finding{Kind: kindCredsUnread, Subject: e.Name, Detail: err.Error()})
 		case d.stale():
@@ -384,79 +317,33 @@ func issuedFindings(keys *ctlkeys.Authority, c *policy.Compiled, path func(strin
 
 // gather reads the four states. conn failures turn the state they affect into "unknown".
 type states struct {
-	account, keys, directory, issued stateReport
-	dirFixes                         []dirFix
-	stale                            []string
+	account, directory, issued stateReport
+	dirFixes                   []dirFix
+	stale                      []string
 }
 
 func gather(ctx context.Context, l *loaded, env func(string) string, sysCreds, credsDir string, servers int) states {
 	var st states
-	// account and keys need the system account connection.
+	// the account state needs the system account connection.
 	nc, err := connectSys(l.cfg, sysCreds, env)
 	if err != nil {
-		st.account, st.keys = unknownState(err), unknownState(err)
+		st.account = unknownState(err)
 	} else {
 		defer nc.Close()
-		res := apply.NATS{Conn: nc, Inventory: servers}
-		f, err := apply.AccountFindings(ctx, apply.Params{Compiled: l.c, Keys: l.keys, Resolver: res, Servers: servers})
+		f, err := apply.AccountFindings(ctx, apply.NATS{Conn: nc, Inventory: servers}, l.keys, servers)
 		if err != nil {
 			st.account = unknownState(err)
 		} else {
 			st.account = newState(f)
 		}
-		st.keys = keysState(ctx, l, res)
 	}
 	st.directory, st.dirFixes = directoryState(ctx, l)
 	var notes []string
 	var f []apply.Finding
-	f, notes, st.stale = issuedFindings(l.keys, l.c, credsPathFunc(l.cfg, credsDir))
+	f, notes, st.stale = issuedFindings(l.keys, l.c, l.cfg.Owner, credsPathFunc(l.cfg, credsDir))
 	st.issued = newState(f)
 	st.issued.Notes = notes
 	return st
-}
-
-func keysState(ctx context.Context, l *loaded, res apply.Resolver) stateReport {
-	_, acctPub, err := l.keys.Account()
-	if err != nil {
-		return unknownState(err)
-	}
-	tok, err := res.Lookup(ctx, acctPub)
-	if err != nil {
-		return unknownState(fmt.Errorf("look up the account JWT: %w", err))
-	}
-	trust, err := apply.LoadTrust(l.keys)
-	if err != nil {
-		return unknownState(err)
-	}
-	ac, err := apply.VerifyAccountJWT(tok, acctPub, trust)
-	if err != nil {
-		return unknownState(fmt.Errorf("refusing the account JWT: %w", err))
-	}
-	zones, err := l.keys.Zones()
-	if err != nil {
-		return unknownState(err)
-	}
-	files := map[string]string{}
-	for _, z := range zones {
-		pub, err := l.keys.ZonePublic(z)
-		if err != nil {
-			return unknownState(err)
-		}
-		files[z] = pub
-	}
-	var pz []string
-	for _, z := range l.c.Zones {
-		pz = append(pz, z.Name)
-	}
-	groups, err := l.keys.GroupPublics()
-	if err != nil {
-		return unknownState(err)
-	}
-	isGroup := map[string]bool{}
-	for _, pub := range groups {
-		isGroup[pub] = true
-	}
-	return newState(keyFindings(pz, files, signersByRole(ac, isGroup)))
 }
 
 func directoryState(ctx context.Context, l *loaded) (stateReport, []dirFix) {
@@ -503,7 +390,7 @@ func printState(out io.Writer, name string, s stateReport) {
 	}
 }
 
-// runPolicyDrift is `mashctl policy drift`: it compares the policy file with the four states and fixes nothing.
+// runPolicyDrift is `mashctl policy drift`: it compares the policy file with the three states and fixes nothing.
 func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pfx := "mashctl: policy drift: "
 	o, err := parseDriftArgs(args)
@@ -524,8 +411,8 @@ func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup
 		return 2
 	}
 	st := gather(ctx, l, env, o.sysCreds, o.credsDir, servers)
-	rep := driftReport{Policy: l.path, Account: st.account, Keys: st.keys, Directory: st.directory, Issued: st.issued, NotCovered: driftNotCovered}
-	for _, s := range []stateReport{st.account, st.keys, st.directory, st.issued} {
+	rep := driftReport{Policy: l.path, Account: st.account, Directory: st.directory, Issued: st.issued, NotCovered: driftNotCovered}
+	for _, s := range []stateReport{st.account, st.directory, st.issued} {
 		rep.Drift = rep.Drift || s.Status != statusOK
 	}
 	if o.json {
@@ -536,9 +423,8 @@ func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup
 		}
 		fmt.Fprintf(stdout, "%s\n", b)
 	} else {
-		fmt.Fprintf(stdout, "policy drift: %s compared with the account, the key store, the directory and the creds files\n", l.path)
+		fmt.Fprintf(stdout, "policy drift: %s compared with the account, the directory and the creds files\n", l.path)
 		printState(stdout, "account", st.account)
-		printState(stdout, "keys", st.keys)
 		printState(stdout, "directory", st.directory)
 		printState(stdout, "issued", st.issued)
 		fmt.Fprintln(stdout, "Not covered by drift:")
@@ -548,7 +434,7 @@ func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup
 		if rep.Drift {
 			fmt.Fprintln(stdout, "drift found: `mashctl policy repair` makes the repairs (additive, except that it clears labels the file does not name on declared endpoints) and lists the rest; drift itself fixes nothing.")
 		} else {
-			fmt.Fprintln(stdout, "no drift: the four states match the policy file.")
+			fmt.Fprintln(stdout, "no drift: the three states match the policy file.")
 		}
 	}
 	if rep.Drift {
@@ -561,7 +447,7 @@ func runPolicyDrift(args []string, env func(string) string, lookup config.Lookup
 // policy file between the steps. It does nothing in production.
 var repairHook = func(stage string) {}
 
-// runPolicyRepair is `mashctl policy repair`: in four steps, additive except that it clears the labels the file does not
+// runPolicyRepair is `mashctl policy repair`: in three steps, additive except that it clears the labels the file does not
 // name on an endpoint the file declares; never a revoke or a delete of a credential, key file or record. With --dry-run it
 // writes nothing and prints what a real run would do. It is not a transaction: each step is safe to repeat and a failed one leaves the earlier ones done.
 func runPolicyRepair(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
@@ -569,14 +455,6 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	o, err := parseApplyArgs("repair", args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n%s", pfx, err, repairUsage())
-		return 2
-	}
-	if len(o.removeZones) > 0 || len(o.replaceZones) > 0 {
-		flag, why := "--remove-zone", "removes a zone's signing key from the account"
-		if len(o.removeZones) == 0 {
-			flag, why = "--replace-zone-key", "replaces a zone's signing key in the account"
-		}
-		fmt.Fprintf(stderr, "%srepair does not take %s: it %s, so users signed by the old key stop working, and repair never revokes. Run `mashctl policy apply` with that flag explicitly if you mean it.\n%s", pfx, flag, why, repairUsage())
 		return 2
 	}
 	if sv := o.servers; sv != "" {
@@ -598,58 +476,30 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	pf("policy repair: %s\n", l.path)
 	if o.dryRun {
 		pf("%s\n", repairHeader)
-		pf("dry run: nothing is written (no key file, no account push, no directory change); these are the changes a real run would make.\n")
+		pf("dry run: nothing is written (no directory change); these are the changes a real run would make.\n")
 	} else {
 		pf("%s\n", repairHeader)
 	}
 
-	// Steps 1 and 2 are one code path: apply, with the same flags, so every refusal, lock and acknowledgement rule
-	// holds. Apply creates a missing zone key file only after its refusals have passed (a key made before them would
-	// stand in the way of restoring the original file), so step 1 reports what step 2 created.
-	before, err := l.keys.Zones()
-	if err != nil {
-		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
-		return 1
-	}
+	// Step 1 is one code path with apply, with the same flags, so every refusal holds (an applied zone policy, a zoned
+	// record, a failing policy test).
 	var applyOut bytes.Buffer
 	repairHook("snapshot")
 	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c, guard: guard}, env, lookup, &applyOut, stderr)
 	repairHook("applied")
-	after, _ := l.keys.Zones()
-	var created []string
-	for _, z := range after {
-		if !slices.Contains(before, z) {
-			created = append(created, z)
-		}
-	}
-	if o.dryRun {
-		for _, z := range l.c.Zones {
-			if !slices.Contains(before, z.Name) {
-				created = append(created, z.Name)
-			}
-		}
-	}
-	pf("step 1, zone key files: ")
-	if len(created) == 0 {
-		pf("nothing to do\n")
-	} else if o.dryRun {
-		pf("would create %s (a local file in the key store each; nothing is created in a dry run)\n", strings.Join(created, ", "))
-	} else {
-		pf("created %s (a local file in the key store each; nothing was overwritten)\n", strings.Join(created, ", "))
-	}
-	pf("step 2, account (the same code path as `mashctl policy apply`, same flags):\n")
+	pf("step 1, account (the same code path as `mashctl policy apply`, same flags):\n")
 	for _, line := range strings.Split(strings.TrimRight(applyOut.String(), "\n"), "\n") {
 		pf("  %s\n", line)
 	}
 	if code != 0 {
-		pf("repair stopped at step 2: apply did not complete (exit %d). Nothing was revoked or deleted; steps 3 and 4 were not run. Fix what apply says and run repair again.\n", code)
+		pf("repair stopped at step 1: apply did not complete (exit %d). Nothing was revoked or deleted; steps 2 and 3 were not run. Fix what apply says and run repair again.\n", code)
 		pf("%s\n", repairNotATransaction)
 		return 1
 	}
 
-	// Step 3: directory records of endpoints present in both the file and the directory.
+	// Step 2: directory records of endpoints present in both the file and the directory.
 	exit := 0
-	pf("step 3, directory records:\n")
+	pf("step 2, directory records:\n")
 	adm, actx, closeAdmin, err := ctl.OpenAdmin("mashctl", l.cfg)
 	if err != nil {
 		pf("  could not open the directory: %v\n", err)
@@ -685,9 +535,9 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 		closeAdmin()
 	}
 
-	// Step 4: stale creds are listed with the command, never run: a reissue replaces a credential file.
-	pf("step 4, issued credentials:\n")
-	findings, _, stale := issuedFindings(l.keys, l.c, credsPathFunc(l.cfg, ""))
+	// Step 3: stale creds are listed with the command, never run: a reissue replaces a credential file.
+	pf("step 3, issued credentials:\n")
+	findings, _, stale := issuedFindings(l.keys, l.c, l.cfg.Owner, credsPathFunc(l.cfg, ""))
 	if len(stale) == 0 && len(findings) == 0 {
 		pf("  nothing to do\n")
 	}
@@ -713,7 +563,7 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 // repairHeader is printed at the start of every run, so the one removal repair makes is never a surprise.
 const repairHeader = "repair is additive EXCEPT that it clears every label the file does not name on an endpoint the file declares (the file is the source of truth for a declared endpoint); every change is listed below. It never touches an endpoint the file does not declare."
 
-const repairNotATransaction = "repair is not a transaction across NATS claims, JetStream resources and local files: each step is idempotent, a step that fails leaves the earlier ones done, and running repair again is safe. It never revokes a credential, deletes a key file, a record or a creds file, or moves an endpoint between zones; the only thing it removes is a directory label the file does not name on a declared endpoint."
+const repairNotATransaction = "repair is not a transaction across NATS claims, JetStream resources and local files: each step is idempotent, a step that fails leaves the earlier ones done, and running repair again is safe. It never revokes a credential, deletes a key file, a record or a creds file, ; the only thing it removes is a directory label the file does not name on a declared endpoint."
 
 func shellQuote(s string) string {
 	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+=:,@") == "" {

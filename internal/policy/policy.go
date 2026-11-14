@@ -6,7 +6,7 @@
 // the empty selector matches every endpoint. A rule allows or denies mail from the endpoints its from selector
 // selects to the endpoints its to selector selects. Rules are a union and their order means nothing: a sender may
 // address a recipient when some allow rule matches and no deny rule does; when no rule matches the pair, the file's
-// default decides. Today a rule covers mail; prompt and status probes stay open (ADR 0054; they join the policy when the maintainer decides). Self-mail
+// default decides. Today a rule covers mail; prompt and status probes stay open (ADR 0055; they join the policy when the maintainer decides). Self-mail
 // follows the same rules as any other pair: a sender is its own recipient when the rules (or the default) say so.
 package policy
 
@@ -14,12 +14,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-)
-
-// DefaultSubjectLabel is the label whose value is the zone; DefaultZone is the zone of an endpoint without it.
-const (
-	DefaultSubjectLabel = "zone"
-	DefaultZone         = "default"
 )
 
 // Actions and defaults.
@@ -32,13 +26,10 @@ const (
 type File struct {
 	// Default is "allow" or "deny": what applies to a sender-recipient pair no rule matches. Parse sets "allow" when
 	// the file does not say.
-	Default string `yaml:"default"`
-	// SubjectLabel is the label whose value is carried in the mail subject: an endpoint's zone is its label of this
-	// name, or DefaultZone when it has none. Parse sets "zone" when the file does not say.
-	SubjectLabel string              `yaml:"subject_label"`
-	Endpoints    map[string]Endpoint `yaml:"endpoints"`
-	Rules        []Rule              `yaml:"rules"`
-	Tests        []Test              `yaml:"tests"`
+	Default   string              `yaml:"default"`
+	Endpoints map[string]Endpoint `yaml:"endpoints"`
+	Rules     []Rule              `yaml:"rules"`
+	Tests     []Test              `yaml:"tests"`
 
 	lines fileLines
 }
@@ -70,7 +61,7 @@ type Rule struct {
 	// (ADR 0062); the field stays parsed so the refusal is a clear message, not an unknown-field error.
 	Log bool `yaml:"log"`
 	// AllowEmpty says a from or to selector of this rule may match no endpoint (a group that is empty on purpose, such
-	// as a zone with no endpoints yet). Without it a deny rule that selects nobody is a Check error. It is carried
+	// as a group with no endpoints yet). Without it a deny rule that selects nobody is a Check error. It is carried
 	// through the file and has no effect on the compiled permissions.
 	AllowEmpty bool `yaml:"allow_empty"`
 }
@@ -107,38 +98,6 @@ func (s Selector) String() string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-// subjectLabel is the label that names an endpoint's zone.
-func (f *File) subjectLabel() string {
-	if f.SubjectLabel == "" {
-		return DefaultSubjectLabel
-	}
-	return f.SubjectLabel
-}
-
-// zoneOf is the zone of a declared endpoint: its subject label's value, or DefaultZone.
-func (f *File) zoneOf(name string) string {
-	if z, ok := f.Endpoints[name].Labels[f.subjectLabel()]; ok {
-		return z
-	}
-	return DefaultZone
-}
-
-// effectiveLabels is a copy of the endpoint's labels plus, when it lacks the subject label, that label set to
-// DefaultZone: the labels selectors are matched against. What the file stores is unchanged.
-func (f *File) effectiveLabels(name string) map[string]string {
-	src := f.Endpoints[name].Labels
-	out := make(map[string]string, len(src)+1)
-	for k, v := range src {
-		out[k] = v
-	}
-	if sl := f.subjectLabel(); !has(out, sl) {
-		out[sl] = DefaultZone
-	}
-	return out
-}
-
-func has(m map[string]string, k string) bool { _, ok := m[k]; return ok }
-
 func (f *File) defaultAllow() bool { return f.Default != Deny }
 
 func (f *File) defaultName() string {
@@ -167,7 +126,7 @@ type decision struct {
 // decide applies the rules to from -> to. Both must be declared. Any matching deny beats any matching allow; the
 // default applies only when no rule matched.
 func (f *File) decide(from, to string) decision {
-	fl, tl := f.effectiveLabels(from), f.effectiveLabels(to)
+	fl, tl := f.Endpoints[from].Labels, f.Endpoints[to].Labels
 	var d decision
 	for _, r := range f.Rules {
 		if !r.From.matches(fl) || !r.To.matches(tl) {
@@ -226,7 +185,7 @@ func (f *File) matrix(names []string) matrix {
 	key := make([]byte, 0, 2*len(f.Rules))
 	for i, n := range names {
 		key = key[:0]
-		labels := f.effectiveLabels(n)
+		labels := f.Endpoints[n].Labels
 		for _, r := range f.Rules {
 			key = append(key, b2c(r.From.matches(labels)), b2c(r.To.matches(labels)))
 		}

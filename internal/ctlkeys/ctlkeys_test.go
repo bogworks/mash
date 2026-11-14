@@ -41,7 +41,7 @@ func TestInitAccount(t *testing.T) {
 		t.Fatalf("init: %q %v %v", pub, created, err)
 	}
 	for p, want := range map[string]os.FileMode{
-		dir: 0o700, filepath.Join(dir, "zones"): 0o700, filepath.Join(dir, "account.nk"): 0o600,
+		dir: 0o700, filepath.Join(dir, "account.nk"): 0o600,
 	} {
 		if got := mode(t, p); got != want {
 			t.Errorf("%s mode %04o, want %04o", p, got, want)
@@ -73,9 +73,6 @@ func TestOpenAndAccountCreateNothing(t *testing.T) {
 	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
 		t.Fatalf("dir created: %v", err)
 	}
-	if z, err := a.Zones(); err != nil || len(z) != 0 {
-		t.Fatalf("zones on empty store: %v %v", z, err)
-	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -87,48 +84,6 @@ func TestOpenAndAccountCreateNothing(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "account.nk")); !os.IsNotExist(err) {
 		t.Fatal("account.nk created")
-	}
-}
-
-func TestZoneKey(t *testing.T) {
-	a, dir := newStore(t)
-	if _, err := a.ZoneKey("prod", false); !errors.Is(err, ErrNoZoneKey) {
-		t.Fatalf("want ErrNoZoneKey, got %v", err)
-	}
-	if _, err := a.ZonePublic("prod"); !errors.Is(err, ErrNoZoneKey) {
-		t.Fatalf("want ErrNoZoneKey, got %v", err)
-	}
-	kp, err := a.ZoneKey("prod", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p1, _ := kp.PublicKey()
-	kp2, err := a.ZoneKey("prod", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p2, _ := kp2.PublicKey()
-	pp, err := a.ZonePublic("prod")
-	if err != nil || p1 != p2 || p1 != pp || !nkeys.IsValidPublicAccountKey(p1) {
-		t.Fatalf("keys differ: %s %s %s %v", p1, p2, pp, err)
-	}
-	if got := mode(t, filepath.Join(dir, "zones", "prod.nk")); got != 0o600 {
-		t.Fatalf("mode %04o", got)
-	}
-}
-
-func TestBadZoneNames(t *testing.T) {
-	a, dir := newStore(t)
-	for _, z := range []string{"", "A", "a.b", "../x", "a/b", "*", ">", strings.Repeat("a", 33)} {
-		if _, err := a.ZoneKey(z, true); err == nil {
-			t.Errorf("zone %q accepted", z)
-		}
-		if _, err := a.ZoneKey(z, false); err == nil {
-			t.Errorf("zone %q accepted (no create)", z)
-		}
-	}
-	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
-		t.Fatalf("something was written: %v", err)
 	}
 }
 
@@ -160,16 +115,6 @@ func TestRefusals(t *testing.T) {
 		}
 		if _, _, err := a.Account(); err == nil {
 			t.Fatal("account read from a loose dir")
-		}
-	})
-	t.Run("group-readable zones dir", func(t *testing.T) {
-		a, dir := newStore(t)
-		a.InitAccount()
-		if err := os.Chmod(filepath.Join(dir, "zones"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := a.ZoneKey("prod", true); err == nil {
-			t.Fatal("zone key made in a loose dir")
 		}
 	})
 	t.Run("symlink seed", func(t *testing.T) {
@@ -221,21 +166,7 @@ func TestRefusals(t *testing.T) {
 	})
 }
 
-func TestZonesSorted(t *testing.T) {
-	a, dir := newStore(t)
-	for _, z := range []string{"zeta", "alpha", "mid-1"} {
-		if _, err := a.ZoneKey(z, true); err != nil {
-			t.Fatal(err)
-		}
-	}
-	os.WriteFile(filepath.Join(dir, "zones", "ignored.txt"), nil, 0o600)
-	got, err := a.Zones()
-	if err != nil || strings.Join(got, ",") != "alpha,mid-1,zeta" {
-		t.Fatalf("got %v %v", got, err)
-	}
-}
-
-func TestConcurrentZoneKey(t *testing.T) {
+func TestConcurrentInitAccount(t *testing.T) {
 	_, dir := newStore(t)
 	var wg sync.WaitGroup
 	pubs := make([]string, 8)
@@ -249,12 +180,12 @@ func TestConcurrentZoneKey(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			kp, err := a.ZoneKey("prod", true)
+			pub, _, err := a.InitAccount()
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			pubs[i], _ = kp.PublicKey()
+			pubs[i] = pub
 		}()
 	}
 	wg.Wait()
@@ -263,7 +194,7 @@ func TestConcurrentZoneKey(t *testing.T) {
 			t.Fatalf("keys differ: %v", pubs)
 		}
 	}
-	if left, _ := filepath.Glob(filepath.Join(dir, "zones", "*.tmp-*")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*")); len(left) != 0 {
 		t.Fatalf("temp files left: %v", left)
 	}
 }
@@ -301,15 +232,8 @@ func TestCreateSyncsDirectories(t *testing.T) {
 	if _, _, err := a.InitAccount(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.ZoneKey("alpha", true); err != nil {
-		t.Fatal(err)
-	}
-	ents, _ := os.ReadDir(filepath.Join(dir, "zones"))
-	if len(ents) != 1 {
-		t.Fatalf("zones dir entries: %v", ents)
-	}
-	if got := mode(t, filepath.Join(dir, "zones", ents[0].Name())); got.Perm() != 0o600 {
-		t.Fatalf("zone key mode %v", got)
+	if got := mode(t, filepath.Join(dir, "account.nk")); got.Perm() != 0o600 {
+		t.Fatalf("account key mode %v", got)
 	}
 	if len(synced) < 3 {
 		t.Fatalf("expected directory syncs, got %v", synced)
@@ -324,7 +248,29 @@ func TestSyncDirFailureIsAnError(t *testing.T) {
 	if _, _, err := a.InitAccount(); err == nil {
 		t.Fatal("InitAccount reported success despite a failing directory sync")
 	}
-	if _, err := a.ZoneKey("beta", true); err == nil {
-		t.Fatal("ZoneKey(create) reported success despite a failing directory sync")
+}
+
+// TestStoreHasNoZoneKeys: ADR 0091 removed the per-zone scoped signing keys, and a zones directory an older release
+// left is neither created, read nor touched.
+func TestStoreHasNoZoneKeys(t *testing.T) {
+	a, dir := newStore(t)
+	if _, _, err := a.InitAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "zones")); !os.IsNotExist(err) {
+		t.Fatalf("a zones directory was created: %v", err)
+	}
+	old := filepath.Join(dir, "zones")
+	if err := os.Mkdir(old, 0o755); err != nil { // loose on purpose: it is not checked
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "prod.nk"), []byte("left by an older release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Account(); err != nil {
+		t.Fatalf("an old zones directory broke the store: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(old, "prod.nk")); string(b) != "left by an older release\n" {
+		t.Fatal("the old zone key file was changed")
 	}
 }

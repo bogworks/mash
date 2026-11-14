@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -35,7 +34,7 @@ func revokedIn(t *testing.T, tok, user string) bool {
 var revokeAt = time.Unix(1_700_000_000, 0)
 
 func TestRevokeUsersRevokesAndReadsBack(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u1, u2 := userKey(t), userKey(t)
 	res, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, Now: func() time.Time { return revokeAt }}, []string{u2, u1, u1})
@@ -55,7 +54,7 @@ func TestRevokeUsersRevokesAndReadsBack(t *testing.T) {
 }
 
 func TestRevokeUsersIdempotentPushesNothing(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u := userKey(t)
 	p := RevokeParams{Keys: ks, Resolver: fk, Now: func() time.Time { return revokeAt }}
@@ -77,7 +76,7 @@ func TestRevokeUsersIdempotentPushesNothing(t *testing.T) {
 }
 
 func TestRevokeUsersAlreadyRevokedNeedsAcks(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u := userKey(t)
 	p := RevokeParams{Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1, Now: func() time.Time { return revokeAt }}
@@ -103,7 +102,7 @@ func TestRevokeUsersAlreadyRevokedNeedsAcks(t *testing.T) {
 }
 
 func TestRevokeUsersInvalidKeyBeforeAnyIO(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	good := userKey(t)
 	acct, _ := nkeys.CreateAccount()
 	apub, _ := acct.PublicKey()
@@ -132,7 +131,7 @@ func (c *countFake) LookupAll(ctx context.Context, a string, n int) ([]string, e
 }
 
 func TestRevokeUsersRefusesSubjectMismatch(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	op, _, _ := ks.Operator()
 	other, _ := nkeys.CreateAccount()
 	opub, _ := other.PublicKey()
@@ -159,7 +158,7 @@ func TestRevokeUsersNotAckedIsNotConfirmed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ks, fk, _ := setup(t)
+			ks, fk := setup(t)
 			tc.fk(fk)
 			u := userKey(t)
 			_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1}, []string{u})
@@ -196,7 +195,7 @@ func (c *changing) LookupAll(ctx context.Context, a string, n int) ([]string, er
 }
 
 func TestRevokeUsersRetriesOnceWhenJWTChanges(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	op, _, _ := ks.Operator()
 	_, apub, _ := ks.Account()
@@ -225,7 +224,7 @@ func TestRevokeUsersRetriesOnceWhenJWTChanges(t *testing.T) {
 }
 
 func TestRevokeUsersGivesUpAfterTwoChanges(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	op, _, _ := ks.Operator()
 	mk := func() string {
 		cl, _ := jwt.DecodeAccountClaims(fk.token)
@@ -243,25 +242,8 @@ func TestRevokeUsersGivesUpAfterTwoChanges(t *testing.T) {
 	}
 }
 
-func TestRevocationSurvivesLaterPolicyApply(t *testing.T) {
-	ks, fk, c := setup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	u := userKey(t)
-	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{u}); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
-		t.Fatalf("%d\n%s", code, out.String())
-	}
-	got, _ := jwt.DecodeAccountClaims(fk.token)
-	if len(got.SigningKeys) == 0 || !revokedIn(t, fk.token, u) {
-		t.Fatal("apply dropped the revocation")
-	}
-}
-
 func TestRevokeUsersRaisesAnOlderRevocation(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u := userKey(t)
 	p := RevokeParams{Keys: ks, Resolver: fk, Now: func() time.Time { return revokeAt }}
@@ -284,7 +266,7 @@ func TestRevokeUsersRaisesAnOlderRevocation(t *testing.T) {
 }
 
 func TestRevokeUsersNeverLowersAndResendsUnchanged(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u := userKey(t)
 	late := revokeAt.Add(time.Hour)
@@ -309,7 +291,7 @@ func TestRevokeUsersNeverLowersAndResendsUnchanged(t *testing.T) {
 }
 
 func TestRevokeUsersRefusesForeignIssuer(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	foreign, _ := nkeys.CreateOperator()
 	resolverToken(t, fk, ks, foreign, nil)
 	before := fk.token
@@ -322,25 +304,8 @@ func TestRevokeUsersRefusesForeignIssuer(t *testing.T) {
 	}
 }
 
-func TestRevokeUsersRefusesUnknownSigningKeys(t *testing.T) {
-	ks, fk, _, scoped, plain, _ := unknownSetup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})
-	if err == nil {
-		t.Fatal("want a refusal")
-	}
-	for _, w := range []string{scoped, "role legacy", plain, "plain signing key", "will not carry signing keys it did not create", "tool that added it", "mashctl policy apply", "nothing was changed"} {
-		if !strings.Contains(err.Error(), w) {
-			t.Fatalf("missing %q in %v", w, err)
-		}
-	}
-	if fk.pushes != 0 {
-		t.Fatal("something was pushed")
-	}
-}
-
 func TestRevokeUsersAcceptsAnOperatorSigningKeyIssuer(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	sk, _ := nkeys.CreateOperator()
 	resolverToken(t, fk, ks, sk, nil)
@@ -377,7 +342,7 @@ func (l *launder) LookupAll(ctx context.Context, a string, n int) ([]string, err
 }
 
 func TestRevokeUsersReadBackVerifiesTheIssuer(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
 	u := userKey(t)
 	// a foreign-issued JWT that does show the revocation: the read-back must still not accept it
@@ -399,7 +364,7 @@ func TestRevokeUsersReadBackVerifiesTheIssuer(t *testing.T) {
 // Fewer lookup replies than known servers refuse the revoke before anything is pushed: the silent server may hold a
 // newer copy (with an earlier revocation) than the one the revoke would build from.
 func TestRevokeRefusesShortLookupAndIncompleteSet(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
 	fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
 	fk.applyPush = true

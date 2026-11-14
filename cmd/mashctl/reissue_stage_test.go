@@ -67,7 +67,7 @@ func TestReissueResumesAfterFailedWrite(t *testing.T) {
 	if stagedPub == oldPub {
 		t.Fatal("staged key is the old key")
 	}
-	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+stagedPub {
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a//"+stagedPub {
 		t.Fatalf("records %v, want user %s", recs, stagedPub)
 	}
 
@@ -80,7 +80,7 @@ func TestReissueResumesAfterFailedWrite(t *testing.T) {
 		t.Fatalf("creds key %s, want staged %s", pub, stagedPub)
 	}
 	h.noStaged("a")
-	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+stagedPub {
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a//"+stagedPub {
 		t.Fatalf("records %v", recs)
 	}
 	if len(*calls) != 2 || !slices.Equal((*calls)[1].users, []string{oldPub}) {
@@ -101,7 +101,7 @@ func TestReissueResumesAfterFailedRevoke(t *testing.T) {
 	}
 	noSecrets(t, out, errb)
 	_, stagedPub := h.stagedClaims("a")
-	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+oldPub {
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a//"+oldPub {
 		t.Fatalf("records %v", recs)
 	}
 	if _, pub := h.credsClaims("a"); pub != oldPub {
@@ -135,7 +135,7 @@ func TestReissueRefusesBadStagedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := mint.Mint(h.keys(), c, "b", nil, true) // a staged file carrying name b
+	m, err := mint.Mint(h.keys(), c, "b", nil) // a staged file carrying name b
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestReissueRefusesBadStagedFile(t *testing.T) {
 	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
 		t.Fatal("creds file changed")
 	}
-	if recs := h.records(); len(recs) != 1 || recs[0] != "a/red/"+oldPub {
+	if recs := h.records(); len(recs) != 1 || recs[0] != "a//"+oldPub {
 		t.Fatalf("records %v", recs)
 	}
 	if len(*calls) != 0 {
@@ -184,11 +184,11 @@ func TestReissueRotationLeavesNoStagedFile(t *testing.T) {
 func TestReissueRefusesFutureIssuedOldJWT(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		edit    func([]string) []string
+		edit    func(*jwt.UserClaims)
 		revoked bool
 	}{
 		{"narrowing", extraTag, false},
-		{"revoked key", noDenyNone, true},
+		{"revoked key", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newAddEnv(t, addPolicy)
