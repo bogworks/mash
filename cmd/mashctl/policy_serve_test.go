@@ -106,7 +106,18 @@ func submitterPerms() jwt.Permissions {
 // newServeEnvOpts is newServeEnvNoService with a hook on the server options.
 func newServeEnvOpts(t *testing.T, adopt bool, optsHook func(o *server.Options)) *serveEnv {
 	t.Helper()
-	e := &serveEnv{applyEnv: newApplyEnvOpts(t, nil, optsHook), logs: &syncBuf{}}
+	return newServeEnvFull(t, adopt, nil, optsHook, nil)
+}
+
+// newServeEnvFull is newServeEnvOpts with a hook that runs after the files are written and before the server starts
+// (tweak), and one that runs after the server is started and before the directory is made (afterStart), where a test
+// brings up the rest of a cluster.
+func newServeEnvFull(t *testing.T, adopt bool, tweak func(e *applyEnv), optsHook func(o *server.Options), afterStart func(e *applyEnv)) *serveEnv {
+	t.Helper()
+	e := &serveEnv{applyEnv: newApplyEnvOpts(t, tweak, optsHook), logs: &syncBuf{}}
+	if afterStart != nil {
+		afterStart(e.applyEnv)
+	}
 	e.env["MASH_POLICY_BUCKET"] = serveBucketPattern
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)

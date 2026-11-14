@@ -318,7 +318,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}
 
-	// The probes and witnesses are opened before the push, for the senders of the generation in force.
+	// The probes and witnesses are opened before the push; a witness only for a sender the gate needs one for.
 	minter := &policyapply.ProbeMinter{Signer: GroupSigner{a.Keys}, Account: a.Account, Record: a.Record, Now: a.Now}
 	prober, wit := a.transports(servers, minter)
 	var loaders []*nats.Conn
@@ -343,11 +343,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 			loaders = append(loaders, c)
 		}
 	}
-	if prev != nil && len(prev.Users) > 0 {
-		var creds []policyapply.ProbeCred
-		for _, u := range prev.Users {
-			creds = append(creds, policyapply.ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
-		}
+	if creds := witnessSenders(prev, ex); len(creds) > 0 {
 		if err := wit.Open(ctx, URLs(servers), minter, creds); err != nil {
 			return policyintake.Result{}, fmt.Errorf("open the witness connections: %w; nothing was pushed", err)
 		}
@@ -446,4 +442,32 @@ func detailOf(st policyapply.Status) string {
 		parts = append(parts, r.Stage+": "+r.Reason)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// witnessSenders are the credentials of the senders of the generation in force that need a witness connection: those
+// with a removed reach (Removed, CredentialOnly) and those the change removes (RemovedSenders), the very senders the
+// gate requires a closed witness for. A push closes a connection only when the template of the group's scoped key
+// changes, so a witness for any other sender would stay open on a change that only widens, and the gate would take that
+// for a failure. It returns nil when no sender needs one.
+func witnessSenders(prev *listset.Compiled, ex policyapply.Expect) []policyapply.ProbeCred {
+	if prev == nil {
+		return nil
+	}
+	need := map[string]bool{}
+	for _, r := range ex.Removed {
+		need[r.Sender] = true
+	}
+	for _, r := range ex.CredentialOnly {
+		need[r.Sender] = true
+	}
+	for _, s := range ex.RemovedSenders {
+		need[s] = true
+	}
+	var creds []policyapply.ProbeCred
+	for _, u := range prev.Users {
+		if need[u.Sender] {
+			creds = append(creds, policyapply.ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
+		}
+	}
+	return creds
 }
