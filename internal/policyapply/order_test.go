@@ -232,6 +232,7 @@ type world14 struct {
 	in     RunInput
 	ledger *MemLedger
 	prov   *recProv
+	cl     *fakeCluster
 }
 
 func newWorld14(t *testing.T) *world14 { return newWorld14For(t, at014Target()) }
@@ -247,6 +248,7 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	prober := fakeProber{cluster: cl, byGen: map[uint64]*listset.Compiled{1: w.c1, 2: w.c2}, allow: map[string]bool{}}
 	w.ledger = NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
 	w.prov = &recProv{ev: w.ev}
+	w.cl = cl
 	w.in = RunInput{
 		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
 		Ledger: evLedger{w.ledger, w.ev}, Account: w.k.acctPub, ListSet: target, Received: []byte("x"),

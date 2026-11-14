@@ -63,13 +63,13 @@ func (c rotConns) Connected(context.Context, string) (bool, error) {
 
 type rotRevoker struct {
 	ev   *events
-	hook func(pubs []string) error
+	hook func(pubs []string) (string, error)
 }
 
 func (r rotRevoker) Revoke(_ context.Context, pubs []string) (string, error) {
 	r.ev.add("revoke:" + strings.Join(pubs, ","))
 	if r.hook != nil {
-		return "", r.hook(pubs)
+		return r.hook(pubs)
 	}
 	return "", nil
 }
@@ -245,7 +245,7 @@ func TestRotateRefusesRevokedAndKnownKeys(t *testing.T) {
 func TestRotateRevokeFailureLeavesRecordUnmarked(t *testing.T) {
 	e := newRotEnv(t, time.Second)
 	e.ok.Store(true)
-	e.in.Revoker = rotRevoker{ev: e.ev, hook: func([]string) error { return errors.New("push refused") }}
+	e.in.Revoker = rotRevoker{ev: e.ev, hook: func([]string) (string, error) { return "", errors.New("push refused") }}
 	if _, err := Rotate(context.Background(), e.in); err == nil {
 		t.Fatal("no error")
 	}
@@ -314,13 +314,13 @@ func rotRun(t *testing.T, connect bool, mod ...func(*RunInput)) (Status, *world,
 	w := newWorld(t)
 	e := newRotEnv(t, 200*time.Millisecond)
 	e.ok.Store(connect)
-	e.in.Revoker = rotRevoker{ev: e.ev, hook: func(pubs []string) error {
+	e.in.Revoker = rotRevoker{ev: e.ev, hook: func(pubs []string) (string, error) {
 		// The fake push: every server now holds the target with these keys revoked too.
 		tok := w.k.build(t, w.c2, append([]string{w.k.revoked}, pubs...)...)
 		for _, s := range w.servers {
 			w.cluster.set(s, tok)
 		}
-		return nil
+		return tok, nil
 	}}
 	plan := &RotationPlan{
 		Narrowed:   []NarrowedSender{{Address: e.address, Name: "core", Tags: e.in.Tags, NewPub: e.in.NewPub}},

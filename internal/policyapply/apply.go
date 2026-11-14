@@ -2,7 +2,6 @@ package policyapply
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -59,18 +58,16 @@ type ApplyDeps struct {
 	Provisioner Provisioner
 	// AfterPush is RunInput.AfterPush.
 	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
+	// BeforeWrite is RunInput.BeforeWrite.
+	BeforeWrite func(ctx context.Context, what string) error
 	// Now is the clock for the Status; nil means time.Now.
 	Now func() time.Time
 }
 
 // Apply is Run for the intake: it takes what the document states and reads the rest from the ledger.
 //
-// A replay is a no-op: if the digest of req.Received (the one Record.Received is computed with, SHA-256) equals the
-// Received of the record in force, that exact document is already applied. Apply then signs and pushes nothing, and
-// returns a Status built from the record in force itself (applied, in force, with its generation and digests), with a
-// nil error. The record is the one read to make the comparison, so the two always agree; the ledger's latest status is
-// not used, since it may be the refusal of another submission. This check comes before the stale-base check, so a replayed document
-// whose base is now behind is not reported stale. A different document on a stale base is still a StaleBaseError.
+// A replay of the document in force is refused like any stale base: the intake that calls Apply skips a replayed
+// document itself.
 //
 // It first checks, before anything else is pushed, that req.BaseGeneration is the generation in force in the ledger
 // (*listset.StaleBaseError, matching listset.ErrStaleBase; the stale base is refused before anything else), then that
@@ -86,11 +83,6 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	cur, err := deps.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
-	}
-	if cur.Generation > 0 && sha256.Sum256(req.Received) == cur.Received {
-		st := newStatus(cur, StateApplied, deps.Now)
-		st.InForce = true
-		return st, nil
 	}
 	if cur.Generation != req.BaseGeneration {
 		return Status{}, &listset.StaleBaseError{Stated: req.BaseGeneration, InForce: cur.Generation}
@@ -121,7 +113,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		ListSet: req.ListSet, Received: req.Received,
 		Previous: prev, Signer: deps.Signer,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
-		AfterPush: deps.AfterPush, Now: deps.Now,
+		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,
 	}
 	if deps.Provisioner != nil {
 		os, err := RunOrdered(ctx, in, deps.Provisioner)

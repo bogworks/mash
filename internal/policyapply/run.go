@@ -230,6 +230,9 @@ func Converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 		return st, err
 	}
+	if ferr := CheckBeforeWrite(ctx, FencePush); ferr != nil {
+		return withFence(st, ferr), ferr
+	}
 	if pushed(ctx, in, targetJWT) {
 		if st, err = Gate(ctx, in); err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 			return st, err
@@ -271,6 +274,9 @@ func Converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	}
 	// A server holding the rollback carries the previous generation plus extra revocations; GenerationOf needs the
 	// candidate's own revocations to be a subset, so in.Previous still matches it. A failed push back shows in the gate below: servers keep the generations they hold.
+	if ferr := CheckBeforeWrite(ctx, FenceRollback); ferr != nil {
+		return withFence(st, ferr), ferr
+	}
 	pushed(ctx, in, prevTok)
 	return Gate(ctx, in)
 }
@@ -313,6 +319,15 @@ func pushed(ctx context.Context, in GateInput, tok string) bool {
 	return true
 }
 
+// The labels RunInput.BeforeWrite is called with.
+const (
+	FencePush      = "push"
+	FenceRevoke    = "revoke"
+	FenceProvision = "provision"
+	FenceCommit    = "commit"
+	FenceRollback  = "rollback"
+)
+
 // RunInput is one submission.
 type RunInput struct {
 	Cluster   Cluster
@@ -349,6 +364,18 @@ type RunInput struct {
 	// has an empty inventory. A sender in notConnected never showed a connection with its new key by the deadline: the Status lists it,
 	// holds the state at partial and nothing is committed. See RotationsAfterPush.
 	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
+	// BeforeWrite, if set, is the fencing hook of a caller that holds a lock which could expire during a long run
+	// (the apply intake's account lock). It is called immediately before each protected write with its label:
+	// FencePush ("push": the target account JWT push, and any re-push of it in Converge), FenceRevoke ("revoke":
+	// each revocation push, made through the Revoker of RotationsAfterPush; a custom AfterPush calls
+	// CheckBeforeWrite itself), FenceProvision ("provision": before Provisioner.CreateInbox and before
+	// IssueCredential), FenceCommit ("commit": before the ledger commit) and FenceRollback ("rollback": before the
+	// rollback push in Converge). If it returns an error the write is not made, nothing later is, and the run
+	// returns an error wrapping a *FenceError (errors.Is matches the hook's error). Before the first push nothing
+	// happened and the Status is empty. After the target was pushed the generation is pending, as for any other
+	// post-push failure, and the Status is partial, not in force, with a CheckFence failure naming the step. The
+	// status write is not gated: the ledger lease fences it. nil means no hook.
+	BeforeWrite func(ctx context.Context, what string) error
 	// OnStatus, if set, receives the applying status before the push.
 	OnStatus func(Status)
 	// BeforeCommit, if set, runs after the gate reports applied (and so with no sender not connected) and before the generation is committed, still under
@@ -511,6 +538,10 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if in.OnStatus != nil {
 		in.OnStatus(newStatus(rec, StateApplying, in.Now))
 	}
+	ctx = withBeforeWrite(ctx, in.BeforeWrite)
+	if err := CheckBeforeWrite(ctx, FencePush); err != nil {
+		return Status{}, err // nothing was pushed
+	}
 	pushed(ctx, gi, tok)
 	var notConnected []string
 	if in.AfterPush != nil {
@@ -537,7 +568,18 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			if perr := in.Ledger.SetPending(rec); perr != nil {
 				aerr = errors.Join(aerr, perr)
 			}
-			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+			var fe *FenceError
+			var fst Status
+			if errors.As(aerr, &fe) {
+				fst = withFence(newStatus(rec, StatePartial, in.Now), aerr)
+			}
+			return fst, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+		}
+		if finalJWT == "" && len(all) > 0 {
+			// Committing tok would store a JWT without the revocations that were pushed, and a later generation could
+			// restore those keys.
+			perr := in.Ledger.SetPending(rec)
+			return Status{}, errors.Join(fmt.Errorf("%w: revocations were pushed but no final account JWT was returned", ErrSignedMismatch), perr)
 		}
 		if finalJWT != "" {
 			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
@@ -583,7 +625,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		if err == nil {
 			err = perr
 		}
-		return st, err
+		return withFence(st, err), err
 	}
 	if in.BeforeCommit != nil {
 		if err := in.BeforeCommit(ctx, Accepted{Record: rec, Compiled: frozen, Expect: expect}, st); err != nil {
@@ -591,8 +633,15 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			if perr := in.Ledger.SetPending(rec); perr != nil {
 				err = errors.Join(err, perr)
 			}
-			return st, fmt.Errorf("before committing generation %d: %w", rec.Generation, err)
+			return withFence(st, err), fmt.Errorf("before committing generation %d: %w", rec.Generation, err)
 		}
+	}
+	if ferr := CheckBeforeWrite(ctx, FenceCommit); ferr != nil {
+		// The target is on the servers and not committed: pending, so a later run can finish or roll back.
+		if perr := in.Ledger.SetPending(rec); perr != nil {
+			ferr = errors.Join(ferr, perr)
+		}
+		return withFence(st, ferr), fmt.Errorf("before committing generation %d: %w", rec.Generation, ferr)
 	}
 	var cerr error
 	if hasDetail {
@@ -669,4 +718,61 @@ func cloneCompiled(c *listset.Compiled) *listset.Compiled {
 		out.Users = append(out.Users, u)
 	}
 	return out
+}
+
+// FenceError is the error of a protected write that the BeforeWrite hook refused. What is the step label ("push",
+// "revoke", "provision", "commit" or "rollback"); Err is the hook's error. It wraps Err, so errors.Is matches it.
+type FenceError struct {
+	What string
+	Err  error
+}
+
+func (e *FenceError) Error() string { return "fenced before " + e.What + ": " + e.Err.Error() }
+func (e *FenceError) Unwrap() error { return e.Err }
+
+type beforeWriteKey struct{}
+
+// withBeforeWrite returns ctx carrying fn, so the code that writes deep inside a run (Converge, the Revoker that
+// RotationsAfterPush hands to Rotate) asks it first. A nil fn returns ctx.
+func withBeforeWrite(ctx context.Context, fn func(ctx context.Context, what string) error) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, beforeWriteKey{}, fn)
+}
+
+// CheckBeforeWrite calls the RunInput.BeforeWrite hook of the run ctx belongs to with what, and returns its refusal
+// as a *FenceError; it is nil when there is no hook or the hook allows the write. A custom AfterPush calls it
+// immediately before each revocation push, with "revoke" (RotationsAfterPush does).
+func CheckBeforeWrite(ctx context.Context, what string) error {
+	fn, _ := ctx.Value(beforeWriteKey{}).(func(context.Context, string) error)
+	if fn == nil {
+		return nil
+	}
+	if err := fn(ctx, what); err != nil {
+		var fe *FenceError
+		if errors.As(err, &fe) {
+			return err
+		}
+		return &FenceError{What: what, Err: err}
+	}
+	return nil
+}
+
+// withFence returns st with a CheckFence failure for err, when err is a refusal of the hook and st does not name one
+// yet; the state is then partial and not in force. Any other err leaves st as it is.
+func withFence(st Status, err error) Status {
+	var fe *FenceError
+	if !errors.As(err, &fe) {
+		return st
+	}
+	for _, f := range st.Failing {
+		if f.Check == CheckFence {
+			return st
+		}
+	}
+	st.Failing = append(slices.Clone(st.Failing), Failure{Check: CheckFence, Detail: "refused before " + fe.What + ": " + fe.Err.Error()})
+	sortFailures(st.Failing)
+	st.State, st.InForce = StatePartial, false
+	return st
 }

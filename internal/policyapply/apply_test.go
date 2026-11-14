@@ -19,7 +19,7 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
 		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
-			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, "", nil
+			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, w.k.build(t, w.c2, w.k.revoked), nil
 		},
 	}
 }
@@ -200,7 +200,8 @@ func (l statusLedger) LatestStatus(context.Context) (Status, bool, error) {
 	return *l.st, true, nil
 }
 
-func TestApplyReplayIsNoOp(t *testing.T) {
+// A replay of the document in force is refused like any stale base and writes nothing.
+func TestApplyReplayIsStaleBase(t *testing.T) {
 	w, l, deps := applyWorld(t)
 	deps.Signer = withSign(deps.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
 		return w.k.build(t, c, w.k.revoked), nil
@@ -214,31 +215,19 @@ func TestApplyReplayIsNoOp(t *testing.T) {
 		signed = true
 		return "", errors.New("signed")
 	})
-	// The same bytes again: the base is now stale, but the document is the one in force.
+	stored := Status{Generation: 3, State: StateRefused, UpdatedAt: "stored"}
+	sl := statusLedger{MemLedger: l, st: &stored}
+	deps.Ledger = sl
+	// The same bytes again: the base is now stale.
 	st, err := Apply(context.Background(), applyReq(), deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.State != StateApplied || !st.InForce || st.Generation != 2 {
-		t.Fatalf("%+v", st)
-	}
-	if signed || len(w.cluster.pushes) != pushes {
-		t.Errorf("signed %v, pushes %d -> %d", signed, pushes, len(w.cluster.pushes))
-	}
-	// A stored refusal of another submission is not what a replay returns: the status is built from the record in force.
-	stored := Status{Generation: 3, State: StateRefused, Refusals: []listset.Refusal{{Stage: "check", Reason: "no"}}, UpdatedAt: "stored"}
-	deps.Ledger = statusLedger{MemLedger: l, st: &stored}
-	got, err := Apply(context.Background(), applyReq(), deps)
-	if err != nil || got.State != StateApplied || !got.InForce || got.Generation != 2 || got.UpdatedAt == "stored" || len(got.Refusals) != 0 {
-		t.Fatalf("%+v %v", got, err)
-	}
-	// A different document on the stale base is still stale.
-	req := applyReq()
-	req.Received = []byte("other-bytes")
-	if _, err := Apply(context.Background(), req, deps); !errors.Is(err, listset.ErrStaleBase) {
+	var sb *listset.StaleBaseError
+	if !errors.Is(err, listset.ErrStaleBase) || !errors.As(err, &sb) {
 		t.Fatalf("err = %v", err)
 	}
-	if signed || len(w.cluster.pushes) != pushes {
-		t.Errorf("signed %v, pushes %d", signed, len(w.cluster.pushes))
+	if st.State != "" || signed || len(w.cluster.pushes) != pushes {
+		t.Errorf("status %+v, signed %v, pushes %d -> %d", st, signed, pushes, len(w.cluster.pushes))
+	}
+	if stored.UpdatedAt != "stored" || stored.Generation != 3 {
+		t.Errorf("status written: %+v", stored)
 	}
 }
