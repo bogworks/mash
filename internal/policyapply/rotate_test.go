@@ -223,6 +223,12 @@ func TestRotateRefusesRevokedAndKnownKeys(t *testing.T) {
 	if err := e.rec.Add(ctx, IssueEntry{Address: "foo.c.sdk", PublicKey: e.old[1], Purpose: PurposeIssue}); !errors.Is(err, ErrDuplicateKey) {
 		t.Errorf("Add of a duplicate key: %v", err)
 	}
+	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.old[1], Purpose: PurposeIssue, Generation: 9}); err != nil {
+		t.Errorf("reissue of an active key for the same address (ADR 0101): %v", err)
+	}
+	if n := len(e.rec.Entries()); n != 4 {
+		t.Errorf("a reissue changed the number of entries: %d", n)
+	}
 	e.in.NewPub = e.old[0]
 	if _, err := Rotate(ctx, e.in); !errors.Is(err, ErrRevokedKey) {
 		t.Errorf("Rotate to a revoked key: %v", err)
@@ -262,10 +268,23 @@ func TestRemoveSenderRevokesEveryKey(t *testing.T) {
 	if !slices.Equal(got, want) || !slices.Equal(e.revokedKeys(), want) {
 		t.Errorf("revoked %v, record %v, want %v", got, e.revokedKeys(), want)
 	}
-	// A second call has nothing left to revoke.
+	// A second call hands the keys to the Revoker again and returns them: a retry signs a fresh JWT that need not carry
+	// the first attempt's revocations. The record's revoked timestamps do not change.
+	before, _ := e.rec.ByAddress(context.Background(), e.address)
 	n := len(e.ev.get())
-	if got, err := RemoveSender(context.Background(), e.address, e.rec, rotRevoker{ev: e.ev}, fixedNow); err != nil || len(got) != 0 || len(e.ev.get()) != n {
+	later := func() time.Time { return fixedNow().Add(time.Hour) }
+	got, err = RemoveSender(context.Background(), e.address, e.rec, rotRevoker{ev: e.ev}, later)
+	if err != nil || !slices.Equal(got, want) || len(e.ev.get()) != n+1 {
 		t.Errorf("second removal: %v %v", got, err)
+	}
+	after, _ := e.rec.ByAddress(context.Background(), e.address)
+	for i := range before {
+		if !slices.Contains(want, before[i].PublicKey) {
+			continue
+		}
+		if before[i].RevokedAt == nil || after[i].RevokedAt == nil || !before[i].RevokedAt.Equal(*after[i].RevokedAt) {
+			t.Errorf("revoked timestamp of %s changed: %v -> %v", before[i].PublicKey, before[i].RevokedAt, after[i].RevokedAt)
+		}
 	}
 }
 
@@ -451,5 +470,96 @@ func TestRunRotationNotConnectedIsPending(t *testing.T) {
 	pend, ok, _ := led.Pending()
 	if !ok || pend.Generation != 2 {
 		t.Fatalf("pending = %+v %v", pend, ok)
+	}
+}
+
+// A resubmitted rotation whose entry is already recorded resumes: the new JWT is recorded again as a revision (it may be
+// issued later than the one recorded), and the handover completes.
+func TestRotateResumesRecordedRotation(t *testing.T) {
+	e := newRotEnv(t, time.Second)
+	ctx := context.Background()
+	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.in.NewPub, Purpose: PurposeRotation,
+		Tags: slices.Clone(e.in.Tags), Generation: e.in.Generation, IssuedAt: fixedNow()}); err != nil {
+		t.Fatal(err)
+	}
+	e.ok.Store(true)
+	res, err := Rotate(ctx, e.in)
+	if err != nil {
+		t.Fatalf("resumed rotation: %v", err)
+	}
+	log := e.ev.get()
+	if !res.Connected || !slices.Contains(log, "record:rotation") {
+		t.Errorf("result %+v, log %v: the resumed rotation must be recorded again", res, log)
+	}
+	if !slices.Contains(log, "deliver:"+e.address) || !slices.Contains(res.Revoked, e.old[0]) {
+		t.Errorf("not delivered or old key not revoked: %v %v", log, res.Revoked)
+	}
+	// A different generation is not a resume.
+	e2 := newRotEnv(t, time.Second)
+	if err := e2.rec.Add(ctx, IssueEntry{Address: e2.address, PublicKey: e2.in.NewPub, Purpose: PurposeRotation,
+		Tags: slices.Clone(e2.in.Tags), Generation: e2.in.Generation + 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rotate(ctx, e2.in); !errors.Is(err, ErrDuplicateKey) {
+		t.Errorf("another generation: %v", err)
+	}
+}
+
+// A first attempt that revoked the old keys and ended not connected leaves them marked revoked in the record. The
+// retry must hand them to the Revoker again and report them, so the revocations are in what the retry commits.
+func TestRotateResumeRevokesAlreadyRevokedOldKeysAgain(t *testing.T) {
+	e := newRotEnv(t, 60*time.Millisecond)
+	ctx := context.Background()
+	first, err := Rotate(ctx, e.in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Sorted(slices.Values(e.old))
+	if first.Connected || !slices.Equal(first.Revoked, want) {
+		t.Fatalf("first attempt = %+v", first)
+	}
+	if !slices.Equal(e.revokedKeys(), want) {
+		t.Fatalf("record revoked %v", e.revokedKeys())
+	}
+	e.ok.Store(true)
+	e.in.Deadline = time.Now().Add(time.Second)
+	res, err := Rotate(ctx, e.in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Connected || !slices.Equal(res.Revoked, want) {
+		t.Errorf("second attempt = %+v, want revoked %v", res, want)
+	}
+	call := "revoke:" + strings.Join(want, ",")
+	n := 0
+	for _, s := range e.ev.get() {
+		if s == call {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("revoker called with the old keys %d times, want 2: %v", n, e.ev.get())
+	}
+}
+
+// A resumed rotation records the new JWT's issue time: the record keeps the later one.
+func TestRotateResumeRecordsNewRevision(t *testing.T) {
+	e := newRotEnv(t, time.Second)
+	ctx := context.Background()
+	early := fixedNow().Add(-time.Hour)
+	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.in.NewPub, Purpose: PurposeRotation,
+		Tags: slices.Clone(e.in.Tags), Generation: e.in.Generation, IssuedAt: early}); err != nil {
+		t.Fatal(err)
+	}
+	e.ok.Store(true)
+	e.in.Now = fixedNow
+	if _, err := Rotate(ctx, e.in); err != nil {
+		t.Fatal(err)
+	}
+	held, _ := e.rec.ByAddress(ctx, e.address)
+	for _, h := range held {
+		if h.PublicKey == e.in.NewPub && !h.IssuedAt.Equal(fixedNow()) {
+			t.Errorf("issued at %v, want the resumed rotation's %v", h.IssuedAt, fixedNow())
+		}
 	}
 }

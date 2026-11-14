@@ -30,7 +30,13 @@ type ApplyRequest struct {
 	BaseGeneration uint64
 }
 
-// ApplyDeps is what Apply needs besides the request. Every field but Provisioner, AfterPush and Now is required.
+// ErrNoProvisionMarkers is returned by Apply when deps.Provisioner is set and neither deps.ProvisionMarkers nor the
+// ledger keeps provisioning markers: without them a rollback could expose an inbox the target refuses (REQ-015), so
+// Apply refuses before anything is pushed.
+var ErrNoProvisionMarkers = errors.New("a provisioner is set but no provisioning markers are kept")
+
+// ApplyDeps is what Apply needs besides the request. Every field but Provisioner, ProvisionMarkers, AfterPush and Now
+// is required.
 type ApplyDeps struct {
 	// Ledger holds the record in force. To apply on top of a generation it must be a DetailLedger, so the previous
 	// Compiled and the JWT for a rollback can be read.
@@ -56,6 +62,16 @@ type ApplyDeps struct {
 	ServerLimits []listset.ServerLimits
 	// Provisioner, if set, provisions new addresses inside the run (RunOrdered); if nil, Run is used.
 	Provisioner Provisioner
+	// ProvisionMarkers keeps the provisioning markers of RunOrdered (see ProvisionMarkers). Required when Provisioner is
+	// set, unless Ledger implements ProvisionMarkers itself (Apply then refuses with ErrNoProvisionMarkers). Apply gives
+	// the run the ledger wrapped with WithProvisionMarkers; DetailLedger and StatusWriter are kept, which are the only
+	// optional interfaces Run and RunOrdered use. The caller's own Ledger value is unchanged, so StatusReader and
+	// RefusalWriter stay available on it.
+	ProvisionMarkers ProvisionMarkers
+	// IssueRecord, if set, is the issue record Apply reads the old-key inventory from (RunInput.OldKeys, see
+	// oldKeysFromRecord). If nil, Apply gives the run no inventory, and refuses (ErrIncompleteInventory) a change with
+	// a credential-only or removed sender, which needs one.
+	IssueRecord IssueInventory
 	// AfterPush is RunInput.AfterPush.
 	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
 	// BeforeWrite is RunInput.BeforeWrite.
@@ -77,9 +93,19 @@ type ApplyDeps struct {
 // deps.Signers. The reads happen before Run takes the ledger's lock; if the generation in force changes in between,
 // Run's own check under the lock refuses the stale base before anything is pushed. The rollback JWT is the one the
 // ledger stored (see Run). With deps.Provisioner set it calls RunOrdered, and the returned Status is the one of that
-// run. Apply does not set RunInput.RevokedKeys, PreviousRevoked or OldKeys: keys a narrowing revokes are reported by
+// run. With deps.IssueRecord set, OldKeys is built from it (see oldKeysFromRecord); an incomplete inventory is refused before anything is pushed. Apply does not set RunInput.RevokedKeys or PreviousRevoked: keys a narrowing revokes are reported by
 // deps.AfterPush.
 func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error) {
+	runLedger := deps.Ledger
+	if deps.Provisioner != nil {
+		_, own := deps.Ledger.(ProvisionMarkers)
+		switch {
+		case deps.ProvisionMarkers != nil:
+			runLedger = WithProvisionMarkers(deps.Ledger, deps.ProvisionMarkers)
+		case !own:
+			return Status{}, ErrNoProvisionMarkers
+		}
+	}
 	cur, err := deps.Ledger.InForce()
 	if err != nil {
 		return Status{}, err
@@ -107,11 +133,18 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 			return Status{}, fmt.Errorf("compile the list set in force (generation %d): %w", cur.Generation, err)
 		}
 	}
+	// Known gap: the inventory is read here, before Run takes the ledger's lock, so an issue or revocation that lands
+	// between this read and the gate is not in OldKeys. Closing it needs a RunInput hook that Run calls under the lock
+	// to read the inventory; run.go is owned by an open PR, so it is not changed here.
+	oldKeys, err := oldKeysFromRecord(ctx, deps.IssueRecord, prev, req.ListSet)
+	if err != nil {
+		return Status{}, err
+	}
 	in := RunInput{
-		Cluster: deps.Cluster, Prober: deps.Prober, Witnesses: deps.Witnesses, Ledger: deps.Ledger,
+		Cluster: deps.Cluster, Prober: deps.Prober, Witnesses: deps.Witnesses, Ledger: runLedger,
 		Account: deps.Account, Inventory: deps.Inventory,
 		ListSet: req.ListSet, Received: req.Received,
-		Previous: prev, Signer: deps.Signer,
+		Previous: prev, Signer: deps.Signer, OldKeys: oldKeys,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
 		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,
 	}

@@ -596,3 +596,39 @@ func TestIssuedHistoryByKeyStatusFailure(t *testing.T) {
 		t.Fatalf("after the fault: found=%v err=%v", found, err)
 	}
 }
+
+// RecordIssuedChecked refuses, inside its compare-and-set, a same-address revision that moves an active key between the
+// sender class (issue, rotation) and the probe class: that would hide an active sender credential from the inventory.
+func TestRecordIssuedCheckedRefusesPurposeClassChange(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	rec := func(purpose string) store.Issued {
+		return store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Purpose: purpose}
+	}
+	if err := a.RecordIssuedChecked(ctx, rec(store.PurposeIssue)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec(store.PurposeRotation)); err != nil {
+		t.Fatalf("issue -> rotation: %v", err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec(store.PurposeProbe)); !errors.Is(err, admin.ErrKeyPurposeChanged) {
+		t.Fatalf("rotation -> probe: %v", err)
+	}
+	pk := userKey(t)
+	probe := store.Issued{PublicKey: pk, Address: "x", Kind: store.IssuedEndpoint, Purpose: store.PurposeProbe}
+	if err := a.RecordIssuedChecked(ctx, probe); err != nil {
+		t.Fatal(err)
+	}
+	probe.Purpose = store.PurposeIssue
+	if err := a.RecordIssuedChecked(ctx, probe); !errors.Is(err, admin.ErrKeyPurposeChanged) {
+		t.Fatalf("probe -> issue: %v", err)
+	}
+	kv, err := js.KeyValue(ctx, store.IssuedBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := kv.History(ctx, key); err != nil || len(h) != 2 {
+		t.Fatalf("history %d %v", len(h), err)
+	}
+}

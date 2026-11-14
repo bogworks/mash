@@ -3,8 +3,11 @@ package policyapply
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
+	"time"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 )
 
@@ -15,8 +18,13 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 	set := set1()
 	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1, ListSet: &set})
 	in := w.run(l, set2(), "bytes-2")
+	rec := &MemIssueRecord{}
+	if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: time.Unix(1000, 0)}); err != nil {
+		t.Fatal(err)
+	}
 	return w, l, ApplyDeps{
-		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
+		IssueRecord: rec,
+		Ledger:      l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
 		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
 			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, w.k.build(t, w.c2, w.k.revoked), nil
@@ -229,5 +237,152 @@ func TestApplyReplayIsStaleBase(t *testing.T) {
 	}
 	if stored.UpdatedAt != "stored" || stored.Generation != 3 {
 		t.Errorf("status written: %+v", stored)
+	}
+}
+
+// Apply refuses, before pushing anything, an old-key inventory that is missing or incomplete (ADR 0113, ADR 0114).
+func TestApplyRefusesIncompleteInventory(t *testing.T) {
+	cases := map[string]func(t *testing.T, w *world, deps *ApplyDeps){
+		"no record for a credential-only sender": func(_ *testing.T, _ *world, d *ApplyDeps) { d.IssueRecord = nil },
+		"record holds none for the sender":       func(_ *testing.T, _ *world, d *ApplyDeps) { d.IssueRecord = &MemIssueRecord{} },
+		"a credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
+			rec := &MemIssueRecord{}
+			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue}); err != nil {
+				t.Fatal(err)
+			}
+			d.IssueRecord = rec
+		},
+	}
+	for name, mod := range cases {
+		t.Run(name, func(t *testing.T) {
+			w, l, deps := applyWorld(t)
+			mod(t, w, &deps)
+			pushed := false
+			deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+				pushed = true
+				return "", errors.New("signed")
+			})
+			if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrIncompleteInventory) {
+				t.Fatalf("err = %v", err)
+			}
+			if pushed {
+				t.Error("something was signed before the refusal")
+			}
+			if rec, _ := l.InForce(); rec.Generation != 1 {
+				t.Errorf("in force = %d", rec.Generation)
+			}
+		})
+	}
+}
+
+// With the record, OldKeys carries each unrevoked key with its issue time; an already revoked key is not inventory.
+func TestOldKeysFromRecord(t *testing.T) {
+	w, _, deps := applyWorld(t)
+	rec := deps.IssueRecord.(*MemIssueRecord)
+	ctx := context.Background()
+	at := time.Unix(2000, 0)
+	for _, e := range []IssueEntry{
+		{Address: "foo.c.core", PublicKey: "UREV", Purpose: PurposeRotation, IssuedAt: at},
+		{Address: "foo.c.core", PublicKey: "UPROBE", Purpose: PurposeProbe},
+		{Address: "foo.c.docs", PublicKey: "UDOCS", Purpose: PurposeIssue, IssuedAt: at},
+		{Address: "admin", PublicKey: "UADM", Purpose: PurposeIssue},
+	} {
+		if err := rec.Add(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rec.MarkRevoked(ctx, "UREV", at); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := listset.Compile(set1())
+	got, err := oldKeysFromRecord(ctx, rec, prev, set2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := got["foo.c.core"]; len(k) != 1 || k[0].PublicKey != w.k.revoked || !k[0].IssuedAt.Equal(time.Unix(1000, 0)) {
+		t.Errorf("core = %+v", k)
+	}
+	if k := got["foo.c.docs"]; len(k) != 1 || k[0].PublicKey != "UDOCS" {
+		t.Errorf("docs = %+v", k)
+	}
+	if _, has := got["admin"]; has {
+		t.Error("a record entry of no sender is inventory")
+	}
+}
+
+// A Provisioner without provisioning markers is refused before anything is signed or pushed: the guard of RunOrdered
+// only works on a ledger that keeps markers, and Apply's plain ledger does not.
+func TestApplyRefusesProvisionerWithoutMarkers(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	ev := &events{}
+	deps.Provisioner = &recProv{ev: ev}
+	signed := false
+	deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrNoProvisionMarkers) {
+		t.Fatalf("err = %v, want ErrNoProvisionMarkers", err)
+	}
+	if signed || len(ev.get()) != 0 {
+		t.Errorf("something ran before the refusal: signed %v, events %v", signed, ev.get())
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d", rec.Generation)
+	}
+}
+
+// With deps.ProvisionMarkers set, Apply's run writes a marker before CreateInbox, and clears it on commit.
+func TestApplyWithProvisionMarkersMarksBeforeCreateInbox(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	m := NewMemProvisionMarkers()
+	deps.ProvisionMarkers = m
+	req := applyReq()
+	req.ListSet.Senders = append(req.ListSet.Senders, listset.SenderLists{Sender: "foo.c.new"})
+	var atCreate []string
+	deps.Provisioner = &markSpyProv{create: func(string) { atCreate, _ = m.Provisioning(2) }}
+	st, err := Apply(context.Background(), req, deps)
+	if err != nil {
+		t.Fatalf("apply: %v (%+v)", err, st)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 2 {
+		t.Fatalf("in force = %d, status %+v", rec.Generation, st)
+	}
+	if !slices.Equal(atCreate, []string{"foo.c.new"}) {
+		t.Errorf("markers when CreateInbox ran = %v", atCreate)
+	}
+	if left, _ := m.Provisioning(2); len(left) != 0 {
+		t.Errorf("markers after commit = %v", left)
+	}
+}
+
+type markSpyProv struct{ create func(string) }
+
+func (p *markSpyProv) CreateInbox(_ context.Context, a string) error { p.create(a); return nil }
+func (p *markSpyProv) IssueCredential(context.Context, string) error { return nil }
+
+// OldKeys carries the greatest issue time of a key's revisions, and an incomplete history refuses the inventory.
+func TestOldKeysFromAdminRecordUsesMaxIssued(t *testing.T) {
+	w, _, _ := applyWorld(t)
+	ctx := context.Background()
+	f := &fakeIssued{}
+	r := NewAdminIssueRecord(f)
+	future := time.Unix(4_000_000_000, 0)
+	for _, at := range []time.Time{future, time.Unix(1000, 0)} {
+		if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prev, _ := listset.Compile(set1())
+	got, err := oldKeysFromRecord(ctx, r, prev, set2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := got["foo.c.core"]; len(k) != 1 || !k[0].IssuedAt.Equal(future) {
+		t.Errorf("core = %+v, want the future issue time", k)
+	}
+	f.histErr = map[string]error{w.k.revoked: &admin.IncompleteHistoryError{Key: w.k.revoked}}
+	if _, err := oldKeysFromRecord(ctx, r, prev, set2()); !errors.Is(err, ErrIncompleteInventory) {
+		t.Errorf("incomplete history: err = %v", err)
 	}
 }

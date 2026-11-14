@@ -23,6 +23,8 @@ import (
 // sender under the key is disconnected, not only the one whose reach changed (ADR 0097). RunOrdered pushes once for
 // the whole change, so the price is paid once per owner group, not once per sender.
 //
+// A rollback while an inbox may exist is refused: see ProvisionMarkers.
+//
 // Provisioning happens inside the run, after the gate reports applied and before the generation is committed. If a
 // step fails nothing is committed and the generation is pending: resubmitting the same list set pushes and gates again
 // and resumes the provisioning, so a Provisioner's steps must be idempotent.
@@ -218,10 +220,18 @@ var errProvisioning = errors.New("provisioning failed")
 // When the generation is not applied, or the list set was refused, nothing is provisioned and the new addresses are
 // held, each with its Reason. The Provisioner is never called before the gate has applied. An error from Run (a stale
 // base, a pending generation, a signing error, a commit failure) is returned as is. See the package comment for the
-// cost of the push. A hook the caller set in in.BeforeCommit runs first.
+// cost of the push. A hook the caller set in in.BeforeCommit runs first. With prov set, in.Ledger must implement
+// ProvisionMarkers (see WithProvisionMarkers), else ErrNoProvisionMarkers is returned before anything is pushed.
 func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStatus, error) {
 	var out OrderedStatus
 	var acc Accepted
+	// Without markers a rollback could expose an inbox the target refuses (REQ-015): refuse before anything is pushed.
+	if prov != nil {
+		if _, ok := in.Ledger.(ProvisionMarkers); !ok {
+			return out, ErrNoProvisionMarkers
+		}
+	}
+	in, markers := withProvisionGuard(in, prov)
 	userHook := in.BeforeCommit
 	in.BeforeCommit = func(ctx context.Context, a Accepted, st Status) error {
 		if userHook != nil {
@@ -236,6 +246,15 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 			}
 			if err := CheckBeforeWrite(ctx, FenceProvision); err != nil {
 				return err
+			}
+			// The marker is written before the inbox can exist, so a crash or a failed step later cannot leave an
+			// inbox with no marker. If it cannot be written the address is not provisioned.
+			if markers != nil {
+				if err := markers.MarkProvisioning(na.Address, a.Record.Generation); err != nil {
+					out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: "mark provisioning: " + err.Error()})
+					failed = true
+					continue
+				}
 			}
 			if err := prov.CreateInbox(ctx, na.Address); err != nil {
 				out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: err.Error()})
@@ -289,6 +308,13 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 	case err != nil:
 		return out, err
 	case st.State == StateApplied:
+		// The generation is committed: its markers are done with. A marker that cannot be cleared stays and is harmless,
+		// because markers are keyed by generation and the next run builds the next one.
+		if markers != nil {
+			for _, p := range out.Provisioned {
+				_ = markers.ClearProvisioning(p, st.Generation)
+			}
+		}
 		return out, nil
 	}
 	// Not applied: every new address is held.
