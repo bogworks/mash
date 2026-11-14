@@ -65,6 +65,17 @@ queue_rules:
       # must have run, and succeeded, on this head before it can enter the queue, so a push cannot slip in on the
       # previous head's label (fail closed).
       - check-success = label-reset
+      # The lead's review, as a commit status `lead-review` = success on the exact head SHA the lead reviewed (posted by
+      # scripts/lead-approve; ADR 0116). A new head has no such status, so a push drops this approval by itself. It is a
+      # PLAIN entry here, not in `merge_protections` (the status does not exist on the queue draft's commit, the #424
+      # deadlock) and not inside the `or` below (a bare check inside an `or` is banned, ADR 0078). Migration week,
+      # 2026-11-14 to 2026-11-21: it is required ALONGSIDE the approval-or-`lead-approved` gate below, so for now it ADDS
+      # a requirement. On 2026-11-21 the `or` below becomes the status-or-approval (the `lead-approved` alternative
+      # drops and this plain entry moves into it as the status alternative), and the files that change are this file,
+      # internal/release/mergify_test.go, .github/workflows/label-reset.yml (stops stripping `lead-approved`), and
+      # docs/branch-protection.md. `check-success` matches a status whoever posted it (Mergify has no creator
+      # filter), so this binds approval to the head commit; it does not authenticate the lead (ADR 0116).
+      - check-success = lead-review
       # Entry needs a recorded maintainer approval or the `lead-approved` label. Authorship is NOT a condition: the
       # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
       # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's

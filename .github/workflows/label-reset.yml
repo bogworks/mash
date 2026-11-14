@@ -5,6 +5,10 @@ name: label-reset
 # open (a pull request can be created with labels) does not count. It running on open also means the label-reset check
 # exists on every head: the queue requires it (fail closed), and a head with no green label-reset check cannot enter.
 #
+# The lead's other approval, the `lead-review` commit status (scripts/lead-approve, ADR 0116), needs no reset here: it is
+# set on one head SHA, so a new head has no `lead-review` status and the approval drops by itself. The `lead-approved`
+# strip below stays through the migration week (to 2026-11-21), while the label is still an accepted alternative.
+#
 # Trust: pull_request_target gives a token that can edit labels on a pull request from a fork, and runs THIS file from
 # the base branch. So there is no checkout and nothing from the pull request is built, sourced or run; the only inputs
 # are the pull request number from the event, passed through env, never through the text of the script.
