@@ -59,6 +59,9 @@ type ApplyDeps struct {
 	// generations unless the signer set does, also PreviousSigners. A caller whose signer set changed with this
 	// generation must call Run itself.
 	Signers map[string]string
+	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps
+	// beside Signers (RunInput.KeptSigners). Without them a multi-range account is never read as the target.
+	KeptSigners map[string]string
 	// ServerLimits are the servers' limits. Apply does not use them: the intake checks sizes with listset.SizeCheck
 	// before it calls Apply, and Run refuses a JWT over policy.AccountJWTLimit.
 	ServerLimits []listset.ServerLimits
@@ -136,9 +139,8 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 			return Status{}, fmt.Errorf("compile the list set in force (generation %d): %w", cur.Generation, err)
 		}
 	}
-	// Known gap: the inventory is read here, before Run takes the ledger's lock, so an issue or revocation that lands
-	// between this read and the gate is not in OldKeys. Closing it needs a RunInput hook that Run calls under the lock
-	// to read the inventory; run.go is owned by an open PR, so it is not changed here.
+	// This early read is only a cheap refusal before the lock; the authoritative inventory is RunInput.OldKeysFn,
+	// which Run calls under the lock, so a credential recorded in between reaches the gate.
 	oldKeys, err := oldKeysFromRecord(ctx, deps.IssueRecord, prev, req.ListSet)
 	if err != nil {
 		return Status{}, err
@@ -149,6 +151,10 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		ListSet: req.ListSet, Received: req.Received, RotationStep: req.RotationStep,
 		Previous: prev, Signer: deps.Signer, OldKeys: oldKeys,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
+		KeptSigners: deps.KeptSigners,
+		OldKeysFn: func(ctx context.Context) (map[string][]OldKey, error) {
+			return oldKeysFromRecord(ctx, deps.IssueRecord, prev, req.ListSet)
+		},
 		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,
 	}
 	if deps.Provisioner != nil {

@@ -163,3 +163,37 @@ func TestRunOrderedRefusesLedgerWithoutProvisionMarkers(t *testing.T) {
 		t.Errorf("events before the refusal: %v", got)
 	}
 }
+
+// verifyOnlyProv is a Provisioner whose CreateInbox only verifies an existing inbox.
+type verifyOnlyProv struct{ *recProv }
+
+func (verifyOnlyProv) VerifiesOnly() bool { return true }
+
+// A Provisioner that only verifies creates no inbox, so RunOrdered writes no marker for it, and a rollback after a
+// later failure is not blocked.
+func TestRunOrderedWritesNoMarkerForAVerifyOnlyProvisioner(t *testing.T) {
+	w := newWorld14(t)
+	prov := verifyOnlyProv{w.prov}
+	ml := newMarkerLedger(evLedger{w.ledger, w.ev})
+	w.in.Ledger = ml
+	w.prov.fail("issue:foo.c.new", true)
+	if _, err := RunOrdered(context.Background(), w.in, prov); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := w.ledger.Pending(); !ok || ml.count() != 0 {
+		t.Fatalf("after the first run: pending %v, markers %d, want pending and no marker", ok, ml.count())
+	}
+	w.prov.fail("issue:foo.c.new", false)
+	w.cl.mu.Lock()
+	w.cl.jwts["s2"] = w.j1
+	w.cl.dropN["s2"] = dropTargetPushes
+	w.cl.mu.Unlock()
+	if _, err := RunOrdered(context.Background(), w.in, prov); errors.Is(err, ErrProvisioningMarker) {
+		t.Fatalf("the rollback was blocked: %v", err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := w.ledger.Pending(); ok {
+		t.Error("pending stayed after a rollback")
+	}
+}

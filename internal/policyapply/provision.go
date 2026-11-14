@@ -44,6 +44,19 @@ type InboxRemover interface {
 	RemoveInbox(ctx context.Context, address string) error
 }
 
+// VerifyOnly is the optional interface of a Provisioner whose CreateInbox only verifies an inbox that already exists
+// and creates nothing. RunOrdered writes no provisioning marker for such a Provisioner: there is no inbox of this run to
+// remove, so a marker would block a rollback for nothing.
+type VerifyOnly interface {
+	VerifiesOnly() bool
+}
+
+// verifiesOnly reports whether prov declares that CreateInbox creates nothing.
+func verifiesOnly(prov Provisioner) bool {
+	v, ok := prov.(VerifyOnly)
+	return ok && v.VerifiesOnly()
+}
+
 // ErrProvisioningMarker is the error of a run that refused to roll back or clear its pending generation because an
 // inbox may exist that a rollback would expose to a sender the target refuses.
 var ErrProvisioningMarker = errors.New("an inbox was provisioned for the pending generation; it cannot be rolled back until the inbox is removed")

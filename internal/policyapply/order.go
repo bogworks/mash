@@ -249,7 +249,8 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 			}
 			// The marker is written before the inbox can exist, so a crash or a failed step later cannot leave an
 			// inbox with no marker. If it cannot be written the address is not provisioned.
-			if markers != nil {
+			// A Provisioner that only verifies creates no inbox, so it needs no marker.
+			if markers != nil && !verifiesOnly(prov) {
 				if err := markers.MarkProvisioning(na.Address, a.Record.Generation); err != nil {
 					out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: "mark provisioning: " + err.Error()})
 					failed = true

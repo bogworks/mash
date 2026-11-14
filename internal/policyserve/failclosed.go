@@ -6,49 +6,131 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // ErrNotDecided is wrapped by the fail-closed steps: the behaviour they stand for is not decided, so nothing is done.
 var ErrNotDecided = errors.New("not available yet")
 
+// maxNamedAddresses is how many addresses a refusal names; the rest are counted, so the status stays short.
+const maxNamedAddresses = 3
+
 // Reasons the Applier gives when it refuses a change before anything is pushed.
 const (
-	// NewAddressDetail is the reason a change that adds an address is refused. It is the status text, so it is plain
-	// and under the intake's 500 byte limit for a refusal.
-	NewAddressDetail = "this change adds an address. An address's inbox can be made only for an endpoint that was provisioned under its own key, " +
-		"and mash cannot provision one from a list set yet. The change was refused and nothing was pushed. " +
-		"There is nothing to do about it until that step exists; the list set can be submitted again then."
+	// NewAddressDetail is what a refusal for an address with no inbox says after naming the addresses. It is the
+	// status text, so it is plain and, with the names, under the intake's 500 byte limit for a refusal.
+	NewAddressDetail = "A new address needs its endpoint provisioned first, with a credential from the issue service. " +
+		"The change was refused and nothing was pushed; submit it again once the endpoint exists."
 	// NarrowingDetail is the reason a change that narrows an existing sender by tags is refused. Same limits as above.
 	NarrowingDetail = "this change narrows what an existing sender may reach by tags, which needs a new credential for that sender. " +
 		"Replacing a sender's credential is not part of this release, so there is nothing to do about it yet: " +
 		"the change was refused and nothing was pushed. Submit a list set that does not narrow an existing sender by tags."
 )
 
-// Provisioner is the policyapply.Provisioner of the service. It creates no inbox and issues no credential.
+// NoInboxDetail is the status text of a change that adds addresses that have no inbox yet.
+func NoInboxDetail(addresses []string) string {
+	shown := addresses
+	if len(shown) > maxNamedAddresses {
+		shown = shown[:maxNamedAddresses]
+	}
+	list := strings.Join(shown, ", ")
+	if n := len(addresses) - len(shown); n > 0 {
+		list += fmt.Sprintf(" and %d more", n)
+	}
+	return list + ": no inbox yet. " + NewAddressDetail
+}
+
+// SuspendedInboxDetail is the status text of a change that adds addresses whose inbox is suspended: a suspended inbox
+// receives no mail, so the address would be admitted but unreachable.
+func SuspendedInboxDetail(addresses []string) string {
+	shown := addresses
+	if len(shown) > maxNamedAddresses {
+		shown = shown[:maxNamedAddresses]
+	}
+	list := strings.Join(shown, ", ")
+	if n := len(addresses) - len(shown); n > 0 {
+		list += fmt.Sprintf(" and %d more", n)
+	}
+	return list + ": its inbox is suspended; resume it first (mashctl resume). The change was refused and nothing was pushed; " +
+		"submit it again once the inbox is resumed."
+}
+
+// InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one.
+type InboxChecker interface {
+	CheckInbox(ctx context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error)
+}
+
+var _ InboxChecker = (*admin.Admin)(nil)
+
+// Provisioner is the policyapply.Provisioner of the service. It creates no inbox and issues no credential: a list set
+// does not carry the endpoint's public key, and mash never holds an endpoint's private key (ADR 0104), so an
+// address's endpoint is made first, by `mashctl add` or by the issue service, and applying a list set only checks it.
 //
-// CreateInbox is not available for any new address. Admin.EnsureInbox takes a legacy endpoint name (config.ValidName:
-// letters, digits and single hyphens), and a list-set address range.owner.name is a new-form identity whose key is the
-// flat form range_owner_name, which that rule refuses. The inbox of a new-form identity is made only by
-// Admin.ProvisionIdentity, which also writes the endpoint's directory record and needs the endpoint's user public key,
-// which a list set does not carry and mash does not have until the issue service has issued the credential. So the
-// Applier refuses a change that adds an address before anything is pushed, and this step fails if it is reached.
+// CreateInbox verifies, through Inboxes, that the address has its inbox stream and durable consumer, with the
+// configuration mail depends on. The Applier runs the same check for every added address before anything is pushed,
+// so a step reached here finds the inbox it found then.
 //
 // IssueCredential issues nothing: credentials come from the issue service on a wrangler's request (ADR 0104). It only
 // checks that the address is issuable, so a step reached for an address that no list set in the run names, or whose
-// owner group has no scoped key, fails.
+// owner group has no scoped key, fails. It is idempotent.
 type Provisioner struct {
 	Keys Keys
 	// Sets are the list sets in force and being applied; an address of any of them is issuable.
 	Sets []*listset.Compiled
+	// Inboxes is the read-only inbox check. Nil means no address has an inbox.
+	Inboxes InboxChecker
 }
 
 var _ policyapply.Provisioner = Provisioner{}
 
-// CreateInbox implements policyapply.Provisioner.
-func (Provisioner) CreateInbox(context.Context, string) error {
-	return errors.New("creating the inbox of a new address is " + ErrNotDecided.Error())
+// SuspendedReason follows the address in the answer of MissingInbox for a suspended inbox.
+const SuspendedReason = ": its inbox is suspended; resume it first"
+
+// MissingInbox says what the inbox of address lacks, in plain words, or "" when it has a stream and a consumer. A
+// suspended inbox counts as lacking: it receives no mail, so the answer is that it is suspended, with the resume step.
+// Callers tell that answer apart with SuspendedReason. A
+// stream or consumer that exists but does not have the configuration mail depends on is an error, as is a failed read.
+func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
+	id, err := sap.ParseCanonical(address)
+	if err != nil {
+		return "", fmt.Errorf("address %.64q is not range.owner.name: %w", address, err)
+	}
+	if p.Inboxes == nil {
+		return address + " has no inbox stream", nil
+	}
+	got, err := p.Inboxes.CheckInbox(ctx, id)
+	switch {
+	case err != nil:
+		return "", err
+	case got.Stream == "":
+		return address + " has no inbox stream", nil
+	case got.Suspended:
+		return address + SuspendedReason + "; run mashctl resume " + id.Flat(), nil
+	case !got.Consumer:
+		return address + " has an inbox stream (" + got.Stream + ") but not the consumer that reads it", nil
+	}
+	return "", nil
+}
+
+// VerifiesOnly implements policyapply.VerifyOnly: CreateInbox creates nothing, so no provisioning marker is needed.
+func (Provisioner) VerifiesOnly() bool { return true }
+
+var _ policyapply.VerifyOnly = Provisioner{}
+
+// CreateInbox implements policyapply.Provisioner. It creates nothing: it fails, naming what is missing, unless the
+// address's inbox exists.
+func (p Provisioner) CreateInbox(ctx context.Context, address string) error {
+	missing, err := p.MissingInbox(ctx, address)
+	if err != nil {
+		return err
+	}
+	if missing != "" {
+		return errors.New(missing + "; the endpoint must be provisioned first")
+	}
+	return nil
 }
 
 // IssueCredential implements policyapply.Provisioner. It is idempotent and changes nothing.

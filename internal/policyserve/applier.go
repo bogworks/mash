@@ -64,8 +64,11 @@ type Applier struct {
 	// loaded and reports its JWT. The connections stay open for the apply.
 	Load func(ctx context.Context, url string) (*nats.Conn, error)
 	Log  *slog.Logger
+	// Inboxes is the read-only inbox check the service's Provisioner uses: a change that adds an address whose inbox
+	// does not exist is refused before the push. Nil means no address has an inbox.
+	Inboxes InboxChecker
 	// Provisioner provisions the new addresses of a change inside the run. Nil is the production setting: the
-	// service's Provisioner, and a change that adds an address is refused before the push. A test sets its own.
+	// service's Provisioner over Inboxes. A test may set its own, which then also decides the added addresses.
 	Provisioner policyapply.Provisioner
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
@@ -74,7 +77,8 @@ type Applier struct {
 	markers     policyapply.ProvisionMarkers
 	markersErr  error
 
-	// applyFn and readServers are seams for the tests; nil means policyapply.Apply and ReadServers.
+	// applyFn, keptFn and readServers are seams for the tests; nil means policyapply.Apply, Issuer.Kept and ReadServers.
+	keptFn      func(context.Context) (map[string]string, error)
 	applyFn     func(context.Context, policyapply.ApplyRequest, policyapply.ApplyDeps) (policyapply.Status, error)
 	readServers func(ctx context.Context) ([]ServerInfo, error)
 }
@@ -209,15 +213,16 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		return policyintake.Result{}, fmt.Errorf("provisioning markers: %w", err)
 	}
 	prov := a.Provisioner
-	failClosed := prov == nil
+	production := prov == nil
 	deps := policyapply.ApplyDeps{
 		Ledger: a.Ledger, Cluster: issuer.Cluster, Signer: issuer, Account: a.Account, Inventory: a.Servers,
 		Provisioner: prov, ProvisionMarkers: markers, IssueRecord: a.Record, BeforeWrite: BeforeWrite(g), Now: a.Now,
 	}
 
 	target, cerr := listset.Compile(doc.ListSet)
-	if failClosed {
-		deps.Provisioner = Provisioner{Keys: a.Keys, Sets: []*listset.Compiled{prev, target}}
+	svc := Provisioner{Keys: a.Keys, Sets: []*listset.Compiled{prev, target}, Inboxes: a.Inboxes}
+	if production {
+		deps.Provisioner = svc
 	}
 	if cerr != nil {
 		// A list set that does not validate is refused by Apply, with its own status, before anything is signed or pushed.
@@ -260,8 +265,27 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	if err != nil {
 		return policyintake.Result{}, err
 	}
-	if failClosed && len(policyapply.NewOrder(prev, target, ex).NewAddresses) > 0 {
-		return policyintake.Result{}, errors.New(NewAddressDetail)
+	if production {
+		// Every added address must already have its inbox: refused here, before anything is signed or pushed.
+		var missing, suspended []string
+		for _, na := range policyapply.NewOrder(prev, target, ex).NewAddresses {
+			m, err := svc.MissingInbox(ctx, na.Address)
+			if err != nil {
+				return policyintake.Result{}, fmt.Errorf("the inbox of %s cannot be used: %w; nothing was pushed", na.Address, err)
+			}
+			switch {
+			case strings.HasPrefix(m, na.Address+SuspendedReason):
+				suspended = append(suspended, na.Address)
+			case m != "":
+				missing = append(missing, na.Address)
+			}
+		}
+		if len(suspended) > 0 {
+			return policyintake.Result{}, errors.New(SuspendedInboxDetail(suspended))
+		}
+		if len(missing) > 0 {
+			return policyintake.Result{}, errors.New(NoInboxDetail(missing))
+		}
 	}
 	if len(ex.CredentialOnly) > 0 {
 		return policyintake.Result{}, errors.New(NarrowingDetail)
@@ -283,6 +307,13 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		signers[tpl.Group] = pub
 	}
 	deps.Signers = signers
+	kept := issuer.Kept
+	if a.keptFn != nil {
+		kept = a.keptFn
+	}
+	if deps.KeptSigners, err = kept(ctx); err != nil {
+		return policyintake.Result{}, err
+	}
 	deps.ServerLimits = Limits(servers)
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}

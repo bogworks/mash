@@ -410,19 +410,117 @@ func TestPolicyServeRefusesWhenFewerServersAnswer(t *testing.T) {
 	}
 }
 
-func TestPolicyServeRefusesAnAddedAddress(t *testing.T) {
-	e := newServeEnvNoService(t, true)
+// ownerDoc is generation 1 for the deployment's own owner (the owner `mashctl add` mints for): one group, and the
+// senders given, each allowed to mail the next.
+func (e *serveEnv) ownerDoc(gen, base int, names ...string) []byte {
+	return e.serveDoc(gen, base, func(m map[string]any) {
+		owner := e.env["MASH_OWNER"]
+		m["groups"] = map[string]any{owner: map[string]any{"mail": "closed", "prompt": "closed", "status": "shared", "heartbeat": "closed"}}
+		senders := map[string]any{}
+		for i, n := range names {
+			allow := []string{}
+			if i+1 < len(names) {
+				allow = append(allow, serveRange+"."+owner+"."+names[i+1])
+			}
+			senders[serveRange+"."+owner+"."+n] = map[string]any{"allow": allow, "deny": []string{}}
+		}
+		m["senders"] = senders
+	})
+}
+
+// adoptLater adopts the account after its endpoints were made: `mashctl add` refuses an adopted account, so an
+// account that has endpoints made by add is adopted afterwards.
+func (e *serveEnv) adoptLater() {
+	e.t.Helper()
+	if out, errb, code := e.run("policy", "adopt", "--submitter", e.subPub); code != 0 {
+		e.t.Fatalf("adopt: %d %s %s", code, out, errb)
+	}
+}
+
+// add runs `mashctl add NAME` in the serve environment, before the account is adopted.
+func (e *serveEnv) add(name string) string {
+	e.t.Helper()
+	out, errb, code := e.run("add", name)
+	if code != 0 {
+		e.t.Fatalf("add %s: %d %s %s", name, code, out, errb)
+	}
+	return filepath.Join(e.env["MASH_CONFIG_DIR"], name+".creds")
+}
+
+// A list set that adds an address with no inbox is refused before anything is pushed, and says why in plain words.
+func TestPolicyServeRefusesAnAddressWithNoInbox(t *testing.T) {
+	e := newServeEnvNoService(t, false)
+	e.add("core") // "ghost" has no endpoint
+	e.adoptLater()
 	e.start()
 	before := e.shape()
+	e.put(signed(t, e.sub, e.ownerDoc(1, 0, "core", "ghost")))
+	st := e.waitStatus("the refusal", func(s *policyapply.Status) bool { return s.State == policyapply.StateRefused })
+	if len(st.Refusals) != 1 || st.Refusals[0].Stage != "apply" {
+		t.Fatalf("refusals %+v", st.Refusals)
+	}
+	r := st.Refusals[0].Reason
+	if !strings.Contains(r, serveRange+"."+e.env["MASH_OWNER"]+".ghost") || !strings.Contains(r, "no inbox yet") ||
+		!strings.Contains(r, "credential") || strings.Contains(r, ".core,") {
+		t.Fatalf("reason %q", r)
+	}
+	if e.shape() != before || e.inForce() != 0 {
+		t.Error("the account changed")
+	}
+}
+
+// The first list set of an account whose endpoints were made with `mashctl add` is applied by the service with no
+// provisioner of its own: each address already has the inbox `add` made.
+func TestPolicyServeAppliesAFirstListSetOfAddMadeEndpoints(t *testing.T) {
+	e := newServeEnvNoService(t, false)
+	corePath := e.add("core")
+	e.add("lead")
+	e.adoptLater()
+	e.start()
+	owner := e.env["MASH_OWNER"]
+	group := serveRange + "." + owner
+	e.put(signed(t, e.sub, e.ownerDoc(1, 0, "core", "lead")))
+	st := e.waitStatus("generation 1 applied", func(s *policyapply.Status) bool { return s.Generation == 1 && s.State == policyapply.StateApplied })
+	if !st.InForce || len(st.Failing) != 0 || len(st.Refusals) != 0 {
+		t.Fatalf("status %+v", st)
+	}
+	if e.inForce() != 1 {
+		t.Fatalf("generation in force %d", e.inForce())
+	}
+	us, n := e.scopedFor(group)
+	if us == nil || n != 1 {
+		t.Fatalf("scoped signer for %s: %v, signing keys %d", group, us, n)
+	}
+	gk := mustT(e.ks.GroupKey(group, false))
+	if us.Key != mustT(gk.PublicKey()) {
+		t.Errorf("the scoped key is not the key store's group key")
+	}
+	if len(us.Template.Pub.Allow) == 0 {
+		t.Errorf("the scoped key carries no template: %+v", us.Template)
+	}
+	// What add made is untouched: the directory still has both endpoints and an add-made credential still connects.
+	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(corePath), nats.Timeout(serveWait))
+	if err != nil {
+		t.Fatalf("an add-made credential no longer connects: %v", err)
+	}
+	nc.Close()
+	e.noSeeds(e.logs.String())
+	if code := e.shutdown(); code != 0 {
+		t.Fatalf("exit %d: %s", code, e.logs.String())
+	}
+}
+
+// With a change that adds an address, the refusal text says an inbox is missing; what the user can do about it is
+// in the text too (the endpoint first, then the credential).
+func TestPolicyServeRefusalForAnUnprovisionedAddressSaysWhatToDo(t *testing.T) {
+	e := newServeEnvNoService(t, true)
+	e.start()
 	e.put(signed(t, e.sub, e.serveDoc(1, 0, func(m map[string]any) {
 		m["senders"] = map[string]any{"foo.c.core": map[string]any{"allow": []string{}, "deny": []string{}}}
 	})))
 	st := e.waitStatus("the refusal", func(s *policyapply.Status) bool { return s.State == policyapply.StateRefused })
-	if len(st.Refusals) != 1 || st.Refusals[0].Stage != "apply" || !strings.Contains(st.Refusals[0].Reason, "adds an address") {
+	if len(st.Refusals) != 1 || !strings.Contains(st.Refusals[0].Reason, "provisioned first") || e.inForce() != 0 {
 		t.Fatalf("refusals %+v", st.Refusals)
-	}
-	if e.shape() != before || e.inForce() != 0 {
-		t.Error("the account changed")
 	}
 }
 
