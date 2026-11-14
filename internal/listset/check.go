@@ -657,3 +657,14 @@ func universeNamed(m *model) []string {
 	slices.Sort(out)
 	return out
 }
+
+// ReachOf returns, for sender in c, the addresses of universe it reaches per verb once its tags are expanded through
+// its group's template, the way nats-server does it: the simulation behind DryRun. Each slice is sorted. It is an error
+// for c to have no user or no template for sender.
+func ReachOf(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
+	return reachOver(c, sender, universe)
+}
+
+// Subject returns the subject a sender uses for verb v towards address: a publish subject for mail, prompt and status,
+// and the subject a sender subscribes to for heartbeat.
+func Subject(v Verb, address string) string { return subj(address, v) }

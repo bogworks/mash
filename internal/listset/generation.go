@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -155,9 +156,11 @@ func DigestListSet(ls ListSet) Digest {
 //	    | pub allow sorted | pub deny sorted | sub allow sorted | sub deny sorted
 //	    | response permission: 0, or 1 then MaxMsgs and Expires as 8 bytes big-endian
 //	| count of users | users sorted by their encoding, each Sender Name | tags sorted
+//	    | for a user with permission claims only: 0x01, then the JSON encoding of the claims as one string
 //
 // The order of lines within a permission list and of tags does not change what the server enforces, so it does not
-// change the digest.
+// change the digest. User permission claims are covered too; a user with none adds nothing, so the digest of a
+// Compiled without them is unchanged.
 func DigestCompiled(c *Compiled) Digest {
 	e := newEnc("mash.compiled.v1\x00")
 	if c == nil {
@@ -182,6 +185,14 @@ func DigestCompiled(c *Compiled) Digest {
 	us := make([]string, len(c.Users))
 	for i, u := range c.Users {
 		us[i] = enc1(u.Sender, u.Name) + encSorted(u.Tags)
+		if !claimsEmpty(u.Permissions) {
+			// Check refuses these today; covering them keeps a future Compile change from leaving them unsigned.
+			pj, err := json.Marshal(u.Permissions)
+			if err != nil {
+				panic(err) // a plain struct of strings and numbers always marshals
+			}
+			us[i] += "\x01" + enc1(string(pj))
+		}
 	}
 	e.sortedRaw(us)
 	return e.sum()
