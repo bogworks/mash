@@ -115,6 +115,13 @@ func SetIssuedStatusFault(f func() error) (prev func() error) {
 	return
 }
 
+// SetIssuedMarkerFault installs a hook whose error stops init between the history raise and the marker write; it
+// returns the previous one.
+func SetIssuedMarkerFault(f func() error) (prev func() error) {
+	prev, issuedMarkerFault = issuedMarkerFault, f
+	return
+}
+
 // SetLockRefresh sets how often a refreshing lock extends its expiry; it returns a func that restores it.
 func SetLockRefresh(d time.Duration) (restore func()) {
 	old := lockRefresh

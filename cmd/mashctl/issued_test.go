@@ -565,7 +565,8 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		u := h.provisionDeclared("a") // provisioned without mashctl add: not in the issue record
 		stubRevoke(t)
 		out, errb, code := h.run("retire", "a")
-		if code != 0 || strings.Contains(errb, "issue record") {
+		// The pre-revocation check warns once that the key has no record; marking the revocation says nothing more.
+		if code != 0 || strings.Count(errb, "issue record") != 1 || !strings.Contains(errb, "has no issue record") || strings.Contains(errb, "was not updated") {
 			t.Fatalf("%d %s %s", code, out, errb)
 		}
 		if _, ok := h.issued()[u]; ok {
