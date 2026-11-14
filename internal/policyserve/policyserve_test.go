@@ -317,3 +317,25 @@ func TestSignPreviousKeepsTheJWTAndAddsRevocations(t *testing.T) {
 		t.Error("a JWT that does not decode was re-signed")
 	}
 }
+
+// A suspended inbox receives no mail: the provisioner refuses it, naming the resume step, and the applier's text for
+// it is not the "no inbox yet" one.
+func TestSuspendedInboxIsRefusedWithTheResumeStep(t *testing.T) {
+	ctx := context.Background()
+	inb := &fakeInboxes{answers: map[string]admin.InboxCheck{
+		"foo.c.parked": {Stream: "inbox-foo_c_parked", Consumer: true, Suspended: true},
+	}}
+	p := Provisioner{Inboxes: inb}
+	err := p.CreateInbox(ctx, "foo.c.parked")
+	if err == nil || !strings.Contains(err.Error(), "suspended") || !strings.Contains(err.Error(), "mashctl resume") {
+		t.Fatalf("a suspended inbox: %v", err)
+	}
+	m, err := p.MissingInbox(ctx, "foo.c.parked")
+	if err != nil || !strings.HasPrefix(m, "foo.c.parked"+SuspendedReason) {
+		t.Errorf("MissingInbox: %q %v", m, err)
+	}
+	d := SuspendedInboxDetail([]string{"foo.c.parked"})
+	if len(d) > 500 || !strings.Contains(d, "suspended") || !strings.Contains(d, "nothing was pushed") || strings.Contains(d, "no inbox yet") {
+		t.Errorf("%d bytes: %s", len(d), d)
+	}
+}

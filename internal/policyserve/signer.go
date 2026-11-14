@@ -103,35 +103,67 @@ func (s *Issuer) current(ctx context.Context) (*jwt.AccountClaims, error) {
 	return apply.CurrentAccountClaims(ctx, s.Resolver, s.Account, s.Trust, s.Servers)
 }
 
-// Sign builds the account JWT of a generation: the account JWT the servers hold now, with the scoped signing keys
-// replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
-// Everything else in it (limits, exports, revocations, the account's own settings) is kept. A signing key it does not
-// manage is not dropped silently: the apply is refused. It implements policyapply.Signer.
-func (s *Issuer) Sign(_ listset.Record, c *listset.Compiled) (string, error) {
-	base, err := s.current(s.Ctx)
-	if err != nil {
-		return "", fmt.Errorf("read the account JWT: %w", err)
-	}
+// keptFrom splits the scoped signing keys of base. kept is the other ranges' group keys of the key store (group ->
+// public key) that base also carries: the ones the next account JWT retains, and the ones the generation read must
+// find. A key store key of another range that base does not carry is in neither. mine are this range's keys in base,
+// which are rebuilt from the list set. A signing key of base that is not a scoped owner group key of the key store is
+// an error: the apply is refused rather than dropping it silently.
+func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine []string, err error) {
 	ours, err := s.Keys.GroupPublics()
 	if err != nil {
-		return "", fmt.Errorf("owner group keys: %w", err)
+		return nil, nil, fmt.Errorf("owner group keys: %w", err)
 	}
 	if s.Range == "" {
-		return "", errors.New("the issuer has no range: cannot tell which signing keys are this range's")
+		return nil, nil, errors.New("the issuer has no range: cannot tell which signing keys are this range's")
 	}
 	groupOf := map[string]string{} // public key -> owner group
 	for g, pub := range ours {
 		groupOf[pub] = g
 	}
+	kept = map[string]string{}
 	for _, k := range base.SigningKeys.Keys() {
 		sc, _ := base.SigningKeys.GetScope(k)
 		g, held := groupOf[k]
 		if _, scoped := sc.(*jwt.UserScope); !scoped || !held {
-			return "", fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
+			return nil, nil, fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
 		}
 		if strings.HasPrefix(g, s.Range+".") {
-			delete(base.SigningKeys, k) // this range's: rebuilt below from the list set
+			mine = append(mine, k)
+		} else {
+			kept[g] = k
 		}
+	}
+	return kept, mine, nil
+}
+
+// Kept is the scoped signing keys the next account JWT keeps beside this range's, as Sign retains them: the owner
+// group keys of other ranges that the account JWT the servers hold now carries. It maps group to public key and is
+// never nil.
+func (s *Issuer) Kept(ctx context.Context) (map[string]string, error) {
+	base, err := s.current(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the account JWT: %w", err)
+	}
+	kept, _, err := s.keptFrom(base)
+	return kept, err
+}
+
+// Sign builds the account JWT of a generation: the account JWT the servers hold now, with the scoped signing keys
+// replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
+// The other ranges' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
+// the account's own settings) is kept. A signing key it does not manage is not dropped silently: the apply is refused.
+// It implements policyapply.Signer.
+func (s *Issuer) Sign(_ listset.Record, c *listset.Compiled) (string, error) {
+	base, err := s.current(s.Ctx)
+	if err != nil {
+		return "", fmt.Errorf("read the account JWT: %w", err)
+	}
+	_, mine, err := s.keptFrom(base)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range mine {
+		delete(base.SigningKeys, k) // this range's: rebuilt below from the list set
 	}
 	for _, tpl := range c.Templates {
 		kp, err := s.Keys.GroupKey(tpl.Group, false)

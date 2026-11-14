@@ -77,7 +77,8 @@ type Applier struct {
 	markers     policyapply.ProvisionMarkers
 	markersErr  error
 
-	// applyFn and readServers are seams for the tests; nil means policyapply.Apply and ReadServers.
+	// applyFn, keptFn and readServers are seams for the tests; nil means policyapply.Apply, Issuer.Kept and ReadServers.
+	keptFn      func(context.Context) (map[string]string, error)
 	applyFn     func(context.Context, policyapply.ApplyRequest, policyapply.ApplyDeps) (policyapply.Status, error)
 	readServers func(ctx context.Context) ([]ServerInfo, error)
 }
@@ -266,15 +267,21 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	}
 	if production {
 		// Every added address must already have its inbox: refused here, before anything is signed or pushed.
-		var missing []string
+		var missing, suspended []string
 		for _, na := range policyapply.NewOrder(prev, target, ex).NewAddresses {
 			m, err := svc.MissingInbox(ctx, na.Address)
 			if err != nil {
 				return policyintake.Result{}, fmt.Errorf("the inbox of %s cannot be used: %w; nothing was pushed", na.Address, err)
 			}
-			if m != "" {
+			switch {
+			case strings.HasPrefix(m, na.Address+SuspendedReason):
+				suspended = append(suspended, na.Address)
+			case m != "":
 				missing = append(missing, na.Address)
 			}
+		}
+		if len(suspended) > 0 {
+			return policyintake.Result{}, errors.New(SuspendedInboxDetail(suspended))
 		}
 		if len(missing) > 0 {
 			return policyintake.Result{}, errors.New(NoInboxDetail(missing))
@@ -300,7 +307,11 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		signers[tpl.Group] = pub
 	}
 	deps.Signers = signers
-	if deps.KeptSigners, err = KeptSigners(a.Keys, a.Range); err != nil {
+	kept := issuer.Kept
+	if a.keptFn != nil {
+		kept = a.keptFn
+	}
+	if deps.KeptSigners, err = kept(ctx); err != nil {
 		return policyintake.Result{}, err
 	}
 	deps.ServerLimits = Limits(servers)
@@ -435,21 +446,4 @@ func detailOf(st policyapply.Status) string {
 		parts = append(parts, r.Stage+": "+r.Reason)
 	}
 	return strings.Join(parts, "; ")
-}
-
-// KeptSigners is the scoped signing keys the account JWT keeps beside this range's: the key store's owner group
-// keys whose group is not one of the range's ("range." prefix), the same split Issuer.Sign makes. It maps group to
-// public key.
-func KeptSigners(keys Keys, rng string) (map[string]string, error) {
-	pubs, err := keys.GroupPublics()
-	if err != nil {
-		return nil, fmt.Errorf("owner group keys: %w", err)
-	}
-	out := map[string]string{}
-	for g, pub := range pubs {
-		if !strings.HasPrefix(g, rng+".") {
-			out[g] = pub
-		}
-	}
-	return out, nil
 }

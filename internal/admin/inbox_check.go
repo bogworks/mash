@@ -22,6 +22,9 @@ type InboxCheck struct {
 	// Legacy is whether the inbox is the one of a legacy endpoint (inbox-<name>, made by `mashctl add`) whose filter
 	// agents.mail.*.<owner>.<name> also matches the address's new-form subject.
 	Legacy bool
+	// Suspended is whether the inbox is parked (ADR 0057): its stream receives no mail until it is resumed. A
+	// suspended inbox is still the endpoint's own, so its saved configuration is checked like any other.
+	Suspended bool
 }
 
 // Exists is whether mail to the address has a stream and a consumer to land in.
@@ -75,13 +78,14 @@ func (a *Admin) CheckInbox(ctx context.Context, id sap.EndpointIdentity) (InboxC
 	}
 	want := store.InboxConfigIdentity(target, a.limits)
 	got := s.CachedInfo().Config
-	if saved, ok := suspendedSubjects(flat, got); ok { // a suspended inbox is still the endpoint's own
+	saved, suspended := suspendedSubjects(flat, got)
+	if suspended { // a suspended inbox is still the endpoint's own
 		got.Subjects = saved
 	}
 	if err := checkInboxStream(flat, got, want); err != nil {
 		return InboxCheck{}, err
 	}
-	out := InboxCheck{Stream: sap.InboxStream(flat), Legacy: legacy}
+	out := InboxCheck{Stream: sap.InboxStream(flat), Legacy: legacy, Suspended: suspended}
 	c, err := s.Consumer(ctx, store.Consumer)
 	switch {
 	case errors.Is(err, jetstream.ErrConsumerNotFound):

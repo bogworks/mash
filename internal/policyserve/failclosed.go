@@ -43,6 +43,21 @@ func NoInboxDetail(addresses []string) string {
 	return list + ": no inbox yet. " + NewAddressDetail
 }
 
+// SuspendedInboxDetail is the status text of a change that adds addresses whose inbox is suspended: a suspended inbox
+// receives no mail, so the address would be admitted but unreachable.
+func SuspendedInboxDetail(addresses []string) string {
+	shown := addresses
+	if len(shown) > maxNamedAddresses {
+		shown = shown[:maxNamedAddresses]
+	}
+	list := strings.Join(shown, ", ")
+	if n := len(addresses) - len(shown); n > 0 {
+		list += fmt.Sprintf(" and %d more", n)
+	}
+	return list + ": its inbox is suspended; resume it first (mashctl resume). The change was refused and nothing was pushed; " +
+		"submit it again once the inbox is resumed."
+}
+
 // InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one.
 type InboxChecker interface {
 	CheckInbox(ctx context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error)
@@ -71,7 +86,12 @@ type Provisioner struct {
 
 var _ policyapply.Provisioner = Provisioner{}
 
+// SuspendedReason follows the address in the answer of MissingInbox for a suspended inbox.
+const SuspendedReason = ": its inbox is suspended; resume it first"
+
 // MissingInbox says what the inbox of address lacks, in plain words, or "" when it has a stream and a consumer. A
+// suspended inbox counts as lacking: it receives no mail, so the answer is that it is suspended, with the resume step.
+// Callers tell that answer apart with SuspendedReason. A
 // stream or consumer that exists but does not have the configuration mail depends on is an error, as is a failed read.
 func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
 	id, err := sap.ParseCanonical(address)
@@ -87,11 +107,18 @@ func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, 
 		return "", err
 	case got.Stream == "":
 		return address + " has no inbox stream", nil
+	case got.Suspended:
+		return address + SuspendedReason + "; run mashctl resume " + id.Flat(), nil
 	case !got.Consumer:
 		return address + " has an inbox stream (" + got.Stream + ") but not the consumer that reads it", nil
 	}
 	return "", nil
 }
+
+// VerifiesOnly implements policyapply.VerifyOnly: CreateInbox creates nothing, so no provisioning marker is needed.
+func (Provisioner) VerifiesOnly() bool { return true }
+
+var _ policyapply.VerifyOnly = Provisioner{}
 
 // CreateInbox implements policyapply.Provisioner. It creates nothing: it fails, naming what is missing, unless the
 // address's inbox exists.

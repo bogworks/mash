@@ -37,7 +37,8 @@ func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 	led := memLedger{policyapply.NewMemLedgerWith(rec, policyapply.InForceDetail{ListSet: &ls})}
 	a := &Applier{
 		Account: "A", Range: "foo", Ledger: led, Record: anyRecord{}, Servers: 1, URL: "nats://127.0.0.1:4222",
-		Keys: memKeys{},
+		Keys:   memKeys{},
+		keptFn: func(context.Context) (map[string]string, error) { return map[string]string{}, nil },
 		readServers: func(context.Context) ([]ServerInfo, error) {
 			return []ServerInfo{{Name: "s1", Host: "127.0.0.1", Port: 4222}}, nil
 		},

@@ -83,3 +83,25 @@ func TestCheckInboxReportsAMissingConsumerAndAChangedStream(t *testing.T) {
 		t.Fatalf("the check created a consumer: %v", err)
 	}
 }
+
+// A suspended inbox receives no mail, so the check reports it as suspended rather than as the endpoint's usable inbox.
+func TestCheckInboxReportsASuspendedInbox(t *testing.T) {
+	e, a, _ := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, "ops3")
+	id := newID(t, "acme", "team1", "ops3")
+	if _, err := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.CheckInbox(ctx, id)
+	if err != nil || got.Suspended || !got.Exists() {
+		t.Fatalf("before: %+v %v", got, err)
+	}
+	if _, err := a.Suspend(ctx, id.Flat()); err != nil {
+		t.Fatal(err)
+	}
+	got, err = a.CheckInbox(ctx, id)
+	if err != nil || !got.Suspended || got.Stream != "inbox-acme_team1_ops3" {
+		t.Fatalf("suspended: %+v %v", got, err)
+	}
+}
