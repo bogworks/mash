@@ -273,7 +273,9 @@ func TestBusySessionGetsNoWake(t *testing.T) {
 	}
 }
 
-// The converse: an idle session (no hook) is woken exactly once after the configured wake, and not before.
+// The converse: an idle session (no hook) is woken after the configured wake, not before, and the re-wake is backed off
+// to 2x the idle wake. Both properties are checked on the recorded wake times, never on how long the test slept: a
+// stalled runner can only delay when the test looks, which cannot fail it.
 func TestIdleSessionWakesOnceAfterTheConfiguredWake(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	f.idle = 300 * time.Millisecond
@@ -295,20 +297,24 @@ func TestIdleSessionWakesOnceAfterTheConfiguredWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
-	time.Sleep(f.idle / 2)
-	if count() != 0 {
-		t.Fatal("woke before the idle wake")
-	}
-	until(t, "the wake", func() bool { return count() == 1 })
+	until(t, "the wake", func() bool { return count() >= 1 })
+	// Not before: the wake clock starts at the spool write, which is after sent, so first-sent >= idle is a safe lower
+	// bound whatever the scheduler did in between.
 	mu.Lock()
 	first := wakes[0]
 	mu.Unlock()
 	if first.Sub(sent) < f.idle {
 		t.Fatalf("woke after %s, before the idle wake %s", first.Sub(sent), f.idle)
 	}
-	time.Sleep(f.idle) // the re-wake is 2x the base away
-	if count() != 1 {
-		t.Fatalf("%d wakes, want exactly one", count())
+	// Backed off: give a re-wake a bounded time to show (it never fails the test if it does not), then require that any
+	// re-wake came no sooner than 2x the idle wake after the first.
+	for deadline := time.Now().Add(f.idle); count() < 2 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	}
+	mu.Lock()
+	got := append([]time.Time(nil), wakes...)
+	mu.Unlock()
+	if len(got) >= 2 && got[1].Sub(got[0]) < 2*f.idle {
+		t.Fatalf("re-woke after %s, sooner than the backoff %s", got[1].Sub(got[0]), 2*f.idle)
 	}
 }
 
