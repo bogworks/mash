@@ -1,0 +1,70 @@
+{
+  "generation": 2,
+  "content": "sha256:479139ca08986ea175f1629632254fa863cf20e16d6c6253b21ee50e3a4b778b",
+  "signed": "sha256:ad38033419eb9bfb3452f42a4115945b548cdcfd83eb7ce5187d85f6d4c8c244",
+  "state": "partial",
+  "refusals": [],
+  "servers": [
+    {
+      "server": "s1",
+      "generation": 2
+    },
+    {
+      "server": "s2",
+      "generation": 1
+    }
+  ],
+  "not_connected": [],
+  "failing": [
+    {
+      "server": "s2",
+      "sender": "",
+      "check": "generation",
+      "detail": "holds generation 1, want 2"
+    },
+    {
+      "server": "s2",
+      "sender": "",
+      "check": "revoked",
+      "detail": "key not refused: UA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCTYM5"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.core",
+      "check": "refused",
+      "detail": "pub agents.mail.foo.c.sdk was not refused"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.core",
+      "check": "refused_current",
+      "detail": "pub agents.mail.foo.c.docs (mail from foo.c.core to foo.c.docs) was not refused for the target credential"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.docs",
+      "check": "refused",
+      "detail": "pub agents.mail.foo.c.core was not refused"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.docs",
+      "check": "refused",
+      "detail": "pub agents.mail.foo.c.sdk was not refused"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.sdk",
+      "check": "refused",
+      "detail": "pub agents.mail.foo.c.core was not refused"
+    },
+    {
+      "server": "s2",
+      "sender": "foo.c.sdk",
+      "check": "refused",
+      "detail": "pub agents.mail.foo.c.docs was not refused"
+    }
+  ],
+  "in_force": false,
+  "updated_at": "2026-11-12T10:00:00Z"
+}
