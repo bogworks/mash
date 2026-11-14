@@ -1,3 +1,0 @@
-web-intake cannot mail billing-agent: rule nothing-internet-facing-reaches-finance (deny), selected by from {internet=yes} and to {team=finance}
-hr-agent cannot mail hr-agent: rule hr-is-private (deny), selected by from {} and to {team=hr}; allow rules also matched: hr-agent-may-mail-itself, internal-agents-talk (a deny beats any allow)
-build-bot can mail deploy-tool: rule internal-agents-talk (allow), selected by from {net=internal} and to {net=internal}

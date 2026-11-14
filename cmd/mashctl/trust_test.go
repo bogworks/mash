@@ -40,14 +40,14 @@ func otherOperatorStore(t *testing.T, e *applyEnv) *ctlkeys.Authority {
 	return ks
 }
 
-func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
-	e := newApplyEnv(t, twoZones).withDirectory()
+func TestIssuedCheckRefusesForeignIssuer(t *testing.T) {
+	e := newApplyEnv(t).withDirectory()
 	ks := otherOperatorStore(t, e)
 	_, opPub, _ := ks.Operator()
 	realOp, _, _ := e.ks.Operator()
 	realPub, _ := realOp.PublicKey()
 	before := e.accountJWT()
-	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "repair"}, {"policy", "repair", "--dry-run"}} {
+	for _, args := range [][]string{{"unzone", "x"}} {
 		out, errb, code := e.run(args...)
 		if code != 1 || !strings.Contains(out+errb, "not an accepted issuer") || !strings.Contains(out+errb, realPub) || !strings.Contains(out+errb, opPub) {
 			t.Fatalf("%v: exit %d\n%s\n%s", args, code, out, errb)
@@ -56,11 +56,6 @@ func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
 	}
 	if e.accountJWT() != before {
 		t.Fatal("the account JWT changed")
-	}
-	// drift cannot trust the JWT either
-	out, _, code := e.run("policy", "drift", "--json")
-	if code != 1 || !strings.Contains(out, "not an accepted issuer") {
-		t.Fatalf("drift: %d\n%s", code, out)
 	}
 	// declaring the real operator as the identity of an operator JWT that lists our key makes the issuer acceptable
 	oc := jwt.NewOperatorClaims(realPub)
@@ -72,14 +67,14 @@ func TestApplyAndDriftRefuseForeignIssuer(t *testing.T) {
 	if _, err := ks.InstallOperatorJWT(tok); err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement") {
-		t.Fatalf("apply with operator.jwt: %d\n%s\n%s", code, out, errb)
+	if out, errb, code := e.run("issued", "check"); code == 1 && strings.Contains(out+errb, "not an accepted issuer") {
+		t.Fatalf("issued check with operator.jwt: %d\n%s\n%s", code, out, errb)
 	}
 }
 
 func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 	lookupWait = 1e9
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	realPub := mustPub(t, a.opSeed)
 
@@ -105,10 +100,10 @@ func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 
 func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	// a plain loopback server without the opt-in: every admin verb and the system connection are refused
-	e := newApplyEnv(t, twoZones).withDirectory()
+	e := newApplyEnv(t).withDirectory()
 	e.env["MASH_INSECURE_LOOPBACK"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	for _, args := range [][]string{{"policy", "apply"}, {"policy", "drift"}, {"list"}, {"init"}} {
+	for _, args := range [][]string{{"issued", "check"}, {"list"}, {"init"}} {
 		out, errb, code := e.run(args...)
 		if code == 0 || !strings.Contains(out+errb, "secure connection not available") {
 			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
@@ -116,14 +111,14 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	}
 	// with the opt-in the same server works
 	e.env["MASH_INSECURE_LOOPBACK"] = "1"
-	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement") {
+	if out, errb, code := e.run("list"); code != 0 {
 		t.Fatalf("with the opt-in: %d\n%s\n%s", code, out, errb)
 	}
 	// a non-loopback plain URL is refused before any connection, with or without the opt-in
 	for _, optIn := range []string{"", "1"} {
 		e.env["MASH_INSECURE_LOOPBACK"] = optIn
 		e.env["MASH_URL"] = "nats://192.0.2.1:4222"
-		for _, args := range [][]string{{"policy", "apply"}, {"list"}} {
+		for _, args := range [][]string{{"issued", "check"}, {"list"}} {
 			out, errb, code := e.run(args...)
 			if code == 0 || !(strings.Contains(out+errb, "refusing a plain nats://") || strings.Contains(out+errb, "allows a plain connection only to localhost")) {
 				t.Fatalf("%v opt-in %q: %d\n%s\n%s", args, optIn, code, out, errb)
@@ -131,7 +126,7 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 		}
 	}
 	// the same for adopt, which names its server on the command line
-	a := newAdopter(t, newApplyEnv(t, twoZones))
+	a := newAdopter(t, newApplyEnv(t))
 	a.env["MASH_INSECURE_LOOPBACK"] = ""
 	a.refuses(1, []string{"secure connection not available"})
 	a.env["MASH_INSECURE_LOOPBACK"] = "1"

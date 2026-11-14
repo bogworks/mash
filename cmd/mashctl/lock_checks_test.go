@@ -65,7 +65,7 @@ type guardedScenario struct {
 }
 
 func addEnvScenario(t *testing.T, g guarded, pre func(h *addEnv)) guardedScenario {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if pre != nil {
 		pre(h)
 	}
@@ -104,9 +104,8 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 		{guarded{name: "add", args: []string{"add", "c", "--label", "env=red"}}, nil},
 		{guarded{name: "reissue", args: []string{"reissue", "a"}}, rotate},
 		{guarded{name: "reissue, add-only", args: []string{"reissue", "a"}}, func(h *addEnv) { h.seedWith("a", nil) }},
-		{guarded{name: "label", args: []string{"label", "a", "env=prod"}}, nil},
-		{guarded{name: "label --sync", args: []string{"label", "b", "env=prod", "--sync"}}, provisionB},
-		{guarded{name: "unlabel", args: []string{"unlabel", "a", "team"}}, nil},
+		{guarded{name: "label", args: []string{"label", "b", "env=prod"}}, provisionB},
+		{guarded{name: "unlabel", args: []string{"unlabel", "b", "team"}}, func(h *addEnv) { provisionB(h); h.run("label", "b", "team=x") }},
 		{guarded{name: "retire", args: []string{"retire", "b"}}, provisionB},
 		{guarded{name: "set-meta --label", args: []string{"set-meta", "b", "--label", "k=v"}}, provisionB},
 		{guarded{name: "provision --label", args: []string{"provision"}, build: provisionWith("--label", "k=v")}, nil},
@@ -160,7 +159,7 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 // The reissue of a rotating endpoint, with the lock lost after the new creds were staged: the old user is not
 // revoked, the old creds file and the directory record are untouched, and a second run finishes the rotation.
 func TestLostLockAfterStagingDoesNotRevokeTheOldUser(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.seedWith("a", extraTag)
 	revokes := fakeRevoke(t, nil)
 	oldCreds, err := os.ReadFile(h.creds("a"))
@@ -208,7 +207,7 @@ func TestLostLockAfterStagingDoesNotRevokeTheOldUser(t *testing.T) {
 // A lock lost after the old key was revoked stops the reissue before the directory record and the creds file, and the
 // message says what was done.
 func TestLostLockAfterRevocationLeavesTheRecordAndFileAndSaysSo(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.seedWith("a", extraTag)
 	revokes := fakeRevoke(t, nil)
 	oldCreds, _ := os.ReadFile(h.creds("a"))

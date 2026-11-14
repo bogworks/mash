@@ -91,7 +91,7 @@ func TestDeprovisionDrainedAliasedLegacyIsRefusedClearly(t *testing.T) {
 }
 
 func TestRetireAliasedLegacyIsRefusedClearly(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	a, err := admin.New(h.e.Conn(t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -102,7 +102,6 @@ func TestRetireAliasedLegacyIsRefusedClearly(t *testing.T) {
 	if _, err := a.ProvisionIdentity(context.Background(), id, &store.Alias{Owner: h.e.Owner, Name: "b"}, u, h.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	before := h.policyText()
 	out, errb, code := h.run("retire", "b")
 	if code != 1 || !strings.HasPrefix(out, "") {
 		t.Fatalf("%d %q %q", code, out, errb)
@@ -114,9 +113,6 @@ func TestRetireAliasedLegacyIsRefusedClearly(t *testing.T) {
 	}
 	if strings.Count(errb, "nothing was") != 1 || strings.Contains(errb, "PARTIAL") {
 		t.Errorf("muddled: %q", errb)
-	}
-	if h.policyText() != before {
-		t.Error("policy file changed")
 	}
 	if r := h.records(); len(r) != 2 {
 		t.Errorf("records %v", r)

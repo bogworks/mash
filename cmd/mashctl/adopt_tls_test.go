@@ -72,7 +72,7 @@ func writeTestPKI(t *testing.T, dir string) (caPath, certPath, keyPath string) {
 func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
 	t.Helper()
 	caPath, certPath, keyPath := writeTestPKI(t, t.TempDir())
-	e := newApplyEnvOpts(t, twoZones, nil, func(o *server.Options) {
+	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
 		cfg, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: certPath, KeyFile: keyPath})
 		if err != nil {
 			t.Fatal(err)

@@ -17,13 +17,12 @@ const clockBehind = time.Hour
 // A creds JWT dated after the revocation time is refused by retire, with nothing revoked or removed; the same
 // creds with the clock right retire normally.
 func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
 	before, _ := os.ReadFile(h.creds("c"))
 	recs := h.records()
-	policyBefore := h.policyText()
 	calls := fakeRevoke(t, nil)
 
 	prev := retireRevokeNow
@@ -40,8 +39,8 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	if after, _ := os.ReadFile(h.creds("c")); !bytes.Equal(before, after) {
 		t.Fatal("creds file changed")
 	}
-	if len(h.records()) != len(recs) || h.policyText() != policyBefore {
-		t.Fatal("record or policy changed")
+	if len(h.records()) != len(recs) {
+		t.Fatal("record changed")
 	}
 
 	// Control: a JWT issued in the past is revoked as before.
@@ -54,7 +53,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 // Retire reads the clock once: the time the creds JWT is checked against is the revocation time it hands to the
 // revoker, even when the clock moves between the two.
 func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -120,7 +119,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 		}, "exists but its JWT cannot be decoded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newFleetEnv(t, addPolicy)
+			h := newFleetEnv(t)
 			if _, errb, code := h.run("add", "c"); code != 0 {
 				t.Fatal(errb)
 			}
@@ -128,7 +127,6 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 			before, _ := os.ReadFile(h.creds("c"))
 			fiBefore, _ := os.Stat(h.creds("c"))
 			recs := h.records()
-			policyBefore := h.policyText()
 			calls := fakeRevoke(t, nil)
 			out, errb, code := h.run("retire", "c")
 			if code != 1 || out != "" || !strings.Contains(errb, tc.want) || !strings.Contains(errb, "nothing was changed") {
@@ -146,14 +144,14 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 			if !bytes.Equal(before, after) || fiBefore.Mode() != fiAfter.Mode() {
 				t.Fatal("creds file changed")
 			}
-			if len(h.records()) != len(recs) || h.policyText() != policyBefore {
-				t.Fatal("record or policy changed")
+			if len(h.records()) != len(recs) {
+				t.Fatal("record changed")
 			}
 		})
 	}
 
 	t.Run("missing file proceeds", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
 		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}
@@ -171,12 +169,11 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 // The creds check runs inside the guarded removal, under the name's lock: creds that become unreadable after the
 // directory read and before the revoke still refuse the retire, with nothing revoked or removed.
 func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
 	recs := h.records()
-	policyBefore := h.policyText()
 	calls := fakeRevoke(t, nil)
 
 	swapped := 0
@@ -197,8 +194,8 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Fatalf("revoke calls %+v", *calls)
 	}
-	if len(h.records()) != len(recs) || h.policyText() != policyBefore {
-		t.Fatal("record or policy changed")
+	if len(h.records()) != len(recs) {
+		t.Fatal("record changed")
 	}
 }
 
@@ -206,7 +203,7 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 // nothing changed, and a dangling link (no target) proceeds as a missing file does.
 func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 	t.Run("future-dated target refuses", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
 		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}
@@ -225,7 +222,6 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 		recs := h.records()
-		policyBefore := h.policyText()
 		calls := fakeRevoke(t, nil)
 
 		prev := retireRevokeNow
@@ -245,13 +241,13 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 		if after, _ := os.ReadFile(target); !bytes.Equal(raw, after) {
 			t.Fatal("target changed")
 		}
-		if len(h.records()) != len(recs) || h.policyText() != policyBefore {
-			t.Fatal("record or policy changed")
+		if len(h.records()) != len(recs) {
+			t.Fatal("record changed")
 		}
 	})
 
 	t.Run("dangling link proceeds", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
 		if _, errb, code := h.run("add", "c"); code != 0 {
 			t.Fatal(errb)
 		}

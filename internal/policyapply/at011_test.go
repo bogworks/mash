@@ -1,4 +1,4 @@
-package policy
+package policyapply
 
 import (
 	"encoding/json"

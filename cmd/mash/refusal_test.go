@@ -41,8 +41,8 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 }
 
 const refusalBase = "refused by policy: you may not mail denied." +
-	" If the policy file allows this pair, or lists the recipient at all (mashctl policy explain)," +
-	" your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue."
+	" If the recipient is an endpoint of this owner, your credentials may be older than the permissions mash issues now:" +
+	" ask the admin to run mashctl reissue --changed."
 
 // refusal is the CLI's text for a send with --id k1; the retry sentence names that key.
 var refusal = refusalBase + " If you retry, use --id k1 (the send tool's id): it sends at most once within " + endpoint.DuplicateWindowText() + "."

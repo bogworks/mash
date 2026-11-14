@@ -67,7 +67,8 @@ func holdLabelSeam(t *testing.T, release <-chan struct{}) <-chan struct{} {
 // started meanwhile. Adopt blocks until the command is done; the command's write goes through (it started first);
 // a command started after the adoption is refused.
 func TestAdoptWaitsForAGuardedCommandInFlight(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
+	h.provisionDeclared("a")
 	release := make(chan struct{})
 	entered := holdLabelSeam(t, release)
 
@@ -92,8 +93,8 @@ func TestAdoptWaitsForAGuardedCommandInFlight(t *testing.T) {
 	if r := waitResult(t, labelRes, "label"); r.code != 0 || !strings.Contains(r.out, "labeled a") {
 		t.Fatalf("the command that started first did not go through: %d %q %q", r.code, r.out, r.errb)
 	}
-	if !strings.Contains(h.policyText(), "env: prod") {
-		t.Error("the label write is not in the policy file")
+	if l, _ := h.recordLabels("a"); l["env"] != "prod" {
+		t.Errorf("the label write is not in the directory record: %v", l)
 	}
 	if r := waitResult(t, adoptRes, "adopt"); r.code != 0 {
 		t.Fatalf("adopt after the command: %d %q %q", r.code, r.out, r.errb)
@@ -102,8 +103,8 @@ func TestAdoptWaitsForAGuardedCommandInFlight(t *testing.T) {
 	if code != 1 || !strings.Contains(errb, "label is refused: this account is adopted") {
 		t.Fatalf("a command started after the adoption: %d %q %q", code, out, errb)
 	}
-	if !strings.Contains(h.policyText(), "env: prod") || strings.Contains(h.policyText(), "env: dev") {
-		t.Error("the refused command changed the policy file")
+	if l, _ := h.recordLabels("a"); l["env"] != "prod" {
+		t.Errorf("the refused command changed the directory record: %v", l)
 	}
 }
 
@@ -113,7 +114,7 @@ func TestGuardedCommandsRefuseWhileTheLockIsHeld(t *testing.T) {
 	t.Cleanup(ctl.SetAccountLockWait(shortLockWait))
 	for _, g := range addEnvGuarded() {
 		t.Run(g.name, func(t *testing.T) {
-			h := newFleetEnv(t, addPolicy)
+			h := newFleetEnv(t)
 			if g.pre != nil {
 				g.pre(h)
 			}
@@ -141,7 +142,7 @@ func TestGuardedCommandsRefuseWhileTheLockIsHeld(t *testing.T) {
 // policy adopt that cannot take the lock refuses and writes nothing.
 func TestAdoptRefusesWhileAGuardedCommandHoldsTheLock(t *testing.T) {
 	t.Cleanup(ctl.SetAccountLockWait(shortLockWait))
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	lk, err := h.adminOf().LockAccount(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -167,21 +168,22 @@ func TestGuardedCommandReleasesTheLockOnEveryExit(t *testing.T) {
 		lk.Release()
 	}
 	t.Run("success", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
+		h.provisionDeclared("a")
 		if _, errb, code := h.run("label", "a", "env=prod"); code != 0 {
 			t.Fatal(errb)
 		}
 		free(t, h)
 	})
 	t.Run("failure after the guard", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
 		if _, _, code := h.run("label", "nosuch", "env=prod"); code != 1 {
 			t.Fatalf("code %d", code)
 		}
 		free(t, h)
 	})
 	t.Run("refused as adopted", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
 		h.adoptAs(userPub(t))
 		if _, _, code := h.run("label", "a", "env=prod"); code != 1 {
 			t.Fatalf("code %d", code)
@@ -189,7 +191,8 @@ func TestGuardedCommandReleasesTheLockOnEveryExit(t *testing.T) {
 		free(t, h)
 	})
 	t.Run("panic", func(t *testing.T) {
-		h := newFleetEnv(t, addPolicy)
+		h := newFleetEnv(t)
+		h.provisionDeclared("a")
 		afterLabelLoad = func() { panic("boom") }
 		t.Cleanup(func() { afterLabelLoad = nil })
 		func() {
@@ -203,7 +206,9 @@ func TestGuardedCommandReleasesTheLockOnEveryExit(t *testing.T) {
 
 // Two guarded commands serialise: the second does not reach its write until the first has finished.
 func TestTwoGuardedCommandsSerialise(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
+	h.provisionDeclared("a")
+	h.provisionDeclared("b")
 	release := make(chan struct{})
 	entered := holdLabelSeam(t, release)
 	first := h.goRun("label", "a", "env=prod")
@@ -227,9 +232,10 @@ func TestTwoGuardedCommandsSerialise(t *testing.T) {
 			t.Fatalf("%s: %d %q %q", c.name, r.code, r.out, r.errb)
 		}
 	}
-	txt := h.policyText()
-	if !strings.Contains(txt, "env: prod") || !strings.Contains(txt, "env: dev") {
-		t.Errorf("both writes should be in the file:\n%s", txt)
+	la, _ := h.recordLabels("a")
+	lb, _ := h.recordLabels("b")
+	if la["env"] != "prod" || lb["env"] != "dev" {
+		t.Errorf("both writes should be in the directory: a %v, b %v", la, lb)
 	}
 }
 
@@ -245,34 +251,30 @@ func loseLock(t *testing.T, h *addEnv) {
 	}
 }
 
-// A lock lost between the guard and the write stops the command before the write: label leaves the file alone.
+// A lock lost between the guard and the write stops the command before the write: label leaves the record alone.
 func TestLostLockStopsLabelBeforeItsWrite(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
-	before := h.policyText()
+	h := newFleetEnv(t)
+	h.provisionDeclared("a")
 	afterLabelLoad = func() { loseLock(t, h) }
 	t.Cleanup(func() { afterLabelLoad = nil })
 	out, errb, code := h.run("label", "a", "env=prod")
 	if code != 1 || !strings.Contains(errb, "lock") || strings.Contains(out, "labeled") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if h.policyText() != before {
-		t.Error("the policy file changed after the lock was lost")
+	if l, _ := h.recordLabels("a"); len(l) != 0 {
+		t.Errorf("the record changed after the lock was lost: %v", l)
 	}
 }
 
-// A lock lost after add's directory record and creds file are written stops add before the policy edit, and both
+// A lock lost after add's directory record and creds file are written stops add before the creds file, and the record is
 // are rolled back: nothing is left of the add.
 func TestLostLockStopsAddBeforeCredsAndPolicy(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
-	before := h.policyText()
+	h := newFleetEnv(t)
 	afterProvision = func() { loseLock(t, h) }
 	t.Cleanup(func() { afterProvision = nil })
 	out, errb, code := h.run("add", "c", "--label", "env=red")
 	if code != 1 || !strings.Contains(errb, "lock") || strings.Contains(out, "added") {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if h.policyText() != before {
-		t.Error("add edited the policy file after the lock was lost")
 	}
 	for _, r := range h.records() {
 		if strings.HasPrefix(r, "c/") {
@@ -281,34 +283,6 @@ func TestLostLockStopsAddBeforeCredsAndPolicy(t *testing.T) {
 	}
 	if _, err := os.Lstat(h.creds("c")); err == nil {
 		t.Error("the creds file of c was left behind")
-	}
-}
-
-// policy apply and policy repair (and their dry runs) refuse while the lock is held by another change, with the
-// account JWT, the policy file and the key store as they were.
-func TestApplyAndRepairRefuseWhileTheLockIsHeld(t *testing.T) {
-	t.Cleanup(ctl.SetAccountLockWait(shortLockWait))
-	for _, args := range [][]string{{"policy", "apply"}, {"policy", "apply", "--dry-run"}, {"policy", "repair"}, {"policy", "repair", "--dry-run"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			e := newApplyEnv(t, twoZones)
-			adm, err := admin.New(natsConnect(t, e), "alice")
-			if err != nil {
-				t.Fatal(err)
-			}
-			lk, err := adm.LockAccount(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer lk.Release()
-			jwtBefore := e.accountJWT()
-			out, errb, code := e.run(args...)
-			if code != 1 || !strings.Contains(errb, busyText) || !strings.Contains(errb, args[0]+" "+args[1]+" is refused") {
-				t.Fatalf("%d %q %q", code, out, errb)
-			}
-			if e.accountJWT() != jwtBefore {
-				t.Error("the account JWT changed")
-			}
-		})
 	}
 }
 

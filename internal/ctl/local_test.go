@@ -75,8 +75,11 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 	if err != nil || !strings.Contains(string(c), "nats://127.0.0.1:4333") {
 		t.Fatalf("config.json: %s %v", c, err)
 	}
-	if _, err := os.Stat(filepath.Join(e.root, "cfg", "policy.yaml")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(e.root, "cfg", "policy.yaml")); err == nil {
+		t.Fatal("init --local wrote a policy file")
+	}
+	if strings.Contains(strings.ToLower(out), "policy") {
+		t.Errorf("init --local output mentions a policy file:\n%s", out)
 	}
 
 	code, _, errs = e.run("init", "--local", "--owner", "alice")
