@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -533,7 +534,7 @@ func TestPolicyAdoptRecordsTheExemptKeys(t *testing.T) {
 		if code != 0 || json.Unmarshal([]byte(out), &v) != nil {
 			t.Fatalf("show --json: %d %q", code, out)
 		}
-		if strings.Contains(out, "SU") || strings.Contains(out, "seed") {
+		if seedToken.MatchString(out) || strings.Contains(out, "seed") { // a user seed token, not any text with "SU" in a random key
 			t.Errorf("the marker output mentions a seed: %q", out)
 		}
 		return v.Marker.Exempt
@@ -677,3 +678,6 @@ func TestAdoptedAccountAllowsAPlainProvision(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
+
+// seedToken matches a user seed: the prefix SU and 56 base32 characters, as a whole token.
+var seedToken = regexp.MustCompile(`\bSU[A-Z2-7]{56}\b`)
