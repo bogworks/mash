@@ -28,6 +28,8 @@ type ApplyRequest struct {
 	// BaseGeneration is the generation the document states it is based on; it must equal ListSet.Base and the
 	// generation in force.
 	BaseGeneration uint64
+	// RotationStep is RunInput.RotationStep; the caller copies it from policyintake.Doc.RotationStep.
+	RotationStep bool
 }
 
 // ErrNoProvisionMarkers is returned by Apply when neither deps.ProvisionMarkers nor the ledger keeps provisioning
@@ -144,7 +146,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	in := RunInput{
 		Cluster: deps.Cluster, Prober: deps.Prober, Witnesses: deps.Witnesses, Ledger: runLedger,
 		Account: deps.Account, Inventory: deps.Inventory,
-		ListSet: req.ListSet, Received: req.Received,
+		ListSet: req.ListSet, Received: req.Received, RotationStep: req.RotationStep,
 		Previous: prev, Signer: deps.Signer, OldKeys: oldKeys,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
 		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,
