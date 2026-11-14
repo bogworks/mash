@@ -20,24 +20,35 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 type fakeReader struct {
 	doc []byte
 	st  *policyapply.Status
+	// pend is the pending record; err is what the read fails with.
+	pend *listset.Record
+	err  error
 }
 
 func (f fakeReader) Account() string { return testAccount }
 
-func (f fakeReader) InForceViewAndStatus(context.Context) (listset.Record, listset.ListSet, bool, policyapply.Status, bool, error) {
+func (f fakeReader) InForceViewAndStatus(context.Context) (listset.Record, listset.ListSet, bool, listset.Record, bool, policyapply.Status, bool, error) {
 	var st policyapply.Status
+	var pend listset.Record
+	if f.pend != nil {
+		pend = *f.pend
+	}
+	hasPend := f.pend != nil
+	if f.err != nil {
+		return listset.Record{}, listset.ListSet{}, false, listset.Record{}, false, policyapply.Status{}, false, f.err
+	}
 	stOK := f.st != nil
 	if stOK {
 		st = *f.st
 	}
 	if len(f.doc) == 0 {
-		return listset.Record{}, listset.ListSet{}, false, st, stOK, nil
+		return listset.Record{}, listset.ListSet{}, false, pend, hasPend, st, stOK, nil
 	}
 	d, err := Decode(f.doc, DecodeOptions{})
 	if err != nil {
-		return listset.Record{}, listset.ListSet{}, false, st, stOK, err
+		return listset.Record{}, listset.ListSet{}, false, pend, hasPend, st, stOK, err
 	}
-	return listset.Record{Generation: d.Generation}, d.ListSet, true, st, stOK, nil
+	return listset.Record{Generation: d.Generation}, d.ListSet, true, pend, hasPend, st, stOK, nil
 }
 
 func u(n uint64) *uint64 { return &n }
@@ -98,7 +109,7 @@ func TestShowPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := res.Header
-	if h.InForceGeneration != 7 || h.Latest == nil || h.Latest.Applied || !h.Partial || !strings.Contains(h.Notice, "partial application") || !strings.Contains(h.Notice, NoPolicyNotice) ||
+	if h.InForceGeneration != 7 || h.Latest == nil || h.Latest.Applied || !h.Partial || !strings.Contains(h.Notice, "partial application") || strings.Contains(h.Notice, NoPolicyNotice) ||
 		!strings.Contains(h.Notice, "nats-b: 6") || !strings.Contains(h.Notice, "nats-c: unknown") {
 		t.Fatalf("%+v", h)
 	}
@@ -146,6 +157,9 @@ func TestShowCommittedThenPartial(t *testing.T) {
 	}
 	text := RenderShow(res)
 	if !strings.Contains(text, "in force: generation 7\nlatest attempt: generation 8, partial\n") {
+		t.Fatal(text)
+	}
+	if strings.Contains(text, NoPolicyNotice) {
 		t.Fatal(text)
 	}
 	golden(t, "show_committed_partial", text)
@@ -276,5 +290,50 @@ func TestDiffRangeMismatch(t *testing.T) {
 	golden(t, "plan_range", RenderPlan(p))
 	if p, err := Diff(ctx, r, doc(8, 7, nil), "foo", nil); err != nil || p.Refused {
 		t.Fatalf("matching range: %+v, %v", p, err)
+	}
+}
+
+// A generation is pending: a document with other content is refused at stage pending, naming the generation; the same
+// content, a pending record left from an older generation and no pending record do not refuse.
+func TestDiffPending(t *testing.T) {
+	ctx := context.Background()
+	changed := doc(8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
+	})
+	d, err := Decode(changed, DecodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingFor := func(gen uint64, content listset.Digest) fakeReader {
+		return fakeReader{doc: doc(7, 6, nil), st: applied(7), pend: &listset.Record{Generation: gen, Content: content}}
+	}
+	// Other content than the pending generation's.
+	other := listset.DigestListSet(listset.ListSet{Range: "other"})
+	p, err := Diff(ctx, pendingFor(8, other), changed, "", nil)
+	if err != nil || !p.Refused || p.Refusals[0].Stage != StagePending || !strings.Contains(p.Refusals[0].Reason, "generation 8 is pending") {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	// The same content as the pending generation's.
+	if p, err = Diff(ctx, pendingFor(8, listset.DigestListSet(d.ListSet)), changed, "", nil); err != nil || p.Refused {
+		t.Fatalf("same content: %+v, %v", p, err)
+	}
+	// A pending record from a generation that has since been committed is cleared by the apply: it does not count.
+	if p, err = Diff(ctx, pendingFor(7, other), changed, "", nil); err != nil || p.Refused {
+		t.Fatalf("stale pending: %+v, %v", p, err)
+	}
+}
+
+// A read that fails (a committed record with no stored list set) fails show, explain and diff: nothing is reported.
+func TestUnreadableInForce(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{err: errors.New("the record in force (generation 7) has no stored list set: it cannot be read")}
+	if _, err := Show(ctx, r); err == nil || !strings.Contains(err.Error(), "generation 7") {
+		t.Fatal(err)
+	}
+	if _, err := Explain(ctx, r, "foo.c.lead", "foo.c.core"); err == nil {
+		t.Fatal("explain read nothing")
+	}
+	if _, err := Diff(ctx, r, doc(8, 7, nil), "", nil); err == nil {
+		t.Fatal("diff compared against nothing")
 	}
 }

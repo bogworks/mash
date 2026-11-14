@@ -16,9 +16,10 @@ import (
 type Reader interface {
 	// Account is the account public key the ledger is for.
 	Account() string
-	// InForceViewAndStatus returns the record and the list set in force and the latest status, all from one revision;
-	// ok is false when no list set is in force and statusOK when no status has been written.
-	InForceViewAndStatus(ctx context.Context) (rec listset.Record, ls listset.ListSet, ok bool, st policyapply.Status, statusOK bool, err error)
+	// InForceViewAndStatus returns the record and the list set in force, the pending record and the latest status, all
+	// from one revision; ok is false when no list set is in force, hasPending when a generation is pending and
+	// statusOK when no status has been written. A committed record with no stored list set is an error.
+	InForceViewAndStatus(ctx context.Context) (rec listset.Record, ls listset.ListSet, ok bool, pending listset.Record, hasPending bool, st policyapply.Status, statusOK bool, err error)
 }
 
 // NoPolicyNotice is the notice when no account-wide policy is in force.
@@ -80,6 +81,12 @@ func header(inForceGen uint64, st *policyapply.Status) StateHeader {
 		h.Partial = len(seen) > 1
 	}
 	switch {
+	case h.Partial && inForceGen != 0:
+		parts := make([]string, 0, len(h.Servers))
+		for _, s := range h.Servers {
+			parts = append(parts, fmt.Sprintf("%s: %s", s.Server, genWord(s.Generation)))
+		}
+		h.Notice = fmt.Sprintf("partial application: servers hold different generations (%s)", strings.Join(parts, ", "))
 	case h.Partial:
 		parts := make([]string, 0, len(h.Servers))
 		for _, s := range h.Servers {
@@ -107,11 +114,16 @@ func genWord(g *uint64) string {
 type loaded struct {
 	ls  listset.ListSet
 	gen uint64
+	// committed is false when no generation is committed; ls and gen are then empty.
+	committed bool
+	// pending is the pending record; hasPending is false when no generation is pending.
+	pending    listset.Record
+	hasPending bool
 }
 
-// load reads the list set in force and the latest status in one read. cur is nil when nothing is committed.
+// load reads the list set in force, the pending record and the latest status in one read.
 func load(ctx context.Context, r Reader) (*loaded, StateHeader, error) {
-	rec, ls, ok, st, haveStatus, err := r.InForceViewAndStatus(ctx)
+	rec, ls, ok, pending, hasPending, st, haveStatus, err := r.InForceViewAndStatus(ctx)
 	if err != nil {
 		return nil, StateHeader{}, fmt.Errorf("the list set in force is unreadable: %w", err)
 	}
@@ -120,16 +132,16 @@ func load(ctx context.Context, r Reader) (*loaded, StateHeader, error) {
 		sp = &st
 	}
 	if !ok || rec.Generation < 1 {
-		return nil, header(0, sp), nil
+		return &loaded{pending: pending, hasPending: hasPending}, header(0, sp), nil
 	}
-	return &loaded{ls: ls, gen: rec.Generation}, header(rec.Generation, sp), nil
+	return &loaded{ls: ls, gen: rec.Generation, committed: true, pending: pending, hasPending: hasPending}, header(rec.Generation, sp), nil
 }
 
 // Show describes the list set in force (REQ-010) with the state of its application (REQ-011). Nothing in force is
 // an answer, not an error.
 func Show(ctx context.Context, r Reader) (ShowResult, error) {
 	cur, h, err := load(ctx, r)
-	if err != nil || cur == nil {
+	if err != nil || !cur.committed {
 		return ShowResult{Header: h}, err
 	}
 	c, err := listset.Compile(cur.ls)
@@ -146,7 +158,7 @@ func Show(ctx context.Context, r Reader) (ShowResult, error) {
 // Explain says whether sender may reach receiver, per verb, under the list set in force.
 func Explain(ctx context.Context, r Reader, sender, receiver string) (ExplainResult, error) {
 	cur, h, err := load(ctx, r)
-	if err != nil || cur == nil {
+	if err != nil || !cur.committed {
 		return ExplainResult{Header: h}, err
 	}
 	c, err := listset.Compile(cur.ls)
@@ -167,6 +179,10 @@ const StageBase = "base"
 // StageRange is the stage of the refusal Diff reports for a document whose range is not the selected range.
 const StageRange = "range"
 
+// StagePending is the stage of the refusal Diff reports for a document whose content is not that of the pending
+// generation: until the pending generation is applied or rolled back, only the same list set can be submitted.
+const StagePending = "pending"
+
 // SizeLimitsDefault is the size_limits of a plan: sizes were checked against the default server limits.
 const SizeLimitsDefault = "default"
 
@@ -183,8 +199,8 @@ type DiffPlan struct {
 // Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
 // document for another account is an error. A document for a range other than rng (when rng is empty, the range of
 // the list set in force; with none in force, any range) is reported in the plan as a refusal with stage "range", and
-// one whose base_generation is not the generation in force as a refusal with stage "base": a submission of either
-// would be refused.
+// one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
+// that of the pending generation as a refusal with stage "pending": a submission of any would be refused.
 func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
@@ -199,7 +215,7 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	}
 	var inForce *listset.ListSet
 	var gen uint64
-	if cur != nil {
+	if cur.committed {
 		inForce, gen = &cur.ls, cur.gen
 		if rng == "" {
 			rng = cur.ls.Range
@@ -214,6 +230,12 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	if next.BaseGeneration != gen {
 		pre = append(pre, listset.Refusal{Stage: StageBase, Entry: "base_generation",
 			Reason: fmt.Sprintf("the document is based on generation %d and generation %d is in force: a submission would be refused as stale", next.BaseGeneration, gen)})
+	}
+	// The apply refuses other content while the generation after the one in force is pending (policyapply.Run); a
+	// pending record left from an older generation is cleared by the apply and does not count.
+	if cur.hasPending && cur.pending.Generation == gen+1 && cur.pending.Content != listset.DigestListSet(next.ListSet) {
+		pre = append(pre, listset.Refusal{Stage: StagePending, Entry: "pending",
+			Reason: fmt.Sprintf("generation %d is pending: only the same list set can be submitted until it is applied or rolled back", cur.pending.Generation)})
 	}
 	if len(pre) > 0 {
 		p.Refusals = append(pre, p.Refusals...)
