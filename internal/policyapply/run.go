@@ -118,6 +118,36 @@ type DetailLedger interface {
 	InForceListSet() (ls listset.ListSet, ok bool, err error)
 }
 
+// PendingJWTLedger is a Ledger that also keeps the last account JWT pushed for the pending generation. Run uses it,
+// when the ledger is one, so that a retry of the pending content keeps every revocation the earlier attempt pushed (a
+// revocation is never lowered or removed). MemLedger and KVLedger are.
+type PendingJWTLedger interface {
+	Ledger
+	// SetPendingJWT is SetPending that also stores jwt, the last account JWT pushed for rec.
+	SetPendingJWT(rec listset.Record, jwt string) error
+	// PendingJWT returns the account JWT stored with the pending record; empty when none is stored.
+	PendingJWT() (string, error)
+}
+
+// CommitSizeChecker is a Ledger that can tell, before anything is pushed, whether the value its commit would write
+// fits its limit. Run uses it, when the ledger is one, so that a commit that could never be recorded is refused with
+// an error wrapping ErrValueTooLarge before the target is on the servers. KVLedger is one.
+type CommitSizeChecker interface {
+	// CheckCommitSize returns an error when committing rec with jwt as the JWT in force and ls as its list set would
+	// write a value over the ledger's limit. It writes nothing.
+	CheckCommitSize(rec listset.Record, jwt string, ls listset.ListSet) error
+}
+
+// RollbackLedger is a DetailLedger that can record a confirmed rollback: every server is back on the previous
+// generation, holding the rollback JWT. Run uses it, when the ledger is one, instead of ClearPending after a
+// rollback. MemLedger and KVLedger are.
+type RollbackLedger interface {
+	DetailLedger
+	// CommitRollback stores jwt as the JWT in force, leaving the record in force and its list set unchanged, and
+	// clears the pending record, in one write where the store allows.
+	CommitRollback(jwt string) error
+}
+
 // MemLedger is an in-memory Ledger, safe for concurrent use. It is process-local: see the package comment.
 type MemLedger struct {
 	mu      sync.Mutex // guards rec, pending, hasPend
@@ -126,6 +156,7 @@ type MemLedger struct {
 	detail  InForceDetail
 	pending listset.Record
 	hasPend bool
+	pendJWT string
 }
 
 // NewMemLedger returns a MemLedger with rec in force; the zero Record means nothing is in force.
@@ -207,7 +238,34 @@ func (l *MemLedger) Pending() (listset.Record, bool, error) {
 func (l *MemLedger) SetPending(rec listset.Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.pending != rec {
+		l.pendJWT = ""
+	}
 	l.pending, l.hasPend = rec, true
+	return nil
+}
+
+// SetPendingJWT implements PendingJWTLedger.
+func (l *MemLedger) SetPendingJWT(rec listset.Record, jwt string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pending, l.hasPend, l.pendJWT = rec, true, jwt
+	return nil
+}
+
+// PendingJWT implements PendingJWTLedger.
+func (l *MemLedger) PendingJWT() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.pendJWT, nil
+}
+
+// CommitRollback implements RollbackLedger.
+func (l *MemLedger) CommitRollback(jwt string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.detail.JWT = jwt
+	l.pending, l.hasPend, l.pendJWT = listset.Record{}, false, ""
 	return nil
 }
 
@@ -215,7 +273,7 @@ func (l *MemLedger) SetPending(rec listset.Record) error {
 func (l *MemLedger) ClearPending() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pending, l.hasPend = listset.Record{}, false
+	l.pending, l.hasPend, l.pendJWT = listset.Record{}, false, ""
 	return nil
 }
 
@@ -231,27 +289,29 @@ func (l *MemLedger) ClearPending() error {
 // rollback is not pushed and a rollback failure is added (fail closed: the servers stay as they are, partial, nothing
 // in force). The returned Status is the final gate result; it is applied only if the target is.
 func Converge(ctx context.Context, in GateInput, targetJWT string, signPrevious func(revoked []string) (accountJWT string, err error)) (Status, error) {
-	return converge(ctx, in, targetJWT, signPrevious, map[string]bool{})
+	st, _, err := converge(ctx, in, targetJWT, signPrevious, map[string]bool{})
+	return st, err
 }
 
-// converge is Converge recording in acked each server that acknowledged a push of the target with OK.
-func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious func(revoked []string) (accountJWT string, err error), acked map[string]bool) (Status, error) {
+// converge is Converge that also returns the rollback JWT it pushed ("" when none was pushed), and records in acked
+// each server that acknowledged a push of the target with OK.
+func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious func(revoked []string) (accountJWT string, err error), acked map[string]bool) (Status, string, error) {
 	st, err := Gate(ctx, in)
 	if err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
-		return st, err
+		return st, "", err
 	}
 	if ferr := CheckBeforeWrite(ctx, FencePush); ferr != nil {
-		return withFence(st, ferr), ferr
+		return withFence(st, ferr), "", ferr
 	}
 	if pushed(ctx, in, targetJWT, acked) {
 		if st, err = Gate(ctx, in); err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
-			return st, err
+			return st, "", err
 		}
 	}
-	failRollback := func(detail string) (Status, error) {
+	failRollback := func(detail string) (Status, string, error) {
 		st.Failing = append(st.Failing, Failure{Check: CheckRollback, Detail: detail})
 		sortFailures(st.Failing)
-		return st, nil
+		return st, "", nil
 	}
 	if signPrevious == nil || in.Previous == nil {
 		return failRollback("servers hold different generations and there is no previous generation to push back")
@@ -265,6 +325,9 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	prevTok, err := signPrevious(slices.Clone(revoked))
 	if err != nil {
 		return failRollback(fmt.Sprintf("servers hold different generations and the previous generation could not be signed: %v", err))
+	}
+	if len(prevTok) > policy.AccountJWTLimit {
+		return failRollback(fmt.Sprintf("rollback JWT is %d bytes, over the limit of %d, not pushed", len(prevTok), policy.AccountJWTLimit))
 	}
 	claims, derr := jwt.DecodeAccountClaims(prevTok)
 	if derr != nil {
@@ -282,13 +345,23 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if len(missing) > 0 {
 		return failRollback("rollback JWT would un-revoke keys, not pushed; missing revocations: " + strings.Join(missing, ", "))
 	}
+	// A revocation is never lowered: no key may be revoked at an earlier time than in the target JWT or in the JWT in force.
+	if err := keepsRevocations(targetJWT, true, prevTok); err != nil {
+		return failRollback("rollback JWT would lower a revocation of the target, not pushed: " + err.Error())
+	}
+	if in.PreviousJWT != "" {
+		if err := keepsRevocations(in.PreviousJWT, true, prevTok); err != nil {
+			return failRollback("rollback JWT would lower a revocation in force, not pushed: " + err.Error())
+		}
+	}
 	// A server holding the rollback carries the previous generation plus extra revocations; GenerationOf needs the
 	// candidate's own revocations to be a subset, so in.Previous still matches it. A failed push back shows in the gate below: servers keep the generations they hold.
 	if ferr := CheckBeforeWrite(ctx, FenceRollback); ferr != nil {
-		return withFence(st, ferr), ferr
+		return withFence(st, ferr), "", ferr
 	}
 	pushed(ctx, in, prevTok, nil)
-	return Gate(ctx, in)
+	gst, gerr := Gate(ctx, in)
+	return gst, prevTok, gerr
 }
 
 // onTarget says every server holds the target, so there is nothing to converge.
@@ -566,13 +639,60 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
-	if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, tok); err != nil {
+	// A retry of the pending content keeps every revocation the earlier attempt pushed, as well as those in force.
+	var pendJWT string
+	if pl, ok := in.Ledger.(PendingJWTLedger); ok && hasPend {
+		if pendJWT, err = pl.PendingJWT(); err != nil {
+			return Status{}, err
+		}
+	}
+	// An earlier run may have pushed or revoked and died before its pending record was written (an interrupted
+	// revocation that reached some servers): the JWTs the servers hold are the ground truth, so every revocation on any
+	// server is kept too, on every run. Read once, before the fence and the first push. A failed read or an incomplete
+	// server set refuses the run before anything is pushed.
+	serverJWTs, err := serverRevocationJWTs(ctx, in)
+	if err != nil {
 		return Status{}, err
+	}
+	keeps := func(target string) error {
+		if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, target); err != nil {
+			return err
+		}
+		for _, sj := range serverJWTs {
+			if err := keepsRevocations(sj, true, target); err != nil {
+				return fmt.Errorf("%w (the revocations a server holds)", err)
+			}
+		}
+		if pendJWT != "" {
+			if err := keepsRevocations(pendJWT, true, target); err != nil {
+				return fmt.Errorf("%w (the pending attempt's revocations)", err)
+			}
+		}
+		return nil
+	}
+	if err := keeps(tok); err != nil {
+		return Status{}, err
+	}
+	checkSize := func(jwt string) error {
+		if cs, ok := in.Ledger.(CommitSizeChecker); ok && hasDetail {
+			return cs.CheckCommitSize(rec, jwt, in.ListSet)
+		}
+		return nil
+	}
+	if err := checkSize(tok); err != nil {
+		return Status{}, err // nothing was pushed
+	}
+	setPending := func(jwt string) error {
+		if pl, ok := in.Ledger.(PendingJWTLedger); ok {
+			return pl.SetPendingJWT(rec, jwt)
+		}
+		return in.Ledger.SetPending(rec)
 	}
 
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
 		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, TargetJWT: tok, OldKeys: in.OldKeys, Now: in.Now,
+		PreviousJWT: prevJWT,
 	}
 	if in.Previous != nil {
 		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked, Signers: in.PreviousSigners}
@@ -583,6 +703,13 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	ctx = withBeforeWrite(ctx, in.BeforeWrite)
 	if err := CheckBeforeWrite(ctx, FencePush); err != nil {
 		return Status{}, err // nothing was pushed
+	}
+	// The generation is pending from before the first push, so a crash at any later point leaves it pending with at
+	// least the target. A retry keeps the JWT already stored with an existing pending record.
+	if !hasPend {
+		if err := setPending(tok); err != nil {
+			return Status{}, fmt.Errorf("record generation %d as pending before pushing it: %w", rec.Generation, err)
+		}
 	}
 	acked := map[string]bool{}
 	pushed(ctx, gi, tok, acked)
@@ -618,7 +745,14 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		}
 		if aerr != nil {
 			// The target is on the servers: pending, so only a resubmission of the same content may follow.
-			if perr := in.Ledger.SetPending(rec); perr != nil {
+			// An interrupted revocation may have reached some servers: the JWT it attempted is what to keep.
+			pj := tok
+			if finalJWT != "" {
+				if _, derr := jwt.DecodeAccountClaims(finalJWT); derr == nil {
+					pj = finalJWT
+				}
+			}
+			if perr := setPending(pj); perr != nil {
 				aerr = errors.Join(aerr, perr)
 			}
 			var fe *FenceError
@@ -631,18 +765,26 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		if finalJWT == "" && len(all) > 0 {
 			// Committing tok would store a JWT without the revocations that were pushed, and a later generation could
 			// restore those keys.
-			perr := in.Ledger.SetPending(rec)
+			perr := setPending(tok)
 			return Status{}, errors.Join(fmt.Errorf("%w: revocations were pushed but no final account JWT was returned", ErrSignedMismatch), perr)
+		}
+		if finalJWT != "" && len(finalJWT) > policy.AccountJWTLimit {
+			perr := setPending(tok)
+			return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations is %d bytes, limit %d", ErrAccountJWTTooLarge, len(finalJWT), policy.AccountJWTLimit), perr)
 		}
 		if finalJWT != "" {
 			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
 			// what Converge pushes again. It must still be the target and carry every revocation.
 			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
-				perr := in.Ledger.SetPending(rec)
+				perr := setPending(tok)
 				return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations does not carry generation %d with every revoked key", ErrSignedMismatch, rec.Generation), perr)
 			}
-			if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, finalJWT); err != nil {
-				perr := in.Ledger.SetPending(rec)
+			if err := keeps(finalJWT); err != nil {
+				perr := setPending(tok)
+				return Status{}, errors.Join(err, perr)
+			}
+			if err := checkSize(finalJWT); err != nil {
+				perr := setPending(tok)
 				return Status{}, errors.Join(err, perr)
 			}
 			tok = finalJWT
@@ -655,7 +797,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return in.Signer.SignPrevious(PreviousClaims{JWT: prevJWT}, revoked)
 		}
 	}
-	st, err := converge(ctx, gi, tok, signPrevious, acked)
+	st, rollbackJWT, err := converge(ctx, gi, tok, signPrevious, acked)
 	if err == nil && st.State == StateApplied {
 		// Holding the target is not enough: every server must have acknowledged it.
 		for _, sv := range st.Servers {
@@ -684,9 +826,35 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		// generation is not a place to return to.
 		var perr error
 		if err == nil && len(notConnected) == 0 && backOn(st, base.Generation) {
-			perr = in.Ledger.ClearPending()
+			// Generation alone does not confirm the rollback: a server that kept the previous generation because the
+			// rollback push failed lacks the rollback's revocations.
+			if rollbackJWT != "" {
+				if lacking, why := rollbackLacking(ctx, in, rollbackJWT); len(lacking) > 0 || why != "" {
+					if len(lacking) == 0 {
+						st.Failing = append(st.Failing, Failure{Check: CheckRollback, Detail: why})
+					}
+					for _, n := range lacking {
+						st.Failing = append(st.Failing, Failure{Server: n, Check: CheckRollback,
+							Detail: "holds the previous generation without every revocation of the rollback JWT"})
+					}
+					sortFailures(st.Failing)
+					st.State, st.InForce = StatePartial, false
+					perr = setPending(rollbackJWT)
+					if perr != nil {
+						err = perr
+					}
+					return withFence(st, err), err
+				}
+			}
+			// The servers may hold the rollback JWT, which can carry revocations the JWT in force lacks: it becomes the
+			// JWT in force (record and list set unchanged), so the next submission is signed from it.
+			if rl, ok := in.Ledger.(RollbackLedger); ok && rollbackJWT != "" {
+				perr = rl.CommitRollback(rollbackJWT)
+			} else {
+				perr = in.Ledger.ClearPending()
+			}
 		} else {
-			perr = in.Ledger.SetPending(rec)
+			perr = setPending(tok)
 		}
 		if err == nil {
 			err = perr
@@ -701,7 +869,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			st.Failing = append(slices.Clone(st.Failing), Failure{Check: CheckProvision, Detail: err.Error()})
 			sortFailures(st.Failing)
 			bc := &beforeCommitError{err: err}
-			if perr := in.Ledger.SetPending(rec); perr != nil {
+			if perr := setPending(tok); perr != nil {
 				bc.err = errors.Join(err, perr)
 			} else {
 				bc.pending = true
@@ -711,7 +879,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	}
 	if ferr := CheckBeforeWrite(ctx, FenceCommit); ferr != nil {
 		// The target is on the servers and not committed: pending, so a later run can finish or roll back.
-		if perr := in.Ledger.SetPending(rec); perr != nil {
+		if perr := setPending(tok); perr != nil {
 			ferr = errors.Join(ferr, perr)
 		}
 		return withFence(st, ferr), fmt.Errorf("before committing generation %d: %w", rec.Generation, ferr)
@@ -740,6 +908,61 @@ type beforeCommitError struct {
 
 func (e *beforeCommitError) Error() string { return e.err.Error() }
 func (e *beforeCommitError) Unwrap() error { return e.err }
+
+// rollbackLacking reads the servers' account JWTs after a rollback and returns the servers whose JWT does not revoke
+// every key rollbackJWT revokes, each at a time no earlier. why is set when the servers could not be read completely.
+func rollbackLacking(ctx context.Context, in RunInput, rollbackJWT string) (lacking []string, why string) {
+	set, err := in.Cluster.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Sprintf("the server set could not be read to confirm the rollback: %v", err)
+	}
+	if !set.Complete(in.Inventory) {
+		return nil, "the server set is incomplete, so the rollback cannot be confirmed: " + set.Why(in.Inventory)
+	}
+	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
+	if err != nil {
+		return nil, fmt.Sprintf("the servers' account JWTs could not be read to confirm the rollback: %v", err)
+	}
+	for _, n := range slices.Sorted(slices.Values(set.Names)) {
+		tok, ok := jwts[n]
+		if !ok || tok == "" || keepsRevocations(rollbackJWT, true, tok) != nil {
+			lacking = append(lacking, n)
+		}
+	}
+	return lacking, ""
+}
+
+// serverRevocationJWTs reads the account JWT of every server and returns the non-empty ones, so a retry can keep
+// every revocation any server holds. It fails closed: an error reading the server set or the JWTs, an incomplete
+// server set, a server missing from the answer or a JWT that does not decode is an error wrapping ErrSignedMismatch.
+func serverRevocationJWTs(ctx context.Context, in RunInput) ([]string, error) {
+	set, err := in.Cluster.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the server set before pushing: %w", ErrSignedMismatch, err)
+	}
+	if !set.Complete(in.Inventory) {
+		return nil, fmt.Errorf("%w: the server set is incomplete, so the revocations on the servers cannot be read: %s", ErrSignedMismatch, set.Why(in.Inventory))
+	}
+	jwts, err := in.Cluster.AccountJWTs(ctx, in.Account)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the servers' account JWTs before pushing: %w", ErrSignedMismatch, err)
+	}
+	var out []string
+	for _, n := range slices.Sorted(slices.Values(set.Names)) {
+		tok, ok := jwts[n]
+		if !ok {
+			return nil, fmt.Errorf("%w: no account JWT was read from server %s", ErrSignedMismatch, n)
+		}
+		if tok == "" {
+			continue
+		}
+		if _, derr := jwt.DecodeAccountClaims(tok); derr != nil {
+			return nil, fmt.Errorf("%w: the account JWT of server %s does not decode: %w", ErrSignedMismatch, n, derr)
+		}
+		out = append(out, tok)
+	}
+	return out, nil
+}
 
 // keepsRevocations checks that target revokes every key the in-force JWT prev revokes, each at a time no earlier than
 // in prev: a revocation is never lowered or removed, so a later generation cannot restore an old key. tracked says
