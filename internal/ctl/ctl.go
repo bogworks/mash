@@ -281,7 +281,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return usage(err)
 		}
-		if len(meta.Labels) > 0 || meta.Zone != "" { // a label or a zone is the policy's; a plain provision of an inbox is not
+		if len(meta.Labels) > 0 { // a label is the policy's; a plain provision of an inbox is not
 			lk, err := guardAccount(ctx, a, pfx, "provision")
 			if err != nil {
 				return fail(err)
