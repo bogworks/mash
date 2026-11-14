@@ -101,10 +101,14 @@ func hasFailure(st Status, server, sender, check string) bool {
 
 func TestNewExpect(t *testing.T) {
 	w := newWorld(t)
-	if len(w.expect.Removed) != 5 {
+	if len(w.expect.Removed) != 8 {
 		t.Fatalf("removed = %+v", w.expect.Removed)
 	}
-	r := w.expect.Removed[0]
+	// core's mail to itself is removed too (the shared verb closes), and sorts before its mail to sdk.
+	if r0 := w.expect.Removed[0]; r0.Sender != "foo.c.core" || r0.Receiver != "foo.c.core" || r0.Verb != listset.Mail {
+		t.Errorf("self-reach not listed first: %+v", r0)
+	}
+	r := w.expect.Removed[1]
 	if r.Sender != "foo.c.core" || r.Receiver != "foo.c.sdk" || r.Verb != listset.Mail || r.Probe.Name != "core" {
 		t.Errorf("first removed = %+v", r)
 	}
@@ -792,5 +796,52 @@ func TestRunRefusesOversizedListSet(t *testing.T) {
 	st, err := Run(context.Background(), in)
 	if err != nil || st.State != StateRefused || len(st.Refusals) == 0 || st.Refusals[0].Stage != "size" || signed || len(w.cluster.pushes) != 0 {
 		t.Fatalf("%+v %v signed %v pushes %d", st, err, signed, len(w.cluster.pushes))
+	}
+}
+
+// A sender whose only removed reach is to its own address (its group's shared mail closes and it has no other
+// receivers) is still listed, and the gate requires a probe refusal and a closed witness for it.
+func TestGateSelfReachOnlyRemoval(t *testing.T) {
+	solo := func(mail listset.Switch) listset.ListSet {
+		return listset.ListSet{
+			Range:    "foo",
+			Switches: switches("foo.c", mail, listset.Closed, listset.Closed, listset.Closed),
+			Senders:  []listset.SenderLists{{Sender: "foo.c.solo"}},
+		}
+	}
+	c1, c2 := compile(t, solo(listset.Shared)), compile(t, solo(listset.Closed))
+	e, err := NewExpect(c1, c2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := slices.Concat(e.Removed, e.CredentialOnly)
+	if len(all) != 1 || all[0].Sender != "foo.c.solo" || all[0].Receiver != "foo.c.solo" || all[0].Verb != listset.Mail || all[0].Op != OpPub {
+		t.Fatalf("expect = %+v", e)
+	}
+
+	w := newWorld(t)
+	servers := []string{"s1", "s2"}
+	j2 := w.k.build(t, c2)
+	w.cluster = newCluster(j2, servers...)
+	w.prober = fakeProber{cluster: w.cluster, byGen: map[uint64]*listset.Compiled{1: c1, 2: c2}, allow: map[string]bool{}}
+	w.wit = witnessesFor(servers, "foo.c.solo")
+	in := w.gate()
+	in.Compiled, in.Previous, in.Expect = c2, &Candidate{Generation: 1, Compiled: c1, Signers: w.k.signers}, e
+	in.TargetJWT, in.OldKeys = j2, map[string][]OldKey{"foo.c.solo": {}}
+	in.Prober, in.Witnesses = w.prober, w.wit
+
+	if st, _ := Gate(context.Background(), in); st.State != StateApplied {
+		t.Fatalf("closed: %+v", st.Failing)
+	}
+	w.prober.allow["s2"] = true
+	in.Prober = w.prober
+	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s2", "foo.c.solo", CheckRefused) {
+		t.Fatalf("probe accepted: %+v", st.Failing)
+	}
+	w.prober.allow["s2"] = false
+	w.wit.open[WitnessKey{"s1", "foo.c.solo"}] = true
+	in.Prober, in.Witnesses = w.prober, w.wit
+	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s1", "foo.c.solo", CheckWitness) {
+		t.Fatalf("witness open: %+v", st.Failing)
 	}
 }
