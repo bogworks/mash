@@ -68,6 +68,11 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	guard, ok := accountGuard(cfg, "reissue", stderr)
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	path, err := policyPath(file, env, cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: reissue: no policy file: use --policy FILE or MASH_POLICY (%v)\n", err)
@@ -164,7 +169,7 @@ func runReissue(args []string, env func(string) string, lookup config.Lookup, st
 				warned = true
 			}
 		}
-		tags, rotated, err := reissueOne(keys, cfg, env, c, name, stdout, stderr)
+		tags, rotated, err := reissueOne(guard, keys, cfg, env, c, name, stdout, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "mashctl: reissue %s: %v\n", name, err)
 			code = 1
@@ -343,7 +348,7 @@ func (d credsDiff) rotates() bool {
 // (confirmed), points the directory record at the new key and only then replaces the file. The record check, the
 // revocation check, the mint, the revocation, the record update and the file rewrite all run under the endpoint's name
 // lock (admin.WithNameLock), so a concurrent reissue of the same name cannot interleave.
-func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
+func reissueOne(guard *ctl.Guard, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
 	ep, ok := findEndpoint(c, name)
 	if !ok {
 		return nil, false, fmt.Errorf("endpoint %q is not declared in the policy file", name)
@@ -411,7 +416,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 	// its creds between our check and our write.
 	err = adm.WithNameLock(ctx, name, func(ctx context.Context, lock admin.NameLock) error {
 		var err error
-		tags, rotated, err = reissueLocked(ctx, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
+		tags, rotated, err = reissueLocked(ctx, guard, adm, lock, keys, cfg, env, c, name, ep, p, seed, seedPub, oldPub, oldClaims, accountPub, d, stdout, stderr)
 		return err
 	})
 	if err != nil {
@@ -421,7 +426,7 @@ func reissueOne(keys mint.Keys, cfg config.Config, env func(string) string, c *p
 }
 
 // reissueLocked is the part of reissueOne that runs under name's lock.
-func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
+func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, c *policy.Compiled, name string, ep policy.CompiledEndpoint, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (tags []string, rotated bool, err error) {
 	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
 		return nil, false, fmt.Errorf("%s has no directory record (retired or never added): add it again; a leftover creds file is not reissued", name)
@@ -494,8 +499,14 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 			return nil, false, err
 		}
 		defer clear(m.Creds)
+		if err := guard.Before("the issue record"); err != nil { // the account lock, before the first write
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		}
 		if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		}
+		if err := guard.Before("the creds file replacement"); err != nil {
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten (the new key is recorded as issued; run mashctl reissue %s again)", err, name)
 		}
 		if err := lock.Check(ctx); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
@@ -527,6 +538,9 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	defer clear(m.Creds)
 	// The new key is in the issue record before it is staged or written anywhere: a key that can connect
 	// is always recorded. The old key's record stays (revocation is separate; the record is append-only).
+	if err := guard.Before("the issue record of the new key"); err != nil { // the account lock, before the first write of the rotation
+		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
+	}
 	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeRotation)); err != nil {
 		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
 	}
@@ -535,8 +549,14 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 	if err := nameLockCheck(ctx, lock); err != nil {
 		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
 	}
+	if err := guard.Before("the staging of the new creds"); err != nil {
+		return nil, false, fmt.Errorf("%v; the new key is recorded as issued but nothing was staged, and the old creds and key are unchanged; run mashctl reissue %s again", err, name)
+	}
 	if err := stageCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
+	}
+	if err := guard.Before("the revocation of the old user key"); err != nil {
+		return nil, false, fmt.Errorf("%v; the new key is recorded as issued and its creds are staged in %s, but the old key %s... is not revoked, the directory record and the old creds file are unchanged (the old creds still work); run mashctl reissue %s again", err, sp, ctl.ShortKey(oldPub), name)
 	}
 	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
@@ -545,12 +565,21 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		}
 		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); the directory record and the creds file are unchanged (the old creds still work) and the new key is staged in %s; run the reissue again", why, err, sp)
 	}
-	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
 	finish := fmt.Sprintf("the old key %s... is revoked, so the endpoint is cut off; the rotation is staged in %s, and running mashctl reissue %s again finishes it", ctl.ShortKey(oldPub), sp, name)
+	if err := guard.Before("the record of the revocation"); err != nil { // the old key is revoked: the staged rotation is finished by a later run
+		return nil, false, fmt.Errorf("%s: the revocation was not recorded in the issue record and the directory record was not updated (%v)", finish, err)
+	}
+	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
+	if err := guard.Before("the directory record update"); err != nil {
+		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
+	}
 	if _, err := adm.SetUserLocked(ctx, lock, name, m.AccountPub, oldPub, m.UserPub); err != nil {
 		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
 	}
 	if err := lock.Check(ctx); err != nil {
+		return nil, false, fmt.Errorf("%s: the record names the new key, but %v", finish, err)
+	}
+	if err := guard.Before("the creds file replacement"); err != nil {
 		return nil, false, fmt.Errorf("%s: the record names the new key, but %v", finish, err)
 	}
 	if err := writeCreds(p, m.Creds); err != nil {

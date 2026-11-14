@@ -69,7 +69,7 @@ func newAddEnv(t *testing.T, src string) *addEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ka.InitAccount(); err != nil {
+	if _, _, err := ka.ImportAccount(e.AccountSeed); err != nil {
 		t.Fatal(err)
 	}
 	return h

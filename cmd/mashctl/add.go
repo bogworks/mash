@@ -269,6 +269,11 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	guard, ok := accountGuard(cfg, "add", stderr)
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	// The name rule comes before any key, policy edit or record: a refused name creates nothing.
 	if err := admin.CheckProvision(cfg.NameRule, cfg.Owner, o.name); err != nil {
 		return fail("%v", err)
@@ -353,6 +358,9 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	// place by a later failure: an unused key is not in any account JWT, and a retry reuses it.
 	zoneExists := slices.ContainsFunc(before.Endpoints, func(e policy.CompiledEndpoint) bool { return e.Zone == ep.Zone })
 	var mk mint.Keys = keys
+	if err := guard.Before("the creation of the zone key"); err != nil { // before the first write
+		return fail("%v; nothing was changed", err)
+	}
 	_, keyErr := keys.ZoneKey(ep.Zone, false)
 	if zoneExists || keyErr == nil {
 		// A key that already exists (the zone has endpoints, or an earlier failed add left it) must be published as a
@@ -371,11 +379,17 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 
 	// The issue record comes before the directory record and the creds file: a user that can connect is always in it.
 	// A failure here issues nothing (the creds are in memory only).
+	if err := guard.Before("the issue record"); err != nil {
+		return fail("%v; nothing was issued (a zone key may have been created: an unused key is harmless and a retry reuses it)", err)
+	}
 	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
 		return fail("%v; nothing was issued", err)
 	}
 
 	// (4) the directory record and inbox.
+	if err := guard.Before("the directory record and inbox"); err != nil {
+		return fail("%v; nothing was issued", err)
+	}
 	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, admin.Meta{Labels: ep.Labels}); err != nil {
 		if strings.Contains(err.Error(), "is already provisioned") {
 			return fail("%v; %s", err, orphanText(o.name))
@@ -390,6 +404,9 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 
 	// (5) the creds file, never overwriting.
+	if err := guard.Before("the creds file"); err != nil {
+		return fail("%v%s", err, rollbackProvision())
+	}
 	undoCreds, err := writeCredsNew(credsPath, m.Creds)
 	if err != nil {
 		return fail("%v%s", err, rollbackProvision())
@@ -399,6 +416,10 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 
 	// (6) the policy file.
+	if err := guard.Before("the policy file edit"); err != nil {
+		undoCreds()
+		return fail("%v%s", err, rollbackProvision())
+	}
 	if err := doc.Save(); err != nil {
 		undoCreds()
 		msg := rollbackProvision()
