@@ -286,6 +286,7 @@ func TestADRLint_concurrencyNeverCancelsTheSameHead(t *testing.T) {
 		Concurrency struct {
 			Group  string `yaml:"group"`
 			Cancel any    `yaml:"cancel-in-progress"`
+			Queue  string `yaml:"queue"`
 		} `yaml:"concurrency"`
 	}
 	if err := yaml.Unmarshal([]byte(readWorkflow(t, adrLintWorkflow)), &w); err != nil {
@@ -296,5 +297,8 @@ func TestADRLint_concurrencyNeverCancelsTheSameHead(t *testing.T) {
 	}
 	if isTrue(w.Concurrency.Cancel) {
 		t.Errorf("cancel-in-progress is %v: a label event would cancel the run for the same head", w.Concurrency.Cancel)
+	}
+	if w.Concurrency.Queue != "max" {
+		t.Errorf("concurrency queue is %q, want max: the default single queue cancels a pending run when another event arrives in the group", w.Concurrency.Queue)
 	}
 }
