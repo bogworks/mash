@@ -126,8 +126,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
+	line("reissue NAME... [--widen] | --all --yes | --changed --yes", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -141,19 +141,13 @@ func issueServiceLines(line func(left, right string)) {
 }
 
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox and its policy entry")
-	line("label NAME k=v... [--policy FILE] [--dry-run] [--sync]", "set labels in the policy file (offline unless --sync updates the directory record)")
-	line("unlabel NAME k... [--policy FILE] [--dry-run] [--sync]", "remove labels from the policy file (offline unless --sync)")
+	line("retire NAME [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox")
+	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
+	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
 }
 
 func policyLines(line func(left, right string)) {
-	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
-	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
-	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
 	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: signing keys, the account push, directory labels; lists stale creds")
 }
 
 // accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
@@ -662,10 +656,10 @@ func initUsage(prog string) string {
 }
 
 // permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
-// An endpoint added under a policy file gets narrower permissions from the policy instead.
+// An endpoint added by `mashctl add` gets narrower permissions, the owner-line set, instead.
 func permissionsNote(prog string) string {
 	pfx, _, _ := strings.Cut(prog, " ")
-	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` or a policy file get narrower permissions from the policy (see `" + pfx + " policy explain`)."
+	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` get narrower permissions, the owner-line set."
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.

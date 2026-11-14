@@ -128,16 +128,8 @@ func mustPub(t *testing.T, path string) string {
 	return pub
 }
 
-const oneZone = `default: deny
-endpoints:
-  x: {labels: {zone: a}}
-rules:
-  - {name: a-to-a, action: allow, from: {zone: a}, to: {zone: a}}
-`
-
-func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newApplyEnv(t, twoZones)
+func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 
 	before := tree(t, a.root)
@@ -145,7 +137,7 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 	if code != 0 || errb != "" {
 		t.Fatalf("dry run: %d\n%s\n%s", code, out, errb)
 	}
-	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl policy apply` is the first to use it"} {
+	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl retire` (or a rotating `reissue`) is the first to use it"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run output lacks %q:\n%s", want, out)
 		}
@@ -164,7 +156,7 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 		t.Fatalf("account key differs: %s %s", got, want)
 	}
 	srvDir := filepath.Join(a.env["MASH_CONFIG_DIR"], "server")
-	for _, p := range []string{filepath.Join(keyDir, "operator.nk"), filepath.Join(keyDir, "account.nk"), filepath.Join(srvDir, "sys.creds"), filepath.Join(srvDir, "mashadmin.creds"), filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"), filepath.Join(a.env["MASH_CONFIG_DIR"], "policy.yaml")} {
+	for _, p := range []string{filepath.Join(keyDir, "operator.nk"), filepath.Join(keyDir, "account.nk"), filepath.Join(srvDir, "sys.creds"), filepath.Join(srvDir, "mashadmin.creds"), filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")} {
 		fi, err := os.Stat(p)
 		if err != nil || fi.Mode().Perm() != 0o600 {
 			t.Errorf("%s: %v %v", p, fi, err)
@@ -176,9 +168,8 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 			t.Errorf("config.json lacks %q:\n%s", want, cj)
 		}
 	}
-	pol, _ := os.ReadFile(filepath.Join(a.env["MASH_CONFIG_DIR"], "policy.yaml"))
-	if string(pol) != bootstrap.OpenPolicy {
-		t.Errorf("policy.yaml: %q", pol)
+	if _, err := os.Stat(filepath.Join(a.env["MASH_CONFIG_DIR"], "policy.yaml")); err == nil {
+		t.Error("adopt wrote a policy file: the policy file is gone")
 	}
 	if sys, _ := os.ReadFile(a.sys); !bytes.Equal(sys, mustRead(t, filepath.Join(srvDir, "sys.creds"))) {
 		t.Error("sys.creds is not a copy")
@@ -206,25 +197,17 @@ func TestAdoptDryRunThenRealRunThenApply(t *testing.T) {
 	}
 	sameTree(t, snap, tree(t, a.root))
 
-	// policy apply works from the adopted key dir against the same server.
-	pf := filepath.Join(a.root, "one.yaml")
-	if err := os.WriteFile(pf, []byte(oneZone), 0o600); err != nil {
-		t.Fatal(err)
+	// add works from the adopted key dir against the same server, with no file.
+	if out, errb, code = a.run("add", "x"); code != 0 {
+		t.Fatalf("add after adopt: %d\n%s\n%s", code, out, errb)
 	}
-	out, errb, code = a.run("policy", "apply", "--policy", pf)
-	if code != 0 {
-		t.Fatalf("policy apply after adopt: %d\n%s\n%s", code, out, errb)
-	}
-	if !strings.Contains(out, "zone a: new") {
-		t.Errorf("apply output:\n%s", out)
-	}
-	if n := len(scopedSigners(e.claims())); n != 1 {
-		t.Fatalf("want 1 scoped signer after apply, got %d", n)
+	if n := len(scopedSigners(e.claims())); n != 0 {
+		t.Fatalf("want no scoped signer after add, got %d", n)
 	}
 }
 
 func TestAdoptAdminCredsFileIsRecordedNotCopied(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	ac := filepath.Join(a.root, "in", "admin.creds")
 	if err := os.WriteFile(ac, mustRead(t, e.pl.AdminCredsPath()), 0o600); err != nil {
@@ -288,7 +271,7 @@ func (a *adopter) refuses(want int, msg []string, args ...string) {
 func TestAdoptRefusals(t *testing.T) {
 	lookupWait = time.Second
 	t.Cleanup(func() { lookupWait = 5 * time.Second })
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	in := filepath.Join(a.root, "in")
 
@@ -374,7 +357,7 @@ func TestAdoptRefusals(t *testing.T) {
 }
 
 func TestAdoptRefusesAServerWithoutOperatorMode(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	srv, err := server.NewServer(&server.Options{Port: -1, Host: "127.0.0.1", NoLog: true, NoSigs: true})
 	if err != nil {
@@ -469,7 +452,7 @@ func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
 		t.Fatal(err)
 	}
 	sskPub, _ := ssk.PublicKey()
-	e := newApplyEnvTweak(t, twoZones, func(e *applyEnv) {
+	e := newApplyEnvTweak(t, func(e *applyEnv) {
 		opKP, _, err := e.ks.Operator()
 		if err != nil {
 			t.Fatal(err)
@@ -585,7 +568,7 @@ func TestAdoptStrictSigningKeyUsage(t *testing.T) {
 }
 
 func TestAdoptMintAdminConnectsOnNonStrictServer(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	out, errb, code := a.adopt("--mint-admin")
 	if code != 0 || !strings.Contains(out, "admin creds    ok: connected (minted)") {

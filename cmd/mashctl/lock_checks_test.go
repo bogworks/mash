@@ -65,7 +65,7 @@ type guardedScenario struct {
 }
 
 func addEnvScenario(t *testing.T, g guarded, pre func(h *addEnv)) guardedScenario {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if pre != nil {
 		pre(h)
 	}
@@ -103,10 +103,9 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 	}{
 		{guarded{name: "add", args: []string{"add", "c", "--label", "env=red"}}, nil},
 		{guarded{name: "reissue", args: []string{"reissue", "a"}}, rotate},
-		{guarded{name: "reissue, add-only", args: []string{"reissue", "a"}}, func(h *addEnv) { h.seedWith("a", noDenyNone) }},
-		{guarded{name: "label", args: []string{"label", "a", "env=prod"}}, nil},
-		{guarded{name: "label --sync", args: []string{"label", "b", "env=prod", "--sync"}}, provisionB},
-		{guarded{name: "unlabel", args: []string{"unlabel", "a", "team"}}, nil},
+		{guarded{name: "reissue, add-only", args: []string{"reissue", "a"}}, func(h *addEnv) { h.seedWith("a", nil) }},
+		{guarded{name: "label", args: []string{"label", "b", "env=prod"}}, provisionB},
+		{guarded{name: "unlabel", args: []string{"unlabel", "b", "team"}}, func(h *addEnv) { provisionB(h); h.run("label", "b", "team=x") }},
 		{guarded{name: "retire", args: []string{"retire", "b"}}, provisionB},
 		{guarded{name: "set-meta --label", args: []string{"set-meta", "b", "--label", "k=v"}}, provisionB},
 		{guarded{name: "provision --label", args: []string{"provision"}, build: provisionWith("--label", "k=v")}, nil},
@@ -160,7 +159,7 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 // The reissue of a rotating endpoint, with the lock lost after the new creds were staged: the old user is not
 // revoked, the old creds file and the directory record are untouched, and a second run finishes the rotation.
 func TestLostLockAfterStagingDoesNotRevokeTheOldUser(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.seedWith("a", extraTag)
 	revokes := fakeRevoke(t, nil)
 	oldCreds, err := os.ReadFile(h.creds("a"))
@@ -208,7 +207,7 @@ func TestLostLockAfterStagingDoesNotRevokeTheOldUser(t *testing.T) {
 // A lock lost after the old key was revoked stops the reissue before the directory record and the creds file, and the
 // message says what was done.
 func TestLostLockAfterRevocationLeavesTheRecordAndFileAndSaysSo(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.seedWith("a", extraTag)
 	revokes := fakeRevoke(t, nil)
 	oldCreds, _ := os.ReadFile(h.creds("a"))
@@ -237,105 +236,5 @@ func initApplyEnv(t *testing.T, e *applyEnv) {
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)
-	}
-}
-
-// policy apply and policy repair: the creation of each zone's key file and the push of the account JWT are each
-// preceded by a lock check; with the lock lost before one, that step and the later ones are not taken.
-func TestLostLockStopsApplyAndRepairBeforeKeysAndPush(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before any key is made or anything is pushed (any declared endpoint compiles a zone, so the fixture cannot be zone-free); refusal is asserted in unzone_test.go; delete with the policy stack")
-	for _, verb := range []string{"apply", "repair"} {
-		t.Run(verb, func(t *testing.T) {
-			state := func(e *applyEnv) string {
-				d := digests(t, e.keyDir, func(rel string) bool { return strings.HasSuffix(rel, ".lock") })
-				return fmt.Sprint(d) + "\n" + e.accountJWT()
-			}
-			e := newApplyEnv(t, twoZones)
-			initApplyEnv(t, e)
-			rec := installStepHook(t, nil)
-			if out, errb, code := e.run("policy", verb); code != 0 {
-				t.Fatalf("%d %q %q", code, out, errb)
-			}
-			steps := append([]string(nil), rec.steps...)
-			if len(steps) < 3 {
-				t.Fatalf("steps %v: want a key creation for each of two zones and the push", steps)
-			}
-			for k := 1; k <= len(steps); k++ {
-				t.Run(fmt.Sprintf("lock lost before %s", steps[k-1]), func(t *testing.T) {
-					var snap string
-					e := newApplyEnv(t, twoZones)
-					initApplyEnv(t, e)
-					h := installStepHook(t, func(n int, _ string) {
-						if n == k {
-							snap = state(e)
-							a, _, done := e.admin()
-							defer done()
-							loseLockOf(t, a)
-						}
-					})
-					out, errb, code := e.run("policy", verb)
-					if code == 0 || !strings.Contains(out+errb, "lock") || !strings.Contains(out+errb, steps[k-1]) {
-						t.Fatalf("went on after the lock was lost before %q: %d %q %q", steps[k-1], code, out, errb)
-					}
-					if len(h.steps) != k {
-						t.Errorf("steps checked %v: a later step was reached", h.steps)
-					}
-					if after := state(e); after != snap {
-						t.Errorf("a write was made at or after %q", steps[k-1])
-					}
-				})
-			}
-		})
-	}
-}
-
-// policy repair: with the lock lost between two directory fixes, the second is not written and the output says
-// what was done and what was not.
-func TestLostLockBetweenRepairDirectoryFixesSkipsTheRest(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy (newDriftEnv), which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
-	adm, ctx, done := e.admin()
-	defer done()
-	// x's labels changed and y has no zone: two fixes.
-	if _, err := adm.SetMeta(ctx, "x", admin.MetaUpdate{Labels: map[string]string{"team": "blue", "stray": "yes"}}); err != nil {
-		t.Fatal(err)
-	}
-	recs, _ := adm.List(ctx)
-	for _, rec := range recs {
-		if rec.Name == "y" {
-			if err := adm.Deprovision(ctx, "y"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := adm.Provision(ctx, "y", rec.User, rec.Account, "", admin.Meta{}); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	installStepHook(t, func(_ int, step string) {
-		if strings.Contains(step, "zone change of y") {
-			loseLockOf(t, adm)
-		}
-	})
-	out, errb, code := e.run("policy", "repair")
-	if code != 1 || errb != "" {
-		t.Fatalf("%d\n%s\n%s", code, out, errb)
-	}
-	for _, w := range []string{"stopped, the account lock was lost", "done: x labels; not done: y", "run `mashctl policy repair` again"} {
-		if !strings.Contains(out, w) {
-			t.Errorf("the output lacks %q:\n%s", w, out)
-		}
-	}
-	recs, _ = adm.List(ctx)
-	for _, r := range recs {
-		switch r.Name {
-		case "x":
-			if r.Labels["stray"] != "" || r.Labels["team"] != "red" {
-				t.Errorf("x's labels were not fixed before the lock was lost: %v", r.Labels)
-			}
-		case "y":
-			if r.Zone != "" {
-				t.Errorf("y's zone was written after the lock was lost: %q", r.Zone)
-			}
-		}
 	}
 }

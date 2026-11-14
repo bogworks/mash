@@ -10,11 +10,11 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// lockName is the advisory lock file in the key directory that serializes `mashctl policy apply`.
+// lockName is the advisory lock file in the key directory that serializes the commands that write the account JWT (`mashctl revoke`, `retire`, `deprovision`, a rotating `reissue`).
 const lockName = "apply.lock"
 
 // ErrLocked is the error of Lock when another holder keeps the lock past the wait.
-var ErrLocked = errors.New("another mashctl policy apply holds the key directory lock")
+var ErrLocked = errors.New("another mashctl command that writes the account JWT holds the key directory lock")
 
 // ErrLockBusy is the error of LockFile when another holder keeps the lock past the wait.
 var ErrLockBusy = errors.New("another process holds the lock")
