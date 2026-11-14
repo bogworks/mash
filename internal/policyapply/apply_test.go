@@ -32,9 +32,22 @@ func TestApplyApplied(t *testing.T) {
 	w, l, deps := applyWorld(t)
 	deps.Inventory = 0
 	var signed string
+	// The JWT in force is the final one AfterPush returns (it may be built a second after the target).
+	if inner := deps.AfterPush; inner != nil {
+		deps.AfterPush = func(ctx context.Context) (map[string][]string, []string, string, error) {
+			rev, nc, final, err := inner(ctx)
+			if final != "" {
+				signed = final
+			}
+			return rev, nc, final, err
+		}
+	}
 	deps.Signer = withSign(deps.Signer, func(rec listset.Record, c *listset.Compiled) (string, error) {
-		signed = w.k.build(t, c, w.k.revoked)
-		return signed, nil
+		tok := w.k.build(t, c, w.k.revoked)
+		if signed == "" {
+			signed = tok
+		}
+		return tok, nil
 	})
 	st, err := Apply(context.Background(), applyReq(), deps)
 	if err != nil {
