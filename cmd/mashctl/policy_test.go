@@ -17,7 +17,7 @@ func TestPolicyGroupHasNoSubcommands(t *testing.T) {
 	} {
 		var out, errb bytes.Buffer
 		code := runEnv(args, func(string) string { return "" }, &out, &errb)
-		if code != 2 || out.Len() != 0 || !strings.Contains(errb.String(), "usage: mashctl policy") || !strings.Contains(errb.String(), "no subcommands yet") {
+		if code != 2 || out.Len() != 0 || !strings.Contains(errb.String(), "usage: mashctl policy") {
 			t.Errorf("%v: code %d out %q err %q", args, code, out.String(), errb.String())
 		}
 	}

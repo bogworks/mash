@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -75,24 +76,7 @@ func text(b []byte) string {
 
 // showControls replaces each control character other than "\n" and "\t" (C0, DEL and C1) with its \xNN escape, so a
 // body cannot send an escape sequence to a terminal and nothing is hidden from the reader.
-func showControls(s string) string {
-	if !strings.ContainsFunc(s, isHiddenControl) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		if isHiddenControl(r) {
-			fmt.Fprintf(&b, "\\x%02x", r)
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-func isHiddenControl(r rune) bool {
-	return r != '\n' && r != '\t' && (r < 0x20 || (r >= 0x7f && r <= 0x9f))
-}
+func showControls(s string) string { return config.EscapeText(s) }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 

@@ -141,7 +141,18 @@ func retireLines(line func(left, right string)) {
 }
 
 func policyLines(line func(left, right string)) {
-	line("policy", "no subcommands yet: the policy file is gone, and endpoints are declared in the directory by `add`")
+	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
+}
+
+// accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
+var accountLockWait = madmin.AccountLockWait
+
+// SetAccountLockWait sets how long guarded commands wait for the account lock and returns a func that restores the
+// wait. It is for tests; production uses madmin.AccountLockWait.
+func SetAccountLockWait(d time.Duration) (restore func()) {
+	old := accountLockWait
+	accountLockWait = d
+	return func() { accountLockWait = old }
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -180,7 +191,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		nc.Close()
 		return nil, nil, nil, err
 	}
-	a = a.WithNameRule(cfg.NameRule)
+	a = a.WithNameRule(cfg.NameRule).WithAccountLockWait(accountLockWait)
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err
@@ -240,6 +251,10 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(err)
 	}
 	defer closeAdmin()
+	// The account lock of a command that changes policy (provision with labels or a zone, set-meta with labels,
+	// set-zone): taken with the marker check, held through the write, released on every exit.
+	var acct *madmin.AccountLock
+	defer func() { acct.Release() }()
 
 	switch args[0] {
 	case "init":
@@ -265,6 +280,16 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		meta, err := provisionMeta(prog, args, opt)
 		if err != nil {
 			return usage(err)
+		}
+		if len(meta.Labels) > 0 { // a label is the policy's; a plain provision of an inbox is not
+			lk, err := guardAccount(ctx, a, pfx, "provision")
+			if err != nil {
+				return fail(err)
+			}
+			acct = lk
+		}
+		if err := acct.Before(ctx, "the provision"); err != nil {
+			return fail(err)
 		}
 		if nf != nil {
 			if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
@@ -309,6 +334,16 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		u, err := setMetaUpdate(prog, args)
 		if err != nil {
 			return usage(err)
+		}
+		if len(u.Labels) > 0 { // labels are the policy's; a role, host, description or capability is not
+			lk, err := guardAccount(ctx, a, pfx, "set-meta")
+			if err != nil {
+				return fail(err)
+			}
+			acct = lk
+		}
+		if err := acct.Before(ctx, "the record's update"); err != nil {
+			return fail(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {

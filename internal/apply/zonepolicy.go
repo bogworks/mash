@@ -26,10 +26,16 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 	if err != nil {
 		return false, err
 	}
-	set, _ := r.Servers(ctx)
+	set, serr := r.Servers(ctx)
+	if serr != nil {
+		return false, fmt.Errorf("cannot confirm the server set: %w", serr)
+	}
 	base, err := lookupBase(ctx, r, acctPub, trust, serverExpect(set, servers), "look up the account JWT")
 	if err != nil {
 		return false, err
+	}
+	if base.short != "" {
+		return false, fmt.Errorf("not every server was checked: %s", base.short)
 	}
 	return HasZoneScope(base.claims), nil
 }

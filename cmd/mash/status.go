@@ -260,13 +260,22 @@ func credsLine(cfg config.Config) string {
 
 const cliLiveNote = "not checked from the CLI (a running session reports it)"
 
-// tlsLine warns when the url is plain nats:// (or ws://) to a non-loopback host.
+// tlsLine says how the url is protected. A plain nats:// or ws:// entry (a scheme-less entry is nats://) to a host that
+// is not loopback is a WARN that names the host, or, with require_tls on, the refusal an endpoint connection gives.
 func tlsLine(cfg config.Config) string {
-	switch w := config.PlainTextWarning(cfg.URL); {
-	case cfg.URL == "":
+	if cfg.URL == "" {
 		return "tls: n/a - no url"
+	}
+	if cfg.RequireTLS {
+		if _, err := endpoint.EndpointTLS(cfg); err != nil {
+			return "tls: FAILED - " + redactText(err.Error())
+		}
+	}
+	switch w := config.PlainTextWarning(cfg.URL); {
 	case w != "":
 		return fmt.Sprintf("tls: WARN - %s %s", redactURL(cfg.URL), w)
+	case cfg.RequireTLS:
+		return "tls: OK (required) - no plain text to a remote host"
 	case strings.Contains(cfg.URL, "tls://") || strings.Contains(cfg.URL, "wss://"):
 		return "tls: OK - tls:// connection"
 	}
