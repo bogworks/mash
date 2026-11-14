@@ -520,7 +520,13 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	// A revocation covers only JWTs issued at or before its time: an old JWT that claims a later issue time (a clock
 	// that was ahead or has since been set back) would stay valid, so the rotation would report success without
 	// cutting it off. Refused before anything is staged or revoked, on the revoked-key path too.
-	if err := refuseFutureIssued(name, oldClaims, reissueNow()); err != nil {
+	// The same holds for every issue time the record keeps of the old key, and the record must be able to show it holds
+	// them all. One reading of the clock serves the checks and the revocation.
+	revokeAt := reissueNow()
+	if err := refuseFutureIssued(name, oldClaims, revokeAt); err != nil {
+		return nil, false, err
+	}
+	if err := ctl.CheckNotFutureIssued(ctx, adm, []ctl.RevokeTarget{{Name: name, Key: oldPub}}, revokeAt, stderr); err != nil {
 		return nil, false, err
 	}
 
@@ -558,7 +564,7 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	if err := guard.Before("the revocation of the old user key"); err != nil {
 		return nil, false, fmt.Errorf("%v; the new key is recorded as issued and its creds are staged in %s, but the old key %s... is not revoked, the directory record and the old creds file are unchanged (the old creds still work); run mashctl reissue %s again", err, sp, ctl.ShortKey(oldPub), name)
 	}
-	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
+	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, func() time.Time { return revokeAt }); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
 		if revoked {
 			why = "the user key is already revoked in the account JWT"
@@ -569,7 +575,7 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	if err := guard.Before("the record of the revocation"); err != nil { // the old key is revoked: the staged rotation is finished by a later run
 		return nil, false, fmt.Errorf("%s: the revocation was not recorded in the issue record and the directory record was not updated (%v)", finish, err)
 	}
-	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
+	ctl.MarkRevoked(ctx, adm, oldPub, revokeAt, stderr)
 	if err := guard.Before("the directory record update"); err != nil {
 		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
 	}
