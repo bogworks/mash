@@ -234,10 +234,16 @@ func RunOrdered(ctx context.Context, in RunInput, prov Provisioner) (OrderedStat
 			if len(blockingOf(st, na)) > 0 { // defence: an applied gate has no failures
 				continue
 			}
+			if err := CheckBeforeWrite(ctx, FenceProvision); err != nil {
+				return err
+			}
 			if err := prov.CreateInbox(ctx, na.Address); err != nil {
 				out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepCreateInbox, Detail: err.Error()})
 				failed = true
 				continue
+			}
+			if err := CheckBeforeWrite(ctx, FenceProvision); err != nil {
+				return err
 			}
 			if err := prov.IssueCredential(ctx, na.Address); err != nil {
 				out.Errors = append(out.Errors, ProvisionError{Address: na.Address, Step: StepIssueCredential, Detail: err.Error()})

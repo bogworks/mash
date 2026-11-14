@@ -35,6 +35,9 @@ const (
 	CheckOldKeyNotRevoked = "old_key_not_revoked"
 	// CheckProvision is a provisioning step that failed after the gate applied (RunOrdered): nothing was committed.
 	CheckProvision = "provision"
+	// CheckFence: the BeforeWrite hook refused a protected write (the apply intake's lock may have expired); the
+	// detail names the step. Whatever was pushed before it stays as it is and the generation is pending.
+	CheckFence = "fence"
 	// CheckNotConnected: a narrowed sender's new credential was not seen connected by the deadline (REQ-014).
 	CheckNotConnected = "not_connected"
 )
