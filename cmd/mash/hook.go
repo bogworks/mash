@@ -31,6 +31,12 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if cfgErr != nil || cfg.Inert() {
 		return 0
 	}
+	// The hook connects to nothing, but a configuration serve and the CLI refuse must not look healthy here: the refusal
+	// is said on stderr (hook.log) and the hook still exits 0 (the spool has no mail from a serve that never started).
+	if _, err := endpoint.EndpointTLS(cfg); err != nil {
+		fmt.Fprintf(stderr, "mash hook: %v\n", err)
+		return 0
+	}
 	// The whole input is read, uncapped: a PostToolUse input carries the tool's full response and may pass 1 MiB.
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
