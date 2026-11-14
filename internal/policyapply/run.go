@@ -497,6 +497,9 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
+	if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, tok); err != nil {
+		return Status{}, err
+	}
 
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
@@ -542,6 +545,10 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
 				perr := in.Ledger.SetPending(rec)
 				return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations does not carry generation %d with every revoked key", ErrSignedMismatch, rec.Generation), perr)
+			}
+			if err := keepsRevocations(prevJWT, hasDetail && base.Generation > 0, finalJWT); err != nil {
+				perr := in.Ledger.SetPending(rec)
+				return Status{}, errors.Join(err, perr)
 			}
 			tok = finalJWT
 		}
@@ -601,6 +608,38 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		return st, fmt.Errorf("clear pending after committing generation %d: %w", rec.Generation, err)
 	}
 	return st, nil
+}
+
+// keepsRevocations checks that target revokes every key the in-force JWT prev revokes, each at a time no earlier than
+// in prev: a revocation is never lowered or removed, so a later generation cannot restore an old key. tracked says
+// the ledger stores the in-force JWT and a generation is in force; an empty prev then fails closed. It returns an
+// error wrapping ErrSignedMismatch naming the keys that are missing or lowered.
+func keepsRevocations(prev string, tracked bool, target string) error {
+	if !tracked {
+		return nil
+	}
+	if prev == "" {
+		return fmt.Errorf("%w: the ledger stores no account JWT for the generation in force, so its revocations cannot be kept", ErrSignedMismatch)
+	}
+	pc, err := jwt.DecodeAccountClaims(prev)
+	if err != nil {
+		return fmt.Errorf("%w: the stored account JWT does not decode: %w", ErrSignedMismatch, err)
+	}
+	tc, err := jwt.DecodeAccountClaims(target)
+	if err != nil {
+		return fmt.Errorf("%w: the account JWT does not decode: %w", ErrSignedMismatch, err)
+	}
+	var missing []string
+	for k, at := range pc.Revocations {
+		if got, has := tc.Revocations[k]; !has || got < at {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("%w: the account JWT does not keep the revocations in force (missing or lowered): %s", ErrSignedMismatch, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func refusals(stage string, ps []listset.Problem) []listset.Refusal {

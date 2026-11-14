@@ -245,3 +245,93 @@ func TestFinalJWTMissingRevocationIsNotCommitted(t *testing.T) {
 		t.Error("not pending")
 	}
 }
+
+// revokedAt re-encodes tok with the revocation of key at unix time at.
+func revokedAt(t *testing.T, k keys, tok, key string, at int64) string {
+	t.Helper()
+	c, err := jwt.DecodeAccountClaims(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Revocations == nil {
+		c.Revocations = jwt.RevocationList{}
+	}
+	c.Revocations[key] = at
+	out, err := c.Encode(k.acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// A target JWT must keep every revocation of the JWT in force, each at a time no earlier: it is refused before any
+// push otherwise (a revocation is never lowered or removed).
+func TestRunKeepsInForceRevocations(t *testing.T) {
+	const at = 2_000_000_000
+	for _, tc := range []struct {
+		name string
+		at   int64 // the time of the target's revocation; 0 means not revoked
+		ok   bool
+	}{
+		{"missing", 0, false},
+		{"lowered", at - 1, false},
+		{"same time", at, true},
+		{"later", at + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			old := freshUserPub(t)
+			j1 := revokedAt(t, w.k, w.j1, old, at)
+			l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: j1})
+			in := w.run(l, set2(), "bytes-2")
+			in.Signer = withSign(in.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
+				tok := w.k.build(t, c, w.k.revoked)
+				if tc.at != 0 {
+					tok = revokedAt(t, w.k, tok, old, tc.at)
+				}
+				return tok, nil
+			})
+			pushes := len(w.cluster.pushes)
+			st, err := Run(context.Background(), in)
+			if tc.ok {
+				if err != nil || st.State != StateApplied {
+					t.Fatalf("%+v %v", st, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrSignedMismatch) || !strings.Contains(err.Error(), old) {
+				t.Fatalf("err = %v, want ErrSignedMismatch naming %s", err, old)
+			}
+			if len(w.cluster.pushes) != pushes {
+				t.Errorf("pushed %d -> %d", pushes, len(w.cluster.pushes))
+			}
+		})
+	}
+}
+
+// The final JWT after AfterPush is held to the same rule; a ledger with a generation in force and no stored JWT fails closed.
+func TestRunKeepsInForceRevocationsFinalAndFailClosed(t *testing.T) {
+	w := newWorld(t)
+	old := freshUserPub(t)
+	j1 := revokedAt(t, w.k, w.j1, old, 2_000_000_000)
+	in := w.run(NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: j1}), set2(), "bytes-2")
+	in.Signer = withSign(in.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
+		return revokedAt(t, w.k, w.k.build(t, c, w.k.revoked), old, 2_000_000_000), nil
+	})
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
+		return nil, nil, w.k.build(t, w.c2, w.k.revoked), nil // drops old
+	}
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrSignedMismatch) {
+		t.Fatalf("final JWT: err = %v", err)
+	}
+
+	w = newWorld(t)
+	in = w.run(NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{}), set2(), "bytes-2")
+	pushes := len(w.cluster.pushes)
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrSignedMismatch) {
+		t.Fatalf("no stored JWT: err = %v", err)
+	}
+	if len(w.cluster.pushes) != pushes {
+		t.Error("pushed with no stored JWT")
+	}
+}

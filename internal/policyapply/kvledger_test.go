@@ -320,7 +320,7 @@ func TestKVLedgerConcurrentRunsSingleWinner(t *testing.T) {
 	w := newWorld(t)
 	watch := &pushWatch{Cluster: w.cluster}
 	ledgers := []*KVLedger{e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond}), e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})}
-	if err := ledgers[0].CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := ledgers[0].CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -375,7 +375,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
@@ -404,7 +404,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	w2 := newWorld(t)
 	w2.prober.allow["s1"] = true
 	l2 := e.ledger(KVLedgerOptions{})
-	if err := l2.CompareAndCommit(2, testRecord(1)); err != nil {
+	if err := l2.CompareAndCommitDetail(2, testRecord(1), InForceDetail{JWT: w2.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err = Run(context.Background(), w2.run(l2, set2(), "bytes-2"))
@@ -431,7 +431,7 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	ls := set2()
@@ -541,7 +541,7 @@ func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
 	w := newWorld(t)
 	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
 	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
-	if err := first.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := first.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}

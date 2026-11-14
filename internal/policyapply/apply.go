@@ -67,8 +67,9 @@ type ApplyDeps struct {
 //
 // A replay is a no-op: if the digest of req.Received (the one Record.Received is computed with, SHA-256) equals the
 // Received of the record in force, that exact document is already applied. Apply then signs and pushes nothing, and
-// returns the latest stored status (when the ledger is a StatusReader and holds one) or a minimal applied Status for
-// the generation in force, with a nil error. This check comes before the stale-base check, so a replayed document
+// returns a Status built from the record in force itself (applied, in force, with its generation and digests), with a
+// nil error. The record is the one read to make the comparison, so the two always agree; the ledger's latest status is
+// not used, since it may be the refusal of another submission. This check comes before the stale-base check, so a replayed document
 // whose base is now behind is not reported stale. A different document on a stale base is still a StaleBaseError.
 //
 // It first checks, before anything else is pushed, that req.BaseGeneration is the generation in force in the ledger
@@ -87,15 +88,6 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		return Status{}, err
 	}
 	if cur.Generation > 0 && sha256.Sum256(req.Received) == cur.Received {
-		if sr, ok := deps.Ledger.(StatusReader); ok {
-			st, ok, err := sr.LatestStatus(ctx)
-			if err != nil {
-				return Status{}, err
-			}
-			if ok {
-				return st, nil
-			}
-		}
 		st := newStatus(cur, StateApplied, deps.Now)
 		st.InForce = true
 		return st, nil

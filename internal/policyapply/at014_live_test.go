@@ -233,7 +233,7 @@ func TestAT014Live(t *testing.T) {
 			newUser = c
 		}
 	}
-	ledger := NewMemLedger(listset.Record{Generation: 1})
+	ledger := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: e.account(c1)})
 	prov := &liveProv{
 		t: t, e: e, ctx: ctx, ev: ev, user: newUser, ledger: ledger, admin: e.adminCreds(),
 		cands: []Candidate{

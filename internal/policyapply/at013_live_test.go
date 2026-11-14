@@ -222,7 +222,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		t.Fatal(err)
 	}
 	s.c2 = c2
-	s.ledger = NewMemLedger(listset.Record{Generation: 1})
+	s.ledger = NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: e.account(s.c1)})
 
 	// The old credentials, as their hosts made them: only the public key is known to the record.
 	for _, addr := range oldFor {

@@ -327,7 +327,7 @@ func rotRun(t *testing.T, connect bool, mod ...func(*RunInput)) (Status, *world,
 		Generation: 2, Issuer: e.in.Issuer, Deliverer: e.in.Deliverer, Conns: e.in.Conns, Record: e.in.Record,
 		Revoker: e.in.Revoker, Deadline: e.in.Deadline, Poll: e.in.Poll,
 	}
-	led := NewMemLedger(listset.Record{Generation: 1})
+	led := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
 	in := w.run(led, set2(), "x")
 	in.AfterPush = RotationsAfterPush(plan)
 	// The inventory comes from the issue record through AfterPush: the caller passes none for core.
