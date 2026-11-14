@@ -179,7 +179,7 @@ func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			signed, signErr = iss.Sign(listset.Record{}, c)
+			signed, signErr = iss.Sign(listset.Record{Generation: req.Generation}, c)
 			return policyapply.Status{State: policyapply.StateApplied, Generation: req.Generation}, nil
 		}
 		if _, err := a.Apply(context.Background(), policyintake.Doc{Raw: raw}, okGuard{}); err != nil {

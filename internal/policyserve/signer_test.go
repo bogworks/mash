@@ -212,11 +212,11 @@ func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 	} {
 		w.iss.AdminUser, w.iss.AdminIssuer, w.iss.ExemptIssuers = "", "", nil
 		set()
-		_, err := w.iss.Sign(listset.Record{}, w.compiled)
+		_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 		if err == nil || !strings.Contains(err.Error(), "not an owner group key of the key store") || !strings.Contains(err.Error(), w.plain[:8]) {
 			t.Errorf("%s: err %v", name, err)
 		}
-		if _, err := w.iss.Kept(context.Background()); err == nil {
+		if _, err := w.iss.Kept(context.Background(), 1); err == nil {
 			t.Errorf("%s: Kept accepted a non-mash key", name)
 		}
 	}
@@ -226,11 +226,11 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 	w := newDropWorld(t)
 	other := newGroupKey()
 	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
-	if _, err := w.iss.Sign(listset.Record{}, w.compiled); err == nil {
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
 		t.Fatal("an exempt user under an unknown key passed the check")
 	}
 	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
-	out, err := w.iss.Sign(listset.Record{}, w.compiled)
+	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 	if len(got.SigningKeys) != 2 {
 		t.Errorf("signing keys: %d", len(got.SigningKeys))
 	}
-	if k, err := w.iss.Kept(context.Background()); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
+	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
 		t.Errorf("Kept: %v %v", k, err)
 	}
 }
@@ -256,7 +256,7 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 func TestSignRefusesWhenTheAdminIssuerIsANonMashKey(t *testing.T) {
 	w := newDropWorld(t)
 	w.enable(w.plain, nil)
-	_, err := w.iss.Sign(listset.Record{}, w.compiled)
+	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	var nk *admin.IssuersNotKeptError
 	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "admin" || nk.Problems[0].Issuer != w.plain {
 		t.Fatalf("err %v", err)
@@ -266,14 +266,14 @@ func TestSignRefusesWhenTheAdminIssuerIsANonMashKey(t *testing.T) {
 func TestSignRefusesWhenAConnectedExemptUserIsUnderANonMashKey(t *testing.T) {
 	w := newDropWorld(t)
 	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.plain}})
-	_, err := w.iss.Sign(listset.Record{}, w.compiled)
+	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	var nk *admin.IssuersNotKeptError
 	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "exempt" || nk.Problems[0].User != "UEXEMPT" {
 		t.Fatalf("err %v", err)
 	}
 	// an unreadable scan refuses too
 	w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return nil, errors.New("scan incomplete") }
-	if _, err := w.iss.Sign(listset.Record{}, w.compiled); err == nil || !strings.Contains(err.Error(), "scan incomplete") {
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil || !strings.Contains(err.Error(), "scan incomplete") {
 		t.Errorf("err %v", err)
 	}
 }
@@ -281,7 +281,7 @@ func TestSignRefusesWhenAConnectedExemptUserIsUnderANonMashKey(t *testing.T) {
 func TestSignWithOnlyMashKeysNeedsNoDropFields(t *testing.T) {
 	w := newDropWorld(t)
 	w.iss.Resolver = oneJWT{tokOf(t, w, false)}
-	if _, err := w.iss.Sign(listset.Record{}, w.compiled); err != nil {
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -301,4 +301,24 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 		t.Fatal(err)
 	}
 	return tok
+}
+
+func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
+	w := newDropWorld(t)
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
+		t.Fatalf("generation 1: %v", err)
+	}
+	if _, err := w.iss.Kept(context.Background(), 1); err != nil {
+		t.Fatalf("Kept generation 1: %v", err)
+	}
+	for _, g := range []uint64{0, 2, 7} {
+		_, err := w.iss.Sign(listset.Record{Generation: g}, w.compiled)
+		if err == nil || !strings.Contains(err.Error(), "remove it before a list set can be applied") || !strings.Contains(err.Error(), w.plain[:8]) {
+			t.Errorf("generation %d: err %v", g, err)
+		}
+		if _, err := w.iss.Kept(context.Background(), g); err == nil {
+			t.Errorf("generation %d: Kept accepted a non-mash key", g)
+		}
+	}
 }

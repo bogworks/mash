@@ -40,7 +40,7 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 	now := time.Now().Add(5 * time.Second)
 	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
 		Now: func() time.Time { return now }}
-	got, err := iss.Kept(context.Background())
+	got, err := iss.Kept(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}

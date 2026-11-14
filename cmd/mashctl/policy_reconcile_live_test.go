@@ -274,7 +274,7 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 }
 
 // applyFirstProduction applies the first list set (raw, range foo) through policyserve.Applier.Apply, the Applier `policy
-// serve` builds, with the drop fields serve sets (policyServeDropFields): its Issuer drops a non-mash signing key once the
+// serve` builds, with the production provisioner (none set) and the drop fields serve sets (policyServeDropFields): its Issuer drops a non-mash signing key once the
 // admin user and the exempt users are shown to stay under kept keys. It creates the policy bucket and returns its ledger,
 // an admin handle and the cluster.
 func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte) (*policyapply.KVLedger, *admin.Admin, policyapply.NATSCluster) {
@@ -302,6 +302,12 @@ func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The first list set adds foo.alice.core: its inbox is made as an operator's `mashctl add core` makes it (a legacy
+	// endpoint of the same owner and name serves the address), because `policy serve` checks it, verified and with
+	// nothing created (ADR 0122); the Applier below has no provisioner of its own.
+	if _, err := a.Provision(ctx, "core", userPub(t), e.acctPub, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
 	adminUser, err := credsUserKey(e.pl.Creds)
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +327,7 @@ func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte)
 	// The Applier `policy serve` runs, with the drop fields set by serve's own helper.
 	app := &policyserve.Applier{
 		Account: e.acctPub, Range: "foo", Ledger: ledger, Sys: sysConn, Keys: e.ks, Trust: trust, Record: policyapply.NewAdminIssueRecord(a), KV: kv,
-		Servers: 1, URL: e.srv.ClientURL(), Inboxes: a, Provisioner: nopProvisioner{},
+		Servers: 1, URL: e.srv.ClientURL(), Inboxes: a,
 		Load: func(_ context.Context, u string) (*nats.Conn, error) {
 			return nats.Connect(u, natsauth.UserCredentials(e.pl.Creds), nats.MaxReconnects(0))
 		},
@@ -453,12 +459,6 @@ func revocationOf(t *testing.T, tok, key string) int64 {
 	}
 	return cl.Revocations[key]
 }
-
-// nopProvisioner provisions nothing: the first list set's addresses need no inbox for this test.
-type nopProvisioner struct{}
-
-func (nopProvisioner) CreateInbox(context.Context, string) error     { return nil }
-func (nopProvisioner) IssueCredential(context.Context, string) error { return nil }
 
 type nopGuard struct{}
 

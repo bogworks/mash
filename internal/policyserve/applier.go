@@ -313,7 +313,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		signers[tpl.Group] = pub
 	}
 	deps.Signers = signers
-	kept := issuer.Kept
+	kept := func(ctx context.Context) (map[string]string, error) { return issuer.Kept(ctx, doc.Generation) }
 	if a.keptFn != nil {
 		kept = a.keptFn
 	}
