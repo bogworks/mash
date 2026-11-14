@@ -529,3 +529,35 @@ func TestListSetVerbsWriteNothing(t *testing.T) {
 		t.Fatalf("the bucket changed:\n%s\n%s", before, after)
 	}
 }
+
+// A document with a next_submitter is never "nothing would change", and the diff makes the intake's checks against the
+// adoption marker and the keys mash holds: not adopted, a key mash holds and a good key.
+func TestListSetDiffNextSubmitter(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	next := userPub(t)
+	withNext := func(k string) string {
+		return e.file("next-"+k[:6]+".json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) { m["next_submitter"] = k }))
+	}
+
+	// Not adopted: refused at stage adoption.
+	out, errb, code := e.run("diff", withNext(next))
+	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] next_submitter: the account is not adopted: a next_submitter cannot be recorded") {
+		t.Fatalf("unadopted: %d\n%q\n%s", code, out, errb)
+	}
+
+	if o, eb, c := e.applyEnv.run("policy", "adopt", "--submitter", userPub(t)); c != 0 {
+		t.Fatalf("adopt: %d %q %q", c, o, eb)
+	}
+	out, errb, code = e.run("diff", withNext(next))
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted: this would change\n"+policydoc.SizeLimitsLine+"\nrotation: next submitter "+next+" would be recorded\n") {
+		t.Fatalf("adopted: %d\n%q\n%s", code, out, errb)
+	}
+	e.golden("diff_rotation", strings.ReplaceAll(out, next, "NEXTKEY"))
+
+	// A key mash holds (the account's own key) is refused at stage document, as the intake would.
+	out, errb, code = e.run("diff", withNext(e.acctPub))
+	if code != 1 || errb != "" || !strings.Contains(out, "[document] next_submitter:") {
+		t.Fatalf("held: %d\n%q\n%s", code, out, errb)
+	}
+}

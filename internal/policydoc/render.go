@@ -101,11 +101,14 @@ func RenderPlan(p DiffPlan) string {
 		}
 		return b.String()
 	}
-	if len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
+	if p.rotation == "" && !p.completes && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
 		return "accepted: nothing would change\n" + SizeLimitsLine + "\n"
 	}
 	b.WriteString("accepted: this would change\n" + SizeLimitsLine + "\n")
+	if p.rotation != "" {
+		b.WriteString("rotation: " + p.rotation + "\n")
+	}
 	section := func(name string, items []string) {
 		fmt.Fprintf(&b, "%s: %s\n", name, list(items))
 	}

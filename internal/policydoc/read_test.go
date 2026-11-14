@@ -10,8 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nats-io/nkeys"
+
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
+	"github.com/bogworks/mash/internal/store"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -212,7 +215,7 @@ func TestDiff(t *testing.T) {
 	next := doc(8, 7, func(m map[string]any) {
 		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
 	})
-	p, err := Diff(ctx, r, next, "", nil)
+	p, err := Diff(ctx, r, next, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,32 +229,32 @@ func TestDiff(t *testing.T) {
 
 	// A JWS is accepted without a signature check.
 	kp, _ := submitter(t)
-	if _, err := Diff(ctx, r, sign(t, kp, next), "", nil); err != nil {
+	if _, err := Diff(ctx, r, sign(t, kp, next), "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// A stale base is a refusal in the plan, not an error.
-	p, err = Diff(ctx, r, doc(7, 6, nil), "", nil)
+	p, err = Diff(ctx, r, doc(7, 6, nil), "", nil, nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_stale", RenderPlan(p))
 
 	// Another account is an error.
-	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), "", nil); err == nil {
+	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), "", nil, nil); err == nil {
 		t.Fatal("a document for another account was diffed")
 	}
-	if _, err := Diff(ctx, r, []byte("junk"), "", nil); !errors.Is(err, ErrBadDocument) {
+	if _, err := Diff(ctx, r, []byte("junk"), "", nil, nil); !errors.Is(err, ErrBadDocument) {
 		t.Fatal(err)
 	}
 
 	// Nothing in force: the first generation.
-	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil)
+	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil, nil)
 	if err != nil || p.Refused || len(p.FirstCredential) != 2 {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_first", RenderPlan(p))
-	p, err = Diff(ctx, fakeReader{}, next, "", nil)
+	p, err = Diff(ctx, fakeReader{}, next, "", nil, nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
 		t.Fatalf("%+v, %v", p, err)
 	}
@@ -260,7 +263,7 @@ func TestDiff(t *testing.T) {
 // A document identical in content to the one in force changes nothing: the plan says so and prints nothing else.
 func TestDiffNothingChanges(t *testing.T) {
 	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
-	p, err := Diff(context.Background(), r, doc(8, 7, nil), "", nil)
+	p, err := Diff(context.Background(), r, doc(8, 7, nil), "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,15 +283,15 @@ func TestDiffRangeMismatch(t *testing.T) {
 	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
 	other := doc(8, 7, func(m map[string]any) { m["range"] = "bar" })
 	for _, rng := range []string{"foo", ""} { // selected, then the range of the list set in force
-		p, err := Diff(ctx, r, other, rng, nil)
+		p, err := Diff(ctx, r, other, rng, nil, nil)
 		if err != nil || !p.Refused || p.Refusals[0].Stage != StageRange ||
 			!strings.Contains(p.Refusals[0].Reason, "bar") || !strings.Contains(p.Refusals[0].Reason, "foo") {
 			t.Fatalf("range %q: %+v, %v", rng, p, err)
 		}
 	}
-	p, _ := Diff(ctx, r, other, "foo", nil)
+	p, _ := Diff(ctx, r, other, "foo", nil, nil)
 	golden(t, "plan_range", RenderPlan(p))
-	if p, err := Diff(ctx, r, doc(8, 7, nil), "foo", nil); err != nil || p.Refused {
+	if p, err := Diff(ctx, r, doc(8, 7, nil), "foo", nil, nil); err != nil || p.Refused {
 		t.Fatalf("matching range: %+v, %v", p, err)
 	}
 }
@@ -309,16 +312,16 @@ func TestDiffPending(t *testing.T) {
 	}
 	// Other content than the pending generation's.
 	other := listset.DigestListSet(listset.ListSet{Range: "other"})
-	p, err := Diff(ctx, pendingFor(8, other), changed, "", nil)
+	p, err := Diff(ctx, pendingFor(8, other), changed, "", nil, nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StagePending || !strings.Contains(p.Refusals[0].Reason, "generation 8 is pending") {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	// The same content as the pending generation's.
-	if p, err = Diff(ctx, pendingFor(8, listset.DigestListSet(d.ListSet)), changed, "", nil); err != nil || p.Refused {
+	if p, err = Diff(ctx, pendingFor(8, listset.DigestListSet(d.ListSet)), changed, "", nil, nil); err != nil || p.Refused {
 		t.Fatalf("same content: %+v, %v", p, err)
 	}
 	// A pending record from a generation that has since been committed is cleared by the apply: it does not count.
-	if p, err = Diff(ctx, pendingFor(7, other), changed, "", nil); err != nil || p.Refused {
+	if p, err = Diff(ctx, pendingFor(7, other), changed, "", nil, nil); err != nil || p.Refused {
 		t.Fatalf("stale pending: %+v, %v", p, err)
 	}
 }
@@ -333,7 +336,93 @@ func TestUnreadableInForce(t *testing.T) {
 	if _, err := Explain(ctx, r, "foo.c.lead", "foo.c.core"); err == nil {
 		t.Fatal("explain read nothing")
 	}
-	if _, err := Diff(ctx, r, doc(8, 7, nil), "", nil); err == nil {
+	if _, err := Diff(ctx, r, doc(8, 7, nil), "", nil, nil); err == nil {
 		t.Fatal("diff compared against nothing")
 	}
+}
+
+func userKey(t *testing.T) string {
+	t.Helper()
+	kp, err := nkeys.CreateUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pub
+}
+
+// A document whose list set is unchanged but which carries next_submitter is a change: it starts a planned rotation.
+func TestDiffRotation(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	next, cur, held := userKey(t), userKey(t), userKey(t)
+	withNext := func(k string) []byte { return doc(8, 7, func(m map[string]any) { m["next_submitter"] = k }) }
+	adopted := func(m store.Marker) *RotationContext {
+		m.Account, m.Submitter = testAccount, cur
+		return &RotationContext{Adopted: true, Marker: m, Held: []string{held}}
+	}
+
+	p, err := Diff(ctx, r, withNext(next), "", nil, adopted(store.Marker{}))
+	if err != nil || p.Refused || p.NextSubmitter != next {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	text := RenderPlan(p)
+	want := "accepted: this would change\n" + SizeLimitsLine + "\nrotation: next submitter " + next + " would be recorded\n"
+	if !strings.HasPrefix(text, want) || strings.Contains(text, "nothing would change") {
+		t.Fatalf("%q", text)
+	}
+	golden(t, "plan_rotation", strings.ReplaceAll(text, next, "NEXTKEY"))
+	if b, _ := json.Marshal(p); !strings.Contains(string(b), `"next_submitter":"`+next+`"`) {
+		t.Fatalf("%s", b)
+	}
+	if b, _ := json.Marshal(mustDiff(t, r, doc(8, 7, nil), adopted(store.Marker{}))); !strings.Contains(string(b), `"next_submitter":""`) {
+		t.Fatalf("%s", b)
+	}
+
+	// Not validated: nobody read the marker or the keys.
+	p, _ = Diff(ctx, r, withNext(next), "", nil, nil)
+	if !strings.Contains(RenderPlan(p), "rotation: next submitter "+next+" would be recorded (not validated: ") {
+		t.Fatalf("%q", RenderPlan(p))
+	}
+
+	refused := func(name string, rc *RotationContext, doc []byte, stage, detail string) {
+		t.Helper()
+		p, err := Diff(ctx, r, doc, "", nil, rc)
+		if err != nil || !p.Refused || p.Refusals[0].Stage != stage || !strings.Contains(p.Refusals[0].Reason, detail) {
+			t.Fatalf("%s: %+v, %v", name, p, err)
+		}
+		if strings.Contains(RenderPlan(p), next) {
+			t.Fatalf("%s: the key is echoed", name)
+		}
+	}
+	refused("held", adopted(store.Marker{}), withNext(held), StageDocument, "next_submitter is a key mash holds")
+	refused("admin", adopted(store.Marker{By: next}), withNext(next), StageDocument, "next_submitter is a key mash holds")
+	refused("current", adopted(store.Marker{}), withNext(cur), StageDocument, "next_submitter is not acceptable")
+	refused("unadopted", &RotationContext{}, withNext(next), StageAdoption, "the account is not adopted: a next_submitter cannot be recorded")
+	refused("unreadable", &RotationContext{Err: errors.New("boom")}, withNext(next), StageDocument, "next_submitter cannot be checked: boom")
+
+	// A rotation already pending: a note, or the completion when the signer is the pending key.
+	pend := store.Marker{NextSubmitter: userKey(t)}
+	p, _ = Diff(ctx, r, withNext(next), "", nil, adopted(pend))
+	if p.Refused || !strings.Contains(RenderPlan(p), "rotation: a rotation to "+pend.NextSubmitter+" is pending\n") {
+		t.Fatalf("%q", RenderPlan(p))
+	}
+	rc := adopted(pend)
+	rc.Signer = pend.NextSubmitter
+	p, _ = Diff(ctx, r, doc(8, 7, nil), "", nil, rc)
+	if p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pend.NextSubmitter+"\n") {
+		t.Fatalf("%q", RenderPlan(p))
+	}
+}
+
+func mustDiff(t *testing.T, r Reader, file []byte, rc *RotationContext) DiffPlan {
+	t.Helper()
+	p, err := Diff(context.Background(), r, file, "", nil, rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

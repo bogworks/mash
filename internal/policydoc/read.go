@@ -2,12 +2,15 @@ package policydoc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // Reader is what the read path needs of the ledger: the list set in force and the latest status, read together from one
@@ -194,14 +197,88 @@ type DiffPlan struct {
 	listset.Plan
 	// SizeLimits says which limits the size check used: "default" (the apply checks each server's own).
 	SizeLimits string `json:"size_limits"`
+	// NextSubmitter is the document's next_submitter (a planned submitter rotation, ADR 0112); empty when it has none.
+	NextSubmitter string `json:"next_submitter"`
+	// rotation is the text of the rotation line, after "rotation: "; completes is true when the document would
+	// complete a pending rotation. A plan with a next_submitter or one that completes a rotation is a change.
+	rotation  string
+	completes bool
+}
+
+// RotationContext is what the intake would check a document's next_submitter against: the adoption marker and the keys
+// mash holds, read by the caller, and the key that signed the document when it is known (the --submitter).
+type RotationContext struct {
+	// Adopted is whether the account has an adoption marker; Marker is it.
+	Adopted bool
+	Marker  store.Marker
+	// Held is the public keys mash holds.
+	Held []string
+	// Signer is the key that signed the document; "" when unknown.
+	Signer string
+	// Err is why the marker or the held keys could not be read; the plan is then refused at stage document.
+	Err error
+}
+
+// StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
+const StageDocument = "document"
+
+// StageAdoption is the stage of the refusal Diff reports for a next_submitter on an account that is not adopted.
+const StageAdoption = "adoption"
+
+// rotate adds what the document's next_submitter would do to p, the way policyintake checks it before an apply. A nil
+// rc means the caller read neither the marker nor the keys: the rotation is shown, and said not to be validated.
+func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
+	p.NextSubmitter = next.NextSubmitter
+	if rc == nil {
+		if next.NextSubmitter != "" {
+			p.rotation = "next submitter " + next.NextSubmitter + " would be recorded (not validated: the adoption marker and the keys mash holds were not read)"
+		}
+		return nil
+	}
+	refuse := func(stage, reason string) []listset.Refusal {
+		return []listset.Refusal{{Stage: stage, Entry: "next_submitter", Reason: reason}}
+	}
+	if rc.Err != nil {
+		if next.NextSubmitter == "" {
+			return nil
+		}
+		return refuse(StageDocument, "next_submitter cannot be checked: "+rc.Err.Error())
+	}
+	pending := rc.Adopted && rc.Marker.NextSubmitter != ""
+	if pending && rc.Signer != "" && rc.Signer == rc.Marker.NextSubmitter {
+		p.completes = true
+		p.rotation = "generation would complete the pending rotation to " + rc.Marker.NextSubmitter
+		return nil
+	}
+	if next.NextSubmitter == "" {
+		return nil
+	}
+	if pending {
+		p.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending"
+		return nil
+	}
+	if !rc.Adopted {
+		return refuse(StageAdoption, "the account is not adopted: a next_submitter cannot be recorded")
+	}
+	if err := admin.ValidateNextSubmitter(next.Account, rc.Marker, next.NextSubmitter, rc.Held); err != nil {
+		detail := "next_submitter is not acceptable: " + err.Error()
+		if errors.Is(err, admin.ErrNextIsMashKey) {
+			detail = "next_submitter is a key mash holds"
+		}
+		return refuse(StageDocument, detail)
+	}
+	p.rotation = "next submitter " + next.NextSubmitter + " would be recorded"
+	return nil
 }
 
 // Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
 // document for another account is an error. A document for a range other than rng (when rng is empty, the range of
 // the list set in force; with none in force, any range) is reported in the plan as a refusal with stage "range", and
 // one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
-// that of the pending generation as a refusal with stage "pending": a submission of any would be refused.
-func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits) (DiffPlan, error) {
+// that of the pending generation as a refusal with stage "pending", and one whose next_submitter the intake would
+// refuse as a refusal with stage "document" or "adoption" (checked against rc; see RotationContext): a submission of
+// any would be refused. A document with a next_submitter is never "nothing would change".
+func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
 		return DiffPlan{}, err
@@ -237,11 +314,15 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 		pre = append(pre, listset.Refusal{Stage: StagePending, Entry: "pending",
 			Reason: fmt.Sprintf("generation %d is pending: only the same list set can be submitted until it is applied or rolled back", cur.pending.Generation)})
 	}
+	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
+	pre = append(pre, rotate(&dp, next, rc)...)
+	p = dp.Plan
 	if len(pre) > 0 {
 		p.Refusals = append(pre, p.Refusals...)
 		p.Refused = true
 		p.Receivers, p.Templates, p.Tags = []listset.ReceiverChange{}, []listset.TemplateChange{}, []listset.TagChange{}
 		p.RotateAndRevoke, p.NewCredential, p.Revoke, p.FirstCredential = []string{}, []string{}, []string{}, []string{}
 	}
-	return DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}, nil
+	dp.Plan = p
+	return dp, nil
 }

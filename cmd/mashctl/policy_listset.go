@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/listset"
@@ -113,6 +114,9 @@ func (r ledgerReader) Account() string { return r.account }
 type listSetReader struct {
 	r   policydoc.Reader
 	ctx context.Context
+	// adm is the admin connection (it reads the adoption marker); cfg is the configuration it was opened from.
+	adm *admin.Admin
+	cfg config.Config
 }
 
 // openListSetReader connects with the admin credentials (the connection every admin verb uses), finds the account
@@ -161,7 +165,7 @@ func openListSetReader(pfx string, o listSetOpts, env func(string) string, looku
 		closeAdmin()
 		return fail("%v", err)
 	}
-	return &listSetReader{r: ledgerReader{KVLedger: l, account: account}, ctx: ctx}, closeAdmin, true
+	return &listSetReader{r: ledgerReader{KVLedger: l, account: account}, ctx: ctx, adm: adm, cfg: cfg}, closeAdmin, true
 }
 
 func printListSetJSON(stdout io.Writer, v any) error {
@@ -297,7 +301,7 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 		return 1
 	}
 	defer closeFn()
-	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits())
+	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env))
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 		return 1
@@ -309,4 +313,34 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 		return 1
 	}
 	return 0
+}
+
+// rotationContext reads what the intake checks a next_submitter against: the adoption marker over the admin connection
+// and the keys mash holds in the key store. A read that fails is carried in the context, and the diff refuses a
+// document with a next_submitter then, as the intake does. A document that is not readable, or has no next_submitter
+// and no pending rotation to complete, needs nothing read; Diff reports a bad document itself.
+func rotationContext(rd *listSetReader, file []byte, signer string, env func(string) string) *policydoc.RotationContext {
+	rc := &policydoc.RotationContext{Signer: signer}
+	m, found, err := rd.adm.Adoption(rd.ctx)
+	if err != nil {
+		rc.Err = fmt.Errorf("the adoption marker cannot be read: %w", err)
+		return rc
+	}
+	rc.Adopted, rc.Marker = found, m
+	if d, err := policydoc.Decode(file, policydoc.DecodeOptions{}); err != nil || d.NextSubmitter == "" || m.NextSubmitter != "" {
+		return rc // the held keys only matter for a rotation that would start
+	}
+	keys, err := openKeys(rd.cfg, env)
+	if err == nil {
+		var held map[string]string
+		if _, held, err = keys.HeldKeys(); err == nil {
+			for k := range held {
+				rc.Held = append(rc.Held, k)
+			}
+		}
+	}
+	if err != nil {
+		rc.Err = fmt.Errorf("the keys mash holds cannot be read: %w", err)
+	}
+	return rc
 }
