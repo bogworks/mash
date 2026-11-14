@@ -431,3 +431,26 @@ func TestServerLimitsAccountJWTCapped(t *testing.T) {
 		}
 	}
 }
+
+func TestReachOfAndSubject(t *testing.T) {
+	c, err := Compile(drySet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := ReachOf(c, "foo.c.core", []string{"foo.c.sdk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"foo.c.sdk"}; !reflect.DeepEqual(r[Status], want) {
+		t.Errorf("status reach = %v, want %v", r[Status], want)
+	}
+	if _, err := ReachOf(c, "foo.c.nobody", nil); err == nil {
+		t.Error("unknown sender accepted")
+	}
+	if got := Subject(Heartbeat, "foo.c.sdk"); got != "agents.hb.foo.c.sdk" {
+		t.Errorf("heartbeat subject = %q", got)
+	}
+	if got := Subject(Mail, "foo.c.sdk"); got != "agents.mail.foo.c.sdk" {
+		t.Errorf("mail subject = %q", got)
+	}
+}
