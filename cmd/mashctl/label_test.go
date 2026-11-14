@@ -134,7 +134,7 @@ func TestLabelWithoutAServer(t *testing.T) {
 	h := newFleetEnv(t)
 	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
 	out, errb, code := h.run("label", "b", "note=hello")
-	if code != 1 || !strings.Contains(errb, "label b:") {
+	if code != 1 || !strings.Contains(errb, "label is refused: cannot tell whether this account is adopted") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	noSecrets(t, out, errb)

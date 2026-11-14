@@ -91,6 +91,8 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	e.env = map[string]string{
 		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_INSECURE_LOOPBACK": "1", "MASH_OWNER": "alice",
 		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds),
+		// policy adopt and the account guard read the adoption marker over the admin connection (REQ-016, ADR 0111).
+		"MASH_ADMIN_CREDS": pl.Creds,
 	}
 	return e
 }

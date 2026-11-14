@@ -70,6 +70,9 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 // runLabel is `mashctl label` and `mashctl unlabel`. They set and clear labels on the endpoint's directory record,
 // which is where its labels live: nothing is read from or written to a file, and no creds are touched. The endpoint
 // must have a directory record.
+// afterLabelLoad is a test seam called after the edit is compiled and before the directory record is written.
+var afterLabelLoad func()
+
 func runLabel(unlabel bool, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	verb, usage := "label", labelUsage
 	if unlabel {
@@ -93,6 +96,11 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	guard, ok := accountGuard(cfg, verb, stderr)
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
@@ -143,6 +151,12 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 	if o.dry {
 		fmt.Fprintf(stdout, "dry run: would have %s %s (nothing written)\n", done, o.name)
 		return 0
+	}
+	if afterLabelLoad != nil {
+		afterLabelLoad()
+	}
+	if !heldOrStop(guard, verb, "the update of the directory labels", stderr) {
+		return 1
 	}
 	if _, err := adm.SetMeta(ctx, o.name, admin.MetaUpdate{Labels: changes}); err != nil {
 		return fail("%v", err)
