@@ -184,6 +184,9 @@ type LiveProber struct {
 	// Grace is how long to wait for the server's answer to the probe's barrier; zero means 1 s. It is used in full
 	// only when the barrier itself is not refused.
 	Grace time.Duration
+	// Options are added to every connection the prober makes (the TLS settings of the deployment: the CA, the client
+	// certificate, the TLS requirement). They come after the prober's own and so win over them.
+	Options []nats.Option
 
 	m minted
 }
@@ -216,7 +219,7 @@ func (p *LiveProber) Refused(ctx context.Context, server string, probe ProbeCred
 	seen := map[string]bool{}
 	barrier := make(chan struct{})
 	var once sync.Once
-	nc, err := connectTo(ctx, server, p.URLs[server], creds, timeout,
+	nc, err := connectTo(ctx, server, p.URLs[server], creds, timeout, append(slices.Clone(p.Options),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 			m := violationRE.FindStringSubmatch(err.Error())
 			if m == nil {
@@ -229,7 +232,7 @@ func (p *LiveProber) Refused(ctx context.Context, server string, probe ProbeCred
 			if kind == "publish" && subj == barrierSubject {
 				once.Do(func() { close(barrier) })
 			}
-		}))
+		}))...)
 	if err != nil {
 		return false, err
 	}
@@ -268,6 +271,9 @@ type LiveWitnesses struct {
 	Timeout time.Duration
 	// Grace is how long Closed waits, at most, for the servers to close the connections; zero means 2 s.
 	Grace time.Duration
+	// Options are added to every connection the witnesses open (the TLS settings of the deployment); see
+	// LiveProber.Options.
+	Options []nats.Option
 
 	mu    sync.Mutex
 	conns map[WitnessKey][]*witnessConn
@@ -363,7 +369,7 @@ func (w *LiveWitnesses) Open(ctx context.Context, urls map[string]string, minter
 			w.m.add(pub)
 			wc := &witnessConn{expires: credExpiry(cr)}
 			nc, err := connectTo(ctx, s, urls[s], cr, timeout,
-				nats.ClosedHandler(func(*nats.Conn) { wc.markClosed() }))
+				append(slices.Clone(w.Options), nats.ClosedHandler(func(*nats.Conn) { wc.markClosed() }))...)
 			if err != nil {
 				return fail(err)
 			}

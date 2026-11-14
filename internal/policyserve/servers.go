@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -27,11 +28,8 @@ import (
 // The subject and waits of the server limits query.
 const (
 	varzSubject = "$SYS.REQ.SERVER.PING.VARZ"
-	// varzFirst bounds the first server's answer; varzSettle ends the collection when no further server answered for
-	// that long (skipped once every expected server has answered); varzTotal bounds the whole collection.
-	varzFirst  = 2 * time.Second
-	varzSettle = 500 * time.Millisecond
-	varzTotal  = 4 * time.Second
+	// varzTotal bounds the whole collection: it ends when every declared server has answered, or at this deadline.
+	varzTotal = 4 * time.Second
 	// maxVarzReplies is the most replies one query reads, maxVarzBytes the largest reply taken (a bigger one is
 	// refused, never cut) and maxServerNameBytes the longest server name taken as an identity.
 	maxVarzReplies     = 4096
@@ -43,7 +41,10 @@ const (
 type ServerInfo struct {
 	// Name is the server's name as the system account ping reports it.
 	Name string
-	// URL is a client URL for the server, built from its own host and port.
+	// Host and Port are the client address the server reported; Host is empty when it reported none or a wildcard.
+	Host string
+	Port int
+	// URL is a client URL for the server; ResolveURLs sets it.
 	URL string
 	// Limits are its size limits: max_control_line as the connect line limit, max_payload as the account JWT limit.
 	Limits listset.ServerLimits
@@ -53,12 +54,14 @@ type ServerInfo struct {
 var ErrFewerServers = errors.New("fewer servers answered than the deployment has")
 
 // ReadServers asks every server for its limits and client address with a $SYS.REQ.SERVER.PING.VARZ request and
-// returns what the answering servers reported, sorted by name. want is the number of servers that must answer (the
-// declared --servers count, or the count the system account ping found, whichever is larger); fewer replies is an error
-// wrapping ErrFewerServers, with the servers collected so far, because a server that is silent may have limits that make
-// a list set unusable there: limits are never guessed. scheme and fallbackHost build a client URL for a server that
-// reports a wildcard or no host.
-func ReadServers(ctx context.Context, nc *nats.Conn, want int, scheme, fallbackHost string) ([]ServerInfo, error) {
+// returns what the answering servers reported, sorted by name. want is the declared number of servers (--servers, 1 or
+// more): the collection waits until that many have answered, or until the deadline. Fewer replies is an error wrapping
+// ErrFewerServers, with the servers collected so far, because a server that is silent may have limits that make a list
+// set unusable there: limits are never guessed, and a quiet interval never ends the wait early.
+func ReadServers(ctx context.Context, nc *nats.Conn, want int) ([]ServerInfo, error) {
+	if want < 1 {
+		return nil, errors.New("the number of servers in the deployment is not declared (--servers)")
+	}
 	inbox := nc.NewRespInbox()
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
@@ -72,27 +75,24 @@ func ReadServers(ctx context.Context, nc *nats.Conn, want int, scheme, fallbackH
 		return nil, err
 	}
 	seen := map[string]ServerInfo{}
-	start := time.Now()
-	wait := varzFirst
+	deadline := time.Now().Add(varzTotal)
 	replies := 0
-	for ctx.Err() == nil && (want <= 0 || len(seen) < want) {
-		msg, err := sub.NextMsg(wait)
-		if err != nil {
-			left := varzTotal - time.Since(start)
-			if len(seen) == 0 || left <= 0 || want <= 0 {
-				break
-			}
-			wait = min(varzSettle, left)
-			continue
+	for ctx.Err() == nil && len(seen) < want {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
 		}
-		wait = varzSettle
+		msg, err := sub.NextMsg(left)
+		if err != nil {
+			break
+		}
 		if replies++; replies > maxVarzReplies {
 			return nil, fmt.Errorf("more than %d replies to the server limits query: refusing", maxVarzReplies)
 		}
 		if len(msg.Data) > maxVarzBytes {
 			return nil, fmt.Errorf("a reply to the server limits query is %d bytes, over %d: refusing", len(msg.Data), maxVarzBytes)
 		}
-		info, ok, err := parseVarz(msg.Data, scheme, fallbackHost)
+		info, ok, err := parseVarz(msg.Data)
 		if err != nil {
 			return nil, err
 		}
@@ -108,15 +108,64 @@ func ReadServers(ctx context.Context, nc *nats.Conn, want int, scheme, fallbackH
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-	if len(out) < want || len(out) == 0 {
+	if len(out) < want {
 		return out, fmt.Errorf("%w: %d of %d servers reported their limits", ErrFewerServers, len(out), want)
+	}
+	return out, nil
+}
+
+// wildcardHost reports whether a server's reported host names no address a client can dial.
+func wildcardHost(h string) bool {
+	switch h {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	}
+	return false
+}
+
+// ResolveURLs sets the client URL of each server (as ReadServers returned them, sorted by name). configured is the
+// configured server URL as the comma-separated list it may be, declared the declared server count. A server that
+// reported a concrete host is reached there, with the scheme of the first configured URL. A server that reported a
+// wildcard or no host takes the configured URL at its own position in the sorted server names, which is allowed only
+// when the list has exactly declared entries and as many servers answered; otherwise it is refused, because no host is
+// ever invented: the connection would go to the machine this service runs on and not to the deployment.
+func ResolveURLs(servers []ServerInfo, configured string, declared int) ([]ServerInfo, error) {
+	var entries []string
+	for _, e := range strings.Split(configured, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			entries = append(entries, e)
+		}
+	}
+	scheme := "nats"
+	if len(entries) > 0 {
+		if sch, _, ok := strings.Cut(entries[0], "://"); ok {
+			scheme = strings.ToLower(sch)
+		}
+	}
+	byOrder := len(entries) == declared && len(servers) == declared
+	out := make([]ServerInfo, len(servers))
+	for i, s := range servers {
+		switch {
+		case !wildcardHost(s.Host):
+			u := url.URL{Scheme: scheme, Host: net.JoinHostPort(s.Host, strconv.Itoa(s.Port))}
+			s.URL = u.String()
+		case byOrder:
+			s.URL = entries[i]
+			if !strings.Contains(s.URL, "://") {
+				s.URL = "nats://" + s.URL
+			}
+		default:
+			return nil, fmt.Errorf("server %.64s reports no address of its own (a wildcard host) and the configured URL list has %d entries for %d declared servers (%d answered): list one URL per server, in the order of the server names, or have each server advertise its host",
+				s.Name, len(entries), declared, len(servers))
+		}
+		out[i] = s
 	}
 	return out, nil
 }
 
 // parseVarz reads one reply. ok is false for a reply that names no server or carries an error (such a server did not
 // report its limits, so it does not count).
-func parseVarz(data []byte, scheme, fallbackHost string) (info ServerInfo, ok bool, err error) {
+func parseVarz(data []byte) (info ServerInfo, ok bool, err error) {
 	var r struct {
 		Server struct {
 			Name string `json:"name"`
@@ -147,16 +196,11 @@ func parseVarz(data []byte, scheme, fallbackHost string) (info ServerInfo, ok bo
 		return ServerInfo{}, false, nil // no limits reported: not proven
 	}
 	host := r.Data.Host
-	switch host {
-	case "", "0.0.0.0", "::", "[::]":
-		host = fallbackHost
+	if wildcardHost(host) {
+		host = ""
 	}
-	if scheme == "" {
-		scheme = "nats"
-	}
-	u := url.URL{Scheme: scheme, Host: net.JoinHostPort(host, strconv.Itoa(r.Data.Port))}
 	return ServerInfo{
-		Name: name, URL: u.String(),
+		Name: name, Host: host, Port: r.Data.Port,
 		Limits: listset.ServerLimits{Server: name, MaxConnectLine: r.Data.MaxControlLine, MaxAccountJWT: r.Data.MaxPayload},
 	}, true, nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -161,6 +162,9 @@ func (e *serveEnv) start(extra ...string) {
 	e.t.Cleanup(func() { policyServeContext, policyServeReady = oldCtx, oldReady })
 	e.done = make(chan int, 1)
 	args := append([]string{"policy", "serve", "--range", serveRange}, extra...)
+	if !slices.Contains(extra, "--servers") {
+		args = append(args, "--servers", "1") // the declared server count is required
+	}
 	go func() {
 		var out bytes.Buffer
 		e.done <- runEnv(args, func(k string) string { return e.env[k] }, &out, e.logs)
@@ -432,7 +436,7 @@ func TestPolicyServeRefusesAnAccountThatIsNotAdopted(t *testing.T) {
 	policyServeContext = func() (context.Context, context.CancelFunc) { return ctx, cancel }
 	t.Cleanup(func() { policyServeContext = old })
 	go func() {
-		done <- runEnv([]string{"policy", "serve", "--range", serveRange}, func(k string) string { return e.env[k] }, &out, &errb)
+		done <- runEnv([]string{"policy", "serve", "--range", serveRange, "--servers", "1"}, func(k string) string { return e.env[k] }, &out, &errb)
 	}()
 	select {
 	case code := <-done:
@@ -456,6 +460,7 @@ func TestPolicyServeRefusesBadArguments(t *testing.T) {
 	}{
 		{[]string{"policy", "serve"}, nil, "--range is required"},
 		{[]string{"policy", "serve", "--range", "foo", "--servers", "0"}, nil, "whole number of servers"},
+		{[]string{"policy", "serve", "--range", "foo"}, map[string]string{"MASH_SERVERS": ""}, "--servers (or MASH_SERVERS) is required"},
 		{[]string{"policy", "serve", "--range", "foo", "--zone", "z"}, nil, "unknown"},
 		{[]string{"policy", "serve", "--range", "foo"}, map[string]string{"MASH_POLICY_BUCKET": ""}, "MASH_POLICY_BUCKET"},
 	} {
@@ -655,7 +660,7 @@ func TestPolicyServeServerLimitsSmallerWins(t *testing.T) {
 	var got []policyserve.ServerInfo
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), serveWait)
-		got, _ = policyserve.ReadServers(ctx, sys, 2, "nats", "127.0.0.1")
+		got, _ = policyserve.ReadServers(ctx, sys, 2)
 		cancel()
 		if len(got) == 2 {
 			break
@@ -702,5 +707,25 @@ func TestPolicyServeServerLimitsSmallerWins(t *testing.T) {
 	}
 	if e.shape() != before || e.inForce() != 0 {
 		t.Error("the account changed")
+	}
+}
+
+// Every URL derived for a server goes through the TLS and loopback rule of the admin connection.
+func TestPolicyServeVetsEveryDerivedURL(t *testing.T) {
+	for _, c := range []struct {
+		url      string
+		insecure bool
+		ok       bool
+	}{
+		{"tls://10.0.0.5:4222", false, true},
+		{"nats://10.0.0.5:4222", false, false}, // plain TCP to a remote host
+		{"nats://127.0.0.1:4222", false, true},
+		{"nats://127.0.0.1:4222", true, true},
+		{"nats://10.0.0.5:4222", true, false}, // insecure loopback never reaches a remote host
+		{"tls://10.0.0.5:4222", true, false},
+	} {
+		if err := policyServeVet(c.insecure)(c.url); (err == nil) != c.ok {
+			t.Errorf("%s insecure=%v: %v", c.url, c.insecure, err)
+		}
 	}
 }

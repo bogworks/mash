@@ -45,10 +45,17 @@ type Applier struct {
 	Trust apply.Trust
 	// Record is the issue record.
 	Record policyapply.IssueRecord
-	// Servers is the declared server count (--servers; 0 none given).
+	// Servers is the declared server count (--servers, 1 or more).
 	Servers int
-	// Scheme and Host build the client URL of a server that reports no host of its own.
-	Scheme, Host string
+	// URL is the configured server URL, a comma-separated list when the deployment has several; the client URL of a
+	// server that reports no host of its own comes from it (see ResolveURLs).
+	URL string
+	// Vet, if set, checks each client URL before anything connects to it (the TLS requirement and the loopback rule of
+	// the admin connection); a URL it refuses refuses the apply.
+	Vet func(url string) error
+	// Options are the connection options of the deployment (the CA, the client certificate, the TLS requirement),
+	// passed to every probe and witness connection.
+	Options []nats.Option
 	// Load, if set, opens a connection to one server (by URL) as a user of the account, so the server has the account
 	// loaded and reports its JWT. The connections stay open for the apply.
 	Load func(ctx context.Context, url string) (*nats.Conn, error)
@@ -165,9 +172,19 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	}
 
 	// What the servers allow. Fewer answers than servers is a refusal: the limits are never guessed.
-	servers, err := ReadServers(ctx, a.Sys, a.Servers, a.Scheme, a.Host)
+	servers, err := ReadServers(ctx, a.Sys, a.Servers)
 	if err != nil {
 		return policyintake.Result{}, fmt.Errorf("refusing to apply: %w; nothing was pushed", err)
+	}
+	if servers, err = ResolveURLs(servers, a.URL, a.Servers); err != nil {
+		return policyintake.Result{}, fmt.Errorf("refusing to apply: %w; nothing was pushed", err)
+	}
+	if a.Vet != nil {
+		for _, s := range servers {
+			if err := a.Vet(s.URL); err != nil {
+				return policyintake.Result{}, fmt.Errorf("refusing to connect to server %.64s: %w; nothing was pushed", s.Name, err)
+			}
+		}
 	}
 	if ps := listset.SizeCheck(target, Limits(servers)); len(ps) > 0 {
 		st := policyapply.Status{
@@ -215,8 +232,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 
 	// The probes and witnesses are opened before the push, for the senders of the generation in force.
 	minter := &policyapply.ProbeMinter{Signer: GroupSigner{a.Keys}, Account: a.Account, Record: a.Record, Now: a.Now}
-	prober := &policyapply.LiveProber{URLs: URLs(servers), Mint: minter}
-	wit := &policyapply.LiveWitnesses{}
+	prober, wit := a.transports(servers, minter)
 	var loaders []*nats.Conn
 	defer func() {
 		for _, c := range loaders {
@@ -261,6 +277,11 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		deps.AfterPush = policyapply.RotationsAfterPush(plan)
 	}
 	return a.finish(policyapply.Apply(ctx, req, deps))
+}
+
+// transports makes the live prober and witnesses, with the deployment's connection options.
+func (a *Applier) transports(servers []ServerInfo, minter *policyapply.ProbeMinter) (*policyapply.LiveProber, *policyapply.LiveWitnesses) {
+	return &policyapply.LiveProber{URLs: URLs(servers), Mint: minter, Options: a.Options}, &policyapply.LiveWitnesses{Options: a.Options}
 }
 
 func (a *Applier) now() time.Time {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,10 +26,10 @@ import (
 	"github.com/bogworks/mash/internal/policyserve"
 )
 
-const policyServeUsage = `usage: mashctl policy serve --range RANGE [--servers N] [--sys-creds FILE]
+const policyServeUsage = `usage: mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
   --range     the range this service applies list sets for; the policy bucket is named by MASH_POLICY_BUCKET, in which
               {range} is replaced by it
-  --servers   the number of servers in the deployment (or MASH_SERVERS); every apply reads the limits and the account
+  --servers   the number of servers in the deployment, 1 or more (or MASH_SERVERS; required); every apply reads the limits and the account
               JWT from every one and refuses when any does not answer
   (one process serves the one account the key store and the admin credentials belong to; it refuses to start unless
   that account is adopted)
@@ -61,16 +61,18 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 		fmt.Fprintf(stderr, "mashctl: policy serve: --range is required\n%s", policyServeUsage)
 		return 2
 	}
-	servers := 0
-	if sv, src := serversFlag, "--servers"; sv != "" || env("MASH_SERVERS") != "" {
-		if sv == "" {
-			sv, src = env("MASH_SERVERS"), "MASH_SERVERS"
-		}
-		var aerr error
-		if servers, aerr = strconv.Atoi(strings.TrimSpace(sv)); aerr != nil || servers < 1 {
-			fmt.Fprintf(stderr, "mashctl: policy serve: %s must be a whole number of servers, 1 or more, got %q\n%s", src, sv, policyServeUsage)
-			return 2
-		}
+	sv, src := serversFlag, "--servers"
+	if sv == "" {
+		sv, src = env("MASH_SERVERS"), "MASH_SERVERS"
+	}
+	if strings.TrimSpace(sv) == "" {
+		fmt.Fprintf(stderr, "mashctl: policy serve: --servers (or MASH_SERVERS) is required: the number of servers in the deployment\n%s", policyServeUsage)
+		return 2
+	}
+	servers, aerr := strconv.Atoi(strings.TrimSpace(sv))
+	if aerr != nil || servers < 1 {
+		fmt.Fprintf(stderr, "mashctl: policy serve: %s must be a whole number of servers, 1 or more, got %q\n%s", src, sv, policyServeUsage)
+		return 2
 	}
 	bucket, err := policyapply.PolicyBucket(env(policyapply.PolicyBucketEnv), rng)
 	if err != nil {
@@ -146,12 +148,18 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	scheme, host := serverAddress(cfg.URL)
+	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
+	if err != nil {
+		return fail("%v", err)
+	}
+	// The options of every connection to a server of the deployment: the probes and witnesses carry them without
+	// credentials of the admin, the loaders add the admin credentials.
+	connOpts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...)
 	app := &policyserve.Applier{
 		Account: account, Range: rng, Ledger: ledger, Sys: sys, Keys: keys, Trust: trust, Record: policyapply.NewAdminIssueRecord(adm),
-		Servers: servers, Scheme: scheme, Host: host, Log: logger, Provisioner: policyServeProvisioner,
+		Servers: servers, URL: cfg.URL, Vet: policyServeVet(cfg.InsecureLoopback), Options: connOpts, Log: logger, Provisioner: policyServeProvisioner,
 		Load: func(ctx context.Context, u string) (*nats.Conn, error) {
-			opts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), natsauth.UserCredentials(cfg.AdminCreds),
+			opts := append(slices.Clone(connOpts), natsauth.UserCredentials(cfg.AdminCreds),
 				nats.Name("mashctl-policy-serve"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
 			return nats.Connect(u, opts...)
 		},
@@ -173,12 +181,12 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	return 0
 }
 
-// serverAddress returns the scheme and host of the server URL: where a server that reports no host of its own is
-// reached.
-func serverAddress(raw string) (scheme, host string) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "nats", "127.0.0.1"
+// policyServeVet is the check of every client URL the service derives for a server, before any connection to it: the
+// TLS requirement and the loopback rule of the initial admin connection, so a server that reports another host than the
+// configured one cannot make admin credentials travel over plain TCP.
+func policyServeVet(insecureLoopback bool) func(string) error {
+	return func(u string) error {
+		_, err := natsauth.RequireTLS(u, insecureLoopback)
+		return err
 	}
-	return u.Scheme, u.Hostname()
 }

@@ -19,17 +19,17 @@ import (
 
 func TestParseVarz(t *testing.T) {
 	good := `{"server":{"name":"s1","id":"X"},"data":{"host":"0.0.0.0","port":4222,"max_payload":1048576,"max_control_line":4096}}`
-	info, ok, err := parseVarz([]byte(good), "tls", "example.test")
+	info, ok, err := parseVarz([]byte(good))
 	if err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
-	if info.Name != "s1" || info.URL != "tls://example.test:4222" ||
+	if info.Name != "s1" || info.Host != "" || info.Port != 4222 ||
 		info.Limits != (listset.ServerLimits{Server: "s1", MaxConnectLine: 4096, MaxAccountJWT: 1048576}) {
 		t.Errorf("%+v", info)
 	}
-	info, _, _ = parseVarz([]byte(strings.Replace(good, "0.0.0.0", "10.0.0.7", 1)), "", "example.test")
-	if info.URL != "nats://10.0.0.7:4222" {
-		t.Errorf("url %s", info.URL)
+	info, _, _ = parseVarz([]byte(strings.Replace(good, "0.0.0.0", "10.0.0.7", 1)))
+	if info.Host != "10.0.0.7" {
+		t.Errorf("host %s", info.Host)
 	}
 	// A reply that carries an error, no data or no limits does not count as a server that reported its limits.
 	for _, bad := range []string{
@@ -39,12 +39,12 @@ func TestParseVarz(t *testing.T) {
 		`{"data":{"host":"h","port":1,"max_payload":1,"max_control_line":1}}`,
 		`not json`,
 	} {
-		if _, ok, err := parseVarz([]byte(bad), "", "h"); ok || err != nil {
+		if _, ok, err := parseVarz([]byte(bad)); ok || err != nil {
 			t.Errorf("%s: ok %v err %v", bad, ok, err)
 		}
 	}
 	long := `{"server":{"name":"` + strings.Repeat("a", maxServerNameBytes+1) + `"},"data":{"host":"h","port":1,"max_payload":1,"max_control_line":1}}`
-	if _, _, err := parseVarz([]byte(long), "", "h"); err == nil {
+	if _, _, err := parseVarz([]byte(long)); err == nil {
 		t.Error("a server name over the cap was taken")
 	}
 }
