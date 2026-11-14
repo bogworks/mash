@@ -1,0 +1,1 @@
+The merge queue's conditions on the GitHub Actions checks `pr-check`, `adr-lint` and `label-reset` are now written `@github-actions/<name>`, so only a check run posted by GitHub Actions satisfies them; a plain name matched a commit status of that name from anyone who can write statuses. `codex-review` and `lead-review` are commit statuses and stay plain.
