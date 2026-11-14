@@ -320,7 +320,7 @@ func TestKVLedgerConcurrentRunsSingleWinner(t *testing.T) {
 	w := newWorld(t)
 	watch := &pushWatch{Cluster: w.cluster}
 	ledgers := []*KVLedger{e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond}), e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})}
-	if err := ledgers[0].CompareAndCommit(0, w.rec1()); err != nil {
+	if err := ledgers[0].CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -375,7 +375,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := l.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
@@ -404,7 +404,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	w2 := newWorld(t)
 	w2.prober.allow["s1"] = true
 	l2 := e.ledger(KVLedgerOptions{})
-	if err := l2.CompareAndCommit(2, w2.rec1()); err != nil {
+	if err := l2.CompareAndCommitDetail(2, w2.rec1(), InForceDetail{JWT: w2.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err = Run(context.Background(), w2.run(l2, set2(), "bytes-2"))
@@ -431,7 +431,7 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := l.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	ls := set2()
@@ -541,7 +541,7 @@ func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
 	w := newWorld(t)
 	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
 	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
-	if err := first.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := first.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}
@@ -705,5 +705,135 @@ func TestPolicyBucket(t *testing.T) {
 		if (err == nil) != c.ok || got != c.want {
 			t.Errorf("PolicyBucket(%q, %q) = %q, %v", c.pattern, c.rng, got, err)
 		}
+	}
+}
+
+func TestKVLedgerInForceDetail(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	if jwt, err := l.InForceJWT(); err != nil || jwt != "" {
+		t.Fatalf("empty: %q %v", jwt, err)
+	}
+	if _, ok, err := l.InForceListSet(); err != nil || ok {
+		t.Fatalf("empty list set: %v %v", ok, err)
+	}
+	ls := set2()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &ls}); err != nil {
+		t.Fatal(err)
+	}
+	other := e.ledger(KVLedgerOptions{})
+	if jwt, err := other.InForceJWT(); err != nil || jwt != "jwt-1" {
+		t.Fatalf("jwt: %q %v", jwt, err)
+	}
+	got, ok, err := other.InForceListSet()
+	if err != nil || !ok || listset.DigestListSet(got) != listset.DigestListSet(ls) {
+		t.Fatalf("list set: %+v %v %v", got, ok, err)
+	}
+	// A status write keeps them; a plain commit clears them, as they would describe the wrong generation.
+	if err := l.WriteStatus(context.Background(), Status{State: StatePartial}); err == nil {
+		t.Fatal("status written without the lease")
+	}
+	if err := l.CompareAndCommit(1, testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if jwt, _ := l.InForceJWT(); jwt != "" {
+		t.Errorf("jwt after a plain commit = %q", jwt)
+	}
+	if _, ok, _ := l.InForceListSet(); ok {
+		t.Error("list set after a plain commit")
+	}
+}
+
+func refusalStatus() Status {
+	return Status{State: StateRefused, Refusals: []listset.Refusal{{Stage: "signature", Entry: "doc", Reason: "bad signature"}}}
+}
+
+func TestKVLedgerWriteRefusal(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	set := set1()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &set}); err != nil {
+		t.Fatal(err)
+	}
+	pend := testRecord(2)
+	if err := l.SetPending(pend); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteRefusal(ctx, refusalStatus()); err != nil {
+		t.Fatal(err)
+	}
+	st, ok, err := l.LatestStatus(context.Background())
+	if err != nil || !ok || st.State != StateRefused || st.Generation != 0 || len(st.Refusals) != 1 {
+		t.Fatalf("%+v %v %v", st, ok, err)
+	}
+	if rec, _ := l.InForce(); rec != testRecord(1) {
+		t.Errorf("in force = %+v", rec)
+	}
+	if rec, ok, _ := l.Pending(); !ok || rec != pend {
+		t.Errorf("pending = %+v %v", rec, ok)
+	}
+	if jwt, _ := l.InForceJWT(); jwt != "jwt-1" {
+		t.Errorf("jwt = %q", jwt)
+	}
+	if got, ok, _ := l.InForceListSet(); !ok || got.Range != set.Range {
+		t.Errorf("list set = %+v %v", got, ok)
+	}
+	// The lease is released: another ledger takes it at once.
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	unlock, err := e.ledger(KVLedgerOptions{}).Lock(short)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
+
+func TestKVLedgerWriteRefusalWaitsForLease(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	a, b := e.ledger(KVLedgerOptions{Holder: "a"}), e.ledger(KVLedgerOptions{Holder: "b", Poll: 20 * time.Millisecond})
+	unlockA, err := a.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if err := b.WriteRefusal(short, refusalStatus()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("while held: %v", err)
+	}
+	if _, ok, _ := b.LatestStatus(context.Background()); ok {
+		t.Fatal("a refusal was written without the lease")
+	}
+	got := make(chan error, 1)
+	go func() { got <- b.WriteRefusal(ctx, refusalStatus()) }()
+	time.Sleep(100 * time.Millisecond)
+	unlockA()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WriteRefusal did not finish after the lease was released")
+	}
+	if st, ok, _ := b.LatestStatus(context.Background()); !ok || st.State != StateRefused {
+		t.Fatalf("%+v %v", st, ok)
+	}
+}
+
+func TestKVLedgerWriteRefusalRejectsOthers(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	for _, st := range []Status{
+		{State: StateApplied, Refusals: refusalStatus().Refusals},
+		{State: StateRefused},
+	} {
+		if err := l.WriteRefusal(context.Background(), st); !errors.Is(err, ErrNotRefusal) {
+			t.Errorf("%+v: err = %v", st, err)
+		}
+	}
+	if _, ok, _ := l.LatestStatus(context.Background()); ok {
+		t.Error("a status was written")
 	}
 }

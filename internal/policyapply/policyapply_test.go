@@ -75,11 +75,13 @@ func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
 	return RunInput{
 		Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Ledger: l, Account: w.k.acctPub,
 		ListSet: ls, Received: []byte(received), Previous: w.c1,
-		SignPrevious: func(revoked []string) (string, error) { return w.k.build(w.t, w.c1, revoked...), nil },
-		RevokedKeys:  []string{w.k.revoked}, Now: fixedNow,
+		RevokedKeys: []string{w.k.revoked}, Now: fixedNow,
 		Signers: w.k.signers, PreviousSigners: w.k.signers, OldKeys: w.oldKeys(),
-		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
-			return w.k.build(w.t, c, w.k.revoked), nil
+		Signer: SignerFuncs{
+			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return w.k.build(w.t, w.c1, revoked...), nil },
+			SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
+				return w.k.build(w.t, c, w.k.revoked), nil
+			},
 		},
 	}
 }
@@ -309,7 +311,7 @@ func TestGateUnknownGenerationIsNull(t *testing.T) {
 
 func TestRunApplied(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	var seen []State
 	in := w.run(l, set2(), "bytes-2")
 	in.OnStatus = func(s Status) { seen = append(seen, s.State) }
@@ -331,7 +333,7 @@ func TestRunApplied(t *testing.T) {
 func TestRunConvergeFinishesPush(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.dropN["s2"] = 1 // the first push never reaches s2
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StateApplied {
 		t.Fatalf("%+v %v", st, err)
@@ -347,7 +349,7 @@ func TestRunConvergeFinishesPush(t *testing.T) {
 func TestRunConvergeRollsBack(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.failPush["s2"] = true
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +378,7 @@ func TestRunConvergeRollsBack(t *testing.T) {
 func TestRunNotCommittedWhenCheckFails(t *testing.T) {
 	w := newWorld(t)
 	w.prober.allow["s1"] = true
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StatePartial || !hasFailure(st, "s1", "foo.c.core", CheckRefused) {
 		t.Fatalf("%+v %v", st, err)
@@ -391,7 +393,7 @@ func TestRunNotCommittedWhenCheckFails(t *testing.T) {
 
 func TestRunConcurrentSingleWinner(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
@@ -420,12 +422,12 @@ func TestRunConcurrentSingleWinner(t *testing.T) {
 
 func TestRunMutatedCompiledRefusedBeforePush(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
-	in.Sign = func(_ listset.Record, c *listset.Compiled) (string, error) {
+	in.Signer = withSign(in.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
 		c.Users[0].Tags = append(c.Users[0].Tags, "allow:foo.c.sdk")
 		return w.k.build(t, c, w.k.revoked), nil
-	}
+	})
 	_, err := Run(context.Background(), in)
 	if !errors.Is(err, ErrSignedMismatch) {
 		t.Fatalf("err = %v", err)
@@ -437,9 +439,9 @@ func TestRunMutatedCompiledRefusedBeforePush(t *testing.T) {
 
 func TestRunJWTNotCarryingTargetRefused(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
-	in.Sign = func(listset.Record, *listset.Compiled) (string, error) { return w.j1, nil }
+	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) { return w.j1, nil })
 	if _, err := Run(context.Background(), in); !errors.Is(err, ErrSignedMismatch) || len(w.cluster.pushes) != 0 {
 		t.Fatalf("err = %v, pushes %d", err, len(w.cluster.pushes))
 	}
@@ -447,7 +449,7 @@ func TestRunJWTNotCarryingTargetRefused(t *testing.T) {
 
 func TestRunRefusedListSet(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	bad := set2()
 	bad.Senders = append(bad.Senders, listset.SenderLists{Sender: "bar.c.x"})
 	st, err := Run(context.Background(), w.run(l, bad, "b"))
@@ -531,7 +533,7 @@ func TestGateRefusesTargetWithoutSigners(t *testing.T) {
 	if st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || st.Failing[0].Detail != NoSignersDetail {
 		t.Fatalf("%+v", st)
 	}
-	r := w.run(NewMemLedger(w.rec1()), set2(), "bytes-2")
+	r := w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2")
 	r.Signers = nil
 	st, err := Run(context.Background(), r)
 	if err != nil || st.State != StatePartial || !hasFailure(st, "", "", CheckGeneration) || len(w.cluster.pushes) != 0 {
@@ -579,7 +581,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 func TestRunPendingGeneration(t *testing.T) {
 	w := newWorld(t)
 	w.prober.allow["s1"] = true
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State != StatePartial {
 		t.Fatalf("%+v %v", st, err)
@@ -593,10 +595,10 @@ func TestRunPendingGeneration(t *testing.T) {
 	other := set2()
 	other.Senders[0].Allow = []string{"foo.c.docs"}
 	in := w.run(l, other, "bytes-other")
-	in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) {
 		t.Error("signed while a generation is pending")
 		return "", errors.New("signed")
-	}
+	})
 	if _, err := Run(context.Background(), in); !errors.Is(err, ErrPendingGeneration) {
 		t.Fatalf("err = %v", err)
 	}
@@ -620,7 +622,7 @@ func TestRunPendingGeneration(t *testing.T) {
 func TestRunRollbackClearsPending(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.failPush["s2"] = true
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	if _, err := Run(context.Background(), w.run(l, set2(), "bytes-2")); err != nil {
 		t.Fatal(err)
 	}
@@ -631,11 +633,11 @@ func TestRunRollbackClearsPending(t *testing.T) {
 
 func TestRunRefusesOversizedJWT(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
-	in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) {
 		return strings.Repeat("a", policy.AccountJWTLimit+1), nil
-	}
+	})
 	_, err := Run(context.Background(), in)
 	if !errors.Is(err, ErrAccountJWTTooLarge) || !strings.Contains(err.Error(), strconv.Itoa(policy.AccountJWTLimit+1)) || len(w.cluster.pushes) != 0 {
 		t.Fatalf("err = %v pushes %d", err, len(w.cluster.pushes))
@@ -717,7 +719,7 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 func TestRunRequiresOKAckFromEveryServer(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.badAck["s2"] = true // s2 holds the target but did not acknowledge it
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
 	if err != nil || st.State == StateApplied || !hasFailure(st, "s2", "", CheckPush) {
 		t.Fatalf("%+v %v", st, err)
@@ -801,11 +803,11 @@ func TestGateRevocationOlderThanCredentialIssue(t *testing.T) {
 
 func TestRunRefusesOversizedListSet(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.ServerLimits = []listset.ServerLimits{{Server: "tiny", MaxConnectLine: 400}}
 	signed := false
-	in.Sign = func(listset.Record, *listset.Compiled) (string, error) { signed = true; return "", nil }
+	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) { signed = true; return "", nil })
 	st, err := Run(context.Background(), in)
 	if err != nil || st.State != StateRefused || len(st.Refusals) == 0 || st.Refusals[0].Stage != "size" || signed || len(w.cluster.pushes) != 0 {
 		t.Fatalf("%+v %v signed %v pushes %d", st, err, signed, len(w.cluster.pushes))
@@ -871,14 +873,14 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
-			l := NewMemLedger(w.rec1())
+			l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 			in := w.run(l, set2(), "bytes-2")
 			mutate(w, &in, &l)
 			in.Ledger = l
-			in.Sign = func(listset.Record, *listset.Compiled) (string, error) {
+			in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) {
 				t.Error("signed with a mismatched previous")
 				return "", errors.New("signed")
-			}
+			})
 			if _, err := Run(context.Background(), in); !errors.Is(err, ErrPreviousMismatch) {
 				t.Fatalf("err = %v", err)
 			}
@@ -888,7 +890,7 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 		})
 	}
 	w := newWorld(t)
-	st, err := Run(context.Background(), w.run(NewMemLedger(w.rec1()), set2(), "bytes-2"))
+	st, err := Run(context.Background(), w.run(NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1}), set2(), "bytes-2"))
 	if err != nil || st.State != StateApplied {
 		t.Fatalf("matching previous: %+v %v", st, err)
 	}
@@ -897,7 +899,7 @@ func TestRunPreviousMustBeInForce(t *testing.T) {
 // TestRunBeforeCommitFailureIsPartial (M): a failed hook leaves the Status partial and not in force, and pending.
 func TestRunBeforeCommitFailureIsPartial(t *testing.T) {
 	w := newWorld(t)
-	l := NewMemLedger(w.rec1())
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.BeforeCommit = func(context.Context, Accepted, Status) error { return errors.New("hook failed") }
 	st, err := Run(context.Background(), in)
@@ -910,4 +912,18 @@ func TestRunBeforeCommitFailureIsPartial(t *testing.T) {
 	if pend, ok, _ := l.Pending(); !ok || pend.Generation != 2 {
 		t.Errorf("pending = %+v %v", pend, ok)
 	}
+}
+
+// withSign returns s (a SignerFuncs) with Sign replaced by f.
+func withSign(s Signer, f func(listset.Record, *listset.Compiled) (string, error)) Signer {
+	sf := s.(SignerFuncs)
+	sf.SignFn = f
+	return sf
+}
+
+// withSignPrevious returns s (a SignerFuncs) with SignPrevious replaced by f.
+func withSignPrevious(s Signer, f func(PreviousClaims, []string) (string, error)) Signer {
+	sf := s.(SignerFuncs)
+	sf.SignPreviousFn = f
+	return sf
 }

@@ -233,7 +233,7 @@ func TestAT014Live(t *testing.T) {
 			newUser = c
 		}
 	}
-	ledger := NewMemLedger(listset.Record{Generation: 1, Signed: listset.DigestCompiled(c1)})
+	ledger := NewMemLedgerWith(listset.Record{Generation: 1, Signed: listset.DigestCompiled(c1)}, InForceDetail{JWT: e.account(c1)})
 	prov := &liveProv{
 		t: t, e: e, ctx: ctx, ev: ev, user: newUser, ledger: ledger, admin: e.adminCreds(),
 		cands: []Candidate{
@@ -253,16 +253,18 @@ func TestAT014Live(t *testing.T) {
 		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: oldPub}}},
 		Account: e.acctPub, Inventory: 2, ListSet: at014Target(), Received: []byte("at014"),
 		Previous: c1, RevokedKeys: ex.RevokedKeys,
-		SignPrevious: func(revoked []string) (string, error) { return e.account(c1, revoked...), nil },
-		Sign: func(_ listset.Record, c *listset.Compiled) (string, error) {
-			// Nothing for foo.c.new exists when the JWT is signed, which is before the push.
-			if st, co, err := prov.inbox(ctx, "s1", "foo.c.new"); err != nil || st || co {
-				t.Errorf("at signing: stream=%v consumer=%v err=%v", st, co, err)
-			}
-			e.waitNewSecond()
-			tok := e.account(c, oldPub)
-			e.setCurrent(tok)
-			return tok, nil
+		Signer: SignerFuncs{
+			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return e.account(c1, revoked...), nil },
+			SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
+				// Nothing for foo.c.new exists when the JWT is signed, which is before the push.
+				if st, co, err := prov.inbox(ctx, "s1", "foo.c.new"); err != nil || st || co {
+					t.Errorf("at signing: stream=%v consumer=%v err=%v", st, co, err)
+				}
+				e.waitNewSecond()
+				tok := e.account(c, oldPub)
+				e.setCurrent(tok)
+				return tok, nil
+			},
 		},
 	}
 	os, err := RunOrdered(ctx, in, prov)
