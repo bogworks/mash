@@ -34,9 +34,16 @@ permissions:
   contents: read
 env:
   GOTOOLCHAIN: go1.27.4
+# One group per pull request AND head commit, and nothing is cancelled. A label event (labeled, unlabeled) on the same
+# head queues behind the run in flight instead of cancelling it: a cancelled run reports no success, and Mergify waited
+# forever on it. A new head (synchronize) is a new group, so it never touches the old head's run.
+# queue: max matters: with the default (queue: single) GitHub still cancels an existing PENDING run when another event
+# arrives in the same group, which recreates the no-success condition; max lets up to 100 runs wait FIFO, so label and
+# edit events on the same head queue behind one another and none replaces another.
 concurrency:
-  group: adr-lint-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: adr-lint-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+  queue: max
 jobs:
   adr-lint:
     if: ${{ !(startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'mergify[bot]') }}

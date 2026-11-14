@@ -1,0 +1,58 @@
+name: policy-tests
+# REQ-020: the policy tests (AT-001, AT-003, AT-004, AT-005, AT-010, AT-011 and AT-020; the list is
+# scripts/releasecheck/policytests.txt) run on every release and on every change of the NATS server version mash ships
+# with. The release gate runs the same step (scripts/release-check). This workflow covers the other half:
+#   - a pull request that changes go.mod, go.sum, go.work, go.work.sum or vendor/ at all, or the list or the step itself
+#     (scripts/ci-nats-version-changed decides), runs `scripts/release-check --policy-tests`;
+#   - every push to main or a release/* branch runs it, so a version change that landed is still gated.
+# Any other pull request gets the job as a skipped no-op: the check name still reports. A pull request from a fork
+# runs it too, as in ci.yml: the repository holds an outside contributor's run for a person's approval (a repository
+# setting), and the decision comes from the base revision's script. The job runs on a self-hosted runner picked by literal
+# labels (ADR 0079), and the live tests use an in-process nats-server: nothing here needs the network beyond the module
+# cache. Making `policy-tests` a required status check is a repository setting a maintainer changes
+# (docs/branch-protection.md).
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: go1.27.4
+concurrency:
+  group: policy-tests-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  policy-tests:
+    name: policy-tests
+    timeout-minutes: 30
+    runs-on: [self-hosted, rh-linux]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Hardening, as in ci.yml: the decision comes from the base revision's copy of the script, not the pull
+          # request's. No copy there (the pull request adds it): run.
+          if [ "$EVENT" = pull_request ] && git show "$BASE:scripts/ci-nats-version-changed" > "$RUNNER_TEMP/ci-nats-version-changed"; then
+            bash "$RUNNER_TEMP/ci-nats-version-changed" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            bash scripts/ci-nats-version-changed >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.decide.outputs.run == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Policy tests (REQ-020)
+        if: steps.decide.outputs.run == 'true'
+        run: scripts/release-check --policy-tests
