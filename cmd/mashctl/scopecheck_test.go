@@ -43,7 +43,7 @@ func TestAddExistingZoneRefusedWhenScopeUnverified(t *testing.T) {
 	calls := stubScope(t, errors.New("the signing key of zone red is not published in the account JWT as a scoped signer: run `mashctl policy apply`"))
 	before, _ := os.ReadFile(h.policy)
 	recs := h.records()
-	out, errb, code := h.run("add", "n", "--zone", "red")
+	out, errb, code := h.run("add", "n", "--label", "zone=red")
 	if code != 1 || out != "" || !strings.Contains(errb, "zone red") || !strings.Contains(errb, "mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -66,8 +66,8 @@ func TestAddExistingZoneVerifiedSucceeds(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	h.seed("a")
 	calls := stubScope(t, nil)
-	out, errb, code := h.run("add", "n", "--zone", "red")
-	if code != 0 || !strings.HasPrefix(out, "added n (zone red)") {
+	out, errb, code := h.run("add", "n", "--label", "zone=red")
+	if code != 0 || !strings.HasPrefix(out, "added n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if *calls != 1 {
@@ -78,7 +78,7 @@ func TestAddExistingZoneVerifiedSucceeds(t *testing.T) {
 func TestAddNewZoneSkipsScopeCheck(t *testing.T) {
 	h := newAddEnv(t, addPolicy)
 	calls := stubScope(t, errors.New("must not be called"))
-	out, errb, code := h.run("add", "g", "--zone", "green")
+	out, errb, code := h.run("add", "g", "--label", "zone=green")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -94,7 +94,7 @@ func TestAddNewZoneWithLeftoverKeyRefusedWhenScopeUnverified(t *testing.T) {
 	}
 	calls := stubScope(t, errors.New("the signing key of zone green is not published in the account JWT as a scoped signer: run `mashctl policy apply`"))
 	recs := h.records()
-	out, errb, code := h.run("add", "g", "--zone", "green")
+	out, errb, code := h.run("add", "g", "--label", "zone=green")
 	if code != 1 || out != "" || !strings.Contains(errb, "zone green") || !strings.Contains(errb, "mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

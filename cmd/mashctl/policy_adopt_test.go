@@ -319,7 +319,7 @@ func provisionB(h *addEnv) { h.provisionDeclared("b") }
 
 func addEnvGuarded() []guarded {
 	return []guarded{
-		{"add", []string{"add", "c", "--zone", "red"}, nil, false, nil},
+		{"add", []string{"add", "c", "--label", "env=prod"}, nil, false, nil},
 		{"reissue", []string{"reissue", "a"}, func(h *addEnv) { h.seed("a") }, true, nil},
 		{"label", []string{"label", "a", "env=prod"}, nil, false, nil},
 		{"label --sync", []string{"label", "a", "env=prod", "--sync"}, nil, false, nil},
@@ -327,9 +327,7 @@ func addEnvGuarded() []guarded {
 		{"unlabel", []string{"unlabel", "a", "team"}, nil, false, nil},
 		{"retire", []string{"retire", "b"}, provisionB, false, nil},
 		{"set-meta --label", []string{"set-meta", "b", "--label", "k=v"}, provisionB, false, nil},
-		{"set-zone", []string{"set-zone", "b", "blue"}, provisionB, false, nil},
 		{"provision --label", []string{"provision"}, nil, false, provisionWith("--label", "k=v")},
-		{"provision --zone", []string{"provision"}, nil, false, provisionWith("--zone", "red")},
 	}
 }
 
@@ -411,9 +409,9 @@ func TestAdoptedAccountRefusesApplyAndRepair(t *testing.T) {
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
 			e := newApplyEnv(t, twoZones)
-			// Not adopted: the command goes on as before (repair stops at a directory this server never had made).
-			if out, errb, code := e.run(r.args...); strings.Contains(out+errb, "adopted by an outside system") || strings.Contains(out+errb, "is refused") ||
-				(r.verb == "policy apply" && code != 0) {
+			// Not adopted: the command goes on as before (repair and, with zones removed, apply stop at a directory this
+			// server never had made: the zoned-directory gate fails closed, so only the adopted-account refusal is ruled out).
+			if out, errb, code := e.run(r.args...); strings.Contains(out+errb, "adopted by an outside system") || strings.Contains(out+errb, "is refused") {
 				t.Fatalf("not adopted: %d %q %q", code, out, errb)
 			}
 			e = newApplyEnv(t, twoZones)

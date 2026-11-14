@@ -101,7 +101,7 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 		g   guarded
 		pre func(h *addEnv)
 	}{
-		{guarded{name: "add", args: []string{"add", "c", "--zone", "red"}}, nil},
+		{guarded{name: "add", args: []string{"add", "c", "--label", "env=red"}}, nil},
 		{guarded{name: "reissue", args: []string{"reissue", "a"}}, rotate},
 		{guarded{name: "reissue, add-only", args: []string{"reissue", "a"}}, func(h *addEnv) { h.seedWith("a", noDenyNone) }},
 		{guarded{name: "label", args: []string{"label", "a", "env=prod"}}, nil},
@@ -109,7 +109,6 @@ func TestLostLockStopsBeforeEachWriteOfEveryGuardedCommand(t *testing.T) {
 		{guarded{name: "unlabel", args: []string{"unlabel", "a", "team"}}, nil},
 		{guarded{name: "retire", args: []string{"retire", "b"}}, provisionB},
 		{guarded{name: "set-meta --label", args: []string{"set-meta", "b", "--label", "k=v"}}, provisionB},
-		{guarded{name: "set-zone", args: []string{"set-zone", "b", "blue"}}, provisionB},
 		{guarded{name: "provision --label", args: []string{"provision"}, build: provisionWith("--label", "k=v")}, nil},
 	}
 	for _, c := range cmds {
@@ -244,6 +243,7 @@ func initApplyEnv(t *testing.T, e *applyEnv) {
 // policy apply and policy repair: the creation of each zone's key file and the push of the account JWT are each
 // preceded by a lock check; with the lock lost before one, that step and the later ones are not taken.
 func TestLostLockStopsApplyAndRepairBeforeKeysAndPush(t *testing.T) {
+	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before any key is made or anything is pushed (any declared endpoint compiles a zone, so the fixture cannot be zone-free); refusal is asserted in unzone_test.go; delete with the policy stack")
 	for _, verb := range []string{"apply", "repair"} {
 		t.Run(verb, func(t *testing.T) {
 			state := func(e *applyEnv) string {
@@ -292,6 +292,7 @@ func TestLostLockStopsApplyAndRepairBeforeKeysAndPush(t *testing.T) {
 // policy repair: with the lock lost between two directory fixes, the second is not written and the output says
 // what was done and what was not.
 func TestLostLockBetweenRepairDirectoryFixesSkipsTheRest(t *testing.T) {
+	t.Skip("TODO(Z2): applies a zoned policy (newDriftEnv), which ADR 0091 refuses before anything is pushed; delete with the policy stack")
 	e := newDriftEnv(t)
 	adm, ctx, done := e.admin()
 	defer done()
