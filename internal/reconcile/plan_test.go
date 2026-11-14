@@ -541,3 +541,39 @@ func TestIncompleteScanWithholdsUntrackedRevocations(t *testing.T) {
 		t.Errorf("findings %+v", p.Findings)
 	}
 }
+
+// The digest ignores times and connection details, and changes with what is revoked.
+func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) {
+	w := newWorld(t)
+	old := userKey(t)
+	w.record(old, "foo.c.gone", w.now.Add(-time.Hour))
+	w.connect(w.conn(old, w.acct, "gone", w.now.Add(-time.Hour).Unix()))
+	p1 := w.build()
+	if !strings.HasPrefix(p1.PlanDigest, "sha256:") || len(p1.PlanDigest) != len("sha256:")+64 || p1.PlanDigest != p1.Digest() {
+		t.Fatalf("digest %q", p1.PlanDigest)
+	}
+	w.now = w.now.Add(10 * time.Minute) // a later run: another revocation time
+	w.servers = nil
+	w.connect(w.conn(old, w.acct, "gone", w.now.Unix())) // reconnected: another connection id and iat
+	p2 := w.build()
+	if p2.Revocations[0].At == p1.Revocations[0].At {
+		t.Fatal("the revocation time did not move: the test shows nothing")
+	}
+	if p2.PlanDigest != p1.PlanDigest {
+		t.Errorf("the digest moved with times or connections: %s %s", p1.PlanDigest, p2.PlanDigest)
+	}
+	other := userKey(t)
+	w.record(other, "foo.c.gone2", w.now.Add(-time.Hour))
+	w.connect(w.conn(other, w.acct, "gone2", w.now.Unix()))
+	if p3 := w.build(); p3.PlanDigest == p1.PlanDigest {
+		t.Error("a second revocation did not change the digest")
+	}
+	if !strings.Contains(p1.Text(), "run again with --yes --plan "+p1.PlanDigest+" to revoke\nplan: "+p1.PlanDigest+"\nreconciled: 1 actions\n") {
+		t.Errorf("text:\n%s", p1.Text())
+	}
+	pre := p1
+	pre.Source, pre.PlanDigest = SourceListSetFile, ""
+	if strings.Contains(pre.Text(), "plan: ") || strings.Contains(pre.Text(), "--yes --plan") {
+		t.Errorf("a preview names a digest:\n%s", pre.Text())
+	}
+}

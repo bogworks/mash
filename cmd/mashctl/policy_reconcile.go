@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,31 +16,35 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
+	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/bogworks/mash/internal/reconcile"
 )
 
-const policyReconcileUsage = `usage: mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
-       (run after the first applied list set of an adopted account: prints the plan that removes what the account held
-       before it and the list set does not own, and changes nothing. The plan reports each signing key that is not one of
-       the list set's scoped keys and still present, revokes recorded issued users whose sender is not in the list set
-       and connected keys that are neither recorded, exempt nor issued under the list set, and reports anything else it
-       cannot name as a finding. --listset FILE previews the signing keys the first apply would remove, before it. Exit
-       0 when the plan is computed; 1 when an admin or exempt user is signed by a signing key that does not stay, or on
-       a failure. --yes is refused in this version: no signer is configured)
+const policyReconcileUsage = `usage: mashctl policy reconcile [--json] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+       mashctl policy reconcile --yes --plan DIGEST [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+       (run after the first applied list set of an adopted account. Without --yes it prints the plan that removes what the
+       account held before the list set and the list set does not own, and changes nothing: each signing key that is not
+       one of the list set's scoped keys and still present, each recorded issued user whose sender is not in the list set
+       and each connected key that is neither recorded, exempt nor issued under the list set that it revokes, and anything
+       else it cannot name as a finding; it ends with plan: sha256:DIGEST. --listset FILE previews the signing keys the
+       first apply would remove, before it. Exit 0 when the plan is computed; 1 when an admin or exempt user is signed by
+       a signing key that does not stay, or on a failure. --yes --plan DIGEST revokes what that dry run planned, one way:
+       it takes the account lock and the ledger lease, computes the plan again and refuses, changing nothing, when its
+       digest is not DIGEST. --listset is for the dry run only)
 `
-
-// policyReconcileNoSigner is what --yes says until a signer is wired: the executor (internal/reconcile) is built and
-// tested, and this is the one place a caller will hand it a signer.
-const policyReconcileNoSigner = "mashctl: policy reconcile: no signer configured: run without --yes to see the plan"
 
 type reconcileOpts struct {
 	json, yes                     bool
 	listset, rng, bucket, account string
+	plan                          string
 	sysCreds                      string
 	servers                       int
 }
@@ -71,6 +76,8 @@ func parseReconcileArgs(args []string, env func(string) string) (reconcileOpts, 
 			} else {
 				o.yes = true
 			}
+		case "--plan":
+			o.plan, err = val()
 		case "--listset":
 			o.listset, err = val()
 		case "--range":
@@ -122,9 +129,21 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		fmt.Fprintf(stderr, "%s--account is not an account public key (the value is not shown)\n%s", pfx, policyReconcileUsage)
 		return 2
 	}
-	if o.yes {
-		fmt.Fprintln(stderr, policyReconcileNoSigner)
-		return 1
+	usage := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "%s%s\n%s", pfx, fmt.Sprintf(format, a...), policyReconcileUsage)
+		return 2
+	}
+	switch {
+	case o.yes && o.listset != "":
+		return usage("--listset is a preview of the dry run: it cannot be used with --yes")
+	case o.yes && o.plan == "":
+		return usage("--yes needs --plan DIGEST from a dry run")
+	case !o.yes && o.plan != "":
+		return usage("--plan is for --yes")
+	case o.yes && o.json:
+		return usage("--json is for the dry run")
+	case o.yes && !validPlanDigest(o.plan): // named, never printed
+		return usage("--plan is not a plan digest, sha256: and 64 hex digits, as the dry run prints it (the value is not shown)")
 	}
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "%s%s\n", pfx, fmt.Sprintf(format, a...))
@@ -194,45 +213,64 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		return fail("the adoption marker records no exempt keys: run `mashctl policy adopt` again before the reconcile")
 	}
 
-	in := reconcile.Input{Account: account, Held: held, Now: time.Now(), Exempt: marker.Exempt, Issued: adm, AdminUser: adminUser, AdminIssuer: adminIssuer}
 	nc, err := connectSys(cfg, o.sysCreds, env)
 	if err != nil {
 		return fail("%v", err)
 	}
 	defer nc.Close()
-	sctx, cancel := context.WithTimeout(ctx, applyDeadline)
-	defer cancel()
 
-	if fileDoc != nil {
-		in.Source, in.ListSet = reconcile.SourceListSetFile, fileDoc.ListSet
-		in.Claims, err = heldAccountClaims(sctx, nc, account, o.servers)
-		if err != nil {
+	var ledger *policyapply.KVLedger
+	if fileDoc == nil {
+		if ledger, err = openReconcileLedger(ctx, adm.Conn(), account, o, env); err != nil {
 			return fail("%v", err)
 		}
-	} else {
-		rec, ls, jwtIn, err := readInForce(ctx, adm.Conn(), account, o, env)
+	}
+	// build computes the plan from what is true now: the list set and the JWT in force (or the file), the connections and
+	// the issue record. The dry run calls it once; --yes calls it before it locks, to take the signers, and again under
+	// the account lock and the ledger lease (reconcile.Execute).
+	build := func(ctx context.Context) (reconcile.Plan, map[string]string, error) {
+		in := reconcile.Input{Account: account, Held: held, Now: time.Now(), Exempt: marker.Exempt, Issued: adm, AdminUser: adminUser, AdminIssuer: adminIssuer}
+		sctx, cancel := context.WithTimeout(ctx, applyDeadline)
+		defer cancel()
+		if fileDoc != nil {
+			in.Source, in.ListSet = reconcile.SourceListSetFile, fileDoc.ListSet
+			var err error
+			if in.Claims, err = heldAccountClaims(sctx, nc, account, o.servers); err != nil {
+				return reconcile.Plan{}, nil, err
+			}
+		} else {
+			rec, ls, jwtIn, err := readInForce(ledger)
+			if err != nil {
+				return reconcile.Plan{}, nil, err
+			}
+			in.Source, in.Generation, in.ListSet = reconcile.SourceInForce, rec.Generation, ls
+			if in.Claims, err = jwt.DecodeAccountClaims(jwtIn); err != nil {
+				return reconcile.Plan{}, nil, fmt.Errorf("the account JWT in force does not decode: %v", err)
+			}
+		}
+		groups, err := reconcile.Groups(in.ListSet)
 		if err != nil {
-			return fail("%v", err)
+			return reconcile.Plan{}, nil, fmt.Errorf("the list set: %v", err)
 		}
-		in.Source, in.Generation, in.ListSet = reconcile.SourceInForce, rec.Generation, ls
-		if in.Claims, err = jwt.DecodeAccountClaims(jwtIn); err != nil {
-			return fail("the account JWT in force does not decode: %v", err)
+		if in.Signers, err = reconcile.ExpectedSigners(groups, held); err != nil {
+			return reconcile.Plan{}, nil, err
 		}
+		scan, err := scanConnections(sctx, nc, account, o.servers)
+		if err != nil {
+			return reconcile.Plan{}, nil, err
+		}
+		in.Servers, in.ScanIncomplete = scan.Conns, scan.Incomplete
+		plan, err := reconcile.Build(ctx, in)
+		return plan, in.Signers, err
 	}
-	groups, err := reconcile.Groups(in.ListSet)
-	if err != nil {
-		return fail("the list set: %v", err)
-	}
-	if in.Signers, err = reconcile.ExpectedSigners(groups, held); err != nil {
-		return fail("%v", err)
-	}
-	scan, err := scanConnections(sctx, nc, account, o.servers)
-	if err != nil {
-		return fail("%v", err)
-	}
-	in.Servers, in.ScanIncomplete = scan.Conns, scan.Incomplete
 
-	plan, err := reconcile.Build(ctx, in)
+	if o.yes {
+		return runReconcileYes(ctx, o, reconcileYes{
+			account: account, adm: adm, ledger: ledger, sys: nc, keys: keys, exempt: append(slices.Clone(marker.Exempt), adminUser),
+			adminUser: adminUser, adminIssuer: adminIssuer, build: build,
+		}, stdout, stderr)
+	}
+	plan, _, err := build(ctx)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -249,6 +287,124 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		fmt.Fprintf(stderr, "%s%v\n", pfx, e)
 		return 1
 	}
+	return 0
+}
+
+// validPlanDigest is true for "sha256:" and 64 lower-case hex digits.
+func validPlanDigest(s string) bool {
+	h, ok := strings.CutPrefix(s, "sha256:")
+	if !ok || len(h) != 64 {
+		return false
+	}
+	return strings.Trim(h, "0123456789abcdef") == ""
+}
+
+// reconcileYes is what --yes needs beyond the plan builder.
+type reconcileYes struct {
+	account, adminUser, adminIssuer string
+	adm                             *admin.Admin
+	ledger                          *policyapply.KVLedger
+	sys                             *nats.Conn
+	keys                            *ctlkeys.Authority
+	// exempt is the adoption marker's exempt users and the admin user.
+	exempt []string
+	build  func(ctx context.Context) (reconcile.Plan, map[string]string, error)
+}
+
+// exemptIssuerSource reads, on each call, the issuer of every connection of every connected user in exempt: the
+// source an Issuer's ExemptIssuers needs. A scan that is not the whole picture is an error, never a partial answer:
+// a connection on a server that did not answer could be under a key that is about to leave.
+func exemptIssuerSource(nc *nats.Conn, account string, servers int, exempt []string) func(context.Context) (map[string][]string, error) {
+	return func(ctx context.Context) (map[string][]string, error) {
+		scan, err := scanConnections(ctx, nc, account, servers)
+		if err != nil {
+			return nil, err
+		}
+		if scan.Incomplete != "" {
+			return nil, fmt.Errorf("the connection scan is incomplete: %s", scan.Incomplete)
+		}
+		isExempt := map[string]bool{}
+		for _, k := range exempt {
+			isExempt[k] = true
+		}
+		out := map[string][]string{}
+		for _, s := range scan.Conns {
+			for _, c := range s.Conns {
+				if isExempt[c.Key] {
+					out[c.Key] = append(out[c.Key], c.IssuerKey)
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
+// runReconcileYes is `policy reconcile --yes --plan DIGEST`: it checks the plan the person saw against a fresh one,
+// takes the account lock and calls reconcile.Execute, which takes the ledger lease and computes the plan a third time
+// right before it signs; every one of them must have the digest. Nothing is pushed unless all do.
+func runReconcileYes(ctx context.Context, o reconcileOpts, y reconcileYes, stdout, stderr io.Writer) int {
+	const pfx = "mashctl: policy reconcile: "
+	fail := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "%s%s\n", pfx, fmt.Sprintf(format, a...))
+		return 1
+	}
+	changed := func() int { return fail("the plan changed since the dry run: run it again (nothing was changed)") }
+	plan, signers, err := y.build(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if plan.IssuerErr() != nil {
+		fmt.Fprint(stdout, plan.Text())
+		return fail("%v", plan.IssuerErr())
+	}
+	if plan.PlanDigest != o.plan {
+		return changed()
+	}
+	trust, err := apply.LoadTrust(y.keys)
+	if err != nil {
+		return fail("%v", err)
+	}
+	signer := &policyserve.Issuer{
+		Ctx: ctx, Keys: y.keys, Cluster: policyapply.NATSCluster{Conn: y.sys, Inventory: o.servers},
+		Resolver: apply.NATS{Conn: y.sys, Inventory: o.servers}, Account: y.account, Range: o.rng, Trust: trust, Servers: o.servers,
+		AdminUser: y.adminUser, AdminIssuer: y.adminIssuer, ExemptIssuers: exemptIssuerSource(y.sys, y.account, o.servers, y.exempt),
+	}
+	lock, err := y.adm.LockAccount(ctx)
+	if err != nil {
+		return fail("%v", err)
+	}
+	defer lock.Release()
+	res, err := reconcile.Execute(ctx, reconcile.ExecInput{
+		Build: func(ctx context.Context) (reconcile.Plan, error) {
+			p, _, err := y.build(ctx)
+			if err != nil {
+				return p, err
+			}
+			if p.PlanDigest != o.plan {
+				return p, reconcile.ErrPlanChanged
+			}
+			return p, nil
+		},
+		Ledger: y.ledger, Cluster: signer.Cluster, Account: y.account, Inventory: o.servers,
+		Signers: signers, Signer: signer, Marker: y.adm, BeforeWrite: func(ctx context.Context, _ string) error { return lock.Held(ctx) },
+	})
+	reasons := map[string]string{}
+	for _, r := range res.Plan.Revocations {
+		reasons[r.Key] = r.Reason
+	}
+	for _, k := range res.Revoked {
+		fmt.Fprintf(stdout, "revoked %s: %s\n", k, reasons[k])
+	}
+	switch {
+	case errors.Is(err, reconcile.ErrPlanChanged):
+		return changed()
+	case err != nil && len(res.Revoked) > 0:
+		fmt.Fprintf(stdout, "reconciled: %d revoked\n", len(res.Revoked))
+		return fail("the revocations are on every server, but: %v", err)
+	case err != nil:
+		return fail("%v (nothing was committed)", err)
+	}
+	fmt.Fprintf(stdout, "reconciled: %d revoked\n", len(res.Revoked))
 	return 0
 }
 
@@ -276,27 +432,28 @@ func reconcileBucket(o reconcileOpts, env func(string) string) (string, error) {
 	return name, nil
 }
 
-// readInForce opens the account's ledger in the range's policy bucket and reads the list set and the account JWT in
-// force. It is read only: it takes no lease and writes nothing.
-func readInForce(ctx context.Context, nc *nats.Conn, account string, o reconcileOpts, env func(string) string) (listset.Record, listset.ListSet, string, error) {
+// openReconcileLedger opens the account's ledger in the range's policy bucket.
+func openReconcileLedger(ctx context.Context, nc *nats.Conn, account string, o reconcileOpts, env func(string) string) (*policyapply.KVLedger, error) {
 	bucket, err := reconcileBucket(o, env)
 	if err != nil {
-		return listset.Record{}, listset.ListSet{}, "", err
+		return nil, err
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
-		return listset.Record{}, listset.ListSet{}, "", err
+		return nil, err
 	}
-	l, err := policyapply.NewKVLedger(ctx, js, account, policyapply.KVLedgerOptions{Bucket: bucket})
-	if err != nil {
-		return listset.Record{}, listset.ListSet{}, "", err
-	}
+	return policyapply.NewKVLedger(ctx, js, account, policyapply.KVLedgerOptions{Bucket: bucket, Holder: "mashctl-policy-reconcile"})
+}
+
+// readInForce reads the list set and the account JWT in force from the ledger. It is read only: it takes no lease and
+// writes nothing.
+func readInForce(l *policyapply.KVLedger) (listset.Record, listset.ListSet, string, error) {
 	var (
 		rec listset.Record
 		ls  listset.ListSet
 		tok string
 	)
-	err = readStable(func() (uint64, error) {
+	err := readStable(func() (uint64, error) {
 		r, err := l.InForce()
 		return r.Generation, err
 	}, func() error {

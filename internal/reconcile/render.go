@@ -74,6 +74,12 @@ func (p Plan) Text() string {
 	}
 	if len(p.Revocations) > 0 {
 		fmt.Fprintln(&b, OneWayLine)
+		if p.PlanDigest != "" && len(p.IssuerProblems) == 0 {
+			fmt.Fprintf(&b, "run again with --yes --plan %s to revoke\n", p.PlanDigest)
+		}
+	}
+	if p.PlanDigest != "" {
+		fmt.Fprintf(&b, "plan: %s\n", p.PlanDigest)
 	}
 	fmt.Fprintln(&b, p.Status)
 	return b.String()
