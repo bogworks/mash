@@ -210,6 +210,12 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
 				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
 				revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
+				// The issue record is read first: a key whose recorded history is future-dated, or cannot be shown to be
+				// complete, refuses the removal in the same way.
+				if err := ctl.CheckNotFutureIssued(ctx, recorder, []ctl.RevokeTarget{{Name: name, Key: u}}, revokeAt, stderr); err != nil {
+					checkErr = err
+					return err
+				}
 				if credsErr == nil {
 					claims, err := credsIssuedClaims(credsPath, u)
 					if err == nil {

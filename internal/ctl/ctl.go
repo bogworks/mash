@@ -833,7 +833,8 @@ type RevokeTarget struct {
 // still held. A key whose history is at the bucket's cap (store.IssuedHistory) may have lost its oldest revisions, so
 // it is refused unless a retained revision is already future-dated (the usual refusal). Every target is checked before
 // the caller writes anything, and one refused key refuses them all; nothing has been changed when it returns an
-// error. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did not issue)
+// error. A key whose retained history cannot be shown to be complete from the bucket's marker
+// (store.IssuedMarkerKey, madmin.IncompleteHistoryError) is refused too, with the way forward: revoke it by hand. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did not issue)
 // gets one warning line on stderr and the revocation goes on. A record that exists but cannot be read, or whose
 // issued_at is missing or not a time in any retained revision, cannot be ruled out and refuses the whole command.
 func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []RevokeTarget, at time.Time, stderr io.Writer) error {
@@ -842,6 +843,10 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		var bad *madmin.MalformedIssuedAtError
 		if errors.As(err, &bad) {
 			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+		}
+		var incomplete *madmin.IncompleteHistoryError
+		if errors.As(err, &incomplete) {
+			return fmt.Errorf("user key %s...: a future-dated credential cannot be ruled out: its issued history cannot be shown to be complete (%d revisions are kept and the record may have dropped older ones before its history limit was raised); revoke the key by hand in the account JWT, only after checking where it was issued; nothing was changed", ShortKey(t.Key), incomplete.Retained)
 		}
 		if err != nil {
 			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl reissue NAME` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
