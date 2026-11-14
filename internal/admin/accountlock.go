@@ -10,7 +10,7 @@ import (
 )
 
 // The account lock serialises every change to the account's policy against the adoption marker (REQ-016, ADR 0111).
-// A guarded command (policy apply and repair, add, reissue, label, unlabel, retire, set-meta with labels, set-zone,
+// A guarded command (policy apply and repair, add, reissue, label, unlabel, retire, set-meta with labels,
 // provision with labels) takes it first, reads the marker, and holds the lock through all of its writes. `policy
 // adopt` takes the same lock for its read-modify-write of the marker. So an adoption waits for a command already
 // running and a command that starts after the adoption reads the marker and is refused; no command can change policy

@@ -614,7 +614,7 @@ func TestPolicyAdoptShowsAnOlderMarker(t *testing.T) {
 	}
 }
 
-// provision without --label and --zone stays allowed on an adopted account.
+// provision without --label stays allowed on an adopted account.
 func TestAdoptedAccountAllowsAPlainProvision(t *testing.T) {
 	h := newFleetEnv(t)
 	h.adoptAs(userPub(t))

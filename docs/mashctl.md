@@ -120,14 +120,12 @@ On an adopted account these refuse before they touch anything (no policy-file ed
 
 | Command | On an adopted account |
 |---|---|
-| `policy apply` (also `--dry-run`), `policy repair` (also `--dry-run`) | refused |
 | `add`, `reissue` | refused |
 | `label`, `unlabel` (also `--dry-run` and `--sync`: the policy-file edit is the policy change) | refused |
 | `retire` | refused (it edits the policy file and revokes in the account JWT) |
 | `set-meta` with `--label` | refused (labels are the policy's) |
-| `set-zone` | refused |
-| `provision` with `--label` or `--zone` (also `mash admin provision`) | refused (a label or a zone is a policy change) |
-| `set-meta` without `--label` (role, host, description, capabilities), `provision` without `--label` and `--zone`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
+| `provision` with `--label` (also `mash admin provision`) | refused (a label is a policy change) |
+| `set-meta` without `--label` (role, host, description, capabilities), `provision` without `--label`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
 | `policy diff`, `drift`, `check`, `test`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
 
 Policy changes and adoption are serialised by an account lock. Every guarded command takes it first, reads the marker, and holds the lock through all of its writes; `policy adopt` takes the same lock for its write. So an adoption waits for a guarded command that is already running (which finishes first), and a command started after the adoption is refused. A command, or `policy adopt`, that cannot take the lock within 30 seconds exits 1 with `another policy change or an adoption is in progress; nothing was changed`: another guarded command or an adoption holds it, so try again in a moment. The lock extends itself while a long command runs; a command that finds the lock lost stops before its next write and says so. Read-only commands never take it.
@@ -141,7 +139,7 @@ Policy changes and adoption are serialised by an account lock. Every guarded com
 | `reissue` (key rotated) | the issue record of the new key; the staging of the new creds; the revocation of the old user key (account JWT push); the record of the revocation; the directory record update; the creds file replacement |
 | `retire` | the removal of the directory record and inbox; the revocation of the user key; the record of the revocation; the policy file edit; the move or removal of the creds file |
 | `label`, `unlabel` | the policy file edit; with `--sync`, the update of the directory labels |
-| `set-meta --label`, `set-zone`, `provision` with a label or zone | the one record write |
+| `set-meta --label`, `provision` with a label | the one record write |
 
 A check that fails stops the command before that write and every later one, and the message names the step that was not taken and what was already done (for a reissue: the new key is recorded and its creds are staged, the old key is or is not revoked; run `mashctl reissue NAME` again, which resumes from the staged file). `add` also undoes the record and creds file it wrote (the issue record is append-only and stays). Not preceded by a check: undoing a command's own earlier write on the way out, the removal of a reissue's leftover staged file, and the writes inside one guarded admin call (for example the inbox stream and the record of one `provision`), which are one step.
 
