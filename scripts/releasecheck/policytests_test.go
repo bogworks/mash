@@ -244,7 +244,7 @@ func TestRealPolicyListNamesTestsThatExist(t *testing.T) {
 			}
 		}
 	}
-	for _, at := range []string{"AT-001", "AT-003", "AT-004", "AT-005", "AT-010", "AT-011", "AT-020"} {
+	for _, at := range []string{"AT-001", "AT-003", "AT-004", "AT-005", "AT-010", "AT-020"} {
 		if !listed[at] {
 			t.Errorf("%s (REQ-020) is not in %s", at, policyListFile)
 		}

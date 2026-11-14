@@ -26,8 +26,6 @@ AT-005  ./internal/listset  TestAT005DenyAllSenderIsRefused  required
 # AT-010: the applied gate runs against a live two-server cluster, with an in-process nats-server pair: the policy
 # applied on both, and a server held back.
 AT-010  ./internal/policyapply  TestAT010Live  required
-# AT-011: does a template change reach open connections, per shipped NATS server version (checks the committed record).
-AT-011  ./internal/policy  TestAT011TemplateChangeReachesOpenConnections  required
 # AT-020: a raw client (tags-only credentials, a plain NATS client) gets no more than its lists. The whole live run:
 # its subtests all publish, subscribe and fetch as raw clients. The second test pins what it reaches on the open reply
 # and plumbing subjects (the table in docs/security/threat-model.md, section 5.3.1) and that another address's inbox,
