@@ -1111,3 +1111,35 @@ func TestRunRefusesStatusValueOverLimitBeforePush(t *testing.T) {
 		t.Errorf("in force = %d", rec.Generation)
 	}
 }
+
+func TestKVLedgerInForceViewAndStatus(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	if _, _, ok, _, sok, err := l.InForceViewAndStatus(ctx); err != nil || ok || sok {
+		t.Fatalf("empty ledger: ok=%v statusOK=%v err=%v", ok, sok, err)
+	}
+	set := set1()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &set}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetPending(testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteRefusal(ctx, refusalStatus()); err != nil {
+		t.Fatal(err)
+	}
+	rec, ls, ok, st, sok, err := l.InForceViewAndStatus(ctx)
+	if err != nil || !ok || !sok {
+		t.Fatalf("ok=%v statusOK=%v err=%v", ok, sok, err)
+	}
+	wantRec, _ := l.InForce()
+	wantSt, _, _ := l.LatestStatus(ctx)
+	wantView, wantLS, _, _ := l.InForceView()
+	if rec != wantRec || rec != wantView || ls.Range != wantLS.Range || ls.Range != set.Range {
+		t.Errorf("in force %+v %q disagrees with %+v %+v", rec, ls.Range, wantRec, wantView)
+	}
+	if st.State != wantSt.State || st.State != StateRefused || st.Generation != wantSt.Generation {
+		t.Errorf("status %+v disagrees with %+v", st, wantSt)
+	}
+}

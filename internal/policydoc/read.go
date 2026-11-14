@@ -10,32 +10,39 @@ import (
 	"github.com/bogworks/mash/internal/policyapply"
 )
 
-// Reader is what the read path needs of the ledger: the list set in force and the latest status, both read without
-// taking the lease or writing anything. policyapply.KVLedger implements the two reads; Account is the account the
-// ledger is for (the ledger's key is derived from it).
+// Reader is what the read path needs of the ledger: the list set in force and the latest status, read together from one
+// revision of the ledger value, without taking the lease or writing anything. policyapply.KVLedger implements the read;
+// Account is the account the ledger is for (the ledger's key is derived from it).
 type Reader interface {
 	// Account is the account public key the ledger is for.
 	Account() string
-	// InForceView returns the record and the list set in force, read together so they are one generation; ok is
-	// false when no list set is in force.
-	InForceView() (rec listset.Record, ls listset.ListSet, ok bool, err error)
-	// LatestStatus returns the latest status; ok is false when none has been written.
-	LatestStatus(ctx context.Context) (policyapply.Status, bool, error)
+	// InForceViewAndStatus returns the record and the list set in force and the latest status, all from one revision;
+	// ok is false when no list set is in force and statusOK when no status has been written.
+	InForceViewAndStatus(ctx context.Context) (rec listset.Record, ls listset.ListSet, ok bool, st policyapply.Status, statusOK bool, err error)
 }
 
 // NoPolicyNotice is the notice when no account-wide policy is in force.
 const NoPolicyNotice = "no account-wide policy in force"
 
-// StateHeader is what the latest status says about the list set, shown above every answer. It is plain data with
-// stable JSON: snake_case, slices never null and sorted.
-type StateHeader struct {
-	// State is the latest status's state ("" when no status has been written).
+// LatestAttempt is the latest status: the last attempt to apply a generation, which may be about a generation other
+// than the one in force.
+type LatestAttempt struct {
+	// Generation is the generation the attempt is about; 0 when it is unknown (a refusal before the generation was read).
+	Generation uint64 `json:"generation"`
+	// State is the status's state.
 	State string `json:"state"`
-	// InForce is the status's in_force: true only when the generation was applied on every server.
-	InForce bool `json:"in_force"`
-	// StatusGeneration is the generation the status is about.
-	StatusGeneration uint64 `json:"status_generation"`
-	// Servers is the generation each server holds, sorted by server.
+	// Applied is the status's in_force: true only when the generation was applied on every server.
+	Applied bool `json:"applied"`
+}
+
+// StateHeader is what the ledger says about the list set, shown above every answer. It is plain data with stable
+// JSON: snake_case, slices never null and sorted.
+type StateHeader struct {
+	// InForceGeneration is the generation of the committed list set in force; 0 when none is committed.
+	InForceGeneration uint64 `json:"in_force_generation"`
+	// Latest is the latest attempt; nil when no status has been written.
+	Latest *LatestAttempt `json:"latest"`
+	// Servers is the generation each server holds in the latest status, sorted by server.
 	Servers []policyapply.ServerGeneration `json:"servers"`
 	// Partial is true when the servers hold different generations (an unknown generation counts as different).
 	Partial bool `json:"partial"`
@@ -58,19 +65,20 @@ type ExplainResult struct {
 	Explanation    *listset.Explanation `json:"explanation"`
 }
 
-func header(st *policyapply.Status) StateHeader {
-	h := StateHeader{Servers: []policyapply.ServerGeneration{}}
-	if st == nil {
-		return h
+// header builds the header from the committed in-force generation (0 when none) and the latest status. What is in
+// force comes from the committed record; the servers and the partial notice come from the status.
+func header(inForceGen uint64, st *policyapply.Status) StateHeader {
+	h := StateHeader{InForceGeneration: inForceGen, Servers: []policyapply.ServerGeneration{}}
+	if st != nil {
+		h.Latest = &LatestAttempt{Generation: st.Generation, State: string(st.State), Applied: st.InForce}
+		h.Servers = append(h.Servers, st.Servers...)
+		sort.SliceStable(h.Servers, func(i, j int) bool { return h.Servers[i].Server < h.Servers[j].Server })
+		seen := map[string]bool{}
+		for _, s := range h.Servers {
+			seen[genWord(s.Generation)] = true
+		}
+		h.Partial = len(seen) > 1
 	}
-	h.State, h.InForce, h.StatusGeneration = string(st.State), st.InForce, st.Generation
-	h.Servers = append(h.Servers, st.Servers...)
-	sort.SliceStable(h.Servers, func(i, j int) bool { return h.Servers[i].Server < h.Servers[j].Server })
-	seen := map[string]bool{}
-	for _, s := range h.Servers {
-		seen[genWord(s.Generation)] = true
-	}
-	h.Partial = len(seen) > 1
 	switch {
 	case h.Partial:
 		parts := make([]string, 0, len(h.Servers))
@@ -78,8 +86,12 @@ func header(st *policyapply.Status) StateHeader {
 			parts = append(parts, fmt.Sprintf("%s: %s", s.Server, genWord(s.Generation)))
 		}
 		h.Notice = fmt.Sprintf("partial application: servers hold different generations (%s); %s", strings.Join(parts, ", "), NoPolicyNotice)
-	case !st.InForce:
+	case inForceGen == 0 && st != nil && st.Generation != 0:
 		h.Notice = fmt.Sprintf("generation %d is %s; %s", st.Generation, st.State, NoPolicyNotice)
+	case inForceGen == 0 && st != nil:
+		h.Notice = fmt.Sprintf("the latest attempt is %s; %s", st.State, NoPolicyNotice)
+	case inForceGen == 0:
+		h.Notice = NoPolicyNotice
 	}
 	return h
 }
@@ -97,25 +109,20 @@ type loaded struct {
 	gen uint64
 }
 
-// load reads the list set in force and the status. cur is nil when nothing is in force.
+// load reads the list set in force and the latest status in one read. cur is nil when nothing is committed.
 func load(ctx context.Context, r Reader) (*loaded, StateHeader, error) {
-	st, haveStatus, err := r.LatestStatus(ctx)
+	rec, ls, ok, st, haveStatus, err := r.InForceViewAndStatus(ctx)
 	if err != nil {
-		return nil, StateHeader{}, err
+		return nil, StateHeader{}, fmt.Errorf("the list set in force is unreadable: %w", err)
 	}
 	var sp *policyapply.Status
 	if haveStatus {
 		sp = &st
 	}
-	h := header(sp)
-	rec, ls, ok, err := r.InForceView()
-	if err != nil {
-		return nil, h, fmt.Errorf("the list set in force is unreadable: %w", err)
+	if !ok || rec.Generation < 1 {
+		return nil, header(0, sp), nil
 	}
-	if !ok {
-		return nil, h, nil
-	}
-	return &loaded{ls: ls, gen: rec.Generation}, h, nil
+	return &loaded{ls: ls, gen: rec.Generation}, header(rec.Generation, sp), nil
 }
 
 // Show describes the list set in force (REQ-010) with the state of its application (REQ-011). Nothing in force is

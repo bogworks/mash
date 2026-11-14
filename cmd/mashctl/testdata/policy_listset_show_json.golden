@@ -1,9 +1,12 @@
 {
   "list_set_in_force": true,
   "header": {
-    "state": "applied",
-    "in_force": true,
-    "status_generation": 7,
+    "in_force_generation": 7,
+    "latest": {
+      "generation": 7,
+      "state": "applied",
+      "applied": true
+    },
     "servers": [
       {
         "server": "nats-a",

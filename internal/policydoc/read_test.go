@@ -24,22 +24,20 @@ type fakeReader struct {
 
 func (f fakeReader) Account() string { return testAccount }
 
-func (f fakeReader) InForceView() (listset.Record, listset.ListSet, bool, error) {
+func (f fakeReader) InForceViewAndStatus(context.Context) (listset.Record, listset.ListSet, bool, policyapply.Status, bool, error) {
+	var st policyapply.Status
+	stOK := f.st != nil
+	if stOK {
+		st = *f.st
+	}
 	if len(f.doc) == 0 {
-		return listset.Record{}, listset.ListSet{}, false, nil
+		return listset.Record{}, listset.ListSet{}, false, st, stOK, nil
 	}
 	d, err := Decode(f.doc, DecodeOptions{})
 	if err != nil {
-		return listset.Record{}, listset.ListSet{}, false, err
+		return listset.Record{}, listset.ListSet{}, false, st, stOK, err
 	}
-	return listset.Record{Generation: d.Generation}, d.ListSet, true, nil
-}
-
-func (f fakeReader) LatestStatus(context.Context) (policyapply.Status, bool, error) {
-	if f.st == nil {
-		return policyapply.Status{}, false, nil
-	}
-	return *f.st, true, nil
+	return listset.Record{Generation: d.Generation}, d.ListSet, true, st, stOK, nil
 }
 
 func u(n uint64) *uint64 { return &n }
@@ -78,7 +76,7 @@ func TestShow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.ListSetInForce || res.View.Generation != 7 || res.Header.State != "applied" || res.Header.Partial || res.Header.Notice != "" {
+	if !res.ListSetInForce || res.View.Generation != 7 || res.Header.InForceGeneration != 7 || res.Header.Latest == nil || res.Header.Latest.State != "applied" || res.Header.Partial || res.Header.Notice != "" {
 		t.Fatalf("%+v", res)
 	}
 	if res.Header.Servers[0].Server != "nats-a" {
@@ -100,11 +98,57 @@ func TestShowPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := res.Header
-	if !h.Partial || h.InForce || !strings.Contains(h.Notice, "partial application") || !strings.Contains(h.Notice, NoPolicyNotice) ||
+	if h.InForceGeneration != 7 || h.Latest == nil || h.Latest.Applied || !h.Partial || !strings.Contains(h.Notice, "partial application") || !strings.Contains(h.Notice, NoPolicyNotice) ||
 		!strings.Contains(h.Notice, "nats-b: 6") || !strings.Contains(h.Notice, "nats-c: unknown") {
 		t.Fatalf("%+v", h)
 	}
 	golden(t, "show_partial", RenderShow(res))
+}
+
+// refusedAfter is the latest status when an attempt at generation 8 was refused after generation 7 was committed.
+func refusedAfter() *policyapply.Status {
+	return &policyapply.Status{Generation: 8, State: policyapply.StateRefused,
+		Servers: []policyapply.ServerGeneration{{Server: "nats-a", Generation: u(7)}, {Server: "nats-b", Generation: u(7)}}}
+}
+
+func TestShowCommittedThenRefused(t *testing.T) {
+	res, err := Show(context.Background(), fakeReader{doc: doc(7, 6, nil), st: refusedAfter()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := res.Header
+	if !res.ListSetInForce || h.InForceGeneration != 7 || h.Partial || h.Notice != "" ||
+		h.Latest == nil || h.Latest.Generation != 8 || h.Latest.State != "refused" || h.Latest.Applied {
+		t.Fatalf("%+v", res)
+	}
+	text := RenderShow(res)
+	if !strings.Contains(text, "in force: generation 7\nlatest attempt: generation 8, refused\n") || strings.Contains(text, NoPolicyNotice) {
+		t.Fatal(text)
+	}
+	golden(t, "show_committed_refused", text)
+	ex, err := Explain(context.Background(), fakeReader{doc: doc(7, 6, nil), st: refusedAfter()}, "foo.c.lead", "foo.c.core")
+	if err != nil || !ex.ListSetInForce || ex.Header.InForceGeneration != 7 || strings.Contains(RenderExplain(ex), NoPolicyNotice) {
+		t.Fatalf("%+v, %v", ex, err)
+	}
+}
+
+func TestShowCommittedThenPartial(t *testing.T) {
+	st := partial()
+	st.Generation = 8
+	res, err := Show(context.Background(), fakeReader{doc: doc(7, 6, nil), st: st})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := res.Header
+	if !res.ListSetInForce || res.View.Generation != 7 || h.InForceGeneration != 7 || !h.Partial ||
+		h.Latest == nil || h.Latest.Generation != 8 || h.Latest.State != "partial" {
+		t.Fatalf("%+v", res)
+	}
+	text := RenderShow(res)
+	if !strings.Contains(text, "in force: generation 7\nlatest attempt: generation 8, partial\n") {
+		t.Fatal(text)
+	}
+	golden(t, "show_committed_partial", text)
 }
 
 func TestShowNothingInForce(t *testing.T) {

@@ -449,6 +449,30 @@ func (l *KVLedger) InForceView() (listset.Record, listset.ListSet, bool, error) 
 	return rec, ls, true, nil
 }
 
+// InForceViewAndStatus returns the record and the list set in force and the latest status, all from one read of the
+// status value, so they are one revision of the ledger: a commit between two reads cannot mix generations. ok is false
+// when no list set is in force; statusOK is false when no status was written. It takes no lease and writes nothing.
+func (l *KVLedger) InForceViewAndStatus(ctx context.Context) (rec listset.Record, ls listset.ListSet, ok bool, st Status, statusOK bool, err error) {
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return listset.Record{}, listset.ListSet{}, false, Status{}, false, err
+	}
+	if v.Status != nil {
+		st, statusOK = *v.Status, true
+	}
+	if len(v.InForceListSet) == 0 {
+		return listset.Record{}, listset.ListSet{}, false, st, statusOK, nil
+	}
+	rec, err = v.InForce.record()
+	if err != nil {
+		return listset.Record{}, listset.ListSet{}, false, Status{}, false, err
+	}
+	if err := json.Unmarshal(v.InForceListSet, &ls); err != nil {
+		return listset.Record{}, listset.ListSet{}, false, Status{}, false, fmt.Errorf("policy ledger %s: in_force_listset: %w", l.key, err)
+	}
+	return rec, ls, true, st, statusOK, nil
+}
+
 // Pending implements Ledger.
 func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	ctx, cancel := l.opCtx()

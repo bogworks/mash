@@ -17,10 +17,20 @@ func list(items []string) string {
 }
 
 func renderHeader(b *strings.Builder, h StateHeader) {
-	if h.State == "" {
-		b.WriteString("state: no status written\n")
+	if h.InForceGeneration == 0 {
+		b.WriteString("in force: none\n")
 	} else {
-		fmt.Fprintf(b, "state: %s\nin force: %s\nstatus generation: %d\n", h.State, yesNo(h.InForce), h.StatusGeneration)
+		fmt.Fprintf(b, "in force: generation %d\n", h.InForceGeneration)
+	}
+	switch l := h.Latest; {
+	case l == nil:
+		b.WriteString("state: no status written\n")
+	case l.Generation != h.InForceGeneration || !l.Applied:
+		if l.Generation == 0 {
+			fmt.Fprintf(b, "latest attempt: %s\n", l.State)
+		} else {
+			fmt.Fprintf(b, "latest attempt: generation %d, %s\n", l.Generation, l.State)
+		}
 	}
 	for _, s := range h.Servers {
 		fmt.Fprintf(b, "server %s: generation %s\n", s.Server, genWord(s.Generation))
@@ -28,13 +38,6 @@ func renderHeader(b *strings.Builder, h StateHeader) {
 	if h.Notice != "" {
 		fmt.Fprintf(b, "notice: %s\n", h.Notice)
 	}
-}
-
-func yesNo(v bool) string {
-	if v {
-		return "yes"
-	}
-	return "no"
 }
 
 // RenderShow is the plain, line-oriented text of a ShowResult.

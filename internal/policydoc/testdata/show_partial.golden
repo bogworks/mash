@@ -1,7 +1,6 @@
 This describes the list set in force, not any installed credential.
-state: partial
-in force: no
-status generation: 7
+in force: generation 7
+latest attempt: generation 7, partial
 server nats-a: generation 7
 server nats-b: generation 6
 server nats-c: generation unknown
