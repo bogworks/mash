@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -59,12 +60,12 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error {
+	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error {
 		n, err := parseServers(env)
 		if err != nil {
 			return err
 		}
-		return revokeUsers(ctx, cfg, env, n, users, stdout, nil)
+		return revokeUsers(ctx, cfg, env, n, users, stdout, now)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)
