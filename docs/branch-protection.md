@@ -64,7 +64,7 @@ here when done.
 
 **Residual risk.** Apart from `Mergify Merge Protections`, `pr-check`, `label-reset` and `adr-lint`, nothing in GitHub
 pins `codex-review`. It is a condition only in the queue rule of `.mergify.yml`, and Mergify's `check-success = <name>` matches a check run or commit status of that name whoever posted
-it. A pull request that adds or edits a workflow can post a check (or, with a token, a status) named `codex-review`,
+it. (The queue conditions on the Actions checks `pr-check`, `adr-lint` and `label-reset` are written `@github-actions/<name>`, which binds them to checks posted by GitHub Actions, so a forged commit status of that name does not satisfy them; `codex-review` and `lead-review` are commit statuses and stay plain.) A pull request that adds or edits a workflow can post a check (or, with a token, a status) named `codex-review`,
 so that check proves nothing against a pull request author who controls workflows. What holds instead:
 changes to `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `scripts/adrlint/`, `internal/release/` and this file
 are protected paths (judged on `git diff --no-renames`, so a rename out of one counts), so `Decision: none` on them

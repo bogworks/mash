@@ -2,6 +2,7 @@ package release
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -110,8 +111,9 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 		if mm == nil || mm[1] == "codex-review" || mm[1] == "lead-review" {
 			continue
 		}
-		if _, ok := names[mm[1]]; !ok {
-			t.Errorf(".mergify.yml waits for %q, which no job (by its name:, or its key when it has none) in ci.yml, adr-lint.yml or label-reset.yml is called", mm[1])
+		name := strings.TrimPrefix(mm[1], actionsApp)
+		if _, ok := names[name]; !ok {
+			t.Errorf(".mergify.yml waits for %q, which no job (by its name:, or its key when it has none) in ci.yml, adr-lint.yml or label-reset.yml is called", name)
 		}
 	}
 	for _, c := range []struct{ check, file string }{{"adr-lint", "adr-lint.yml"}, {"label-reset", "label-reset.yml"}, {"pr-check", "ci.yml"}} {
@@ -119,13 +121,13 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			t.Errorf("check %q is run by %q, want %q", c.check, names[c.check], c.file)
 		}
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = pr-check", "check-success = adr-lint", "check-success = label-reset", "label != hold", "-draft", "-conflict"} {
+	for _, want := range []string{"check-success = codex-review", "check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset", "label != hold", "-draft", "-conflict"} {
 		if !strings.Contains(strings.Join(queuePlain, "\n"), want) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
 	}
-	if strings.Join(q.MergeConditions, "|") != "check-success = pr-check" {
-		t.Errorf("merge_conditions = %v, want pr-check on the queue branch's run", q.MergeConditions)
+	if strings.Join(q.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check" {
+		t.Errorf("merge_conditions = %v, want @github-actions/pr-check on the queue branch's run", q.MergeConditions)
 	}
 	if q.MergeMethod != "fast-forward" || m.MergeQueue.Mode != "serial" || m.MergeQueue.MaxParallelChecks != 1 {
 		t.Errorf("main must only move to a tested commit: merge_method %q, mode %q, max_parallel_checks %d",
@@ -452,4 +454,49 @@ func contains(l []string, s string) bool {
 		}
 	}
 	return false
+}
+
+const actionsApp = "@github-actions/"
+
+// A plain `check-success = <name>` matches a status or check run by whoever posted it, so a commit status named
+// pr-check, adr-lint or label-reset could be forged by anyone who can write statuses. Every condition naming a
+// GitHub Actions job must be qualified with the app; codex-review and lead-review are commit statuses and stay plain.
+func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
+	jobs := map[string]bool{"pr-check": true, "adr-lint": true, "label-reset": true}
+	files, err := filepath.Glob(filepath.Join(repoRoot(t), ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		for key, j := range load(t, filepath.Base(f)).Jobs {
+			jobs[key] = true
+			if j.Name != "" {
+				jobs[j.Name] = true
+			}
+		}
+	}
+	q := loadMergify(t).QueueRules[0]
+	plain, _ := splitConditions(t, q.QueueConditions)
+	check := regexp.MustCompile(`^check-success = (.+)$`)
+	seen := map[string]bool{}
+	for _, c := range append(append([]string{}, plain...), q.MergeConditions...) {
+		mm := check.FindStringSubmatch(c)
+		if mm == nil {
+			continue
+		}
+		seen[mm[1]] = true
+		if mm[1] == "codex-review" || mm[1] == "lead-review" {
+			continue
+		}
+		if jobs[mm[1]] {
+			t.Errorf("%q names a GitHub Actions job without the app: write check-success = %s%s", c, actionsApp, mm[1])
+		} else if !strings.HasPrefix(mm[1], actionsApp) {
+			t.Errorf("%q is neither a known status (codex-review, lead-review) nor app-qualified", c)
+		}
+	}
+	for _, s := range []string{"codex-review", "lead-review"} {
+		if !seen[s] {
+			t.Errorf("queue_conditions lack the plain `check-success = %s`", s)
+		}
+	}
 }
