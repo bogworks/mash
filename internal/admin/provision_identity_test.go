@@ -92,7 +92,7 @@ func TestProvisionIdentityCreatesRecordStreamConsumer(t *testing.T) {
 	}
 	if rec.Name != "ops1" || rec.Owner != "team1" || rec.AgentToken != "acme" || rec.Agent != sap.AgentName ||
 		rec.MailSubject != "agents.mail.acme.team1.ops1" || rec.User != user || rec.Account != e.Account ||
-		rec.Zone != "" || rec.Alias != nil || rec.Note != "note" || rec.Role != "r" || rec.Created == "" {
+		rec.Alias != nil || rec.Note != "note" || rec.Role != "r" || rec.Created == "" {
 		t.Fatalf("record %+v", rec)
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
@@ -160,7 +160,6 @@ func TestProvisionIdentityRefusesBadInputs(t *testing.T) {
 		"bad user":      {good, "nope", e.Account, admin.Meta{}},
 		"bad account":   {good, user, "nope", admin.Meta{}},
 		"bad meta":      {good, user, e.Account, admin.Meta{Role: "a\tb"}},
-		"zone":          {good, user, e.Account, admin.Meta{Zone: "z1"}},
 	} {
 		if _, err := a.ProvisionIdentity(ctx, c.id, nil, c.user, c.acct, "", c.meta); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -180,9 +179,6 @@ func TestProvisionIdentityAliasVerification(t *testing.T) {
 		want  string
 	}{
 		"no legacy record": {nil, id, store.Alias{Owner: "o", Name: "ghost"}, "no legacy endpoint"},
-		"legacy record is zoned": {func(t *testing.T, e *testenv.Env, a *admin.Admin) {
-			provLegacy(t, e, a, "ghost", admin.Meta{Zone: "default"})
-		}, id, ghost, "zoned"},
 		"claimed by another new-form record": {func(t *testing.T, e *testenv.Env, a *admin.Admin) {
 			provLegacy(t, e, a, "ghost", admin.Meta{})
 			_, u := e.Mint(t, "x")
@@ -251,9 +247,6 @@ func TestProvisionIdentityAdmission(t *testing.T) {
 		"unreadable record": {newID(t, "acme", "team1", "ops1"), func(t *testing.T, e *testenv.Env, a *admin.Admin, js jetstream.JetStream, user string) {
 			putRawRecord(t, js, "oddname", "not json")
 		}, "oddname"},
-		"zoned legacy present": {newID(t, "acme", "team1", "ops1"), func(t *testing.T, e *testenv.Env, a *admin.Admin, js jetstream.JetStream, user string) {
-			provLegacy(t, e, a, "zed", admin.Meta{Zone: "default"})
-		}, "zoned legacy"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, a, js := setup(t)
@@ -639,9 +632,9 @@ func TestNewFormEndpointUserCannotReachRetiredBucket(t *testing.T) {
 
 func TestVerifyAlias(t *testing.T) {
 	id := newID(t, "acme", "team1", "ops1")
-	legRec := func(owner, name, zone string) store.Record {
+	legRec := func(owner, name string) store.Record {
 		return store.Record{Name: name, Owner: owner, Agent: sap.AgentName, AgentToken: "cc", Account: "A", User: "U",
-			MailSubject: store.MailSubjectFor(owner, zone, name), Zone: zone}
+			MailSubject: store.MailSubjectFor(owner, name)}
 	}
 	newRec := func(owner, name string, a *store.Alias) store.Record {
 		nid := newID(t, "acme", owner, name)
@@ -649,7 +642,7 @@ func TestVerifyAlias(t *testing.T) {
 			MailSubject: nid.Subjects().Mail, Alias: a}
 	}
 	al := store.Alias{Owner: "legowner", Name: "ghost"}
-	leg := legRec("legowner", "ghost", "")
+	leg := legRec("legowner", "ghost")
 	for name, c := range map[string]struct {
 		id    sap.EndpointIdentity
 		alias store.Alias
@@ -660,9 +653,8 @@ func TestVerifyAlias(t *testing.T) {
 		"accepted with unrelated new":  {id, al, []store.Record{leg, newRec("team2", "other", nil)}, ""},
 		"accepted, own record present": {id, al, []store.Record{leg, newRec("team1", "ops1", &al)}, ""},
 		"no records":                   {id, al, nil, "no legacy endpoint"},
-		"legacy with another owner":    {id, al, []store.Record{legRec("elsewhere", "ghost", "")}, "no legacy endpoint"},
-		"legacy with another name":     {id, al, []store.Record{legRec("legowner", "other", "")}, "no legacy endpoint"},
-		"zoned legacy":                 {id, al, []store.Record{legRec("legowner", "ghost", "z1")}, "zoned"},
+		"legacy with another owner":    {id, al, []store.Record{legRec("elsewhere", "ghost")}, "no legacy endpoint"},
+		"legacy with another name":     {id, al, []store.Record{legRec("legowner", "other")}, "no legacy endpoint"},
 		"claimed by another":           {id, al, []store.Record{leg, newRec("team2", "other", &al)}, "already claimed"},
 		"owner equal":                  {newID(t, "acme", "legowner", "ops1"), al, []store.Record{leg}, "alias owner"},
 		"bad legacy name":              {id, store.Alias{Owner: "legowner", Name: "Bad"}, []store.Record{leg}, "legacy name"},
@@ -693,11 +685,11 @@ func TestNewFormUserPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legRec := func(owner, name, zone string) store.Record {
+	legRec := func(owner, name string) store.Record {
 		return store.Record{Name: name, Owner: owner, Agent: sap.AgentName, AgentToken: "cc", Account: "A", User: "U",
-			MailSubject: store.MailSubjectFor(owner, zone, name), Zone: zone}
+			MailSubject: store.MailSubjectFor(owner, name)}
 	}
-	existing := []store.Record{legRec("legowner", "ghost", "")}
+	existing := []store.Record{legRec("legowner", "ghost")}
 	got, err := admin.NewFormUserPermissions(id, nil, nil, extra)
 	if err != nil {
 		t.Fatal(err)
@@ -768,8 +760,7 @@ func TestNewFormUserPermissions(t *testing.T) {
 		want string
 	}{
 		"names no existing legacy record": {nil, "no legacy endpoint"},
-		"zoned legacy record":             {[]store.Record{legRec("legowner", "ghost", "z1")}, "zoned"},
-		"claimed by another new-form":     {[]store.Record{legRec("legowner", "ghost", ""), claimed}, "already claimed"},
+		"claimed by another new-form":     {[]store.Record{legRec("legowner", "ghost"), claimed}, "already claimed"},
 	} {
 		_, err := admin.NewFormUserPermissions(id, &al, c.recs, nil)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

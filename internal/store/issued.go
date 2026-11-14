@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -20,6 +22,49 @@ const IssuedHistory = 64
 // revisions of a key; such a bucket is accepted and `mash admin init` raises it to IssuedHistory (a raise loses
 // nothing).
 const IssuedMinHistory = 8
+
+// IssuedMarkerKey is the key in the issue record stream's own metadata (the stream config's Metadata map, which no
+// data write can change) that says whether the retained history of a key can be trusted to be complete. A bucket made at
+// the full history IssuedHistory carries IssuedMarkerFull. When `mash admin init` raises an older bucket to
+// IssuedHistory it writes IssuedMarkerRaised(n, seq): n is the per-key history it had, seq the stream's last sequence
+// at that moment. A bucket with neither is a legacy or unknown one.
+const (
+	IssuedMarkerKey  = "mash_issued_history"
+	IssuedMarkerFull = "full"
+)
+
+// IssuedMarkerRaised is the marker value for a bucket raised from a per-key history of n at stream sequence seq.
+func IssuedMarkerRaised(n int, seq uint64) string {
+	return "raised:" + strconv.Itoa(n) + ":" + strconv.FormatUint(seq, 10)
+}
+
+// IssuedMarker is a parsed marker. Kind is "" (no marker), "full" or "raised"; for "raised", N and Seq are set.
+type IssuedMarker struct {
+	Kind string
+	N    int
+	Seq  uint64
+}
+
+// ParseIssuedMarker reads the marker out of a stream's metadata. A value that is present but not one of the two forms
+// is an error: it is not read as absent.
+func ParseIssuedMarker(md map[string]string) (IssuedMarker, error) {
+	v, ok := md[IssuedMarkerKey]
+	if !ok {
+		return IssuedMarker{}, nil
+	}
+	if v == IssuedMarkerFull {
+		return IssuedMarker{Kind: "full"}, nil
+	}
+	parts := strings.Split(v, ":")
+	if len(parts) == 3 && parts[0] == "raised" {
+		n, err1 := strconv.Atoi(parts[1])
+		seq, err2 := strconv.ParseUint(parts[2], 10, 64)
+		if err1 == nil && err2 == nil && n > 0 {
+			return IssuedMarker{Kind: "raised", N: n, Seq: seq}, nil
+		}
+	}
+	return IssuedMarker{}, fmt.Errorf("mash: issue record stream: the %s marker is not understood", IssuedMarkerKey)
+}
 
 // IssuedMaxBytes caps the issue record's bucket. A record is a few hundred bytes. The stream discards new messages
 // when full, never an old record, so a full bucket refuses new issues (fail closed) and nothing is lost.
@@ -57,11 +102,11 @@ func ValidPurpose(p string) bool {
 // a JWT. The bucket key is the user's public key.
 type Issued struct {
 	PublicKey string `json:"public_key"`
-	// Address is the endpoint's directory name (for an admin user, the name in its JWT). Owner and Zone are the
-	// owner the name lives under and the zone the signing key belongs to ("" when the user has none).
+	// Address is the endpoint's directory name (for an admin user, the name in its JWT). Owner is the
+	// owner the name lives under ("" when the user has none). An entry an older release wrote may carry a "zone" key;
+	// it is ignored on read.
 	Address string   `json:"address"`
 	Owner   string   `json:"owner,omitempty"`
-	Zone    string   `json:"zone,omitempty"`
 	Kind    string   `json:"kind"`
 	Tags    []string `json:"tags"`
 	// Generation is the generation of the policy the JWT was issued under. mash has no policy generation yet, so it
@@ -121,6 +166,7 @@ func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream) (jetstream.
 		MaxConsumers:      -1,
 		AllowDirect:       true,
 		Discard:           jetstream.DiscardNew,
+		Metadata:          map[string]string{IssuedMarkerKey: IssuedMarkerFull},
 	}
 	if _, err := js.CreateStream(ctx, scfg); err != nil && !errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
 		return nil, err
@@ -170,3 +216,10 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 	}
 	return nil
 }
+
+// ErrKeyRevoked and ErrKeyBoundElsewhere are what a checked write of the issue record refuses with: the key's record has
+// revoked_at set, or is bound to an address other than the one being written.
+var (
+	ErrKeyRevoked        = errors.New("mash: issue record: the public key has been revoked")
+	ErrKeyBoundElsewhere = errors.New("mash: issue record: the public key is bound to another address")
+)

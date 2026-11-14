@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -37,17 +38,25 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
 		return runAudit(args[1:], env, lookup, stdout, stderr)
+	case "inbox": // read-only: `inbox inspect` shows one inbox's stored messages and their delivery state; writes nothing
+		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
+	case "issue": // the issue service: runs until interrupted
+		return runIssue(args[1:], env, lookup, stdout, stderr)
+	case "wrangler": // the static wrangler registry of a test account: a file in the key store, no server
+		return runWrangler(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
-	case "label", "unlabel": // the policy file; the server only with --sync
+	case "label", "unlabel": // the labels on the directory record
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, lookup, stdout, stderr)
+	case "unzone": // zones are removed (ADR 0091): makes a zoned record five-token, keeping its mail
+		return runUnzone(args[1:], env, lookup, stdout, stderr)
 	case "reissue": // needs the key directory and creds files, no server
 		return runReissue(args[1:], env, lookup, stdout, stderr)
-	case "init", "limits", "permissions", "provision", "set-meta", "set-zone", "suspend", "resume", "suspended", "deprovision", "list":
+	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
@@ -57,12 +66,12 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error {
+	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error {
 		n, err := parseServers(env)
 		if err != nil {
 			return err
 		}
-		return revokeUsers(ctx, cfg, env, n, users, stdout, nil)
+		return revokeUsers(ctx, cfg, env, n, users, stdout, now)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)

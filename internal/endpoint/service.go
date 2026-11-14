@@ -70,6 +70,19 @@ var (
 	PromptTimeout     = 10 * time.Minute
 )
 
+// MaxPromptBytes is the most bytes of text a live prompt may carry (the decoded text, before any escaping). A longer
+// prompt is refused to its caller before it is acknowledged, so the session is never shown a cut-off request and no
+// caller waits on one; the longer text goes as mail. The session's channel notice (cmd/mash PromptTextMax) uses this
+// same number, so the notice never has to cut.
+const MaxPromptBytes = 32 << 10
+
+// PromptTooLargeCode is the stable error code of a refused oversized prompt; its description starts with
+// "prompt_too_large:".
+const PromptTooLargeCode = "413"
+
+// promptTooLarge is the error description a caller gets for a prompt over MaxPromptBytes.
+var promptTooLarge = fmt.Sprintf("prompt_too_large: a live prompt is at most %d bytes; send the longer text as mail", MaxPromptBytes)
+
 // PromptEvent is a verified live SAP prompt for the session to answer.
 type PromptEvent struct {
 	RequestID string
@@ -342,6 +355,10 @@ func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(Promp
 		e.end(reply, "400", err.Error())
 		return
 	}
+	if len(text) > MaxPromptBytes {
+		e.end(reply, PromptTooLargeCode, promptTooLarge)
+		return
+	}
 	_ = e.nc.Publish(reply, chunk("status", "ack"))
 	id := nuid.Next()
 	p := &openPrompt{from: from, reply: reply, done: make(chan struct{})}
@@ -466,6 +483,14 @@ func discoverSubject(ctx context.Context, nc *nats.Conn, owner, want, name strin
 // Prompt sends a signed live prompt to subject and writes the streamed reply
 // to out (SAP §5-§6, §13). It fails on an error chunk or 60 s of silence.
 func Prompt(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
+	if len(text) > MaxPromptBytes {
+		return fmt.Errorf("mash: prompt refused: %s %s (this one is %d)", PromptTooLargeCode, promptTooLarge, len(text))
+	}
+	return promptSend(ctx, nc, id, name, subject, text, out)
+}
+
+// promptSend is Prompt without the size pre-check, so a test can send what the service must refuse.
+func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
 	inbox := secretInbox(nc)
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {

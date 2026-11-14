@@ -7,17 +7,14 @@
 >
 > | Item | Where in this file | Waits for | State of the text |
 > |---|---|---|---|
-> | The applied-policy gate: applied, partial and not applied; generations | section 5.1 | #487 (gate), #488 (live gate), #499 (state and ledger), #489 (ordering) | Written from the contract only. Names no code or test. |
-> | Narrowing rotates to a new key with a deadline; removal revokes | section 5.2 | #498 (rotation) | Written from the contract and ADR 0067 only. Names no code or test. |
-> | Probe-credential evidence for the gate | sections 5.1 and 6.3 | #488 | Written from the contract and the `probe` purpose that ADR 0101 reserves. |
-> | The issue service (REQ-013), ADR 0104, the static wrangler registry | sections 5.3 and 6.8 | the issue-service branch (`pr/core/issue-service`) | Written from ADR 0104 and its tests as they stand on that branch. |
-> | Per-sender size table and refusal text (REQ-007, REQ-008), the dry run | sections 6.2 and 7 | the policy-size branch (`pr/core/policy-size`) | Tables copied from that branch's `docs/policy-file.md`. |
-> | The raw-client table on the open subjects (AT-020) and the release-gate list (AT-021) | sections 6.1 and 7 | the policy-release-tests branch (`pr/core/policy-release-tests`) | Copied from that branch's `docs/security/threat-model.md` 5.3.1 and `docs/release.md`. |
+> | The applied-policy gate: applied, partial and not applied; generations | section 5.1 | nothing: #487, #488, #499 and #489 are on `main` | Written from the contract only, before they merged. Names no code or test beyond section 7. |
+> | Narrowing rotates to a new key with a deadline; removal revokes | section 5.2 | nothing: #498 is on `main` | Written from the contract and ADR 0067 only. Names no code or test beyond section 7. |
+> | Probe-credential evidence for the gate | sections 5.1 and 6.3 | nothing: #488 is on `main` | Written from the contract and the `probe` purpose that ADR 0101 reserves. |
 > | AT-011 on nats-server 2.15.2 | section 4 | the deps-go-group branch (`pr/core/deps-go-group`), ADR 0103 | Figures copied from ADR 0103 on that branch. |
-> | #503 (a sender's lost reach to its own address is checked) | section 5.1 | #503 (sdk) | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
+> | #503 (a sender's lost reach to its own address is checked) | section 5.1 | nothing: #503 is on `main` | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
 > | Mail's lost-publish result at the close (REQ-021) | sections 4 and 6.5 | ADR 0103 in #469 | Pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged). |
-> | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | not on `main` or on any branch the drafter read | Not yet documented beyond the contract text. |
-> | The list set file format (DEC-004) and wiring the compile into `mashctl policy apply` | sections 2 and 5 | a decision and a change not yet made | Nothing outside `internal/listset` imports the compile on this commit. |
+> | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | the adoption marker is on `main` (ADR 0111, `mashctl policy adopt`); `show`, `explain` and the generation numbers: not checked here | Not yet documented beyond the contract text. |
+> | The list set file format (DEC-004) and wiring the compile into `mashctl policy apply` | sections 2 and 5 | a decision and a change not yet made | The compile is used by `internal/policyapply` and `internal/issue`; no `mashctl policy` subcommand takes a list set file yet (`docs/mashctl.md`). |
 
 ## 1. Purpose, and the claim
 
@@ -222,7 +219,7 @@ tests, and the owner group comes from the sender's own address.
 <!-- source: nats-server behaviour as verified in ADR 0102 and ADR 0097; internal/listset/live_test.go (TestLiveMatchesCheck); ADR 0061 -->
 
 Everything below is the stock nats-server in operator mode. mash patches nothing and runs no relay (contract BND-003,
-[ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md)).
+ADR 0053, amended by ADR 0091).
 
 At connect:
 
@@ -270,7 +267,7 @@ Three consequences:
 
 ## 4. What a change does to connected senders
 
-<!-- source: docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md; ADR 0103 (open branch); internal/policy/at011_test.go; internal/policy/testdata/at011-result.json -->
+<!-- source: docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md; ADR 0103 (open branch); internal/policyapply/at011_test.go; internal/policyapply/testdata/at011-result.json -->
 
 A new template reaches a sender by disconnect and reconnect. It does not change a connection that stays open. This was
 measured by AT-011 ([ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md)):
@@ -301,7 +298,7 @@ sequenceDiagram
 | Runs | 20 under `-race`, 10 with eight busy loops | 20 under `-race`, 10 with 12 busy loops |
 
 > Pending: the 2.15.2 column describes ADR 0103, not yet merged (`pr/core/deps-go-group`). On `main`, `go.mod` pins
-> nats-server 2.15.1, and `internal/policy/testdata/at011-result.json` records 2.15.1.
+> nats-server 2.15.1, and `internal/policyapply/testdata/at011-result.json` records 2.15.1.
 
 In one phrase: about 0.1 s. That figure is the **test client's**, which waits 10 ms before it reconnects. A mash
 endpoint waits 2 s (`nats.ReconnectWait(2*time.Second)` and `nats.MaxReconnects(-1)` in `internal/endpoint/endpoint.go`),
@@ -329,8 +326,8 @@ What this means for a reader who must defend the policy:
   publisher that needs the message to arrive confirms it".
 - **The result is guarded.** `TestAT011TemplateChangeReachesOpenConnections` runs the four scenarios on every `go
   test`. It compares outcome classes (`after_reconnect`, `reconnected`, no loss outside the disconnect, fresh
-  connection `changed`) and the server version with `internal/policy/testdata/at011-result.json`. It fails when either
-  differs, and says so. The maintainer then runs `MASH_AT011_UPDATE=1 go test -run TestAT011 ./internal/policy/`,
+  connection `changed`) and the server version with `internal/policyapply/testdata/at011-result.json`. It fails when either
+  differs, and says so. The maintainer then runs `MASH_AT011_UPDATE=1 go test -run TestAT011 ./internal/policyapply/`,
   commits the record, and writes an ADR that amends the last. The release gate lists this test as required (section 7).
 
 ## 5. The gate, rotation and the issue record
@@ -340,7 +337,7 @@ pull requests. It is written from the contract text (`mash-messaging-policy`, dr
 
 ### 5.1 The applied-policy gate
 
-> Pending: describes #487, #488, #499 and #489, not yet merged. Not yet documented: the command names, output layout,
+> Pending: describes #487, #488, #499 and #489, which are on `main`. Not yet documented: the command names, output layout,
 > the generation counter's storage, the deadline values, and any test names. The text below restates the contract
 > (REQ-011, REQ-012, REQ-015, REQ-017, AT-010) and nothing else.
 
@@ -363,7 +360,7 @@ a sender is its own address (a self-only removal). A gate that skipped that case
 sender can still reach itself. #503 removed an exclusion in the gate that skipped it, so a sender's lost reach to its own
 address is checked like any other removed receiver.
 
-> Pending: describes #503, not yet merged. Written from the maintainer's description of the change. Not yet documented:
+> Pending: describes #503, which is on `main`. Written from the maintainer's description of the change. Not yet documented:
 > the test names and the output. The contract text of REQ-011 and AT-010 does not name the self-only case.
 
 Because a template push closes every connection under the key (section 4), the gate expects a disconnect and then a
@@ -393,7 +390,7 @@ issue record's `generation` field is 0 because mash has no generation yet (ADR 0
 
 ### 5.2 Narrowing rotates, removal revokes
 
-> Pending: describes #498, not yet merged. Not yet documented: the handover deadline's length, the retry behaviour and
+> Pending: describes #498, which is on `main`. Not yet documented: the handover deadline's length, the retry behaviour and
 > test names. The text below is REQ-014 and AT-013, plus ADR 0067 for what `mashctl reissue` does today.
 
 - When a sender's tags narrow, mash issues the new credential to a **new public key**, waits until the servers show a
@@ -430,8 +427,6 @@ once mash has revoked the key. It never holds a seed or a JWT.
 
 **The issue service (REQ-013).**
 
-> Pending: describes ADR 0104 and `cmd/mashctl/issuecmd_test.go` on `pr/core/issue-service`, not yet merged.
-
 [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) lets a
 wrangler on a sender's host ask for a credential for a public key, without any private key leaving the host.
 `mashctl issue serve` answers on `agents.issue.<range>.<owner>`. The request names an address, a public key, a host, a
@@ -464,11 +459,11 @@ registered to its host and owner group signed for a key it chooses.
 
 ### 6.1 The open reply and plumbing subjects
 
-<!-- source: docs/security/threat-model.md section 5.3.1, from pr/core/policy-release-tests; test TestAT020OpenReplyAndPlumbingSubjectsArePinned in internal/listset/at_live_test.go on that branch -->
+<!-- source: docs/security/threat-model.md section 5.3.1; test TestAT020OpenReplyAndPlumbingSubjectsArePinned in internal/listset/at_live_test.go -->
 
-> Pending: the table below is copied from `docs/security/threat-model.md` 5.3.1 and `TestAT020OpenReplyAndPlumbingSubjectsArePinned` on
-> `pr/core/policy-release-tests`, not yet merged. The same table lives in [the threat model](security/threat-model.md)
-> once that branch lands; change both together.
+> The table below is copied from `docs/security/threat-model.md` 5.3.1 and pinned by
+> `TestAT020OpenReplyAndPlumbingSubjectsArePinned` (`internal/listset/at_live_test.go`). Both are on `main`; change the
+> two together.
 
 A raw client is a plain NATS client holding one sender's creds file (its signed user JWT: tags and no permissions of its
 own). Under list-set enforcement ([ADR 0102](decisions/0102-list-set-permissions-are-one-template-per-owner-group-with-allow-and-deny-tags-and-a-deny-sentinel.md)) it publishes mail, prompt and status only to the
@@ -500,12 +495,14 @@ whom, and not who may communicate at all (contract section 1, non-goals; REQ-010
 
 ### 6.2 Size limits
 
-<!-- source: docs/policy-file.md "How many exceptions one sender can have", from pr/core/policy-size; contract REQ-007, REQ-008 -->
+<!-- source: internal/listset/size.go (SizeCheck), internal/listset/dryrun.go (DryRun); contract REQ-007, REQ-008 -->
 
-> Pending: the tables and the refusal text below are copied from `docs/policy-file.md` on `pr/core/policy-size`, not yet
-> merged. That branch's measure, `listset.SizeCheck`, is not wired into `mashctl policy apply`: apply still measures the
-> older compile. The tables measure the list set compile of section 2. The source does not record the nats-server version
-> of the calibration.
+> The measure, `listset.SizeCheck` (`internal/listset/size.go`), and the dry run, `listset.DryRun`
+> (`internal/listset/dryrun.go`), are on `main`. The tables and the refusal text below are kept in this document; they
+> measure the list set compile of section 2 (`internal/listset/compile.go`). The applied-policy run in
+> `internal/policyapply/run.go` calls `SizeCheck` and refuses a list set that does not fit; `DryRun` has no caller outside
+> its tests. The calibration's nats-server version is
+> not recorded.
 
 A user's JWT travels in the connect line, which a default server caps at 4,096 bytes (`max_control_line`). Every
 exception is a tag, and tags are what make the JWT grow. mash **refuses on measured size, never on a count**
@@ -561,7 +558,7 @@ name, fits (the limit is 62). At 63 it does not, and mash says so:
 
 ```text
 sender "rng.sxx.r0000000000000" (group "rng.sxx"): its connect line would be 4,106 bytes with 63 exceptions (63 tags); server "default server limit" allows 4,096 (max_control_line)
-Use a shared verb instead of a long list of exceptions (docs/policy-file.md).
+Use a shared verb instead of a long list of exceptions.
 ```
 
 The same sender with owner parts of 4 characters and names of 7 characters fits 114. The bytes are the rule, not the
@@ -569,8 +566,8 @@ count. A cluster is limited by its smallest server, and the message names the se
 An account JWT that does not fit a server is refused the same way, naming the account. It grows with the number of owner
 groups and the shared verbs they hold, never with the number of senders. The measure is conservative by at most 6 bytes:
 a credential within 6 bytes of the limit may be refused although the server would take it, and one the measure accepts
-always connects. Tests on that branch: `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable`,
-`TestSizeCheckMeasuresTheFullConnectLine` in `internal/listset/size_test.go`.
+always connects. On `main` the refusal is tested by `TestSizeCheckNamesTheServerThatDoesNotFit` and `TestSizeCheckAccountJWT`
+(`internal/listset/dryrun_test.go`). No test compares the tables here with the measure: that is not yet tested.
 
 **The way out** is a shared verb instead of a long list of exceptions: share the verb in the owner group, so its senders
 reach each other through the owner line (no tag), and keep the list for the few addresses outside the group. A server
@@ -578,7 +575,7 @@ that runs a larger `max_control_line` holds more: the limit is the server's own.
 
 ### 6.3 Probe-credential evidence
 
-> Pending: describes #488, not yet merged. Not yet documented.
+> Pending: describes #488, which is on `main`. Not yet documented.
 
 The applied gate's evidence for a withdrawn permission is a probe credential, not a send as the old sender (section 5.1).
 So the evidence has three parts: the probe is refused on every server, every server's account JWT revokes each old key,
@@ -610,12 +607,13 @@ owner-line-only). One account run both ways is not supported (contract REQ-016, 
 2026-11-11: "Running mash with both [an outside owner of the policy] and without is not supported. Documented.").
 
 > Pending: the marker, its submitter key, the refusal of direct policy changes on a marked account, and the
-> reconciliation at adoption are REQ-016, not on `main` and not on any branch the drafter read. Not yet documented
-> beyond the contract text. On `main` there is no adoption marker.
+> reconciliation at adoption are REQ-016. `mashctl policy adopt` and the guards on an adopted account are on `main` (ADR 0111;
+> `docs/mashctl.md`); the list-set intake that would take a list set from the submitter is not documented here. Not yet
+> documented beyond the contract text.
 
 ### 6.7 Credential custody
 
-<!-- source: docs/security/threat-model.md section 10 "Who holds which key"; the group-key and wrangler rows are from pr/core/issue-service -->
+<!-- source: docs/security/threat-model.md section 10 "Who holds which key" -->
 
 The enforcement is only as strong as the custody of the keys that sign credentials. In one table (the full text, with
 what to do when each leaks, is [threat model section 10](security/threat-model.md#10-who-holds-which-key)):
@@ -630,18 +628,12 @@ what to do when each leaks, is [threat model section 10](security/threat-model.m
 | Endpoint creds (user JWT and seed) | the host that runs that endpoint | Be that endpoint, under its permissions. No access to the issue record. |
 | Wrangler key (the countersigning key, public half in a registry) | the wrangler on each sender's host | Have any address of its registered host and owner group signed for a public key it chooses. |
 
-> Pending: the rows for the owner group signing keys (`groups/<range>.<owner>.nk`) and wranglers come from
-> `docs/security/threat-model.md` on `pr/core/issue-service`, not yet merged. On `main` the signing keys in the key store
-> are zone keys.
-
 The custody rule: scoped signing keys stay with the minting authority, and a sender's host holds only its own creds.
 `mashctl issued check` shows a user signed outside the authority with a copied key (section 5.3). The modes on the key
 store stop other users and not other processes of the same user; the threat model says to keep it under a separate user
 or on a mount agent sessions cannot read.
 
 ### 6.8 The static wrangler registry is for test accounts
-
-> Pending: describes ADR 0104 on `pr/core/issue-service`, not yet merged.
 
 How a real wrangler's key comes to be registered for a host and owner group is **not decided** (contract DEC-002, open
 part). Until it is, mash ships only a static registry, `wranglers.json` in the key store directory, managed by `mashctl
@@ -652,7 +644,7 @@ statement that wrangler keys should be registered this way on a real account.
 
 ## 7. How each claim is tested
 
-<!-- source: scripts/releasecheck/policytests.txt from pr/core/policy-release-tests; test names read from main and from the open branches named in the Status column -->
+<!-- source: scripts/releasecheck/policytests.txt; test names read from `main` and from the open branches named in the Status column -->
 
 The release gate runs the rows marked **required** on every release and every NATS server version change, and a failure
 blocks the release ([docs/release.md](release.md#policy-tests-on-every-release), contract REQ-020, AT-021). A row that
@@ -662,25 +654,25 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 |---|---|---|---|
 | AT-001 | Exact lists become enforced permissions: allowed sends pass, others are refused, from a raw client | `TestAT001TemplateNamesNoPeer`, `TestLiveMatchesCheck/AT-001_shape` (`internal/listset`) | on `main`; required in the gate list |
 | AT-002 | A bad entry refuses the whole set, naming each | `TestAT002_BadEntriesRefuseTheWholeSet`, `TestAT002_AllNamedInOneError`, `TestDenyRule` (`internal/listset`) | on `main`. The half that an account JWT and the issue record stay unchanged has no test: no apply path uses the compile yet. |
-| AT-003 | Closing a verb drops the owner line, sharing restores it, a deny holds with every user carrying a deny tag | `TestLiveMatchesCheck/deny_key_(AT-003)`, `TestAT003OwnerLineDroppedAndDenyHolds` | the first on `main`; the second on `pr/core/policy-release-tests`; required |
+| AT-003 | Closing a verb drops the owner line, sharing restores it, a deny holds with every user carrying a deny tag | `TestLiveMatchesCheck/deny_key_(AT-003)`, `TestAT003OwnerLineDroppedAndDenyHolds` | both on `main`; required |
 | AT-004 | Compiled output fails closed: a tag-free allow line, tags only, effective permissions equal the lists | `TestAT004_Corpus`, `TestAT004_ZeroTags`, `TestMutationsAreRefused` | on `main`; required |
-| AT-005 | A deny-all sender is refused everywhere and still reaches its own inbox | `TestAT005DenyAllSenderIsRefused` | `pr/core/policy-release-tests`; required. The half that an issue request lacking a deny tag is refused before signing: not yet documented. |
-| AT-006 | An oversize credential or account JWT is refused before issue or push | `TestSizeCheckNamesTheServerThatDoesNotFit`, `TestSizeCheckAccountJWT` (`internal/listset`), `TestSmallestServerRefusesTheWholeSet` (`internal/apply`) | `pr/core/policy-size`; pending |
-| AT-007 | The documented exception limit matches the measured table | `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable` | `pr/core/policy-size`; pending |
-| AT-008 | The dry run lists exactly the changes and changes nothing | `TestDryRunAT008Golden`, `TestAT008Content`, `TestDryRunDoesNotMutateItsInputs` | `pr/core/policy-size`; pending |
+| AT-005 | A deny-all sender is refused everywhere and still reaches its own inbox | `TestAT005DenyAllSenderIsRefused` | on `main`; required. The half that an issue request lacking a deny tag is refused before signing: not yet documented. |
+| AT-006 | An oversize credential or account JWT is refused before issue or push | `TestSizeCheckNamesTheServerThatDoesNotFit`, `TestSizeCheckAccountJWT` (`internal/listset`) | on `main`; not in the gate list. The check that the smallest server of a cluster refuses the whole set has no test on `main` that this document found. |
+| AT-007 | The documented exception limit matches the measured table | `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable` | not on `main`: the tables are in section 6.2 of this document and no test compares them with the measure yet; pending |
+| AT-008 | The dry run lists exactly the changes and changes nothing | `TestDryRunAT008Golden`, `TestAT008Content`, `TestDryRunDoesNotMutateItsInputs` (`internal/listset/dryrun_test.go`) | on `main`; not in the gate list |
 | AT-009 | `explain` and `show` work without admin rights and name what they describe | not yet documented | no test found |
-| AT-010 | The applied gate, on a cluster of two or more servers | pending: #488. The gate's check of a sender's lost reach to its own address (#503) is not yet mapped to AT-010: the contract's AT-010 text does not name a self-only removal. | pending; `pending` row in the gate list |
-| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policy`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md), ADR 0103 | on `main` (2.15.1); ADR 0103 on `pr/core/deps-go-group` (2.15.2); required. ADR 0103 also measured mail published through JetStream at the close (sections 4 and 6.5); pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged). |
-| AT-012 | A credential for a public key, for exactly one address, with no private key anywhere | `TestIssueServiceAT012IssuesAJWTThatConnects`, `TestIssueServiceAT012NoPrivateKeyAnywhere`, `TestIssueServiceAT012Refusals`, `TestIssueServiceIgnoresTagsAndPermissionsInARequest` (`cmd/mashctl`), [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) | `pr/core/issue-service`; not in the gate list |
-| AT-013 | Narrowing rotates, revokes and causes no outage | pending: #498 | pending |
-| AT-014 | A new receiver is reachable only after the senders that must refuse it | pending: #489 | pending |
+| AT-010 | The applied gate, on a cluster of two or more servers | `TestAT010Live` (`internal/policyapply/at010_live_test.go`). The gate's check of a sender's lost reach to its own address (#503) is not yet mapped to AT-010: the contract's AT-010 text does not name a self-only removal. | on `main`; required in the gate list |
+| AT-011 | A template change closes the connection and the reconnect is bound by the new template | `TestAT011TemplateChangeReachesOpenConnections` (`internal/policyapply`), [ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md), ADR 0103 | on `main` (2.15.1); ADR 0103 on `pr/core/deps-go-group` (2.15.2); required. ADR 0103 also measured mail published through JetStream at the close (sections 4 and 6.5); pending: the measurement is recorded in ADR 0103 (PR #469, not yet merged). |
+| AT-012 | A credential for a public key, for exactly one address, with no private key anywhere | `TestIssueServiceAT012IssuesAJWTThatConnects`, `TestIssueServiceAT012NoPrivateKeyAnywhere`, `TestIssueServiceAT012Refusals`, `TestIssueServiceIgnoresTagsAndPermissionsInARequest` (`cmd/mashctl`), [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) | on `main`; not in the gate list |
+| AT-013 | Narrowing rotates, revokes and causes no outage | `TestAT013Live` (`internal/policyapply/at013_live_test.go`) | on `main`; not in the gate list |
+| AT-014 | A new receiver is reachable only after the senders that must refuse it | `TestAT014Live` (`internal/policyapply/at014_live_test.go`) | on `main`; not in the gate list |
 | AT-015 | An adopted account takes list sets only from its owner | not yet documented | no test found |
-| AT-016 | A stale generation is refused | pending: #499 | pending |
+| AT-016 | A stale generation is refused | `TestAT016_StaleBaseRefused` (`internal/listset/generation_test.go`) | on `main`; not in the gate list |
 | AT-017 | The issue record holds every issued JWT, and a foreign key is reported | `TestAddRecordsTheIssuedUser`, `TestIssuedCheckReportsAKeyMashDidNotIssue` (`cmd/mashctl/issued_test.go`), [ADR 0101](decisions/0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md) | on `main` for `add`, `reissue` and the drift check. The record cannot yet hold JWTs from the gate or rotation paths. |
-| AT-018 | Zones are gone | [ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md) decides it | not complete on this commit: `internal/policy` and `docs/policy-file.md` still carry zones |
+| AT-018 | The old per-area scoping is gone | ADR 0091 decides it | on `main`: the flag, the policy file and its compile are removed. Some code remains that finds and refuses on, or cleans up after, a policy that an older release applied (in `cmd/mashctl`, `internal/admin` and `internal/apply`). No test is mapped to this row. |
 | AT-019 | Lists are one direction only | the case "cross-group allows go one way" of `TestLiveMatchesCheck` | on `main`. The half that a live prompt still gets its direct answer: not yet documented. |
-| AT-020 | A raw client gets no more than its lists, and the open subjects are pinned | `TestLiveMatchesCheck`, `TestAT020OpenReplyAndPlumbingSubjectsArePinned` | the first on `main`; the second on `pr/core/policy-release-tests`; required |
-| AT-021 | The release pipeline runs these tests and a failure blocks it | `scripts/releasecheck/policytests.txt`, `scripts/releasecheck/policytests_test.go`, `.github/workflows/policy-tests.yml`, [docs/release.md](release.md#policy-tests-on-every-release) | `pr/core/policy-release-tests`. The gate lists AT-001, AT-003, AT-004, AT-005, AT-011 and AT-020 as required. It does not yet run AT-010. |
+| AT-020 | A raw client gets no more than its lists, and the open subjects are pinned | `TestLiveMatchesCheck`, `TestAT020OpenReplyAndPlumbingSubjectsArePinned` | both on `main`; required |
+| AT-021 | The release pipeline runs these tests and a failure blocks it | `scripts/releasecheck/policytests.txt`, `scripts/releasecheck/policytests_test.go`, `.github/workflows/policy-tests.yml`, [docs/release.md](release.md#policy-tests-on-every-release) | on `main`. The gate lists AT-001, AT-003, AT-004, AT-005, AT-010, AT-011 and AT-020 as required. |
 | AT-022 | This document exists with its diagrams, AT-011 result, custody, raw-client limit and the not-supported statement | inspection of this file | this file |
 
 ## 8. Glossary
@@ -710,5 +702,5 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | Raw client | A plain NATS client that uses one sender's creds file and nothing of mash. |
 | Applied | A list set is applied when the gate has passed on every server (section 5.1). |
 
-See also: [the policy file](policy-file.md), [mash architecture](architecture.md), [the threat model](security/threat-model.md),
+See also: [the list set compile and its checks](../internal/listset/compile.go), [`mashctl`](mashctl.md), [mash architecture](architecture.md), [the threat model](security/threat-model.md),
 [releasing mash](release.md).

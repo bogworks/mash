@@ -21,6 +21,26 @@ func Clean(s string) string { return clean(s, CleanMax) }
 // UTF-8 are escaped, nothing is cut.
 func Escape(s string) string { return clean(s, 0) }
 
+// EscapeText is Escape for text whose layout matters (a mail body, a live prompt): "\n" and "\t" pass through, every
+// other control character (C0, DEL and C1) and every invalid UTF-8 byte becomes a visible \xNN escape. It is the one
+// rule the mail renderer and the live-prompt notice share.
+func EscapeText(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size <= 1:
+			fmt.Fprintf(&b, `\x%02x`, s[i])
+		case r != '\n' && r != '\t' && (r < 0x20 || (r >= 0x7f && r <= 0x9f)):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+		i += size
+	}
+	return b.String()
+}
+
 func clean(s string, max int) string {
 	var b strings.Builder
 	n := 0

@@ -1,4 +1,4 @@
-// Package ctlkeys is the key store of mashctl: the account signing seed and the per-zone scoped signing seeds, kept
+// Package ctlkeys is the key store of mashctl: the account signing seed (and the operator and system keys of a server `mashctl init --local` stood up), kept
 // as 0600 files in a 0700 directory (ADR 0052). Seed text is never put in an error or a log line.
 package ctlkeys
 
@@ -23,8 +23,6 @@ import (
 )
 
 var (
-	// ErrNoZoneKey is wrapped by ZoneKey when the zone has no key file and create is false.
-	ErrNoZoneKey = errors.New("mashctl: no signing key for zone")
 	// ErrNoOperatorKey is returned by Operator when operator.nk is absent.
 	ErrNoOperatorKey = errors.New("mashctl: no operator key (operator.nk): it exists only for a server `mashctl init --local` stood up")
 	// ErrNoSystemKey is returned by System when system.nk is absent.
@@ -37,7 +35,7 @@ const (
 	accountFile  = "account.nk"
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
-	zonesDir     = "zones"
+	groupsDir    = "groups"
 	seedExt      = ".nk"
 )
 
@@ -53,12 +51,6 @@ var (
 	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
 	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
-
-// zoneRE is the shape of a zone name, identical to sap.ValidZone (zone-in-subject, ADR 0054; not on main yet): swap it for that
-// when it lands. The shape also keeps path separators and dots out of file names.
-var zoneRE = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-func validZone(z string) bool { return len(z) >= 1 && len(z) <= 32 && zoneRE.MatchString(z) }
 
 // Authority is the key store rooted at one directory.
 type Authority struct {
@@ -132,6 +124,11 @@ func ownerErr(fi fs.FileInfo, path, what string) error {
 	return nil
 }
 
+// CheckOwned refuses a file or directory (described by fi, named path, called what in the error) that the effective
+// uid does not own: the owner check the key store applies to its own files, for a caller that holds a file of the same
+// custody. It is a no-op where the platform reports no owner.
+func CheckOwned(fi fs.FileInfo, path, what string) error { return ownerErr(fi, path, what) }
+
 // CheckParentDir refuses a directory that is not a real directory (a symlink is refused), is not owned by the
 // effective uid, or is writable by other users (group-writable is allowed: under the usual user-private-group umask 002 a config directory is 0775 and the group is the owner alone): a place where a creds file may be created without another user
 // being able to swap or replace it. A missing directory is an error wrapping fs.ErrNotExist.
@@ -155,11 +152,36 @@ func CheckParentDir(d string) error {
 	return nil
 }
 
-func (a *Authority) zonesPath() string { return filepath.Join(a.dir, zonesDir) }
+// CheckStrictParentDir is the rule for a directory that holds a file deciding who may be issued a credential (the
+// wrangler registry, its lock file, the issue service's list set): a real directory (a symlink is refused) that the
+// effective uid owns and that no group or other user can write (mode & 0022 == 0). Unlike CheckParentDir it refuses a
+// group-writable directory too, because another member of the group could replace the file by rename. A missing
+// directory is an error wrapping fs.ErrNotExist.
+func CheckStrictParentDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("directory %s is a symlink: refusing it", d)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", d)
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("directory %s has mode %04o: a group or other user can write it and could replace the files in it. Run: chmod go-w %s", d, fi.Mode().Perm(), d)
+	}
+	return ownerErr(fi, d, "directory")
+}
 
-// checkDirs checks the key dir and the zones dir; with create it makes missing ones (0700).
-func (a *Authority) checkDirs(create bool) error {
-	for _, d := range []string{a.dir, a.zonesPath()} {
+// checkDirs checks the key dir; with create it makes it if missing (0700). A zones directory left by an older release
+// is not read, checked or removed: its seeds are the operator's to keep or destroy (ADR 0091).
+func (a *Authority) checkDirs(create bool) error { return a.checkDirsIn(create) }
+
+// checkDirsIn checks the key dir and the sub directories subs (the key dir's own); with create it makes missing
+// ones (0700).
+func (a *Authority) checkDirsIn(create bool, subs ...string) error {
+	for _, d := range append([]string{a.dir}, subs...) {
 		ok, err := checkDir(d)
 		if err != nil {
 			return err
@@ -384,54 +406,84 @@ func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
 }
 
-// ZoneKey returns zone's scoped signing key; with create it generates and writes one if absent. It never overwrites.
-func (a *Authority) ZoneKey(zone string, create bool) (nkeys.KeyPair, error) {
-	if !validZone(zone) {
-		return nil, fmt.Errorf("mashctl: invalid zone name %q: use lower-case letters, digits and hyphens, starting with a letter, up to 32 characters", zone)
+// ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
+var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
+
+// groupRE is one part of an owner group name "range.owner": the shape of a zone name.
+var groupRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+// validGroup reports whether g is "range.owner" with both parts of a zone name's shape. The shape keeps path
+// separators out of file names; the single dot cannot make a name that climbs.
+func validGroup(g string) bool {
+	r, o, ok := strings.Cut(g, ".")
+	return ok && groupRE.MatchString(r) && groupRE.MatchString(o)
+}
+
+func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir) }
+
+// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk beside the
+// zones directory under the same custody rules; with create it generates and writes one if absent. It never
+// overwrites. Zone keys (ZoneKey) are the policy file's; group keys are the list set's.
+func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
+	if !validGroup(group) {
+		return nil, fmt.Errorf("mashctl: invalid owner group %q: want range.owner, each part lower-case letters, digits and hyphens, up to 32 characters", group)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.checkDirs(create); err != nil {
+	if err := a.checkDirsIn(create, a.groupsPath()); err != nil {
 		return nil, err
 	}
-	kp, _, err := getOrCreate(filepath.Join(a.zonesPath(), zone+seedExt), accountKind, create)
+	kp, _, err := getOrCreate(filepath.Join(a.groupsPath(), group+seedExt), accountKind, create)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("%w %q", ErrNoZoneKey, zone)
+		return nil, fmt.Errorf("%w %q", ErrNoGroupKey, group)
 	}
 	return kp, err
 }
 
-// ZonePublic is the public key of an existing zone key.
-func (a *Authority) ZonePublic(zone string) (string, error) {
-	kp, err := a.ZoneKey(zone, false)
-	if err != nil {
-		return "", err
-	}
-	defer kp.Wipe()
-	return kp.PublicKey()
-}
-
-// Zones lists the zones that have a key file, sorted.
-func (a *Authority) Zones() ([]string, error) {
+// Groups lists the owner groups that have a key file, sorted.
+func (a *Authority) Groups() ([]string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.checkDirs(false); err != nil {
+	if err := a.checkDirsIn(false, a.groupsPath()); err != nil {
 		return nil, err
 	}
-	ents, err := os.ReadDir(a.zonesPath())
+	ents, err := os.ReadDir(a.groupsPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("mashctl: list zones: %w", err)
+		return nil, fmt.Errorf("mashctl: list owner groups: %w", err)
 	}
 	var out []string
 	for _, e := range ents {
-		if z, ok := strings.CutSuffix(e.Name(), seedExt); ok && validZone(z) && !e.IsDir() {
-			out = append(out, z)
+		if g, ok := strings.CutSuffix(e.Name(), seedExt); ok && validGroup(g) && !e.IsDir() {
+			out = append(out, g)
 		}
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+// GroupPublics maps every owner group with a key file to the public key of that key. Each key pair is wiped after its
+// public key is read; no seed leaves this function.
+func (a *Authority) GroupPublics() (map[string]string, error) {
+	groups, err := a.Groups()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(groups))
+	for _, g := range groups {
+		kp, err := a.GroupKey(g, false)
+		if err != nil {
+			return nil, err
+		}
+		pub, err := kp.PublicKey()
+		kp.Wipe()
+		if err != nil {
+			return nil, err
+		}
+		out[g] = pub
+	}
 	return out, nil
 }
 

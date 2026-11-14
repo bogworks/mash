@@ -27,10 +27,11 @@ const Owner = "o"
 
 // Env is one running test server and its keys.
 type Env struct {
-	URL        string
-	Owner      string
-	Account    string // MASH account public key
-	AdminCreds string // path of the admin's creds file
+	URL         string
+	Owner       string
+	Account     string // MASH account public key
+	AdminCreds  string // path of the admin's creds file
+	AccountSeed string // path of the MASH account identity seed file (0600), as ctlkeys.ImportAccount takes
 
 	CAFile, ClientCert, ClientKey string // PEM paths, set when the server runs with TLS (the client pair only if it requires one)
 
@@ -122,12 +123,20 @@ func launch(dir string, o Options) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, mashPub, mashSK, err := account("MASH", true)
+	mashKP, mashPub, mashSK, err := account("MASH", true)
 	if err != nil {
 		return nil, err
 	}
+	mashSeed := must(mashKP.Seed())
+	seedPath := filepath.Join(dir, "mash-account.nk")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(seedPath, append(mashSeed, '\n'), 0o600); err != nil {
+		return nil, err
+	}
 
-	e := &Env{Owner: Owner, Account: mashPub, dir: dir, acctSK: mashSK, operator: op, resolver: resolver, maxPay: o.MaxPayload, tls: o.TLS, verify: o.RequireClientCert}
+	e := &Env{Owner: Owner, Account: mashPub, AccountSeed: seedPath, dir: dir, acctSK: mashSK, operator: op, resolver: resolver, maxPay: o.MaxPayload, tls: o.TLS, verify: o.RequireClientCert}
 	if o.TLS {
 		if err := e.setupTLS(dir, o); err != nil {
 			return nil, err

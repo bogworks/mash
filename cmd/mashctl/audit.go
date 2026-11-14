@@ -98,7 +98,6 @@ type auditRecord struct {
 	Flat     string        `json:"flat"`
 	Form     string        `json:"form"` // legacy or new
 	User     string        `json:"user"`
-	Zone     string        `json:"zone,omitempty"`
 	Alias    *auditAlias   `json:"alias,omitempty"`
 	Running  bool          `json:"running"`
 	Inbox    auditInbox    `json:"inbox"`
@@ -411,6 +410,9 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		}
 	}
 	for _, r := range snap.Records {
+		if zerr := store.ZonedRecordError(r); zerr != nil { // zones are removed (ADR 0091): a finding, so --strict fails
+			rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: r.KeyOrName(), Error: zerr.Error()})
+		}
 		id, err := r.Identity()
 		if err != nil {
 			rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: r.KeyOrName(), Error: err.Error()})
@@ -429,7 +431,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 		}
 		var legacyInbox *auditInbox
 		ar := auditRecord{Key: key, Identity: auditIdentity{Agent: id.Agent, Owner: id.Owner, Name: id.Name}, Flat: key,
-			Form: form, User: r.User, Zone: r.Zone, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
+			Form: form, User: r.User, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
 		if r.Alias != nil {
 			ar.Alias = &auditAlias{Owner: r.Alias.Owner, Name: r.Alias.Name}
 			aid, ok, aerr := r.AliasIdentity()

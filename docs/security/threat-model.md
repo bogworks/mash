@@ -109,7 +109,7 @@ interface mash uses, and the internals of the NATS server.
 
 | Threat | STRIDE | Today | Gap | Rating |
 |---|---|---|---|---|
-| Plaintext connection lets a network attacker read mail and obtain signatures | I, S | Docs say "Use TLS: SAP identity is only meaningful over a verified connection" (`docs/install.md:55`). nats.go verifies a `tls://` server against system roots (inferred). | mash accepts any URL, including `nats://` with no TLS (`internal/endpoint/endpoint.go:236-246`). No CA pin option. SAP warns that the connect handshake signs a server-chosen nonce with the same seed, so a man in the middle without TLS can obtain a valid `Agent-Sender` signature over input it chooses (`SAP:L1056`); nats.go signs the nonce bytes as given (nats.go v1.54.0 `nats.go:3135`). | M |
+| Plaintext connection lets a network attacker read mail and obtain signatures | I, S | Docs say "Use TLS: SAP identity is only meaningful over a verified connection" (`docs/install.md:55`). nats.go verifies a `tls://` server against system roots (inferred). | By default mash accepts any URL, including `nats://` with no TLS, and `mash status` only warns; `require_tls` (`MASH_REQUIRE_TLS=1`, [ADR 0108](../decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md)) makes endpoint connections refuse plain text to a non-loopback host, and is off until the deployment sets it. No CA pin option. SAP warns that the connect handshake signs a server-chosen nonce with the same seed, so a man in the middle without TLS can obtain a valid `Agent-Sender` signature over input it chooses (`SAP:L1056`); nats.go signs the nonce bytes as given (nats.go v1.54.0 `nats.go:3135`). | M |
 | Forged sender | S | Every mail carries an ed25519 `Agent-Sender` signature over account, user, subject, time, nonce and the body hash (`internal/sap/sender.go:120-124`). A bad signature or a `sub` that differs from the stored subject is `forged` and never shown (`sender.go:266-276`, `mail.go:78-79`). Only a directory match makes `[verified]` (`mail.go:85-90`). | The signed `account` is never compared with the directory record (`mail.go:85-96`); harmless while user keys are unique (`SAP:L965`). | L |
 | Replay of a captured signed mail | S, R | Signatures older than 5 minutes at store time are `[stale]` (`mail.go:48,91-94`). The recipient drops a repeat `(user, nonce)` seen within 2 minutes (`mail.go:138-150`). | Between 2 and 5 minutes a replay showed `[verified]` again (raised by research, confirmed). Only someone who already holds the message can replay it, and only to the same recipient, since `sub` is signed. Fix open in [#185](https://github.com/bogworks/mash/pull/185): the recipient keeps the signed timestamp and drops an exact copy for as long as its signature could read as fresh; a `send --id` re-send re-signs and is still shown. | L, fix open (#185) |
 | Inbox flood evicts unread mail | D | Any endpoint may publish to any peer's mail subject (`permissions.go:22`). Inbox: 16 MiB, `DiscardOld`, deny delete and purge (`internal/store/store.go:19,57,59-60`). Documented (`SECURITY.md:52`). | No per-sender quota or rate limit. Forged mail is acked but still fills the stream (inferred). | M |
@@ -118,6 +118,32 @@ interface mash uses, and the internals of the NATS server.
 | Takeover of a live name | S, D | One live session per name through a KV lease, create then revision-checked update (`docs/specs/2026-10-21-mash-design.md:141-144`). Endpoints write only their own lease key (`permissions.go:38`). | Stolen creds (T7) can hold the lease and lock the real session out. | L |
 | Fake presence | S | `mash serve` no longer listens to heartbeats ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)); presence comes from `$SRV.INFO` answers, which need a valid `id_sig` whose key is the directory's for that name (`applyPresence` in `internal/endpoint/directory.go`). | A peer can replay a captured `$SRV.INFO` answer, which SAP says re-announces the registration (`SAP:L1037`), so `who` can show an offline endpoint online for a while (inferred). The same forged answer to `mash prompt`'s discovery can only make an offline target look online, costing the caller a 60 s timeout: since [#178](https://github.com/bogworks/mash/pull/178) `Discover` accepts only the SAP-derived prompt subject. Known limit: `id_sig` has no freshness. | L |
 | Unsigned live-prompt chunks and status replies | S | SAP leaves replies unsigned (`SAP:L1052`). Since [#178](https://github.com/bogworks/mash/pull/178) a prompt's reply subject is 128 random bits, seen only by the caller, the target and the server. A status request goes to the target's own status subject, which only the target may subscribe to (`permissions.go:44`), and its reply inbox is never broadcast. | Known limit, accepted: the only parties that can answer are the target (whose answer it is) and the server (which can already forge, H2). Holds only while the inbox deployment requirement holds (mitigation 17). | L |
+
+### 5.3.1 What a raw client reaches on the open subjects (list-set enforcement)
+
+A raw client is a plain NATS client holding one sender's creds file (its signed user JWT: tags and no permissions of its
+own). Under list-set enforcement ([ADR 0102](decisions/0102-list-set-compile-templates-and-tags.md)) it publishes mail, prompt and status only to the
+addresses its lists give, and it cannot subscribe to another address's inbox, prompt or status subjects. A few lines of
+every template stay open to every sender, because replies, discovery and the directory need them. The table is what a
+raw client of `foo.c.core` reaches on them, measured against a real nats-server by
+`TestAT020OpenReplyAndPlumbingSubjectsArePinned` (`internal/listset/at_live_test.go`). The test pins the table: a
+change that widens or narrows what is reachable fails it, and the maintainer who changes the test updates this table.
+
+| Subject (as the raw client publishes it) | Server | Reaches another address | Why it stays open |
+|---|---|---|---|
+| `_INBOX.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (section 6.4). |
+| `$SRV.INFO.agents`, `$SRV.PING` and the rest of `$SRV.>` | accepted | yes: delivered to every sender (each subscribes to `$SRV.>`) | Discovery and live prompts are service requests to every endpoint ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). |
+| `_INBOX.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
+| `$JS.API.INFO`, `$JS.API.STREAM.INFO.KV_mash-directory`, `$JS.API.DIRECT.GET.KV_mash-directory.>`, `$JS.API.STREAM.INFO.KV_mash-leases` | accepted | no: server API reads; the directory is readable by every sender | Needed to resolve names and read the lease bucket state; read only. |
+| Another address's lease key (`$KV.mash-leases.<flat>`), a read of it, and any write to `$KV.mash-directory.>` | refused | no | A sender writes only its own lease and never the directory. |
+| Another address's inbox stream: `STREAM.INFO`, `CONSUMER.INFO`, `CONSUMER.CREATE`, `CONSUMER.DURABLE.CREATE`, `CONSUMER.MSG.NEXT`, `$JS.ACK`, `STREAM.MSG.GET`, `DIRECT.GET`, `STREAM.DELETE`, `STREAM.PURGE` | refused | no | Every JetStream line names the sender's own inbox stream only. |
+| Another address's heartbeat | refused | no | Publish only to its own heartbeat. |
+
+What a raw client can therefore do: send an unlisted address a reply-prefix publish (`_INBOX.<other>.<id>`), or a
+`$SRV.>` request, and what the receiver does with it rests on its own checks (verified callers, random reply subjects), not on the server. It
+cannot mail, prompt or probe an address its lists do not give, and it cannot read, consume or delete another inbox.
+Subscribing to another address's inbox, prompt and status subjects, or to a wider reply prefix (`_INBOX.>`, `agents.>`,
+`$JS.API.>`), is refused; the same test checks each.
 
 ### 5.4 B4: server, provider and key holders
 
@@ -137,7 +163,7 @@ interface mash uses, and the internals of the NATS server.
 | API token leaks | I | Read from `SYNADIA_API_TOKEN` (then unset, so no child inherits it), one line on stdin, or an echo-off prompt on the terminal (`scripts/quickstart-synadia.sh:114-122`). Never in argv: `api()` hands it to curl as `-K <(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN")`, a config read through a descriptor, and `printf` is a shell builtin, so neither curl's nor printf's argv holds it (`:126-130`, checked by reading, no `ps` test exists). Never stored. Error messages name the status and path only, never a body (`:124-138`). No `set -x` (`:22`). | `SYNADIA_API_TOKEN` in a shell profile or CI env outlives the run. The token equals the account signing key for that account. The base-URL gap is now closed (next row). | L |
 | Token sent to an attacker's API URL | I, S | **Fixed in #182.** `SYNADIA_API_URL` is checked before the token is read (`scripts/quickstart-synadia.sh:40-48`, token read at `:115`): `https://HOST[:port][/path]` with no user info, or `http://127.0.0.1` / `http://localhost` only; anything else exits (`:44-47`). A look-alike such as `http://localhost.evil.com` fails the pattern (`:45`). curl is not given `-L`, so it follows no redirect (`:128`, inferred from the flags). The header comment and `docs/synadia.md:33` name the override as test-only (`:34-35`). | Any `https://` host is still accepted, so someone who sets the script's environment can send the token to a host they run, over TLS. That needs control of the environment, which can also read the token (inferred). The binary had the same limit. | L, fixed (#182) |
 | Script fetched from a mutable branch | T, E | **Fixed in #182.** The README now fetches the script and `SHA256SUMS` from the `v0.3.0` release, not from `main` (`README.md:24-25`), and runs nothing unless the script's line in `SHA256SUMS` appears exactly once and `sha256sum -c` passes; the `&&` chain stops at the first failure (`README.md:26-29`, `:32`). The release workflow copies the tagged script into the release and lists it in `SHA256SUMS` (`.github/workflows/release.yml:93-96,110`, #182's tree). The release gate checks the script is byte-equal to the file at the tagged commit before the draft is published (`docs/release.md:41`, #182's tree). | `SHA256SUMS` comes from the same release as the script, so one who can replace release assets replaces both and the check still passes. It guards against a bad merge to `main` after the tag and a damaged download, not against a hijacked release. `SHA256SUMS` is unsigned until [PR #164](https://github.com/bogworks/mash/pull/164) lands; once it does, the README flow still only runs `sha256sum -c` and does not check the signature (`README.md:26-29`), so the gain needs a README step too. The version is pinned in the README text (`v0.3.0`), so each release must update it, and until v0.3.0 is published the links fail closed (inferred). | L, fixed (#182); residual L |
-| Same-UID access to the key store and admin creds | E | The key store (`operator.nk`, `account.nk`, zone keys) and `mashadmin.creds` are 0600 in 0700 directories (see `docs/operations.md`, "Where the key store lives"). | Modes stop other users, not other processes of the same UID, and agent sessions on the operator host run as that UID: the account seed is unrestricted, account-wide authority. Run `mashctl` and keep the key store under a separate UID or mount, and give each host's agents only their own creds. | M, deployment |
+| Same-UID access to the key store and admin creds | E | The key store (`operator.nk`, `system.nk`, `account.nk`) and `mashadmin.creds` are 0600 in 0700 directories (see `docs/operations.md`, "Where the key store lives"). | Modes stop other users, not other processes of the same UID, and agent sessions on the operator host run as that UID: the account seed is unrestricted, account-wide authority. Run `mashctl` and keep the key store under a separate UID or mount, and give each host's agents only their own creds. | M, deployment |
 | Script dependencies | T | Needs `bash`, `curl`, `jq` and a `mash` binary, plus `od`, `tr`, `sed`, `grep`, `mktemp` from the host (`scripts/quickstart-synadia.sh:7,76-78,300`). It resolves `mash` to an absolute path first, so its own wrapper cannot recurse (`:78`). It unsets `MASH_URL`, `MASH_OWNER`, `MASH_CREDS`, `MASH_NAME`, `MASH_ADMIN_CREDS` and `MASH_LAUNCH_TOKEN` from the environment and says so (`:107-111`). | No `nsc` or `nats` CLI is used. Every tool is taken from `PATH` as is, and one that is replaced sees the token (curl) or the admin creds (`mash`). The `PATH` hijack in 5.2 applies. No version or checksum check on any of them. | L |
 | Temporary admin user is broad | E | `$JS.API.>`, `$KV.>`, `_INBOX.>` to publish and `_INBOX.>`, `$JS.EVENT.>` to subscribe, no expiry, for the minutes the script runs (`scripts/quickstart-synadia.sh:302`). Deleted on every exit through an `EXIT` trap, which also runs on INT and TERM, and again right after provisioning (`:140-178,378`). If the delete fails, the script says so, names the user id and exits non-zero (`:148-149`). | **Lost control:** the binary also warned about leftover admin users from crashed runs; the script does not look (`:24-29`, `docs/synadia.md:32`). A `kill -9` or a lost network leaves the user, with full JetStream control, until someone deletes it in the console. | L |
 | Admin creds on disk during the run | I | The script writes the admin creds to `$TMP/admin.creds` (`mktemp -d`, `umask 077`, then `chmod 600`) and removes the directory in the `EXIT` trap (`scripts/quickstart-synadia.sh:299-306,173-176`). The binary kept them in memory only and said they were "never written anywhere" (`internal/initsynadia/initsynadia.go:6` on `origin/main`). | **New:** a `kill -9` leaves a usable admin cred file in the temp directory, next to the leftover user it opens. If restoring the previous `config.json` fails, the script keeps the temp directory so the backup survives (`:170`, `TMP=""`); the admin user is deleted first, so those creds are dead unless that delete failed too (inferred). Same OS user only; the leftover user is deleted in the console. | L |
@@ -154,7 +180,7 @@ interface mash uses, and the internals of the NATS server.
 | Compromised GitHub Action | T | All 13 `uses:` pinned to commit SHAs ([PR #155](https://github.com/bogworks/mash/pull/155), merged; e.g. `.github/workflows/release.yml:23,57,70,85`). No third-party actions. | No Dependabot on main to refresh pins ([PR #132](https://github.com/bogworks/mash/pull/132), open). | L |
 | Vulnerable or malicious Go dependency | T | Six direct dependencies, all `nats-io`, `golang.org/x` or `yaml.v3` (`go.mod:5-13`). `go mod verify` before each release build (`docs/release.md:78`). `go install` goes through the Go checksum database (inferred). | No govulncheck, CodeQL or Dependabot in CI ([PR #132](https://github.com/bogworks/mash/pull/132), open). No workflow runs gitleaks (inferred from `.github/workflows/`). | M |
 | Fork PR runs on a self-hosted runner | E | Fork PRs run on the same self-hosted runners as same-repo PRs, only after a person approves the run; there is no hosted-runner routing: every job runs on the self-hosted labels `[self-hosted, rh-linux]` or `[self-hosted, rh-macos]` and a test refuses a hosted label (ADR 0079, `internal/release/workflows_selfhosted_test.go`), and the GitHub fork-PR approval setting is the boundary. The two gate workflows, `label-reset` and `adr-lint`, run on `pull_request_target`, so they run from the base branch, check out nothing from the PR and execute nothing from it, with `pull-requests: write` and `contents: read` at most (`.github/workflows/label-reset.yml`, `.github/workflows/adr-lint.yml`). No secrets in workflows. | The approval of a fork run is a GitHub setting that is not in the repo and not verified here. A fork's own workflow files do not run the gate, but ordinary CI runs the fork's code on a self-hosted runner once approved. | M |
-| Agent pull request enters the merge queue without a human decision | E | Queue entry needs a recorded approval by the maintainer or the `lead-approved` label; authorship no longer admits a PR (`.mergify.yml`, [ADR 0078](../decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md)). `hold` stays the brake. `label-reset` removes `lead-approved` and `decision-confirmed` on every push, reopen and open, re-reads the labels and fails if one remains, and `check-success = label-reset` is a queue condition, so a head with no green reset cannot enter. adr-lint ignores `decision-confirmed` on `synchronize`, `reopened` and `opened`, and the gate files (`.mergify.yml`, `.github/workflows/`, `scripts/adrlint/`, `internal/release/`, `docs/branch-protection.md`) are protected paths that need an ADR or a confirmation. | Residual risks, each stated in ADR 0078. (1) The label has no provenance: write access lets any identity agents push as apply it to its own PR, so the gate makes an unintended entry a deliberate, logged act, not an impossible one. (2) The queue conditions `codex-review`, `pr-check`, `adr-lint` and `label-reset` are matched by name in `.mergify.yml`; the ruleset on `main` pins only the "Mergify Merge Protections" check, so a PR that controls a workflow can post a same-named check, and the protected-path rule is what stands against that. (3) The gate guards the queue only: the ruleset has no pull-request or review rule, so a direct merge by an identity with write access skips Mergify entirely, and "Mergify Merge Protections" reports success while a protection is blocking. Closing (2) and (3) is a repository-settings change for the maintainer (required checks pinned to their source, a required-review rule). | M |
+| Agent pull request enters the merge queue without a human decision | E | Queue entry needs a recorded approval by the maintainer or the `lead-approved` label; authorship no longer admits a PR (`.mergify.yml`, [ADR 0078](../decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md)). `hold` stays the brake. `label-reset` removes `lead-approved` and `decision-confirmed` on every push, reopen and open, re-reads the labels and fails if one remains, and `check-success = @github-actions/label-reset` is a queue condition, so a head with no green reset cannot enter. adr-lint ignores `decision-confirmed` on `synchronize`, `reopened` and `opened`, and the gate files (`.mergify.yml`, `.github/workflows/`, `scripts/adrlint/`, `internal/release/`, `docs/branch-protection.md`) are protected paths that need an ADR or a confirmation. | Residual risks, each stated in ADR 0078. (1) The label has no provenance: write access lets any identity agents push as apply it to its own PR, so the gate makes an unintended entry a deliberate, logged act, not an impossible one. (2) The queue conditions `codex-review`, `pr-check`, `adr-lint` and `label-reset` are matched by name in `.mergify.yml` (`pr-check`, `adr-lint` and `label-reset` qualified `@github-actions/`, so a forged commit status of that name does not satisfy them; `codex-review` is a plain status name); the ruleset on `main` pins only the "Mergify Merge Protections" check, so a PR that controls a workflow can post a same-named check, and the protected-path rule is what stands against that. (3) The gate guards the queue only: the ruleset has no pull-request or review rule, so a direct merge by an identity with write access skips Mergify entirely, and "Mergify Merge Protections" reports success while a protection is blocking. (4) From 2026-11-14 the lead's approval is also the commit status `lead-review` on the exact head, required beside the label for a migration week ([ADR 0116](../decisions/0116-the-maintainers-review-is-a-commit-status-on-the-exact-head-and-the-queue-requires-it-beside-the-label-for-one-week.md)): a push drops it by itself, but `check-success` matches a status whoever posted it and Mergify cannot filter by creator, so any token with status access can post it, as it could the label; the gain is binding to the head commit, not authentication, and `scripts/lead-approve --audit` flags a status from another creator. Closing (2) and (3) is a repository-settings change for the maintainer (required checks pinned to their source, a required-review rule). | M |
 | Release key compromise | S | Below the cutover version, one ed25519 key signs tags (`docs/allowed_signers:4`). From the cutover the key signs nothing for mash: tags are unsigned and pushed with a deploy key held by the minting service, and trust rests on the attestations pinned to the workflow, tag and commit and on the tag rulesets (see "Tampered release binary"); the frozen `docs/allowed_signers` still covers the older releases. | For releases below the cutover: single key, no documented rotation, and per [PR #164](https://github.com/bogworks/mash/pull/164) the same key also signs another project's releases. Its `allowed_signers` line there has no `namespaces=` restriction (inferred from the PR diff). | M |
 
 ## 6. End-to-end attack scenarios
@@ -222,7 +248,7 @@ its next tool call. No signature covers plugin content. Rating M.
    for a single operator's own fleet? Mitigation 1 changes the product's feel.
 2. Should a hostile or compromised server stay out of scope (`SECURITY.md:44`) now that the quickstart starts on a
    hosted service? If yes, the README should say what `[verified]` does not cover.
-3. Should mash refuse plaintext `nats://` outright, or warn?
+3. Should mash refuse plaintext `nats://` outright, or warn? (Partly settled 2026-11-12: admin and system connections refuse it, and endpoint connections refuse it when `MASH_REQUIRE_TLS=1`; the default stays a warning, [ADR 0108](../decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md).)
 4. Release key: keep one key across projects and purposes, or create a mash-only key, ideally hardware-backed, with a
    rotation plan?
 5. (Settled 2026-10-31: the two new findings were fixed before publication, [#178](https://github.com/bogworks/mash/pull/178)
@@ -257,7 +283,7 @@ do if it leaks. It describes what the code does today (`internal/ctlkeys`, `inte
 seed appears in the issue record. "The operator host" is the machine that runs `mashctl`; the control plane is the
 account that holds the key store.
 
-Custody rule: the account's scoped (zone) signing keys, and every key above them, stay with the minting authority
+Custody rule: the account signing key, and every key above it, stay with the minting authority
 (`mashctl`'s key store). No sender's host holds one; a sender's host holds only its own endpoint creds.
 
 **Operator key** (`operator.nk`)
@@ -280,18 +306,26 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
 - If it leaks: every user it signed is as strong as the key. Replace the account (a new account key under the operator,
   re-issued users), and revoke the old account's users.
 
-**Zone (scoped) signing keys** (`zones/<zone>.nk`)
-- Lives: `<config dir>/keys/zones/<zone>.nk`, 0600 in 0700, one per zone. The public halves are published in the account
-  JWT as scoped signers (`mashctl policy apply`), each with its permission template.
+**Owner group signing keys** (`groups/<range>.<owner>.nk`)
+- Lives: `<config dir>/keys/groups/<range>.<owner>.nk`, 0600 in 0700, under the same rules as the other keys. The
+  public half is published in the account JWT as a scoped signer with the group's template. `mashctl issue serve` reads
+  it and never creates it.
 - Held by: the operator host's user (the minting authority) only.
-- A holder can: sign a user JWT that the account accepts and that takes the zone's template. The signer chooses the
-  user's name and tags, and the template expands them: the user gets the per-name grants of whatever name it carries
-  (own inbox, lease key, prompt, status and heartbeat subjects), the zone's wildcard mail lines, and a mail line for
-  every `allow` tag. A user signed this way is not in mash's issue record, which only `mashctl` writes.
-  Policy rules limit what the key's honest users get; they do not limit the key's holder.
-- If it leaks: `mashctl policy apply --replace-zone-key ZONE` replaces the key in the account JWT, which stops users
-  signed by the old key from authenticating; then `mashctl reissue` the zone's endpoints. Run `mashctl issued check` to
-  see what is connected that mash did not issue, and revoke those keys.
+- A holder can: sign a user JWT that takes the group's template, with any name and tags, with a scoped signer's reach. The issue
+  service signs only for a public key and an address, with the tags of mash's table.
+- If it leaks: replace the key in the account JWT and re-issue the group's senders.
+
+**Wrangler keys and the wrangler registry** (`wranglers.json`)
+- Lives: the registry is `<config dir>/keys/wranglers.json`, 0600, public keys only, in the key store directory. The
+  wrangler's private key stays on the wrangler's host. The registry exists only for test accounts: how a real wrangler's
+  key is registered is not decided (ADR 0104), and `mashctl issue serve` refuses an account without a test registry.
+- Held by: the registry by the operator host's user; the wrangler key by the wrangler on each sender's host.
+- A holder can: the wrangler key signs issue requests for the host and owner group it is registered for: it can have any
+  address of that group signed for a public key it chooses, so a compromised wrangler compromises that group's addresses
+  on that host, never another group's (the address is inside the signed bytes). Whoever can write the registry can
+  register a wrangler key, which is why the file is 0600 and read only if no one else can write it.
+- If it leaks: `mashctl wrangler remove --host H --group G` (takes effect at the next request), then revoke the keys the
+  issue record shows for that group's addresses on that host and re-issue.
 
 **System account key** (`system.nk`) and **system creds** (`sys.creds`)
 - Lives: the key at `<config dir>/keys/system.nk` (0600 in 0700), only for a server `init --local` stood up. The creds
@@ -326,7 +360,7 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   NAME` when the key is already revoked or the policy narrows; the old key stays revoked.
 
 **The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
-- Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk`, `zones/*.nk` (0600), `operator.jwt` (a
+- Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk` (0600), `operator.jwt` (a
   public JWT) and the `apply.lock` file. `mashctl` refuses a key directory that is a symlink, not a directory, readable
   or writable by group or other, or owned by another user.
 - Held by: the control plane's user. The modes stop other users and not other processes of the same UID, so keep it
@@ -339,10 +373,27 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   has revoked the key, the revocation time. Only the admin
   connection `mashctl` holds writes it; endpoint users have no permission on it, and the stream refuses rollup, delete and
   purge. It holds no seed or JWT. It is written before the creds are handed out.
-- What it does not do: it does not stop a copy of a zone key signing a user elsewhere; it makes that user visible.
+- What it does not do: it does not stop a copy of the account signing key signing a user elsewhere; it makes that user visible.
   `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
   issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
+
+**The submitter key** (held by an outside system; its public half is in the adoption marker, `mash-adoption` bucket)
+- Lives: the private half with the outside system that owns the account's list sets, never on the operator host and
+  never in mash's key store (`mashctl policy adopt` refuses a key the store holds). The public half is in the adoption
+  marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
+  permission on the bucket or its stream subjects, and a test asserts it.
+- Held by: the outside system.
+- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a signing key, change the
+  account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
+  refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
+  name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key
+  mash holds or its own key, and the rotation completes only after a list set signed by the new key is applied. A list
+  set cannot touch the marker in any other way, the exempt set among them. Until a command runs the intake an adopted
+  account takes no list set at all.
+- If it leaks: run `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once
+  and the marker's history records the recovery. Whoever holds the admin credentials can replace the submitter, so the
+  marker protects against the submitter's key and against direct policy commands, not against the admin credentials.
 
 ## 11. Keeping it current
 

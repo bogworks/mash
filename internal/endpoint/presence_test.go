@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -188,30 +189,58 @@ func onlineSet(ps []Presence) map[string]bool {
 	return m
 }
 
+// Bounds for TestServeHoldsNoHeartbeatSubscription. The deadline is only reached when something is wrong; the quiet
+// period and the window are what the test observes for.
+const (
+	hbReadyDeadline = 30 * time.Second
+	hbQuiet         = 300 * time.Millisecond // no message at the endpoint for this long: its start-up has settled
+	hbWindowBeats   = 10                     // heartbeat intervals observed
+)
+
 // An idle serving endpoint holds no heartbeat subscription: heartbeats published around it reach no one on its
-// connection (ADR 0066). A witness on another connection proves the heartbeats were flowing.
+// connection (ADR 0066). A witness on another connection proves the heartbeats were flowing. The endpoint's own
+// background reads (the lease watch) also arrive on its connection, so they are turned off for the test, and the
+// window opens only after the witness has heard both endpoints and the endpoint's inbound count has stopped moving.
 func TestServeHoldsNoHeartbeatSubscription(t *testing.T) {
 	oh, op := HeartbeatInterval, DirectoryPoll
 	HeartbeatInterval, DirectoryPoll = 50*time.Millisecond, time.Hour
 	t.Cleanup(func() { HeartbeatInterval, DirectoryPoll = oh, op })
+	setVar(t, &leaseWatchEvery, time.Hour)
 	f := newFixture(t, "a", "b", "w")
 	a := f.serve(t, "a", noPrompt)
 	f.serve(t, "b", noPrompt)
 
 	witness := f.e.ConnAs(t, f.creds["w"], "w")
 	var beats atomic.Int64
-	if _, err := witness.Subscribe("agents.hb.*."+f.e.Owner+".*", func(*nats.Msg) { beats.Add(1) }); err != nil {
+	var heard sync.Map // the endpoints whose heartbeat the witness has received
+	if _, err := witness.Subscribe("agents.hb.*."+f.e.Owner+".*", func(m *nats.Msg) {
+		beats.Add(1)
+		heard.Store(m.Subject[strings.LastIndex(m.Subject, ".")+1:], true)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := witness.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond) // lease and start-up traffic settle
+	// Ready: both endpoints are heartbeating, and nothing has reached a for a quiet period.
+	waitFor(t, "the witness to hear both endpoints", hbReadyDeadline, func() bool {
+		_, ha := heard.Load("a")
+		_, hb := heard.Load("b")
+		return ha && hb
+	})
+	last, since := a.nc.Stats().InMsgs, time.Now()
+	waitFor(t, "the endpoint's start-up traffic to settle", hbReadyDeadline, func() bool {
+		if n := a.nc.Stats().InMsgs; n != last {
+			last, since = n, time.Now()
+		}
+		time.Sleep(10 * time.Millisecond)
+		return time.Since(since) >= hbQuiet
+	})
 	before := a.nc.Stats().InMsgs
 	b0 := beats.Load()
-	time.Sleep(10 * HeartbeatInterval)
-	if got := beats.Load() - b0; got < 5 {
-		t.Fatalf("the witness saw %d heartbeats over 10 intervals: the test is not exercising heartbeats", got)
+	time.Sleep(hbWindowBeats * HeartbeatInterval)
+	if got := beats.Load() - b0; got < hbWindowBeats/2 {
+		t.Fatalf("the witness saw %d heartbeats over %d intervals: the test is not exercising heartbeats", got, hbWindowBeats)
 	}
 	if d := a.nc.Stats().InMsgs - before; d != 0 {
 		t.Fatalf("an idle endpoint received %d messages while others sent heartbeats", d)

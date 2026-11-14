@@ -24,8 +24,8 @@ type RefusedError struct {
 
 func (e *RefusedError) Error() string {
 	return "refused by policy: you may not mail " + sap.Display(e.To) + "." +
-		" If the policy file allows this pair, or lists the recipient at all (mashctl policy explain)," +
-		" your credentials may be older than the rule: ask the admin to run mashctl policy drift, then mashctl reissue." + e.retryClause()
+		" If the recipient is an endpoint of this owner, your credentials may be older than the permissions mash issues now:" +
+		" ask the admin to run mashctl reissue --changed." + e.retryClause()
 }
 
 // retryClause says how to retry safely. A refusal is attributed by subject and can, rarely, be a violation from an

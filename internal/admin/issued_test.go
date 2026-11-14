@@ -53,7 +53,7 @@ func issuedSubjects(key string) []string {
 }
 
 // No permission list mash gives an endpoint grants anything on the issue record: not the legacy or the new-form
-// endpoint list, not a recipient-narrowed one, and not the template of a zone's scoped signing key.
+// endpoint list, not a recipient-narrowed one.
 func TestEndpointPermissionsGrantNothingOnIssuedRecord(t *testing.T) {
 	id, err := sap.New("claude", "o", "a")
 	if err != nil {
@@ -64,10 +64,9 @@ func TestEndpointPermissionsGrantNothingOnIssuedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	lists := map[string]jwt.Permissions{
-		"Permissions":     admin.Permissions("o", "a"),
-		"PermissionsTo":   admin.PermissionsTo("o", "a", []string{"b", "c"}),
-		"ZonePermissions": admin.ZonePermissions("o", "red", []string{"blue"}),
-		"NewForm":         nf,
+		"Permissions":   admin.Permissions("o", "a"),
+		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
+		"NewForm":       nf,
 	}
 	for name, p := range lists {
 		allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)
@@ -475,5 +474,125 @@ func TestInitRaisesAnOldIssuedBucketHistory(t *testing.T) {
 	kv, _ := js.KeyValue(ctx, store.IssuedBucket)
 	if h, err := kv.History(ctx, key); err != nil || len(h) != 5 {
 		t.Fatalf("records after the raise: %d %v", len(h), err)
+	}
+}
+
+// RecordIssuedChecked tests its conditions against the record it writes after, on every attempt: a revoked key and a
+// key bound to another address are refused and nothing is written; the same address is a normal re-issue.
+func TestRecordIssuedCheckedRefusesRevokedAndBoundElsewhere(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	rec := func(addr string) store.Issued {
+		return store.Issued{PublicKey: key, Address: addr, Kind: store.IssuedEndpoint}
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); err != nil {
+		t.Fatalf("a re-issue to the same address: %v", err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("y")); !errors.Is(err, admin.ErrKeyBoundElsewhere) {
+		t.Fatalf("bound elsewhere: %v", err)
+	}
+	if err := a.MarkRevoked(ctx, key, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RecordIssuedChecked(ctx, rec("x")); !errors.Is(err, admin.ErrKeyRevoked) {
+		t.Fatalf("revoked: %v", err)
+	}
+	kv, err := js.KeyValue(ctx, store.IssuedBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := kv.History(ctx, key); err != nil || len(h) != 3 { // x, x, the revocation: nothing else was written
+		t.Fatalf("history %d %v", len(h), err)
+	}
+}
+
+// Racing issuers of one key for two addresses, over the real record: exactly one is recorded, the other refused.
+func TestRecordIssuedCheckedRacingAddressesExactlyOneWins(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	for round := 0; round < 10; round++ {
+		key := userKey(t)
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, addr := range []string{"x", "y"} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- a.RecordIssuedChecked(ctx, store.Issued{PublicKey: key, Address: addr, Kind: store.IssuedEndpoint})
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		var ok, bound int
+		for err := range errs {
+			switch {
+			case err == nil:
+				ok++
+			case errors.Is(err, admin.ErrKeyBoundElsewhere):
+				bound++
+			default:
+				t.Fatal(err)
+			}
+		}
+		if ok != 1 || bound != 1 {
+			t.Fatalf("round %d: %d recorded, %d refused", round, ok, bound)
+		}
+	}
+}
+
+// IssuedHistoryByKey reports the maximum issued_at over every retained revision, not only the latest, and marks a
+// history at the cap as truncated.
+func TestIssuedHistoryByKey(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	if _, found, err := a.IssuedHistoryByKey(ctx, key); err != nil || found {
+		t.Fatalf("absent: found=%v err=%v", found, err)
+	}
+	rec := func(at string) {
+		t.Helper()
+		if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("2030-01-01T00:00:00Z")
+	rec("2026-01-01T00:00:00Z") // a later write with an earlier time
+	got, found, err := a.IssuedHistoryByKey(ctx, key)
+	if err != nil || !found || got.Revisions != 2 || got.Truncated {
+		t.Fatalf("%+v found=%v err=%v", got, found, err)
+	}
+	if got.Max.Format(time.RFC3339) != "2030-01-01T00:00:00Z" || got.Latest.Format(time.RFC3339) != "2026-01-01T00:00:00Z" {
+		t.Fatalf("max %v latest %v", got.Max, got.Latest)
+	}
+	for i := 0; i < store.IssuedHistory; i++ {
+		rec("2026-01-01T00:00:00Z")
+	}
+	got, _, err = a.IssuedHistoryByKey(ctx, key)
+	if err != nil || got.Revisions != store.IssuedHistory || !got.Truncated || got.Max.Year() != 2026 {
+		t.Fatalf("at the cap: %+v err=%v", got, err)
+	}
+}
+
+// A bucket status that cannot be read refuses the history read: the history cap is unknown, so an evicted future-dated
+// record cannot be ruled out.
+func TestIssuedHistoryByKeyStatusFailure(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, IssuedAt: "2026-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	prev := admin.SetIssuedStatusFault(func() error { return errors.New("status unavailable") })
+	_, found, err := a.IssuedHistoryByKey(ctx, key)
+	admin.SetIssuedStatusFault(prev)
+	if err == nil || found || !strings.Contains(err.Error(), "status") {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if _, found, err := a.IssuedHistoryByKey(ctx, key); err != nil || !found {
+		t.Fatalf("after the fault: found=%v err=%v", found, err)
 	}
 }

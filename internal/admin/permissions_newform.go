@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -52,20 +51,9 @@ func ValidateGrant(subject string) error {
 	return nil
 }
 
-// RefuseCompiledForNewForm is the policy-compiled-user refusal of amendment 2: ADR 0053's compiler uses the zone as
-// its wildcard unit, so a policy-compiled user cannot carry a three-token identity until Randy rules on the zone
-// question. It returns an error when compiled is true.
-func RefuseCompiledForNewForm(compiled bool) error {
-	if compiled {
-		return errors.New("a three-token identity cannot take a policy-compiled user until the zone ruling")
-	}
-	return nil
-}
-
 // NewFormPermissions is the DEFAULT, un-policied permission set of the new-form endpoint id, plus the validated extra
 // grants. It takes no policy input on purpose: new-form provisioning (step 1.6) MUST use it for every three-token
-// identity and MUST refuse any policy-compiled permission set (RefuseCompiledForNewForm), because the compiler's zone
-// wildcard unit is unruled (amendment 2). Anything not listed is denied; there is no response permission.
+// identity. Anything not listed is denied; there is no response permission.
 //
 // Publish: peer lines to any endpoint of the same owner with the same literal agent token (mail, prompt, status; no
 // wildcard in the agent position), its own exact heartbeat, replies, the service API, and fixedPub's JetStream and KV

@@ -1,0 +1,79 @@
+{
+  "schema": "mash-inbox-inspect@1",
+  "address": "alpha",
+  "stream": {
+    "name": "inbox-alpha",
+    "first_seq": 1,
+    "last_seq": 4,
+    "messages": 4,
+    "bytes": 812
+  },
+  "consumer": {
+    "name": "deliver",
+    "ack_floor": {
+      "stream_seq": 1,
+      "consumer_seq": 1
+    },
+    "delivered": {
+      "stream_seq": 3,
+      "consumer_seq": 3
+    },
+    "num_pending": 1,
+    "num_redelivered": 0,
+    "num_ack_pending": 2
+  },
+  "messages": [
+    {
+      "seq": 1,
+      "msg_id": "id1",
+      "sender": "bob",
+      "trust": "verified",
+      "stored_at": "2026-11-12T10:00:00Z",
+      "size": 10,
+      "kind": "message",
+      "state": "acked",
+      "delivery_count": null,
+      "ack_time": null
+    },
+    {
+      "seq": 2,
+      "msg_id": "id2",
+      "sender": "bob",
+      "trust": "claimed",
+      "stored_at": "2026-11-12T10:01:00Z",
+      "size": 20,
+      "kind": "message",
+      "state": "delivered-unacked-or-acked-out-of-order",
+      "delivery_count": null,
+      "ack_time": null
+    },
+    {
+      "seq": 3,
+      "msg_id": "id3",
+      "sender": "bob",
+      "trust": "forged",
+      "stored_at": "2026-11-12T10:02:00Z",
+      "size": 30,
+      "kind": "message",
+      "state": "delivered-unacked-or-acked-out-of-order",
+      "delivery_count": null,
+      "ack_time": null
+    },
+    {
+      "seq": 4,
+      "msg_id": "id4",
+      "sender": "bob",
+      "trust": "unknown-signer",
+      "stored_at": "2026-11-12T10:03:00Z",
+      "size": 40,
+      "kind": "message",
+      "state": "undelivered",
+      "delivery_count": null,
+      "ack_time": null
+    }
+  ],
+  "limits": [
+    "per-message delivery count and ack time are not kept by JetStream or mash; the consumer's num_redelivered is the aggregate",
+    "a message above the consumer's ack floor and at or below its last delivered sequence is delivered and either not acknowledged yet or acknowledged out of order: JetStream does not report acknowledgements above the ack floor"
+  ]
+}

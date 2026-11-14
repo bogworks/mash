@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -9,8 +8,6 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
-
-	"github.com/bogworks/mash/internal/policy"
 )
 
 // TestLookupAllLive runs NATS.LookupAll over the real transport against an in-process operator-mode server with a
@@ -57,21 +54,8 @@ func TestLookupAllLive(t *testing.T) {
 		}
 	}
 
-	// AccountFindings after a real apply: one server, all agreeing, so no servers-* finding.
-	f, err := policy.Parse([]byte("default: deny\nendpoints:\n  x: {labels: {zone: a}}\n  y: {labels: {zone: b}}\nrules:\n  - {name: r, action: allow, from: {zone: a}, to: {zone: b}}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := policy.Compile(f, "alice")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := Params{Mode: Apply, Compiled: c, Keys: env.ks, Resolver: n, Servers: 1}
-	var out bytes.Buffer
-	if code := Run(ctx, p, &out); code != 0 {
-		t.Fatalf("apply: %d\n%s", code, out.String())
-	}
-	fs, err := AccountFindings(ctx, p)
+	// AccountFindings on a live account: one server, all agreeing, so no servers-* finding.
+	fs, err := AccountFindings(ctx, n, env.ks, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +66,6 @@ func TestLookupAllLive(t *testing.T) {
 		}
 	}
 	if len(fs) != 0 {
-		t.Fatalf("findings after apply: %v", fs)
+		t.Fatalf("findings on a plain account: %v", fs)
 	}
 }

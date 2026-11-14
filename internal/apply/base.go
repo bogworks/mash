@@ -41,6 +41,11 @@ func lookupBase(ctx context.Context, r Resolver, acct string, trust Trust, expec
 	if err != nil && len(toks) == 0 {
 		return baseJWT{}, fmt.Errorf("%s: %w", what, err)
 	}
+	return chooseBase(toks, acct, trust, expect)
+}
+
+// chooseBase picks the newest verified copy among the replies toks of a lookup that waited for expect servers.
+func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, error) {
 	type copyT struct {
 		claims *jwt.AccountClaims
 		n      int
@@ -188,4 +193,37 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 		}
 	}
 	return last
+}
+
+// CurrentAccountClaims is the account's newest JWT, verified against trust, for a reader that acts on it (the issue
+// service checks a signing key's scope with it). servers is the declared server count (--servers, MASH_SERVERS; 0 none
+// given). It returns an error unless the server set is complete (ServerSet.Complete, as policy apply needs) and every
+// expected server answered the lookup: a silent server may hold a newer JWT that removed or narrowed a key, so the
+// answers of the others do not decide. A lookup error on any answering server is an error, not a skipped reply. Only a
+// complete set is compared: the highest iat wins (see chooseBase, which refuses a copy that does not verify and two
+// different copies with the same iat). An account no server has a JWT for is an error.
+func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Trust, servers int) (*jwt.AccountClaims, error) {
+	set, err := r.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("server set: %w", err)
+	}
+	if !set.Complete(servers) {
+		return nil, fmt.Errorf("the server set is not complete (%s): the account JWT must be read from every expected server, so declare the servers with --servers N or MASH_SERVERS (a named cluster needs it)", set.Why(servers))
+	}
+	need := serverExpect(set, servers)
+	toks, err := r.LookupAll(ctx, acct, need)
+	if err != nil {
+		return nil, fmt.Errorf("account JWT lookup: %w", err)
+	}
+	if len(toks) < need {
+		return nil, fmt.Errorf("only %d of %d servers answered the account JWT lookup: a silent server may hold a newer JWT", len(toks), need)
+	}
+	b, err := chooseBase(toks, acct, trust, need)
+	if err != nil {
+		return nil, err
+	}
+	if b.claims == nil {
+		return nil, fmt.Errorf("no server holds a JWT for account %s", acct)
+	}
+	return b.claims, nil
 }

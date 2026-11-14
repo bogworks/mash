@@ -1,3 +1,0 @@
-coder can mail reviewer: no rule matched; default allow
-coder cannot mail deploy-bot: rule agents-do-not-reach-high-risk-tools (deny), selected by from {role=agent} and to {risk=high}
-deploy-bot can mail deploy-bot: no rule matched; default allow

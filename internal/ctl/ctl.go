@@ -28,7 +28,7 @@ import (
 // RevokeUsers revokes NATS user keys in the account JWT; mashctl sets it, which has the key store. The system account
 // credentials come from MASH_SYS_CREDS or the init server's sys.creds, the server count from MASH_SERVERS. It stays nil
 // in `mash admin`, which has neither: deprovision then only advises.
-var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error
+var RevokeUsers func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error
 
 // NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
 func NoRevokeWarning(name, user string) string {
@@ -66,15 +66,11 @@ func limitsUsage(prog string) string {
 }
 
 func provisionUsage(prog string) string {
-	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]" + newFormUsage
+	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..." + newFormUsage
 }
 
 // newFormUsage is the three-token tail of the provision usage line.
 const newFormUsage = "\n  three tokens (needs the agent_token setting): <name> --agent A [--owner O] [--alias OWNER/NAME], or agent.owner.name; --owner defaults to the configured owner"
-
-func setZoneUsage(prog string) string {
-	return "usage: " + prog + " set-zone <name> <zone>   (moves an existing endpoint into the zone: its inbox also takes the zone mail subject, mail to the old subject still arrives; a zone is 1-32 lower-case letters, digits and hyphens)"
-}
 
 func suspendUsage(prog, verb string) string {
 	return "usage: " + prog + " " + verb + " <name>"
@@ -100,9 +96,8 @@ func Usage(prog string) string {
 	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <name> [--nsc]", "the NATS permissions an endpoint user needs")
-	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--zone Z]", "")
+	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]...", "")
 	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
-	line("set-zone <name> <zone>", "move an endpoint into a zone; mail to its old subject still arrives")
 	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
 	line("resume <name>", "undo suspend")
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
@@ -114,10 +109,13 @@ func Usage(prog string) string {
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan, an undrained inbox, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
+		line("inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
 		adoptLines(line)
 		mintLines(line)
 		issuedLines(line)
+		issueServiceLines(line)
 		retireLines(line)
+		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It does not reissue the endpoint's user: run `mashctl permissions NAME --nsc` afterwards")
 		policyLines(line)
 	}
 	return b.String()
@@ -128,8 +126,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--zone Z] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
+	line("reissue NAME... [--widen] | --all --yes | --changed --yes", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -137,19 +135,30 @@ func issuedLines(line func(left, right string)) {
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
+func issueServiceLines(line func(left, right string)) {
+	line("issue serve [--list-set FILE] [--registry FILE]", "run the issue service: sign a user JWT for a public key a registered wrangler countersigned, with the tags of the list set (test accounts only; runs until interrupted)")
+	line("wrangler init --test-account | add --host H --group G --key PUB | list | remove --host H --group G", "the static wrangler registry for a test account (the key store's wranglers.json)")
+}
+
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox and its policy entry")
-	line("label NAME k=v... [--policy FILE] [--dry-run] [--sync]", "set labels in the policy file (offline unless --sync updates the directory record)")
-	line("unlabel NAME k... [--policy FILE] [--dry-run] [--sync]", "remove labels from the policy file (offline unless --sync)")
+	line("retire NAME [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox")
+	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
+	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
 }
 
 func policyLines(line func(left, right string)) {
-	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
-	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
-	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: zone keys, the account push, directory zone and labels; lists stale creds")
+	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
+}
+
+// accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
+var accountLockWait = madmin.AccountLockWait
+
+// SetAccountLockWait sets how long guarded commands wait for the account lock and returns a func that restores the
+// wait. It is for tests; production uses madmin.AccountLockWait.
+func SetAccountLockWait(d time.Duration) (restore func()) {
+	old := accountLockWait
+	accountLockWait = d
+	return func() { accountLockWait = old }
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -188,7 +197,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		nc.Close()
 		return nil, nil, nil, err
 	}
-	a = a.WithNameRule(cfg.NameRule)
+	a = a.WithNameRule(cfg.NameRule).WithAccountLockWait(accountLockWait)
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err
@@ -248,6 +257,10 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(err)
 	}
 	defer closeAdmin()
+	// The account lock of a command that changes policy (provision with labels or a zone, set-meta with labels,
+	// set-zone): taken with the marker check, held through the write, released on every exit.
+	var acct *madmin.AccountLock
+	defer func() { acct.Release() }()
 
 	switch args[0] {
 	case "init":
@@ -274,8 +287,18 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return usage(err)
 		}
+		if len(meta.Labels) > 0 { // a label is the policy's; a plain provision of an inbox is not
+			lk, err := guardAccount(ctx, a, pfx, "provision")
+			if err != nil {
+				return fail(err)
+			}
+			acct = lk
+		}
+		if err := acct.Before(ctx, "the provision"); err != nil {
+			return fail(err)
+		}
 		if nf != nil {
-			if err := provisionKeyArgs(prog, opt("--user"), opt("--account"), meta.Zone); err != nil {
+			if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
 				return usage(err)
 			}
 			rec, err := a.ProvisionIdentity(ctx, nf.id, nf.alias, opt("--user"), opt("--account"), opt("--note"), meta)
@@ -289,7 +312,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s%s\n", config.Clean(nf.id.String()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), alias, metaSuffix(rec))
 			return 0
 		}
-		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account"), meta.Zone); err != nil {
+		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account")); err != nil {
 			return usage(err)
 		}
 		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"), meta)
@@ -318,26 +341,21 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return usage(err)
 		}
+		if len(u.Labels) > 0 { // labels are the policy's; a role, host, description or capability is not
+			lk, err := guardAccount(ctx, a, pfx, "set-meta")
+			if err != nil {
+				return fail(err)
+			}
+			acct = lk
+		}
+		if err := acct.Before(ctx, "the record's update"); err != nil {
+			return fail(err)
+		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
-	case "set-zone":
-		if len(args) != 3 || !config.ValidName(args[1]) {
-			return usage(errors.New(setZoneUsage(prog)))
-		}
-		if args[2] == "-" {
-			return usage(errors.New(pfx + ": set-zone: an endpoint in a zone cannot return to the legacy subject in this version (the zone - is refused)"))
-		}
-		if !sap.ValidZone(args[2]) {
-			return usage(fmt.Errorf("%s: set-zone: the zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", pfx, sap.MaxZoneLen))
-		}
-		rec, err := a.SetZone(ctx, args[1], args[2])
-		if err != nil {
-			return fail(err)
-		}
-		fmt.Fprintf(stdout, "updated %s: zone %s, mail %s (the old subject still arrives)\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Zone), config.Clean(rec.MailSubject))
 	case "suspend", "resume", "suspended":
 		if len(args) != 2 || !madmin.ValidKey(args[1]) {
 			return usage(errors.New(suspendUsage(prog, args[0])))
@@ -405,15 +423,21 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		// The revocation runs inside the admin's removal, under the name's lock, after its guards passed and before
 		// anything is removed (see madmin.RevokeHook): a refused removal revokes nothing, a failed revocation removes
 		// nothing, and the key revoked is the one in the record the removal accepted.
-		adm, revokedUser, revokeErr := a, "", error(nil)
+		adm, revokedUser, revokeErr, checkErr := a, "", error(nil), error(nil)
 		if RevokeUsers != nil && !noRevoke {
 			adm = a.WithRevoker(func(ctx context.Context, user string) error {
-				if err := RevokeUsers(ctx, cfg, []string{user}, stdout); err != nil {
+				// One reading of the clock: the issue-record check and the revocation carry the same time.
+				at := RevokeNow()
+				if err := CheckNotFutureIssued(ctx, a, []RevokeTarget{{Name: shown, Key: user}}, at, stderr); err != nil {
+					checkErr = err
+					return err
+				}
+				if err := RevokeUsers(ctx, cfg, []string{user}, stdout, func() time.Time { return at }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ShortKey(user), err)
 				}
 				revokedUser = user
-				MarkRevoked(ctx, a, user, time.Now(), stderr)
+				MarkRevoked(ctx, a, user, at, stderr)
 				return nil
 			})
 		}
@@ -422,6 +446,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if msg, ok := AliasedRefusal(err, args[1]); ok {
 				fmt.Fprintln(stderr, msg)
 				return 1
+			}
+			if checkErr != nil && errors.Is(err, checkErr) {
+				return fail(checkErr)
 			}
 			if revokeErr != nil && errors.Is(err, revokeErr) {
 				return fail(fmt.Errorf("%w (--no-revoke deprovisions without revoking)", err))
@@ -530,7 +557,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note), zoneSuffix(r))
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note))
 		}
 	default:
 		if prog == "mash admin" {
@@ -555,14 +582,6 @@ func optOf(args []string) func(string) string {
 	}
 }
 
-// zoneSuffix is a list line's tail for the zone: a tab and zone=<z>, empty for an endpoint with the legacy subject.
-func zoneSuffix(r store.Record) string {
-	if r.Zone == "" {
-		return ""
-	}
-	return "\tzone=" + config.Clean(r.Zone)
-}
-
 // metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
 func metaSuffix(r store.Record) string {
 	var b strings.Builder
@@ -571,9 +590,6 @@ func metaSuffix(r store.Record) string {
 	}
 	if len(r.Caps) > 0 {
 		fmt.Fprintf(&b, ", caps %s", config.Clean(strings.Join(r.Caps, ",")))
-	}
-	if r.Zone != "" {
-		fmt.Fprintf(&b, ", zone %s", config.Clean(r.Zone))
 	}
 	return b.String()
 }
@@ -598,7 +614,7 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 			labels[k] = v
 		case "--cap":
 			caps = append(caps, args[i+1])
-		case "--user", "--account", "--note", "--role", "--host", "--describe", "--zone":
+		case "--user", "--account", "--note", "--role", "--host", "--describe":
 			if seen[args[i]] {
 				return madmin.Meta{}, bad
 			}
@@ -607,20 +623,20 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 			return madmin.Meta{}, bad
 		}
 	}
-	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps, Zone: opt("--zone")}, nil
+	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps}, nil
 }
 
 // provisionArgs checks the arguments provision needs before anything touches the server. An invalid one is named,
 // never printed: a seed pasted into --user must not come back on the screen.
-func provisionArgs(prog, name, user, account, zone string) error {
+func provisionArgs(prog, name, user, account string) error {
 	if !config.ValidName(name) {
 		return errors.New(provisionUsage(prog) + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
 	}
-	return provisionKeyArgs(prog, user, account, zone)
+	return provisionKeyArgs(prog, user, account)
 }
 
-// provisionKeyArgs is provisionArgs without the legacy name: the keys and the zone, for the three-token form too.
-func provisionKeyArgs(prog, user, account, zone string) error {
+// provisionKeyArgs is provisionArgs without the legacy name: the keys, for the three-token form too.
+func provisionKeyArgs(prog, user, account string) error {
 	use := provisionUsage(prog)
 	switch {
 	case user == "":
@@ -631,8 +647,6 @@ func provisionKeyArgs(prog, user, account, zone string) error {
 		return errors.New(use + "\n--account is required")
 	case !nkeys.IsValidPublicAccountKey(account):
 		return errors.New(use + "\n--account is not a NATS account public key (A, then 55 upper-case base32 characters; the value is not shown)")
-	case zone != "" && !sap.ValidZone(zone):
-		return fmt.Errorf("%s\n--zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", use, sap.MaxZoneLen)
 	}
 	return nil
 }
@@ -642,10 +656,10 @@ func initUsage(prog string) string {
 }
 
 // permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
-// An endpoint added under a policy file gets narrower permissions from its zone's key instead.
+// An endpoint added by `mashctl add` gets narrower permissions, the owner-line set, instead.
 func permissionsNote(prog string) string {
 	pfx, _, _ := strings.Cut(prog, " ")
-	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` or a policy file get narrower permissions from the policy (see `" + pfx + " policy explain`)."
+	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` get narrower permissions, the owner-line set."
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.
@@ -796,4 +810,58 @@ func MarkRevoked(ctx context.Context, a *madmin.Admin, user string, at time.Time
 		return
 	}
 	fmt.Fprintf(stderr, "warning: user key %s... is revoked, but the issue record was not updated with it: %v\n", ShortKey(user), err)
+}
+
+// RevokeNow is the clock a revocation takes its time from; a test replaces it.
+var RevokeNow = time.Now
+
+// RevokeTarget is a user key about to be revoked and the name to show for it in messages ("" shows the short key).
+type RevokeTarget struct {
+	Name, Key string
+}
+
+// CheckNotFutureIssued refuses a revocation at time at when the issue record shows a user's JWT issued after at: NATS
+// honours a revocation only for JWTs issued at or before it, so that JWT would stay valid. It looks at every issue
+// time the record retains of the key, not only the latest: a reissue that keeps the key writes a new revision with a
+// new time, and after a clock rollback the newer revision can be the earlier time while an older, future-dated JWT is
+// still held. A key whose history is at the bucket's cap (store.IssuedHistory) may have lost its oldest revisions, so
+// it is refused unless a retained revision is already future-dated (the usual refusal). Every target is checked before
+// the caller writes anything, and one refused key refuses them all; nothing has been changed when it returns an
+// error. A key whose retained history cannot be shown to be complete from the bucket's marker
+// (store.IssuedMarkerKey, madmin.IncompleteHistoryError) is refused too, with the way forward: revoke it by hand. A key with no record at all (the bucket or the key is absent: an older deployment, a key mash did not issue)
+// gets one warning line on stderr and the revocation goes on. A record that exists but cannot be read, or whose
+// issued_at is missing or not a time in any retained revision, cannot be ruled out and refuses the whole command.
+func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []RevokeTarget, at time.Time, stderr io.Writer) error {
+	for _, t := range targets {
+		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
+		var bad *madmin.MalformedIssuedAtError
+		if errors.As(err, &bad) {
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+		}
+		var incomplete *madmin.IncompleteHistoryError
+		if errors.As(err, &incomplete) {
+			return fmt.Errorf("user key %s...: a future-dated credential cannot be ruled out: its issued history cannot be shown to be complete (%d revisions are kept and the record may have dropped older ones before its history limit was raised); revoke the key by hand in the account JWT, only after checking where it was issued; nothing was changed", ShortKey(t.Key), incomplete.Retained)
+		}
+		if err != nil {
+			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl reissue NAME` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
+		}
+		if !found {
+			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))
+			continue
+		}
+		who := t.Name
+		if who == "" {
+			who = ShortKey(t.Key) + "..."
+		}
+		if times.Max.After(at) {
+			if times.Max.Equal(times.Latest) {
+				return fmt.Errorf("%s's current creds JWT claims it was issued in the future (%s): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed", who, times.Max.Format(time.RFC3339))
+			}
+			return fmt.Errorf("%s: an earlier credential of this key was dated in the future (%s): the revocation would not cover it; wait until the revocation time is past that time, or fix this machine's clock (or the machine that minted it), and run again; nothing was changed", who, times.Max.Format(time.RFC3339))
+		}
+		if times.Truncated {
+			return fmt.Errorf("%s: the key has been re-recorded %d times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future; run again once this machine's clock is known to be right and the revocation time is well past the newest recorded issue time (%s), or fix the clock; nothing was changed", who, store.IssuedHistory, times.Max.Format(time.RFC3339))
+		}
+	}
+	return nil
 }

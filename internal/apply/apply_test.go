@@ -1,21 +1,17 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/ctlkeys"
-	"github.com/bogworks/mash/internal/policy"
 )
 
 // fake is an in-memory resolver.
@@ -71,7 +67,7 @@ func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, err
 	return f.acks, f.pushErr
 }
 
-func setup(t *testing.T) (*ctlkeys.Authority, *fake, *policy.Compiled) {
+func setup(t *testing.T) (*ctlkeys.Authority, *fake) {
 	t.Helper()
 	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
 	if err != nil {
@@ -88,545 +84,154 @@ func setup(t *testing.T) (*ctlkeys.Authority, *fake, *policy.Compiled) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := policy.Parse([]byte("default: deny\nendpoints:\n  x: {labels: {zone: a}}\n  y: {labels: {zone: b}}\nrules:\n  - {name: r, action: allow, from: {zone: a}, to: {zone: b}}\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := policy.Compile(f, "alice")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ks, &fake{token: tok}, c
+	return ks, &fake{token: tok}
 }
 
-func TestBudgetRefusalChangesNothing(t *testing.T) {
-	ks, fk, c := setup(t)
-	var out bytes.Buffer
-	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk,
-		Budget: func(*policy.Compiled) (policy.BudgetReport, error) {
-			return policy.BudgetReport{}, errors.New("policy: the account JWT would be too big")
-		}}, &out)
-	if code != 1 || !strings.Contains(out.String(), "refusing") || !strings.Contains(out.String(), "too big") {
-		t.Fatalf("%d %s", code, out.String())
-	}
-	if fk.pushes != 0 {
-		t.Fatal("pushed")
-	}
-	if z, _ := ks.Zones(); len(z) != 0 {
-		t.Fatalf("created keys %v", z)
-	}
-}
+// The exported names other packages import keep their shape: the system account transport, the server set and its
+// verdicts, and the acknowledgement.
+var (
+	_ Resolver = NATS{}
+	_          = ServerSet{}.Complete
+	_          = ServerSet{}.Why
+	_          = ServerAck{}.OK
+	_          = NATS{Conn: nil, Inventory: 0}.Servers
+	_          = NATS{}.Push
+)
 
-func TestPartialWhenNotAcknowledgedOrNotVerified(t *testing.T) {
-	cases := []struct {
-		name string
-		fk   func(*fake)
-		want string
-	}{
-		{"no ack", func(f *fake) { f.pushErr = errors.New("no server answered the claims update in time") }, "not acknowledged"},
-		{"a server refuses", func(f *fake) {
-			f.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 500, Message: "boom"}}
-		}, "refused by s2: code 500 boom"},
-		{"acked but the resolver shows the old claims", func(f *fake) { f.acks = []ServerAck{{Server: "s1", Code: 200}} }, "missing signing keys"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ks, fk, c := setup(t)
-			tc.fk(fk)
-			var out bytes.Buffer
-			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1}, &out)
-			s := out.String()
-			if code != 1 || !strings.Contains(s, "PARTIAL") || !strings.Contains(s, tc.want) || !strings.Contains(s, "mashctl policy apply") || !strings.Contains(s, "zone keys created locally: a, b") {
-				t.Fatalf("%d\n%s", code, s)
-			}
-		})
-	}
-}
-
-func TestAckedAndVerifiedThenNoOp(t *testing.T) {
-	ks, fk, c := setup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 1 {
-		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
-	}
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 || fk.pushes != 2 || !strings.Contains(out.String(), "account claims already up to date") {
-		t.Fatalf("%d %d\n%s", code, fk.pushes, out.String())
-	}
-	if fk.lastPush != fk.token {
-		t.Fatal("the no-change run re-signed instead of sending the JWT the resolver has")
-	}
-}
-
-// With no change the unchanged JWT is still sent to every server; "already up to date" needs a complete set and an
-// acknowledgement from each, and anything else is PARTIAL or UNCONFIRMED.
-func TestNoChangeStillConfirmsEveryServer(t *testing.T) {
-	ok := func(names ...string) []ServerAck {
-		var a []ServerAck
-		for _, n := range names {
-			a = append(a, ServerAck{Server: n, Code: 200})
-		}
-		return a
-	}
-	cases := []struct {
-		name    string
-		servers ServerSet
-		acks    []ServerAck
-		code    int
-		want    string
-		not     string
-	}{
-		{"all match", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1", "s2"), 0, "already up to date", "PARTIAL"},
-		{"one silent (stale)", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, "PARTIAL: the re-send of the unchanged claims was not acknowledged: no acknowledgement from s2", "already up to date"},
-		{"one refuses", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 500, Message: "boom"}}, 1, "refused by s2: code 500 boom", "already up to date"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ks, fk, c := setup(t)
-			// First apply brings every server up to date; then the case's servers answer the second.
-			fk.servers, fk.acks, fk.applyPush = ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1", "s2"), true
-			var out bytes.Buffer
-			if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
-				t.Fatalf("setup apply: %d\n%s", code, out.String())
-			}
-			fk.pushes = 0
-			fk.servers, fk.acks = tc.servers, tc.acks
-			out.Reset()
-			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
-			if code != tc.code || !strings.Contains(out.String(), tc.want) || strings.Contains(out.String(), tc.not) {
-				t.Fatalf("%d\n%s", code, out.String())
-			}
-			if fk.pushes != 1 || fk.lastPush != fk.token {
-				t.Fatalf("pushes %d, re-signed %v", fk.pushes, fk.lastPush != fk.token)
-			}
-		})
-	}
-}
-
-func TestDryRunCreatesNoKeysAndPreservesOtherSigners(t *testing.T) {
-	ks, fk, c := setup(t)
-	// the account already has a plain signing key and an unrelated scoped one
-	op, _, _ := ks.Operator()
-	_, apub, _ := ks.Account()
-	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	cl.SigningKeys.Add(apub)                 // a plain signing key that is mashctl's own (the account identity key)
-	other, err := ks.ZoneKey("legacy", true) // a zone key of the key store whose zone the file lacks
-	if err != nil {
-		t.Fatal(err)
-	}
-	op2, _ := other.PublicKey()
-	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = op2, "legacy"
-	cl.SigningKeys.AddScopedSigner(sc)
-	tok, err := cl.Encode(op)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fk.token = tok
-	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 1 || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") {
-		t.Fatal(out.String())
-	}
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk, KeepZones: []string{"legacy"}}, &out); code != 0 {
-		t.Fatal(out.String())
-	}
-	s := out.String()
-	if !strings.Contains(s, "zone legacy is outside the policy and its key stays active") || !strings.Contains(s, "would create its signing key") {
-		t.Fatalf("%s", s)
-	}
-	if z, _ := ks.Zones(); len(z) != 1 || fk.pushes != 0 { // only the legacy key the test made
-		t.Fatal("dry run changed something")
-	}
-}
-
-func compile(t *testing.T, y string) *policy.Compiled {
-	t.Helper()
-	f, err := policy.Parse([]byte(y))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := policy.Compile(f, "alice")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c
-}
-
-func TestServerAcknowledgements(t *testing.T) {
-	ok := func(names ...string) []ServerAck {
-		var a []ServerAck
-		for _, n := range names {
-			a = append(a, ServerAck{Server: n, Code: 200})
-		}
-		return a
-	}
-	cases := []struct {
-		name    string
-		servers ServerSet
-		acks    []ServerAck
-		code    int
-		want    []string
-	}{
-		{"complete three all ack", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}, ok("s1", "s2", "s3"), 0, []string{"pushed: 3 server(s)"}},
-		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, ok("s1", "s2"), 1, []string{"refusing", "2 server(s) replied but the cluster reports 3", "nothing was changed"}},
-		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, ok("s1"), 1, []string{"refusing", "gateways"}},
-		{"single server", ServerSet{Names: []string{"s1"}, Expected: 1}, ok("s1"), 0, []string{"pushed: 1 server(s)"}},
-		{"one silent", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, ok("s1"), 1, []string{"PARTIAL", "no acknowledgement from s2"}},
-		{"non-200", ServerSet{Names: []string{"s1", "s2"}, Expected: 2}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, 1, []string{"PARTIAL", "refused by s2: code 503 busy"}},
-		{"ping found nobody", ServerSet{}, ok("s1"), 1, []string{"refusing", "answered by no server"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ks, fk, c := setup(t)
-			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
-			fk.noServers = len(tc.servers.Names) == 0 && tc.servers.Expected == 0 && !tc.servers.Gateways
-			var out bytes.Buffer
-			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
-			if code != tc.code {
-				t.Fatalf("%d\n%s", code, out.String())
-			}
-			for _, w := range tc.want {
-				if !strings.Contains(out.String(), w) {
-					t.Fatalf("missing %q:\n%s", w, out.String())
-				}
-			}
-			if strings.Contains(out.String(), "refusing") && fk.pushes != 0 {
-				t.Fatalf("pushed %d time(s) before refusing", fk.pushes)
-			}
-		})
-	}
-}
-
-// lostKey applies once, then replaces the zone key file of zone a, as if the file were lost and apply ran again.
-func lostKey(t *testing.T) (*ctlkeys.Authority, *fake, *policy.Compiled, string, string) {
-	t.Helper()
-	ks, fk, c := setup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
-		t.Fatal(out.String())
-	}
-	oldPub, err := ks.ZonePublic("a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	zdir := filepath.Join(ks.Dir(), "zones")
-	entries, _ := os.ReadDir(zdir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "a.") {
-			if err := os.Remove(filepath.Join(zdir, e.Name())); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if _, err := ks.ZonePublic("a"); err == nil {
-		t.Fatal("zone key a still present")
-	}
-	return ks, fk, c, oldPub, fk.token
-}
-
-func TestLostZoneKeyIsRefusedUnlessReplaced(t *testing.T) {
-	for _, mode := range []Mode{Apply, DryRun, Diff} {
-		ks, fk, c, oldPub, before := lostKey(t)
-		pushes := fk.pushes
-		var out bytes.Buffer
-		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1 // a refusal exits 1 in every mode, `diff` included
-		s := out.String()
-		if code != want || !strings.Contains(s, "REFUSED") || !strings.Contains(s, "zone a") || !strings.Contains(s, oldPub) ||
-			!strings.Contains(s, "--replace-zone-key") || !strings.Contains(s, "restore the original zone key file") || !strings.Contains(s, "stop working") {
-			t.Fatalf("%s: %d\n%s", mode, code, s)
-		}
-		if fk.pushes != pushes || fk.token != before {
-			t.Fatalf("%s pushed", mode)
-		}
-		if _, err := ks.ZonePublic("a"); err == nil {
-			t.Fatalf("%s created a zone key before refusing", mode)
-		}
-	}
-}
-
-func TestReplaceZoneKeyReplacesTheOldSigner(t *testing.T) {
-	ks, fk, c, oldPub, _ := lostKey(t)
-	var out bytes.Buffer
-	// a dry run with the flag reports the replacement and changes nothing
-	if code := Run(context.Background(), Params{Mode: DryRun, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"a"}}, &out); code != 0 ||
-		!strings.Contains(out.String(), "replaces the signing key "+oldPub+" (role a)") || !strings.Contains(out.String(), "by any other tool, stop working") {
-		t.Fatalf("%d\n%s", code, out.String())
-	}
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"a"}}, &out); code != 0 {
-		t.Fatalf("%d\n%s", code, out.String())
-	}
-	newPub, err := ks.ZonePublic("a")
-	if err != nil || newPub == oldPub {
-		t.Fatalf("%v %s", err, newPub)
-	}
-	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	if _, ok := cl.SigningKeys.GetScope(oldPub); ok {
-		t.Fatal("the old signer is still in the account JWT")
-	}
-	if _, ok := cl.SigningKeys.GetScope(newPub); !ok || len(cl.SigningKeys) != 2 {
-		t.Fatalf("signers: %v", cl.SigningKeys.Keys())
-	}
-	// a flag for a zone the file lacks is an error
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, ReplaceZoneKeys: []string{"nope"}}, &out); code != 1 || !strings.Contains(out.String(), "no zone of that name") {
-		t.Fatalf("%d %s", code, out.String())
-	}
-}
-
-func TestConcurrentAppliesNeverLoseAZone(t *testing.T) {
-	ks, fk, _ := setup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	y1 := "default: deny\nendpoints:\n  x: {labels: {zone: a}}\n  y: {labels: {zone: b}}\nrules:\n  - {name: r, action: allow, from: {zone: a}, to: {zone: b}}\n"
-	y2 := "default: deny\nendpoints:\n  x: {labels: {zone: c}}\n  y: {labels: {zone: d}}\nrules:\n  - {name: r, action: allow, from: {zone: c}, to: {zone: d}}\n"
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	codes := map[int]int{}
-	for _, y := range []string{y1, y2} {
-		c := compile(t, y)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var out bytes.Buffer
-			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, LockWait: 10 * time.Second}, &out)
-			mu.Lock()
-			codes[code]++
-			mu.Unlock()
-			if code != 0 && !strings.Contains(out.String(), "lock") && !strings.Contains(out.String(), "changed twice") && !strings.Contains(out.String(), "REFUSED unless") {
-				t.Errorf("unclean error: %s", out.String())
-			}
-		}()
-	}
-	wg.Wait()
-	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	have := map[string]bool{}
-	for _, k := range cl.SigningKeys.Keys() {
-		sc, _ := cl.SigningKeys.GetScope(k)
-		if us, ok := sc.(*jwt.UserScope); ok {
-			have[us.Role] = true
-		}
-	}
-	if codes[0] == 2 && (!have["a"] || !have["b"] || !have["c"] || !have["d"]) {
-		t.Fatalf("a zone was lost: %v", have)
-	}
-	if codes[0] == 0 {
-		t.Fatalf("neither apply succeeded: %v", codes)
-	}
-}
-
-func TestLockExcludesAndWaitsOut(t *testing.T) {
-	ks, _, _ := setup(t)
-	un, err := ks.Lock(time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ks.Lock(50 * time.Millisecond); !errors.Is(err, ctlkeys.ErrLocked) {
-		t.Fatalf("second lock: %v", err)
-	}
-	un()
-	un2, err := ks.Lock(time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	un2()
-}
-
-func TestOutsidePolicyZones(t *testing.T) {
-	ks, fk, c := setup(t)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	var out bytes.Buffer
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
-		t.Fatal(out.String())
-	}
-	// an unrelated scoped signer (not created by mash) appears on the server
-	op, _, _ := ks.Operator()
-	cl, _ := jwt.DecodeAccountClaims(fk.token)
-	other, err := ks.ZoneKey("legacy", true) // a zone key of the key store whose zone the file lacks
-	if err != nil {
-		t.Fatal(err)
-	}
-	opub, _ := other.PublicKey()
-	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = opub, "legacy"
-	cl.SigningKeys.AddScopedSigner(sc)
-	tok, err := cl.Encode(op)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fk.token = tok
-	pushes := fk.pushes
-	for _, mode := range []Mode{Apply, DryRun, Diff} {
-		out.Reset()
-		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		want := 1 // a refusal exits 1 in every mode, `diff` included
-		if code != want || !strings.Contains(out.String(), "REFUSED unless --remove-zone legacy or --keep-zone legacy") || strings.Contains(out.String(), "account claims already up to date") || fk.pushes != pushes || fk.token != tok {
-			t.Fatalf("%s: %d\n%s", mode, code, out.String())
-		}
-	}
-	// bad flag names
-	for _, p := range []Params{{RemoveZones: []string{"nope"}}, {KeepZones: []string{"a"}}, {KeepZones: []string{"legacy"}, RemoveZones: []string{"legacy"}}} {
-		p.Mode, p.Compiled, p.Keys, p.Resolver = Apply, c, ks, fk
-		out.Reset()
-		if code := Run(context.Background(), p, &out); code != 1 || fk.pushes != pushes {
-			t.Fatalf("%+v: %d\n%s", p, code, out.String())
-		}
-	}
-	// keep: proceeds with the warning, nothing pushed to the account but the unchanged JWT
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, KeepZones: []string{"legacy"}}, &out); code != 0 ||
-		!strings.Contains(out.String(), "zone legacy is outside the policy and its key stays active") || !strings.Contains(out.String(), "account claims already up to date") {
-		t.Fatalf("%d\n%s", code, out.String())
-	}
-	// remove: the signer is gone from the JWT, the other zones stay
-	out.Reset()
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, RemoveZones: []string{"legacy"}}, &out); code != 0 || !strings.Contains(out.String(), "stop working") {
-		t.Fatalf("%d\n%s", code, out.String())
-	}
-	after, _ := jwt.DecodeAccountClaims(fk.token)
-	if _, ok := after.SigningKeys.GetScope(opub); ok || len(after.SigningKeys) != 2 {
-		t.Fatalf("signers after remove: %v", after.SigningKeys.Keys())
-	}
-}
-
-// A clustered server that sees no peers is not proof of a complete set: it needs the operator's --servers or it is
-// UNCONFIRMED; a server naming no cluster is standalone.
 func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
-	ok := func(names ...string) []ServerAck {
-		var a []ServerAck
-		for _, n := range names {
-			a = append(a, ServerAck{Server: n, Code: 200})
-		}
-		return a
-	}
 	cases := []struct {
 		name      string
 		servers   ServerSet
 		inventory int
-		acks      []ServerAck
-		code      int
-		want      string
+		complete  bool
+		why       string
 	}{
-		{"standalone", ServerSet{Names: []string{"s1"}, Expected: 1}, 0, ok("s1"), 0, "pushed: 1 server(s)"},
-		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, ok("s1"), 1, "refusing: the server set could not be verified (this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N)"},
-		{"three of three", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3, Cluster: "C"}, 3, ok("s1", "s2", "s3"), 0, "pushed: 3 server(s)"},
-		{"two of three", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, ok("s1", "s2"), 1, "refusing: the server set could not be verified (2 server(s) replied but --servers says 3)"},
-		{"one with a cluster name", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 1, ok("s1"), 0, "pushed: 1 server(s)"},
-		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, ok("s1"), 1, "the cluster reports 3"},
-		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, ok("s1"), 1, "--servers says 2"},
+		{"standalone", ServerSet{Names: []string{"s1"}, Expected: 1}, 0, true, ""},
+		{"three of three", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}, 3, true, ""},
+		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, 0, false, "2 server(s) replied but the cluster reports 3"},
+		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, 0, false, "gateways"},
+		{"ping found nobody", ServerSet{}, 0, false, "answered by no server"},
+		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, false, "this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N"},
+		{"one with a cluster name", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 1, true, ""},
+		{"two of three by inventory", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, false, "2 server(s) replied but --servers says 3"},
+		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, false, "the cluster reports 3"},
+		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, false, "--servers says 2"},
+		{"clusters conflict", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C", ClusterConflict: true}, 2, false, "different clusters"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ks, fk, c := setup(t)
-			fk.servers, fk.acks, fk.applyPush = tc.servers, tc.acks, true
-			var out bytes.Buffer
-			code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: tc.inventory, VerifyTries: 1, VerifyWait: 1}, &out)
-			if code != tc.code || !strings.Contains(out.String(), tc.want) || (tc.code == 1 && fk.pushes != 0) {
-				t.Fatalf("%d pushes %d\n%s", code, fk.pushes, out.String())
+			if got := tc.servers.Complete(tc.inventory); got != tc.complete {
+				t.Fatalf("Complete(%d) = %v", tc.inventory, got)
+			}
+			if !tc.complete && !strings.Contains(tc.servers.Why(tc.inventory), tc.why) {
+				t.Fatalf("Why = %q, want %q", tc.servers.Why(tc.inventory), tc.why)
 			}
 		})
 	}
-	ks, fk, c := setup(t)
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, Servers: -1}, &bytes.Buffer{}); code != 1 || fk.pushes != 0 {
-		t.Fatalf("negative servers: %d", code)
+}
+
+func TestServerAckOK(t *testing.T) {
+	if !(ServerAck{Code: 200}).OK() || (ServerAck{Code: 503}).OK() {
+		t.Fatal("OK is not code 200")
 	}
 }
 
-// A successful apply, a diff and a dry run print the "Not covered by apply" block, naming the endpoints that carry
-// exception tags, and the up-to-date text says it is about the account claims.
-func TestNotCoveredBlockOnSuccess(t *testing.T) {
-	ks, fk, c := setup(t)
-	c.Endpoints[0].Tags = []string{"allow:b.y"}
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	for i, mode := range []Mode{Diff, Apply, Apply} {
-		var out bytes.Buffer
-		if code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out); code != 0 {
-			t.Fatalf("%d: %d\n%s", i, code, out.String())
+// pushAndCheck is the acknowledgement rule of every push: each known server must acknowledge with 200.
+func TestPushAndCheck(t *testing.T) {
+	ok := func(names ...string) []ServerAck {
+		var a []ServerAck
+		for _, n := range names {
+			a = append(a, ServerAck{Server: n, Code: 200})
 		}
-		s := out.String()
-		for _, w := range []string{"Not covered by apply:", "1 endpoint(s) carry exception tags: x", "mashctl reissue", "nsc", "mashctl policy drift"} {
-			if !strings.Contains(s, w) {
-				t.Fatalf("%d: missing %q\n%s", i, w, s)
+		return a
+	}
+	cases := []struct {
+		name  string
+		known []string
+		acks  []ServerAck
+		want  string // "" means acknowledged by all
+	}{
+		{"all ack", []string{"s1", "s2", "s3"}, ok("s1", "s2", "s3"), ""},
+		{"one silent", []string{"s1", "s2"}, ok("s1"), "no acknowledgement from s2"},
+		{"non-200", []string{"s1", "s2"}, []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 503, Message: "busy"}}, "refused by s2: code 503 busy"},
+		{"nobody", []string{"s1"}, nil, "no server answered"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, fk := setup(t)
+			fk.acks = tc.acks
+			_, why := pushAndCheck(context.Background(), fk, "tok", tc.known)
+			if (tc.want == "") != (why == "") || !strings.Contains(why, tc.want) {
+				t.Fatalf("why = %q, want %q", why, tc.want)
 			}
-		}
-		if i == 2 && !strings.Contains(s, "account claims already up to date") {
-			t.Fatalf("%s", s)
-		}
+		})
 	}
 }
 
-// --replace-zone-key drops the named zone's own signer only: a plain signing key, a scoped key of a role that is not a
-// zone of the file, and one whose role differs from a zone's in case are still refused.
-func TestReplaceZoneKeyDoesNotCoverForeignKeys(t *testing.T) {
-	ks, fk, c, scoped, plain, _ := unknownSetup(t)
+// An account JWT with scoped signing keys is a zone policy from an older release: AccountFindings reports it, and
+// AppliedZonePolicy (the Z1 guard's detector) says so.
+func TestAccountFindingsAndTheZonePolicyDetector(t *testing.T) {
+	ks, fk := setup(t)
 	op, _, _ := ks.Operator()
-	ck, _ := nkeys.CreateAccount()
-	caseKey := pubOf(t, ck)
-	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
-		cl.SigningKeys.Add(plain)
-		for key, role := range map[string]string{scoped: "legacy", caseKey: "A"} {
-			sc := jwt.NewUserScope()
-			sc.Key, sc.Role = key, role
-			cl.SigningKeys.AddScopedSigner(sc)
-		}
-	})
-	before := fk.token
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	for _, mode := range []Mode{Apply, DryRun} {
-		var out bytes.Buffer
-		p := c
-		p.Mode, p.Keys, p.Resolver, p.ReplaceZoneKeys = mode, ks, fk, []string{"a"}
-		code := Run(context.Background(), p, &out)
-		s := out.String()
-		for _, w := range []string{"REFUSED", scoped, plain, caseKey, "role A"} {
-			if !strings.Contains(s, w) {
-				t.Fatalf("%s: missing %q:\n%s", mode, w, s)
-			}
-		}
-		if code != 1 || fk.pushes != 0 || fk.token != before {
-			t.Fatalf("%s: exit %d, pushes %d", mode, code, fk.pushes)
-		}
+	fs, err := AccountFindings(context.Background(), fk, ks, 0)
+	if err != nil || len(fs) != 0 {
+		t.Fatalf("a plain account: %+v %v", fs, err)
 	}
-	if z, _ := ks.Zones(); len(z) != 0 {
-		t.Fatalf("created zone keys %v", z)
+	if applied, err := AppliedZonePolicy(context.Background(), fk, ks, 0); err != nil || applied {
+		t.Fatalf("a plain account reads as a zone policy: %v %v", applied, err)
+	}
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sk, _ := nkeys.CreateAccount()
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = pubOf(t, sk), "red"
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	fs, err = AccountFindings(context.Background(), fk, ks, 0)
+	if err != nil || len(fs) != 1 || fs[0].Kind != KindZonePolicyApplied || !strings.Contains(fs[0].Detail, "ADR 0091") {
+		t.Fatalf("a scoped signer: %+v %v", fs, err)
+	}
+	if applied, err := AppliedZonePolicy(context.Background(), fk, ks, 0); err != nil || !applied {
+		t.Fatalf("a scoped signer is not a zone policy: %v %v", applied, err)
+	}
+	if err := RefuseZonePolicy(context.Background(), fk, ks, 0, errZoneApplied); err != errZoneApplied {
+		t.Fatalf("RefuseZonePolicy: %v", err)
 	}
 }
 
-// A write needs an answer to the account lookup from every known server: fewer replies than servers refuses apply
-// before a key is created or anything is pushed; the read-only modes warn and go on.
-func TestShortLookupRefusesWritesAndWarnsReadOnly(t *testing.T) {
-	for _, mode := range []Mode{Apply, DryRun, Diff} {
-		ks, fk, c := setup(t)
-		fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
-		fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
-		fk.all = []string{fk.token, fk.token}
-		var out bytes.Buffer
-		code := Run(context.Background(), Params{Mode: mode, Compiled: c, Keys: ks, Resolver: fk}, &out)
-		if fk.pushes != 0 {
-			t.Fatalf("%s: pushed", mode)
-		}
-		if mode == Apply {
-			if code != 1 || !strings.Contains(out.String(), "only 2 of 3 servers answered the account lookup; mashctl will not write") || !strings.Contains(out.String(), "nothing was changed") {
-				t.Fatalf("apply: %d\n%s", code, out.String())
-			}
-			if zs, _ := ks.ZoneKey("a", false); zs != nil {
-				t.Fatal("a zone key was created")
-			}
-			continue
-		}
-		if code != 0 || !strings.Contains(out.String(), "warning: only 2 of 3 servers answered the account lookup; this comparison may be stale") {
-			t.Fatalf("%s: %d\n%s", mode, code, out.String())
-		}
+var errZoneApplied = errors.New("zone policy applied")
+
+// A plain signing key is not a zone policy but is still not mashctl's own.
+func TestAccountFindingsReportsAPlainSigningKey(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	pk, _ := nkeys.CreateAccount()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) { cl.SigningKeys.Add(pubOf(t, pk)) })
+	fs, err := AccountFindings(context.Background(), fk, ks, 0)
+	if err != nil || len(fs) != 1 || fs[0].Kind != KindUnknownKey || !strings.Contains(fs[0].Detail, "will not carry signing keys it did not create") {
+		t.Fatalf("%+v %v", fs, err)
 	}
-	// every server answers: the write goes through
-	ks, fk, c := setup(t)
-	fk.servers = ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3}
-	fk.acks = []ServerAck{{Server: "s1", Code: 200}, {Server: "s2", Code: 200}, {Server: "s3", Code: 200}}
-	fk.applyPush = true
-	if code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &bytes.Buffer{}); code != 0 || fk.pushes != 1 {
-		t.Fatalf("complete: %d pushes %d", code, fk.pushes)
+	if applied, _ := AppliedZonePolicy(context.Background(), fk, ks, 0); applied {
+		t.Fatal("a plain signing key reads as a zone policy")
+	}
+}
+
+func TestAccountFindingsReportsServersThatDisagree(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	_, acct, _ := ks.Account()
+	a := tokenAt(t, op, jwt.NewAccountClaims(acct), 1000)
+	b := tokenAt(t, op, jwt.NewAccountClaims(acct), 2000)
+	fk.servers = ServerSet{Names: []string{"s1", "s2"}, Expected: 2}
+	m := &multi{fake: fk, copies: []string{a, b}}
+	fs, err := AccountFindings(context.Background(), m, ks, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range fs {
+		found = found || f.Kind == KindServersDiffer
+	}
+	if !found {
+		t.Fatalf("no servers-differ finding: %+v", fs)
 	}
 }

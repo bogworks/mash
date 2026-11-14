@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -80,7 +81,7 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 func whoNames(ps []endpoint.Presence) string {
 	names := make([]string, len(ps))
 	for i, p := range ps {
-		names[i] = p.Record.KeyOrName()
+		names[i] = config.Clean(p.Record.KeyOrName())
 	}
 	return strings.Join(names, "\n")
 }
@@ -103,7 +104,6 @@ type whoEntry struct {
 	Description string            `json:"description,omitempty"`
 	Caps        []string          `json:"caps,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
-	Zone        string            `json:"zone,omitempty"` // additive (ADR 0054): present only for a zoned endpoint
 	Lease       *whoLease         `json:"lease,omitempty"`
 	Alias       *whoAlias         `json:"alias,omitempty"` // additive (ADR 0076): present only for a record that carries an alias
 }
@@ -120,7 +120,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
-		e := whoEntry{Name: r.KeyOrName(), Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description, Zone: r.Zone}
+		e := whoEntry{Name: r.KeyOrName(), Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description}
 		if d := sap.Display(r.KeyOrName()); d != e.Name {
 			e.Identity = d // a legacy entry has none: its name is already what people read
 		}

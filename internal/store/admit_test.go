@@ -34,38 +34,32 @@ func TestAdmitMatrix(t *testing.T) {
 	cases := []struct {
 		name     string
 		id       sap.EndpointIdentity
-		zone     string
 		existing []Record
 		want     string // "" admitted, else substring of the error
 	}{
-		{"new-form vs legacy same owner+name", mustNew(t, "acme", "team1", "ops1"), "", []Record{legacyRec("team1", "", "ops1")}, "overlap"},
-		{"new-form owner equals legacy owner, other name", mustNew(t, "acme", "team1", "ops1"), "", []Record{legacyRec("team1", "", "other")}, "owner equals a legacy owner"},
-		{"new-form disjoint owner", mustNew(t, "acme", "team1", "ops1"), "", []Record{legacyRec("legowner", "", "ops1")}, ""},
-		{"legacy vs existing new-form same owner+name", mustLegacy(t, "team1", "ops1"), "", []Record{newRec("acme", "team1", "ops1")}, "overlap"},
-		{"zoned legacy present refuses new-form", mustNew(t, "acme", "team1", "ops1"), "", []Record{legacyRec("legowner", "z", "zed")}, "zoned legacy endpoint present"},
-		{"zoned legacy admission with new-form present", mustLegacy(t, "legowner", "zed"), "z", []Record{newRec("acme", "team1", "ops1")}, "zoned legacy endpoint"},
-		{"zoned legacy admission with only legacy present", mustLegacy(t, "legowner", "zed"), "z", []Record{legacyRec("legowner", "", "ops1")}, ""},
-		{"reverse: legacy owner equals existing new-form owner", mustLegacy(t, "team1", "other"), "", []Record{newRec("acme", "team1", "ops1")}, "owner equals a new-form owner"},
-		{"reverse: legacy owner differs from new-form owner", mustLegacy(t, "zzz", "other"), "", []Record{newRec("acme", "team1", "ops1")}, ""},
-		{"unmodellable record refuses new-form", mustNew(t, "acme", "team1", "ops1"), "", []Record{odd}, "unmodellable record oddname"},
-		{"odd legacy-keyed record does not block legacy admission", mustLegacy(t, "legowner", "ops1"), "", []Record{odd}, ""},
-		{"odd legacy-keyed record does not block legacy zoned admission", mustLegacy(t, "legowner", "ops1"), "z", []Record{odd}, ""},
-		{"unmodellable new-form-keyed record refuses legacy", mustLegacy(t, "legowner", "ops1"), "", []Record{{Name: "bad_key_x", Owner: "o", Agent: "cc", AgentToken: "cc"}}, "unmodellable record bad_key_x"},
-		{"odd legacy-keyed record next to new-form record refuses new-form", mustNew(t, "acme", "team1", "ops1"), "", []Record{odd, newRec("acme", "team2", "ops2")}, "unmodellable record oddname"},
-		{"odd legacy-keyed record with a new-form record present refuses legacy only via new-form", mustLegacy(t, "legowner", "ops1"), "", []Record{odd, newRec("acme", "team2", "ops2")}, ""},
-		{"re-admit legacy itself", mustLegacy(t, "legowner", "ops1"), "", []Record{legacyRec("legowner", "", "ops1")}, ""},
-		{"re-admit zoned legacy itself", mustLegacy(t, "legowner", "zed"), "z", []Record{legacyRec("legowner", "z", "zed")}, ""},
-		{"re-admit new-form itself", mustNew(t, "acme", "team1", "ops1"), "", []Record{newRec("acme", "team1", "ops1")}, ""},
-		{"legacy vs legacy, other owner same name", mustLegacy(t, "o2", "ops1"), "", []Record{legacyRec("o1", "", "ops1"), legacyRec("o1", "", "ops2")}, ""},
-		{"legacy vs legacy, same owner other name", mustLegacy(t, "o1", "ops3"), "", []Record{legacyRec("o1", "", "ops1")}, ""},
-		{"new-form differing in agent", mustNew(t, "beta", "team1", "ops1"), "", []Record{newRec("acme", "team1", "ops1")}, ""},
-		{"new-form differing in owner", mustNew(t, "acme", "team2", "ops1"), "", []Record{newRec("acme", "team1", "ops1")}, ""},
-		{"new-form differing in name", mustNew(t, "acme", "team1", "ops2"), "", []Record{newRec("acme", "team1", "ops1")}, ""},
-		{"no records", mustNew(t, "acme", "team1", "ops1"), "", nil, ""},
+		{"new-form vs legacy same owner+name", mustNew(t, "acme", "team1", "ops1"), []Record{legacyRec("team1", "", "ops1")}, "overlap"},
+		{"new-form owner equals legacy owner, other name", mustNew(t, "acme", "team1", "ops1"), []Record{legacyRec("team1", "", "other")}, "owner equals a legacy owner"},
+		{"new-form disjoint owner", mustNew(t, "acme", "team1", "ops1"), []Record{legacyRec("legowner", "", "ops1")}, ""},
+		{"legacy vs existing new-form same owner+name", mustLegacy(t, "team1", "ops1"), []Record{newRec("acme", "team1", "ops1")}, "overlap"},
+		{"reverse: legacy owner equals existing new-form owner", mustLegacy(t, "team1", "other"), []Record{newRec("acme", "team1", "ops1")}, "owner equals a new-form owner"},
+		{"reverse: legacy owner differs from new-form owner", mustLegacy(t, "zzz", "other"), []Record{newRec("acme", "team1", "ops1")}, ""},
+		{"unmodellable record refuses new-form", mustNew(t, "acme", "team1", "ops1"), []Record{odd}, "unmodellable record oddname"},
+		{"odd legacy-keyed record does not block legacy admission", mustLegacy(t, "legowner", "ops1"), []Record{odd}, ""},
+		{"unmodellable new-form-keyed record refuses legacy", mustLegacy(t, "legowner", "ops1"), []Record{{Name: "bad_key_x", Owner: "o", Agent: "cc", AgentToken: "cc"}}, "unmodellable record bad_key_x"},
+		{"odd legacy-keyed record next to new-form record refuses new-form", mustNew(t, "acme", "team1", "ops1"), []Record{odd, newRec("acme", "team2", "ops2")}, "unmodellable record oddname"},
+		{"odd legacy-keyed record with a new-form record present refuses legacy only via new-form", mustLegacy(t, "legowner", "ops1"), []Record{odd, newRec("acme", "team2", "ops2")}, ""},
+		{"re-admit legacy itself", mustLegacy(t, "legowner", "ops1"), []Record{legacyRec("legowner", "", "ops1")}, ""},
+		{"re-admit new-form itself", mustNew(t, "acme", "team1", "ops1"), []Record{newRec("acme", "team1", "ops1")}, ""},
+		{"legacy vs legacy, other owner same name", mustLegacy(t, "o2", "ops1"), []Record{legacyRec("o1", "", "ops1"), legacyRec("o1", "", "ops2")}, ""},
+		{"legacy vs legacy, same owner other name", mustLegacy(t, "o1", "ops3"), []Record{legacyRec("o1", "", "ops1")}, ""},
+		{"new-form differing in agent", mustNew(t, "beta", "team1", "ops1"), []Record{newRec("acme", "team1", "ops1")}, ""},
+		{"new-form differing in owner", mustNew(t, "acme", "team2", "ops1"), []Record{newRec("acme", "team1", "ops1")}, ""},
+		{"new-form differing in name", mustNew(t, "acme", "team1", "ops2"), []Record{newRec("acme", "team1", "ops1")}, ""},
+		{"no records", mustNew(t, "acme", "team1", "ops1"), nil, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := Admit(c.id, c.zone, c.existing)
+			err := Admit(c.id, c.existing)
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("refused: %v", err)
@@ -79,14 +73,14 @@ func TestAdmitMatrix(t *testing.T) {
 }
 
 func TestAdmitNamesExistingKey(t *testing.T) {
-	err := Admit(mustNew(t, "acme", "team1", "ops1"), "", []Record{legacyRec("team1", "", "ops1")})
+	err := Admit(mustNew(t, "acme", "team1", "ops1"), []Record{legacyRec("team1", "", "ops1")})
 	if err == nil || !strings.Contains(err.Error(), "ops1") {
 		t.Fatalf("error %v", err)
 	}
 }
 
 func TestAdmitFailsClosedOnZeroIdentity(t *testing.T) {
-	if err := Admit(sap.EndpointIdentity{}, "", nil); err == nil {
+	if err := Admit(sap.EndpointIdentity{}, nil); err == nil {
 		t.Fatal("zero identity admitted")
 	}
 }

@@ -125,6 +125,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	if l := spoolFaultLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	if l := legacyInboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
@@ -257,13 +260,22 @@ func credsLine(cfg config.Config) string {
 
 const cliLiveNote = "not checked from the CLI (a running session reports it)"
 
-// tlsLine warns when the url is plain nats:// (or ws://) to a non-loopback host.
+// tlsLine says how the url is protected. A plain nats:// or ws:// entry (a scheme-less entry is nats://) to a host that
+// is not loopback is a WARN that names the host, or, with require_tls on, the refusal an endpoint connection gives.
 func tlsLine(cfg config.Config) string {
-	switch w := config.PlainTextWarning(cfg.URL); {
-	case cfg.URL == "":
+	if cfg.URL == "" {
 		return "tls: n/a - no url"
+	}
+	if cfg.RequireTLS {
+		if _, err := endpoint.EndpointTLS(cfg); err != nil {
+			return "tls: FAILED - " + redactText(err.Error())
+		}
+	}
+	switch w := config.PlainTextWarning(cfg.URL); {
 	case w != "":
 		return fmt.Sprintf("tls: WARN - %s %s", redactURL(cfg.URL), w)
+	case cfg.RequireTLS:
+		return "tls: OK (required) - no plain text to a remote host"
 	case strings.Contains(cfg.URL, "tls://") || strings.Contains(cfg.URL, "wss://"):
 		return "tls: OK - tls:// connection"
 	}
@@ -469,6 +481,23 @@ func legacyInboxLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.LegacyInboxLine(); ok {
+		return redactText(l)
+	}
+	return ""
+}
+
+// spoolFaultLine says that mail is held because the spool is failing (MASH_SPOOL_REQUIRED). Empty when the spool works,
+// when the setting is off, from a shell (nothing is connected) and with no running endpoint. While no spool has yet
+// bound there is no endpoint state to read it from, so serve keeps the endpoint in the state and the line comes from it.
+func spoolFaultLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	if l, ok := st.ep.SpoolFaultLine(); ok {
 		return redactText(l)
 	}
 	return ""

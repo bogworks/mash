@@ -15,11 +15,9 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/policy"
-	"github.com/bogworks/mash/internal/policyfile"
 )
 
-const retireUsage = `usage: mashctl retire NAME [--policy FILE] [--delete-creds] [--force] [--no-revoke]
+const retireUsage = `usage: mashctl retire NAME [--delete-creds] [--force] [--no-revoke]
 `
 
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
@@ -38,34 +36,13 @@ var retireNow = time.Now
 // retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
 var retireRevokeNow = time.Now
 
-// looksInterrupted reports whether a creds file or a directory record exists for a name the policy file lacks. A
-// server that cannot be reached counts as no record.
-func looksInterrupted(cfg config.Config, credsPath, name string) bool {
-	if credsPath != "" {
-		if _, err := os.Lstat(credsPath); err == nil {
-			return true
-		}
-	}
-	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
-	if err != nil {
-		return false
-	}
-	defer closeAdmin()
-	recs, err := adm.List(ctx)
-	if err != nil {
-		return false
-	}
-	_, ok := findRecord(recs, name)
-	return ok
-}
-
 // noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
-const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the zone key is rotated"
+const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
 
-// runRetire is `mashctl retire`: the server removal comes first, the policy save second and the creds file last, so a
-// failure leaves the earlier, safer state and never a policy that names an endpoint the server still serves.
+// runRetire is `mashctl retire`: the server removal (the revocation of the user key, then the directory record and
+// inbox) comes first and the creds file last, so a failure leaves the earlier, safer state.
 func runRetire(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	var name, file string
+	var name string
 	var deleteCreds, force, noRevoke bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -76,17 +53,6 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			force = true
 		case a == "--no-revoke":
 			noRevoke = true
-		case a == "--policy" || strings.HasPrefix(a, "--policy="):
-			if v, has := strings.CutPrefix(a, "--policy="); has {
-				file = v
-			} else if i+1 < len(args) {
-				i++
-				file = args[i]
-			}
-			if file == "" {
-				fmt.Fprintf(stderr, "mashctl: retire: --policy needs a file\n%s", retireUsage)
-				return 2
-			}
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "mashctl: retire: unknown %s\n%s", config.RejectedArg(a), retireUsage)
 			return 2
@@ -119,59 +85,17 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	path, err := policyPath(file, env, cfg)
-	if err != nil {
-		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
+	guard, ok := accountGuard(cfg, "retire", stderr)
+	if !ok {
+		return 1
 	}
+	defer guard.Release()
 	credsPath, credsErr := credsFileFor(cfg, name)
 	if credsErr != nil && deleteCreds {
 		return fail("%v", credsErr)
 	}
 
-	// (1) the policy file, locked for the whole command.
-	doc, err := policyfile.Load(path)
-	if err != nil {
-		return fail("%v", err)
-	}
-	defer doc.Close()
-	beforeBytes, _ := doc.Bytes()
-	beforeFile, before, err := compileBytes(beforeBytes, cfg.Owner)
-	if err != nil {
-		return fail("%s: %v", path, err)
-	}
-	_, declared := beforeFile.Endpoints[name]
-	if !declared && !force {
-		announceTarget(cfg, env, stderr, nil)
-		if looksInterrupted(cfg, credsPath, name) {
-			return fail("endpoint %q is not declared in %s (--force removes it from the server only); %s", name, path, orphanText(name))
-		}
-		return fail("endpoint %q is not declared in %s (--force removes it from the server only)", name, path)
-	}
-
-	// (2) the entry removed in memory.
-	var after *policy.Compiled
-	editPolicy := declared
-	if declared {
-		refs, err := doc.RemoveEndpoint(name)
-		if err != nil {
-			return fail("%v", err)
-		}
-		if len(refs) > 0 {
-			if !force {
-				return fail("tests still name %s: %s; remove them first", name, strings.Join(refs, ", "))
-			}
-			// The file would not parse with those tests: it is left as it is.
-			editPolicy = false
-			fmt.Fprintf(stderr, "mashctl: retire %s: tests still name %s: %s; the policy file is left as it is\n", name, name, strings.Join(refs, ", "))
-		} else {
-			afterBytes, _ := doc.Bytes()
-			if _, after, err = compileBytes(afterBytes, cfg.Owner); err != nil {
-				return fail("the edit does not make a valid policy: %v", err)
-			}
-		}
-	}
-
-	// (3) the guarded server removal. The user key comes from the directory record, so a record someone replaced
+	// (1) the guarded server removal. The user key comes from the directory record, so a record someone replaced
 	// meanwhile is never deleted.
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
@@ -192,7 +116,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
-		var revokeErr, checkErr error
+		var revokeErr, checkErr, lockErr error
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
@@ -205,6 +129,12 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
 				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
 				revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
+				// The issue record is read first: a key whose recorded history is future-dated, or cannot be shown to be
+				// complete, refuses the removal in the same way.
+				if err := ctl.CheckNotFutureIssued(ctx, recorder, []ctl.RevokeTarget{{Name: name, Key: u}}, revokeAt, stderr); err != nil {
+					checkErr = err
+					return err
+				}
 				if credsErr == nil {
 					claims, err := credsIssuedClaims(credsPath, u)
 					if err == nil {
@@ -217,9 +147,18 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 						return fmt.Errorf("creds check: %w", err)
 					}
 				}
+				if err := guard.Before("the revocation of the user key"); err != nil {
+					lockErr = err
+					return err
+				}
 				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
+				}
+				if err := guard.Before("the record of the revocation"); err != nil {
+					// The key is revoked in the account JWT; only the bookkeeping record of it and the removal stop.
+					lockErr = fmt.Errorf("the user key %s... is already revoked in the account JWT, but the removal stopped: %w", ctl.ShortKey(u), err)
+					return lockErr
 				}
 				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 				return nil
@@ -228,10 +167,16 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
+		if err := guard.Before("the removal of the record and inbox"); err != nil { // before the first server write
+			return fail("%v; nothing was changed", err)
+		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
 				if msg, ok := ctl.AliasedRefusal(err, name); ok {
 					return fail("%s", msg)
+				}
+				if lockErr != nil && errors.Is(err, lockErr) {
+					return fail("%v; the directory record was not changed: run mashctl retire %s again", lockErr, name)
 				}
 				if checkErr != nil && errors.Is(err, checkErr) {
 					return fail("%v", checkErr)
@@ -242,35 +187,24 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				return fail("%v: nothing was changed", err)
 			}
 			if admin.IsPartial(err) {
-				return fail("%v; the policy file was not changed; run mashctl retire %s again", err, name)
+				return fail("%v; run mashctl retire %s again", err, name)
 			}
-			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left); the policy file was not changed. Then run: mashctl retire %s --force (it removes the policy entry)", err, name, name)
+			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left)", err, name)
 		}
 	case force:
-		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server, so no user key is known and nothing was revoked; only the policy file and creds are handled\n", name)
+		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server, so no user key is known and nothing was revoked; only the creds file is handled\n", name)
 	default:
-		return fail("no directory record on the server (--force edits the policy file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", name)
+		return fail("no directory record on the server (--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", name)
 	}
 
-	// (4) the policy file.
-	if declared && !editPolicy {
-		fmt.Fprintf(stderr, "mashctl: retire %s: removed from the server, but still declared in %s: remove the tests that name it and its entry by hand\n", name, path)
-		return 1
-	}
-	if editPolicy {
-		if err := doc.Save(); err != nil {
-			if errors.Is(err, policyfile.ErrChanged) {
-				return fail("%v: %s is already removed from the server (its record and inbox are gone) but is still declared in %s: edit the file by hand to remove its entry", err, name, path)
-			}
-			return fail("%v: %s is already removed from the server but is still declared in %s: edit the file by hand to remove its entry", err, name, path)
-		}
-	}
-
-	// (5) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
+	// (2) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
 	// aside so the name can be added again at once; --delete-creds removes it.
 	code := 0
 	renamed := ""
 	if credsErr == nil {
+		if err := guard.Before("the move or removal of the creds file"); err != nil {
+			return fail("%v; %s is removed from the server, but the creds file %s was left in place: rename or remove it by hand", err, name, credsPath)
+		}
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -297,15 +231,10 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		}
 	}
 
-	// (6) report.
+	// (3) report.
 	fmt.Fprintf(stdout, "retired %s\n", name)
 	if renamed != "" {
 		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
-	}
-	if after != nil {
-		for _, l := range consequences(before, after) {
-			fmt.Fprintln(stdout, l)
-		}
 	}
 	switch {
 	case user == "":
@@ -314,7 +243,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 	default:
 		io.WriteString(stdout, revokeOut.String())
-		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file and the policy entry are separate\n", ctl.ShortKey(user))
+		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file is separate\n", ctl.ShortKey(user))
 	}
 	return code
 }

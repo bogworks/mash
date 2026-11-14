@@ -2,6 +2,10 @@
 # full). Every key is documented at https://docs.mergify.com/ . The checks named here are job names in ci.yml,
 # adr-lint.yml or label-reset.yml; internal/release/mergify_test.go fails if one of them is not a job one of those runs,
 # since a name CI never publishes can never be satisfied and the queue would time out.
+# Those Actions checks are written `@github-actions/<name>`. A plain `check-success = pr-check` matches a status or a
+# check run of that name by whoever posted it, so anyone who can write commit statuses could forge pr-check, adr-lint or
+# label-reset; qualifying with the app binds the condition to GitHub Actions. codex-review and lead-review stay plain:
+# they ARE commit statuses (scripts/review-pr, scripts/lead-approve), no app posts them as checks.
 
 # One ordered queue, one queue run at a time: fast-forward allows only serial mode
 # (https://docs.mergify.com/merge-queue/queue-modes/).
@@ -57,14 +61,25 @@ queue_rules:
       - -conflict
       - label != hold
       - check-success = codex-review
-      - check-success = pr-check
+      - check-success = @github-actions/pr-check
       # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
       # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
-      - check-success = adr-lint
+      - check-success = @github-actions/adr-lint
       # label-reset (.github/workflows/label-reset.yml) removes lead-approved and decision-confirmed on every push. It
       # must have run, and succeeded, on this head before it can enter the queue, so a push cannot slip in on the
       # previous head's label (fail closed).
-      - check-success = label-reset
+      - check-success = @github-actions/label-reset
+      # The lead's review, as a commit status `lead-review` = success on the exact head SHA the lead reviewed (posted by
+      # scripts/lead-approve; ADR 0116). A new head has no such status, so a push drops this approval by itself. It is a
+      # PLAIN entry here, not in `merge_protections` (the status does not exist on the queue draft's commit, the #424
+      # deadlock) and not inside the `or` below (a bare check inside an `or` is banned, ADR 0078). Migration week,
+      # 2026-11-14 to 2026-11-21: it is required ALONGSIDE the approval-or-`lead-approved` gate below, so for now it ADDS
+      # a requirement. On 2026-11-21 the `or` below becomes the status-or-approval (the `lead-approved` alternative
+      # drops and this plain entry moves into it as the status alternative), and the files that change are this file,
+      # internal/release/mergify_test.go, .github/workflows/label-reset.yml (stops stripping `lead-approved`), and
+      # docs/branch-protection.md. `check-success` matches a status whoever posted it (Mergify has no creator
+      # filter), so this binds approval to the head commit; it does not authenticate the lead (ADR 0116).
+      - check-success = lead-review
       # Entry needs a recorded maintainer approval or the `lead-approved` label. Authorship is NOT a condition: the
       # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
       # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's
@@ -85,7 +100,7 @@ queue_rules:
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
-      - check-success = pr-check
+      - check-success = @github-actions/pr-check
     # mash sees a few pull requests a day: a batch is whatever is queued, up to 5, with no wait for company. The
     # macOS leg is the slowest job, so fewer, larger runs are cheaper than many.
     batch_size:

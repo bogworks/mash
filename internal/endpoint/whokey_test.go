@@ -16,7 +16,7 @@ func TestWhoKeepsNewFormAndLegacySameNameApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	nf := store.Record{Name: "ops1", Owner: "team1", AgentToken: "acme", User: "U1", MailSubject: id.Subjects().Mail}
-	lg := store.Record{Name: "ops1", Owner: "acme", AgentToken: "cc", User: "U2", MailSubject: store.MailSubjectFor("acme", "", "ops1")}
+	lg := store.Record{Name: "ops1", Owner: "acme", AgentToken: "cc", User: "U2", MailSubject: store.MailSubjectFor("acme", "ops1")}
 	e := &Endpoint{dir: map[string]store.Record{id.Flat(): nf, "ops1": lg},
 		lastSeen: map[string]time.Time{"ops1": time.Now()}}
 	for i := 0; i < 20; i++ { // map order is random: a sort on Name alone would tie and flap

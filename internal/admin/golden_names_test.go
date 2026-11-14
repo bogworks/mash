@@ -39,7 +39,6 @@ func TestGoldenPermissionsUnpolicied(t *testing.T) {
 	p := Permissions("o", "a")
 	goldenSame(t, "pub allow", p.Pub.Allow, append([]string{
 		"agents.mail.*.o.*",
-		"agents.mail.*.o.*.*",
 		"agents.prompt.*.o.*",
 		"agents.status.*.o.*",
 	}, goldenFixed("a", "agents.hb.cc.o.a")...))
@@ -71,7 +70,6 @@ func TestGoldenPermissionsLongNames(t *testing.T) {
 	p := Permissions(n48, n48)
 	want := append([]string{
 		"agents.mail.*." + n48 + ".*",
-		"agents.mail.*." + n48 + ".*.*",
 		"agents.prompt.*." + n48 + ".*",
 		"agents.status.*." + n48 + ".*",
 	}, goldenFixed(n48, "agents.hb.cc."+n48+"."+n48)...)
@@ -95,36 +93,8 @@ func TestGoldenNSCFlags(t *testing.T) {
 		want = append(want, "--allow-sub", s)
 	}
 	goldenSame(t, "flags", NSCFlags("o", "a"), want)
-	if f := NSCFlags("o", "a"); f[0] != "--allow-pub" || f[1] != "agents.mail.*.o.*" || len(f) != 2*(4+15+5) {
+	if f := NSCFlags("o", "a"); f[0] != "--allow-pub" || f[1] != "agents.mail.*.o.*" || len(f) != 2*(3+15+5) {
 		t.Errorf("flag shape: %q", f)
-	}
-}
-
-func TestGoldenZonePermissions(t *testing.T) {
-	p := ZonePermissions("o", "z", nil)
-	goldenSame(t, "pub allow", p.Pub.Allow, append([]string{
-		"agents.mail.*.o.{{tag(allow)}}",
-		"agents.prompt.*.o.*",
-		"agents.status.*.o.*",
-	}, goldenFixed("{{name()}}", "agents.hb.cc.o.{{name()}}")...))
-	goldenSame(t, "pub deny", p.Pub.Deny, []string{"agents.mail.*.o.{{tag(deny)}}"})
-	goldenSame(t, "sub allow", p.Sub.Allow, []string{
-		"_INBOX.{{name()}}.>",
-		"agents.prompt.cc.o.{{name()}}",
-		"agents.status.cc.o.{{name()}}",
-		"$SRV.>",
-		"agents.hb.*.o.*",
-	})
-	w := ZonePermissions("o", "z", []string{"y", "x"})
-	goldenSame(t, "pub allow with wildcard zones", w.Pub.Allow, append([]string{
-		"agents.mail.*.o.x.*",
-		"agents.mail.*.o.y.*",
-		"agents.mail.*.o.{{tag(allow)}}",
-		"agents.prompt.*.o.*",
-		"agents.status.*.o.*",
-	}, goldenFixed("{{name()}}", "agents.hb.cc.o.{{name()}}")...))
-	if AllowTag != "allow" || DenyTag != "deny" || NoDenyTag != "deny:_none" {
-		t.Errorf("tag names: %q %q %q", AllowTag, DenyTag, NoDenyTag)
 	}
 }
 

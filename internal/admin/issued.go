@@ -41,6 +41,12 @@ func (a *Admin) issuedKV(ctx context.Context) (jetstream.KeyValue, error) {
 // record's bucket does not exist). A caller that revokes a key mash may not have issued treats it as no finding.
 var ErrNotRecorded = errors.New("mash: issue record: key not recorded")
 
+// ErrKeyRevoked and ErrKeyBoundElsewhere are the refusals of RecordIssuedChecked.
+var (
+	ErrKeyRevoked        = store.ErrKeyRevoked
+	ErrKeyBoundElsewhere = store.ErrKeyBoundElsewhere
+)
+
 // issuedCASTries is how many times a read-modify-write of one record retries after losing a race.
 const issuedCASTries = 8
 
@@ -51,6 +57,20 @@ const issuedCASTries = 8
 // set. Callers record before they hand the creds out, so a user that can connect is always in the record; an error
 // means the user must not be issued.
 func (a *Admin) RecordIssued(ctx context.Context, r store.Issued) error {
+	return a.recordIssued(ctx, r, false)
+}
+
+// RecordIssuedChecked is RecordIssued with the issue service's conditions made part of every compare-and-set attempt:
+// when the record the write would follow has revoked_at set it fails with store.ErrKeyRevoked, and when that record is
+// bound to another address it fails with store.ErrKeyBoundElsewhere; in both cases nothing is written. The conditions
+// are tested against the revision the write is made at, so a MarkRevoked or a second issuer's write that lands between
+// a caller's earlier lookup and this write is seen, not overwritten. A caller hands a credential out only after this
+// returns nil.
+func (a *Admin) RecordIssuedChecked(ctx context.Context, r store.Issued) error {
+	return a.recordIssued(ctx, r, true)
+}
+
+func (a *Admin) recordIssued(ctx context.Context, r store.Issued, checked bool) error {
 	if !nkeys.IsValidPublicUserKey(r.PublicKey) {
 		return fmt.Errorf("mash: issue record: %q is not a user public key", r.PublicKey)
 	}
@@ -78,6 +98,14 @@ func (a *Admin) RecordIssued(ctx context.Context, r store.Issued) error {
 		return err
 	}
 	return casIssued(ctx, kv, r.PublicKey, func(cur *store.Issued) (store.Issued, bool, error) {
+		if checked && cur != nil {
+			if cur.RevokedAt != "" {
+				return store.Issued{}, false, store.ErrKeyRevoked
+			}
+			if cur.Address != r.Address {
+				return store.Issued{}, false, store.ErrKeyBoundElsewhere
+			}
+		}
 		next := r
 		if cur != nil && cur.RevokedAt != "" {
 			next.RevokedAt = cur.RevokedAt
@@ -205,6 +233,177 @@ func (a *Admin) Issued(ctx context.Context) (recs []store.Issued, present bool, 
 	return recs, true, nil
 }
 
+// IssuedByKey returns the latest issue record of publicKey. found is false when the key is not recorded or the bucket
+// does not exist (nothing was ever recorded: jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean
+// absent); any other failure (network, permission, cancelled context, JetStream) and an entry that cannot be read or
+// decoded is an error.
+func (a *Admin) IssuedByKey(ctx context.Context, publicKey string) (rec store.Issued, found bool, err error) {
+	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return store.Issued{}, false, nil
+	}
+	if err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record bucket: %w", err)
+	}
+	e, err := kv.Get(ctx, publicKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return store.Issued{}, false, nil
+	}
+	if err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: %w", publicKey, err)
+	}
+	if err := json.Unmarshal(e.Value(), &rec); err != nil {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: unreadable entry", publicKey)
+	}
+	if rec.PublicKey != publicKey {
+		return store.Issued{}, false, fmt.Errorf("mash: issue record %s: the entry names another key", publicKey)
+	}
+	rec.Purpose = rec.EffectivePurpose()
+	return rec, true, nil
+}
+
+// IssuedTimes is every issue time the record keeps of one key.
+type IssuedTimes struct {
+	// Latest is the newest revision's issued_at; Max is the greatest issued_at over all retained revisions. They differ
+	// when a re-record of the same key (a reissue that keeps the key) carries an earlier time than a revision before it,
+	// as after a clock rollback.
+	Latest, Max time.Time
+	// Revisions is how many revisions the bucket still holds of the key.
+	Revisions int
+	// Truncated is true when the history is at the bucket's cap: the oldest revisions may have been dropped, so Max
+	// may not cover every credential ever recorded for the key.
+	Truncated bool
+}
+
+// MalformedIssuedAtError is returned by IssuedHistoryByKey for a revision whose issued_at is missing or not an RFC 3339
+// time.
+type MalformedIssuedAtError struct {
+	Key, Value string
+	Revision   uint64
+}
+
+func (e *MalformedIssuedAtError) Error() string {
+	return fmt.Sprintf("mash: issue record %s: revision %d has a missing or malformed issued_at (%q)", e.Key, e.Revision, e.Value)
+}
+
+// IncompleteHistoryError is returned by IssuedHistoryByKey for a key whose retained history cannot be shown to be
+// complete: an older revision may have been dropped from the bucket before its history limit was raised.
+type IncompleteHistoryError struct {
+	Key      string
+	Retained int
+}
+
+func (e *IncompleteHistoryError) Error() string {
+	return fmt.Sprintf("mash: issue record %s: the retained history (%d revisions) cannot be shown to be complete", e.Key, e.Retained)
+}
+
+// historyProvable reports whether the revisions retained of a key (their stream sequences) can be shown to be all it
+// ever had, from the bucket's marker: "full" always; "raised:N:S" when fewer than N of them are at or below S (nothing
+// could have been dropped at a limit of N); no marker when fewer than store.IssuedMinHistory are retained.
+func historyProvable(m store.IssuedMarker, seqs []uint64) bool {
+	switch m.Kind {
+	case "full":
+		return true
+	case "raised":
+		n := 0
+		for _, q := range seqs {
+			if q <= m.Seq {
+				n++
+			}
+		}
+		return n < m.N
+	}
+	return len(seqs) < store.IssuedMinHistory
+}
+
+// issuedStatusFault is a test seam: a non-nil error it returns replaces the bucket status read in IssuedHistoryByKey.
+var issuedStatusFault func() error
+
+// issuedMarkerFault is a test seam: a non-nil error it returns stops initIssued between the limit raise and the marker
+// write.
+var issuedMarkerFault func() error
+
+// IssuedHistoryByKey reads every retained revision of publicKey's issue record (up to the bucket's history cap,
+// store.IssuedHistory) and returns the issue times they hold. found is false when the key is not recorded or the bucket
+// does not exist (jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean absent). Any other failure, a
+// revision that cannot be decoded or names another key, a revision that is not a plain write, and a revision whose
+// issued_at is missing or not a time (*MalformedIssuedAtError) is an error: a check must not pass over a revision it
+// cannot read. A key whose retained history cannot be shown complete from the bucket's marker (see
+// store.IssuedMarkerKey) is an *IncompleteHistoryError.
+func (a *Admin) IssuedHistoryByKey(ctx context.Context, publicKey string) (t IssuedTimes, found bool, err error) {
+	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return IssuedTimes{}, false, nil
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record bucket: %w", err)
+	}
+	hist, err := kv.History(ctx, publicKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return IssuedTimes{}, false, nil
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: %w", publicKey, err)
+	}
+	if len(hist) == 0 {
+		return IssuedTimes{}, false, nil
+	}
+	// The bucket's own history cap and marker decide whether the oldest revisions may have been dropped, so a status that
+	// cannot be read is an error: assuming the current cap could pass a key whose older, future-dated record was evicted.
+	stream, err := a.js.Stream(ctx, store.IssuedStreamName)
+	var info *jetstream.StreamInfo
+	if err == nil {
+		info, err = stream.Info(ctx)
+	}
+	if err == nil && issuedStatusFault != nil {
+		err = issuedStatusFault()
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record bucket status: %w", err)
+	}
+	marker, err := store.ParseIssuedMarker(info.Config.Metadata)
+	if err != nil {
+		return IssuedTimes{}, false, &IncompleteHistoryError{Key: publicKey, Retained: len(hist)}
+	}
+	limit := store.IssuedHistory
+	if h := int(info.Config.MaxMsgsPerSubject); h > 0 && h < limit {
+		limit = h // a bucket from before `mash admin init` raised it keeps fewer
+	}
+	seqs := make([]uint64, 0, len(hist))
+	for _, e := range hist {
+		seqs = append(seqs, e.Revision())
+	}
+	if !historyProvable(marker, seqs) {
+		return IssuedTimes{}, false, &IncompleteHistoryError{Key: publicKey, Retained: len(hist)}
+	}
+	for i, e := range hist {
+		if e.Operation() != jetstream.KeyValuePut {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: revision %d is not a plain write", publicKey, e.Revision())
+		}
+		var rec store.Issued
+		if err := json.Unmarshal(e.Value(), &rec); err != nil {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: unreadable entry", publicKey)
+		}
+		if rec.PublicKey != publicKey {
+			return IssuedTimes{}, false, fmt.Errorf("mash: issue record %s: the entry names another key", publicKey)
+		}
+		at, perr := time.Parse(time.RFC3339, rec.IssuedAt)
+		if perr != nil {
+			return IssuedTimes{}, false, &MalformedIssuedAtError{Key: publicKey, Value: rec.IssuedAt, Revision: e.Revision()}
+		}
+		at = at.UTC()
+		if at.After(t.Max) {
+			t.Max = at
+		}
+		if i == len(hist)-1 {
+			t.Latest = at
+		}
+	}
+	t.Revisions = len(hist)
+	t.Truncated = len(hist) >= limit
+	return t, true, nil
+}
+
 // initIssued creates the issue record's bucket, or verifies an existing one. An existing bucket is altered in one way
 // only: a per-key history below store.IssuedHistory (the first version kept 8) is raised to it, a stream update that
 // loses no record. Everything else about it is only verified.
@@ -233,10 +432,41 @@ func (a *Admin) initIssued(ctx context.Context) error {
 	if info.Config.MaxMsgsPerSubject >= store.IssuedHistory {
 		return nil
 	}
-	sc := info.Config
+	oldLimit := int(info.Config.MaxMsgsPerSubject)
+	sc := info.Config // a copy of the whole config: DenyDelete, DenyPurge and the rest carry over
 	sc.MaxMsgsPerSubject = store.IssuedHistory
 	if _, err := a.js.UpdateStream(ctx, sc); err != nil {
 		return fmt.Errorf("mash: bucket %s: raising the history to %d: %w", store.IssuedBucket, store.IssuedHistory, err)
+	}
+	// The marker records how the history limit was before the raise and where the stream stood, read AFTER the raise:
+	// a write that landed before the raise, under the old limit, is at or below that sequence, so a key with fewer
+	// than that many revisions at or below it lost none. A larger S only refuses more. An existing marker (a "raised"
+	// one from an earlier run, or "full") is never replaced. If the second step fails the limit stays raised and the
+	// marker stays absent, which is the legacy 8-revision rule: the error is returned so init does not look clean.
+	if _, has := sc.Metadata[store.IssuedMarkerKey]; has {
+		return nil
+	}
+	if issuedMarkerFault != nil {
+		if err := issuedMarkerFault(); err != nil {
+			return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies; run init again after removing the cause): %w", store.IssuedBucket, store.IssuedHistory, err)
+		}
+	}
+	after, err := s.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies): %w", store.IssuedBucket, store.IssuedHistory, err)
+	}
+	mc := after.Config
+	if _, has := mc.Metadata[store.IssuedMarkerKey]; has {
+		return nil
+	}
+	md := make(map[string]string, len(mc.Metadata)+1)
+	for k, v := range mc.Metadata {
+		md[k] = v
+	}
+	md[store.IssuedMarkerKey] = store.IssuedMarkerRaised(oldLimit, after.State.LastSeq)
+	mc.Metadata = md
+	if _, err := a.js.UpdateStream(ctx, mc); err != nil {
+		return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies): %w", store.IssuedBucket, store.IssuedHistory, err)
 	}
 	return nil
 }
