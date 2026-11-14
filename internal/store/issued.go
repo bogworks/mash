@@ -170,3 +170,10 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 	}
 	return nil
 }
+
+// ErrKeyRevoked and ErrKeyBoundElsewhere are what a checked write of the issue record refuses with: the key's record has
+// revoked_at set, or is bound to an address other than the one being written.
+var (
+	ErrKeyRevoked        = errors.New("mash: issue record: the public key has been revoked")
+	ErrKeyBoundElsewhere = errors.New("mash: issue record: the public key is bound to another address")
+)
