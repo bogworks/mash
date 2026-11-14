@@ -620,6 +620,56 @@ func TestStatusTLSLine(t *testing.T) {
 	}
 }
 
+// The warning was silent for an entry with no scheme (nats:// is the default) and for a list whose plain entry has
+// none; it names the host and both fixes, in the tool and in `mash status`.
+func TestStatusTLSLineWarnsNamingTheHost(t *testing.T) {
+	for url, host := range map[string]string{
+		"10.0.0.5:4222":                    "10.0.0.5",
+		"nats.example.com":                 "nats.example.com",
+		"tls://a:4222,nats.example.com:42": "nats.example.com",
+		"nats://u:s3cret@10.0.0.5:4222":    "10.0.0.5",
+		"ws://ws.example.com":              "ws.example.com",
+	} {
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL = url
+		l := statusLine(t, statusText(src), "tls: ")
+		if !strings.HasPrefix(l, "tls: WARN") || !strings.Contains(l, "("+host+")") || !strings.Contains(l, "use tls://") ||
+			!strings.Contains(l, "MASH_REQUIRE_TLS=1") || strings.Contains(l, "s3cret") {
+			t.Errorf("tool, url %s: line %q", url, l)
+		}
+		cli := settingsSource(t, "a", nil)
+		cli.cfg.URL, cli.cli = url, true
+		if l := statusLine(t, statusText(cli), "tls: "); !strings.HasPrefix(l, "tls: WARN") || !strings.Contains(l, "("+host+")") {
+			t.Errorf("cli, url %s: line %q", url, l)
+		}
+		var buf bytes.Buffer
+		reportSettings(src, &buf)
+		if !strings.Contains(buf.String(), "tls: WARN") {
+			t.Errorf("url %s: serve stderr is silent: %q", url, buf.String())
+		}
+	}
+}
+
+func TestStatusTLSLineRequireTLS(t *testing.T) {
+	for url, want := range map[string]string{
+		"nats://127.0.0.1:4222":        "tls: OK (required)",
+		"tls://nats.example.com:4222":  "tls: OK (required)",
+		"nats://10.0.0.5:4222":         "tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to \"10.0.0.5\"",
+		"nats://u:s3cret@10.0.0.5":     "tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to \"10.0.0.5\"",
+		"tls://a:4222,example.com:422": "tls: FAILED",
+	} {
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL, src.cfg.RequireTLS = url, true
+		for _, cli := range []bool{false, true} {
+			src.cli = cli
+			l := statusLine(t, statusText(src), "tls: ")
+			if !strings.HasPrefix(l, want) || strings.Contains(l, "s3cret") {
+				t.Errorf("url %s cli=%v: line %q, want prefix %q", url, cli, l, want)
+			}
+		}
+	}
+}
+
 func TestStatusManagedDirEnv(t *testing.T) {
 	src := settingsSource(t, "a", nil)
 	dir := t.TempDir()

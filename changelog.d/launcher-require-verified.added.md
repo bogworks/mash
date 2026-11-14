@@ -1,0 +1,1 @@
+The plugin launcher honours MASH_PLUGIN_REQUIRE_VERIFIED: when set it refuses an unpinned plugin, a failed or mismatched download and a cached binary that fails verification instead of falling back to mash on PATH; by default nothing changes ([ADR 0096](docs/decisions/0096-the-plugin-launcher-takes-a-verification-setting-and-the-layer-above-owns-profiles.md)).

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -80,7 +81,7 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 func whoNames(ps []endpoint.Presence) string {
 	names := make([]string, len(ps))
 	for i, p := range ps {
-		names[i] = p.Record.KeyOrName()
+		names[i] = config.Clean(p.Record.KeyOrName())
 	}
 	return strings.Join(names, "\n")
 }

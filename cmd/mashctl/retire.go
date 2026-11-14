@@ -85,6 +85,11 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	guard, ok := accountGuard(cfg, "retire", stderr)
+	if !ok {
+		return 1
+	}
+	defer guard.Release()
 	credsPath, credsErr := credsFileFor(cfg, name)
 	if credsErr != nil && deleteCreds {
 		return fail("%v", credsErr)
@@ -111,7 +116,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
-		var revokeErr, checkErr error
+		var revokeErr, checkErr, lockErr error
 		if noRevoke {
 			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 		} else {
@@ -136,9 +141,18 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 						return fmt.Errorf("creds check: %w", err)
 					}
 				}
+				if err := guard.Before("the revocation of the user key"); err != nil {
+					lockErr = err
+					return err
+				}
 				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
+				}
+				if err := guard.Before("the record of the revocation"); err != nil {
+					// The key is revoked in the account JWT; only the bookkeeping record of it and the removal stop.
+					lockErr = fmt.Errorf("the user key %s... is already revoked in the account JWT, but the removal stopped: %w", ctl.ShortKey(u), err)
+					return lockErr
 				}
 				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 				return nil
@@ -147,10 +161,16 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
+		if err := guard.Before("the removal of the record and inbox"); err != nil { // before the first server write
+			return fail("%v; nothing was changed", err)
+		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
 				if msg, ok := ctl.AliasedRefusal(err, name); ok {
 					return fail("%s", msg)
+				}
+				if lockErr != nil && errors.Is(err, lockErr) {
+					return fail("%v; the directory record was not changed: run mashctl retire %s again", lockErr, name)
 				}
 				if checkErr != nil && errors.Is(err, checkErr) {
 					return fail("%v", checkErr)
@@ -176,6 +196,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	code := 0
 	renamed := ""
 	if credsErr == nil {
+		if err := guard.Before("the move or removal of the creds file"); err != nil {
+			return fail("%v; %s is removed from the server, but the creds file %s was left in place: rename or remove it by hand", err, name, credsPath)
+		}
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):

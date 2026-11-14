@@ -66,6 +66,16 @@ func Compile(ls ListSet) (*Compiled, error) {
 	if err != nil {
 		return nil, err
 	}
+	c := build(m)
+	if err := Check(ls, c); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// build derives the templates and tags of a validated model. It does not check them; DryRun uses it to collect the
+// refusals of Check and SizeCheck together.
+func build(m *model) *Compiled {
 	c := &Compiled{Range: m.rng}
 
 	denyKey := map[string]bool{}
@@ -102,11 +112,7 @@ func Compile(ls ListSet) (*Compiled, error) {
 		sort.Strings(tags)
 		c.Users = append(c.Users, User{Sender: s.addr.String(), Name: s.addr.name, Tags: tags})
 	}
-
-	if err := Check(ls, c); err != nil {
-		return nil, err
-	}
-	return c, nil
+	return c
 }
 
 // template builds the permission template of owner group rng.owner.

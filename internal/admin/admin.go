@@ -30,6 +30,16 @@ type Admin struct {
 	limits store.Limits
 	revoke RevokeHook     // nil: the removal methods revoke nothing (see WithRevoker)
 	rule   *namerule.Rule // nil: no name rule (see WithNameRule)
+
+	accountWait time.Duration // 0: AccountLockWait (see WithAccountLockWait)
+}
+
+// WithAccountLockWait returns a copy of a that waits d, not AccountLockWait, for the account lock. a itself is
+// unchanged.
+func (a *Admin) WithAccountLockWait(d time.Duration) *Admin {
+	c := *a
+	c.accountWait = d
+	return &c
 }
 
 // WithNameRule returns a copy of a whose Provision applies rule to the identity it provisions, before the directory is
@@ -168,7 +178,10 @@ func (a *Admin) Init(ctx context.Context) error {
 			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
 		}
 	}
-	return a.initIssued(ctx)
+	if err := a.initIssued(ctx); err != nil {
+		return err
+	}
+	return a.initAdoption(ctx)
 }
 
 // initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An
