@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/kind"
+	"github.com/bogworks/mash/internal/ledger"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -86,9 +88,11 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 		return fmt.Errorf("mash: inbox: %w", err)
 	}
 	info := st.CachedInfo() // the response to the request just made
-	if err := s.BindStream("", info.Config.Name+"@"+info.Created.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := s.BindStream("", streamIdent(info)); err != nil {
 		return err
 	}
+	e.noteGen("", streamIdent(info))
+	e.useLedger(filepath.Join(s.Dir, ledger.File))
 	if e.alias != nil {
 		// The legacy stream is bound on its own: its sequences are not the primary stream's, and it too can be recreated.
 		lst, err := e.js.Stream(ctx, sap.InboxStream(e.legacyKey))
@@ -96,9 +100,10 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 			return fmt.Errorf("mash: legacy inbox: %w", err)
 		}
 		linfo := lst.CachedInfo()
-		if err := s.BindStream(LegacyStream, linfo.Config.Name+"@"+linfo.Created.UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := s.BindStream(LegacyStream, streamIdent(linfo)); err != nil {
 			return err
 		}
+		e.noteGen(LegacyStream, streamIdent(linfo))
 	}
 	// The previous session's waiting files are stale: the hook timestamp resets with this serve, so a later hook
 	// would print them again while NATS redelivers the unacked mail. Clear them; the redelivery is spooled again or
@@ -180,6 +185,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 		seq := refOf(p.mail)
 		switch {
 		case e.spool.IsDrained(seq):
+			e.ledgerNote(ledger.Presented, seq) // the tombstone is the evidence; the earlier line may be missing (a crash before it)
 			e.ackDrained(p)
 		case h.msgs[seq].msg != nil: // already held: the consumer redelivered it; keep the newest handle (codex H1 on #21)
 			hp := h.msgs[seq]
@@ -309,6 +315,17 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 		return
 	}
 	ran := false
+	// One ledger line for every message a hook has drained this pass, written and synced before any of them is acked.
+	// A message drained after this scan but before its turn in the loop is recorded on its own (see below).
+	drained := map[spool.Ref]bool{}
+	var refs []spool.Ref
+	for seq := range h.msgs {
+		if e.spool.IsDrained(seq) {
+			drained[seq] = true
+			refs = append(refs, seq)
+		}
+	}
+	e.ledgerNote(ledger.Presented, refs...)
 	for seq, p := range h.msgs {
 		if !h.listed[seq] && e.spool.IsListed(seq) {
 			// Listed in a digest: the model was told of it, so it neither rings nor wakes again and is not a waking
@@ -322,6 +339,9 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 		}
 		if e.spool.IsDrained(seq) {
 			ran = true
+			if !drained[seq] {
+				e.ledgerNote(ledger.Presented, seq) // drained since the scan above
+			}
 			e.ackDrained(p)
 			h.bytes -= len(p.mail.Body)
 			h.stored -= storedSize(p)

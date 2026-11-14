@@ -135,6 +135,9 @@ type Endpoint struct {
 
 	// The test-only before-ack failpoint (hook.go): nil outside the crash tests.
 	failBeforeAck func(seq uint64)
+
+	// ledg is the presented ledger serve writes before it acks (ledger.go).
+	ledg ledgerState
 }
 
 // LeaseHeldError reports that another live session holds this endpoint name.
@@ -403,6 +406,9 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),
 		dir: map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
+	if p := LedgerPath(cfg); p != "" {
+		e.useLedger(p)
+	}
 	if opts.Presence {
 		// Asked before anything else, so the answers arrive while the rest of the open is under way.
 		e.pre.probe = e.startPresence()
