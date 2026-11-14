@@ -36,8 +36,8 @@ const (
 // issuedOf is the issue record's entry for a user mint just made: public information only. The issue time is the
 // JWT's own iat.
 func issuedOf(m *mint.Minted, owner, purpose string) store.Issued {
-	r := store.Issued{PublicKey: m.UserPub, Address: m.Name, Owner: owner, Zone: m.Zone, Kind: store.IssuedEndpoint,
-		Tags: append([]string{}, m.Tags...), Purpose: purpose}
+	r := store.Issued{PublicKey: m.UserPub, Address: m.Name, Owner: owner, Kind: store.IssuedEndpoint,
+		Tags: []string{}, Purpose: purpose} // a user minted without a zone key carries no tags (ADR 0091)
 	if uc, err := jwt.DecodeUserClaims(m.JWT); err == nil && uc.IssuedAt > 0 {
 		r.IssuedAt = time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339)
 	}

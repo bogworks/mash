@@ -125,7 +125,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 	}
 	defer doc.Close()
 	beforeBytes, _ := doc.Bytes()
-	beforeFile, before, err := compileBytes(beforeBytes, cfg.Owner)
+	beforeFile, _, err := compileBytes(beforeBytes, cfg.Owner)
 	if err != nil {
 		return fail("%s: %v", path, err)
 	}
@@ -176,8 +176,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		}
 		return 0
 	}
-	_, after, err := compileBytes(afterBytes, cfg.Owner)
-	if err != nil {
+	if _, _, err := compileBytes(afterBytes, cfg.Owner); err != nil {
 		return fail("the edit does not make a valid policy: %v", err)
 	}
 	if afterLabelLoad != nil {
@@ -203,9 +202,6 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 	}
 	if !o.sync {
 		fmt.Fprintf(stdout, "directory labels not updated: run %s (or re-run with --sync) to refresh who --long\n", setMeta)
-	}
-	for _, l := range consequences(before, after) {
-		fmt.Fprintln(stdout, l)
 	}
 	if o.sync && !o.dry {
 		return syncLabels(guard, o, verb, setMeta, cfg, env, stdout, stderr)

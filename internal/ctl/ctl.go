@@ -126,8 +126,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user, provision it and write its creds file")
-	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again from the policy (checks the directory record; a narrowing reissue rotates the user key and revokes the old one)")
+	line("add NAME [--label k=v]... [--tool] [--policy FILE] [--note N]", "declare NAME in the policy file, mint its user (signed by the account key), provision it and write its creds file")
+	line("reissue NAME... | --changed [--policy FILE]", "mint NAME's user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one)")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -149,11 +149,9 @@ func retireLines(line func(left, right string)) {
 func policyLines(line func(left, right string)) {
 	line("policy check [--policy FILE]", "validate the policy file (offline; FILE, else MASH_POLICY, else <config dir>/policy.yaml)")
 	line("policy test [--policy FILE]", "run the file's tests")
-	line("policy explain FROM TO [--policy FILE]", "why FROM may or may not mail TO")
-	line("policy show [--json] [--budget] [--policy FILE]", "who may mail whom (needs the owner); --budget checks the JWT sizes")
-	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the key store, the directory and the creds files; fixes nothing")
+	line("policy drift [--policy FILE] [--sys-creds FILE] [--creds-dir DIR] [--json]", "compare the file with the account, the directory and the creds files; fixes nothing")
 	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
-	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: signing keys, the account push, directory labels; lists stale creds")
+	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: the account check, directory labels; lists stale creds")
 }
 
 // accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.

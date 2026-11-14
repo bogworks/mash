@@ -1,8 +1,8 @@
 package apply
 
 import (
-	"bytes"
 	"context"
+	"github.com/nats-io/nkeys"
 	"strings"
 	"testing"
 
@@ -20,25 +20,25 @@ func noRawControls(t *testing.T, what, s string) {
 	}
 }
 
-// A hostile server's scoped-signer role must reach neither the apply output nor the drift findings raw.
+// A hostile server's scoped-signer role must reach neither the revoke refusal nor the drift findings raw.
 func TestHostileRoleIsEscaped(t *testing.T) {
-	ks, fk, c, scoped, _, _ := unknownSetup(t)
+	ks, fk := setup(t)
 	op, _, _ := ks.Operator()
+	sk, _ := nkeys.CreateAccount()
 	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
 		sc := jwt.NewUserScope()
-		sc.Key, sc.Role = scoped, hostileRole
+		sc.Key, sc.Role = pubOf(t, sk), hostileRole
 		cl.SigningKeys.AddScopedSigner(sc)
 	})
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	var out bytes.Buffer
-	p := c
-	p.Mode, p.Keys, p.Resolver = DryRun, ks, fk
-	Run(context.Background(), p, &out)
-	noRawControls(t, "apply output", out.String())
-	if !strings.Contains(out.String(), `legacy\x1b[2K\x0d\x0aREFUSED: none`) {
-		t.Fatalf("escaped role missing:\n%s", out.String())
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})
+	if err == nil {
+		t.Fatal("revoked over a scoped signer")
 	}
-	fs, err := AccountFindings(context.Background(), Params{Compiled: c.Compiled, Keys: ks, Resolver: fk})
+	noRawControls(t, "revoke refusal", err.Error())
+	if !strings.Contains(err.Error(), `legacy\x1b[2K\x0d\x0aREFUSED: none`) {
+		t.Fatalf("escaped role missing:\n%s", err)
+	}
+	fs, err := AccountFindings(context.Background(), fk, ks, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,9 +49,7 @@ func TestHostileRoleIsEscaped(t *testing.T) {
 
 // An ack message and server name from a hostile server are escaped in the refusal text.
 func TestHostileAckIsEscaped(t *testing.T) {
-	ks, fk, c := setup(t)
-	_ = ks
-	_ = c
+	_, fk := setup(t)
 	fk.acks = []ServerAck{{Server: "s1\x1b[2K", Code: 500, Message: "bad\r\n"}}
 	_, why := pushAndCheck(context.Background(), fk, "tok", nil)
 	noRawControls(t, "push refusal", why)

@@ -140,7 +140,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 			unknown = append(unknown, u.describe())
 		}
 		if len(unknown) > 0 {
-			return res, fmt.Errorf("revoke: refusing: the account JWT carries signing keys mashctl did not create: %s. %s Run mashctl policy apply first if the key is one of its own, otherwise remove it with the tool that added it, then revoke again (nothing was changed)", strings.Join(unknown, "; "), unknownKeyNote)
+			return res, fmt.Errorf("revoke: refusing: the account JWT carries signing keys mashctl did not create: %s. %s Remove it, then revoke again (nothing was changed)", strings.Join(unknown, "; "), unknownKeyNote)
 		}
 		res.Revoked, res.Already, res.Raised = nil, nil, nil
 		want = map[string]int64{}

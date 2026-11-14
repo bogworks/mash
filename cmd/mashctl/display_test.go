@@ -14,7 +14,7 @@ import (
 // command it suggests keeps the directory key, which is what the tools take.
 func TestDriftNamesThreeTokenRecordCanonically(t *testing.T) {
 	nf, lg := keyedRecords(t)
-	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x", Zone: "z"}}}
+	c := &policy.Compiled{Owner: "acme", Endpoints: []policy.CompiledEndpoint{{Name: "x"}}}
 	out, _ := directoryFindings(c, []store.Record{nf, lg})
 	if len(out) != 1 {
 		t.Fatalf("%+v", out)
