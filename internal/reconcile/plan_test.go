@@ -521,3 +521,23 @@ func TestExemptUserWithOneConnectionUnderARemovedIssuerIsRefused(t *testing.T) {
 		t.Error("no issuer error")
 	}
 }
+
+// While the scan is incomplete a silent server could hold a connection that makes the key protected: no connected,
+// untracked key is revoked, each is a finding. A recorded user's revocation does not depend on the scan.
+func TestIncompleteScanWithholdsUntrackedRevocations(t *testing.T) {
+	w := newWorld(t)
+	legacy := userKey(t)
+	w.connect(w.conn(legacy, w.acct, "legacy", w.now.Add(-time.Hour).Unix()))
+	p, err := Build(context.Background(), Input{Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(),
+		Claims: w.claims, Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct, ScanIncomplete: "server s2 did not answer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := revocation(p, legacy); ok {
+		t.Errorf("revoked while the scan is incomplete: %+v", p.Revocations)
+	}
+	if f, ok := finding(p, legacy); !ok || !strings.Contains(f.Detail, "not revoked: the connection scan is incomplete") {
+		t.Errorf("findings %+v", p.Findings)
+	}
+}

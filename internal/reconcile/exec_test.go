@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -414,5 +415,38 @@ func TestExecuteRefusesToDropARevocationAServerHolds(t *testing.T) {
 	}
 	if f.cluster.pushes != 0 || f.inForceJWT() != f.jwt {
 		t.Error("pushed or committed")
+	}
+}
+
+// The plan seen must be for the same account, source and generation as the rebuilt one, even with the same revocations;
+// a preview plan is never executable.
+func TestExecuteRefusesAPlanSeenForAnotherGenerationAccountOrSource(t *testing.T) {
+	a := userKey(t)
+	run := func(mutate func(*Plan)) (*first, error) {
+		f := newFirst(t)
+		seen := f.plan(a)
+		mutate(&seen)
+		_, err := Execute(context.Background(), ExecInput{Build: func(context.Context) (Plan, error) { return f.plan(a), nil }, Seen: &seen,
+			Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2, Signers: f.signers, Signer: f.signer, Marker: f.marker})
+		return f, err
+	}
+	for name, mutate := range map[string]func(*Plan){
+		"generation": func(p *Plan) { p.Generation = 7 },
+		"account":    func(p *Plan) { p.Account = "AOTHER" },
+	} {
+		f, err := run(mutate)
+		if !errors.Is(err, ErrPlanChanged) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if f.cluster.pushes != 0 || len(f.marker.marked) != 0 {
+			t.Errorf("%s: something was changed", name)
+		}
+	}
+	f, err := run(func(p *Plan) { p.Source = SourceListSetFile; p.Generation = 0 })
+	if err == nil || errors.Is(err, ErrPlanChanged) || !errors.Is(err, ErrNotExecutable) || !strings.Contains(err.Error(), "preview") {
+		t.Errorf("preview: err = %v", err)
+	}
+	if f.cluster.pushes != 0 || len(f.marker.marked) != 0 {
+		t.Error("preview: something was changed")
 	}
 }

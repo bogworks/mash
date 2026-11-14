@@ -86,6 +86,9 @@ type Result struct {
 // The account lock (admin.Admin.LockAccount) is the caller's, taken before the plan is recomputed; pass its Held as
 // BeforeWrite. Execute never signs anything itself and never reads a key.
 func Execute(ctx context.Context, in ExecInput) (Result, error) {
+	if in.Seen != nil && in.Seen.Source != SourceInForce {
+		return Result{}, fmt.Errorf("%w: the plan seen is a %q preview, not the list set in force: a preview is never executed", ErrNotExecutable, in.Seen.Source)
+	}
 	if in.Build == nil || in.Ledger == nil || in.Cluster == nil || in.Signer == nil || in.Marker == nil || in.Signers == nil {
 		return Result{}, errors.New("reconcile: Execute needs a plan builder, a ledger, a cluster, signers, a signer and an issue-record marker")
 	}
@@ -267,8 +270,12 @@ func failing(st policyapply.Status) string {
 	return fmt.Sprintf("%s: %s (%d failures)", f.Check, f.Detail, len(st.Failing))
 }
 
-// sameRevocations is true when both plans revoke the same keys for the same reasons; the times may differ.
+// sameRevocations is true when both plans are for the same account, source and generation and revoke the same keys
+// for the same reasons; the times may differ.
 func sameRevocations(a, b Plan) bool {
+	if a.Account != b.Account || a.Source != b.Source || a.Generation != b.Generation {
+		return false
+	}
 	set := func(p Plan) []string {
 		out := make([]string, 0, len(p.Revocations))
 		for _, r := range p.Revocations {

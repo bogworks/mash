@@ -378,6 +378,9 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			finding(k, "connected, not in the issue record, and the record cannot prove no record was lost (%s): not revoked", why)
 		case badIssuer(cs, in.Account, in.Claims) != "":
 			finding(k, "connection with no reported issuer: cannot tell whether a list-set key signed it (%s): not revoked", badIssuer(cs, in.Account, in.Claims))
+		case in.ScanIncomplete != "":
+			// A server that did not answer could hold a connection using this key under a list-set signer.
+			finding(k, "connected, untracked: not revoked: the connection scan is incomplete")
 		default:
 			p.Revocations = append(p.Revocations, Revocation{Key: k, Reason: ReasonUntracked,
 				At: revokeAt(cs).Format(time.RFC3339), Connections: connsOf(cs)})
