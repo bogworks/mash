@@ -149,6 +149,20 @@ The residual window is the time between a check and its write, microseconds to o
 
 The guard needs the server: it reads the marker over the admin connection first. So `policy apply` and `policy repair`, which until now needed only the system credentials, also need the admin credentials. Where no server is configured at all (no `url`, no `MASH_URL`), the one command that can run that way, a `label` or `unlabel` that only edits the policy file, is allowed and says nothing about adoption: mash has nothing to ask. With a server configured and the marker unreadable (no admin credentials, no connection), it refuses.
 
+## Applying list sets: `policy serve`
+
+```
+mashctl policy serve --range RANGE [--servers N] [--sys-creds FILE]
+```
+
+`policy serve` is a long-running service that applies the list sets of one adopted account. It watches the key `listset.<account public key>` in the range's policy bucket. The bucket is named by `MASH_POLICY_BUCKET`, a bucket name in which `{range}` is replaced by `--range`; operations creates the bucket and mash never does, so the service refuses to start when it is missing. For each document written there it checks, in this order, that the account is adopted, that the document is not the one already in force, that its signature verifies under the submitter the adoption marker expects, and that it names this account and this range. A document that passes is applied: the account JWT is signed with the operator key and one scoped signing key per owner group, pushed to every server, and checked by the applied-policy gate before the generation is recorded as in force. The outcome of every document, applied or refused, is the value at `status.<account public key>` in the same bucket; a refusal names its stage (`adoption`, `signature`, `document`, `account`, `range`, `size` or `apply`) and a short reason, and changes nothing. The service uses the same configuration as the other verbs: the admin credentials and the key store (`MASH_KEYS_DIR`), the system credentials (`--sys-creds`, `MASH_SYS_CREDS` or the `sys.creds` beside the admin credentials) and the server URL. It logs what it does and never a key.
+
+- `--range` is required. One process serves one account, the one the key store and the admin credentials belong to; it refuses when the admin credentials belong to another account than the key store's account key, and when the account is not adopted.
+- `--servers N` (or `MASH_SERVERS`) is the number of servers in the deployment, as for `issue serve`. Before each apply the service reads every server's `max_control_line` and `max_payload` through the system account and checks the list set against them (the size of each sender's credential and of the account JWT). The smallest limit of any server decides, and a refusal at stage `size` names that server and its limit. If fewer servers answer than the deployment has, it refuses that document and pushes nothing: the limits are never guessed.
+- A list set that narrows an existing sender by tags (it takes an allow away from a sender that is already in force) cannot be applied yet: replacing that sender's credential is not part of this release. It is refused before anything is pushed, with the reason in the status, and nothing changes. The same holds for a list set that adds an address: its inbox can be made only for an endpoint provisioned under its own key, and `policy serve` cannot do that from a list set yet. Nothing is half-applied in either case, and the list set can be submitted again once the step exists.
+- The list-set key is the only key of the bucket the outside system's credential may write; give it publish permission on `$KV.<bucket>.listset.>` and nothing else in the bucket, so that it cannot write the `status.` keys.
+- It stops cleanly on SIGINT or SIGTERM.
+
 ## Labels
 
 ```sh

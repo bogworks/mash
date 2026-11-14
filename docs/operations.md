@@ -257,7 +257,6 @@ How to adopt: run `mashctl policy adopt --submitter KEY` with the account's admi
 
 What is not done yet, and the account is stuck with until it is:
 
-- **Running the list-set intake.** The intake exists as a package (see [List-set intake](#list-set-intake)) but no command runs it yet, so an adopted account's policy still cannot be changed. `mashctl policy serve` is assembled later, once the apply stack it hands list sets to is in.
 - **The first-list-set reconcile.** Adoption does not yet remove signing keys that are not mash's scoped keys or revoke user credentials issued outside the first list set. The plan, not built: it removes non-mash signing keys, revokes recorded issued users that are not in the first list set and connected unrecorded keys that are neither recorded nor exempt, reports anything else it cannot name as a finding with the status `reconciled: partial (N unknown)`, prints a dry run and acts only with `--yes`; the exempt keys are never touched. Adopting an account does not change what is already in it.
 - **Un-adoption.** There is no command. If one is ever built it is admin-only, logged in the marker's revision history and never goes through a list set; today the way back is an operator acting on the account directly. The marker's bucket refuses deletes and purges, even to the admin.
 
