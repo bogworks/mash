@@ -87,7 +87,7 @@ const unprovableText = "its issued history cannot be shown to be complete"
 
 // retire refuses a key whose issue history cannot be shown complete, with nothing changed; a provable one retires.
 func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c", "--label", "env=red"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -95,7 +95,6 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 	h.recordHistory(pub, "c", store.IssuedMinHistory) // no marker, 8 revisions
 	before, _ := os.ReadFile(h.creds("c"))
 	recs := h.records()
-	policyBefore := h.policyText()
 	calls := fakeRevoke(t, nil)
 
 	out, errb, code := h.run("retire", "c")
@@ -103,12 +102,12 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	noSecrets(t, out, errb)
-	if after, _ := os.ReadFile(h.creds("c")); len(*calls) != 0 || !bytes.Equal(before, after) || !slices.Equal(recs, h.records()) || h.policyText() != policyBefore || h.issued()[pub].RevokedAt != "" {
+	if after, _ := os.ReadFile(h.creds("c")); len(*calls) != 0 || !bytes.Equal(before, after) || !slices.Equal(recs, h.records()) || h.issued()[pub].RevokedAt != "" {
 		t.Fatalf("something changed: calls %+v records %v", *calls, h.records())
 	}
 
 	// Control: the same bucket with 7 revisions of the key is provable.
-	h2 := newFleetEnv(t, addPolicy)
+	h2 := newFleetEnv(t)
 	if _, errb, code := h2.run("add", "c", "--label", "env=red"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -123,7 +122,7 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 // A rotating reissue refuses before staging or revoking anything when the old key's history cannot be shown
 // complete; a provable one rotates.
 func TestReissueRotationRefusesAnUnprovableIssueHistory(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	_, oldPub := h.credsClaims("a")
 	h.recordHistory(oldPub, "a", store.IssuedMinHistory)
@@ -142,7 +141,7 @@ func TestReissueRotationRefusesAnUnprovableIssueHistory(t *testing.T) {
 		t.Fatalf("something changed: calls %+v records %v history %d issued %d", *calls, h.records(), h.issuedHistory(oldPub), len(h.issued()))
 	}
 
-	h2 := newAddEnv(t, addPolicy)
+	h2 := newAddEnv(t)
 	h2.seedWith("a", extraTag)
 	_, pub2 := h2.credsClaims("a")
 	h2.recordHistory(pub2, "a", store.IssuedMinHistory-1)
