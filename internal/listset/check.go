@@ -598,6 +598,13 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	if err != nil {
 		return nil, err
 	}
+	return reachOver(c, sender, universeNamed(m))
+}
+
+// reachOver is the simulation behind effective and DryRun: the addresses of universe that sender reaches per verb
+// once its tags are expanded through its group's template, the way nats-server does it (expandPermissions and
+// expanded.reach, the same code Check uses). Each slice is sorted.
+func reachOver(c *Compiled, sender string, universe []string) (map[Verb][]string, error) {
 	var tpl *Template
 	var user *User
 	for i := range c.Users {
@@ -626,7 +633,7 @@ func effective(ls ListSet, c *Compiled, sender string) (map[Verb][]string, error
 	}
 	out := map[Verb][]string{}
 	for _, v := range Verbs {
-		for _, addr := range universeNamed(m) {
+		for _, addr := range universe {
 			if p.reach(v, []string{addr})[addr] {
 				out[v] = append(out[v], addr)
 			}
