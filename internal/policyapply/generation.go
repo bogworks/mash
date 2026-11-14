@@ -20,6 +20,11 @@ type Candidate struct {
 	// permissions and revocations alone, so a JWT with a different or an extra signer can be read as the generation:
 	// that is for tests only. A caller in production MUST pass Signers; Run and Gate refuse a target without it.
 	Signers map[string]string
+	// Kept maps group -> public key of the scoped signing keys of other ranges that the account JWT keeps beside this
+	// range's (the serve signer leaves them alone). When Kept is non-nil each must be present as a scoped signer
+	// with its group as role, its group must not be a template of this candidate, and no key beyond Signers and Kept
+	// may be present. A kept key missing, or with another role, fails the read.
+	Kept map[string]string
 }
 
 // GenerationOf says which candidate the account JWT carries. The JWT carries no marker: a scoped signing key whose
@@ -67,7 +72,16 @@ func matches(claims *jwt.AccountClaims, roles map[string]scoped, c Candidate, al
 			return false
 		}
 	}
-	if c.Signers != nil && len(claims.SigningKeys) != len(own) {
+	for g, pub := range c.Kept {
+		if own[g] {
+			return false // a kept key never stands for a group of this candidate
+		}
+		sc, _ := claims.SigningKeys.GetScope(pub)
+		if us, isUser := sc.(*jwt.UserScope); !isUser || us == nil || us.Role != g {
+			return false // a kept signer missing, plain, or with another role
+		}
+	}
+	if c.Signers != nil && len(claims.SigningKeys) != len(own)+len(c.Kept) {
 		return false // a plain, a duplicate-role or any other signing key beyond the expected ones
 	}
 	for _, o := range all {
