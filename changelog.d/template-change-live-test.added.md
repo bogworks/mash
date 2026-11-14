@@ -1,2 +1,2 @@
 A live test records and guards whether a template change reaches open connections, per NATS server version
-([ADR 0097](docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md)).
+([ADR 0097](docs/decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md)). It also publishes mail through JetStream at the close and records that a lost publish is reported to the publisher ([ADR 0103](docs/decisions/0103-at-011-on-nats-server-2-15-2-gives-the-same-result-as-2-15-1.md)).

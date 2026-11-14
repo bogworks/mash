@@ -1,7 +1,9 @@
 package policy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 )
 
@@ -42,6 +45,16 @@ const (
 	// at011Stream is the interval of the mail sent to the unchanged subject while the change is pushed.
 	at011Stream = 2 * time.Millisecond
 
+	// at011MailAck is how long a mail publish through JetStream waits for its acknowledgement.
+	at011MailAck = 2 * time.Second
+	// at011MailLead is how long mail flows before the push, so that the push lands in a running stream.
+	at011MailLead = 150 * time.Millisecond
+	// at011MailStream is the stream the mail is stored in: the shape of mash's inbox stream (store.inboxStreamConfig)
+	// on the subject the key may publish to.
+	at011MailStream = "inbox-at011"
+	// at011MailScenario is the name of the mail scenario in the record.
+	at011MailScenario = "mail_at_close"
+
 	at011Wait         = 10 * time.Second
 	at011ResolverSync = 5 * time.Minute
 	at011Unchanged    = "agents.mail.a"
@@ -53,14 +66,25 @@ type at011Outcome struct {
 	// Applied is "open_connection" when the change showed with the connection still the one opened before the push,
 	// "after_reconnect" when it showed only after the server closed that connection and the client reconnected, and
 	// "not_applied" when it did not show within the bound.
-	Applied string `json:"applied"`
+	Applied string `json:"applied,omitempty"`
 	// Connection is "kept" when the connection stayed open with no reconnect, "closed" or "reconnected" otherwise.
-	Connection string `json:"connection"`
+	Connection string `json:"connection,omitempty"`
 	// UnchangedSubjects is "no_loss_outside_the_disconnect" when every message to a subject the change did not touch
 	// reached the observer, except possibly some sent after the push and before the client had reconnected.
-	UnchangedSubjects string `json:"unchanged_subjects"`
+	UnchangedSubjects string `json:"unchanged_subjects,omitempty"`
 	// FreshConnection is how a connection opened right after the push saw the change: "changed" or "old".
-	FreshConnection string `json:"fresh_connection"`
+	FreshConnection string `json:"fresh_connection,omitempty"`
+
+	// The fields below are set only by the mail scenario, which publishes mail through JetStream at the instant the
+	// server closes the connection. They are classes that hold on every run. Whether a message is lost at the close at
+	// all is probabilistic and is logged, not recorded.
+
+	// MailAckedAndMissing is "none" when every mail publish that was acknowledged is in the stream, as the contract of an
+	// acknowledgement says it must be.
+	MailAckedAndMissing string `json:"mail_acked_and_missing,omitempty"`
+	// MailSilentLoss is "none" when every mail publish that is not in the stream made the publisher see an error: no
+	// message was lost without the publisher being told (an acknowledgement that never came counts as an error).
+	MailSilentLoss string `json:"mail_silent_loss,omitempty"`
 }
 
 type at011Record_ struct {
@@ -108,6 +132,7 @@ type at011Env struct {
 	keyPub  string
 	srv     *server.Server
 	sys     *nats.Conn
+	js      bool // the account has JetStream
 }
 
 // at011Must returns v, or panics: a setup failure aborts the test and the panic names it.
@@ -121,6 +146,9 @@ func at011Must[T any](v T, err error) T {
 func (e *at011Env) accountJWT(perms jwt.Permissions) string {
 	ac := jwt.NewAccountClaims(e.acctPub)
 	ac.Name = "MASH"
+	if e.js {
+		ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: 64 << 20, Streams: 5, Consumer: 5}
+	}
 	scope := jwt.NewUserScope()
 	scope.Key = e.keyPub
 	scope.Role = "K"
@@ -131,7 +159,13 @@ func (e *at011Env) accountJWT(perms jwt.Permissions) string {
 
 func newAT011Env(t *testing.T, before jwt.Permissions) *at011Env {
 	t.Helper()
-	e := &at011Env{t: t}
+	return newAT011EnvJS(t, before, false)
+}
+
+// newAT011EnvJS is newAT011Env with JetStream on the server and in the account's limits when js is set.
+func newAT011EnvJS(t *testing.T, before jwt.Permissions, js bool) *at011Env {
+	t.Helper()
+	e := &at011Env{t: t, js: js}
 	e.op = at011Must(nkeys.CreateOperator())
 	opPub := at011Must(e.op.PublicKey())
 	oc := jwt.NewOperatorClaims(opPub)
@@ -156,10 +190,14 @@ func newAT011Env(t *testing.T, before jwt.Permissions) *at011Env {
 	if err := resolver.Store(e.acctPub, e.accountJWT(before)); err != nil {
 		t.Fatal(err)
 	}
-	s := at011Must(server.NewServer(&server.Options{
+	opts := &server.Options{
 		Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true,
 		TrustedOperators: []*jwt.OperatorClaims{op}, AccountResolver: resolver, SystemAccount: sysPub,
-	}))
+	}
+	if js {
+		opts.JetStream, opts.StoreDir = true, t.TempDir()
+	}
+	s := at011Must(server.NewServer(opts))
 	go s.Start()
 	if !s.ReadyForConnections(at011Wait) {
 		t.Fatal("nats-server did not start")
@@ -467,13 +505,26 @@ func TestAT011TemplateChangeReachesOpenConnections(t *testing.T) {
 				mu.Unlock()
 			})
 		}
+		t.Run(at011MailScenario, func(t *testing.T) {
+			t.Parallel()
+			out := at011RunMail(t)
+			mu.Lock()
+			measured[at011MailScenario] = out
+			mu.Unlock()
+		})
 	})
 	if t.Failed() {
 		return
 	}
 	got := at011Record_{NATSServerVersion: server.VERSION, Outcome: measured}
 
+	// A run narrowed with -run measures some scenarios only: it is compared on those and never writes the record.
+	full := len(measured) == len(scenarios)+1
+
 	if os.Getenv(at011UpdateEnv) != "" {
+		if !full {
+			t.Fatalf("%s needs every scenario to run", at011UpdateEnv)
+		}
 		b, err := json.MarshalIndent(got, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -497,10 +548,250 @@ func TestAT011TemplateChangeReachesOpenConnections(t *testing.T) {
 		t.Fatalf("AT-011: nats-server is %s, the record in %s was taken on %s. A server version change can change whether a template change reaches open connections. Rerun with %s=1 to measure again, commit the new record, and update ADR 0097 (and REQ-012/REQ-020 if the outcome changed).",
 			got.NATSServerVersion, at011Record, want.NATSServerVersion, at011UpdateEnv)
 	}
-	if !reflect.DeepEqual(want.Outcome, got.Outcome) {
-		wj, _ := json.Marshal(want.Outcome)
+	compared := want.Outcome
+	if !full {
+		compared = map[string]at011Outcome{}
+		for name := range measured {
+			compared[name] = want.Outcome[name]
+		}
+	}
+	if !reflect.DeepEqual(compared, got.Outcome) {
+		wj, _ := json.Marshal(compared)
 		gj, _ := json.Marshal(got.Outcome)
 		t.Fatalf("AT-011: the outcome on nats-server %s differs from the record in %s.\nrecorded: %s\nmeasured: %s\nWhat mash may rely on has changed: rerun with %s=1, commit the new record, and update ADR 0097 and the requirements that cite it.",
 			got.NATSServerVersion, at011Record, wj, gj, at011UpdateEnv)
 	}
+}
+
+// at011MailRec is one mail publish: what the publisher saw, then whether the message is in the stream.
+type at011MailRec struct {
+	id    int
+	api   string // "legacy_sync", "sync" or "async"
+	state string // "acked", "error" or "unresolved" (an async publish whose acknowledgement neither came nor failed)
+	kind  string // the error kind, for state "error"
+}
+
+// at011ErrKind names an error a publisher saw, so the kinds can be counted.
+func at011ErrKind(err error) string {
+	for _, k := range []struct {
+		err  error
+		name string
+	}{
+		{nats.ErrTimeout, "nats.ErrTimeout"},
+		{context.DeadlineExceeded, "context.DeadlineExceeded"},
+		{jetstream.ErrNoStreamResponse, "ErrNoStreamResponse"},
+		{nats.ErrNoResponders, "ErrNoResponders"},
+		{nats.ErrConnectionClosed, "ErrConnectionClosed"},
+		{nats.ErrDisconnected, "ErrDisconnected"},
+		{nats.ErrConnectionReconnecting, "ErrConnectionReconnecting"},
+		{jetstream.ErrAsyncPublishTimeout, "ErrAsyncPublishTimeout"},
+	} {
+		if errors.Is(err, k.err) {
+			return k.name
+		}
+	}
+	return "other: " + err.Error()
+}
+
+// at011RunMail measures what a publisher sees when mail is published through JetStream at the instant the server
+// closes its connection on a template change. The change is the unrelated-subject narrowing of fixed_narrow: the mail
+// subject stays allowed, so only the close matters. Three kinds of publisher run on the one connection, each in a tight
+// loop through the push: the legacy synchronous publish, the synchronous publish of the jetstream package (what mash
+// uses), and its asynchronous publish in bursts, which keeps several messages in flight at the close. Afterwards the
+// stream is read and every publish is classified by what the publisher saw and whether the message is stored.
+func at011RunMail(t *testing.T) at011Outcome {
+	t.Helper()
+	sc := at011Scenarios()[0] // fixed_narrow: the mail subject, at011Unchanged, is in both templates
+	e := newAT011EnvJS(t, sc.before, true)
+	owner := e.connect(false, nil)
+	ljsOwner := at011Must(owner.nc.JetStream())
+	cfg := &nats.StreamConfig{
+		Name: at011MailStream, Subjects: []string{at011Unchanged}, Storage: nats.FileStorage, Retention: nats.LimitsPolicy,
+		MaxMsgs: -1, MaxBytes: 32 << 20, MaxMsgsPerSubject: -1, MaxMsgSize: 1 << 20, Discard: nats.DiscardOld,
+		Duplicates: 2 * time.Minute, DenyDelete: true, DenyPurge: true, AllowDirect: true, Replicas: 1,
+	}
+	var addErr error
+	for deadline := time.Now().Add(at011Wait); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if _, addErr = ljsOwner.AddStream(cfg); addErr == nil {
+			break
+		}
+	}
+	if addErr != nil {
+		t.Fatalf("create the stream: %v", addErr)
+	}
+
+	sender := e.connect(true, nil)
+	ljs := at011Must(sender.nc.JetStream())
+	js := at011Must(jetstream.New(sender.nc, jetstream.WithPublishAsyncTimeout(at011MailAck)))
+	if _, err := ljs.Publish(at011Unchanged, []byte("0")); err != nil {
+		t.Fatalf("a mail publish before the change: %v", err)
+	}
+
+	var next atomic.Int64
+	var mu sync.Mutex
+	var recs []at011MailRec
+	record := func(r at011MailRec) {
+		mu.Lock()
+		recs = append(recs, r)
+		mu.Unlock()
+	}
+	finish := func(id int, api string, err error) {
+		if err != nil {
+			record(at011MailRec{id: id, api: api, state: "error", kind: at011ErrKind(err)})
+			return
+		}
+		record(at011MailRec{id: id, api: api, state: "acked"})
+	}
+
+	// An account JWT is replaced only by a newer one, and its issue time has a resolution of one second.
+	time.Sleep(time.Second)
+	token := e.accountJWT(sc.after)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	type future struct {
+		id int
+		f  jetstream.PubAckFuture
+	}
+	var futures []future // read after the async publisher has stopped
+	loop := func(every time.Duration, body func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				body()
+				time.Sleep(every)
+			}
+		}()
+	}
+	for range 2 {
+		loop(time.Millisecond, func() {
+			id := int(next.Add(1))
+			_, err := ljs.Publish(at011Unchanged, []byte(strconv.Itoa(id)), nats.AckWait(at011MailAck))
+			finish(id, "legacy_sync", err)
+		})
+		loop(time.Millisecond, func() {
+			id := int(next.Add(1))
+			ctx, cancel := context.WithTimeout(context.Background(), at011MailAck)
+			_, err := js.Publish(ctx, at011Unchanged, []byte(strconv.Itoa(id)))
+			cancel()
+			finish(id, "sync", err)
+		})
+	}
+	loop(2*time.Millisecond, func() {
+		for range 20 {
+			id := int(next.Add(1))
+			f, err := js.PublishAsync(at011Unchanged, []byte(strconv.Itoa(id)))
+			if err != nil {
+				finish(id, "async", err)
+				continue
+			}
+			futures = append(futures, future{id, f})
+		}
+	})
+
+	time.Sleep(at011MailLead)
+	e.push(token)
+	pushed := time.Now()
+	for sender.reconnects.Load() == 0 && time.Since(pushed) < at011Bound {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(at011Settle) // mail runs on a little past the reconnect
+	close(stop)
+	wg.Wait()
+	for _, f := range futures {
+		select {
+		case <-f.f.Ok():
+			finish(f.id, "async", nil)
+		case err := <-f.f.Err():
+			finish(f.id, "async", err)
+		case <-time.After(at011MailAck + at011Wait):
+			record(at011MailRec{id: f.id, api: "async", state: "unresolved"})
+		}
+	}
+
+	// Read the stream back: how many times each counter is in it.
+	info, err := ljsOwner.StreamInfo(at011MailStream)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	stored := map[int]int{}
+	var storedMsgs atomic.Int64
+	var smu sync.Mutex
+	sub, err := ljsOwner.Subscribe(at011Unchanged, func(m *nats.Msg) {
+		if n, err := strconv.Atoi(string(m.Data)); err == nil {
+			smu.Lock()
+			stored[n]++
+			smu.Unlock()
+		}
+		storedMsgs.Add(1)
+	}, nats.OrderedConsumer(), nats.DeliverAll(), nats.BindStream(at011MailStream))
+	if err != nil {
+		t.Fatalf("read the stream: %v", err)
+	}
+	defer sub.Unsubscribe()
+	for deadline := time.Now().Add(at011Wait); storedMsgs.Load() < int64(info.State.Msgs); {
+		if time.Now().After(deadline) {
+			t.Fatalf("read %d of %d messages in the stream", storedMsgs.Load(), info.State.Msgs)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	smu.Lock()
+	defer smu.Unlock()
+
+	var ackedStored, ackedMissing, errStored, errMissing, unresolvedMissing, duplicates int
+	kinds := map[string]int{}
+	byAPI := map[string]int{}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, r := range recs {
+		byAPI[r.api]++
+		n := stored[r.id]
+		if n > 1 {
+			duplicates++
+		}
+		switch {
+		case r.state == "acked" && n > 0:
+			ackedStored++
+		case r.state == "acked":
+			ackedMissing++
+		case r.state == "error" && n > 0:
+			errStored++
+			kinds[r.kind+" (stored)"]++
+		case r.state == "error":
+			errMissing++
+			kinds[r.kind+" (missing)"]++
+		case n == 0:
+			unresolvedMissing++
+		}
+	}
+	silent := ackedMissing + unresolvedMissing
+	conn := "kept"
+	if sender.closed.Load() > 0 {
+		conn = "closed"
+	} else if sender.reconnects.Load() > 0 || sender.disconnect.Load() > 0 {
+		conn = "reconnected"
+	}
+	t.Logf("AT011MAIL connection=%s published=%d (%v) acked_stored=%d acked_missing=%d error_stored=%d error_missing=%d silent_loss=%d duplicates=%d lost=%d error_kinds=%v disconnect=%dms reconnect=%dms",
+		conn, len(recs), byAPI, ackedStored, ackedMissing, errStored, errMissing, silent, duplicates, errMissing+silent, kinds,
+		sender.sinceMS(&sender.disconnectAt, pushed), sender.sinceMS(&sender.reconnectAt, pushed))
+
+	if conn != "reconnected" {
+		t.Errorf("the connection was %s: the push did not close it, so the close was not measured", conn)
+	}
+	out := at011Outcome{MailAckedAndMissing: "none", MailSilentLoss: "none"}
+	if ackedMissing > 0 {
+		t.Errorf("%d acknowledged mail publishes are not in the stream", ackedMissing)
+		out.MailAckedAndMissing = "present"
+	}
+	if silent > 0 {
+		t.Errorf("%d mail publishes were lost without the publisher seeing an error", silent)
+		out.MailSilentLoss = "present"
+	}
+	return out
 }
