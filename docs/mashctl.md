@@ -1,6 +1,6 @@
 # mashctl: adding, re-issuing, labeling and retiring endpoints
 
-The policy file is gone: endpoints are declared in the directory, by `mashctl add`, and every endpoint carries the same kind of permission set, the owner-line set `admin.Permissions(owner, name)` (it may mail the endpoints of its own owner and read what it needs to; the address is the fence). `mashctl add` and `mashctl reissue` mint NATS users for them. A user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there are no zones, no per-zone signing keys and no tags ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md). See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md); [ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) is amended by ADR 0091. The `mashctl policy` group has no subcommands yet; the list-set verbs that will replace the file's rules are added to it later.
+The policy file is gone: endpoints are declared in the directory, by `mashctl add`, and every endpoint carries the same kind of permission set, the owner-line set `admin.Permissions(owner, name)` (it may mail the endpoints of its own owner and read what it needs to; the address is the fence). `mashctl add` and `mashctl reissue` mint NATS users for them. A user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there are no zones, no per-zone signing keys and no tags ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md). See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md); [ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) is amended by ADR 0091. The `mashctl policy` group has `adopt`, `show`, `explain` and `diff`: `adopt` is [below](#adopting-the-account-an-outside-owner-of-the-list-sets), and the other three read the list set in force ([Reading the list set](#reading-the-list-set)).
 
 ## Prerequisites
 
@@ -97,6 +97,32 @@ mashctl wrangler remove --host H --group G
 - A key already bound to a different address in the issue record, or marked revoked there, is refused.
 
 **The static wrangler registry is for test accounts only.** `issue serve` requires `--test-account`, your own declaration that this account is a test account; the registry file must say `test_account` too, and the file alone does not start the service. The registry file, at the default path or the one `--registry` names, must be a regular file owned by you that group and others cannot write, in a directory that is not a symlink, is owned by you and that group and others cannot write (`chmod go-w DIR`; the lock file lives in the same directory). The list set file (`--list-set`, or the default) is held to the same rule: it is opened without following a symlink, must be a regular file owned by you that group and others cannot write (others may read it; it is not secret), and sits in a directory only you can write. These checks run at every request, so a list set that is swapped or loosened while the service runs is refused with `no_list_set`, nothing is signed, and the reason is logged. How a real wrangler's key comes to be registered for a host and an owner group is not decided yet. `wrangler init --test-account` writes `wranglers.json` in the key store directory (`--registry FILE` on `serve` names another), 0600, naming this account and flagged `test_account`; `add`, `list` and `remove` change it (the file is replaced atomically and keeps mode 0600; `init`, `add` and `remove` are serialised by a lock file, `wranglers.json.lock`, held from reading the registry to writing it, so a concurrent edit cannot undo another, while `list` and the service read without waiting). `issue serve` refuses to start, saying `no wrangler registry for this account: the static registry is for test accounts only; real wrangler registration is not decided yet`, when there is no registry, when it names another account, or when it is not flagged `test_account`. A removal takes effect at the next request.
+## Reading the list set
+
+```sh
+mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
+mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
+```
+
+These three verbs read the list set in force, and the status of its application, from the account's entry in the policy bucket over the admin connection. They change nothing: they take no lease and write no bucket entry, record or file.
+
+- `show` prints the list set in force and how far it is applied: its generation, its state, and the generation each server holds. With nothing in force it says so.
+- `explain SENDER RECEIVER` says whether the sender may mail the receiver under the list set in force, and which entries decide it. SENDER and RECEIVER are three-part addresses (`range.owner.name`).
+- `diff FILE` reads a list-set document (canonical JSON or a compact JWS) and prints what applying it would do to the list set in force, without applying it. The plan is accepted or refused, and a refusal names the reasons. A document whose content is the same as the list set in force prints `accepted: nothing would change` and nothing else. `diff` checks the signature only when `--submitter` is given; without it the file is read as it is.
+
+Flags:
+
+- `--json` prints the result as JSON in place of the text.
+- `--bucket NAME` names the policy bucket and overrides the setting below.
+- `--range RANGE` fills `{range}` in the bucket name. It is required when the bucket name has `{range}` and refused when it does not.
+- `--account KEY` is the account public key. It defaults to the account key in the key store.
+- `--submitter PUBKEY` (`diff` only) is the public key that must have signed FILE.
+
+The bucket is named by the `MASH_POLICY_BUCKET` setting, a bucket name pattern that may contain `{range}` (letters, digits, `-` and `_`). Set it or pass `--bucket`; with neither, the verb fails with `no policy bucket`. A value that is not a valid bucket name is named by its source and never printed back.
+
+Exit codes: 0 on success; 1 for a failure (no bucket, no connection, an unreadable file) and, for `diff`, a refused plan; 2 for a usage error (a missing or extra argument, an unknown flag, an address or key that fails validation).
+
 ## Adopting the account: an outside owner of the list sets
 
 ```sh
@@ -126,7 +152,7 @@ On an adopted account these refuse before they touch anything (no policy-file ed
 | `set-meta` with `--label` | refused (labels are the policy's) |
 | `provision` with `--label` (also `mash admin provision`) | refused (a label is a policy change) |
 | `set-meta` without `--label` (role, host, description, capabilities), `provision` without `--label`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
-| `policy diff`, `drift`, `check`, `test`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
+| `policy diff`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
 
 Policy changes and adoption are serialised by an account lock. Every guarded command takes it first, reads the marker, and holds the lock through all of its writes; `policy adopt` takes the same lock for its write. So an adoption waits for a guarded command that is already running (which finishes first), and a command started after the adoption is refused. A command, or `policy adopt`, that cannot take the lock within 30 seconds exits 1 with `another policy change or an adoption is in progress; nothing was changed`: another guarded command or an adoption holds it, so try again in a moment. The lock extends itself while a long command runs; a command that finds the lock lost stops before its next write and says so. Read-only commands never take it.
 
@@ -294,7 +320,7 @@ The three-token form of `provision` and `deprovision` (`--agent A [--owner O] [-
 
 ## Exit codes and arguments
 
-`mashctl policy` with any subcommand prints its usage to stderr and exits 2: the group has no subcommands yet. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get a narrower, per-endpoint set in their JWT.
+`mashctl policy` with no subcommand, or one it does not have (it has `adopt`, `show`, `explain` and `diff`), prints its usage to stderr and exits 2. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get a narrower, per-endpoint set in their JWT.
 
 ## Zones were removed
 

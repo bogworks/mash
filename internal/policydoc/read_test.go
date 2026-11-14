@@ -1,0 +1,217 @@
+package policydoc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/policyapply"
+)
+
+var update = flag.Bool("update", false, "rewrite the golden files in testdata")
+
+// fakeReader serves a list set in force (decoded from doc) and a status.
+type fakeReader struct {
+	doc []byte
+	st  *policyapply.Status
+}
+
+func (f fakeReader) Account() string { return testAccount }
+
+func (f fakeReader) InForceView() (listset.Record, listset.ListSet, bool, error) {
+	if len(f.doc) == 0 {
+		return listset.Record{}, listset.ListSet{}, false, nil
+	}
+	d, err := Decode(f.doc, DecodeOptions{})
+	if err != nil {
+		return listset.Record{}, listset.ListSet{}, false, err
+	}
+	return listset.Record{Generation: d.Generation}, d.ListSet, true, nil
+}
+
+func (f fakeReader) LatestStatus(context.Context) (policyapply.Status, bool, error) {
+	if f.st == nil {
+		return policyapply.Status{}, false, nil
+	}
+	return *f.st, true, nil
+}
+
+func u(n uint64) *uint64 { return &n }
+
+func applied(gen uint64) *policyapply.Status {
+	return &policyapply.Status{Generation: gen, State: policyapply.StateApplied, InForce: true,
+		Servers: []policyapply.ServerGeneration{{Server: "nats-b", Generation: u(gen)}, {Server: "nats-a", Generation: u(gen)}}}
+}
+
+func partial() *policyapply.Status {
+	return &policyapply.Status{Generation: 7, State: policyapply.StatePartial,
+		Servers: []policyapply.ServerGeneration{{Server: "nats-b", Generation: u(6)}, {Server: "nats-a", Generation: u(7)}, {Server: "nats-c"}}}
+}
+
+func golden(t *testing.T, name, got string) {
+	t.Helper()
+	p := filepath.Join("testdata", name+".golden")
+	if *update {
+		if err := os.WriteFile(p, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(want) != got {
+		t.Errorf("%s differs from its golden file (run with -update):\n%s", name, got)
+	}
+}
+
+func TestShow(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	res, err := Show(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.ListSetInForce || res.View.Generation != 7 || res.Header.State != "applied" || res.Header.Partial || res.Header.Notice != "" {
+		t.Fatalf("%+v", res)
+	}
+	if res.Header.Servers[0].Server != "nats-a" {
+		t.Fatalf("servers not sorted: %+v", res.Header.Servers)
+	}
+	text := RenderShow(res)
+	if !strings.Contains(text, listset.RawClientLimit) || !strings.Contains(text, "list set in force") {
+		t.Fatalf("missing sentences:\n%s", text)
+	}
+	golden(t, "show_applied", text)
+	if _, err := json.Marshal(res); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShowPartial(t *testing.T) {
+	res, err := Show(context.Background(), fakeReader{doc: doc(7, 6, nil), st: partial()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := res.Header
+	if !h.Partial || h.InForce || !strings.Contains(h.Notice, "partial application") || !strings.Contains(h.Notice, NoPolicyNotice) ||
+		!strings.Contains(h.Notice, "nats-b: 6") || !strings.Contains(h.Notice, "nats-c: unknown") {
+		t.Fatalf("%+v", h)
+	}
+	golden(t, "show_partial", RenderShow(res))
+}
+
+func TestShowNothingInForce(t *testing.T) {
+	res, err := Show(context.Background(), fakeReader{})
+	if err != nil || res.ListSetInForce || res.View != nil {
+		t.Fatalf("%+v, %v", res, err)
+	}
+	text := RenderShow(res)
+	if !strings.Contains(text, "no list set is in force") || !strings.Contains(text, listset.RawClientLimit) {
+		t.Fatal(text)
+	}
+	golden(t, "show_empty", text)
+	b, _ := json.Marshal(res)
+	if !strings.Contains(string(b), `"servers":[]`) {
+		t.Fatal(string(b))
+	}
+}
+
+func TestExplain(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	res, err := Explain(ctx, r, "foo.c.lead", "foo.c.core")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Explanation == nil || res.Explanation.Verbs[0].Allowed {
+		t.Fatalf("lead denied core mail: %+v", res.Explanation)
+	}
+	text := RenderExplain(res)
+	if !strings.Contains(text, listset.RawClientLimit) {
+		t.Fatal(text)
+	}
+	golden(t, "explain_denied", text)
+	if _, err := Explain(ctx, r, "foo.c.nobody", "foo.c.core"); err == nil {
+		t.Fatal("unknown sender explained")
+	}
+	res, err = Explain(ctx, fakeReader{st: partial()}, "foo.c.lead", "foo.c.core")
+	if err != nil || res.ListSetInForce || !res.Header.Partial {
+		t.Fatalf("%+v, %v", res, err)
+	}
+	golden(t, "explain_empty_partial", RenderExplain(res))
+}
+
+func TestDiff(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	next := doc(8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
+	})
+	p, err := Diff(ctx, r, next, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Refused || len(p.Receivers) == 0 {
+		t.Fatalf("%+v", p)
+	}
+	golden(t, "plan_change", RenderPlan(p))
+	if _, err := json.Marshal(p); err != nil {
+		t.Fatal(err)
+	}
+
+	// A JWS is accepted without a signature check.
+	kp, _ := submitter(t)
+	if _, err := Diff(ctx, r, sign(t, kp, next), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// A stale base is a refusal in the plan, not an error.
+	p, err = Diff(ctx, r, doc(7, 6, nil), nil)
+	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	golden(t, "plan_stale", RenderPlan(p))
+
+	// Another account is an error.
+	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), nil); err == nil {
+		t.Fatal("a document for another account was diffed")
+	}
+	if _, err := Diff(ctx, r, []byte("junk"), nil); !errors.Is(err, ErrBadDocument) {
+		t.Fatal(err)
+	}
+
+	// Nothing in force: the first generation.
+	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), nil)
+	if err != nil || p.Refused || len(p.FirstCredential) != 2 {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	golden(t, "plan_first", RenderPlan(p))
+	p, err = Diff(ctx, fakeReader{}, next, nil)
+	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
+		t.Fatalf("%+v, %v", p, err)
+	}
+}
+
+// A document identical in content to the one in force changes nothing: the plan says so and prints nothing else.
+func TestDiffNothingChanges(t *testing.T) {
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	p, err := Diff(context.Background(), r, doc(8, 7, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Refused {
+		t.Fatalf("%+v", p)
+	}
+	text := RenderPlan(p)
+	if text != "accepted: nothing would change\n" {
+		t.Fatalf("%q", text)
+	}
+	golden(t, "plan_unchanged", text)
+}
