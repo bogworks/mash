@@ -2,6 +2,8 @@
 
 The policy file says which endpoints may mail which others. Today a rule covers mail; prompt and status probes stay open (ADR 0054; they join the policy when the maintainer decides). It is compiled by `mashctl` into NATS publish permissions (one scoped signing key per zone, plus tags on each endpoint's user), so the server enforces it and a client cannot talk around it. `mashctl` is not shipped yet: this page describes the file and the `internal/policy` package that parses, checks, tests, explains and compiles it. The file does nothing until `mashctl` applies it, and mash today still issues every endpoint the wildcard mail line.
 
+For how the NATS server enforces a policy, what a change does to connected senders, and the limits mash cannot remove, see [How mash enforces the messaging policy](policy-enforcement.md).
+
 ## Schema
 
 YAML, one mapping with five keys, all optional. Unknown fields and repeated keys (at any depth) are errors, with line numbers.
