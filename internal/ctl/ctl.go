@@ -148,6 +148,7 @@ func retireLines(line func(left, right string)) {
 
 func policyLines(line func(left, right string)) {
 	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
+	line("policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]", "after the first applied list set of an adopted account: the dry run that plans what to remove (signing keys that are not the list set's, recorded users whose sender is not in it, connected keys that are untracked) and changes nothing; --listset FILE previews the signing keys the first apply removes; exit 1 when an admin or exempt user is signed by a signing key that does not stay; --yes needs a signer and is refused in this version")
 }
 
 // accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
