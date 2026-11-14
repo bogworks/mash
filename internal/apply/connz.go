@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/config"
@@ -47,6 +48,11 @@ type ConnzConn struct {
 	IssuerKey string   `json:"issuer_key,omitempty"` // the key that signed the user's JWT
 	Tags      []string `json:"tags,omitempty"`
 	CID       uint64   `json:"cid"`
+	// IP is the client's address as the server saw it (CONNZ's ip). UserName is the name claim of the user's JWT and
+	// IssuedAt its iat (Unix seconds; 0 when the JWT was not given or does not decode). Only these two claims are kept.
+	IP       string `json:"ip,omitempty"`
+	UserName string `json:"user_name,omitempty"`
+	IssuedAt int64  `json:"issued_at,omitempty"`
 }
 
 // ConnzServer is what one server said: its name and id and every connection it reported for the account.
@@ -79,6 +85,8 @@ type connzReply struct {
 			IssuerKey string   `json:"issuer_key"`
 			Tags      []string `json:"tags"`
 			CID       uint64   `json:"cid"`
+			IP        string   `json:"ip"`
+			JWT       string   `json:"jwt"`
 		} `json:"connections"`
 	} `json:"data"`
 	Error *struct {
@@ -105,7 +113,7 @@ func (r connzReply) name() string {
 // error, or whose answer cannot be read, is an error (the check must not pass over a server it could not read). Each
 // server's further pages (a reply carries at most page connections, DefaultConnzPage when page <= 0) are asked for on
 // that server's own subject, so a server with more connections than one page is read whole. The connections' JWTs, which
-// CONNZ returns with auth on, are not kept.
+// CONNZ returns with auth on, are not kept: only the name and iat claims are read from each.
 func (n NATS) Connz(ctx context.Context, account string, expect []string, page int) ([]ConnzServer, error) {
 	if page <= 0 {
 		page = DefaultConnzPage
@@ -264,7 +272,13 @@ func (n NATS) connzScanOnce(ctx context.Context, cs *ConnzServer, account string
 				continue
 			}
 			seen[c.CID] = true
-			cs.Conns = append(cs.Conns, ConnzConn{Key: c.User, Account: c.Account, Name: c.Name, IssuerKey: c.IssuerKey, Tags: c.Tags, CID: c.CID})
+			cc := ConnzConn{Key: c.User, Account: c.Account, Name: c.Name, IssuerKey: c.IssuerKey, Tags: c.Tags, CID: c.CID, IP: c.IP}
+			if c.JWT != "" {
+				if uc, err := jwt.DecodeUserClaims(c.JWT); err == nil {
+					cc.UserName, cc.IssuedAt = uc.Name, uc.IssuedAt
+				}
+			}
+			cs.Conns = append(cs.Conns, cc)
 		}
 	}
 	add(r)
