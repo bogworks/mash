@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policy"
@@ -117,17 +120,22 @@ func (l *MemLedger) ClearPending() error {
 }
 
 // Converge gates the target and, when servers do not all hold it, finishes the push: it pushes targetJWT again. If
-// the push fails or some server still lacks the target it pushes previousJWT so every server is back on one
-// generation, and gates again. It never rolls back when every server already holds the target but a check fails: that
-// is one generation, reported partial with the failures. previousJWT is the caller's rollback JWT; it must keep the
-// target's revoked keys revoked, or the rollback un-revokes them. The returned Status is the final gate result; it is
-// applied only if the target is.
-func Converge(ctx context.Context, in GateInput, targetJWT, previousJWT string) (Status, error) {
-	return converge(ctx, in, targetJWT, previousJWT, map[string]bool{})
+// the push fails or some server still lacks the target it pushes the previous generation so every server is back on
+// one generation, and gates again. It never rolls back when every server already holds the target but a check fails:
+// that is one generation, reported partial with the failures.
+//
+// signPrevious builds the rollback JWT. It is called only when a rollback is needed, with in.Expect.RevokedKeys (every
+// key the change revokes, sorted and unique), and must return the previous generation's account JWT with every one of
+// them revoked: a revocation is never lowered or removed. Before anything is pushed Converge decodes the result and
+// checks that it carries the previous generation and every key in the list. If it does not, or signPrevious fails, the
+// rollback is not pushed and a rollback failure is added (fail closed: the servers stay as they are, partial, nothing
+// in force). The returned Status is the final gate result; it is applied only if the target is.
+func Converge(ctx context.Context, in GateInput, targetJWT string, signPrevious func(revoked []string) (accountJWT string, err error)) (Status, error) {
+	return converge(ctx, in, targetJWT, signPrevious, map[string]bool{})
 }
 
 // converge is Converge recording in acked each server that acknowledged a push of the target with OK.
-func converge(ctx context.Context, in GateInput, targetJWT, previousJWT string, acked map[string]bool) (Status, error) {
+func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious func(revoked []string) (accountJWT string, err error), acked map[string]bool) (Status, error) {
 	st, err := Gate(ctx, in)
 	if err != nil || st.State == StateApplied || onTarget(st, in.Record.Generation) {
 		return st, err
@@ -137,13 +145,39 @@ func converge(ctx context.Context, in GateInput, targetJWT, previousJWT string, 
 			return st, err
 		}
 	}
-	if previousJWT == "" || in.Previous == nil {
-		st.Failing = append(st.Failing, Failure{Check: CheckRollback, Detail: "servers hold different generations and there is no previous generation to push back"})
+	failRollback := func(detail string) (Status, error) {
+		st.Failing = append(st.Failing, Failure{Check: CheckRollback, Detail: detail})
 		sortFailures(st.Failing)
 		return st, nil
 	}
-	// A failed push back shows in the gate below: servers keep the generations they hold.
-	pushed(ctx, in, previousJWT, nil)
+	if signPrevious == nil || in.Previous == nil {
+		return failRollback("servers hold different generations and there is no previous generation to push back")
+	}
+	revoked := slices.Compact(slices.Sorted(slices.Values(in.Expect.RevokedKeys)))
+	prevTok, err := signPrevious(slices.Clone(revoked))
+	if err != nil {
+		return failRollback(fmt.Sprintf("servers hold different generations and the previous generation could not be signed: %v", err))
+	}
+	claims, derr := jwt.DecodeAccountClaims(prevTok)
+	if derr != nil {
+		return failRollback(fmt.Sprintf("rollback JWT does not decode, not pushed: %v", derr))
+	}
+	if g, ok := generationOfClaims(claims, []Candidate{{Generation: in.Previous.Generation, Compiled: in.Previous.Compiled}}); !ok || g != in.Previous.Generation {
+		return failRollback(fmt.Sprintf("rollback JWT does not carry generation %d, not pushed", in.Previous.Generation))
+	}
+	var missing []string
+	for _, k := range revoked {
+		if _, has := claims.Revocations[k]; !has {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return failRollback("rollback JWT would un-revoke keys, not pushed; missing revocations: " + strings.Join(missing, ", "))
+	}
+	// A server holding the rollback carries the previous generation plus extra revocations; GenerationOf needs the
+	// candidate's own revocations to be a subset, so in.Previous still matches it. A failed push back shows in the gate
+	// below: servers keep the generations they hold.
+	pushed(ctx, in, prevTok, nil)
 	return Gate(ctx, in)
 }
 
@@ -206,11 +240,13 @@ type RunInput struct {
 	// ListSet and Received are the submission and the exact bytes it was decoded from.
 	ListSet  listset.ListSet
 	Received []byte
-	// Previous is the Compiled of the generation in force (nil when none); PreviousJWT is the JWT to push back
-	// (see Converge); PreviousRevoked are the keys it revokes.
+	// Previous is the Compiled of the generation in force (nil when none); PreviousRevoked are the keys it revokes.
 	Previous        *listset.Compiled
-	PreviousJWT     string
 	PreviousRevoked []string
+	// SignPrevious signs the rollback: the previous generation's account JWT with every key in revoked also revoked.
+	// Run calls it only when a rollback is needed, with the union of RevokedKeys and the keys AfterPush revoked
+	// (sorted, unique). Converge refuses to push a result that lacks the previous generation or any of those keys.
+	SignPrevious func(revoked []string) (accountJWT string, err error)
 	// RevokedKeys are the user public keys this change revokes.
 	RevokedKeys []string
 	// Signers are the expected scoped signing keys of the target, and PreviousSigners of the previous generation
@@ -224,9 +260,16 @@ type RunInput struct {
 	// Sign builds the account JWT for the record and a copy of the Compiled. Signing is the caller's.
 	Sign func(rec listset.Record, c *listset.Compiled) (accountJWT string, err error)
 	Now  func() time.Time
+	// AfterPush, if set, is called after the target is pushed and before the gate. It revokes keys (REQ-014: a
+	// narrowed sender's old keys, a removed sender's keys) and reports them by sender address (the key "" is for keys
+	// that belong to no sender). They are added to the gate's revoked keys, and each sender's keys are merged into
+	// its old-key inventory (OldKeys), so a sender listed here needs no entry there; an address present with no keys
+	// has an empty inventory. A sender in notConnected never showed a connection with its new key by the deadline: the Status lists it,
+	// holds the state at partial and nothing is committed. See RotationsAfterPush.
+	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, err error)
 	// OnStatus, if set, receives the applying status before the push.
 	OnStatus func(Status)
-	// BeforeCommit, if set, runs after the gate reports applied and before the generation is committed, still under
+	// BeforeCommit, if set, runs after the gate reports applied (and so with no sender not connected) and before the generation is committed, still under
 	// the ledger's lock. It gets what Run accepted and froze. If it fails, nothing is committed and the generation is
 	// pending (a resubmission of the same content runs it again), and Run returns the error. RunOrdered uses it to
 	// provision new addresses.
@@ -362,7 +405,45 @@ func run(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
 	}
 	acked := map[string]bool{}
 	pushed(ctx, gi, tok, acked)
-	st, err := converge(ctx, gi, tok, in.PreviousJWT, acked)
+	var notConnected []string
+	if in.AfterPush != nil {
+		revoked, nc, aerr := in.AfterPush(ctx)
+		notConnected = slices.Compact(slices.Sorted(slices.Values(nc)))
+		// Whatever AfterPush revoked stays revoked, even when it also failed: it joins the gate's revoked keys, and
+		// the keys of each sender are that sender's old keys, so the gate checks them too (merged into OldKeys; a
+		// copy, the caller's map is not changed).
+		var all []string
+		oldKeys := map[string][]OldKey{}
+		for addr, keys := range in.OldKeys {
+			oldKeys[addr] = slices.Clone(keys)
+		}
+		for addr, keys := range revoked {
+			all = append(all, keys...)
+			if addr == "" {
+				continue
+			}
+			for _, k := range keys {
+				if !slices.ContainsFunc(oldKeys[addr], func(o OldKey) bool { return o.PublicKey == k }) {
+					oldKeys[addr] = append(oldKeys[addr], OldKey{PublicKey: k})
+				}
+			}
+			slices.SortFunc(oldKeys[addr], func(a, b OldKey) int { return strings.Compare(a.PublicKey, b.PublicKey) })
+		}
+		gi.OldKeys = oldKeys
+		gi.Expect.RevokedKeys = slices.Compact(slices.Sorted(slices.Values(slices.Concat(gi.Expect.RevokedKeys, all))))
+		if len(all) > 0 {
+			// AfterPush re-signed the account JWT with its revocations: the servers no longer hold tok, so the target is read by content (templates, signers, revocations).
+			gi.TargetJWT = ""
+		}
+		if aerr != nil {
+			// The target is on the servers: pending, so only a resubmission of the same content may follow.
+			if perr := in.Ledger.SetPending(rec); perr != nil {
+				aerr = errors.Join(aerr, perr)
+			}
+			return Status{}, fmt.Errorf("after push of generation %d: %w", rec.Generation, aerr)
+		}
+	}
+	st, err := converge(ctx, gi, tok, in.SignPrevious, acked)
 	if err == nil && st.State == StateApplied {
 		// Holding the target is not enough: every server must have acknowledged it.
 		for _, sv := range st.Servers {
@@ -375,11 +456,22 @@ func run(ctx context.Context, in RunInput, acc *Accepted) (Status, error) {
 			st.State, st.InForce = StatePartial, false
 		}
 	}
+	if len(notConnected) > 0 && err == nil {
+		st.NotConnected = notConnected
+		for _, s := range notConnected {
+			st.Failing = append(st.Failing, Failure{Sender: s, Check: CheckNotConnected,
+				Detail: "no connection with the new key was seen by the deadline; the old keys were revoked"})
+		}
+		sortFailures(st.Failing)
+		st.State, st.InForce = StatePartial, false
+	}
 	if err != nil || st.State != StateApplied {
 		// The target was pushed. Unless every server is back on the previous generation it may be visible, so it is
-		// pending: only a resubmission of the same content may follow.
+		// pending: only a resubmission of the same content may follow. A not-connected run is pending too, even when
+		// the servers are back on the previous generation: the old keys are already revoked, so the previous
+		// generation is not a place to return to.
 		var perr error
-		if err == nil && backOn(st, base.Generation) {
+		if err == nil && len(notConnected) == 0 && backOn(st, base.Generation) {
 			perr = in.Ledger.ClearPending()
 		} else {
 			perr = in.Ledger.SetPending(rec)
