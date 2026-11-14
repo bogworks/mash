@@ -45,8 +45,10 @@ The issue record's stream carries the metadata key `mash_issued_history`, which 
 
 * A bucket created at the full limit (64) has the value `full`.
 * When `mash admin init` raises a bucket from a per-key history of N to 64, it writes `raised:<N>:<S>`, where S is the
-  stream's last sequence read just before the update. The update copies the whole stream configuration, so rollup,
-  delete and purge stay refused. A raise never replaces an existing marker and never turns `full` into anything else,
+  stream's last sequence. It raises the limit first (one stream update) and reads the last sequence after that update,
+  then writes the marker in a second update. Both updates copy the whole stream configuration, so rollup, delete and
+  purge stay refused. If the second step fails, the limit stays raised, no marker is written, `init` returns the error,
+  and the legacy rule (no marker) applies until `init` is run again. A raise never replaces an existing marker and never turns `full` into anything else,
   and a second `init` changes nothing.
 * A bucket with no marker is a legacy one: nothing is known about what it dropped.
 
@@ -73,14 +75,17 @@ anything is staged or revoked). A refusal changes nothing there either.
 * Good, because `deprovision`, `retire` and a rotating `reissue` make one check with one clock reading.
 * Bad, because a key of a legacy bucket with 8 or more revisions, or one that had 8 up to a raise, is refused until it
   is revoked by hand.
-* Bad, because the marker's S is read just before the update: an issue write between that read and the update could
-  cause one dropped revision to go uncounted. `init` runs rarely, and mash writes the record under its account lock.
+* Good, because S is read after the raise: a write that lands under the old limit has a sequence at or below S, so a
+  concurrent write cannot evict a revision unseen. S can only be larger than strictly needed, which refuses more.
+* Bad, because the raise and the marker are two updates: a failure between them leaves a raised bucket with no marker,
+  which is judged by the legacy 8-revision rule (conservative) until `init` is run again.
 
 ### Confirmation
 
 `internal/admin` tests cover each marker state (full; raised and provable; raised with exactly N revisions before S;
 no marker with 7 and with 8 revisions; an unreadable marker), that creation writes `full`, and that a raise writes
-`raised:8:S` once, keeps the hardening and is idempotent. `cmd/mashctl` tests show that `retire` and a rotating
+`raised:8:S` once, keeps the hardening and is idempotent, that S is the last sequence after the raise, and that a fault between the two
+updates leaves the limit raised with no marker and the legacy rule in force. `cmd/mashctl` tests show that `retire` and a rotating
 `reissue` refuse on an unprovable history with nothing changed, and proceed on a provable one.
 
 ## Pros and Cons of the Options

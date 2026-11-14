@@ -291,6 +291,10 @@ func historyProvable(m store.IssuedMarker, seqs []uint64) bool {
 // issuedStatusFault is a test seam: a non-nil error it returns replaces the bucket status read in IssuedHistoryByKey.
 var issuedStatusFault func() error
 
+// issuedMarkerFault is a test seam: a non-nil error it returns stops initIssued between the limit raise and the marker
+// write.
+var issuedMarkerFault func() error
+
 // IssuedHistoryByKey reads every retained revision of publicKey's issue record (up to the bucket's history cap,
 // store.IssuedHistory) and returns the issue times they hold. found is false when the key is not recorded or the bucket
 // does not exist (jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean absent). Any other failure, a
@@ -400,21 +404,41 @@ func (a *Admin) initIssued(ctx context.Context) error {
 	if info.Config.MaxMsgsPerSubject >= store.IssuedHistory {
 		return nil
 	}
+	oldLimit := int(info.Config.MaxMsgsPerSubject)
 	sc := info.Config // a copy of the whole config: DenyDelete, DenyPurge and the rest carry over
-	// The marker records how the history limit was before the raise and where the stream stood, read just before the
-	// update: a key with fewer than that many revisions at or below that sequence lost none. An existing marker (a
-	// "raised" one from an earlier run, or "full") is never replaced.
-	if _, has := sc.Metadata[store.IssuedMarkerKey]; !has {
-		md := make(map[string]string, len(sc.Metadata)+1)
-		for k, v := range sc.Metadata {
-			md[k] = v
-		}
-		md[store.IssuedMarkerKey] = store.IssuedMarkerRaised(int(info.Config.MaxMsgsPerSubject), info.State.LastSeq)
-		sc.Metadata = md
-	}
 	sc.MaxMsgsPerSubject = store.IssuedHistory
 	if _, err := a.js.UpdateStream(ctx, sc); err != nil {
 		return fmt.Errorf("mash: bucket %s: raising the history to %d: %w", store.IssuedBucket, store.IssuedHistory, err)
+	}
+	// The marker records how the history limit was before the raise and where the stream stood, read AFTER the raise:
+	// a write that landed before the raise, under the old limit, is at or below that sequence, so a key with fewer
+	// than that many revisions at or below it lost none. A larger S only refuses more. An existing marker (a "raised"
+	// one from an earlier run, or "full") is never replaced. If the second step fails the limit stays raised and the
+	// marker stays absent, which is the legacy 8-revision rule: the error is returned so init does not look clean.
+	if _, has := sc.Metadata[store.IssuedMarkerKey]; has {
+		return nil
+	}
+	if issuedMarkerFault != nil {
+		if err := issuedMarkerFault(); err != nil {
+			return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies; run init again after removing the cause): %w", store.IssuedBucket, store.IssuedHistory, err)
+		}
+	}
+	after, err := s.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies): %w", store.IssuedBucket, store.IssuedHistory, err)
+	}
+	mc := after.Config
+	if _, has := mc.Metadata[store.IssuedMarkerKey]; has {
+		return nil
+	}
+	md := make(map[string]string, len(mc.Metadata)+1)
+	for k, v := range mc.Metadata {
+		md[k] = v
+	}
+	md[store.IssuedMarkerKey] = store.IssuedMarkerRaised(oldLimit, after.State.LastSeq)
+	mc.Metadata = md
+	if _, err := a.js.UpdateStream(ctx, mc); err != nil {
+		return fmt.Errorf("mash: bucket %s: history raised to %d but the marker was not written (the legacy 8-revision rule applies): %w", store.IssuedBucket, store.IssuedHistory, err)
 	}
 	return nil
 }

@@ -170,3 +170,52 @@ func TestInitRaiseKeepsAnExistingMarker(t *testing.T) {
 		t.Fatalf("a bucket already at the limit was marked: %q", c.Metadata[store.IssuedMarkerKey])
 	}
 }
+
+// The raise comes first and S is read after it, so S is at least the sequence before the raise and equals the stream's
+// last sequence afterwards.
+func TestInitRaiseReadsTheSequenceAfterTheRaise(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	setIssuedStream(t, js, 8, "")
+	recordN(t, a, userKey(t), 10)
+	before := issuedLastSeq(t, js)
+	if err := a.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after := issuedLastSeq(t, js)
+	got := issuedStreamConfig(t, js).Metadata[store.IssuedMarkerKey]
+	if want := store.IssuedMarkerRaised(8, after); got != want || after < before {
+		t.Fatalf("marker %q, want %q (before %d, after %d)", got, want, before, after)
+	}
+}
+
+// A fault between the two updates leaves the limit raised and no marker; init reports it and the legacy 8-revision
+// rule applies.
+func TestInitRaiseFaultBetweenUpdatesLeavesNoMarker(t *testing.T) {
+	_, a, js := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	setIssuedStream(t, js, 8, "")
+	recordN(t, a, key, 8)
+	prev := admin.SetIssuedMarkerFault(func() error { return errors.New("injected") })
+	err := a.Init(ctx)
+	admin.SetIssuedMarkerFault(prev)
+	if err == nil {
+		t.Fatal("init reported no error")
+	}
+	c := issuedStreamConfig(t, js)
+	if c.MaxMsgsPerSubject != store.IssuedHistory || !c.DenyDelete || !c.DenyPurge {
+		t.Fatalf("the raise did not stay: %+v", c)
+	}
+	if v, ok := c.Metadata[store.IssuedMarkerKey]; ok {
+		t.Fatalf("a marker was written: %q", v)
+	}
+	if _, _, err := a.IssuedHistoryByKey(ctx, key); !errors.As(err, new(*admin.IncompleteHistoryError)) {
+		t.Fatalf("8 revisions with no marker must not be shown complete: %v", err)
+	}
+	other := userKey(t)
+	recordN(t, a, other, 7)
+	if _, found, err := a.IssuedHistoryByKey(ctx, other); err != nil || !found {
+		t.Fatalf("7 revisions with no marker: found=%v err=%v", found, err)
+	}
+}
