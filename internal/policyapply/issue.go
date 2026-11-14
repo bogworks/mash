@@ -25,9 +25,12 @@ type IssueEntry struct {
 	Address   string
 	PublicKey string
 	Purpose   Purpose
-	IssuedAt  time.Time
-	Expires   time.Time
-	RevokedAt *time.Time
+	// Tags and Generation are the tags the credential carries and the generation of the list set it was issued for.
+	Tags       []string
+	Generation uint64
+	IssuedAt   time.Time
+	Expires    time.Time
+	RevokedAt  *time.Time
 }
 
 // IssueRecord is where every credential mash issues is written down.
@@ -36,10 +39,19 @@ type IssueRecord interface {
 	Add(ctx context.Context, e IssueEntry) error
 	// MarkRevoked notes that the credential with public key pub was revoked at at.
 	MarkRevoked(ctx context.Context, pub string, at time.Time) error
+	// ByAddress returns every entry for address, in the order they were added.
+	ByAddress(ctx context.Context, address string) ([]IssueEntry, error)
 }
 
 // ErrUnknownKey is returned by MemIssueRecord.MarkRevoked for a key that was never added.
 var ErrUnknownKey = errors.New("no issue record entry for that key")
+
+// ErrRevokedKey is returned by Add for a public key that was already revoked: a later issue request for a revoked key
+// is refused (AT-013).
+var ErrRevokedKey = errors.New("that key was revoked and cannot be issued again")
+
+// ErrDuplicateKey is returned by Add for a public key that is already in the record.
+var ErrDuplicateKey = errors.New("that key is already in the issue record")
 
 // MemIssueRecord is an in-memory IssueRecord, safe for concurrent use.
 type MemIssueRecord struct {
@@ -51,8 +63,30 @@ type MemIssueRecord struct {
 func (m *MemIssueRecord) Add(_ context.Context, e IssueEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, x := range m.entries {
+		if x.PublicKey != e.PublicKey {
+			continue
+		}
+		if x.RevokedAt != nil {
+			return ErrRevokedKey
+		}
+		return ErrDuplicateKey
+	}
 	m.entries = append(m.entries, copyEntry(e))
 	return nil
+}
+
+// ByAddress implements IssueRecord.
+func (m *MemIssueRecord) ByAddress(_ context.Context, address string) ([]IssueEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []IssueEntry
+	for _, e := range m.entries {
+		if e.Address == address {
+			out = append(out, copyEntry(e))
+		}
+	}
+	return out, nil
 }
 
 // MarkRevoked implements IssueRecord. It marks every entry with that key; the first revocation time is kept.
@@ -92,6 +126,7 @@ func copyEntry(e IssueEntry) IssueEntry {
 		t := *e.RevokedAt
 		e.RevokedAt = &t
 	}
+	e.Tags = slices.Clone(e.Tags)
 	return e
 }
 

@@ -245,8 +245,9 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	w.in = RunInput{
 		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
 		Ledger: evLedger{w.ledger, w.ev}, Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
-		Previous: w.c1, PreviousJWT: w.j1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
-		Signers: w.k.signers, PreviousSigners: w.k.signers,
+		Previous: w.c1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
+		SignPrevious: func(revoked []string) (string, error) { return w.k.build(t, w.c1, revoked...), nil },
+		Signers:      w.k.signers, PreviousSigners: w.k.signers,
 		OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked}}, "foo.c.docs": {}},
 		Sign:    func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.build(t, c, w.k.revoked), nil },
 	}

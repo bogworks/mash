@@ -40,6 +40,22 @@
 // sender's gate disconnects every sender under that owner group's key (ADR 0097). AT-014 (at014_live_test.go) runs
 // this on the live cluster.
 //
+// Rotation and removal (REQ-014, AT-013; rotate.go, connz.go). When a sender's tags narrow, Rotate issues the new
+// credential to a public key the sender's host made (mash never receives a seed, D201), records it (purpose rotation)
+// before delivering it, and polls Connections (live: NATSConnections, a CONNZ query of every server) until the servers
+// show a connection with the new key. Only then does it revoke, in one call, every issue or rotation key the issue record
+// holds for the address except the new one. A delivery that reports success proves nothing. At the deadline with no
+// connection the old keys are revoked anyway, the sender is reported not connected (Status.NotConnected, a Failure with
+// CheckNotConnected) and the change stays partial and uncommitted until it connects; the target is deployed, so the
+// generation is pending and only a resubmission of the same content may follow. A sender that leaves the list set
+// has every key revoked (RemoveSender). RotationsAfterPush builds RunInput.AfterPush for a whole change. The keys it
+// revokes join the gate's revoked keys, and they are the old keys of the senders they were revoked for: Run merges
+// them into the old-key inventory (RunInput.OldKeys), so the gate checks each is in every server's revocation list
+// (old_key_not_revoked) without the caller listing them twice. A rollback must keep them revoked: Converge calls
+// RunInput.SignPrevious with every revoked key and refuses to push a rollback JWT that lacks any. Cost: a narrowing
+// template push briefly disconnects every sender under that owner group's key (ADR 0097). AT-013 (at013_live_test.go)
+// runs this on the live cluster.
+//
 // Ledger caveat. MemLedger is process-local. The Ledger's Lock is mandatory and a persistent implementation MUST make it
 // a cross-process lock (a lease in the shared store); MemLedger's lock is exclusive within one process only, so until
 // the persistent compare-and-set store (the status.<account> key in KV) comes, two processes can still push over each

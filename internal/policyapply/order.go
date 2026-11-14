@@ -113,6 +113,9 @@ func SenderPassed(st Status, sender string) bool {
 			return false
 		}
 	}
+	if slices.Contains(st.NotConnected, sender) {
+		return false
+	}
 	for _, f := range st.Failing {
 		if f.Sender == "" || f.Sender == sender {
 			return false

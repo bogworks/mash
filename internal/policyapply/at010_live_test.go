@@ -625,5 +625,7 @@ func at010HeldBack(t *testing.T) {
 	e.refusedConnect(ctx, r.real)
 }
 
-// cur0 is the previous generation's JWT, the one Converge would push back.
-func (e *at010Env) cur0(r *at010Run) string { return e.account(r.c1) }
+// cur0 signs the previous generation, the one Converge would push back, with the revoked keys kept.
+func (e *at010Env) cur0(r *at010Run) func([]string) (string, error) {
+	return func(revoked []string) (string, error) { return e.account(r.c1, revoked...), nil }
+}
