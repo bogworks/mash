@@ -52,8 +52,10 @@ func (s *syncBuf) String() string {
 const (
 	issueHost  = "h1"
 	issueGroup = "foo.c"
-	issueWait  = 10 * time.Second
-	issueTTL   = time.Minute
+	issueWait  = 30 * time.Second // generous: a loaded CI runner under -race has taken over 10 s for one request
+	// issueCapturePoll is how often a test re-reads the traffic capture while it waits for it to catch up.
+	issueCapturePoll = 20 * time.Millisecond
+	issueTTL         = time.Minute
 )
 
 // issueEnv is an operator-mode server with the owner group foo.c's scoped signing key and template in the account JWT,
@@ -355,10 +357,16 @@ func TestIssueServiceAT012NoPrivateKeyAnywhere(t *testing.T) {
 	}
 	e.refused("unlisted", e.newReq("foo.c.ghost").sign(t), issue.CodeUnlisted)
 	e.refused("unsigned", e.newReq("foo.c.core"), issue.CodeMalformed)
-	if err := e.nc.Flush(); err != nil {
+	if err := e.nc.FlushTimeout(issueWait); err != nil { // the default flush wait is 10 s, which a loaded runner can pass
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond) // let the capture subscription catch up
+	// Wait for the capture subscription to have seen all four requests, instead of sleeping a fixed while.
+	for deadline := time.Now().Add(issueWait); strings.Count(e.captured.String(), "agents.issue.foo.c ") < 4; {
+		if time.Now().After(deadline) {
+			break // the checks below report what the capture missed
+		}
+		time.Sleep(issueCapturePoll)
+	}
 	for name, text := range map[string]string{"nats payloads": e.captured.String(), "log": e.logs.String()} {
 		if text == "" {
 			t.Errorf("%s: nothing captured", name)
