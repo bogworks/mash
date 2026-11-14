@@ -277,6 +277,24 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 	}
 }
 
+// The admin credentials must belong to the key store's account: admin creds issued for another account are refused
+// before anything is written, and no marker exists afterwards.
+func TestPolicyAdoptRefusesAdminCredsOfAnotherAccount(t *testing.T) {
+	e := newApplyEnv(t, twoZones)
+	// A creds file of a user issued by a fresh account key, so its account is not the key store's.
+	orig := e.env["MASH_ADMIN_CREDS"]
+	e.env["MASH_ADMIN_CREDS"] = writeUserCreds(t, t.TempDir())
+	out, errb, code := e.run("policy", "adopt", "--submitter", userPub(t))
+	want := "the admin credentials belong to another account than the key store's account key; nothing was changed"
+	if code != 1 || out != "" || !strings.Contains(errb, want) {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	e.env["MASH_ADMIN_CREDS"] = orig
+	if out, _, _ := e.run("policy", "adopt", "--show"); strings.TrimSpace(out) != "not adopted" {
+		t.Errorf("a refused adopt wrote a marker: %q", out)
+	}
+}
+
 // A command and what to run it with on a fresh account.
 type guarded struct {
 	name string

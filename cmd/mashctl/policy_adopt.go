@@ -118,6 +118,11 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 	if err != nil {
 		return fail("%v", err)
 	}
+	if adminAcct, err := credsAccountKey(cfg.AdminCreds); err != nil {
+		return fail("admin credentials: %s; nothing was changed", config.Clean(err.Error()))
+	} else if adminAcct != account {
+		return fail("the admin credentials belong to another account than the key store's account key; nothing was changed")
+	}
 	held[by] = "the admin user's key"
 	if what, bad := held[submitter]; bad {
 		return fail("the submitter must be a key mash does not hold, and this is %s (the value is not shown); nothing was changed", what)

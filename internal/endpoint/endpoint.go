@@ -335,6 +335,17 @@ func SpoolDir(cfg config.Config) (string, error) {
 	return spool.Dir(cfg.StateDir, o, n), nil
 }
 
+// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal. With require_tls
+// off (the default) it is none and nil. With it on, a plain nats:// or ws:// URL to a host that is not loopback is
+// refused here, before anything is connected, and a tls:// or wss:// URL is made to require TLS (natsauth.RequireEndpointTLS).
+// Every endpoint connection, serve and the CLI commands, goes through OpenClientWith, which calls it first.
+func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
+	if !cfg.RequireTLS {
+		return nil, nil
+	}
+	return natsauth.RequireEndpointTLS(cfg.URL)
+}
+
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
 // anything else that classifies mail from every sender wants that.
 func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
@@ -346,6 +357,10 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) (*Endpoint, error) {
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
+	}
+	tlsReq, err := EndpointTLS(cfg)
+	if err != nil {
+		return nil, err
 	}
 	ident, key, subj, err := identityOf(cfg)
 	if err != nil {
@@ -368,7 +383,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, err
 	}
 	refs := newRefusals()
-	nc, err := connect(ctx, cfg.URL, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey),
+	nc, err := connect(ctx, cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
 		nats.CustomInboxPrefix(sap.InboxPrefix(key)),
