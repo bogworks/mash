@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/bogworks/mash/internal/store"
 )
 
 // Purpose says why a credential was issued.
@@ -50,7 +52,8 @@ var ErrUnknownKey = errors.New("no issue record entry for that key")
 // is refused (AT-013).
 var ErrRevokedKey = errors.New("that key was revoked and cannot be issued again")
 
-// ErrDuplicateKey is returned by Add for a public key that is already in the record.
+// ErrDuplicateKey is returned by Add for a public key that is already in the record for another address. A reissue of
+// an active key for the same address is a new revision, not a duplicate (ADR 0101).
 var ErrDuplicateKey = errors.New("that key is already in the issue record")
 
 // MemIssueRecord is an in-memory IssueRecord, safe for concurrent use.
@@ -63,14 +66,30 @@ type MemIssueRecord struct {
 func (m *MemIssueRecord) Add(_ context.Context, e IssueEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, x := range m.entries {
+	for i, x := range m.entries {
 		if x.PublicKey != e.PublicKey {
 			continue
 		}
 		if x.RevokedAt != nil {
 			return ErrRevokedKey
 		}
-		return ErrDuplicateKey
+		if x.Address != e.Address {
+			return ErrDuplicateKey
+		}
+		// A revision cannot move an active key between the sender class and the probe class: that would hide an
+		// active sender credential from the inventory.
+		if store.PurposeClassChanged(string(x.Purpose), string(e.Purpose)) {
+			return ErrDuplicateKey
+		}
+		// ADR 0101: a reissue of an active key for the same address is a new revision of its record, which replaces
+		// the entry (the record holds the latest revision of each key). The entry keeps the greatest issue time of
+		// the revisions, as the admin's full-history read does (ADR 0115): a revocation must cover the latest-dated JWT.
+		maxAt := x.IssuedAt
+		m.entries[i] = copyEntry(e)
+		if maxAt.After(e.IssuedAt) {
+			m.entries[i].IssuedAt = maxAt
+		}
+		return nil
 	}
 	m.entries = append(m.entries, copyEntry(e))
 	return nil
@@ -109,6 +128,12 @@ func (m *MemIssueRecord) MarkRevoked(_ context.Context, pub string, at time.Time
 	}
 	return nil
 }
+
+// All returns every entry, in the order they were added.
+func (m *MemIssueRecord) All(context.Context) ([]IssueEntry, error) { return m.Entries(), nil }
+
+// AllMaxIssued implements IssueInventory. The record keeps the greatest issue time of each key (see Add), so it is All.
+func (m *MemIssueRecord) AllMaxIssued(context.Context) ([]IssueEntry, error) { return m.Entries(), nil }
 
 // Entries returns a copy of the entries in the order they were added.
 func (m *MemIssueRecord) Entries() []IssueEntry {

@@ -156,7 +156,7 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	// credentials of the admin, the loaders add the admin credentials.
 	connOpts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...)
 	app := &policyserve.Applier{
-		Account: account, Range: rng, Ledger: ledger, Sys: sys, Keys: keys, Trust: trust, Record: policyapply.NewAdminIssueRecord(adm),
+		Account: account, Range: rng, Ledger: ledger, Sys: sys, Keys: keys, Trust: trust, Record: policyapply.NewAdminIssueRecord(adm), KV: kv,
 		Servers: servers, URL: cfg.URL, Vet: policyServeVet(cfg.InsecureLoopback), Options: connOpts, Log: logger, Provisioner: policyServeProvisioner,
 		Load: func(ctx context.Context, u string) (*nats.Conn, error) {
 			opts := append(slices.Clone(connOpts), natsauth.UserCredentials(cfg.AdminCreds),

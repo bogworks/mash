@@ -13,12 +13,18 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// IssuedAdmin is the part of *admin.Admin that AdminIssueRecord uses: the issue record's three operations. A fake
+// IssuedAdmin is the part of *admin.Admin that AdminIssueRecord uses: the issue record's operations. A fake
 // stands in for it in unit tests.
 type IssuedAdmin interface {
-	RecordIssued(ctx context.Context, r store.Issued) error
+	// RecordIssuedChecked writes r with the conditions tested inside the write's own compare-and-set: it fails with
+	// store.ErrKeyRevoked for a revoked key, store.ErrKeyBoundElsewhere for a key of another address and
+	// store.ErrKeyPurposeChanged for a revision that moves the key between the sender and probe classes.
+	RecordIssuedChecked(ctx context.Context, r store.Issued) error
 	MarkRevoked(ctx context.Context, publicKey string, at time.Time) error
 	Issued(ctx context.Context) (recs []store.Issued, present bool, err error)
+	// IssuedHistoryByKey reads every retained revision of one key's record (ADR 0115): an *admin.IncompleteHistoryError
+	// when the retained history cannot be shown complete.
+	IssuedHistoryByKey(ctx context.Context, publicKey string) (t admin.IssuedTimes, found bool, err error)
 }
 
 var _ IssuedAdmin = (*admin.Admin)(nil)
@@ -31,10 +37,10 @@ var _ IssuedAdmin = (*admin.Admin)(nil)
 // empty, which the admin fills with its own owner). IssuedAt is stored as RFC 3339 in UTC. Expires is NOT stored:
 // the record has no expiry, so a probe's expiry lives in its JWT only and entries read back with a zero Expires.
 //
-// Add refuses a key that is already recorded (ErrRevokedKey if it was revoked, else ErrDuplicateKey) by reading the
-// record first. There is a small window between that read and the write in which another writer can record the same
-// key; RecordIssued is itself a compare-and-set that keeps a revoked_at set meanwhile, so the record never loses a
-// revocation, but two concurrent Adds of one key can both succeed. mash mints each key fresh, so no caller does that.
+// Add refuses a revoked key (ErrRevokedKey) and a key recorded for another address, or a revision that moves an active key between the sender and probe classes (ErrDuplicateKey). A reissue of an
+// active key for the same address adds a revision of its record (ADR 0101). The refusals are made inside the write's
+// own compare-and-set (admin.RecordIssuedChecked), at the revision the write is made at, so a revocation or another
+// writer that lands after an earlier read is seen and nothing is overwritten.
 type AdminIssueRecord struct {
 	admin IssuedAdmin
 }
@@ -49,19 +55,6 @@ func (r *AdminIssueRecord) Add(ctx context.Context, e IssueEntry) error {
 	if e.Generation > math.MaxInt {
 		return fmt.Errorf("issue record: generation %d does not fit the record", e.Generation)
 	}
-	recs, _, err := r.admin.Issued(ctx)
-	if err != nil {
-		return err
-	}
-	for _, x := range recs {
-		if x.PublicKey != e.PublicKey {
-			continue
-		}
-		if x.RevokedAt != "" {
-			return ErrRevokedKey
-		}
-		return ErrDuplicateKey
-	}
 	s := store.Issued{
 		PublicKey:  e.PublicKey,
 		Address:    e.Address,
@@ -74,7 +67,14 @@ func (r *AdminIssueRecord) Add(ctx context.Context, e IssueEntry) error {
 	if !e.IssuedAt.IsZero() {
 		s.IssuedAt = e.IssuedAt.UTC().Format(time.RFC3339)
 	}
-	return r.admin.RecordIssued(ctx, s)
+	err := r.admin.RecordIssuedChecked(ctx, s)
+	switch {
+	case errors.Is(err, store.ErrKeyRevoked):
+		return ErrRevokedKey
+	case errors.Is(err, store.ErrKeyBoundElsewhere), errors.Is(err, store.ErrKeyPurposeChanged):
+		return ErrDuplicateKey
+	}
+	return err
 }
 
 // MarkRevoked implements IssueRecord. A key the record does not hold is ErrUnknownKey.
@@ -122,6 +122,39 @@ func (r *AdminIssueRecord) All(ctx context.Context) ([]IssueEntry, error) {
 		return out[i].PublicKey < out[j].PublicKey
 	})
 	return out, nil
+}
+
+// AllMaxIssued is All for the old-key inventory: for each issue or rotation key, revoked or not, IssuedAt is the
+// greatest issue time over every retained revision of the key, not the latest revision's (ADR 0115). A revocation
+// refuses a user JWT only when it is at or after the JWT's issue time, so it must be at or after the latest-dated one,
+// a future-dated one included. A key whose retained history cannot be shown complete (*admin.IncompleteHistoryError),
+// that is at the history cap (admin.IssuedTimes.Truncated, so an older, later-dated revision may have been dropped),
+// has none, or has a revision without a readable time, is refused with ErrIncompleteInventory. A revoked key is
+// included because an earlier revocation may be older than a later-dated credential, which the gate must see; probes
+// are returned as All returns them: they are not inventory.
+func (r *AdminIssueRecord) AllMaxIssued(ctx context.Context) ([]IssueEntry, error) {
+	all, err := r.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i, e := range all {
+		if !revocable(e) {
+			continue
+		}
+		t, found, err := r.admin.IssuedHistoryByKey(ctx, e.PublicKey)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("%w: the issue history of %s of %s: %w", ErrIncompleteInventory, e.PublicKey, e.Address, err)
+		case !found:
+			return nil, fmt.Errorf("%w: the issue record has no history of %s of %s", ErrIncompleteInventory, e.PublicKey, e.Address)
+		case t.Truncated:
+			return nil, fmt.Errorf("%w: the issue history of %s of %s is at the bucket's cap, so an older issue time may be dropped", ErrIncompleteInventory, e.PublicKey, e.Address)
+		}
+		if t.Max.After(e.IssuedAt) {
+			all[i].IssuedAt = t.Max
+		}
+	}
+	return all, nil
 }
 
 func entryOf(s store.Issued) (IssueEntry, error) {

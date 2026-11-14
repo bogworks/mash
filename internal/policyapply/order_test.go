@@ -251,7 +251,7 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	w.cl = cl
 	w.in = RunInput{
 		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
-		Ledger: evLedger{w.ledger, w.ev}, Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
+		Ledger: WithProvisionMarkers(evLedger{w.ledger, w.ev}, NewMemProvisionMarkers()), Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
 		Previous: w.c1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
 		Signers: w.k.signers, PreviousSigners: w.k.signers,
 		OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked}}, "foo.c.docs": {}},
@@ -360,7 +360,7 @@ func (failingStatus) WriteStatus(context.Context, Status) error { return errStat
 // A status write that fails on the provisioning-failure path is returned, not hidden behind the provisioning error.
 func TestRunOrderedProvisionFailureStatusWriteError(t *testing.T) {
 	w := newWorld14(t)
-	w.in.Ledger = failingStatus{w.ledger}
+	w.in.Ledger = WithProvisionMarkers(failingStatus{w.ledger}, NewMemProvisionMarkers())
 	w.prov.fail("create:foo.c.new", true)
 	if _, err := RunOrdered(context.Background(), w.in, w.prov); !errors.Is(err, errStatusDown) {
 		t.Fatalf("err = %v, want the status write error", err)
@@ -476,7 +476,7 @@ func (pendingFails) SetPendingJWT(listset.Record, string) error { return errors.
 // error, not a partial status with a nil error.
 func TestRunOrderedPendingNotRecordedIsError(t *testing.T) {
 	w := newWorld14(t)
-	w.in.Ledger = pendingFails{w.ledger}
+	w.in.Ledger = WithProvisionMarkers(pendingFails{w.ledger}, NewMemProvisionMarkers())
 	w.prov.fail("create:foo.c.new", true)
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err == nil || !strings.Contains(err.Error(), "ledger down") {

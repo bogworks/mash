@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -583,9 +585,32 @@ type fakeIssued struct {
 	recs  map[string]store.Issued
 	order []string
 	err   error
+	reads int // calls of Issued
+	// hist is every issue time written for a key, as the bucket's history would be; histErr and truncated are what
+	// IssuedHistoryByKey reports for a key, to stand for an incomplete or capped history.
+	hist      map[string][]time.Time
+	histErr   map[string]error
+	truncated map[string]bool
 }
 
-func (f *fakeIssued) RecordIssued(_ context.Context, r store.Issued) error {
+func (f *fakeIssued) IssuedHistoryByKey(_ context.Context, pub string) (admin.IssuedTimes, bool, error) {
+	if err := f.histErr[pub]; err != nil {
+		return admin.IssuedTimes{}, false, err
+	}
+	h := f.hist[pub]
+	if len(h) == 0 {
+		return admin.IssuedTimes{}, false, nil
+	}
+	t := admin.IssuedTimes{Latest: h[len(h)-1], Revisions: len(h), Truncated: f.truncated[pub]}
+	for _, x := range h {
+		if x.After(t.Max) {
+			t.Max = x
+		}
+	}
+	return t, true, nil
+}
+
+func (f *fakeIssued) RecordIssuedChecked(_ context.Context, r store.Issued) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -593,12 +618,27 @@ func (f *fakeIssued) RecordIssued(_ context.Context, r store.Issued) error {
 		f.recs = map[string]store.Issued{}
 	}
 	if cur, ok := f.recs[r.PublicKey]; ok {
+		if cur.RevokedAt != "" {
+			return store.ErrKeyRevoked
+		}
+		if cur.Address != r.Address {
+			return store.ErrKeyBoundElsewhere
+		}
+		if store.PurposeClassChanged(cur.Purpose, r.Purpose) {
+			return store.ErrKeyPurposeChanged
+		}
 		r.RevokedAt = cur.RevokedAt
 	} else {
 		f.order = append(f.order, r.PublicKey)
 	}
 	if r.Purpose == "" {
 		r.Purpose = store.PurposeIssue
+	}
+	if at, err := time.Parse(time.RFC3339, r.IssuedAt); err == nil {
+		if f.hist == nil {
+			f.hist = map[string][]time.Time{}
+		}
+		f.hist[r.PublicKey] = append(f.hist[r.PublicKey], at.UTC())
 	}
 	f.recs[r.PublicKey] = r
 	return nil
@@ -617,6 +657,7 @@ func (f *fakeIssued) MarkRevoked(_ context.Context, pub string, at time.Time) er
 }
 
 func (f *fakeIssued) Issued(context.Context) ([]store.Issued, bool, error) {
+	f.reads++
 	var out []store.Issued
 	for _, k := range f.order {
 		out = append(out, f.recs[k])
@@ -640,8 +681,16 @@ func TestAdminIssueRecordMapping(t *testing.T) {
 		got.Generation != want.Generation || got.IssuedAt != want.IssuedAt || got.Purpose != want.Purpose || len(got.Tags) != 1 {
 		t.Fatalf("stored %+v, want %+v", got, want)
 	}
-	if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UA"}); !errors.Is(err, ErrDuplicateKey) {
-		t.Errorf("duplicate: %v", err)
+	reads := f.reads
+	if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UA", Purpose: PurposeProbe, Tags: []string{"t1"},
+		Generation: 7, IssuedAt: at, Expires: at.Add(time.Minute)}); err != nil {
+		t.Errorf("reissue of an active key for the same address: %v, %+v", err, f.recs["UA"])
+	}
+	if err := r.Add(ctx, IssueEntry{Address: "foo.c.other", PublicKey: "UA"}); !errors.Is(err, ErrDuplicateKey) {
+		t.Errorf("a key of another address: %v", err)
+	}
+	if f.reads != reads {
+		t.Errorf("Add read the record first (%d reads): the refusals belong to the write's own compare-and-set", f.reads-reads)
 	}
 	if err := r.MarkRevoked(ctx, "UA", at); err != nil {
 		t.Fatal(err)
@@ -835,6 +884,116 @@ func TestKVLedgerWriteRefusalRejectsOthers(t *testing.T) {
 	}
 	if _, ok, _ := l.LatestStatus(context.Background()); ok {
 		t.Error("a status was written")
+	}
+}
+
+// The inventory's issue time of a key is the greatest over its revisions, a future-dated earlier one included, and an
+// incomplete, capped or missing history is refused.
+func TestAdminIssueRecordAllMaxIssued(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeIssued{}
+	r := NewAdminIssueRecord(f)
+	future := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	add := func(pub string, at time.Time) {
+		t.Helper()
+		if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: pub, Purpose: PurposeIssue, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("UK", future) // a JWT dated in the future,
+	add("UK", now)    // then a reissue of the same key with the right time: the latest revision is not the greatest.
+
+	all, err := r.All(ctx)
+	if err != nil || len(all) != 1 || !all[0].IssuedAt.Equal(now) {
+		t.Fatalf("All = %+v, %v (the latest revision is expected)", all, err)
+	}
+	got, err := r.AllMaxIssued(ctx)
+	if err != nil || len(got) != 1 || !got[0].IssuedAt.Equal(future) {
+		t.Fatalf("AllMaxIssued = %+v, %v, want the future time", got, err)
+	}
+
+	bad := map[string]func(g *fakeIssued){
+		"incomplete": func(g *fakeIssued) {
+			g.histErr = map[string]error{"UK": &admin.IncompleteHistoryError{Key: "UK", Retained: 9}}
+		},
+		"capped":     func(g *fakeIssued) { g.truncated = map[string]bool{"UK": true} },
+		"no history": func(g *fakeIssued) { g.hist = nil },
+	}
+	for name, mod := range bad {
+		t.Run(name, func(t *testing.T) {
+			g := &fakeIssued{recs: maps.Clone(f.recs), order: slices.Clone(f.order), hist: maps.Clone(f.hist)}
+			mod(g)
+			if _, err := NewAdminIssueRecord(g).AllMaxIssued(ctx); !errors.Is(err, ErrIncompleteInventory) {
+				t.Errorf("err = %v, want ErrIncompleteInventory", err)
+			}
+		})
+	}
+}
+
+// A revoked key's issue time is the greatest over its revisions too, so its incomplete history refuses the inventory:
+// an early revocation of a later-dated credential must not pass unseen.
+func TestAdminIssueRecordAllMaxIssuedRevokedKeyNeedsHistory(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeIssued{histErr: map[string]error{"UR": &admin.IncompleteHistoryError{Key: "UR"}}}
+	r := NewAdminIssueRecord(f)
+	if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UR", Purpose: PurposeIssue, IssuedAt: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.MarkRevoked(ctx, "UR", time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AllMaxIssued(ctx); !errors.Is(err, ErrIncompleteInventory) {
+		t.Errorf("err = %v, want ErrIncompleteInventory", err)
+	}
+}
+
+// A reissue of an active key keeps the greatest issue time in the in-memory record too.
+func TestMemIssueRecordKeepsMaxIssuedAt(t *testing.T) {
+	ctx := context.Background()
+	m := &MemIssueRecord{}
+	hi, lo := time.Unix(2000, 0), time.Unix(1000, 0)
+	for _, at := range []time.Time{hi, lo} {
+		if err := m.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: PurposeIssue, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e := m.Entries(); len(e) != 1 || !e[0].IssuedAt.Equal(hi) {
+		t.Errorf("entries = %+v, want issued at the greater time", e)
+	}
+}
+
+// A same-address reissue cannot turn an issue or rotation key into a probe, or the reverse: that would hide an active
+// sender credential from the inventory.
+func TestMemIssueRecordRefusesPurposeClassChange(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range [][2]Purpose{{PurposeIssue, PurposeProbe}, {PurposeRotation, PurposeProbe}, {PurposeProbe, PurposeIssue}, {PurposeProbe, PurposeRotation}} {
+		m := &MemIssueRecord{}
+		if err := m.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: c[0]}); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: c[1]}); !errors.Is(err, ErrDuplicateKey) {
+			t.Errorf("%s -> %s: err = %v, want ErrDuplicateKey", c[0], c[1], err)
+		}
+		if e := m.Entries(); len(e) != 1 || e[0].Purpose != c[0] {
+			t.Errorf("%s -> %s: entries = %+v", c[0], c[1], e)
+		}
+	}
+	m := &MemIssueRecord{}
+	_ = m.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: PurposeIssue})
+	if err := m.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: PurposeRotation}); err != nil {
+		t.Errorf("issue -> rotation: %v", err)
+	}
+}
+
+func TestAdminIssueRecordRefusesPurposeClassChange(t *testing.T) {
+	ctx := context.Background()
+	r := NewAdminIssueRecord(&fakeIssued{})
+	if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: PurposeIssue}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: "UK", Purpose: PurposeProbe}); !errors.Is(err, ErrDuplicateKey) {
+		t.Errorf("err = %v, want ErrDuplicateKey", err)
 	}
 }
 

@@ -222,4 +222,14 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 var (
 	ErrKeyRevoked        = errors.New("mash: issue record: the public key has been revoked")
 	ErrKeyBoundElsewhere = errors.New("mash: issue record: the public key is bound to another address")
+	// ErrKeyPurposeChanged is what a checked write refuses with when it would move an active key between the sender
+	// class (issue, rotation) and the probe class.
+	ErrKeyPurposeChanged = errors.New("mash: issue record: the revision changes the purpose class of the key")
 )
+
+// PurposeClassChanged reports whether a revision from purpose from to purpose to moves a key between the sender class
+// (issue, rotation) and the probe class. An empty purpose reads as PurposeIssue.
+func PurposeClassChanged(from, to string) bool {
+	probe := func(p string) bool { return p == PurposeProbe }
+	return probe(from) != probe(to)
+}

@@ -249,7 +249,7 @@ func TestAT014Live(t *testing.T) {
 		}
 	}
 	in := RunInput{
-		Cluster: liveEvCluster{e.cluster, ev}, Prober: prober, Witnesses: wit, Ledger: ledger,
+		Cluster: liveEvCluster{e.cluster, ev}, Prober: prober, Witnesses: wit, Ledger: WithProvisionMarkers(ledger, NewMemProvisionMarkers()),
 		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: oldPub}}},
 		Account: e.acctPub, Inventory: 2, ListSet: at014Target(), Received: []byte("at014"),
 		Previous: c1, RevokedKeys: ex.RevokedKeys,

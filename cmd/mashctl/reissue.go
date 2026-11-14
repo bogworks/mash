@@ -497,6 +497,20 @@ func reissueOne(guard *ctl.Guard, keys mint.Keys, cfg config.Config, env func(st
 }
 
 // reissueLocked is the part of reissueOne that runs under name's lock.
+// recordRefusal words the refusals of admin.RecordIssuedChecked for name: the key was revoked, bound to another address
+// or moved to another purpose class after the reissue's earlier checks. Any other error is returned unchanged.
+func recordRefusal(err error, name string) error {
+	switch {
+	case errors.Is(err, admin.ErrKeyRevoked):
+		return fmt.Errorf("the user key is revoked in the issue record (a revocation landed while the reissue ran); run mashctl reissue %s again, which replaces it", name)
+	case errors.Is(err, admin.ErrKeyBoundElsewhere):
+		return fmt.Errorf("the user key is recorded as issued for another address, not %s", name)
+	case errors.Is(err, admin.ErrKeyPurposeChanged):
+		return fmt.Errorf("the user key is recorded for another purpose than a reissue of %s", name)
+	}
+	return err
+}
+
 func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock admin.NameLock, keys mint.Keys, cfg config.Config, env func(string) string, zguard func() error, name string, p string, seed []byte, seedPub, oldPub string, oldClaims *jwt.UserClaims, accountPub string, d credsDiff, stdout, stderr io.Writer) (rotated bool, err error) {
 	recUser, recAccount, err := adm.UserOfLocked(ctx, lock, name)
 	if errors.Is(err, admin.ErrNoRecord) {
@@ -559,8 +573,8 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 		if err := guard.Before("the issue record"); err != nil { // the account lock, before the first write
 			return false, fmt.Errorf("%v; the creds file was not rewritten", err)
 		}
-		if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
-			return false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		if err := adm.RecordIssuedChecked(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
+			return false, fmt.Errorf("%v; the creds file was not rewritten", recordRefusal(err, name))
 		}
 		if err := guard.Before("the creds file replacement"); err != nil {
 			return false, fmt.Errorf("%v; the creds file was not rewritten (the new key is recorded as issued; run mashctl reissue %s again)", err, name)
@@ -604,8 +618,8 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	if err := guard.Before("the issue record of the new key"); err != nil { // the account lock, before the first write of the rotation
 		return false, fmt.Errorf("%v; nothing was staged or changed", err)
 	}
-	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeRotation)); err != nil {
-		return false, fmt.Errorf("%v; nothing was staged or changed", err)
+	if err := adm.RecordIssuedChecked(ctx, issuedOf(m, cfg.Owner, store.PurposeRotation)); err != nil {
+		return false, fmt.Errorf("%v; nothing was staged or changed", recordRefusal(err, name))
 	}
 	sp := stagePath(p)
 	// The lock may have expired while the key was minted: another reissue could hold it and own the staged file now.

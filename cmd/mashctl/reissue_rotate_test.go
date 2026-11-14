@@ -14,6 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/mint"
+	"github.com/bogworks/mash/internal/store"
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 )
@@ -427,5 +428,33 @@ func reissueRefusesCredsOfAnotherAccount(t *testing.T, direct bool) {
 	}
 	if len(*calls) != 0 || !slices.Equal(recs, h.records()) || !slices.Contains(h.records(), "a//"+oldPub) {
 		t.Errorf("calls %+v records %v", *calls, h.records())
+	}
+}
+
+// A key the issue record holds as revoked is not re-recorded and its creds are not handed out again, though the account
+// JWT check saw no revocation: the write's own compare-and-set refuses it.
+func TestReissueRefusesKeyRevokedInRecord(t *testing.T) {
+	h := newAddEnv(t)
+	h.seed("a") // add-only change: the key is kept
+	_, oldPub := h.credsClaims("a")
+	fakeRevoke(t, nil)
+	fakeKeyRevoked(t, false, nil)
+	adm := h.adminOf()
+	ctx := context.Background()
+	if err := adm.RecordIssued(ctx, store.Issued{PublicKey: oldPub, Address: "a", Kind: store.IssuedEndpoint, Purpose: store.PurposeIssue}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adm.MarkRevoked(ctx, oldPub, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(h.creds("a"))
+
+	out, errb, code := h.run("reissue", "a")
+	if code != 1 || out != "" || !strings.Contains(errb, "revoked") || !strings.Contains(errb, "the creds file was not rewritten") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	noSecrets(t, out, errb)
+	if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {
+		t.Fatal("creds file changed")
 	}
 }

@@ -3,8 +3,12 @@ package policyapply
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 )
 
@@ -15,7 +19,12 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 	set := set1()
 	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1, ListSet: &set})
 	in := w.run(l, set2(), "bytes-2")
+	rec := &MemIssueRecord{}
+	if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: time.Unix(1000, 0)}); err != nil {
+		t.Fatal(err)
+	}
 	return w, l, ApplyDeps{
+		IssueRecord: rec, ProvisionMarkers: NewMemProvisionMarkers(),
 		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
 		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
@@ -242,6 +251,278 @@ func TestApplyReplayIsStaleBase(t *testing.T) {
 	}
 	if stored.UpdatedAt != "stored" || stored.Generation != 3 {
 		t.Errorf("status written: %+v", stored)
+	}
+}
+
+// Apply refuses, before pushing anything, an old-key inventory that is missing or incomplete (ADR 0113, ADR 0114).
+func TestApplyRefusesIncompleteInventory(t *testing.T) {
+	cases := map[string]func(t *testing.T, w *world, deps *ApplyDeps){
+		"no record for a credential-only sender": func(_ *testing.T, _ *world, d *ApplyDeps) { d.IssueRecord = nil },
+		"record holds none for the sender":       func(_ *testing.T, _ *world, d *ApplyDeps) { d.IssueRecord = &MemIssueRecord{} },
+		"a credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
+			rec := &MemIssueRecord{}
+			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue}); err != nil {
+				t.Fatal(err)
+			}
+			d.IssueRecord = rec
+		},
+		"a revoked credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
+			rec := &MemIssueRecord{}
+			at := time.Unix(1500, 0)
+			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, RevokedAt: &at}); err != nil {
+				t.Fatal(err)
+			}
+			d.IssueRecord = rec
+		},
+	}
+	for name, mod := range cases {
+		t.Run(name, func(t *testing.T) {
+			w, l, deps := applyWorld(t)
+			mod(t, w, &deps)
+			pushed := false
+			deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+				pushed = true
+				return "", errors.New("signed")
+			})
+			if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrIncompleteInventory) {
+				t.Fatalf("err = %v", err)
+			}
+			if pushed {
+				t.Error("something was signed before the refusal")
+			}
+			if rec, _ := l.InForce(); rec.Generation != 1 {
+				t.Errorf("in force = %d", rec.Generation)
+			}
+		})
+	}
+}
+
+// With the record, OldKeys carries each credential key with its issue time, an already revoked key included: the gate
+// must see that a server's revocation of it is not older than the credential.
+func TestOldKeysFromRecord(t *testing.T) {
+	w, _, deps := applyWorld(t)
+	rec := deps.IssueRecord.(*MemIssueRecord)
+	ctx := context.Background()
+	at := time.Unix(2000, 0)
+	for _, e := range []IssueEntry{
+		{Address: "foo.c.core", PublicKey: "UREV", Purpose: PurposeRotation, IssuedAt: at},
+		{Address: "foo.c.core", PublicKey: "UPROBE", Purpose: PurposeProbe},
+		{Address: "foo.c.docs", PublicKey: "UDOCS", Purpose: PurposeIssue, IssuedAt: at},
+		{Address: "admin", PublicKey: "UADM", Purpose: PurposeIssue},
+	} {
+		if err := rec.Add(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rec.MarkRevoked(ctx, "UREV", at); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := listset.Compile(set1())
+	got, err := oldKeysFromRecord(ctx, rec, prev, set2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := got["foo.c.core"]
+	if len(core) != 2 {
+		t.Fatalf("core = %+v", core)
+	}
+	for _, k := range core {
+		switch {
+		case k.PublicKey == w.k.revoked && k.IssuedAt.Equal(time.Unix(1000, 0)):
+		case k.PublicKey == "UREV" && k.IssuedAt.Equal(at):
+		default:
+			t.Errorf("unexpected core key %+v", k)
+		}
+	}
+	if k := got["foo.c.docs"]; len(k) != 1 || k[0].PublicKey != "UDOCS" {
+		t.Errorf("docs = %+v", k)
+	}
+	if _, has := got["admin"]; has {
+		t.Error("a record entry of no sender is inventory")
+	}
+}
+
+// A Provisioner without provisioning markers is refused before anything is signed or pushed: the guard of RunOrdered
+// only works on a ledger that keeps markers, and Apply's plain ledger does not.
+func TestApplyRefusesProvisionerWithoutMarkers(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = nil
+	ev := &events{}
+	deps.Provisioner = &recProv{ev: ev}
+	signed := false
+	deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrNoProvisionMarkers) {
+		t.Fatalf("err = %v, want ErrNoProvisionMarkers", err)
+	}
+	if signed || len(ev.get()) != 0 {
+		t.Errorf("something ran before the refusal: signed %v, events %v", signed, ev.get())
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d", rec.Generation)
+	}
+}
+
+// With deps.ProvisionMarkers set, Apply's run writes a marker before CreateInbox, and clears it on commit.
+func TestApplyWithProvisionMarkersMarksBeforeCreateInbox(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	m := NewMemProvisionMarkers()
+	deps.ProvisionMarkers = m
+	req := applyReq()
+	req.ListSet.Senders = append(req.ListSet.Senders, listset.SenderLists{Sender: "foo.c.new"})
+	var atCreate []string
+	deps.Provisioner = &markSpyProv{create: func(string) { atCreate, _ = m.Provisioning(2) }}
+	st, err := Apply(context.Background(), req, deps)
+	if err != nil {
+		t.Fatalf("apply: %v (%+v)", err, st)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 2 {
+		t.Fatalf("in force = %d, status %+v", rec.Generation, st)
+	}
+	if !slices.Equal(atCreate, []string{"foo.c.new"}) {
+		t.Errorf("markers when CreateInbox ran = %v", atCreate)
+	}
+	if left, _ := m.Provisioning(2); len(left) != 0 {
+		t.Errorf("markers after commit = %v", left)
+	}
+}
+
+type markSpyProv struct{ create func(string) }
+
+func (p *markSpyProv) CreateInbox(_ context.Context, a string) error { p.create(a); return nil }
+func (p *markSpyProv) IssueCredential(context.Context, string) error { return nil }
+
+// OldKeys carries the greatest issue time of a key's revisions, and an incomplete history refuses the inventory.
+func TestOldKeysFromAdminRecordUsesMaxIssued(t *testing.T) {
+	w, _, _ := applyWorld(t)
+	ctx := context.Background()
+	f := &fakeIssued{}
+	r := NewAdminIssueRecord(f)
+	future := time.Unix(4_000_000_000, 0)
+	for _, at := range []time.Time{future, time.Unix(1000, 0)} {
+		if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prev, _ := listset.Compile(set1())
+	got, err := oldKeysFromRecord(ctx, r, prev, set2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := got["foo.c.core"]; len(k) != 1 || !k[0].IssuedAt.Equal(future) {
+		t.Errorf("core = %+v, want the future issue time", k)
+	}
+	f.histErr = map[string]error{w.k.revoked: &admin.IncompleteHistoryError{Key: w.k.revoked}}
+	if _, err := oldKeysFromRecord(ctx, r, prev, set2()); !errors.Is(err, ErrIncompleteInventory) {
+		t.Errorf("incomplete history: err = %v", err)
+	}
+}
+
+// ownMarkersLedger is a MemLedger that keeps its provisioning markers itself.
+type ownMarkersLedger struct {
+	*MemLedger
+	*MemProvisionMarkers
+}
+
+// A retry with no Provisioner still honours a marker a crashed run left: the rollback is refused and the generation
+// stays pending, whether the markers come from deps or from the ledger itself.
+func TestApplyWithoutProvisionerRefusesRollbackWhileMarkerStands(t *testing.T) {
+	for name, setup := range map[string]func(deps *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers){
+		"deps markers": func(d *ApplyDeps, _ *MemLedger, pm *MemProvisionMarkers) { d.ProvisionMarkers = pm },
+		"ledger markers": func(d *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers) {
+			d.ProvisionMarkers, d.Ledger = nil, ownMarkersLedger{l, pm}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w, l, deps := applyWorld(t)
+			pm := NewMemProvisionMarkers()
+			if err := pm.MarkProvisioning("foo.c.new", 2); err != nil {
+				t.Fatal(err)
+			}
+			setup(&deps, l, pm)
+			w.cluster.dropN["s2"] = dropTargetPushes // the gate fails and the run would roll back
+			_, err := Apply(context.Background(), applyReq(), deps)
+			if !errors.Is(err, ErrProvisioningMarker) {
+				t.Fatalf("err = %v, want ErrProvisioningMarker", err)
+			}
+			if pend, ok, _ := l.Pending(); !ok || pend.Generation != 2 {
+				t.Errorf("pending = %+v %v: the generation must stay pending", pend, ok)
+			}
+			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+				t.Errorf("markers = %v, want the marker to stand", got)
+			}
+		})
+	}
+}
+
+// With markers kept and none standing, a failed gate still rolls back and clears the pending record.
+func TestApplyWithoutProvisionerRollsBackWithNoMarker(t *testing.T) {
+	w, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = NewMemProvisionMarkers()
+	w.cluster.dropN["s2"] = dropTargetPushes // the rollback push reaches s2, so the rollback is confirmed
+	if _, err := Apply(context.Background(), applyReq(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("pending stayed after a rollback")
+	}
+}
+
+// A retry after an earlier revocation that was too early: the old key is already marked revoked in the record, but a
+// credential for it was issued with a time after that revocation. The key stays in the inventory with its issue time,
+// so the gate sees the revocation on the servers is older than the credential and the change is not applied.
+func TestApplyRevokedFutureDatedOldKeyFailsTheGate(t *testing.T) {
+	w, l, deps := applyWorld(t)
+	ctx := context.Background()
+	const future = time.Hour
+	issued := time.Now().Add(future)
+	rec := &MemIssueRecord{}
+	if err := rec.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: issued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.MarkRevoked(ctx, w.k.revoked, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	deps.IssueRecord = rec
+	st, err := Apply(ctx, applyReq(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State == StateApplied || st.InForce {
+		t.Fatalf("applied although the revocation is older than the credential: %+v", st)
+	}
+	var named bool
+	for _, f := range st.Failing {
+		named = named || (f.Check == CheckRevoked && strings.Contains(f.Detail, "older than the credential"))
+	}
+	if !named {
+		t.Errorf("the early revocation is not named: %+v", st.Failing)
+	}
+	if got, _ := l.InForce(); got.Generation != 1 {
+		t.Errorf("in force = %d", got.Generation)
+	}
+}
+
+// Without a Provisioner Apply still needs provisioning markers: a retry on the bare ledger could otherwise roll back
+// after a crashed run left an inbox.
+func TestApplyRefusesNoProvisionerWithoutMarkers(t *testing.T) {
+	_, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = nil
+	signed := false
+	deps.Signer = withSign(deps.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	if _, err := Apply(context.Background(), applyReq(), deps); !errors.Is(err, ErrNoProvisionMarkers) {
+		t.Fatalf("err = %v, want ErrNoProvisionMarkers", err)
+	}
+	if signed {
+		t.Error("signed before the refusal")
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d, want 1", rec.Generation)
 	}
 }
 

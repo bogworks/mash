@@ -112,11 +112,12 @@ func revocable(e IssueEntry) bool {
 }
 
 // Rotate issues the narrowed sender's new credential to NewPub, waits until the servers show a connection with that key
-// or the deadline, then revokes every issue or rotation key the record holds for the address except NewPub, in one
-// Revoker call, and marks each revoked in the record (REQ-014). Probes are not touched; RevokeMinted revokes those.
+// or the deadline, then revokes every issue or rotation key the record holds for the address except NewPub (also those
+// an earlier attempt already revoked, which are revoked and reported again), in one Revoker call, and marks each revoked in the record (REQ-014). Probes are not touched; RevokeMinted revokes those.
 //
 // The order is: issue, record (purpose rotation), deliver, poll Connected, revoke. A NewPub that is not a user public
-// key, or is in the record already, is refused before anything is issued (ErrRevokedKey if it was revoked). A delivery
+// key, or is in the record for anything but this same rotation, is refused before anything is issued (ErrRevokedKey if it was
+// revoked). An entry for the same address, generation, key and tags is resumed and recorded again as a revision. A delivery
 // error is reported in the result and the deadline still governs. At the deadline with no connection the old keys are
 // revoked anyway and Connected is false: the caller keeps the change "not applied" for the sender until it connects.
 // An error from ctx while waiting is returned and nothing is revoked.
@@ -143,11 +144,17 @@ func Rotate(ctx context.Context, in RotateInput) (RotationResult, error) {
 	if err != nil {
 		return res, fmt.Errorf("rotate %s: read issue record: %w", in.Address, err)
 	}
+	// An entry for this very rotation (same address, generation, key, tags and purpose) is a resubmission after a failed
+	// or interrupted handover: the credential is issued, recorded as a revision, delivered and polled as before, and
+	// the old keys are revoked. A revoked key is refused, and so is a key the record holds for anything else.
 	for _, e := range held {
-		if e.PublicKey == in.NewPub {
-			if e.RevokedAt != nil {
-				return res, fmt.Errorf("rotate %s: %w", in.Address, ErrRevokedKey)
-			}
+		if e.PublicKey != in.NewPub {
+			continue
+		}
+		if e.RevokedAt != nil {
+			return res, fmt.Errorf("rotate %s: %w", in.Address, ErrRevokedKey)
+		}
+		if e.Purpose != PurposeRotation || e.Generation != in.Generation || !slices.Equal(e.Tags, in.Tags) {
 			return res, fmt.Errorf("rotate %s: %w", in.Address, ErrDuplicateKey)
 		}
 	}
@@ -163,7 +170,8 @@ func Rotate(ctx context.Context, in RotateInput) (RotationResult, error) {
 	if uc, derr := jwt.DecodeUserClaims(tok); derr == nil && uc.Expires > 0 {
 		entry.Expires = time.Unix(uc.Expires, 0)
 	}
-	// Record before the credential is handed out.
+	// Record before the credential is handed out. A resumed rotation is recorded again as a revision of its active key:
+	// the JWT delivered now may be issued later than the one recorded.
 	if err := in.Record.Add(ctx, entry); err != nil {
 		return res, fmt.Errorf("rotate %s: record: %w", in.Address, err)
 	}
@@ -194,7 +202,10 @@ func Rotate(ctx context.Context, in RotateInput) (RotationResult, error) {
 	}
 	var old []string
 	for _, e := range held {
-		if revocable(e) && e.PublicKey != in.NewPub && e.RevokedAt == nil {
+		// A key already marked revoked is included: a retry after an attempt that revoked the old keys but stayed pending
+		// must hand them to the Revoker again and report them, because the JWT the retry commits is signed afresh and
+		// need not carry the earlier revocations. Revoking is idempotent and MarkRevoked keeps the first time.
+		if revocable(e) && e.PublicKey != in.NewPub {
 			old = append(old, e.PublicKey)
 		}
 	}
@@ -239,7 +250,9 @@ func RemoveSender(ctx context.Context, address string, record IssueRecord, revok
 	}
 	var keys []string
 	for _, e := range held {
-		if revocable(e) && e.RevokedAt == nil {
+		// Keys already marked revoked are included, as in Rotate: a retry signs a fresh JWT that need not carry the
+		// earlier revocations.
+		if revocable(e) {
 			keys = append(keys, e.PublicKey)
 		}
 	}

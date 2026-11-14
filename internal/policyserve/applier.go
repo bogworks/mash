@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/listset"
@@ -43,8 +45,10 @@ type Applier struct {
 	// Keys is the key store.
 	Keys  Keys
 	Trust apply.Trust
-	// Record is the issue record.
-	Record policyapply.IssueRecord
+	// Record is the issue record; it also gives the old-key inventory of each apply.
+	Record IssueRecord
+	// KV is the account's policy bucket; the provisioning markers of an apply are kept in it.
+	KV jetstream.KeyValue
 	// Servers is the declared server count (--servers, 1 or more).
 	Servers int
 	// URL is the configured server URL, a comma-separated list when the deployment has several; the client URL of a
@@ -66,12 +70,39 @@ type Applier struct {
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
 
+	markersOnce sync.Once
+	markers     policyapply.ProvisionMarkers
+	markersErr  error
+
 	// applyFn and readServers are seams for the tests; nil means policyapply.Apply and ReadServers.
 	applyFn     func(context.Context, policyapply.ApplyRequest, policyapply.ApplyDeps) (policyapply.Status, error)
 	readServers func(ctx context.Context) ([]ServerInfo, error)
 }
 
 var _ policyintake.Applier = (*Applier)(nil)
+
+// IssueRecord is the issue record the Applier needs: the record of what was issued and the inventory of every entry.
+type IssueRecord interface {
+	policyapply.IssueRecord
+	policyapply.IssueInventory
+}
+
+// markersFor builds the provisioning markers of the Applier's account once and keeps them for every document.
+// A nil KV gives in-memory markers: that is a test-only path (the unit tests run over a MemLedger with no bucket);
+// production always sets KV (cmd/mashctl/policy_serve.go), so its markers are always durable.
+func (a *Applier) markersFor() (policyapply.ProvisionMarkers, error) {
+	a.markersOnce.Do(func() {
+		if a.KV == nil {
+			a.markers = policyapply.NewMemProvisionMarkers()
+			return
+		}
+		a.markers, a.markersErr = policyapply.NewKVProvisionMarkers(a.KV, a.Account, policyapply.DefaultProvisionOpTimeout)
+	})
+	if a.markersErr != nil {
+		return nil, a.markersErr
+	}
+	return a.markers, nil
+}
 
 // Ledger is what the Applier needs of the account's ledger: the record and list set in force, what Apply needs, and
 // the write of a refusal. *policyapply.KVLedger is one.
@@ -173,11 +204,15 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
 		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
 	}
+	markers, err := a.markersFor()
+	if err != nil {
+		return policyintake.Result{}, fmt.Errorf("provisioning markers: %w", err)
+	}
 	prov := a.Provisioner
 	failClosed := prov == nil
 	deps := policyapply.ApplyDeps{
 		Ledger: a.Ledger, Cluster: issuer.Cluster, Signer: issuer, Account: a.Account, Inventory: a.Servers,
-		Provisioner: prov, BeforeWrite: BeforeWrite(g), Now: a.Now,
+		Provisioner: prov, ProvisionMarkers: markers, IssueRecord: a.Record, BeforeWrite: BeforeWrite(g), Now: a.Now,
 	}
 
 	target, cerr := listset.Compile(doc.ListSet)
