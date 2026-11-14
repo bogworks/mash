@@ -320,7 +320,7 @@ func TestKVLedgerConcurrentRunsSingleWinner(t *testing.T) {
 	w := newWorld(t)
 	watch := &pushWatch{Cluster: w.cluster}
 	ledgers := []*KVLedger{e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond}), e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})}
-	if err := ledgers[0].CompareAndCommit(0, w.rec1()); err != nil {
+	if err := ledgers[0].CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -375,7 +375,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := l.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
@@ -404,7 +404,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	w2 := newWorld(t)
 	w2.prober.allow["s1"] = true
 	l2 := e.ledger(KVLedgerOptions{})
-	if err := l2.CompareAndCommit(2, w2.rec1()); err != nil {
+	if err := l2.CompareAndCommitDetail(2, w2.rec1(), InForceDetail{JWT: w2.j1}); err != nil {
 		t.Fatal(err)
 	}
 	st, err = Run(context.Background(), w2.run(l2, set2(), "bytes-2"))
@@ -431,7 +431,7 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := l.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	ls := set2()
@@ -541,7 +541,7 @@ func TestKVLedgerSlowRunDoesNotOverwriteNewerStatus(t *testing.T) {
 	w := newWorld(t)
 	first := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
 	second := e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})
-	if err := first.CompareAndCommit(0, w.rec1()); err != nil {
+	if err := first.CompareAndCommitDetail(0, w.rec1(), InForceDetail{JWT: w.j1}); err != nil {
 		t.Fatal(err)
 	}
 	slow := &slowPush{Cluster: w.cluster, entered: make(chan struct{}), release: make(chan struct{})}
@@ -705,5 +705,250 @@ func TestPolicyBucket(t *testing.T) {
 		if (err == nil) != c.ok || got != c.want {
 			t.Errorf("PolicyBucket(%q, %q) = %q, %v", c.pattern, c.rng, got, err)
 		}
+	}
+}
+
+func TestKVLedgerInForceDetail(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	if jwt, err := l.InForceJWT(); err != nil || jwt != "" {
+		t.Fatalf("empty: %q %v", jwt, err)
+	}
+	if _, ok, err := l.InForceListSet(); err != nil || ok {
+		t.Fatalf("empty list set: %v %v", ok, err)
+	}
+	ls := set2()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &ls}); err != nil {
+		t.Fatal(err)
+	}
+	other := e.ledger(KVLedgerOptions{})
+	if jwt, err := other.InForceJWT(); err != nil || jwt != "jwt-1" {
+		t.Fatalf("jwt: %q %v", jwt, err)
+	}
+	got, ok, err := other.InForceListSet()
+	if err != nil || !ok || listset.DigestListSet(got) != listset.DigestListSet(ls) {
+		t.Fatalf("list set: %+v %v %v", got, ok, err)
+	}
+	// A status write keeps them; a plain commit clears them, as they would describe the wrong generation.
+	if err := l.WriteStatus(context.Background(), Status{State: StatePartial}); err == nil {
+		t.Fatal("status written without the lease")
+	}
+	if err := l.CompareAndCommit(1, testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if jwt, _ := l.InForceJWT(); jwt != "" {
+		t.Errorf("jwt after a plain commit = %q", jwt)
+	}
+	if _, ok, _ := l.InForceListSet(); ok {
+		t.Error("list set after a plain commit")
+	}
+}
+
+func refusalStatus() Status {
+	return Status{State: StateRefused, Refusals: []listset.Refusal{{Stage: "signature", Entry: "doc", Reason: "bad signature"}}}
+}
+
+func TestKVLedgerWriteRefusal(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	set := set1()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &set}); err != nil {
+		t.Fatal(err)
+	}
+	pend := testRecord(2)
+	if err := l.SetPending(pend); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteRefusal(ctx, refusalStatus()); err != nil {
+		t.Fatal(err)
+	}
+	st, ok, err := l.LatestStatus(context.Background())
+	if err != nil || !ok || st.State != StateRefused || st.Generation != 0 || len(st.Refusals) != 1 {
+		t.Fatalf("%+v %v %v", st, ok, err)
+	}
+	if rec, _ := l.InForce(); rec != testRecord(1) {
+		t.Errorf("in force = %+v", rec)
+	}
+	if rec, ok, _ := l.Pending(); !ok || rec != pend {
+		t.Errorf("pending = %+v %v", rec, ok)
+	}
+	if jwt, _ := l.InForceJWT(); jwt != "jwt-1" {
+		t.Errorf("jwt = %q", jwt)
+	}
+	if got, ok, _ := l.InForceListSet(); !ok || got.Range != set.Range {
+		t.Errorf("list set = %+v %v", got, ok)
+	}
+	// The lease is released: another ledger takes it at once.
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	unlock, err := e.ledger(KVLedgerOptions{}).Lock(short)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
+
+func TestKVLedgerWriteRefusalWaitsForLease(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	a, b := e.ledger(KVLedgerOptions{Holder: "a"}), e.ledger(KVLedgerOptions{Holder: "b", Poll: 20 * time.Millisecond})
+	unlockA, err := a.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if err := b.WriteRefusal(short, refusalStatus()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("while held: %v", err)
+	}
+	if _, ok, _ := b.LatestStatus(context.Background()); ok {
+		t.Fatal("a refusal was written without the lease")
+	}
+	got := make(chan error, 1)
+	go func() { got <- b.WriteRefusal(ctx, refusalStatus()) }()
+	time.Sleep(100 * time.Millisecond)
+	unlockA()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WriteRefusal did not finish after the lease was released")
+	}
+	if st, ok, _ := b.LatestStatus(context.Background()); !ok || st.State != StateRefused {
+		t.Fatalf("%+v %v", st, ok)
+	}
+}
+
+func TestKVLedgerWriteRefusalRejectsOthers(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	for _, st := range []Status{
+		{State: StateApplied, Refusals: refusalStatus().Refusals},
+		{State: StateRefused},
+	} {
+		if err := l.WriteRefusal(context.Background(), st); !errors.Is(err, ErrNotRefusal) {
+			t.Errorf("%+v: err = %v", st, err)
+		}
+	}
+	if _, ok, _ := l.LatestStatus(context.Background()); ok {
+		t.Error("a status was written")
+	}
+}
+
+// The pending JWT has a key of its own: a JWT near the account limit does not enlarge the status value.
+func TestKVLedgerPendingJWTOwnKey(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	big := strings.Repeat("x", 900<<10)
+	if err := l.SetPendingJWT(testRecord(2), big); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.PendingJWT(); err != nil || got != big {
+		t.Fatalf("pending JWT: %d bytes, %v", len(got), err)
+	}
+	st, err := e.kv.Get(ctx, StatusKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Value()) > 1024 || strings.Contains(string(st.Value()), "xxxx") {
+		t.Errorf("the status value holds the pending JWT: %d bytes", len(st.Value()))
+	}
+	pk, err := e.kv.Get(ctx, PendingJWTKey(kvAccount))
+	if err != nil || len(pk.Value()) < len(big) {
+		t.Fatalf("pending key: %v", err)
+	}
+	if err := l.SetPending(testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != big {
+		t.Error("SetPending of the same record lost the JWT")
+	}
+	if err := l.SetPending(testRecord(3)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != "" {
+		t.Error("a JWT for another record is returned")
+	}
+	if err := l.SetPendingJWT(testRecord(3), "small"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.CommitRollback("rolled"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.PendingJWT(); got != "" {
+		t.Error("pending JWT after CommitRollback")
+	}
+	if got, _ := l.InForceJWT(); got != "rolled" {
+		t.Errorf("in force JWT = %q", got)
+	}
+	if v, _ := e.kv.Get(ctx, PendingJWTKey(kvAccount)); strings.Contains(string(v.Value()), "small") {
+		t.Error("pending key not cleared")
+	}
+}
+
+// A value over the limit is refused with a clear error, before anything is written.
+func TestKVLedgerValueOverLimitRefused(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{MaxValue: 4096})
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := l.SetPendingJWT(testRecord(2), strings.Repeat("x", 5000)); !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("pending JWT over the limit: %v", err)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("a pending record was written")
+	}
+	err = l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: strings.Repeat("x", 5000)})
+	if !errors.Is(err, ErrValueTooLarge) || !strings.Contains(err.Error(), "limit 4096") {
+		t.Fatalf("status value over the limit: %v", err)
+	}
+	if rec, _ := l.InForce(); rec.Generation != 0 {
+		t.Error("committed")
+	}
+}
+
+// A target whose JWT fits the account JWT limit but whose status value does not fit the ledger is refused before any
+// push: nothing is pushed and nothing is pending.
+func TestRunRefusesStatusValueOverLimitBeforePush(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	w := newWorld14(t)
+	seed := e.ledger(KVLedgerOptions{})
+	prevLS := at014Prev()
+	if err := seed.CompareAndCommitDetail(0, listset.Record{Generation: 1, Signed: listset.DigestCompiled(w.c1)}, InForceDetail{JWT: w.j1, ListSet: &prevLS}); err != nil {
+		t.Fatal(err)
+	}
+	ent, err := e.kv.Get(ctx, StatusKey(kvAccount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The seeded value fits; the value with the target's JWT, list set and pending record does not.
+	l := e.ledger(KVLedgerOptions{MaxValue: len(ent.Value()) + 40})
+	w.in.Ledger = l
+	_, err = Run(ctx, w.in)
+	if !errors.Is(err, ErrValueTooLarge) {
+		t.Fatalf("err = %v, want ErrValueTooLarge", err)
+	}
+	if n := len(w.cl.pushes); n != 0 {
+		t.Errorf("pushes = %d, want 0", n)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("a pending record was written")
+	}
+	if rec, _ := l.InForce(); rec.Generation != 1 {
+		t.Errorf("in force = %d", rec.Generation)
 	}
 }

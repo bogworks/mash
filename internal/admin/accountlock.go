@@ -10,14 +10,15 @@ import (
 )
 
 // The account lock serialises every change to the account's policy against the adoption marker (REQ-016, ADR 0111).
-// A guarded command (add, reissue, label, unlabel, retire, set-meta with labels, provision with labels) takes it first, reads the marker, and holds the lock through all of its writes. `policy
+// A guarded command (policy apply and repair, add, reissue, label, unlabel, retire, set-meta with labels,
+// provision with labels) takes it first, reads the marker, and holds the lock through all of its writes. `policy
 // adopt` takes the same lock for its read-modify-write of the marker. So an adoption waits for a command already
 // running and a command that starts after the adoption reads the marker and is refused; no command can change policy
 // on an account after the marker is written.
 //
 // It is a name lock like the limits locks (ADR-0048), under the pseudo-name _policy-account, which is no endpoint's
-// name. Unlike them it refreshes itself in the background every lockRefresh while held, because a reissue of many names may run
-// for minutes. A lock that is lost anyway (the holder was stalled past
+// name. Unlike them it refreshes itself in the background every lockRefresh while held, because a policy apply with
+// its gate or a reissue of many names may run for minutes. A lock that is lost anyway (the holder was stalled past
 // its expiry and another took the name) is reported by Held, and a guarded command calls Held before each write
 // that cannot be undone and stops when it fails.
 

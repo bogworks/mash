@@ -25,6 +25,9 @@ const SubjectPrefix = "agents.issue"
 // requestTimeout bounds one request's reads and writes of the issue record.
 const requestTimeout = 15 * time.Second
 
+// serveFlushWait bounds the wait for the server to confirm the service's subscription.
+const serveFlushWait = 10 * time.Second
+
 // Subject is the subject a wrangler publishes the issue request of owner group (range, owner) on.
 func Subject(rng, owner string) string { return SubjectPrefix + "." + rng + "." + owner }
 
@@ -44,6 +47,12 @@ func Serve(nc *nats.Conn, is *Issuer, rng, version string) (stop func() error, e
 	if err := svc.AddEndpoint("issue", h, micro.WithEndpointSubject(SubjectPrefix+"."+rng+".*"), micro.WithEndpointQueueGroup(ServiceName)); err != nil {
 		_ = svc.Stop()
 		return nil, fmt.Errorf("mash: issue service endpoint: %w", err)
+	}
+	// A subscription is registered on the server asynchronously. Serve returns, and the caller reports the service as
+	// listening, only after the server has acknowledged it, so a request published right after cannot go unanswered.
+	if err := nc.FlushTimeout(serveFlushWait); err != nil {
+		_ = svc.Stop()
+		return nil, fmt.Errorf("mash: issue service subscription not confirmed: %w", err)
 	}
 	return svc.Stop, nil
 }

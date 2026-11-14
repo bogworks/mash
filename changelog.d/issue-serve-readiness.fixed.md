@@ -1,0 +1,1 @@
+`mashctl issue serve` now reports itself listening only after the NATS server has confirmed its subscription, so a request sent right after the "listening" line is not left unanswered. If the server does not confirm within 10 seconds the service stops with an error instead of running without a confirmed subscription.

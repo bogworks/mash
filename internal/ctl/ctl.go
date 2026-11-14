@@ -257,7 +257,8 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(err)
 	}
 	defer closeAdmin()
-	// The account lock of a command that changes policy (provision with labels, set-meta with labels): taken with the marker check, held through the write, released on every exit.
+	// The account lock of a command that changes policy (provision with labels, set-meta with labels):
+	// taken with the marker check, held through the write, released on every exit.
 	var acct *madmin.AccountLock
 	defer func() { acct.Release() }()
 
