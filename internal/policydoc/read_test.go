@@ -249,12 +249,15 @@ func TestDiff(t *testing.T) {
 	}
 
 	// Nothing in force: the first generation.
-	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil, nil)
+	if _, err := Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil, nil); !errors.Is(err, ErrRangeNeeded) {
+		t.Fatalf("no range with nothing in force: %v", err)
+	}
+	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "foo", nil, nil)
 	if err != nil || p.Refused || len(p.FirstCredential) != 2 {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_first", RenderPlan(p))
-	p, err = Diff(ctx, fakeReader{}, next, "", nil, nil)
+	p, err = Diff(ctx, fakeReader{}, next, "foo", nil, nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
 		t.Fatalf("%+v, %v", p, err)
 	}
@@ -271,7 +274,7 @@ func TestDiffNothingChanges(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 	text := RenderPlan(p)
-	if text != "accepted: nothing would change\n"+SizeLimitsLine+"\n" {
+	if text != "accepted: nothing would change\n"+SizeLimitsLine+"\nsignature not checked: give --submitter to check it against the adoption marker\n" {
 		t.Fatalf("%q", text)
 	}
 	golden(t, "plan_unchanged", text)
@@ -415,6 +418,47 @@ func TestDiffRotation(t *testing.T) {
 	p, _ = Diff(ctx, r, doc(8, 7, nil), "", nil, rc)
 	if p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pend.NextSubmitter+"\n") {
 		t.Fatalf("%q", RenderPlan(p))
+	}
+}
+
+// --submitter is checked against the adoption marker as the intake does: the marker's next submitter while a rotation is
+// pending, else its submitter. Without one the plan says the signature was not checked.
+func TestDiffSigner(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	cur, other, next := userKey(t), userKey(t), userKey(t)
+	rc := func(m store.Marker, signer string) *RotationContext {
+		m.Account, m.Submitter = testAccount, cur
+		return &RotationContext{Adopted: true, Marker: m, Signer: signer}
+	}
+	refused := func(name string, rc *RotationContext, stage string, details ...string) {
+		t.Helper()
+		p, err := Diff(ctx, r, doc(8, 7, nil), "", nil, rc)
+		if err != nil || !p.Refused || p.Refusals[0].Stage != stage {
+			t.Fatalf("%s: %+v, %v", name, p, err)
+		}
+		for _, d := range details {
+			if !strings.Contains(p.Refusals[0].Reason, d) {
+				t.Fatalf("%s: %q lacks %q", name, p.Refusals[0].Reason, d)
+			}
+		}
+		if strings.Contains(RenderPlan(p), other) || strings.Contains(RenderPlan(p), cur) {
+			t.Fatalf("%s: a whole key is echoed", name)
+		}
+	}
+	if p := mustDiff(t, r, doc(8, 7, nil), rc(store.Marker{}, cur)); p.Refused || strings.Contains(RenderPlan(p), "not checked") {
+		t.Fatalf("the right key: %q", RenderPlan(p))
+	}
+	refused("wrong key", rc(store.Marker{}, other), StageSignature, "the adoption marker expects "+cur[:8]+"...")
+	pend := store.Marker{NextSubmitter: next}
+	refused("old key during a rotation", rc(pend, cur), StageSignature, "the adoption marker expects "+next[:8]+"...", "a rotation is pending: only the next submitter's key is accepted")
+	if p := mustDiff(t, r, doc(8, 7, nil), rc(pend, next)); p.Refused {
+		t.Fatalf("the next key during a rotation: %+v", p)
+	}
+	refused("not adopted", &RotationContext{Signer: cur}, StageAdoption, "the account is not adopted")
+	refused("unreadable", &RotationContext{Signer: cur, Err: errors.New("boom"), MarkerErr: errors.New("boom")}, StageSignature, "the adoption marker cannot be read: boom")
+	if got := RenderPlan(mustDiff(t, r, doc(8, 7, nil), nil)); !strings.Contains(got, "signature not checked: give --submitter to check it against the adoption marker\n") {
+		t.Fatalf("%q", got)
 	}
 }
 

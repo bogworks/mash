@@ -203,6 +203,8 @@ type DiffPlan struct {
 	// complete a pending rotation. A plan with a next_submitter or one that completes a rotation is a change.
 	rotation  string
 	completes bool
+	// unsigned is true when no --submitter was given, so the document's signature was not checked.
+	unsigned bool
 }
 
 // RotationContext is what the intake would check a document's next_submitter against: the adoption marker and the keys
@@ -217,6 +219,58 @@ type RotationContext struct {
 	Signer string
 	// Err is why the marker or the held keys could not be read; the plan is then refused at stage document.
 	Err error
+	// MarkerErr is why the adoption marker could not be read (Err is set too); with a Signer, the plan is then refused at
+	// stage signature.
+	MarkerErr error
+}
+
+// ErrRangeNeeded is what Diff returns when no list set is in force and the caller gave no range: a first document's
+// range cannot be checked without one.
+var ErrRangeNeeded = errors.New("--range is needed to check a first list set's range when nothing is in force")
+
+// StageSignature is the stage of the refusal Diff reports for a signer the adoption marker does not accept.
+const StageSignature = "signature"
+
+// signerShortLen is how much of a public key a refusal shows, as the intake's.
+const signerShortLen = 8
+
+func shortKey(k string) string {
+	if len(k) > signerShortLen {
+		return k[:signerShortLen] + "..."
+	}
+	return k
+}
+
+// checkSigner is the intake's rule on who may sign: the adoption marker's next submitter when a rotation is pending,
+// else its submitter. It applies only when the caller named the signer.
+func checkSigner(rc *RotationContext) []listset.Refusal {
+	if rc == nil || rc.Signer == "" {
+		return nil
+	}
+	refuse := func(stage, reason string) []listset.Refusal {
+		return []listset.Refusal{{Stage: stage, Entry: "signature", Reason: reason}}
+	}
+	if rc.MarkerErr != nil {
+		return refuse(StageSignature, "the adoption marker cannot be read: "+rc.MarkerErr.Error())
+	}
+	if rc.Err != nil && !rc.Adopted && rc.Marker.Submitter == "" && rc.Marker.NextSubmitter == "" {
+		return nil // the held keys could not be read; the signer needs only the marker
+	}
+	if !rc.Adopted {
+		return refuse(StageAdoption, "the account is not adopted: a next_submitter cannot be recorded")
+	}
+	expected, pending := rc.Marker.Submitter, rc.Marker.NextSubmitter != ""
+	if pending {
+		expected = rc.Marker.NextSubmitter
+	}
+	if rc.Signer == expected {
+		return nil
+	}
+	reason := "the adoption marker expects " + shortKey(expected)
+	if pending {
+		reason += " (a rotation is pending: only the next submitter's key is accepted)"
+	}
+	return refuse(StageSignature, reason)
 }
 
 // StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
@@ -273,7 +327,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 
 // Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
 // document for another account is an error. A document for a range other than rng (when rng is empty, the range of
-// the list set in force; with none in force, any range) is reported in the plan as a refusal with stage "range", and
+// the list set in force; with none in force it is an error, ErrRangeNeeded) is reported in the plan as a refusal with stage "range", and
 // one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
 // that of the pending generation as a refusal with stage "pending", and one whose next_submitter the intake would
 // refuse as a refusal with stage "document" or "adoption" (checked against rc; see RotationContext): a submission of
@@ -297,6 +351,8 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 		if rng == "" {
 			rng = cur.ls.Range
 		}
+	} else if rng == "" {
+		return DiffPlan{}, ErrRangeNeeded
 	}
 	p := listset.DryRun(inForce, next.ListSet, servers)
 	var pre []listset.Refusal
@@ -315,6 +371,8 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 			Reason: fmt.Sprintf("generation %d is pending: only the same list set can be submitted until it is applied or rolled back", cur.pending.Generation)})
 	}
 	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
+	dp.unsigned = rc == nil || rc.Signer == ""
+	pre = append(pre, checkSigner(rc)...)
 	pre = append(pre, rotate(&dp, next, rc)...)
 	p = dp.Plan
 	if len(pre) > 0 {

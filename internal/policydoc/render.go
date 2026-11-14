@@ -103,7 +103,7 @@ func RenderPlan(p DiffPlan) string {
 	}
 	if p.rotation == "" && !p.completes && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
-		return "accepted: nothing would change\n" + SizeLimitsLine + "\n"
+		return "accepted: nothing would change\n" + SizeLimitsLine + "\n" + p.signatureNote()
 	}
 	b.WriteString("accepted: this would change\n" + SizeLimitsLine + "\n")
 	if p.rotation != "" {
@@ -129,5 +129,14 @@ func RenderPlan(p DiffPlan) string {
 	section("new credential", p.NewCredential)
 	section("revoke", p.Revoke)
 	section("first credential", p.FirstCredential)
+	b.WriteString(p.signatureNote())
 	return b.String()
+}
+
+// signatureNote is the line that says the document's signature was not checked, when no --submitter was given.
+func (p DiffPlan) signatureNote() string {
+	if !p.unsigned {
+		return ""
+	}
+	return "signature not checked: give --submitter to check it against the adoption marker\n"
 }

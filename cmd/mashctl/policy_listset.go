@@ -302,6 +302,10 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 	}
 	defer closeFn()
 	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env))
+	if errors.Is(err, policydoc.ErrRangeNeeded) {
+		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
+		return 2
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 		return 1
@@ -324,6 +328,7 @@ func rotationContext(rd *listSetReader, file []byte, signer string, env func(str
 	m, found, err := rd.adm.Adoption(rd.ctx)
 	if err != nil {
 		rc.Err = fmt.Errorf("the adoption marker cannot be read: %w", err)
+		rc.MarkerErr = err
 		return rc
 	}
 	rc.Adopted, rc.Marker = found, m

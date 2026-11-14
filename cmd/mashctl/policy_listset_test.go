@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
+	"github.com/nats-io/nkeys"
 )
 
 var updateListSetGolden = flag.Bool("update-listset", false, "rewrite cmd/mashctl/testdata/policy_listset_*.golden")
@@ -488,7 +490,7 @@ func TestListSetDiffNothingWouldChange(t *testing.T) {
 	e.seedInForce()
 	f := e.file("same.json", listSetDoc(t, e.acctPub, 8, 7, nil))
 	out, errb, code := e.run("diff", f)
-	if code != 0 || errb != "" || out != "accepted: nothing would change\n"+policydoc.SizeLimitsLine+"\n" {
+	if code != 0 || errb != "" || out != "accepted: nothing would change\n"+policydoc.SizeLimitsLine+"\nsignature not checked: give --submitter to check it against the adoption marker\n" {
 		t.Fatalf("diff: %d\n%q\n%s", code, out, errb)
 	}
 	e.golden("diff_unchanged", out)
@@ -559,5 +561,63 @@ func TestListSetDiffNextSubmitter(t *testing.T) {
 	out, errb, code = e.run("diff", withNext(e.acctPub))
 	if code != 1 || errb != "" || !strings.Contains(out, "[document] next_submitter:") {
 		t.Fatalf("held: %d\n%q\n%s", code, out, errb)
+	}
+}
+
+// listSetSigned is payload as a JWS signed by kp.
+func listSetSigned(t *testing.T, kp nkeys.KeyPair, payload []byte) []byte {
+	t.Helper()
+	enc := base64.RawURLEncoding
+	in := enc.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + enc.EncodeToString(payload)
+	sig, err := kp.Sign([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(in + "." + enc.EncodeToString(sig))
+}
+
+// --submitter is checked against the adoption marker: an account that is not adopted is refused at stage adoption, a key
+// the marker does not accept at stage signature, and the marker's key is accepted.
+func TestListSetDiffSubmitterAgainstMarker(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	key := func() (nkeys.KeyPair, string) {
+		kp, err := nkeys.CreateUser()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub, _ := kp.PublicKey()
+		return kp, pub
+	}
+	good, goodPub := key()
+	bad, badPub := key()
+	payload := listSetDoc(t, e.acctPub, 8, 7, nil)
+	goodF, badF := e.file("good.jwt", listSetSigned(t, good, payload)), e.file("bad.jwt", listSetSigned(t, bad, payload))
+
+	out, errb, code := e.run("diff", goodF, "--submitter", goodPub)
+	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] signature: the account is not adopted") || strings.Contains(out, "accepted") {
+		t.Fatalf("not adopted: %d\n%q\n%s", code, out, errb)
+	}
+	if o, eb, c := e.applyEnv.run("policy", "adopt", "--submitter", goodPub); c != 0 {
+		t.Fatalf("adopt: %d %q %q", c, o, eb)
+	}
+	out, errb, code = e.run("diff", badF, "--submitter", badPub)
+	if code != 1 || errb != "" || !strings.Contains(out, "[signature] signature: the adoption marker expects "+goodPub[:8]+"...") || strings.Contains(out, "accepted") {
+		t.Fatalf("wrong key: %d\n%q\n%s", code, out, errb)
+	}
+	out, errb, code = e.run("diff", goodF, "--submitter", goodPub)
+	if code != 0 || errb != "" || !strings.Contains(out, "accepted") || strings.Contains(out, "not checked") {
+		t.Fatalf("right key: %d\n%q\n%s", code, out, errb)
+	}
+}
+
+// With nothing in force and a literal bucket name, the range cannot be learned: --range is required (usage error).
+func TestListSetDiffNeedsRangeForFirstSet(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seed(nil, 0, nil)
+	f := e.file("first.json", listSetDoc(t, e.acctPub, 1, 0, nil))
+	_, errb, code := e.run("diff", f, "--bucket", listSetBucket)
+	if code != 2 || !strings.Contains(errb, "--range is needed to check a first list set's range when nothing is in force") {
+		t.Fatalf("%d %q", code, errb)
 	}
 }

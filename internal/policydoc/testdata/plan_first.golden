@@ -14,3 +14,4 @@ rotate and revoke: (none)
 new credential: (none)
 revoke: (none)
 first credential: foo.c.core, foo.c.lead
+signature not checked: give --submitter to check it against the adoption marker
