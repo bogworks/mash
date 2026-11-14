@@ -590,7 +590,7 @@ Before any step, on the release you run now:
 | Surface | Before | After | Do first |
 |---|---|---|---|
 | `mashctl add`, `mashctl reissue` signing | a zone key and the policy file's rules shaped the permissions and tags | the account key signs, with the owner-wide set `admin.Permissions(owner, name)`; no zone key, no tags | none |
-| `mashctl policy show`, `explain`, `diff` | worked | removed | stop scripts that call them |
+| `mashctl policy show`, `explain`, `diff` | worked, over the policy file | removed in Z2; they return in v0.5.0 with a new meaning, reading the list set in force from the policy bucket (#526) | rewrite scripts that call them for the list-set output |
 | `mashctl policy apply`, `--dry-run`, `repair` | worked | refuse (exit 1) | stop scripts that call them |
 | policy file naming a zone, `subject_label` or a `zone` label | accepted | refused | edit or drop the file |
 | `drift --json` | had a `keys` object | `keys` removed | do not read it |

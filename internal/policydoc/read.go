@@ -157,33 +157,62 @@ func Explain(ctx context.Context, r Reader, sender, receiver string) (ExplainRes
 // force.
 const StageBase = "base"
 
+// StageRange is the stage of the refusal Diff reports for a document whose range is not the selected range.
+const StageRange = "range"
+
+// SizeLimitsDefault is the size_limits of a plan: sizes were checked against the default server limits.
+const SizeLimitsDefault = "default"
+
+// SizeLimitsLine is the text line that says the same.
+const SizeLimitsLine = "size checked against the default server limits; the apply checks each server's own"
+
+// DiffPlan is a plan with the limits its size check used. It marshals as the plan with one more field.
+type DiffPlan struct {
+	listset.Plan
+	// SizeLimits says which limits the size check used: "default" (the apply checks each server's own).
+	SizeLimits string `json:"size_limits"`
+}
+
 // Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
-// document for another account is an error. A document whose base_generation is not the generation in force is
-// reported in the plan as a refusal with stage "base": a submission of it would be refused as stale.
-func Diff(ctx context.Context, r Reader, file []byte, servers []listset.ServerLimits) (listset.Plan, error) {
+// document for another account is an error. A document for a range other than rng (when rng is empty, the range of
+// the list set in force; with none in force, any range) is reported in the plan as a refusal with stage "range", and
+// one whose base_generation is not the generation in force as a refusal with stage "base": a submission of either
+// would be refused.
+func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
-		return listset.Plan{}, err
+		return DiffPlan{}, err
 	}
 	if next.Account != r.Account() {
-		return listset.Plan{}, fmt.Errorf("the document is for account %s, not %s", next.Account, r.Account())
+		return DiffPlan{}, fmt.Errorf("the document is for account %s, not %s", next.Account, r.Account())
 	}
 	cur, _, err := load(ctx, r)
 	if err != nil {
-		return listset.Plan{}, err
+		return DiffPlan{}, err
 	}
 	var inForce *listset.ListSet
 	var gen uint64
 	if cur != nil {
 		inForce, gen = &cur.ls, cur.gen
+		if rng == "" {
+			rng = cur.ls.Range
+		}
 	}
 	p := listset.DryRun(inForce, next.ListSet, servers)
+	var pre []listset.Refusal
+	if rng != "" && next.Range != rng {
+		pre = append(pre, listset.Refusal{Stage: StageRange, Entry: "range",
+			Reason: fmt.Sprintf("the document is for range %s and the selected range is %s", next.Range, rng)})
+	}
 	if next.BaseGeneration != gen {
-		p.Refusals = append([]listset.Refusal{{Stage: StageBase, Entry: "base_generation",
-			Reason: fmt.Sprintf("the document is based on generation %d and generation %d is in force: a submission would be refused as stale", next.BaseGeneration, gen)}}, p.Refusals...)
+		pre = append(pre, listset.Refusal{Stage: StageBase, Entry: "base_generation",
+			Reason: fmt.Sprintf("the document is based on generation %d and generation %d is in force: a submission would be refused as stale", next.BaseGeneration, gen)})
+	}
+	if len(pre) > 0 {
+		p.Refusals = append(pre, p.Refusals...)
 		p.Refused = true
 		p.Receivers, p.Templates, p.Tags = []listset.ReceiverChange{}, []listset.TemplateChange{}, []listset.TagChange{}
 		p.RotateAndRevoke, p.NewCredential, p.Revoke, p.FirstCredential = []string{}, []string{}, []string{}, []string{}
 	}
-	return p, nil
+	return DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}, nil
 }

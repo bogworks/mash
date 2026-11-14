@@ -1,4 +1,5 @@
 accepted: this would change
+size checked against the default server limits; the apply checks each server's own
 receivers foo.c.core mail: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
 receivers foo.c.core prompt: added foo.d.build; removed (none)
 receivers foo.c.core status: added foo.c.core, foo.c.lead, foo.d.build; removed (none)

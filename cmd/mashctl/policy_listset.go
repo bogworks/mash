@@ -182,6 +182,20 @@ func listSetUsageFail(pfx string, err error, stderr io.Writer) int {
 	return 2
 }
 
+// checkListSetScope validates --account and --range before any connection is opened: a bad one is a usage error
+// (exit 2). It never prints a value it was given.
+func checkListSetScope(pfx string, o listSetOpts, stderr io.Writer) int {
+	if o.account != "" && !nkeys.IsValidPublicAccountKey(o.account) {
+		fmt.Fprintf(stderr, "%s--account is not an account public key (the value is not shown)\n", pfx)
+		return 2
+	}
+	if o.rng != "" && !config.ValidName(o.rng) {
+		fmt.Fprintf(stderr, "%s--range is not a valid range name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", pfx)
+		return 2
+	}
+	return 0
+}
+
 // listSetPrint writes v as JSON or text and returns the exit code of a failed write.
 func listSetPrint(pfx string, asJSON bool, v any, text string, stdout, stderr io.Writer) int {
 	var err error
@@ -203,6 +217,9 @@ func policyListSetShow(args []string, env func(string) string, lookup config.Loo
 	o, err := parseListSetArgs(args, false)
 	if err != nil || len(o.args) != 0 {
 		return listSetUsageFail(pfx, err, stderr)
+	}
+	if code := checkListSetScope(pfx, o, stderr); code != 0 {
+		return code
 	}
 	rd, closeFn, ok := openListSetReader(pfx, o, env, lookup, stderr)
 	if !ok {
@@ -229,6 +246,9 @@ func policyListSetExplain(args []string, env func(string) string, lookup config.
 			fmt.Fprintf(stderr, "%s%s is not a three-part address (range.owner.name) (the value is not shown)\n", pfx, []string{"SENDER", "RECEIVER"}[i])
 			return 2
 		}
+	}
+	if code := checkListSetScope(pfx, o, stderr); code != 0 {
+		return code
 	}
 	rd, closeFn, ok := openListSetReader(pfx, o, env, lookup, stderr)
 	if !ok {
@@ -269,12 +289,15 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 			return 1
 		}
 	}
+	if code := checkListSetScope(pfx, o, stderr); code != 0 {
+		return code
+	}
 	rd, closeFn, ok := openListSetReader(pfx, o, env, lookup, stderr)
 	if !ok {
 		return 1
 	}
 	defer closeFn()
-	plan, err := policydoc.Diff(rd.ctx, rd.r, file, listSetServerLimits())
+	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits())
 	if err != nil {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 		return 1

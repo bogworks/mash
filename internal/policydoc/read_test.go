@@ -154,7 +154,7 @@ func TestDiff(t *testing.T) {
 	next := doc(8, 7, func(m map[string]any) {
 		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
 	})
-	p, err := Diff(ctx, r, next, nil)
+	p, err := Diff(ctx, r, next, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,32 +168,32 @@ func TestDiff(t *testing.T) {
 
 	// A JWS is accepted without a signature check.
 	kp, _ := submitter(t)
-	if _, err := Diff(ctx, r, sign(t, kp, next), nil); err != nil {
+	if _, err := Diff(ctx, r, sign(t, kp, next), "", nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// A stale base is a refusal in the plan, not an error.
-	p, err = Diff(ctx, r, doc(7, 6, nil), nil)
+	p, err = Diff(ctx, r, doc(7, 6, nil), "", nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_stale", RenderPlan(p))
 
 	// Another account is an error.
-	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), nil); err == nil {
+	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), "", nil); err == nil {
 		t.Fatal("a document for another account was diffed")
 	}
-	if _, err := Diff(ctx, r, []byte("junk"), nil); !errors.Is(err, ErrBadDocument) {
+	if _, err := Diff(ctx, r, []byte("junk"), "", nil); !errors.Is(err, ErrBadDocument) {
 		t.Fatal(err)
 	}
 
 	// Nothing in force: the first generation.
-	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), nil)
+	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil)
 	if err != nil || p.Refused || len(p.FirstCredential) != 2 {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_first", RenderPlan(p))
-	p, err = Diff(ctx, fakeReader{}, next, nil)
+	p, err = Diff(ctx, fakeReader{}, next, "", nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StageBase {
 		t.Fatalf("%+v, %v", p, err)
 	}
@@ -202,7 +202,7 @@ func TestDiff(t *testing.T) {
 // A document identical in content to the one in force changes nothing: the plan says so and prints nothing else.
 func TestDiffNothingChanges(t *testing.T) {
 	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
-	p, err := Diff(context.Background(), r, doc(8, 7, nil), nil)
+	p, err := Diff(context.Background(), r, doc(8, 7, nil), "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +210,27 @@ func TestDiffNothingChanges(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 	text := RenderPlan(p)
-	if text != "accepted: nothing would change\n" {
+	if text != "accepted: nothing would change\n"+SizeLimitsLine+"\n" {
 		t.Fatalf("%q", text)
 	}
 	golden(t, "plan_unchanged", text)
+}
+
+// A valid document for another range is a refusal at stage range, whether the range is selected or the one in force.
+func TestDiffRangeMismatch(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	other := doc(8, 7, func(m map[string]any) { m["range"] = "bar" })
+	for _, rng := range []string{"foo", ""} { // selected, then the range of the list set in force
+		p, err := Diff(ctx, r, other, rng, nil)
+		if err != nil || !p.Refused || p.Refusals[0].Stage != StageRange ||
+			!strings.Contains(p.Refusals[0].Reason, "bar") || !strings.Contains(p.Refusals[0].Reason, "foo") {
+			t.Fatalf("range %q: %+v, %v", rng, p, err)
+		}
+	}
+	p, _ := Diff(ctx, r, other, "foo", nil)
+	golden(t, "plan_range", RenderPlan(p))
+	if p, err := Diff(ctx, r, doc(8, 7, nil), "foo", nil); err != nil || p.Refused {
+		t.Fatalf("matching range: %+v, %v", p, err)
+	}
 }

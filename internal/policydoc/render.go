@@ -89,7 +89,7 @@ func RenderExplain(r ExplainResult) string {
 }
 
 // RenderPlan is the plain, line-oriented text of a Plan.
-func RenderPlan(p listset.Plan) string {
+func RenderPlan(p DiffPlan) string {
 	var b strings.Builder
 	if p.Refused {
 		fmt.Fprintf(&b, "refused: nothing would change\n")
@@ -100,9 +100,9 @@ func RenderPlan(p listset.Plan) string {
 	}
 	if len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
-		return "accepted: nothing would change\n"
+		return "accepted: nothing would change\n" + SizeLimitsLine + "\n"
 	}
-	b.WriteString("accepted: this would change\n")
+	b.WriteString("accepted: this would change\n" + SizeLimitsLine + "\n")
 	section := func(name string, items []string) {
 		fmt.Fprintf(&b, "%s: %s\n", name, list(items))
 	}

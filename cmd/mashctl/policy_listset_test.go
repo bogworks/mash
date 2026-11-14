@@ -314,15 +314,49 @@ func TestListSetDiffNarrowing(t *testing.T) {
 	})
 	f := e.file("next.json", next)
 	out, errb, code := e.run("diff", f)
-	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted") {
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted") || !strings.HasPrefix(out, "accepted: this would change\n"+policydoc.SizeLimitsLine+"\n") {
 		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
 	}
 	e.golden("diff_narrowing", out)
 
 	out, _, code = e.run("diff", f, "--json")
 	var v map[string]any
-	if code != 0 || json.Unmarshal([]byte(out), &v) != nil {
+	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v["size_limits"] != "default" {
 		t.Fatalf("diff --json: %d\n%s", code, out)
+	}
+}
+
+// A valid document for another range than the one selected is refused at stage range, with both ranges named.
+func TestListSetDiffOtherRange(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	f := e.file("bar.json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) { m["range"] = "bar" }))
+	out, errb, code := e.run("diff", f)
+	if code != 1 || !strings.Contains(out, "[range]") || !strings.Contains(out, "bar") || !strings.Contains(out, listSetRange) || strings.Contains(out, "accepted") {
+		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
+	}
+	e.golden("diff_range", out)
+	out, _, code = e.run("diff", f, "--json")
+	if code != 1 || !strings.Contains(out, `"stage": "range"`) {
+		t.Fatalf("diff --json: %d\n%s", code, out)
+	}
+}
+
+// A bad --account or --range is a usage error (exit 2) before any connection, and the value is never shown.
+func TestListSetBadScopeIsUsageError(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedInForce()
+	f := e.file("next.json", listSetDoc(t, e.acctPub, 8, 7, nil))
+	for _, args := range [][]string{
+		{"show", "--account", "SECRETACCT"}, {"show", "--range", "SECRET_RANGE"},
+		{"explain", "foo.c.core", "foo.c.core", "--account", "SECRETACCT"}, {"explain", "foo.c.core", "foo.c.core", "--range", "SECRET_RANGE"},
+		{"diff", f, "--account", "SECRETACCT"}, {"diff", f, "--range", "SECRET_RANGE"},
+	} {
+		e.env["MASH_ADMIN_CREDS"] = "/nonexistent" // a connection attempt would fail with exit 1
+		_, errb, code := e.run(args[0], args[1:]...)
+		if code != 2 || !strings.Contains(errb, "the value is not shown") || strings.Contains(errb, "SECRET") {
+			t.Fatalf("%v: %d %q", args, code, errb)
+		}
 	}
 }
 
@@ -367,7 +401,7 @@ func TestListSetDiffInputErrors(t *testing.T) {
 	if _, errb, code := e.run("diff", f, "--submitter", "SECRET"); code != 2 || strings.Contains(errb, "SECRET") {
 		t.Fatalf("bad submitter: %d %q", code, errb)
 	}
-	if _, errb, code := e.run("diff", f, "--account", "SECRET"); code != 1 || strings.Contains(errb, "SECRET") {
+	if _, errb, code := e.run("diff", f, "--account", "SECRET"); code != 2 || strings.Contains(errb, "SECRET") {
 		t.Fatalf("bad account: %d %q", code, errb)
 	}
 }
@@ -454,7 +488,7 @@ func TestListSetDiffNothingWouldChange(t *testing.T) {
 	e.seedInForce()
 	f := e.file("same.json", listSetDoc(t, e.acctPub, 8, 7, nil))
 	out, errb, code := e.run("diff", f)
-	if code != 0 || errb != "" || out != "accepted: nothing would change\n" {
+	if code != 0 || errb != "" || out != "accepted: nothing would change\n"+policydoc.SizeLimitsLine+"\n" {
 		t.Fatalf("diff: %d\n%q\n%s", code, out, errb)
 	}
 	e.golden("diff_unchanged", out)
