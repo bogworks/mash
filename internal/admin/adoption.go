@@ -95,6 +95,16 @@ func readMarker(ctx context.Context, kv jetstream.KeyValue) (m store.Marker, rev
 	return m, e.Revision(), true, nil
 }
 
+// AdoptionRev is Adoption with the revision of the marker that was read (0 when not adopted). A rotation write is
+// bound to it (SetNextSubmitter, PromoteSubmitter).
+func (a *Admin) AdoptionRev(ctx context.Context) (m store.Marker, rev uint64, found bool, err error) {
+	kv, err := a.existingAdoptionKV(ctx)
+	if err != nil || kv == nil {
+		return store.Marker{}, 0, false, err
+	}
+	return readMarker(ctx, kv)
+}
+
 // Adoption reads the adoption marker. found is false when the account is not adopted: the bucket does not exist, or
 // it holds no marker. Any other outcome is an error, never "not adopted": a bucket that is not as mash makes it, a
 // read that fails and a value that cannot be understood all return an error, so a caller refuses (fail closed). It

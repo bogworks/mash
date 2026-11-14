@@ -109,9 +109,17 @@ type fakeApplier struct {
 	docs    []policyintake.Doc
 	err     error
 	written bool
+	// onApply, when set, runs first inside Apply (a seam for a concurrent change).
+	onApply func(ctx context.Context)
 }
 
-func (f *fakeApplier) Apply(_ context.Context, d policyintake.Doc) (policyintake.Result, error) {
+func (f *fakeApplier) Apply(ctx context.Context, d policyintake.Doc) (policyintake.Result, error) {
+	f.mu.Lock()
+	hook := f.onApply
+	f.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.docs = append(f.docs, d)
@@ -162,44 +170,106 @@ type flakyMarker struct {
 	mu                                    sync.Mutex
 	currentFails, setNextFails, promFails int
 	setNextCalls, promoteCalls            int
+	currentCalls                          int
+	// onCurrent, when set, runs before each Current is answered, with the 1-based call number.
+	onCurrent func(n int)
 }
 
-func (f *flakyMarker) Current(ctx context.Context) (store.Marker, bool, error) {
+func (f *flakyMarker) Current(ctx context.Context) (store.Marker, uint64, bool, error) {
 	f.mu.Lock()
+	f.currentCalls++
+	n, hook := f.currentCalls, f.onCurrent
 	if f.currentFails > 0 {
 		f.currentFails--
 		f.mu.Unlock()
-		return store.Marker{}, false, errors.New("marker store down")
+		return store.Marker{}, 0, false, errors.New("marker store down")
 	}
 	f.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
 	return f.MarkerStore.Current(ctx)
 }
 
-func (f *flakyMarker) SetNext(ctx context.Context, next string) error {
+func (f *flakyMarker) SetNext(ctx context.Context, next string, expectedRev, ownRev uint64) (uint64, error) {
 	f.mu.Lock()
 	f.setNextCalls++
 	if f.setNextFails > 0 {
 		f.setNextFails--
 		f.mu.Unlock()
-		return errors.New("marker write down")
+		return 0, errors.New("marker write down")
 	}
 	f.mu.Unlock()
-	return f.MarkerStore.SetNext(ctx, next)
+	return f.MarkerStore.SetNext(ctx, next, expectedRev, ownRev)
 }
 
-func (f *flakyMarker) Promote(ctx context.Context, next string) error {
+func (f *flakyMarker) Promote(ctx context.Context, next string, expectedRev, ownRev uint64) (uint64, error) {
 	f.mu.Lock()
 	f.promoteCalls++
 	if f.promFails > 0 {
 		f.promFails--
 		f.mu.Unlock()
-		return errors.New("marker write down")
+		return 0, errors.New("marker write down")
 	}
 	f.mu.Unlock()
-	return f.MarkerStore.Promote(ctx, next)
+	return f.MarkerStore.Promote(ctx, next, expectedRev, ownRev)
+}
+
+// testLock wraps an AccountLock, counts locks and releases, can report the lock busy, and can run a hook before
+// the lock is taken.
+type testLock struct {
+	inner    policyintake.AccountLock
+	mu       sync.Mutex
+	locks    int
+	releases int
+	busy     int // the next calls fail with admin.ErrAccountBusy
+	attempts int
+	before   func()
+}
+
+func (l *testLock) Lock(ctx context.Context) (policyintake.Release, func(context.Context) error, error) {
+	l.mu.Lock()
+	l.attempts++
+	if l.busy > 0 {
+		l.busy--
+		l.mu.Unlock()
+		return nil, nil, fmt.Errorf("%w (test)", admin.ErrAccountBusy)
+	}
+	before := l.before
+	l.mu.Unlock()
+	if before != nil {
+		before()
+	}
+	rel, held, err := l.inner.Lock(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	l.mu.Lock()
+	l.locks++
+	l.mu.Unlock()
+	return func() {
+		rel()
+		l.mu.Lock()
+		l.releases++
+		l.mu.Unlock()
+	}, held, nil
+}
+
+func (l *testLock) counts() (locks, releases int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.locks, l.releases
+}
+
+// neverLock is a lock that never blocks and is always held: the lock deliberately disabled.
+type neverLock struct{}
+
+func (neverLock) Lock(context.Context) (policyintake.Release, func(context.Context) error, error) {
+	return func() {}, func(context.Context) error { return nil }, nil
 }
 
 type rig struct {
+	lock      *testLock
 	t         *testing.T
 	env       *testenv.Env
 	adm       *admin.Admin
@@ -250,12 +320,13 @@ func newRig(t *testing.T, adopt bool) *rig {
 		}
 	}
 	r.marker = &flakyMarker{MarkerStore: policyintake.AdminMarker{Admin: a}}
+	r.lock = &testLock{inner: policyintake.AdminLock{Admin: a}}
 	r.inForceFn = r.app.inForce
 	return r
 }
 
 func (r *rig) intake() *policyintake.Intake {
-	return &policyintake.Intake{Account: r.account, Range: testRange, KV: r.kv, Marker: r.marker, Decode: decode,
+	return &policyintake.Intake{Account: r.account, Range: testRange, KV: r.kv, Marker: r.marker, Lock: r.lock, Decode: decode,
 		InForce: func(ctx context.Context) (string, error) { return r.inForceFn(ctx) }, Apply: r.app, Report: r.rep,
 		Log: log.New(r.logbuf, "", 0), RetryInitial: retryInitial, RetryMax: retryMax}
 }
@@ -689,13 +760,14 @@ func TestPromoteStopsWhenTheMarkerMoved(t *testing.T) {
 	p.NextSubmitter = next.pub
 	r.put(sign(t, r.submitter, p))
 	eventually(t, "next recorded", func() bool { return r.current().NextSubmitter == next.pub })
+	_, staleRev, _, _ := r.marker.Current(context.Background())
 	// Recovery adopt clears the pending key; a doc under it can no longer be verified, so go to Promote directly.
 	rec := newUser(t)
 	if _, _, err := r.adm.Adopt(context.Background(), r.account, rec.pub, r.by, nil); err != nil {
 		t.Fatal(err)
 	}
-	err := r.marker.Promote(context.Background(), next.pub)
-	if !errors.Is(err, policyintake.ErrMarkerMoved) || !errors.Is(err, admin.ErrNextMismatch) {
+	_, err := r.marker.Promote(context.Background(), next.pub, staleRev, 0)
+	if !errors.Is(err, policyintake.ErrMarkerMoved) || !errors.Is(err, admin.ErrMarkerMoved) {
 		t.Fatalf("%v", err)
 	}
 	if m := r.current(); m.Submitter != rec.pub {
@@ -782,5 +854,313 @@ func TestSignatureRefusalNamesOnlyAShortKey(t *testing.T) {
 	rs := r.waitRefused(1)
 	if strings.Contains(rs[0].Detail, r.submitter.pub) || !strings.Contains(rs[0].Detail, r.submitter.pub[:8]) {
 		t.Fatalf("%q", rs[0].Detail)
+	}
+}
+
+// --- the account lock and the marker revision (ADR 0112, Concurrency) ---
+
+// recoveryAdopt replaces the submitter, as `mashctl policy adopt --submitter` does.
+func (r *rig) recoveryAdopt(rec keyPair) error {
+	_, _, err := r.adm.Adopt(context.Background(), r.account, rec.pub, r.by, nil)
+	return err
+}
+
+// A recovery adopt attempted while an apply is in flight waits for the apply (the account lock); the document that
+// was verified under the old marker completes, and the adopt lands after it.
+func TestRecoveryAdoptWaitsForAnApplyInFlight(t *testing.T) {
+	r := newRig(t, true)
+	rec := newUser(t)
+	adopted := make(chan error, 1)
+	var early atomicBool
+	r.app.onApply = func(context.Context) {
+		go func() { adopted <- r.recoveryAdopt(rec) }()
+		select {
+		case err := <-adopted:
+			early.set()
+			adopted <- err
+		case <-time.After(600 * time.Millisecond):
+		}
+	}
+	r.start(r.intake())
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	r.waitApplied(1)
+	select {
+	case err := <-adopted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("the recovery adopt never completed after the apply returned")
+	}
+	if early.get() {
+		t.Fatal("the recovery adopt completed while the apply was in flight")
+	}
+	if m := r.current(); m.Submitter != rec.pub {
+		t.Fatalf("the adopt did not land: %+v", m)
+	}
+	r.settle(1, 0)
+}
+
+type atomicBool struct {
+	mu sync.Mutex
+	v  bool
+}
+
+func (a *atomicBool) set()      { a.mu.Lock(); a.v = true; a.mu.Unlock() }
+func (a *atomicBool) get() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.v }
+
+// A recovery adopt that completes before the intake takes the lock makes the old submitter's document a refusal.
+func TestRecoveryAdoptBeforeTheLockRefusesTheOldSubmitter(t *testing.T) {
+	r := newRig(t, true)
+	rec := newUser(t)
+	var once sync.Once
+	r.lock.before = func() {
+		once.Do(func() {
+			if err := r.recoveryAdopt(rec); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	r.start(r.intake())
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	rs := r.waitRefused(1)
+	if rs[0].Stage != policyintake.StageSignature {
+		t.Fatalf("%+v", rs[0])
+	}
+	r.settle(0, 1)
+}
+
+// With the lock deliberately disabled, a marker that moves between the verification and the apply stops the apply;
+// the revision is processed again and the old submitter's document is refused.
+func TestMarkerRevisionRecheckPreventsTheApply(t *testing.T) {
+	r := newRig(t, true)
+	rec := newUser(t)
+	r.marker.onCurrent = func(n int) {
+		if n == 2 { // the re-read just before the apply
+			if err := r.recoveryAdopt(rec); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	in := r.intake()
+	in.Lock = neverLock{}
+	r.start(in)
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	rs := r.waitRefused(1)
+	if rs[0].Stage != policyintake.StageSignature {
+		t.Fatalf("%+v", rs[0])
+	}
+	r.settle(0, 1)
+	if !strings.Contains(r.logbuf.String(), "processing it again") {
+		t.Error("the reprocess was not logged")
+	}
+}
+
+// A lock that is no longer held before the apply stops the apply too, and the revision is processed again.
+func TestLostLockPreventsTheApply(t *testing.T) {
+	r := newRig(t, true)
+	var lost atomicBool
+	lk := &heldLock{lost: &lost}
+	in := r.intake()
+	in.Lock = lk
+	lk.onHeld = func() { lost.set() }
+	r.start(in)
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	r.waitApplied(1) // the second pass finds the lock held again and applies
+	if lk.heldCalls() < 2 {
+		t.Errorf("Held was called %d times, want a recheck", lk.heldCalls())
+	}
+	r.settle(1, 0)
+}
+
+// heldLock reports the lock lost on its first Held check.
+type heldLock struct {
+	mu     sync.Mutex
+	n      int
+	lost   *atomicBool
+	onHeld func()
+}
+
+func (h *heldLock) Lock(context.Context) (policyintake.Release, func(context.Context) error, error) {
+	return func() {}, func(context.Context) error {
+		h.mu.Lock()
+		h.n++
+		n := h.n
+		h.mu.Unlock()
+		if n == 1 {
+			return errors.New("the lock was lost")
+		}
+		return nil
+	}, nil
+}
+
+func (h *heldLock) heldCalls() int { h.mu.Lock(); defer h.mu.Unlock(); return h.n }
+
+// H2: the marker moved after the apply and before the rotation write: nothing is recorded and the recovery key
+// stays the expected signer.
+func TestSetNextAbandonedWhenTheMarkerMovedAfterTheApply(t *testing.T) {
+	r := newRig(t, true)
+	rec, next := newUser(t), newUser(t)
+	r.app.onApply = func(context.Context) {
+		if err := r.recoveryAdopt(rec); err != nil {
+			t.Error(err)
+		}
+	}
+	in := r.intake()
+	in.Lock = neverLock{}
+	r.start(in)
+	p := r.doc(1, 0)
+	p.NextSubmitter = next.pub
+	r.put(sign(t, r.submitter, p))
+	r.waitApplied(1)
+	eventually(t, "the abandonment to be logged", func() bool { return strings.Contains(r.logbuf.String(), "abandoned") })
+	r.settle(1, 0)
+	m := r.current()
+	if m.NextSubmitter != "" || m.Submitter != rec.pub || m.Action != store.ActionRecover {
+		t.Fatalf("the old document's next key was recorded or the recovery key lost: %+v", m)
+	}
+	r.marker.mu.Lock()
+	calls := r.marker.setNextCalls
+	r.marker.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("SetNext called %d times, want 1 (never retried blindly)", calls)
+	}
+	if !strings.Contains(r.logbuf.String(), "ERROR") {
+		t.Error("not logged loudly")
+	}
+}
+
+// H2 for the promotion.
+func TestPromoteAbandonedWhenTheMarkerMovedAfterTheApply(t *testing.T) {
+	r := newRig(t, true)
+	rec, next := newUser(t), newUser(t)
+	in := r.intake()
+	in.Lock = neverLock{}
+	r.start(in)
+	p := r.doc(1, 0)
+	p.NextSubmitter = next.pub
+	r.put(sign(t, r.submitter, p))
+	eventually(t, "next recorded", func() bool { return r.current().NextSubmitter == next.pub })
+	r.app.mu.Lock()
+	r.app.onApply = func(context.Context) {
+		if err := r.recoveryAdopt(rec); err != nil {
+			t.Error(err)
+		}
+	}
+	r.app.mu.Unlock()
+	r.put(sign(t, next, r.doc(2, 1)))
+	r.waitApplied(2)
+	eventually(t, "the abandonment to be logged", func() bool { return strings.Contains(r.logbuf.String(), "abandoned") })
+	r.settle(2, 0)
+	if m := r.current(); m.Submitter != rec.pub || m.NextSubmitter != "" {
+		t.Fatalf("%+v", m)
+	}
+	r.marker.mu.Lock()
+	calls := r.marker.promoteCalls
+	r.marker.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("Promote called %d times, want 1", calls)
+	}
+}
+
+// The lock is released on every path.
+func TestLockIsReleasedOnEveryPath(t *testing.T) {
+	check := func(t *testing.T, r *rig, wantAtLeast int) {
+		t.Helper()
+		eventually(t, "the lock to be released", func() bool {
+			l, rel := r.lock.counts()
+			return l >= wantAtLeast && l == rel
+		})
+	}
+	t.Run("refusal", func(t *testing.T) {
+		r := newRig(t, true)
+		r.start(r.intake())
+		r.put(sign(t, newUser(t), r.doc(1, 0)))
+		r.waitRefused(1)
+		check(t, r, 1)
+	})
+	t.Run("apply error", func(t *testing.T) {
+		r := newRig(t, true)
+		r.app.err = errors.New("boom")
+		r.start(r.intake())
+		r.put(sign(t, r.submitter, r.doc(1, 0)))
+		r.waitRefused(1)
+		check(t, r, 1)
+	})
+	t.Run("success", func(t *testing.T) {
+		r := newRig(t, true)
+		r.start(r.intake())
+		r.put(sign(t, r.submitter, r.doc(1, 0)))
+		r.waitApplied(1)
+		check(t, r, 1)
+		// and an adopt can take the lock afterwards
+		if err := r.recoveryAdopt(newUser(t)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("not adopted", func(t *testing.T) {
+		r := newRig(t, false)
+		r.start(r.intake())
+		r.put(sign(t, r.submitter, r.doc(1, 0)))
+		r.waitRefused(1)
+		check(t, r, 1)
+	})
+	t.Run("context cancelled during the apply", func(t *testing.T) {
+		r := newRig(t, true)
+		in := r.intake()
+		ctx, cancel := context.WithCancel(context.Background())
+		entered := make(chan struct{})
+		r.app.onApply = func(ctx context.Context) { close(entered); <-ctx.Done() }
+		done := make(chan error, 1)
+		go func() { done <- in.Run(ctx) }()
+		r.put(sign(t, r.submitter, r.doc(1, 0)))
+		<-entered
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(waitLimit):
+			t.Fatal("Run did not return")
+		}
+		check(t, r, 1)
+	})
+	t.Run("panic in the apply", func(t *testing.T) {
+		r := newRig(t, true)
+		in := r.intake()
+		ctx, cancel := context.WithCancel(context.Background())
+		r.app.onApply = func(context.Context) { cancel(); panic("boom") }
+		done := make(chan any, 1)
+		go func() {
+			defer func() { done <- recover() }()
+			_ = in.Run(ctx)
+		}()
+		r.put(sign(t, r.submitter, r.doc(1, 0)))
+		select {
+		case v := <-done:
+			if v == nil {
+				t.Fatal("no panic reached the caller")
+			}
+		case <-time.After(waitLimit):
+			t.Fatal("Run did not return")
+		}
+		check(t, r, 1)
+	})
+}
+
+// A busy lock is waited for, never a refusal: the document applies when the lock frees.
+func TestBusyLockRetriesAndDoesNotRefuse(t *testing.T) {
+	r := newRig(t, true)
+	r.lock.busy = 3
+	r.start(r.intake())
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	r.waitApplied(1)
+	r.settle(1, 0)
+	r.lock.mu.Lock()
+	attempts := r.lock.attempts
+	r.lock.mu.Unlock()
+	if attempts != 4 {
+		t.Errorf("%d lock attempts, want 4", attempts)
+	}
+	if !strings.Contains(r.logbuf.String(), "an adoption or policy change is in progress") {
+		t.Error("the wait was not logged")
 	}
 }

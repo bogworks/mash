@@ -3,6 +3,13 @@
 // reports every refusal. It decides nothing about what a list set says: decoding, applying and writing the status
 // value are behind the small interfaces below, so this package imports none of the apply stack.
 //
+// Concurrency: the intake takes the account lock (the one a recovery adopt and every guarded policy change take)
+// around the whole processing of one revision: it reads the marker and its revision, verifies, applies and records a
+// rotation, then releases. A recovery adopt therefore waits for an apply in flight and cannot interleave. As a second
+// guard, just before applying the intake checks that it still holds the lock and that the marker is still at the
+// revision it verified under; if not it applies nothing and processes the revision again from the top. The rotation
+// writes are bound to the same revision and fail with ErrMarkerMoved when it changed.
+//
 // The checks run in a fixed order and the first that fails refuses the revision (never applying it): the account
 // must be adopted, the document must not already be the one in force, it must decode and verify against the key the
 // marker expects, name this account and this range, and a planned rotation's next key must be acceptable. The marker
@@ -66,8 +73,9 @@ var (
 	ErrSignature = errors.New("policyintake: signature")
 	// ErrDocument marks a malformed document or one of an unknown schema.
 	ErrDocument = errors.New("policyintake: document")
-	// ErrMarkerMoved is returned (wrapped) by a MarkerStore write when the marker no longer is what the write
-	// assumed (a recovery adopt replaced it): retrying cannot help, so the intake stops.
+	// ErrMarkerMoved is returned (wrapped) by a MarkerStore write when the marker is no longer at the revision the
+	// document was verified under (a recovery adopt replaced it): retrying cannot help, so the intake abandons the
+	// rotation and the recovery adopt decides.
 	ErrMarkerMoved = errors.New("policyintake: the adoption marker changed")
 )
 
@@ -92,12 +100,26 @@ type Result struct {
 
 // MarkerStore is the adoption marker as the intake uses it.
 type MarkerStore interface {
-	// Current reads the marker's latest revision. found is false when the account is not adopted.
-	Current(ctx context.Context) (m store.Marker, found bool, err error)
-	// SetNext records next as the pending next submitter (marker action rotate).
-	SetNext(ctx context.Context, next string) error
-	// Promote makes next, the pending one, the submitter and clears it (marker action rotate).
-	Promote(ctx context.Context, next string) error
+	// Current reads the marker's latest revision and that revision's number. found is false when the account is not
+	// adopted.
+	Current(ctx context.Context) (m store.Marker, rev uint64, found bool, err error)
+	// SetNext records next as the pending next submitter (marker action rotate), only if the marker is still at
+	// expectedRev: any other revision is ErrMarkerMoved and nothing is written. ownRev is the revision of this
+	// caller's own earlier write of the same change, 0 for none; a marker already in the end state at expectedRev
+	// or ownRev writes nothing. It returns the marker's revision after the call.
+	SetNext(ctx context.Context, next string, expectedRev, ownRev uint64) (rev uint64, err error)
+	// Promote makes next, the pending one, the submitter and clears it (marker action rotate), bound as SetNext is.
+	Promote(ctx context.Context, next string, expectedRev, ownRev uint64) (rev uint64, err error)
+}
+
+// Release gives up a held account lock. It is safe to call more than once.
+type Release func()
+
+// AccountLock is the account-wide lock a recovery adopt and every guarded policy change take. Lock waits for it
+// and returns the release and a held check: held returns nil only while the lock is still this holder's. A busy
+// lock is an error wrapping admin.ErrAccountBusy.
+type AccountLock interface {
+	Lock(ctx context.Context) (release Release, held func(ctx context.Context) error, err error)
 }
 
 // Applier takes a verified document. It writes the status value of everything it handles (stale base, size, gate).
@@ -134,6 +156,8 @@ type Intake struct {
 	// KV is the policy bucket.
 	KV     jetstream.KeyValue
 	Marker MarkerStore
+	// Lock is the account lock, held while one revision is processed.
+	Lock AccountLock
 	// Decode decodes raw and verifies its signature under submitter (the public key the marker expects). It returns
 	// an error wrapping ErrSignature or ErrDocument.
 	Decode func(raw []byte, submitter string) (Doc, error)
@@ -248,8 +272,8 @@ func (in *Intake) Run(ctx context.Context) error {
 	switch {
 	case in.Account == "" || in.Range == "":
 		return errors.New("policyintake: Account and Range are required")
-	case in.KV == nil || in.Marker == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil:
-		return errors.New("policyintake: KV, Marker, Decode, InForce, Apply and Report are required")
+	case in.KV == nil || in.Marker == nil || in.Lock == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil:
+		return errors.New("policyintake: KV, Marker, Lock, Decode, InForce, Apply and Report are required")
 	}
 	w, err := in.KV.Watch(ctx, in.key())
 	if err != nil {
@@ -318,7 +342,11 @@ func (in *Intake) refuse(ctx context.Context, gen uint64, raw []byte, stage, det
 	}
 }
 
-// handle takes one delivered revision through the checks.
+// maxReprocess bounds how many times one revision is processed again because the lock was lost or the marker moved
+// before the apply.
+const maxReprocess = 10
+
+// handle takes one delivered revision through the checks, holding the account lock around each pass.
 func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queue) {
 	rev := e.Revision()
 	if rev <= in.lastRev {
@@ -334,6 +362,43 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 		in.logf("policyintake: revision %d of %s is a delete or purge; ignored", rev, in.key())
 		return
 	}
+	for pass := 1; pass <= maxReprocess; pass++ {
+		if !in.locked(ctx, e, q) {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		in.logf("policyintake: revision %d: the lock or the adoption marker changed before the apply; nothing applied, processing it again", rev)
+	}
+	in.logf("policyintake: ERROR revision %d not processed: the lock or the adoption marker kept changing; nothing applied", rev)
+}
+
+// locked takes the account lock, runs one pass over the revision and releases the lock on every path. It returns
+// true when the pass must be run again.
+func (in *Intake) locked(ctx context.Context, e jetstream.KeyValueEntry, q *queue) (again bool) {
+	rev := e.Revision()
+	superseded := func() bool { return q.newerThan(rev) }
+	var release Release
+	var held func(context.Context) error
+	err := in.retry(ctx, "taking the account lock (an adoption or policy change is in progress)", superseded, func() (err error) {
+		release, held, err = in.Lock.Lock(ctx)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, errSuperseded) {
+			in.logf("policyintake: revision %d abandoned: a newer revision arrived while waiting for the account lock", rev)
+		}
+		return false
+	}
+	defer release()
+	return in.pass(ctx, e, q, held)
+}
+
+// pass is one run of the checks and the apply under the account lock. It returns true when the revision must be
+// processed again from the top.
+func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue, held func(context.Context) error) (again bool) {
+	rev := e.Revision()
 	raw := e.Value()
 	superseded := func() bool { return q.newerThan(rev) }
 	abandoned := func(err error) bool {
@@ -345,20 +410,21 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 
 	// 2. The marker, read every time.
 	var marker store.Marker
+	var markerRev uint64
 	var found bool
 	if abandoned(in.retry(ctx, "reading the adoption marker", superseded, func() (err error) {
-		marker, found, err = in.Marker.Current(ctx)
+		marker, markerRev, found, err = in.Marker.Current(ctx)
 		return err
 	})) {
-		return
+		return false
 	}
 	if !found {
 		in.refuse(ctx, 0, raw, StageAdoption, "this account is not adopted: list sets are ignored")
-		return
+		return false
 	}
 	if marker.Account != "" && marker.Account != in.Account {
 		in.refuse(ctx, 0, raw, StageAdoption, "the adoption marker names another account: list sets are ignored")
-		return
+		return false
 	}
 
 	// 5 (before decoding). The document in force: a replay after a restart is skipped silently. It is checked before
@@ -369,12 +435,12 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 		inForce, err = in.InForce(ctx)
 		return err
 	})) {
-		return
+		return false
 	}
 	d := digest(raw)
 	if inForce != "" && strings.EqualFold(inForce, d) {
 		in.logf("policyintake: debug: revision %d is the document in force (sha256 %s); skipped", rev, d[:16])
-		return
+		return false
 	}
 
 	// 3. The expected signer: the pending next key if there is one (the old key is refused from then on).
@@ -394,7 +460,7 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 			}
 		}
 		in.refuse(ctx, 0, raw, stage, detail)
-		return
+		return false
 	}
 	doc.Raw = raw
 
@@ -402,13 +468,13 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 	switch {
 	case !doc.Verified:
 		in.refuse(ctx, doc.Generation, raw, StageSignature, "the document is not signed by the key the adoption marker expects ("+short(expected)+")")
-		return
+		return false
 	case doc.Account != strings.TrimPrefix(e.Key(), KeyPrefix):
 		in.refuse(ctx, doc.Generation, raw, StageAccount, "the document names another account than the key it was written to")
-		return
+		return false
 	case doc.Range != in.Range:
 		in.refuse(ctx, doc.Generation, raw, StageRange, "the document names another range than this one serves")
-		return
+		return false
 	}
 
 	// 6. A planned rotation's next key is validated before anything is applied.
@@ -416,11 +482,26 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 	if startRotation {
 		if err := admin.ValidateNextSubmitter(in.Account, marker, doc.NextSubmitter); err != nil {
 			in.refuse(ctx, doc.Generation, raw, StageDocument, "next_submitter is not acceptable: "+err.Error())
-			return
+			return false
 		}
 	}
 
-	// 7. Apply.
+	// 7. Apply, but only if the lock is still ours and the marker is still the one this document was verified under.
+	if err := held(ctx); err != nil {
+		in.logf("policyintake: revision %d: the account lock is no longer held (%v)", rev, redact(err.Error()))
+		return true
+	}
+	var nowRev uint64
+	var nowFound bool
+	if abandoned(in.retry(ctx, "re-reading the adoption marker before the apply", superseded, func() (err error) {
+		_, nowRev, nowFound, err = in.Marker.Current(ctx)
+		return err
+	})) {
+		return false
+	}
+	if !nowFound || nowRev != markerRev {
+		return true
+	}
 	res, err := in.Apply.Apply(ctx, doc)
 	if err != nil {
 		if res.StatusWritten {
@@ -428,17 +509,33 @@ func (in *Intake) handle(ctx context.Context, e jetstream.KeyValueEntry, q *queu
 		} else {
 			in.refuse(ctx, doc.Generation, raw, StageApply, err.Error())
 		}
-		return
+		return false
 	}
 	in.logf("policyintake: generation %d applied (sha256 %s)", doc.Generation, d[:16])
 
-	// 6, after a successful apply: the rotation completes.
+	// 6, after a successful apply: the rotation completes, bound to the marker revision this document was verified
+	// under. own is the revision of this intake's own earlier write of the same change, if a write reported one.
+	var own uint64
+	write := func(f func(next string) (uint64, error), next string) func() error {
+		return func() error {
+			r, err := f(next)
+			if r != 0 {
+				own = r
+			}
+			return err
+		}
+	}
 	switch {
 	case pending:
-		in.finishRotation(ctx, "promoting the next submitter ("+short(marker.NextSubmitter)+")", func() error { return in.Marker.Promote(ctx, marker.NextSubmitter) })
+		in.finishRotation(ctx, "promoting the next submitter ("+short(marker.NextSubmitter)+")", write(func(n string) (uint64, error) {
+			return in.Marker.Promote(ctx, n, markerRev, own)
+		}, marker.NextSubmitter))
 	case startRotation:
-		in.finishRotation(ctx, "recording the next submitter ("+short(doc.NextSubmitter)+")", func() error { return in.Marker.SetNext(ctx, doc.NextSubmitter) })
+		in.finishRotation(ctx, "recording the next submitter ("+short(doc.NextSubmitter)+")", write(func(n string) (uint64, error) {
+			return in.Marker.SetNext(ctx, n, markerRev, own)
+		}, doc.NextSubmitter))
 	}
+	return false
 }
 
 // finishRotation writes the marker after an applied document, retrying until it lands: the rotation must not be lost.
@@ -449,7 +546,7 @@ func (in *Intake) finishRotation(ctx context.Context, what string, f func() erro
 	case err == nil:
 		in.logf("policyintake: rotation recorded: %s", what)
 	case errors.Is(err, ErrMarkerMoved):
-		in.logf("policyintake: ERROR rotation not recorded, the adoption marker changed in the meantime (%s): %v", what, redact(err.Error()))
+		in.logf("policyintake: ERROR rotation not recorded and abandoned, the adoption marker changed after the document was verified (%s); a recovery adopt decides, and the key it set stays the expected signer: %v", what, redact(err.Error()))
 	default:
 		in.logf("policyintake: ERROR rotation NOT recorded (%s): %v; the document was applied, run adopt again to rotate", what, err)
 	}

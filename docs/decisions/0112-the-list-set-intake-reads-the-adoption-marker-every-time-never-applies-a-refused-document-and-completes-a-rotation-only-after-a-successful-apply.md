@@ -53,6 +53,16 @@ delivered revision, one at a time and in order.
   document signed by that key promotes it. Both writes are a compare-and-set on the marker's last revision, are
   retried until they land, are logged loudly when they fail, and report nothing: the applied status stands. A
   `next_submitter` that a promoting document carries is ignored; it starts a rotation only on the next document.
+* **Concurrency: the intake holds the account lock.** It takes the account lock of
+  [ADR 0111](0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md)
+  around the whole processing of one revision (read the marker with its revision, verify, apply, write the
+  rotation), so a recovery adopt waits for an apply in flight. A busy lock is waited for with a doubling backoff and
+  never a refusal. As a second guard, before the apply the intake checks that it still holds the lock and that the
+  marker is still at the revision it verified under; if not it applies nothing and processes the revision again from
+  the top, where the new marker decides. The rotation writes are a compare-and-set on that revision and fail with
+  `ErrMarkerMoved` when it differs (they accept a marker already in the end state only at that revision or at the
+  revision of the intake's own earlier write); the intake then logs loudly and abandons the rotation, never
+  retrying blindly, so the key a recovery adopt set stays the expected signer.
 * **The collaborators are interfaces.** Decoding and verifying (`Decode`), reading what is in force (`InForce`),
   applying (`Applier`), reporting (`Reporter`) and the marker (`MarkerStore`) are left open, and an adapter over the
   apply stack is written when it lands. The real `MarkerStore` is over the admin connection.
