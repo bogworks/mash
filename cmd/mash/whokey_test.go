@@ -20,7 +20,7 @@ func keyedPair(t *testing.T) (newForm, legacy store.Record) {
 	newForm = store.Record{Name: "ops1", Owner: "team1", Agent: "claude", AgentToken: "acme", Account: "A", User: "U1",
 		MailSubject: id.Subjects().Mail, Created: "2026-01-01T00:00:00Z"}
 	legacy = store.Record{Name: "ops1", Owner: "acme", Agent: "cc", AgentToken: "cc", Account: "A", User: "U2",
-		MailSubject: store.MailSubjectFor("acme", "", "ops1"), Created: "2026-01-01T00:00:00Z"}
+		MailSubject: store.MailSubjectFor("acme", "ops1"), Created: "2026-01-01T00:00:00Z"}
 	if newForm.Key() != id.Flat() || legacy.Key() != "ops1" {
 		t.Fatalf("keys %q %q", newForm.Key(), legacy.Key())
 	}

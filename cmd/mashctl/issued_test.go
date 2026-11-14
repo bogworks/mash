@@ -96,8 +96,8 @@ func credsSubject(t *testing.T, path string) (*jwt.UserClaims, string) {
 
 // `mashctl add` records the user it issues, with every field, before it hands the creds out; init records the admin.
 func TestAddRecordsTheIssuedUser(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
-	if out, errb, code := h.run("add", "g", "--tool"); code != 0 {
+	h := newAddEnv(t)
+	if out, errb, code := h.run("add", "g", "--label", "net=green", "--tool"); code != 0 {
 		t.Fatalf("%d %s %s", code, out, errb)
 	}
 	uc, pub := h.credsClaims("g")
@@ -108,7 +108,7 @@ func TestAddRecordsTheIssuedUser(t *testing.T) {
 	if rec.Address != "g" || rec.Owner != h.e.Owner || rec.Kind != store.IssuedEndpoint || rec.Generation != 0 {
 		t.Errorf("record %+v", rec)
 	}
-	if !slices.Equal(rec.Tags, []string(uc.Tags)) || len(rec.Tags) == 0 {
+	if len(rec.Tags) != 0 || len(uc.Tags) != 0 { // a user minted without a zone key carries no tags (ADR 0091)
 		t.Errorf("tags %v, JWT %v", rec.Tags, uc.Tags)
 	}
 	at, err := time.Parse(time.RFC3339, rec.IssuedAt)
@@ -127,7 +127,7 @@ func TestAddRecordsTheIssuedUser(t *testing.T) {
 
 // A record that cannot be written stops the add: no creds file, no directory record.
 func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	ctx := context.Background()
 	js, err := jetstream.New(h.e.Conn(t, h.e.AdminCreds))
 	if err != nil {
@@ -139,7 +139,7 @@ func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
 	if _, err := js.CreateKeyValue(ctx, store.IssuedConfig()); err != nil { // allows rollup: not hardened
 		t.Fatal(err)
 	}
-	out, errb, code := h.run("add", "g", "--label", "team=green")
+	out, errb, code := h.run("add", "g", "--label", "net=green")
 	if code != 1 || !strings.Contains(errb, "nothing was issued") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -154,10 +154,9 @@ func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
 // A reissue that keeps the key adds a revision under the same key; a reissue that rotates records the new key and
 // keeps the old key's record.
 func TestReissueRecordsAndNeverRemoves(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeRevoke(t, nil)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -231,11 +230,30 @@ func connectedKeys(t *testing.T, e *applyEnv) []string {
 	return keys
 }
 
-// AT-017: users issued through mashctl and connected are clean; a user signed outside mashctl with a copy of a zone's
+// mintRogue signs a user JWT for name with the account signing key, as a holder of a copy of that key outside mashctl
+// would, and returns a connect option for it.
+func (e *applyEnv) mintRogue(name string) nats.Option {
+	e.t.Helper()
+	akp, _, err := e.ks.Account()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+	uc := jwt.NewUserClaims(upub)
+	uc.Name = name
+	uc.Permissions = admin.Permissions("alice", name) // NewUserClaims leaves the limits unlimited
+	tok, err := uc.Encode(akp)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return nats.UserJWT(func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return ukp.Sign(n) })
+}
+
+// AT-017: users issued through mashctl and connected are clean; a user signed outside mashctl with a copy of the account
 // signing key connects, and the check reports exactly its public key and exits 1.
 func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	x := e.connect(natsauth.UserCredentials(e.credsPath("x")), nats.Name("x-client"))
 	_ = x
 
@@ -252,8 +270,8 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Errorf("y is recorded and not connected, and should be listed: %+v", r.NotConnected)
 	}
 
-	// The rogue: signed by zone a's key, held outside mashctl.
-	rogue := e.mint("a", "rogue")
+	// The rogue: signed by a copy of the account signing key, held outside mashctl.
+	rogue := e.mintRogue("rogue")
 	rc := e.connect(rogue, nats.Name("rogue-client"))
 	if !rc.IsConnected() {
 		t.Fatal("the rogue did not connect")
@@ -267,13 +285,8 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 	if !nkeys.IsValidPublicUserKey(f.PublicKey) || !slices.Contains(keys, f.PublicKey) || f.Name != "rogue-client" || f.Account != e.acctPub || f.Server == "" {
 		t.Errorf("finding %+v (connected %v)", f, keys)
 	}
-	zk, _ := e.ks.ZoneKey("a", false)
-	zpub, _ := zk.PublicKey()
-	if f.IssuerKey != zpub {
-		t.Errorf("issuer %q, want zone a's key %q", f.IssuerKey, zpub)
-	}
-	if !slices.Contains(f.Tags, "deny:_none") {
-		t.Errorf("tags %v", f.Tags)
+	if f.IssuerKey != e.acctPub {
+		t.Errorf("issuer %q, want the account key %q", f.IssuerKey, e.acctPub)
 	}
 
 	// The text form names the same key, and no more.
@@ -293,8 +306,7 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 
 // Fewer servers answering than the operator says there are is not a clean answer.
 func TestIssuedCheckRefusesAnIncompleteServerSet(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	r, _, code := e.issuedCheck("--servers", "2")
 	if code != 2 || r.Complete || r.Clean || !strings.Contains(r.Incomplete, "1 server(s) replied") {
 		t.Fatalf("%d %+v", code, r)
@@ -313,15 +325,14 @@ func TestIssuedCheckRefusesAnIncompleteServerSet(t *testing.T) {
 	}
 	// a rogue is still reported when the set is incomplete: the finding is certain
 	e.env["MASH_SERVERS"] = "2"
-	e.connect(e.mint("a", "rogue"))
+	e.connect(e.mintRogue("rogue"))
 	if r, _, code := e.issuedCheck(); code != 1 || len(r.Unrecorded) != 1 || r.Complete {
 		t.Fatalf("%d %+v", code, r)
 	}
 }
 
 func TestIssuedCheckUsageAndErrors(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	for _, args := range [][]string{{"issued"}, {"issued", "bogus"}, {"issued", "check", "--servers", "0"}, {"issued", "check", "--servers"}, {"issued", "list", "--sys-creds", "x"}, {"issued", "check", "extra"}} {
 		if _, _, code := e.run(args...); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
@@ -335,8 +346,7 @@ func TestIssuedCheckUsageAndErrors(t *testing.T) {
 
 // The JSON of check and list keeps its shape.
 func TestIssuedJSONShape(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	out, _, code := e.run("issued", "check", "--json")
 	if code != 0 {
 		t.Fatal(code)
@@ -388,10 +398,9 @@ func TestIssuedJSONShape(t *testing.T) {
 
 // A server with more connections than one page is read whole, page by page, with no connection dropped or repeated.
 func TestConnzReadsEveryPage(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	for i := 0; i < 4; i++ {
-		e.connect(e.mint("a", "p"))
+		e.connect(e.mintRogue("p"))
 	}
 	nc := e.connect(natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
 	res := apply.NATS{Conn: nc}
@@ -420,10 +429,9 @@ func TestConnzReadsEveryPage(t *testing.T) {
 // Each path writes its purpose: add issue, a reissue that keeps the key issue, a reissue that rotates rotation, and
 // the admin user at init issue with kind admin.
 func TestIssuedPurposePerPath(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeRevoke(t, nil)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -460,9 +468,8 @@ func TestIssuedPurposePerPath(t *testing.T) {
 
 // A rotating reissue marks the old key revoked after the revocation, and not the new one; a failed revocation marks nothing.
 func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
-	fakeSignerPublished(t, true, nil)
-	if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+	h := newAddEnv(t)
+	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 		t.Fatal(errb)
 	}
 	_, pub1 := h.credsClaims("n")
@@ -500,8 +507,8 @@ func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
 // failed mark is a warning and the revocation still stands; a key mash never recorded is no warning.
 func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	t.Run("retire", func(t *testing.T) {
-		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+		h := newAddEnv(t)
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -525,8 +532,8 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("deprovision", func(t *testing.T) {
-		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+		h := newAddEnv(t)
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -542,8 +549,8 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("mark failure is a warning", func(t *testing.T) {
-		h := newAddEnv(t, addPolicy)
-		if _, errb, code := h.run("add", "n", "--label", "team=green"); code != 0 {
+		h := newAddEnv(t)
+		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
 			t.Fatal(errb)
 		}
 		_, pub := h.credsClaims("n")
@@ -566,7 +573,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("not recorded is silent", func(t *testing.T) {
-		h := newAddEnv(t, addPolicy)
+		h := newAddEnv(t)
 		u := h.provisionDeclared("a") // provisioned without mashctl add: not in the issue record
 		stubRevoke(t)
 		out, errb, code := h.run("retire", "a")
@@ -581,8 +588,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 
 // A connected key the record holds as revoked is its own finding: exit 1, listed apart from the unrecorded.
 func TestIssuedCheckReportsARevokedKeyStillConnected(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	e.connect(natsauth.UserCredentials(e.credsPath("x")), nats.Name("x-client"))
 	r, errb, code := e.issuedCheck()
 	if code != 0 || !r.Clean || len(r.RevokedConn) != 0 {
@@ -664,8 +670,7 @@ func mintUnrecordedAdmin(t *testing.T, e *applyEnv) (string, string) {
 // The admin creds the command itself connects with are not exempt: an admin key the record does not hold is reported
 // (it is connected, by this very command), and once recorded it is clean.
 func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	if r, errb, code := e.issuedCheck(); code != 0 || !r.Clean {
 		t.Fatalf("clean state: %d %+v %s", code, r, errb)
 	}
@@ -697,7 +702,7 @@ func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 
 // `adopt --mint-admin` records the admin user it mints, before the creds file exists, and `init` afterwards still works.
 func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	a := newAdopter(t, e)
 	out, errb, code := a.adopt("--mint-admin")
 	if code != 0 || !strings.Contains(out, "recorded the admin user in the issue record") {
@@ -731,7 +736,7 @@ func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
 
 // If the record cannot be written, adopt fails loudly, says the admin credentials were NOT recorded and leaves no creds file.
 func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	nc := e.connect(natsauth.UserCredentials(e.pl.Creds))
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -753,10 +758,9 @@ func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 // The scan is incomplete AND a finding exists: exit 1 (the finding wins), and the JSON and the text both still say the scan
 // was incomplete.
 func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
-	t.Skip("TODO(Z2): applies a zoned policy, which ADR 0091 refuses before anything is pushed; delete with the policy stack")
-	e := newDriftEnv(t)
+	e := newXYEnv(t)
 	e.env["MASH_SERVERS"] = "2"
-	e.connect(e.mint("a", "rogue"))
+	e.connect(e.mintRogue("rogue"))
 	r, _, code := e.issuedCheck()
 	if code != 1 || len(r.Unrecorded) != 1 || r.Complete || r.Clean || r.Incomplete == "" {
 		t.Fatalf("%d %+v", code, r)
@@ -770,7 +774,7 @@ func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
 		t.Fatalf("text: %d\n%s", code, text)
 	}
 	// Nothing found and still incomplete is exit 2.
-	e2 := newDriftEnv(t)
+	e2 := newXYEnv(t)
 	e2.env["MASH_SERVERS"] = "2"
 	if r, _, code := e2.issuedCheck(); code != 2 || r.Incomplete == "" || r.Clean {
 		t.Fatalf("no finding: %d %+v", code, r)

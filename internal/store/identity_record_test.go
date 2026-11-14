@@ -18,9 +18,14 @@ func recJSON(t *testing.T, r Record) []byte {
 	return b
 }
 
+// legacyRec is a legacy record; a non-empty zone makes the record an older release wrote (parse-only, ADR 0091).
 func legacyRec(owner, zone, name string) Record {
+	subj := MailSubjectFor(owner, name)
+	if zone != "" {
+		subj = "agents.mail.cc." + owner + "." + zone + "." + name
+	}
 	return Record{Name: name, Owner: owner, Agent: "cc", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: MailSubjectFor(owner, zone, name), Zone: zone, Created: "2026-01-01T00:00:00Z"}
+		MailSubject: subj, Zone: zone, Created: "2026-01-01T00:00:00Z"}
 }
 
 func newRec(agent, owner, name string) Record {
@@ -41,10 +46,13 @@ func legacyOnlyParse(key string, value []byte) (Record, error) {
 	if r.Name != key || r.User == "" || r.MailSubject == "" {
 		return Record{}, fmt.Errorf("directory %s: incomplete record", key)
 	}
-	if r.Zone != "" && !sap.ValidZone(r.Zone) {
-		return Record{}, fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+	if r.Zone != "" {
+		if z, ok := sap.LegacyZoneOfMailSubject(r.MailSubject, r.Owner, r.Name); !ok || z != r.Zone {
+			return Record{}, fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+		}
+		return r, nil
 	}
-	if want := MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
+	if want := MailSubjectFor(r.Owner, r.Name); r.MailSubject != want {
 		return Record{}, fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
 	}
 	return r, nil

@@ -136,7 +136,7 @@ func (h *addEnv) state() string {
 }
 
 func TestPolicyAdoptWritesTheMarker(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	sub := userPub(t)
 
 	if out, errb, code := e.run("policy", "adopt", "--show"); code != 0 || strings.TrimSpace(out) != "not adopted" || errb != "" {
@@ -216,7 +216,7 @@ func jsOf(t *testing.T, a *admin.Admin) jetstream.JetStream {
 }
 
 func TestPolicyAdoptRefusals(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	seed := func() string {
 		kp, _ := nkeys.CreateUser()
 		s, _ := kp.Seed()
@@ -230,10 +230,6 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ks.ZoneKey("a", true); err != nil {
-		t.Fatal(err)
-	}
-	zone, _ := e.ks.ZonePublic("a")
 	cfg := config.Config{AdminCreds: e.env["MASH_ADMIN_CREDS"]}
 	adminUser, err := ctl.AdminUserKey(cfg)
 	if err != nil {
@@ -249,7 +245,6 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 		"the account":    {e.acctPub, 1, "the account's own key"},
 		"the operator":   {op, 1, "the operator key"},
 		"the system":     {sys, 1, "the system account key"},
-		"a zone key":     {zone, 1, "the signing key of zone a"},
 		"the admin user": {adminUser, 1, "the admin user's key"},
 	}
 	for name, c := range cases {
@@ -280,7 +275,7 @@ func TestPolicyAdoptRefusals(t *testing.T) {
 // The admin credentials must belong to the key store's account: admin creds issued for another account are refused
 // before anything is written, and no marker exists afterwards.
 func TestPolicyAdoptRefusesAdminCredsOfAnotherAccount(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	// A creds file of a user issued by a fresh account key, so its account is not the key store's.
 	orig := e.env["MASH_ADMIN_CREDS"]
 	e.env["MASH_ADMIN_CREDS"] = writeUserCreds(t, t.TempDir())
@@ -317,14 +312,15 @@ func provisionWith(extra ...string) func(h *addEnv) []string {
 
 func provisionB(h *addEnv) { h.provisionDeclared("b") }
 
+func provisionA(h *addEnv) { h.provisionDeclared("a") }
+
 func addEnvGuarded() []guarded {
 	return []guarded{
 		{"add", []string{"add", "c", "--label", "env=prod"}, nil, false, nil},
 		{"reissue", []string{"reissue", "a"}, func(h *addEnv) { h.seed("a") }, true, nil},
-		{"label", []string{"label", "a", "env=prod"}, nil, false, nil},
-		{"label --sync", []string{"label", "a", "env=prod", "--sync"}, nil, false, nil},
-		{"label --dry-run", []string{"label", "a", "env=prod", "--dry-run"}, nil, false, nil},
-		{"unlabel", []string{"unlabel", "a", "team"}, nil, false, nil},
+		{"label", []string{"label", "a", "env=prod"}, provisionA, false, nil},
+		{"label --dry-run", []string{"label", "a", "env=prod", "--dry-run"}, provisionA, false, nil},
+		{"unlabel", []string{"unlabel", "a", "team"}, provisionA, false, nil},
 		{"retire", []string{"retire", "b"}, provisionB, false, nil},
 		{"set-meta --label", []string{"set-meta", "b", "--label", "k=v"}, provisionB, false, nil},
 		{"provision --label", []string{"provision"}, nil, false, provisionWith("--label", "k=v")},
@@ -336,7 +332,7 @@ func addEnvGuarded() []guarded {
 func TestAdoptedAccountRefusesEveryGuardedCommand(t *testing.T) {
 	for _, g := range addEnvGuarded() {
 		t.Run(g.name, func(t *testing.T) {
-			h := newFleetEnv(t, addPolicy)
+			h := newFleetEnv(t)
 			if g.pre != nil {
 				g.pre(h)
 			}
@@ -367,7 +363,7 @@ func TestAdoptedAccountRefusesEveryGuardedCommand(t *testing.T) {
 func TestUnadoptedAccountRunsEveryGuardedCommand(t *testing.T) {
 	for _, g := range addEnvGuarded() {
 		t.Run(g.name, func(t *testing.T) {
-			h := newFleetEnv(t, addPolicy)
+			h := newFleetEnv(t)
 			if g.pre != nil {
 				g.pre(h)
 			}
@@ -383,71 +379,12 @@ func TestUnadoptedAccountRunsEveryGuardedCommand(t *testing.T) {
 	}
 }
 
-// policy apply, policy repair (and their dry runs) are refused with nothing pushed, no key made and the file as it
-// was; policy diff is read-only and still works; both run on an account that is not adopted.
-func TestAdoptedAccountRefusesApplyAndRepair(t *testing.T) {
-	state := func(e *applyEnv) string {
-		d := digests(t, e.keyDir, nil)
-		var keys []string
-		for k, v := range d {
-			keys = append(keys, k+"="+v)
-		}
-		slices.Sort(keys)
-		b, _ := os.ReadFile(e.policy)
-		return strings.Join(keys, "\n") + "\npolicy=" + string(b) + "\njwt=" + e.accountJWT()
-	}
-	rows := []struct {
-		name string
-		args []string
-		verb string
-	}{
-		{"apply", []string{"policy", "apply"}, "policy apply"},
-		{"apply --dry-run", []string{"policy", "apply", "--dry-run"}, "policy apply"},
-		{"repair", []string{"policy", "repair"}, "policy repair"},
-		{"repair --dry-run", []string{"policy", "repair", "--dry-run"}, "policy repair"},
-	}
-	for _, r := range rows {
-		t.Run(r.name, func(t *testing.T) {
-			e := newApplyEnv(t, twoZones)
-			// Not adopted: the command goes on as before (repair and, with zones removed, apply stop at a directory this
-			// server never had made: the zoned-directory gate fails closed, so only the adopted-account refusal is ruled out).
-			if out, errb, code := e.run(r.args...); strings.Contains(out+errb, "adopted by an outside system") || strings.Contains(out+errb, "is refused") {
-				t.Fatalf("not adopted: %d %q %q", code, out, errb)
-			}
-			e = newApplyEnv(t, twoZones)
-			sub := userPub(t)
-			if _, errb, code := e.run("policy", "adopt", "--submitter", sub); code != 0 {
-				t.Fatal(errb)
-			}
-			before := state(e)
-			out, errb, code := e.run(r.args...)
-			want := "mashctl: " + r.verb + " is refused: this account is adopted by an outside system (submitter " + sub[:8] + "...): list sets come only through the list-set path; nothing was changed"
-			if code != 1 || !strings.Contains(errb, want) {
-				t.Fatalf("%d %q %q", code, out, errb)
-			}
-			if after := state(e); after != before {
-				t.Errorf("a refused %s changed the account:\n%s\n---\n%s", r.name, before, after)
-			}
-		})
-	}
-	// Read-only: diff, drift, show, check, explain, test.
-	e := newApplyEnv(t, twoZones)
-	if _, errb, code := e.run("policy", "adopt", "--submitter", userPub(t)); code != 0 {
-		t.Fatal(errb)
-	}
-	for _, args := range [][]string{{"policy", "diff"}, {"policy", "drift"}, {"policy", "check"}, {"policy", "test"}, {"policy", "show"}, {"policy", "explain", "x", "y"}} {
-		if out, errb, code := e.run(args...); code == 1 && strings.Contains(out+errb, "adopted") {
-			t.Errorf("%v was refused on an adopted account: %q %q", args, out, errb)
-		}
-	}
-}
-
 // Read-only commands, and deprovision (operator housekeeping of one endpoint's inbox), work on an adopted account.
 func TestAdoptedAccountStillAllowsReadsAndDeprovision(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	h.adoptAs(userPub(t))
-	for _, args := range [][]string{{"list"}, {"audit"}, {"issued", "list"}, {"policy", "check"}, {"policy", "test"}, {"policy", "show"}, {"policy", "explain", "a", "b"}, {"policy", "adopt", "--show"}, {"suspended", "b"}} {
+	for _, args := range [][]string{{"list"}, {"audit"}, {"issued", "list"}, {"policy", "adopt", "--show"}, {"suspended", "b"}} {
 		out, errb, code := h.run(args...)
 		if strings.Contains(out+errb, "adopted by an outside system") || (code != 0 && code != 3) {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
@@ -485,7 +422,7 @@ func TestUnreadableMarkerRefusesGuardedCommands(t *testing.T) {
 	for name, breakIt := range map[string]func(*addEnv){"an unreadable value": garbage, "an unhardened bucket": unhardened} {
 		for _, g := range addEnvGuarded() {
 			t.Run(name+"/"+g.name, func(t *testing.T) {
-				h := newFleetEnv(t, addPolicy)
+				h := newFleetEnv(t)
 				if g.pre != nil {
 					g.pre(h)
 				}
@@ -508,10 +445,9 @@ func TestUnreadableMarkerRefusesGuardedCommands(t *testing.T) {
 	}
 }
 
-// With a server configured, an admin connection that cannot be made refuses (cannot tell); with no server configured
-// at all, an edit of the policy file alone is allowed and says nothing about adoption.
+// With a server configured, an admin connection that cannot be made refuses (cannot tell).
 func TestGuardWithoutAConnection(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.env["MASH_ADMIN_CREDS"] = filepath.Join(h.dir, "no-such.creds")
 	before := h.state()
 	_, errb, code := h.run("label", "a", "env=prod")
@@ -521,19 +457,12 @@ func TestGuardWithoutAConnection(t *testing.T) {
 	if h.state() != before {
 		t.Error("a refused label changed the account")
 	}
-
-	delete(h.env, "MASH_URL")
-	delete(h.env, "MASH_ADMIN_CREDS")
-	out, errb, code := h.run("label", "a", "env=prod")
-	if code != 0 || strings.Contains(out+errb, "adopted by an outside system") || !strings.Contains(h.policyText(), "env: prod") {
-		t.Fatalf("an offline policy-file edit: %d %q %q\n%s", code, out, errb, h.policyText())
-	}
 }
 
 // The marker records the admin user's and the system user's keys, by public key, and every --exempt key; a second run
 // behaves as the maintainers ruled; the marker's JSON holds no seed.
 func TestPolicyAdoptRecordsTheExemptKeys(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	sub := userPub(t)
 	adminUser, err := ctl.AdminUserKey(config.Config{AdminCreds: e.env["MASH_ADMIN_CREDS"]})
 	if err != nil {
@@ -599,7 +528,7 @@ func TestPolicyAdoptRecordsTheExemptKeys(t *testing.T) {
 // A missing system creds file refuses with nothing written; a malformed --exempt and the keys mash holds are refused
 // without being echoed.
 func TestPolicyAdoptExemptRefusals(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	sub := userPub(t)
 	_, op, err := e.ks.Operator()
 	if err != nil {
@@ -658,7 +587,7 @@ func TestPolicyAdoptExemptRefusals(t *testing.T) {
 
 // A marker written before the exempt field existed is read as empty and --show says what to do.
 func TestPolicyAdoptShowsAnOlderMarker(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	sub := userPub(t)
 	if _, errb, code := e.run("policy", "adopt", "--submitter", sub); code != 0 {
 		t.Fatal(errb)
@@ -687,7 +616,7 @@ func TestPolicyAdoptShowsAnOlderMarker(t *testing.T) {
 
 // provision without --label and --zone stays allowed on an adopted account.
 func TestAdoptedAccountAllowsAPlainProvision(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.adoptAs(userPub(t))
 	out, errb, code := h.run(provisionWith()(h)...)
 	if code != 0 || strings.Contains(out+errb, "is refused") {

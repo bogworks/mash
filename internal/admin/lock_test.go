@@ -362,7 +362,7 @@ func seam(t *testing.T, set func(func()) func(), hook func()) {
 func suspendedDrain(t *testing.T, name string) (*admin.Admin, jetstream.JetStream, admin.SuspendState) {
 	t.Helper()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, name, "")
+	provisionFor(t, e, a, name)
 	if _, err := js.Publish(context.Background(), "agents.mail.cc.o."+name, []byte("one")); err != nil {
 		t.Fatal(err)
 	}

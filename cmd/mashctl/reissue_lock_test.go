@@ -33,7 +33,7 @@ func lockedRevoke(t *testing.T) {
 
 // Two reissues of one name at once end with the creds file's key equal to the record's user, never mismatched.
 func TestConcurrentReissueKeepsFileAndRecordTogether(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag) // narrowing: each reissue rotates
 	lockedRevoke(t)
 
@@ -60,15 +60,15 @@ func TestConcurrentReissueKeepsFileAndRecordTogether(t *testing.T) {
 	}
 	_, filePub := h.credsClaims("a")
 	recs := h.records()
-	if len(recs) != 1 || recs[0] != "a/red/"+filePub {
+	if len(recs) != 1 || recs[0] != "a//"+filePub {
 		t.Fatalf("creds key %s, records %v: file and record disagree", filePub, recs)
 	}
 }
 
 // The name lock is held while the creds file is replaced: another SetUser of the same name cannot get in.
 func TestReissueHoldsNameLockDuringFileRewrite(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
-	h.seedWith("a", noDenyNone) // add-only: the file is rewritten
+	h := newAddEnv(t)
+	h.seed("a") // up to date: the file is rewritten
 	lockedRevoke(t)
 
 	adm, err := admin.New(h.e.Conn(t, h.e.AdminCreds), h.e.Owner)

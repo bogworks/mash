@@ -48,10 +48,7 @@ func drainInbox(t *testing.T, js jetstream.JetStream, want int) []string {
 func TestUnzoneKeepsQueuedMailAndIsIdempotent(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "n", admin.Meta{Role: "r", Zone: "z1", Labels: map[string]string{"team": "t"}}); err != nil {
-		t.Fatal(err)
-	}
+	user := provisionZoned(t, e, a, js, "alpha", "z1", admin.Meta{Role: "r", Labels: map[string]string{"team": "t"}})
 	// Mail queued under both subjects before the move.
 	for subj, body := range map[string]string{zonedSubj: "zoned", fiveSubj: "five"} {
 		if _, err := js.Publish(ctx, subj, []byte(body)); err != nil {
@@ -115,10 +112,7 @@ func TestUnzoneKeepsQueuedMailAndIsIdempotent(t *testing.T) {
 func TestUnzoneResumesAfterACrashAtEitherStep(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{Zone: "z1"}); err != nil {
-		t.Fatal(err)
-	}
+	provisionZoned(t, e, a, js, "alpha", "z1", admin.Meta{})
 	if _, err := a.Unzone(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}
@@ -185,10 +179,7 @@ func TestUnzoneChecksTheStreamBeforeTheRecord(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e, a, js := setup(t)
 			ctx := context.Background()
-			_, user := e.Mint(t, "alpha")
-			if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{Zone: "z1"}); err != nil {
-				t.Fatal(err)
-			}
+			provisionZoned(t, e, a, js, "alpha", "z1", admin.Meta{})
 			breakIt(t, js)
 			kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
 			before, _ := kv.Get(ctx, "alpha")

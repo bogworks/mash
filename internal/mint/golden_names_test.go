@@ -3,22 +3,15 @@
 package mint
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nats-io/jwt/v2"
 )
 
-// The NATS user's name is the endpoint's bare name; its tags are the compiled policy tags.
+// The NATS user's name is the endpoint's bare name.
 func TestGoldenMintedUserName(t *testing.T) {
-	c := compile(t, `
-default: deny
-endpoints:
-  a: {labels: {zone: red}}
-rules: []
-`)
-	m, err := Mint(newFakeKeys(t), c, "a", nil, true)
+	m, err := Mint(newFakeKeys(t), "o", "a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,11 +19,8 @@ rules: []
 	if err != nil {
 		t.Fatal(err)
 	}
-	if uc.Name != "a" || m.Name != "a" || m.Zone != "red" {
-		t.Errorf("name %q minted name %q zone %q", uc.Name, m.Name, m.Zone)
-	}
-	if !slices.Equal([]string(uc.Tags), []string{"deny:_none"}) || !slices.Equal(c.Endpoints[0].Tags, []string{"deny:_none"}) {
-		t.Errorf("tags %q", []string(uc.Tags))
+	if uc.Name != "a" || m.Name != "a" {
+		t.Errorf("name %q minted name %q", uc.Name, m.Name)
 	}
 	if !strings.Contains(string(m.Creds), "BEGIN NATS USER JWT") {
 		t.Error("creds are not a user creds file")

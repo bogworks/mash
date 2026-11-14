@@ -693,12 +693,12 @@ idle wake.
 |---|---|
 | Endpoint name, owner | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-48 characters: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
 | Subjects | `agents.mail.cc.<owner>.<name>`, `agents.prompt.cc.<owner>.<name>`, `agents.status.cc.<owner>.<name>`, `agents.hb.cc.<owner>.<name>` |
-| Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token; a zoned endpoint's mail subject is `agents.mail.cc.<owner>.<zone>.<name>` and its stream also takes the exact-zone filter `agents.mail.*.<owner>.<zone>.<name>`, never a wildcard zone (ADR 0054) |
+| Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token. Mail has one five-token subject; zones were removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) |
 | Inbox stream, consumer | `inbox-<name>`, `deliver` |
 | Buckets, keys | `mash-directory` and `mash-leases`, keyed by `<name>` |
 | Reply prefix | `_INBOX.<name>.` |
 | SAP service | name `agents`, metadata `agent: claude-code`, `owner`, `session: <name>`, `protocol_version: "0.3"`, `user_nkey`, `account`, `id_sig`, `mail_subject` |
-| Directory labels | At most 64. Key `^[a-z][a-z0-9_.-]{0,31}$`. Values, role and host: at most 64 printable characters, no tab or newline. A grouping field from older records is read as a label. Labels are unsigned metadata: the record carries no signature, so anyone who can write the directory can set them, and nothing may make a security decision on a label. Authority comes from the signed user JWT and the zone key. `mashctl policy drift` compares the labels of declared endpoints with the policy file and reports any that differ |
+| Directory labels | At most 64. Key `^[a-z][a-z0-9_.-]{0,31}$`. Values, role and host: at most 64 printable characters, no tab or newline. A grouping field from older records is read as a label. Labels are unsigned metadata: the record carries no signature, so anyone who can write the directory can set them, and nothing may make a security decision on a label. Authority comes from the signed user JWT. `mashctl label` and `unlabel` set and clear them on the directory record |
 | Idempotency key | 1-128 printable ASCII characters, no spaces |
 | Launch token | At most 128 of `A-Z a-z 0-9 . _ -` |
 | Headers | `Agent-Sender` (SAP), `Nats-Msg-Id` (NATS), `Mash-Sender-Instance`, `Mash-Urgent`, `Mash-Kind`, `Mash-In-Reply-To` |

@@ -15,8 +15,7 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
   environment wins over the file key.
 - `mash` and `mashctl` read it through the same configuration that gives them their owner, so every invocation gets the
   same rule.
-- The file is read once, at start. A change takes a restart. mash does not read a rule from the directory or from the
-  policy file.
+- The file is read once, at start. A change takes a restart. mash does not read a rule from the directory.
 - No path named: no rule. A path that is set but empty is invalid, not absent.
 - `MASH_NAME_RULE_REQUIRED` (or `name_rule_required` in `config.json`; the environment wins) is a boolean, `true` or
   `false`. When it is `true`, mash refuses to start unless a rule file was loaded, so a later restart without the file

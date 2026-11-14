@@ -23,20 +23,19 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
-	"github.com/bogworks/mash/internal/policy"
 )
 
 type setup struct {
-	root, serverDir, keyDir, policy, cfgPath string
-	ks                                       *ctlkeys.Authority
-	pl                                       *Plan
+	root, serverDir, keyDir, cfgPath string
+	ks                               *ctlkeys.Authority
+	pl                               *Plan
 }
 
 func newSetup(t *testing.T) *setup {
 	t.Helper()
 	root := t.TempDir()
 	s := &setup{root: root, serverDir: filepath.Join(root, "cfg", "server"), keyDir: filepath.Join(root, "keys"),
-		policy: filepath.Join(root, "cfg", "policy.yaml"), cfgPath: filepath.Join(root, "cfg", "config.json")}
+		cfgPath: filepath.Join(root, "cfg", "config.json")}
 	ks, err := ctlkeys.Open(s.keyDir)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +45,7 @@ func newSetup(t *testing.T) *setup {
 }
 
 func (s *setup) params() Params {
-	return Params{Dir: s.serverDir, Owner: "alice", Port: 4222, PolicyPath: s.policy, ConfigPath: s.cfgPath}
+	return Params{Dir: s.serverDir, Owner: "alice", Port: 4222, ConfigPath: s.cfgPath}
 }
 
 func (s *setup) generate(t *testing.T) {
@@ -224,19 +223,11 @@ func TestModes(t *testing.T) {
 	}
 }
 
-func TestPolicyAndConfig(t *testing.T) {
+func TestConfigIsWritten(t *testing.T) {
 	s := newSetup(t)
 	s.generate(t)
-	b, err := os.ReadFile(s.policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := policy.Parse(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r := f.Check(); len(r.Errors)+len(r.Warnings) != 0 {
-		t.Fatalf("policy does not check clean: %v", r)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(s.cfgPath), "policy.yaml")); err == nil {
+		t.Fatal("a policy file was written: the policy file is gone")
 	}
 	cfg, err := os.ReadFile(s.cfgPath)
 	if err != nil || !strings.Contains(string(cfg), `"nats://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) {
@@ -255,7 +246,7 @@ func TestPolicyAndConfig(t *testing.T) {
 	}
 }
 
-func TestExistingPolicyAndConfigUntouched(t *testing.T) {
+func TestExistingConfigUntouched(t *testing.T) {
 	s := newSetup(t)
 	if err := os.MkdirAll(filepath.Dir(s.cfgPath), 0o700); err != nil {
 		t.Fatal(err)
@@ -264,18 +255,12 @@ func TestExistingPolicyAndConfigUntouched(t *testing.T) {
 	if err := os.WriteFile(s.cfgPath, []byte(mine), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(s.policy, []byte("default: deny\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	s.generate(t)
-	if s.pl.Config != nil || s.pl.Policy != nil {
+	if s.pl.Config != nil {
 		t.Fatal("plan would write over existing files")
 	}
 	if b, _ := os.ReadFile(s.cfgPath); string(b) != mine {
 		t.Fatal("config.json changed")
-	}
-	if b, _ := os.ReadFile(s.policy); string(b) != "default: deny\n" {
-		t.Fatal("policy changed")
 	}
 }
 

@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,20 +9,8 @@ import (
 	"time"
 )
 
-func TestRunRefusedServerSetPushesNothing(t *testing.T) {
-	ks, fk, c := setup(t)
-	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 1}
-	fk.serversErr = fmt.Errorf("%w: too many", ErrServerSetRefused)
-	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
-	var out bytes.Buffer
-	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 1, VerifyWait: 1}, &out)
-	if code != 1 || fk.pushes != 0 || !strings.Contains(out.String(), "refusing") || !strings.Contains(out.String(), "nothing was pushed") {
-		t.Fatalf("code %d pushes %d\n%s", code, fk.pushes, out.String())
-	}
-}
-
 func TestRevokeRefusedServerSetPushesNothing(t *testing.T) {
-	ks, fk, _ := setup(t)
+	ks, fk := setup(t)
 	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 1}
 	fk.serversErr = fmt.Errorf("%w: too many", ErrServerSetRefused)
 	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
@@ -34,10 +21,10 @@ func TestRevokeRefusedServerSetPushesNothing(t *testing.T) {
 }
 
 func TestDriftRefusedServerSet(t *testing.T) {
-	ks, fk, c := setup(t)
+	ks, fk := setup(t)
 	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 1}
 	fk.serversErr = fmt.Errorf("%w: too many", ErrServerSetRefused)
-	_, err := AccountFindings(context.Background(), Params{Compiled: c, Keys: ks, Resolver: fk})
+	_, err := AccountFindings(context.Background(), fk, ks, 0)
 	if !errors.Is(err, ErrServerSetRefused) {
 		t.Fatalf("err %v", err)
 	}

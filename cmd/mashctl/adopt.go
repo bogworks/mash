@@ -95,7 +95,7 @@ type adoptState struct {
 	adminRaw         []byte
 	serverDir        string
 	sysDst, adminDst string
-	cfgPath, polPath string
+	cfgPath          string
 	haveOp, haveAcct bool   // the key store already holds this very key
 	haveSys          bool   // sys.creds already in place with the same content
 	haveAdmin        bool   // mashadmin.creds already in place (kept)
@@ -119,7 +119,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	need(o.server, "--server", "the NATS URL of the server you run")
 	need(o.operatorKey, "--operator-key", "the operator signing seed: mashctl cannot create authority on a server it did not set up, so adopt needs yours")
 	need(o.accountKey, "--account-key", "the identity seed of the account mash uses: mashctl cannot create an account on a server it did not set up")
-	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl policy apply` pushes")
+	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl retire` and `reissue` revoke a user key")
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "%smissing: %s\nadopt takes over a server you already run in operator mode; it cannot stand one up or reconfigure one from a URL (use `mashctl init --local` for a new local server)\n%s", pfx, strings.Join(missing, "; "), adoptUsage())
 		return 2
@@ -165,7 +165,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		return fail("%v", err)
 	}
 
-	st := &adoptState{serverDir: filepath.Join(cfg.Dir, "server"), cfgPath: cfg.Find("config.json"), polPath: cfg.Find("policy.yaml")}
+	st := &adoptState{serverDir: filepath.Join(cfg.Dir, "server"), cfgPath: cfg.Find("config.json")}
 	st.sysDst = filepath.Join(st.serverDir, bootstrap.SysCreds)
 	st.adminDst = filepath.Join(st.serverDir, bootstrap.AdminCreds)
 	defer func() {
@@ -281,9 +281,9 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if set.Cluster != "" {
 		shape = fmt.Sprintf("cluster %q", set.Cluster)
 	}
-	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl policy apply` is the first to use it\n", shape, len(set.Names))
+	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl retire` (or a rotating `reissue`) is the first to use it\n", shape, len(set.Names))
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N to `mashctl policy apply` so it can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: pass --servers N to `mashctl retire` and `reissue` so they can confirm every server took the update")
 	}
 
 	// (5) can the operator key sign for this account?
@@ -422,21 +422,8 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	} else {
 		step("%s exists and is left as it is; make sure it has: %s", st.cfgPath, settingsText(settings))
 	}
-	if config.Absent(st.polPath) {
-		step("%swrite %s (open: default allow)", verb, st.polPath)
-		if !o.dryRun {
-			if err := ensureDir(filepath.Dir(st.polPath)); err != nil {
-				return fail("%v", err)
-			}
-			if _, err := ctlkeys.InstallFile(st.polPath, []byte(bootstrap.OpenPolicy)); err != nil {
-				return fail("%v", err)
-			}
-		}
-	} else {
-		step("%s exists, left as it is", st.polPath)
-	}
 
-	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl add NAME ...                          declare an endpoint and mint its creds\n  3. mashctl policy apply                          push the policy's signing keys to the account\n")
+	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl add NAME ...                          declare an endpoint and mint its creds\n")
 	if adminPath == "" {
 		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `add` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}

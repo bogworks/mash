@@ -45,15 +45,14 @@ func (h *addEnv) assertNothingCreated(names ...string) {
 }
 
 func TestConfigAMashctlAdd(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	// An endpoint added before the rule came: adding its name again is refused by the rule, before the directory is
 	// read ("already provisioned" would mean it was).
-	if _, errb, code := h.run("add", "early", "--label", "zone=green"); code != 0 {
+	if _, errb, code := h.run("add", "early", "--label", "net=green"); code != 0 {
 		t.Fatalf("add before the rule: %d %q", code, errb)
 	}
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
-	before, _ := os.ReadFile(h.policy)
 	recsBefore := h.records()
 
 	cases := []struct {
@@ -62,18 +61,18 @@ func TestConfigAMashctlAdd(t *testing.T) {
 		env  map[string]string
 		want []string // every substring the refusal's text must carry
 	}{
-		{"bare legacy name, no record", []string{"add", "fresh", "--label", "zone=green"}, nil,
+		{"bare legacy name, no record", []string{"add", "fresh", "--label", "net=green"}, nil,
 			[]string{`name rule "no-cc"`, "the agent token cc is retired", "provision"}},
-		{"bare legacy name, record exists", []string{"add", "early", "--label", "zone=green"}, nil,
+		{"bare legacy name, record exists", []string{"add", "early", "--label", "net=green"}, nil,
 			[]string{`name rule "no-cc"`, "the agent token cc is retired"}},
-		{"bare name that is a reserved agent token", []string{"add", "mash", "--label", "zone=green"}, nil,
+		{"bare name that is a reserved agent token", []string{"add", "mash", "--label", "net=green"}, nil,
 			[]string{`name rule "no-cc"`, "the agent token cc is retired"}},
-		{"three-token flat key with agent cc", []string{"add", "cc_acme_gone", "--label", "zone=green"}, nil, []string{"endpoint name"}},
-		{"three-token flat key with agent mash", []string{"add", "mash_acme_gone", "--label", "zone=green"}, nil, []string{"endpoint name"}},
-		{"dotted display form with agent cc", []string{"add", "cc.acme.gone", "--label", "zone=green"}, nil, []string{"endpoint name"}},
-		{"configured agent_token cc", []string{"add", "fresh", "--label", "zone=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "cc"}, []string{refusal}},
-		{"configured agent_token mash", []string{"add", "fresh", "--label", "zone=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "mash"}, []string{refusal}},
-		{"configured agent_token with an ordinary token", []string{"add", "fresh", "--label", "zone=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "claude"}, []string{refusal}},
+		{"three-token flat key with agent cc", []string{"add", "cc_acme_gone", "--label", "net=green"}, nil, []string{"endpoint name"}},
+		{"three-token flat key with agent mash", []string{"add", "mash_acme_gone", "--label", "net=green"}, nil, []string{"endpoint name"}},
+		{"dotted display form with agent cc", []string{"add", "cc.acme.gone", "--label", "net=green"}, nil, []string{"endpoint name"}},
+		{"configured agent_token cc", []string{"add", "fresh", "--label", "net=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "cc"}, []string{refusal}},
+		{"configured agent_token mash", []string{"add", "fresh", "--label", "net=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "mash"}, []string{refusal}},
+		{"configured agent_token with an ordinary token", []string{"add", "fresh", "--label", "net=green"}, map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": "claude"}, []string{refusal}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,9 +95,6 @@ func TestConfigAMashctlAdd(t *testing.T) {
 		})
 	}
 	h.assertNothingCreated("fresh", "mash", "cc_acme_gone", "mash_acme_gone", "cc.acme.gone")
-	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
-		t.Error("a refused add changed the policy")
-	}
 	if got := h.records(); strings.Join(got, ",") != strings.Join(recsBefore, ",") {
 		t.Errorf("a refused add changed the records: %v -> %v", recsBefore, got)
 	}
@@ -106,7 +102,7 @@ func TestConfigAMashctlAdd(t *testing.T) {
 
 // `mashctl provision` is the same entry point through the other verb: the rule is applied through ctl.Run's admin.
 func TestConfigAMashctlProvision(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
 	recsBefore := h.records()
 	for _, name := range []string{"fresh", "mash", "gone"} {
@@ -126,7 +122,6 @@ func TestConfigAMashctlProvision(t *testing.T) {
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
 		{"list"}, {"init"}, {"limits"}, {"provision", "x", "--user", "U", "--account", "A"},
-		{"policy", "check"}, {"policy", "show"}, {"policy", "apply", "--dry-run"}, {"policy", "drift"},
 		{"add", "x"}, {"label", "x", "k=v"}, {"retire", "x"}, {"reissue", "x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
@@ -169,16 +164,16 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 
 // With a rule file, name_rule_required lets mashctl start; the file decides what is refused.
 func TestConfigAMashctlRequiredWithFile(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	h.env["MASH_NAME_RULE_REQUIRED"] = "true"
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
-	if _, errb, code := h.run("add", "fresh", "--label", "zone=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
+	if _, errb, code := h.run("add", "fresh", "--label", "net=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
 		t.Fatalf("required with configuration A: %d %q", code, errb)
 	}
 	// The control: the same requirement with a file that refuses nothing starts and adds.
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "permissive.json", configAMashctlEmpty)
-	if out, errb, code := h.run("add", "fresh", "--label", "zone=green"); code != 0 {
+	if out, errb, code := h.run("add", "fresh", "--label", "net=green"); code != 0 {
 		t.Fatalf("required with a permissive file: %d %q %q", code, out, errb)
 	}
 }
@@ -187,7 +182,7 @@ func TestConfigAMashctlRequiredWithFile(t *testing.T) {
 // directions: a permissive config.json does not weaken an environment that names configuration A, and a
 // configuration-A config.json does not override a permissive environment.
 func TestConfigAMashctlRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	a := writeRule(t, h.dir, "rule-a.json", configAMashctlRule)
 	permissive := writeRule(t, h.dir, "rule-none.json", configAMashctlEmpty)
@@ -195,7 +190,7 @@ func TestConfigAMashctlRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	// config.json names the permissive file; the environment names configuration A: refused.
 	writeRule(t, h.dir, "config.json", `{"name_rule_file":"`+permissive+`"}`)
 	h.env["MASH_NAME_RULE_FILE"] = a
-	if _, errb, code := h.run("add", "fresh", "--label", "zone=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
+	if _, errb, code := h.run("add", "fresh", "--label", "net=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
 		t.Fatalf("environment configuration A over a permissive config.json: %d %q", code, errb)
 	}
 	h.assertNothingCreated("fresh")
@@ -203,13 +198,13 @@ func TestConfigAMashctlRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	// config.json alone names configuration A: refused (the file key is read).
 	delete(h.env, "MASH_NAME_RULE_FILE")
 	writeRule(t, h.dir, "config.json", `{"name_rule_file":"`+a+`"}`)
-	if _, errb, code := h.run("add", "fresh", "--label", "zone=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
+	if _, errb, code := h.run("add", "fresh", "--label", "net=green"); code == 0 || !strings.Contains(errb, `name rule "no-cc"`) {
 		t.Fatalf("configuration A from config.json alone: %d %q", code, errb)
 	}
 
 	// config.json names configuration A; the environment names the permissive file: the environment wins, add succeeds.
 	h.env["MASH_NAME_RULE_FILE"] = permissive
-	if out, errb, code := h.run("add", "fresh", "--label", "zone=green"); code != 0 {
+	if out, errb, code := h.run("add", "fresh", "--label", "net=green"); code != 0 {
 		t.Fatalf("a permissive environment over configuration A in config.json: %d %q %q", code, out, errb)
 	}
 }
