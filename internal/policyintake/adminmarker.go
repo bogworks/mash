@@ -19,8 +19,8 @@ func (m AdminMarker) Current(ctx context.Context) (store.Marker, uint64, bool, e
 }
 
 // SetNext records the pending next submitter.
-func (m AdminMarker) SetNext(ctx context.Context, next string, expectedRev, ownRev uint64) (uint64, error) {
-	_, rev, err := m.Admin.SetNextSubmitter(ctx, next, expectedRev, ownRev)
+func (m AdminMarker) SetNext(ctx context.Context, next string, expectedRev, ownRev uint64, held []string) (uint64, error) {
+	_, rev, err := m.Admin.SetNextSubmitter(ctx, next, expectedRev, ownRev, held)
 	return rev, moved(err)
 }
 

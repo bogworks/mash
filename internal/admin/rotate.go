@@ -33,19 +33,38 @@ var (
 )
 
 // ValidateNextSubmitter reports why next may not become the next submitter of the account whose marker is m: it must be
-// an nkey public key, not the account's own key, not the current submitter and not a key mash holds (the admin user
-// recorded in the marker and the exempt users). It never echoes a key.
-func ValidateNextSubmitter(account string, m store.Marker, next string) error {
+// an nkey public key, not the account's own key, not the current submitter and not a key mash holds: the admin user
+// recorded in the marker, the exempt users and held, the public keys of the key store (operator, system, account,
+// zone and admin keys: see ctlkeys.Authority.HeldKeys). It never echoes a key.
+func ValidateNextSubmitter(account string, m store.Marker, next string, held []string) error {
 	if err := validateSubmitterKey(account, next); err != nil {
 		return err
 	}
 	if next == m.Submitter {
 		return ErrNextIsCurrent
 	}
-	if next == m.By || slices.Contains(m.Exempt, next) {
+	if next == m.By || slices.Contains(m.Exempt, next) || slices.Contains(held, next) {
 		return ErrNextIsMashKey
 	}
 	return nil
+}
+
+// markerWriteFault, when set (tests), wraps the marker write: it decides whether write runs and what the caller sees,
+// so a test can commit the write and lose the answer, or fail without committing.
+var markerWriteFault func(write func() (uint64, error)) (uint64, error)
+
+// ambiguous reports whether a write error leaves it unknown whether the write was committed: anything that is not a
+// definite refusal by the server (a compare-and-set conflict).
+func ambiguous(err error) bool {
+	return err != nil && !errors.Is(err, jetstream.ErrKeyExists) && !isWrongLastSeq(err)
+}
+
+// sameEndState reports whether got is the marker want was meant to become: every field equal but the time.
+func sameEndState(got, want store.Marker) bool {
+	got.AdoptedAt, want.AdoptedAt = "", ""
+	return got.V == want.V && got.Account == want.Account && got.Submitter == want.Submitter &&
+		got.NextSubmitter == want.NextSubmitter && got.By == want.By && got.Action == want.Action &&
+		slices.Equal(got.Exempt, want.Exempt)
 }
 
 // rotateMarker rewrites the marker through change, which returns the new marker or the marker unchanged (done true:
@@ -53,7 +72,10 @@ func ValidateNextSubmitter(account string, m store.Marker, next string) error {
 // the stored marker is at another revision the call fails with ErrMarkerMoved and writes nothing, except that a
 // marker at ownRev (the revision of the caller's own earlier write of the same change, 0 for none) is accepted, so
 // that a retry after a lost answer finds its end state and writes nothing. It returns the marker and its revision
-// (the new one after a write).
+// (the new one after a write). A write that fails with an ambiguous error (a timeout, no answer, a broken
+// connection) may have been committed: the marker is read back, and if it is the intended end state at exactly the
+// revision after expectedRev (only this write can be there) the write counts as done; if it is at expectedRev the
+// write did not happen and the error is returned; at any other revision or state it is ErrMarkerMoved.
 func (a *Admin) rotateMarker(ctx context.Context, expectedRev, ownRev uint64, change func(cur store.Marker) (next store.Marker, done bool, err error)) (store.Marker, uint64, error) {
 	kv, err := a.existingAdoptionKV(ctx)
 	if err != nil {
@@ -85,12 +107,34 @@ func (a *Admin) rotateMarker(ctx context.Context, expectedRev, ownRev uint64, ch
 	if err != nil {
 		return store.Marker{}, 0, err
 	}
-	newRev, err := kv.Update(ctx, store.AdoptionKey, b, rev)
+	write := func() (uint64, error) { return kv.Update(ctx, store.AdoptionKey, b, rev) }
+	if f := markerWriteFault; f != nil {
+		write = func() (uint64, error) {
+			return f(func() (uint64, error) { return kv.Update(ctx, store.AdoptionKey, b, rev) })
+		}
+	}
+	newRev, err := write()
 	if err == nil {
 		return next, newRev, nil
 	}
 	if errors.Is(err, jetstream.ErrKeyExists) || isWrongLastSeq(err) {
 		return store.Marker{}, 0, ErrMarkerMoved
+	}
+	if ambiguous(err) {
+		// The write may have been committed with its answer lost: read it back.
+		back, backRev, found, rerr := readMarker(ctx, kv)
+		switch {
+		case rerr != nil:
+			return store.Marker{}, 0, fmt.Errorf("mash: adoption marker: %w", err)
+		case !found:
+			return store.Marker{}, 0, ErrMarkerMoved
+		case backRev == rev:
+			// Not committed: a clean failure.
+		case backRev == rev+1 && sameEndState(back, next):
+			return back, backRev, nil
+		default:
+			return store.Marker{}, 0, ErrMarkerMoved
+		}
 	}
 	return store.Marker{}, 0, fmt.Errorf("mash: adoption marker: %w", err)
 }
@@ -102,10 +146,11 @@ func (a *Admin) rotateMarker(ctx context.Context, expectedRev, ownRev uint64, ch
 // then). Setting the key that is already pending writes nothing, but only when the marker is at expectedRev or at
 // ownRev, the revision of the caller's own earlier write (0 for none). It returns the marker and its revision. Every
 // revision stays in the bucket's history as the audit trail. The marker's other fields, the exempt set among them,
-// are kept.
-func (a *Admin) SetNextSubmitter(ctx context.Context, next string, expectedRev, ownRev uint64) (store.Marker, uint64, error) {
+// are kept. held is the public keys mash holds (see ValidateNextSubmitter): next among them is ErrNextIsMashKey and
+// nothing is written; a caller that cannot read the key store must not call at all (fail closed).
+func (a *Admin) SetNextSubmitter(ctx context.Context, next string, expectedRev, ownRev uint64, held []string) (store.Marker, uint64, error) {
 	return a.rotateMarker(ctx, expectedRev, ownRev, func(cur store.Marker) (store.Marker, bool, error) {
-		if err := ValidateNextSubmitter(cur.Account, cur, next); err != nil {
+		if err := ValidateNextSubmitter(cur.Account, cur, next, held); err != nil {
 			return store.Marker{}, false, err
 		}
 		if cur.NextSubmitter == next {

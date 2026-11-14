@@ -113,7 +113,7 @@ type fakeApplier struct {
 	onApply func(ctx context.Context)
 }
 
-func (f *fakeApplier) Apply(ctx context.Context, d policyintake.Doc) (policyintake.Result, error) {
+func (f *fakeApplier) Apply(ctx context.Context, d policyintake.Doc, _ policyintake.Guard) (policyintake.Result, error) {
 	f.mu.Lock()
 	hook := f.onApply
 	f.mu.Unlock()
@@ -191,7 +191,7 @@ func (f *flakyMarker) Current(ctx context.Context) (store.Marker, uint64, bool, 
 	return f.MarkerStore.Current(ctx)
 }
 
-func (f *flakyMarker) SetNext(ctx context.Context, next string, expectedRev, ownRev uint64) (uint64, error) {
+func (f *flakyMarker) SetNext(ctx context.Context, next string, expectedRev, ownRev uint64, held []string) (uint64, error) {
 	f.mu.Lock()
 	f.setNextCalls++
 	if f.setNextFails > 0 {
@@ -200,7 +200,7 @@ func (f *flakyMarker) SetNext(ctx context.Context, next string, expectedRev, own
 		return 0, errors.New("marker write down")
 	}
 	f.mu.Unlock()
-	return f.MarkerStore.SetNext(ctx, next, expectedRev, ownRev)
+	return f.MarkerStore.SetNext(ctx, next, expectedRev, ownRev, held)
 }
 
 func (f *flakyMarker) Promote(ctx context.Context, next string, expectedRev, ownRev uint64) (uint64, error) {
@@ -282,6 +282,7 @@ type rig struct {
 	logbuf    *syncBuf
 	inForceFn func(context.Context) (string, error)
 	by        string
+	heldFn    func() ([]string, error)
 }
 
 type syncBuf struct {
@@ -322,12 +323,13 @@ func newRig(t *testing.T, adopt bool) *rig {
 	r.marker = &flakyMarker{MarkerStore: policyintake.AdminMarker{Admin: a}}
 	r.lock = &testLock{inner: policyintake.AdminLock{Admin: a}}
 	r.inForceFn = r.app.inForce
+	r.heldFn = func() ([]string, error) { return nil, nil }
 	return r
 }
 
 func (r *rig) intake() *policyintake.Intake {
 	return &policyintake.Intake{Account: r.account, Range: testRange, KV: r.kv, Marker: r.marker, Lock: r.lock, Decode: decode,
-		InForce: func(ctx context.Context) (string, error) { return r.inForceFn(ctx) }, Apply: r.app, Report: r.rep,
+		InForce: func(ctx context.Context) (string, error) { return r.inForceFn(ctx) }, Apply: r.app, Report: r.rep, HeldKeys: r.heldFn,
 		Log: log.New(r.logbuf, "", 0), RetryInitial: retryInitial, RetryMax: retryMax}
 }
 

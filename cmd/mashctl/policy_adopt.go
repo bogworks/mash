@@ -12,7 +12,6 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -111,7 +110,7 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 	if err != nil {
 		return fail("%v", err)
 	}
-	account, held, err := heldKeys(keys)
+	account, held, err := keys.HeldKeys()
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -181,44 +180,6 @@ func runPolicyAdopt(args []string, env func(string) string, lookup config.Lookup
 // adoptedNote says what an adopted account cannot do yet, so nobody is surprised by it.
 const adoptedNote = "note: from now on mashctl refuses a direct policy apply, add, reissue, label, set-meta labels, set-zone and retire on this account. " +
 	"This version has no list-set intake and no un-adopt command (un-adoption is not supported yet), so the account's policy cannot be changed until the intake exists."
-
-// heldKeys is the account's public key and every public key the key store holds (operator, system, account and every
-// zone key), each with what it is. A submitter must not be one of them: it is a key the outside system holds. Keys the
-// store does not have (a store of a server mash did not stand up has no operator or system key) are skipped.
-func heldKeys(ks *ctlkeys.Authority) (account string, held map[string]string, err error) {
-	held = map[string]string{}
-	add := func(kp nkeys.KeyPair, pub, what string) {
-		kp.Wipe()
-		held[pub] = what
-	}
-	if kp, pub, err := ks.Operator(); err == nil {
-		add(kp, pub, "the operator key")
-	} else if !errors.Is(err, ctlkeys.ErrNoOperatorKey) {
-		return "", nil, err
-	}
-	if kp, pub, err := ks.System(); err == nil {
-		add(kp, pub, "the system account key")
-	} else if !errors.Is(err, ctlkeys.ErrNoSystemKey) {
-		return "", nil, err
-	}
-	kp, account, err := ks.Account()
-	if err != nil {
-		return "", nil, err
-	}
-	add(kp, account, "the account's own key")
-	zones, err := ks.Zones()
-	if err != nil {
-		return "", nil, err
-	}
-	for _, z := range zones {
-		pub, err := ks.ZonePublic(z)
-		if err != nil {
-			return "", nil, err
-		}
-		held[pub] = "the signing key of zone " + z
-	}
-	return account, held, nil
-}
 
 // adoptionView is `policy adopt --show --json`.
 type adoptionView struct {

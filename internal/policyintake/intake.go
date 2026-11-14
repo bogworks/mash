@@ -7,8 +7,11 @@
 // around the whole processing of one revision: it reads the marker and its revision, verifies, applies and records a
 // rotation, then releases. A recovery adopt therefore waits for an apply in flight and cannot interleave. As a second
 // guard, just before applying the intake checks that it still holds the lock and that the marker is still at the
-// revision it verified under; if not it applies nothing and processes the revision again from the top. The rotation
-// writes are bound to the same revision and fail with ErrMarkerMoved when it changed.
+// revision it verified under; if not it applies nothing and processes the revision again from the top. The same check
+// is handed to the applier as a Guard, which calls it before each write it cannot undo: a lock that expires during a
+// long apply stops the apply at the next write, and the revision is processed again with the marker as it now is.
+// The rotation writes are bound to the same revision and fail with ErrMarkerMoved when it changed. A planned
+// rotation's next key is checked against the keys mash holds before the apply and again at the marker write.
 //
 // The checks run in a fixed order and the first that fails refuses the revision (never applying it): the account
 // must be adopted, the document must not already be the one in force, it must decode and verify against the key the
@@ -60,6 +63,8 @@ const (
 	RetryInitialDefault = 2 * time.Second
 	// RetryMaxDefault is the longest wait between two retries.
 	RetryMaxDefault = time.Minute
+	// GuardTimeoutDefault bounds one Guard.Before call (a lock check and a marker read).
+	GuardTimeoutDefault = 10 * time.Second
 	// DetailMaxBytes bounds the detail of a refusal.
 	DetailMaxBytes = 500
 	// shortKeyLen is how much of a public key a log line or a refusal may show.
@@ -106,8 +111,10 @@ type MarkerStore interface {
 	// SetNext records next as the pending next submitter (marker action rotate), only if the marker is still at
 	// expectedRev: any other revision is ErrMarkerMoved and nothing is written. ownRev is the revision of this
 	// caller's own earlier write of the same change, 0 for none; a marker already in the end state at expectedRev
-	// or ownRev writes nothing. It returns the marker's revision after the call.
-	SetNext(ctx context.Context, next string, expectedRev, ownRev uint64) (rev uint64, err error)
+	// or ownRev writes nothing. held is the public keys mash holds: next among them is refused (a wrapped
+	// ErrMarkerMoved, nothing written). A write whose answer is lost is read back and recognised (see
+	// admin.SetNextSubmitter). It returns the marker's revision after the call.
+	SetNext(ctx context.Context, next string, expectedRev, ownRev uint64, held []string) (rev uint64, err error)
 	// Promote makes next, the pending one, the submitter and clears it (marker action rotate), bound as SetNext is.
 	Promote(ctx context.Context, next string, expectedRev, ownRev uint64) (rev uint64, err error)
 }
@@ -122,9 +129,19 @@ type AccountLock interface {
 	Lock(ctx context.Context) (release Release, held func(ctx context.Context) error, err error)
 }
 
+// Guard is the check an Applier makes before each write it cannot undo. Before returns nil only while the intake
+// still holds the account lock and the adoption marker is still at the revision the document was verified under;
+// any error means stop at once and return it. what names the step ("push", "revoke", "provision", "commit",
+// "rollback", ...) for the log. Every call reads the marker afresh and is bound by the intake's guard timeout.
+type Guard interface {
+	Before(ctx context.Context, what string) error
+}
+
 // Applier takes a verified document. It writes the status value of everything it handles (stale base, size, gate).
+// It calls g.Before before each write and aborts with the error when it fails; the intake then processes the
+// revision again from the top, so the marker as it now stands decides.
 type Applier interface {
-	Apply(ctx context.Context, d Doc) (Result, error)
+	Apply(ctx context.Context, d Doc, g Guard) (Result, error)
 }
 
 // Refusal is what the intake reports for a revision it did not apply.
@@ -165,8 +182,13 @@ type Intake struct {
 	InForce func(ctx context.Context) (receivedSHA256 string, err error)
 	Apply   Applier
 	Report  Reporter
-	Log     *log.Logger
-	Now     func() time.Time
+	// HeldKeys returns the public keys mash holds (operator, system, account, zone and admin keys). A planned
+	// rotation's next submitter among them is refused. An error refuses the rotation: the intake fails closed.
+	HeldKeys func() ([]string, error)
+	// GuardTimeout bounds one Guard.Before call; zero is GuardTimeoutDefault.
+	GuardTimeout time.Duration
+	Log          *log.Logger
+	Now          func() time.Time
 	// RetryInitial and RetryMax override the retry waits; zero keeps the defaults.
 	RetryInitial, RetryMax time.Duration
 
@@ -272,8 +294,8 @@ func (in *Intake) Run(ctx context.Context) error {
 	switch {
 	case in.Account == "" || in.Range == "":
 		return errors.New("policyintake: Account and Range are required")
-	case in.KV == nil || in.Marker == nil || in.Lock == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil:
-		return errors.New("policyintake: KV, Marker, Lock, Decode, InForce, Apply and Report are required")
+	case in.KV == nil || in.Marker == nil || in.Lock == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil || in.HeldKeys == nil:
+		return errors.New("policyintake: KV, Marker, Lock, Decode, InForce, Apply, Report and HeldKeys are required")
 	}
 	w, err := in.KV.Watch(ctx, in.key())
 	if err != nil {
@@ -480,8 +502,17 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 	// 6. A planned rotation's next key is validated before anything is applied.
 	startRotation := !pending && doc.NextSubmitter != ""
 	if startRotation {
-		if err := admin.ValidateNextSubmitter(in.Account, marker, doc.NextSubmitter); err != nil {
-			in.refuse(ctx, doc.Generation, raw, StageDocument, "next_submitter is not acceptable: "+err.Error())
+		heldKeys, err := in.HeldKeys()
+		if err != nil {
+			in.refuse(ctx, doc.Generation, raw, StageDocument, "next_submitter cannot be checked: the keys mash holds cannot be read: "+err.Error())
+			return false
+		}
+		if err := admin.ValidateNextSubmitter(in.Account, marker, doc.NextSubmitter, heldKeys); err != nil {
+			detail := "next_submitter is not acceptable: " + err.Error()
+			if errors.Is(err, admin.ErrNextIsMashKey) {
+				detail = "next_submitter is a key mash holds"
+			}
+			in.refuse(ctx, doc.Generation, raw, StageDocument, detail)
 			return false
 		}
 	}
@@ -502,8 +533,13 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 	if !nowFound || nowRev != markerRev {
 		return true
 	}
-	res, err := in.Apply.Apply(ctx, doc)
+	g := &guard{in: in, held: held, markerRev: markerRev}
+	res, err := in.Apply.Apply(ctx, doc, g)
 	if err != nil {
+		if g.refused != nil {
+			in.logf("policyintake: revision %d: the apply stopped before %s: %v; the revision is processed again", rev, g.step, redact(g.refused.Error()))
+			return true
+		}
 		if res.StatusWritten {
 			in.logf("policyintake: generation %d: apply failed, status written by the applier: %v", doc.Generation, redact(err.Error()))
 		} else {
@@ -532,10 +568,57 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 		}, marker.NextSubmitter))
 	case startRotation:
 		in.finishRotation(ctx, "recording the next submitter ("+short(doc.NextSubmitter)+")", write(func(n string) (uint64, error) {
-			return in.Marker.SetNext(ctx, n, markerRev, own)
+			heldKeys, err := in.HeldKeys() // read again at the write: an unreadable store writes nothing
+			if err != nil {
+				return 0, fmt.Errorf("the keys mash holds cannot be read: %w", err)
+			}
+			return in.Marker.SetNext(ctx, n, markerRev, own, heldKeys)
 		}, doc.NextSubmitter))
 	}
 	return false
+}
+
+// guard is the Guard handed to the applier for one pass: it holds the lock check and the marker revision the document
+// was verified under.
+type guard struct {
+	in        *Intake
+	held      func(context.Context) error
+	markerRev uint64
+	// refused is the first refusal and step the step it was made before; set when Before fails.
+	refused error
+	step    string
+}
+
+// Before implements Guard: the lock must still be ours and the marker unmoved, read afresh, within the guard timeout.
+func (g *guard) Before(ctx context.Context, what string) error {
+	if g.refused != nil {
+		return g.refused
+	}
+	d := g.in.GuardTimeout
+	if d <= 0 {
+		d = GuardTimeoutDefault
+	}
+	ctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	err := g.check(ctx)
+	if err != nil {
+		g.refused, g.step = err, what
+	}
+	return err
+}
+
+func (g *guard) check(ctx context.Context) error {
+	if err := g.held(ctx); err != nil {
+		return fmt.Errorf("the account lock is no longer held: %w", err)
+	}
+	_, rev, found, err := g.in.Marker.Current(ctx)
+	switch {
+	case err != nil:
+		return fmt.Errorf("the adoption marker cannot be read: %w", err)
+	case !found || rev != g.markerRev:
+		return errors.New("the adoption marker changed since the document was verified")
+	}
+	return nil
 }
 
 // finishRotation writes the marker after an applied document, retrying until it lands: the rotation must not be lost.

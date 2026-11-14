@@ -63,6 +63,18 @@ delivered revision, one at a time and in order.
   `ErrMarkerMoved` when it differs (they accept a marker already in the end state only at that revision or at the
   revision of the intake's own earlier write); the intake then logs loudly and abandons the rotation, never
   retrying blindly, so the key a recovery adopt set stays the expected signer.
+* **The apply is guarded before each write.** The same check (the lock still held, the marker read afresh and still at
+  the revision verified under, bounded by a timeout) is handed to the applier as a `Guard`; the applier calls
+  `Before(ctx, step)` ahead of each write it cannot undo and aborts with the error. A lock that expires during a long
+  apply therefore cannot let the old signer's document keep writing after a recovery adopt: the intake logs the step
+  and processes the revision again, and the new marker decides.
+* **A next submitter mash holds is refused.** A `next_submitter` that is any key the key store holds (operator,
+  system, account and zone keys, and the admin user), as `policy adopt` already refuses for a submitter, is refused at
+  stage `document` before the apply and again at the marker write. The held keys come from one shared helper
+  (`ctlkeys.Authority.HeldKeys`). A key store that cannot be read refuses (fail closed).
+* **An ambiguous marker write is read back.** If the write fails without a definite refusal (a timeout, no answer, a
+  broken connection), the marker is read: when it is the intended end state at exactly the revision after the one
+  written against, the write was our own and counts as done; otherwise the marker moved and the rotation is abandoned.
 * **The collaborators are interfaces.** Decoding and verifying (`Decode`), reading what is in force (`InForce`),
   applying (`Applier`), reporting (`Reporter`) and the marker (`MarkerStore`) are left open, and an adapter over the
   apply stack is written when it lands. The real `MarkerStore` is over the admin connection.
