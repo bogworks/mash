@@ -292,5 +292,5 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
 	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
-		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers, BeforePush: func(context.Context) error { return guard.Held() }}, stdout)
+		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers, BeforeWrite: func(_ context.Context, step string) error { return guard.Before(step) }}, stdout)
 }

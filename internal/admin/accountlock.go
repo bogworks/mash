@@ -3,7 +3,9 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -72,4 +74,34 @@ func (k *AccountLock) Release() {
 		return
 	}
 	k.once.Do(func() { k.l.release(context.Background()) })
+}
+
+// beforeHook is a test seam: called with the step's name at the start of every Before, so a test can drop the lock
+// right before step k. It does nothing in production.
+var beforeHook atomic.Pointer[func(step string)]
+
+// SetBeforeHook installs a function called with the step name at the start of every Before, and returns the call that
+// removes it. It is for tests, which use it to lose the lock right before a chosen write.
+func SetBeforeHook(f func(step string)) (restore func()) {
+	beforeHook.Store(&f)
+	return func() { beforeHook.Store(nil) }
+}
+
+// Before is Held for a named step: a guarded command calls it immediately before each write or irreversible step
+// (a record, a key file, a creds file, a revocation, the policy file, the account JWT push) and stops when it returns
+// an error, which names the step that was not taken. A nil lock is a no-op.
+//
+// A check cannot close the window between it and the write: a lock lost in those microseconds (one request) can still
+// let one write through. The next guarded command reads the marker again.
+func (k *AccountLock) Before(ctx context.Context, step string) error {
+	if k == nil {
+		return nil
+	}
+	if h := beforeHook.Load(); h != nil {
+		(*h)(step)
+	}
+	if err := k.l.check(ctx); err != nil {
+		return fmt.Errorf("stopped before %s, an adoption or another policy change may have happened: %w", step, err)
+	}
+	return nil
 }

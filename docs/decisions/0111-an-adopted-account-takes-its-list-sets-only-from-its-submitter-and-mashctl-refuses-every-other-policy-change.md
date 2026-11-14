@@ -103,11 +103,21 @@ get the lock within 30 seconds refuses with `another policy change or an adoptio
 (exit 1); adopt refuses the same way and writes nothing. Read-only commands never take it. Unlike the limits locks, the
 account lock extends its own expiry in the background every 10 seconds while held (the expiry stays 30 seconds), because
 a `policy apply` with its gate, a `reissue` of many names or a `retire` can run for minutes. If the lock is lost anyway (a
-holder stalled past its expiry and another took the name), each guarded command checks `Held` before its writes and stops:
-`policy apply` before it pushes the account JWT, `add` before it makes a key, the issue record, the directory record, the
-creds file and the policy edit (rolling back what it wrote), `reissue` before each of its writes and each name, `retire`
-before the revocation and removal and before the policy edit and the creds move, `label` and `unlabel` before the policy
-edit and the directory label update, and `set-meta`, `set-zone` and `provision` before their single write.
+holder stalled past its expiry and another took the name), each guarded command checks the lock immediately before every
+write or irreversible step (`Guard.Before(step)`), and stops, naming the step it did not take and what it had done. The
+steps, by command: `policy apply` before the creation of each new zone key file and before the push of the account JWT;
+`policy repair` the same two, and before each directory fix (a zone change or a label change) of its directory step,
+where a lost lock leaves the remaining fixes unmade and says which were done; `add` before the zone key, the issue
+record, the directory record and inbox, the creds file and the policy edit (rolling back what it wrote, except the
+append-only issue record); `reissue` before the issue record, the staging of the new creds, the revocation of the old
+user key, the record of that revocation, the directory record update and the creds file replacement (a rotation stopped
+after staging leaves the old key and creds untouched, and running `reissue` again resumes it); `retire` before the
+removal of the record and inbox, the revocation, the record of the revocation, the policy edit and the creds move;
+`label` and `unlabel` before the policy edit and the directory label update; and `set-meta`, `set-zone` and
+`provision` before their single write. The same table is in `docs/mashctl.md`, and a test drops the lock before each
+step of each command and requires the command to stop before that write. The residual window is honest: between a check
+and its write (microseconds to one request) a lost lock can still let one write through. The next guarded command reads
+the marker again and is refused on an adopted account.
 
 ### Consequences
 

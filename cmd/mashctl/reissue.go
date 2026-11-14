@@ -497,14 +497,14 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 			return nil, false, err
 		}
 		defer clear(m.Creds)
-		if err := guard.Held(); err != nil { // the account lock, before the first write
+		if err := guard.Before("the issue record"); err != nil { // the account lock, before the first write
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
 		}
 		if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
 		}
-		if err := guard.Held(); err != nil {
-			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
+		if err := guard.Before("the creds file replacement"); err != nil {
+			return nil, false, fmt.Errorf("%v; the creds file was not rewritten (the new key is recorded as issued; run mashctl reissue %s again)", err, name)
 		}
 		if err := lock.Check(ctx); err != nil {
 			return nil, false, fmt.Errorf("%v; the creds file was not rewritten", err)
@@ -536,7 +536,7 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	defer clear(m.Creds)
 	// The new key is in the issue record before it is staged or written anywhere: a key that can connect
 	// is always recorded. The old key's record stays (revocation is separate; the record is append-only).
-	if err := guard.Held(); err != nil { // the account lock, before the first write of the rotation
+	if err := guard.Before("the issue record of the new key"); err != nil { // the account lock, before the first write of the rotation
 		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
 	}
 	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeRotation)); err != nil {
@@ -547,11 +547,14 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	if err := nameLockCheck(ctx, lock); err != nil {
 		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
 	}
-	if err := guard.Held(); err != nil {
-		return nil, false, fmt.Errorf("%v; nothing was staged or changed", err)
+	if err := guard.Before("the staging of the new creds"); err != nil {
+		return nil, false, fmt.Errorf("%v; the new key is recorded as issued but nothing was staged, and the old creds and key are unchanged; run mashctl reissue %s again", err, name)
 	}
 	if err := stageCreds(p, m.Creds); err != nil {
 		return nil, false, fmt.Errorf("the new creds could not be staged in %s (%v); nothing was changed", sp, err)
+	}
+	if err := guard.Before("the revocation of the old user key"); err != nil {
+		return nil, false, fmt.Errorf("%v; the new key is recorded as issued and its creds are staged in %s, but the old key %s... is not revoked, the directory record and the old creds file are unchanged (the old creds still work); run mashctl reissue %s again", err, sp, ctl.ShortKey(oldPub), name)
 	}
 	if err := revokeUsers(ctx, cfg, env, servers, []string{oldPub}, stdout, nil); err != nil {
 		why := "the creds file's JWT is wider than the policy now allows (" + d.text() + ")"
@@ -560,9 +563,12 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 		}
 		return nil, false, fmt.Errorf("%s, so its user key must be replaced and the old key revoked, and the revocation was not confirmed (%v); the directory record and the creds file are unchanged (the old creds still work) and the new key is staged in %s; run the reissue again", why, err, sp)
 	}
-	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
 	finish := fmt.Sprintf("the old key %s... is revoked, so the endpoint is cut off; the rotation is staged in %s, and running mashctl reissue %s again finishes it", ctl.ShortKey(oldPub), sp, name)
-	if err := guard.Held(); err != nil { // the old key is revoked: the staged rotation is finished by a later run
+	if err := guard.Before("the record of the revocation"); err != nil { // the old key is revoked: the staged rotation is finished by a later run
+		return nil, false, fmt.Errorf("%s: the revocation was not recorded in the issue record and the directory record was not updated (%v)", finish, err)
+	}
+	ctl.MarkRevoked(ctx, adm, oldPub, reissueNow(), stderr)
+	if err := guard.Before("the directory record update"); err != nil {
 		return nil, false, fmt.Errorf("%s: its directory record was not updated (%v)", finish, err)
 	}
 	if _, err := adm.SetUserLocked(ctx, lock, name, m.AccountPub, oldPub, m.UserPub); err != nil {
@@ -571,7 +577,7 @@ func reissueLocked(ctx context.Context, guard *ctl.Guard, adm *admin.Admin, lock
 	if err := lock.Check(ctx); err != nil {
 		return nil, false, fmt.Errorf("%s: the record names the new key, but %v", finish, err)
 	}
-	if err := guard.Held(); err != nil {
+	if err := guard.Before("the creds file replacement"); err != nil {
 		return nil, false, fmt.Errorf("%s: the record names the new key, but %v", finish, err)
 	}
 	if err := writeCreds(p, m.Creds); err != nil {

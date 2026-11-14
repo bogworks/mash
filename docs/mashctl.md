@@ -125,6 +125,21 @@ On an adopted account these refuse before they touch anything (no policy-file ed
 
 Policy changes and adoption are serialised by an account lock. Every guarded command takes it first, reads the marker, and holds the lock through all of its writes; `policy adopt` takes the same lock for its write. So an adoption waits for a guarded command that is already running (which finishes first), and a command started after the adoption is refused. A command, or `policy adopt`, that cannot take the lock within 30 seconds exits 1 with `another policy change or an adoption is in progress; nothing was changed`: another guarded command or an adoption holds it, so try again in a moment. The lock extends itself while a long command runs; a command that finds the lock lost stops before its next write and says so. Read-only commands never take it.
 
+| Command | Writes after the guard, each preceded by a lock check |
+| --- | --- |
+| `policy apply` | the creation of each new zone's signing key file; the push of the account JWT |
+| `policy repair` | the same two (its apply step); then each directory fix, one check before each zone change and each label change |
+| `add` | the zone key (when new); the issue record; the directory record and inbox; the creds file; the policy file edit |
+| `reissue` (key kept) | the issue record; the creds file replacement |
+| `reissue` (key rotated) | the issue record of the new key; the staging of the new creds; the revocation of the old user key (account JWT push); the record of the revocation; the directory record update; the creds file replacement |
+| `retire` | the removal of the directory record and inbox; the revocation of the user key; the record of the revocation; the policy file edit; the move or removal of the creds file |
+| `label`, `unlabel` | the policy file edit; with `--sync`, the update of the directory labels |
+| `set-meta --label`, `set-zone`, `provision` with a label or zone | the one record write |
+
+A check that fails stops the command before that write and every later one, and the message names the step that was not taken and what was already done (for a reissue: the new key is recorded and its creds are staged, the old key is or is not revoked; run `mashctl reissue NAME` again, which resumes from the staged file). `add` also undoes the record and creds file it wrote (the issue record is append-only and stays). Not preceded by a check: undoing a command's own earlier write on the way out, the removal of a reissue's leftover staged file, and the writes inside one guarded admin call (for example the inbox stream and the record of one `provision`), which are one step.
+
+The residual window is the time between a check and its write, microseconds to one request. A lock lost in that window can still let one write through. The account is not left in an unknown state by it: the next guarded command reads the marker again and is refused if the account is adopted.
+
 The guard needs the server: it reads the marker over the admin connection first. So `policy apply` and `policy repair`, which until now needed only the system credentials, also need the admin credentials. Where no server is configured at all (no `url`, no `MASH_URL`), the one command that can run that way, a `label` or `unlabel` that only edits the policy file, is allowed and says nothing about adoption: mash has nothing to ask. With a server configured and the marker unreadable (no admin credentials, no connection), it refuses.
 
 ## Labels

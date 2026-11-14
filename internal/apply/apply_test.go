@@ -631,14 +631,36 @@ func TestShortLookupRefusesWritesAndWarnsReadOnly(t *testing.T) {
 	}
 }
 
-// A BeforePush that refuses stops the apply right before the push: nothing is pushed, and the output says so.
-func TestBeforePushRefusalPushesNothing(t *testing.T) {
+// A BeforeWrite that refuses stops the apply right before the push: nothing is pushed, and the output says so.
+func TestBeforeWriteRefusalPushesNothing(t *testing.T) {
 	ks, fk, c := setup(t)
 	var out bytes.Buffer
 	stop := errors.New("the account lock was lost")
 	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1,
-		BeforePush: func(context.Context) error { return stop }}, &out)
+		BeforeWrite: func(_ context.Context, step string) error {
+			if strings.Contains(step, "push") {
+				return stop
+			}
+			return nil
+		}}, &out)
 	if code != 1 || fk.pushes != 0 || !strings.Contains(out.String(), "the account lock was lost (nothing was pushed)") {
 		t.Fatalf("%d pushes %d\n%s", code, fk.pushes, out.String())
+	}
+}
+
+// A BeforeWrite that refuses the creation of a zone's signing key stops the apply before the key file is made: no key
+// exists afterwards and nothing is pushed.
+func TestBeforeWriteRefusalCreatesNoKey(t *testing.T) {
+	ks, fk, c := setup(t)
+	var out bytes.Buffer
+	var steps []string
+	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1,
+		BeforeWrite: func(_ context.Context, step string) error {
+			steps = append(steps, step)
+			return errors.New("the account lock was lost")
+		}}, &out)
+	zones, _ := ks.Zones()
+	if code != 1 || fk.pushes != 0 || len(zones) != 0 || len(steps) != 1 || !strings.Contains(steps[0], "creation of the signing key") {
+		t.Fatalf("%d pushes %d zones %v steps %v\n%s", code, fk.pushes, zones, steps, out.String())
 	}
 }

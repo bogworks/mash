@@ -190,7 +190,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 			fmt.Fprintf(stdout, "dry run: would then update the directory labels for %s (connected to nothing)\n", o.name)
 		}
 	} else {
-		if !heldOrStop(guard, verb, stderr) {
+		if !heldOrStop(guard, verb, "the policy file edit", stderr) {
 			return 1
 		}
 		if err := doc.Save(); err != nil {
@@ -242,7 +242,7 @@ func syncLabels(guard *ctl.Guard, o labelOpts, verb, setMeta string, cfg config.
 	for _, k := range o.unset {
 		labels[k] = ""
 	}
-	if err := guard.Held(); err != nil {
+	if err := guard.Before("the update of the directory labels"); err != nil {
 		return retry(err)
 	}
 	if _, err := adm.SetMeta(ctx, o.name, admin.MetaUpdate{Labels: labels}); err != nil {
