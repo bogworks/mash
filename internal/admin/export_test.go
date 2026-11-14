@@ -107,3 +107,10 @@ func SetAfterDirectoryGet(f func(key string)) (prev func(key string)) {
 	prev, afterDirectoryGet = afterDirectoryGet, f
 	return
 }
+
+// SetLockRefresh sets how often a refreshing lock extends its expiry; it returns a func that restores it.
+func SetLockRefresh(d time.Duration) (restore func()) {
+	old := lockRefresh
+	lockRefresh = d
+	return func() { lockRefresh = old }
+}

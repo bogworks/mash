@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -44,6 +45,10 @@ var (
 	// lockSafety is how long before its deadline a held lock stops being used: bound ends the operation's context
 	// then, and check refuses from then on.
 	lockSafety = 5 * time.Second
+
+	// lockRefresh is how often a refreshing lock (the account lock) extends its expiry while held. It is below
+	// lockTTL minus lockSafety, so a lock that refreshes on time never reaches the point where check refuses it.
+	lockRefresh = 10 * time.Second
 )
 
 // ErrLockExpiring is the cause of a bound context that ended because its lock was about to expire.
@@ -71,12 +76,34 @@ type lockValue struct {
 }
 
 // streamLock is a held lock. Release it exactly once.
+//
+// A lock taken with refresh also extends its own expiry in the background (lockRefresh) until released, so an
+// operation of any length may hold it; a refresh that finds the key no longer its own revision marks the lock lost
+// for good and check refuses from then on. A lock without refresh (the limits locks) is valid for lockTTL only.
 type streamLock struct {
-	kv       jetstream.KeyValue
-	name     string
-	key      string
+	kv    jetstream.KeyValue
+	name  string
+	key   string
+	owner string
+
+	mu       sync.Mutex // guards rev, deadline and lost; held across a refresh write and a check read
 	rev      uint64
 	deadline time.Time // local time before the acquiring call plus lockTTL: when this lock may be taken from us
+	lost     bool      // a refresh found the lock gone or taken
+
+	stop chan struct{} // closed by release; nil for a lock without refresh
+	done chan struct{} // closed when the refresh goroutine has ended
+}
+
+// lockBusyError is the error of a lock that stayed held by another until the wait ran out.
+type lockBusyError struct {
+	name  string
+	until time.Time
+}
+
+func (e *lockBusyError) Error() string {
+	return fmt.Sprintf("mash: another admin is changing the limits of %s (lock held until %s); try again",
+		e.name, e.until.UTC().Format(time.RFC3339))
 }
 
 // leaseKV returns the lease bucket, creating it with the configured limits if a deployment from before the lock has
@@ -119,6 +146,12 @@ func lockPause() time.Duration {
 // lockStream takes name's limits lock, waiting up to lockWait for a holder. A lock whose time has passed is taken
 // over with a compare-and-set on its revision, so exactly one of several takers wins.
 func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error) {
+	return a.lockNamed(ctx, name, lockWait, false)
+}
+
+// lockNamed is lockStream with its own wait bound, and with background refresh when refresh is set. A lock still
+// held by another when the wait ends is a *lockBusyError.
+func (a *Admin) lockNamed(ctx context.Context, name string, wait time.Duration, refresh bool) (*streamLock, error) {
 	kv, err := a.leaseKV(ctx)
 	if err != nil {
 		return nil, err
@@ -129,12 +162,12 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 	}
 	owner := hex.EncodeToString(raw[:])
 	key := lockKey(name)
-	giveUp := time.Now().Add(lockWait)
+	giveUp := time.Now().Add(wait)
 	for {
 		start := time.Now() // before the call, so the deadline is never later than the key's expiry
 		rev, err := kv.Create(ctx, key, newLockValue(owner, start))
 		if err == nil {
-			return &streamLock{kv: kv, name: name, key: key, rev: rev, deadline: start.Add(lockTTL)}, nil
+			return newHeldLock(kv, name, key, owner, rev, start, refresh), nil
 		}
 		if !errors.Is(err, jetstream.ErrKeyExists) {
 			return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
@@ -157,7 +190,7 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 			start := time.Now()
 			rev, err := kv.Update(ctx, key, newLockValue(owner, start), e.Revision())
 			if err == nil {
-				return &streamLock{kv: kv, name: name, key: key, rev: rev, deadline: start.Add(lockTTL)}, nil
+				return newHeldLock(kv, name, key, owner, rev, start, refresh), nil
 			}
 			if !isRevisionConflict(err) {
 				return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
@@ -165,8 +198,7 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 			continue // someone else took it first; look again
 		}
 		if !time.Now().Before(giveUp) {
-			return nil, fmt.Errorf("mash: another admin is changing the limits of %s (lock held until %s); try again",
-				name, until.UTC().Format(time.RFC3339))
+			return nil, &lockBusyError{name: name, until: until}
 		}
 		select {
 		case <-ctx.Done():
@@ -176,18 +208,77 @@ func (a *Admin) lockStream(ctx context.Context, name string) (*streamLock, error
 	}
 }
 
+// newHeldLock builds the handle of a lock just acquired at start and, with refresh, starts its refresh goroutine.
+func newHeldLock(kv jetstream.KeyValue, name, key, owner string, rev uint64, start time.Time, refresh bool) *streamLock {
+	l := &streamLock{kv: kv, name: name, key: key, owner: owner, rev: rev, deadline: start.Add(lockTTL)}
+	if refresh {
+		l.stop, l.done = make(chan struct{}), make(chan struct{})
+		go l.refreshLoop()
+	}
+	return l
+}
+
+// refreshLoop extends the lock's expiry every lockRefresh until release.
+func (l *streamLock) refreshLoop() {
+	defer close(l.done)
+	t := time.NewTicker(lockRefresh)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.stop:
+			return
+		case <-t.C:
+			l.refreshOnce()
+		}
+	}
+}
+
+// refreshOnce rewrites the lock key with a new expiry, as a compare-and-set on the revision it holds. A transient
+// failure is retried at the next tick (check refuses meanwhile if the deadline gets close); a conflict or a missing
+// key means the lock was taken or removed, and it is lost for good.
+func (l *streamLock) refreshOnce() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lost {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockCheckTimeout)
+	defer cancel()
+	start := time.Now()
+	rev, err := l.kv.Update(ctx, l.key, newLockValue(l.owner, start), l.rev)
+	switch {
+	case err == nil:
+		l.rev, l.deadline = rev, start.Add(lockTTL)
+	case isRevisionConflict(err) || errors.Is(err, jetstream.ErrKeyNotFound):
+		l.lost = true
+	}
+}
+
 // release removes the lock (a revision-aware delete: the lease bucket does not allow rollup, so no purge), but only the revision this admin wrote: if the lock expired and another admin took it
 // over, that admin's lock stays. Errors are ignored: a lock that cannot be removed expires.
 func (l *streamLock) release(ctx context.Context) {
+	if l.stop != nil {
+		close(l.stop)
+		<-l.done
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
 	defer cancel()
-	_ = l.kv.Delete(ctx, l.key, jetstream.LastRevision(l.rev))
+	l.mu.Lock()
+	rev, lost := l.rev, l.lost
+	l.mu.Unlock()
+	if lost {
+		return // not ours any more
+	}
+	_ = l.kv.Delete(ctx, l.key, jetstream.LastRevision(rev))
 }
 
 // bound returns ctx cut off lockSafety before the lock's deadline, with cause ErrLockExpiring. A caller's context
 // that ends earlier keeps its own end.
 func (l *streamLock) bound(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithDeadlineCause(ctx, l.deadline.Add(-lockSafety), ErrLockExpiring)
+	l.mu.Lock()
+	d := l.deadline
+	l.mu.Unlock()
+	return context.WithDeadlineCause(ctx, d.Add(-lockSafety), ErrLockExpiring)
 }
 
 // check refuses unless the lock is still this admin's (the stored revision is the one it wrote) and not within
@@ -195,7 +286,9 @@ func (l *streamLock) bound(ctx context.Context) (context.Context, context.Cancel
 // invalidate.
 func (l *streamLock) check(ctx context.Context) error {
 	lost := fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again", l.name)
-	if !time.Now().Before(l.deadline.Add(-lockSafety)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lost || !time.Now().Before(l.deadline.Add(-lockSafety)) {
 		return lost
 	}
 	if err := ctx.Err(); err != nil {
@@ -210,7 +303,7 @@ func (l *streamLock) check(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %v", lost, err)
 	}
-	if e.Revision() != l.rev || !time.Now().Before(l.deadline.Add(-lockSafety)) {
+	if e.Revision() != l.rev || l.lost || !time.Now().Before(l.deadline.Add(-lockSafety)) {
 		return lost
 	}
 	return nil

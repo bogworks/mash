@@ -107,6 +107,8 @@ func newApplyEnvOpts(t *testing.T, policyYAML string, tweak func(e *applyEnv), o
 	e.env = map[string]string{
 		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_INSECURE_LOOPBACK": "1", "MASH_OWNER": "alice",
 		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds), "MASH_POLICY": e.policy,
+		// policy apply and repair read the adoption marker over the admin connection (REQ-016, ADR 0111).
+		"MASH_ADMIN_CREDS": pl.Creds,
 	}
 	return e
 }
@@ -509,6 +511,7 @@ func TestApplyRefusals(t *testing.T) {
 	}
 	// no creds anywhere
 	e.env["MASH_SYS_CREDS"] = ""
+	delete(e.env, "MASH_ADMIN_CREDS") // the default sys.creds is found next to the admin creds
 	e.env["MASH_CONFIG_DIR"] = filepath.Join(e.root, "empty")
 	_, errb, code = e.run("policy", "diff")
 	if code != 1 || !strings.Contains(errb, "--sys-creds FILE or set MASH_SYS_CREDS") {
@@ -516,6 +519,7 @@ func TestApplyRefusals(t *testing.T) {
 	}
 	// the user's own credentials are not system credentials
 	e.env["MASH_SYS_CREDS"] = e.pl.Creds
+	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	out, errb, code := e.run("policy", "diff")
 	if code != 1 {
 		t.Fatalf("admin creds as sys creds: %d %q %q", code, out, errb)
