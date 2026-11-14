@@ -16,6 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policy"
@@ -160,6 +161,8 @@ type policySnapshot struct {
 	path string
 	f    *policy.File
 	c    *policy.Compiled
+	// guard is the account lock the caller (repair) already holds; apply uses it and takes none of its own.
+	guard *ctl.Guard
 }
 
 // policyTestFailures runs the file's own tests and returns one line per failing test and the number of tests run.
@@ -204,8 +207,17 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if verb != "diff" && adoptedRefusal(cfg, "policy "+verb, stderr) { // first: before the file is read, any key made or anything pushed
-		return 1
+	var guard *ctl.Guard
+	switch {
+	case snap != nil:
+		guard = snap.guard // repair holds the account lock for both of its steps
+	case verb != "diff": // first: before the file is read, any key made or anything pushed
+		g, ok := accountGuard(cfg, "policy "+verb, stderr)
+		if !ok {
+			return 1
+		}
+		guard = g
+		defer guard.Release()
 	}
 	fail := func(format string, a ...any) int { fmt.Fprintf(stderr, pfx+format+"\n", a...); return 1 }
 	var path string
@@ -280,5 +292,5 @@ func runPolicyApplyOpts(verb string, o applyOpts, snap *policySnapshot, env func
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
 	defer cancel()
 	return apply.Run(ctx, apply.Params{Mode: mode, Compiled: c, Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, ReplaceZoneKeys: o.replaceZones,
-		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers}, stdout)
+		RemoveZones: o.removeZones, KeepZones: o.keepZones, Servers: servers, BeforePush: func(context.Context) error { return guard.Held() }}, stdout)
 }

@@ -154,6 +154,17 @@ func policyLines(line func(left, right string)) {
 	line("policy repair [--policy FILE] [--sys-creds FILE] [--servers N] [...]", "the additive repairs of drift: zone keys, the account push, directory zone and labels; lists stale creds")
 }
 
+// accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
+var accountLockWait = madmin.AccountLockWait
+
+// SetAccountLockWait sets how long guarded commands wait for the account lock and returns a func that restores the
+// wait. It is for tests; production uses madmin.AccountLockWait.
+func SetAccountLockWait(d time.Duration) (restore func()) {
+	old := accountLockWait
+	accountLockWait = d
+	return func() { accountLockWait = old }
+}
+
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
 // command's deadline (admin_timeout, else 30 seconds) and a func that releases both. prog is the command prefix of
 // error text. The caller must call the func when done.
@@ -190,7 +201,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		nc.Close()
 		return nil, nil, nil, err
 	}
-	a = a.WithNameRule(cfg.NameRule)
+	a = a.WithNameRule(cfg.NameRule).WithAccountLockWait(accountLockWait)
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err
@@ -250,6 +261,10 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(err)
 	}
 	defer closeAdmin()
+	// The account lock of a command that changes policy (provision with labels or a zone, set-meta with labels,
+	// set-zone): taken with the marker check, held through the write, released on every exit.
+	var acct *madmin.AccountLock
+	defer func() { acct.Release() }()
 
 	switch args[0] {
 	case "init":
@@ -277,9 +292,14 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return usage(err)
 		}
 		if len(meta.Labels) > 0 || meta.Zone != "" { // a label or a zone is the policy's; a plain provision of an inbox is not
-			if err := refuseIfAdopted(ctx, a, pfx, "provision"); err != nil {
+			lk, err := guardAccount(ctx, a, pfx, "provision")
+			if err != nil {
 				return fail(err)
 			}
+			acct = lk
+		}
+		if err := acct.Held(ctx); err != nil {
+			return fail(err)
 		}
 		if nf != nil {
 			if err := provisionKeyArgs(prog, opt("--user"), opt("--account"), meta.Zone); err != nil {
@@ -326,9 +346,14 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return usage(err)
 		}
 		if len(u.Labels) > 0 { // labels are the policy's; a role, host, description or capability is not
-			if err := refuseIfAdopted(ctx, a, pfx, "set-meta"); err != nil {
+			lk, err := guardAccount(ctx, a, pfx, "set-meta")
+			if err != nil {
 				return fail(err)
 			}
+			acct = lk
+		}
+		if err := acct.Held(ctx); err != nil {
+			return fail(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {
@@ -345,7 +370,12 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if !sap.ValidZone(args[2]) {
 			return usage(fmt.Errorf("%s: set-zone: the zone is not valid: 1-%d lower-case letters, digits and hyphens (the value is not shown)", pfx, sap.MaxZoneLen))
 		}
-		if err := refuseIfAdopted(ctx, a, pfx, "set-zone"); err != nil {
+		lk, err := guardAccount(ctx, a, pfx, "set-zone")
+		if err != nil {
+			return fail(err)
+		}
+		acct = lk
+		if err := acct.Held(ctx); err != nil {
 			return fail(err)
 		}
 		rec, err := a.SetZone(ctx, args[1], args[2])

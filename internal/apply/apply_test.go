@@ -630,3 +630,15 @@ func TestShortLookupRefusesWritesAndWarnsReadOnly(t *testing.T) {
 		t.Fatalf("complete: %d pushes %d", code, fk.pushes)
 	}
 }
+
+// A BeforePush that refuses stops the apply right before the push: nothing is pushed, and the output says so.
+func TestBeforePushRefusalPushesNothing(t *testing.T) {
+	ks, fk, c := setup(t)
+	var out bytes.Buffer
+	stop := errors.New("the account lock was lost")
+	code := Run(context.Background(), Params{Mode: Apply, Compiled: c, Keys: ks, Resolver: fk, VerifyTries: 2, VerifyWait: 1,
+		BeforePush: func(context.Context) error { return stop }}, &out)
+	if code != 1 || fk.pushes != 0 || !strings.Contains(out.String(), "the account lock was lost (nothing was pushed)") {
+		t.Fatalf("%d pushes %d\n%s", code, fk.pushes, out.String())
+	}
+}
