@@ -31,7 +31,7 @@ func (h *addEnv) policyText() string {
 
 func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	h := newFleetEnv(t, addPolicy)
-	if _, errb, code := h.run("add", "c", "--zone", "red"); code != 0 {
+	if _, errb, code := h.run("add", "c", "--label", "zone=red"); code != 0 {
 		t.Fatal(errb)
 	}
 	out, errb, code := h.run("retire", "c")

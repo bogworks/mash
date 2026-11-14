@@ -39,7 +39,6 @@ func TestGoldenPermissionsUnpolicied(t *testing.T) {
 	p := Permissions("o", "a")
 	goldenSame(t, "pub allow", p.Pub.Allow, append([]string{
 		"agents.mail.*.o.*",
-		"agents.mail.*.o.*.*",
 		"agents.prompt.*.o.*",
 		"agents.status.*.o.*",
 	}, goldenFixed("a", "agents.hb.cc.o.a")...))
@@ -71,7 +70,6 @@ func TestGoldenPermissionsLongNames(t *testing.T) {
 	p := Permissions(n48, n48)
 	want := append([]string{
 		"agents.mail.*." + n48 + ".*",
-		"agents.mail.*." + n48 + ".*.*",
 		"agents.prompt.*." + n48 + ".*",
 		"agents.status.*." + n48 + ".*",
 	}, goldenFixed(n48, "agents.hb.cc."+n48+"."+n48)...)
@@ -95,7 +93,7 @@ func TestGoldenNSCFlags(t *testing.T) {
 		want = append(want, "--allow-sub", s)
 	}
 	goldenSame(t, "flags", NSCFlags("o", "a"), want)
-	if f := NSCFlags("o", "a"); f[0] != "--allow-pub" || f[1] != "agents.mail.*.o.*" || len(f) != 2*(4+15+5) {
+	if f := NSCFlags("o", "a"); f[0] != "--allow-pub" || f[1] != "agents.mail.*.o.*" || len(f) != 2*(3+15+5) {
 		t.Errorf("flag shape: %q", f)
 	}
 }
