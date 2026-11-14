@@ -78,7 +78,11 @@ func flagArgs(args []string, want map[string]*string) error {
 type adminRecord struct{ a *admin.Admin }
 
 func (r adminRecord) Lookup(ctx context.Context, key string) (*store.Issued, error) {
-	return r.a.IssuedByKey(ctx, key)
+	rec, found, err := r.a.IssuedByKey(ctx, key)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &rec, nil
 }
 func (r adminRecord) RecordChecked(ctx context.Context, rec store.Issued) error {
 	return r.a.RecordIssuedChecked(ctx, rec)

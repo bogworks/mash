@@ -108,6 +108,13 @@ func SetAfterDirectoryGet(f func(key string)) (prev func(key string)) {
 	return
 }
 
+// SetIssuedStatusFault installs a hook whose error replaces the issue bucket's status read in IssuedHistoryByKey; it
+// returns the previous one.
+func SetIssuedStatusFault(f func() error) (prev func() error) {
+	prev, issuedStatusFault = issuedStatusFault, f
+	return
+}
+
 // SetLockRefresh sets how often a refreshing lock extends its expiry; it returns a func that restores it.
 func SetLockRefresh(d time.Duration) (restore func()) {
 	old := lockRefresh

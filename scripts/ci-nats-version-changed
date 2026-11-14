@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# ci-nats-version-changed: must the policy tests run for this change? Prints "run=true" or "run=false" on stdout (the
+# policy-tests job of .github/workflows/policy-tests.yml appends it to $GITHUB_OUTPUT). REQ-020: the tests run on every
+# release and on every change of the NATS server version mash ships with.
+#
+# Environment:
+#   EVENT  the workflow's github.event_name
+#   BASE   the pull request's base commit (github.event.pull_request.base.sha)
+#
+# run=true when any of these holds, and run=false only when none does:
+#   - the event is not a pull_request (a push to main or a release branch always runs them, so a version change that
+#     landed is still gated);
+#   - BASE is empty or cannot be read (nothing to compare: run);
+#   - the pull request changes, at all, a file that can alter module resolution: go.mod, go.sum, go.work, go.work.sum
+#     or anything under vendor/ (a require bump, a replace, an exclude, a go or toolchain line, a checksum: any of them
+#     can change the NATS server the build uses, so no line-specific comparison is attempted);
+#   - the pull request touches the policy test list or the step that reads it (scripts/releasecheck/policytests.*), this
+#     script, or the workflow.
+set -euo pipefail
+
+if [ "${EVENT:-}" != pull_request ] || [ -z "${BASE:-}" ]; then
+	echo "run=true"
+	exit 0
+fi
+
+# No pipeline whose early exit can mask a failure: grep -q closing the pipe on a large diff would make git diff fail,
+# and under pipefail that status must never decide "no match". Capture the names first; a failed diff runs the tests.
+if ! files="$(git diff --no-renames --name-only "$BASE" HEAD)"; then
+	echo "run=true"
+	exit 0
+fi
+rc=0
+printf '%s\n' "$files" | grep -qE '^(go\.mod$|go\.sum$|go\.work$|go\.work\.sum$|vendor/|scripts/releasecheck/policytests\.|scripts/ci-nats-version-changed$|\.github/workflows/policy-tests\.yml$)' || rc=$?
+if [ "$rc" -ne 1 ]; then # 0 = a match; anything but 1 (no match) is an error: run
+	echo "run=true"
+	exit 0
+fi
+echo "run=false"
