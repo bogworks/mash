@@ -278,3 +278,23 @@ func TestADRLint_execGuardRefusesRunningFromPR(t *testing.T) {
 		}
 	}
 }
+
+// A label event must never cancel a run for the same head: a cancelled run reports no success and Mergify waits on it
+// forever. The group names the head sha (a new head is a new group) and nothing is cancelled in progress.
+func TestADRLint_concurrencyNeverCancelsTheSameHead(t *testing.T) {
+	var w struct {
+		Concurrency struct {
+			Group  string `yaml:"group"`
+			Cancel any    `yaml:"cancel-in-progress"`
+		} `yaml:"concurrency"`
+	}
+	if err := yaml.Unmarshal([]byte(readWorkflow(t, adrLintWorkflow)), &w); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Concurrency.Group, prHeadRef) {
+		t.Errorf("concurrency group %q lacks the head sha, so a label event on one head could cancel another run", w.Concurrency.Group)
+	}
+	if isTrue(w.Concurrency.Cancel) {
+		t.Errorf("cancel-in-progress is %v: a label event would cancel the run for the same head", w.Concurrency.Cancel)
+	}
+}
