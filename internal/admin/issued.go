@@ -258,6 +258,9 @@ func (e *MalformedIssuedAtError) Error() string {
 	return fmt.Sprintf("mash: issue record %s: revision %d has a missing or malformed issued_at (%q)", e.Key, e.Revision, e.Value)
 }
 
+// issuedStatusFault is a test seam: a non-nil error it returns replaces the bucket status read in IssuedHistoryByKey.
+var issuedStatusFault func() error
+
 // IssuedHistoryByKey reads every retained revision of publicKey's issue record (up to the bucket's history cap,
 // store.IssuedHistory) and returns the issue times they hold. found is false when the key is not recorded or the bucket
 // does not exist (jetstream.ErrBucketNotFound and ErrKeyNotFound, and only those, mean absent). Any other failure, a
@@ -282,8 +285,17 @@ func (a *Admin) IssuedHistoryByKey(ctx context.Context, publicKey string) (t Iss
 	if len(hist) == 0 {
 		return IssuedTimes{}, false, nil
 	}
+	// The bucket's own history cap decides whether the oldest revisions may have been dropped, so a status that cannot
+	// be read is an error: assuming the current cap could pass a key whose older, future-dated record was evicted.
+	st, err := kv.Status(ctx)
+	if err == nil && issuedStatusFault != nil {
+		err = issuedStatusFault()
+	}
+	if err != nil {
+		return IssuedTimes{}, false, fmt.Errorf("mash: issue record bucket status: %w", err)
+	}
 	limit := store.IssuedHistory
-	if st, err := kv.Status(ctx); err == nil && st.History() > 0 && int(st.History()) < limit {
+	if st.History() > 0 && int(st.History()) < limit {
 		limit = int(st.History()) // a bucket from before `mash admin init` raised it keeps fewer
 	}
 	for i, e := range hist {

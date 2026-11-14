@@ -107,3 +107,10 @@ func SetAfterDirectoryGet(f func(key string)) (prev func(key string)) {
 	prev, afterDirectoryGet = afterDirectoryGet, f
 	return
 }
+
+// SetIssuedStatusFault installs a hook whose error replaces the issue bucket's status read in IssuedHistoryByKey; it
+// returns the previous one.
+func SetIssuedStatusFault(f func() error) (prev func() error) {
+	prev, issuedStatusFault = issuedStatusFault, f
+	return
+}

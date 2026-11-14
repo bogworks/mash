@@ -510,3 +510,23 @@ func TestIssuedHistoryByKey(t *testing.T) {
 		t.Fatalf("at the cap: %+v err=%v", got, err)
 	}
 }
+
+// A bucket status that cannot be read refuses the history read: the history cap is unknown, so an evicted future-dated
+// record cannot be ruled out.
+func TestIssuedHistoryByKeyStatusFailure(t *testing.T) {
+	_, a, _ := setup(t)
+	ctx := context.Background()
+	key := userKey(t)
+	if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, IssuedAt: "2026-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	prev := admin.SetIssuedStatusFault(func() error { return errors.New("status unavailable") })
+	_, found, err := a.IssuedHistoryByKey(ctx, key)
+	admin.SetIssuedStatusFault(prev)
+	if err == nil || found || !strings.Contains(err.Error(), "status") {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if _, found, err := a.IssuedHistoryByKey(ctx, key); err != nil || !found {
+		t.Fatalf("after the fault: found=%v err=%v", found, err)
+	}
+}
