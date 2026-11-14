@@ -59,6 +59,8 @@ type ApplyDeps struct {
 	Provisioner Provisioner
 	// AfterPush is RunInput.AfterPush.
 	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
+	// BeforeWrite is RunInput.BeforeWrite.
+	BeforeWrite func(ctx context.Context, what string) error
 	// Now is the clock for the Status; nil means time.Now.
 	Now func() time.Time
 }
@@ -121,7 +123,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		ListSet: req.ListSet, Received: req.Received,
 		Previous: prev, Signer: deps.Signer,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
-		AfterPush: deps.AfterPush, Now: deps.Now,
+		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,
 	}
 	if deps.Provisioner != nil {
 		os, err := RunOrdered(ctx, in, deps.Provisioner)
