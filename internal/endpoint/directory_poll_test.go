@@ -65,24 +65,42 @@ func waitFor(t *testing.T, what string, within time.Duration, ok func() bool) {
 	}
 }
 
+// Bounds for TestDirectoryPollIdleCostsOneStateRequest. None of them depends on how fast the machine is: the lower
+// ones are waited for with a deadline, the upper one scales with the time that really passed.
+const (
+	idlePollInterval  = 100 * time.Millisecond
+	idlePollMinWait   = idlePollInterval * 3 / 4 // the shortest wait between two polls (the jitter floor)
+	idlePollWindow    = 1500 * time.Millisecond
+	idlePollSettle    = 3                // state requests after the endpoint runs before the window opens: the first load is done
+	idlePollWantPolls = 8                // polls that must show up after the window opened
+	idlePollSlack     = 3                // a poll in flight at a snapshot, and a count delivered a moment late
+	idlePollDeadline  = 30 * time.Second // generous: a loaded runner is slow, not wrong
+)
+
 // An idle directory costs one small request per poll: no filtered stream info and no direct get after the first load.
+// A poll waits at least idlePollMinWait after the one before it, so however slow the machine is, a window that really
+// lasted d holds at most d/idlePollMinWait polls (plus slack); a poll that cost more than one request would exceed it.
+// How many polls a slow runner fits in the window is not asserted (it only has to keep polling).
 func TestDirectoryPollIdleCostsOneStateRequest(t *testing.T) {
-	setPoll(t, 100*time.Millisecond, 0)
+	setPoll(t, idlePollInterval, 0)
 	f := newFixture(t, "a", "b", "c")
 	d := f.watchDirTraffic(t)
+	s0 := d.state.Load()
 	f.run(t, "a")
-	// the first poll (within one interval) reloads once: no state recorded yet
-	time.Sleep(600 * time.Millisecond)
-	before := d.snap()
-	time.Sleep(1500 * time.Millisecond)
-	after := d.snap()
+	// the first poll (within one interval) reloads once; the polls after it find the state recorded
+	waitFor(t, "the first polls to have run", idlePollDeadline, func() bool { return d.state.Load() >= s0+idlePollSettle })
+	before, t0 := d.snap(), time.Now()
+	time.Sleep(idlePollWindow)
+	after, elapsed := d.snap(), time.Since(t0)
 	states := after[0] - before[0]
-	if states < 8 || states > 20 { // ~15 polls of 75..125 ms
-		t.Fatalf("state requests in 1.5 s at a 100 ms poll: %d", states)
+	if limit := int64(elapsed/idlePollMinWait) + idlePollSlack; states > limit {
+		t.Fatalf("state requests in %s at a %s poll: %d, more than one per poll (at most %d)", elapsed, idlePollInterval, states, limit)
 	}
-	if after[1] != before[1] || after[2] != before[2] {
+	waitFor(t, "an idle directory still being polled", idlePollDeadline, func() bool { return d.state.Load() >= before[0]+idlePollWantPolls })
+	final := d.snap()
+	if final[1] != before[1] || final[2] != before[2] {
 		t.Fatalf("an unchanged directory was reloaded: filtered infos %d -> %d, direct gets %d -> %d",
-			before[1], after[1], before[2], after[2])
+			before[1], final[1], before[2], final[2])
 	}
 }
 

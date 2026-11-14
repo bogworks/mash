@@ -395,6 +395,8 @@ func check(ctx context.Context, o Options) error {
 	// Release preparation ran: the change log fragments are assembled and the ADR index is regenerated (ADR 0068).
 	r.step("the change log fragments are assembled", changelogAssembled(o, x))
 	r.step("the ADR index is current", adrIndexFresh(o, x))
+	// The release notes are the change log section, and it opens with a Summary and an Upgrading section (ADR 0105).
+	r.step("the change log section for "+o.Version+" opens with a Summary and an Upgrading section", changelogSectionOpens(o, x))
 	// The candidate and the previous release's binaries are built and downloaded once, by the plugin step, and the
 	// latency step reuses them.
 	bins := &binaries{}
@@ -713,6 +715,8 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	if err := json.Unmarshal(b, &resp); err != nil {
 		return gateError{fmt.Errorf("could not read the release's assets: %w", err)}
 	}
+	// The notes: prose first, a compare link, no commit list, no placeholder; judged only above the cutover (notes.go).
+	r.step("the release notes open with a Summary and an Upgrading section, link the full changes, and are not a commit list", releaseBodyReads(o, x, tag))
 	have := map[string]string{}
 	for _, a := range resp.Assets {
 		have[a.Name] = a.Digest

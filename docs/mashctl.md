@@ -90,6 +90,58 @@ Every user JWT `mashctl` issues is written to the issue record, the `mash-issued
 
 `issued check` asks every server, through the system account (`--sys-creds FILE`, else `MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `policy apply` does). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
 
+## Adopting the account: an outside owner of the list sets
+
+```sh
+mashctl policy adopt --submitter NKEY_PUBLIC_KEY [--sys-creds FILE] [--exempt USER_KEY]...
+mashctl policy adopt --show [--json]
+```
+
+An outside system may own the account's list sets (who may mail whom). `policy adopt` is how the operator tells mash so ([ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md)). Run it with the account's admin credentials and key store, like the other verbs that write to the server. It writes the adoption marker, one key (`account`) in the `mash-adoption` bucket, holding the submitter's public key, the account's public key, the time, the admin user that ran the command and the action (`adopt`, `recover`; `rotate` is reserved for the list-set intake) and the exempt keys. The bucket is made as the issue record's is: file storage, no TTL, history 64 (the revisions are the audit trail), rollup, delete and purge refused, no endpoint permission on it. `mashctl init` creates it, and `policy adopt` creates it when it is missing.
+
+- `--submitter` takes any valid nkey public key; the contract says an Ed25519 nkey public key and does not fix the prefix, so mash checks that it is a public key (a seed is refused, and neither is echoed) and nothing about its type. It must be a key mash does not hold: the account's own key, the operator and system keys, a zone signing key and the admin user's key are refused, and nothing is written.
+- The first run adopts the account. A second run with the same key writes nothing and says so. A run with a **different** key is the recovery rotation: it records the action `recover`, and the old key is refused from then on, at once, because mash reads the marker each time and keeps no copy.
+- The marker also records the **exempt keys**: public keys of the users the later first-list-set reconcile must never touch. `adopt` records the admin user's key (from the admin credentials in use), the system user's key (from the system credentials: `--sys-creds`, `MASH_SYS_CREDS`, or the `sys.creds` beside the admin credentials; adopt refuses, writing nothing, when they cannot be found) and each `--exempt KEY` (repeatable; a hand-made service user; it must be an nkey user public key, and the operator, system, account and zone keys are refused). Only public keys are read from the credentials; a seed is never printed or kept. The same submitter with another exempt set writes a new `adopt` revision ("exempt keys updated"); the same submitter and set writes nothing; a different submitter is the recovery rotation and refreshes the set.
+- `--show` prints the marker and its exempt keys (`--json`: `adopted`, `marker`); for a marker without any it says `exempt: none recorded: run adopt again before the reconcile`, or `not adopted`. It exits 1 when the marker cannot be read; it never calls an unreadable marker "not adopted".
+- There is no un-adopt command. Un-adoption is not supported yet; whether and how it should be is an open question for the maintainer. `next_submitter` is in the marker's schema, `--show` prints it, and only the list-set intake (not in this version) writes it.
+- **Adopting a real account is a live-account step**, taken only on an explicit go from the maintainers. This change was built and tested on test accounts only.
+- This version has no list-set intake: nothing yet takes a list set from the submitter. An adopted account's policy therefore cannot be changed through mashctl until it does. Adopt only when you mean to hand the list sets over.
+
+### What an adopted account refuses
+
+On an adopted account these refuse before they touch anything (no policy-file edit, no key, no signing, no push, no creds file, no directory or issue record) with `mashctl: <command> is refused: this account is adopted by an outside system (submitter UABCDEFG...): list sets come only through the list-set path; nothing was changed` and exit 1. A marker that cannot be read (the server answers with an error, the bucket is not as mash makes it, the value is not one this version understands) refuses too, with `cannot tell whether this account is adopted: ...` instead: the guard fails closed.
+
+| Command | On an adopted account |
+|---|---|
+| `policy apply` (also `--dry-run`), `policy repair` (also `--dry-run`) | refused |
+| `add`, `reissue` | refused |
+| `label`, `unlabel` (also `--dry-run` and `--sync`: the policy-file edit is the policy change) | refused |
+| `retire` | refused (it edits the policy file and revokes in the account JWT) |
+| `set-meta` with `--label` | refused (labels are the policy's) |
+| `set-zone` | refused |
+| `provision` with `--label` or `--zone` (also `mash admin provision`) | refused (a label or a zone is a policy change) |
+| `set-meta` without `--label` (role, host, description, capabilities), `provision` without `--label` and `--zone`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
+| `policy diff`, `drift`, `check`, `test`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
+
+Policy changes and adoption are serialised by an account lock. Every guarded command takes it first, reads the marker, and holds the lock through all of its writes; `policy adopt` takes the same lock for its write. So an adoption waits for a guarded command that is already running (which finishes first), and a command started after the adoption is refused. A command, or `policy adopt`, that cannot take the lock within 30 seconds exits 1 with `another policy change or an adoption is in progress; nothing was changed`: another guarded command or an adoption holds it, so try again in a moment. The lock extends itself while a long command runs; a command that finds the lock lost stops before its next write and says so. Read-only commands never take it.
+
+| Command | Writes after the guard, each preceded by a lock check |
+| --- | --- |
+| `policy apply` | the creation of each new zone's signing key file; the push of the account JWT |
+| `policy repair` | the same two (its apply step); then each directory fix, one check before each zone change and each label change |
+| `add` | the zone key (when new); the issue record; the directory record and inbox; the creds file; the policy file edit |
+| `reissue` (key kept) | the issue record; the creds file replacement |
+| `reissue` (key rotated) | the issue record of the new key; the staging of the new creds; the revocation of the old user key (account JWT push); the record of the revocation; the directory record update; the creds file replacement |
+| `retire` | the removal of the directory record and inbox; the revocation of the user key; the record of the revocation; the policy file edit; the move or removal of the creds file |
+| `label`, `unlabel` | the policy file edit; with `--sync`, the update of the directory labels |
+| `set-meta --label`, `set-zone`, `provision` with a label or zone | the one record write |
+
+A check that fails stops the command before that write and every later one, and the message names the step that was not taken and what was already done (for a reissue: the new key is recorded and its creds are staged, the old key is or is not revoked; run `mashctl reissue NAME` again, which resumes from the staged file). `add` also undoes the record and creds file it wrote (the issue record is append-only and stays). Not preceded by a check: undoing a command's own earlier write on the way out, the removal of a reissue's leftover staged file, and the writes inside one guarded admin call (for example the inbox stream and the record of one `provision`), which are one step.
+
+The residual window is the time between a check and its write, microseconds to one request. A lock lost in that window can still let one write through. The account is not left in an unknown state by it: the next guarded command reads the marker again and is refused if the account is adopted.
+
+The guard needs the server: it reads the marker over the admin connection first. So `policy apply` and `policy repair`, which until now needed only the system credentials, also need the admin credentials. Where no server is configured at all (no `url`, no `MASH_URL`), the one command that can run that way, a `label` or `unlabel` that only edits the policy file, is allowed and says nothing about adoption: mash has nothing to ask. With a server configured and the marker unreadable (no admin credentials, no connection), it refuses.
+
 ## Labels
 
 ```sh
@@ -119,6 +171,44 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 ## Auditing the population
 
 `mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, undrained legacy inboxes, unreadable items, movement found by `--compare`), 2 usage, 3 the audit could not complete (server unreachable, unreadable required input, bad `--compare` file). See [audit.md](audit.md).
+
+## mashctl inbox inspect
+
+```text
+mashctl inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]
+```
+
+Shows one endpoint's stored messages and where its `deliver` consumer stands, so a test lane can prove what the transport kept and delivered. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`, and also when `agent_token` is set.
+
+- `address` is an endpoint name (a legacy endpoint), a flat key `agent_owner_name`, or `agent.owner.name` (`cc.OWNER.NAME` names a legacy endpoint). It is read from the directory record, one key; an address that names no record, or a dotted address whose owner is not the record's, is refused (exit 1).
+- The default is the last 20 messages, oldest first. `--limit N` caps the count. `--from SEQ` and `--to SEQ` are an inclusive stream-sequence range, clamped to the stream's first and last sequence; with `--from` the first N messages from it are shown.
+- During an alias window an endpoint has two inbox streams. The endpoint's own is shown; `--legacy` shows the alias's legacy stream, and is refused for a record with no alias.
+- Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream, no alias for `--legacy`), 2 a usage error, 3 it could not complete (no server, no credentials).
+
+The text form prints the stream and consumer totals, a table of messages and a `note:` line for each limit. `--json` prints one object. The schema string and the field names are a stable contract; they change only when a field is removed or changes meaning.
+
+| field | meaning |
+| --- | --- |
+| `schema` | `mash-inbox-inspect@1` |
+| `address` | the address as given |
+| `stream` | `name`, `first_seq`, `last_seq`, `messages`, `bytes` of the inbox stream |
+| `consumer` | the `deliver` consumer, or `null` when it does not exist (every message is then `undelivered`): `name`; `ack_floor` and `delivered`, each `{stream_seq, consumer_seq}`; `num_pending`; `num_redelivered`; `num_ack_pending` |
+| `messages[].seq` | the stream sequence |
+| `messages[].msg_id` | the `Nats-Msg-Id` header, empty when there is none |
+| `messages[].sender` | the sender's name: from the directory for `verified` and `stale`, the signed name for the others, `?` when the header names none |
+| `messages[].trust` | `verified`, `claimed`, `unknown-signer`, `stale`, `forged`, `malformed` or `absent`, from the stored `Agent-Sender` header (forged and malformed mail is shown, not hidden) |
+| `messages[].stored_at` | the stream's store time, RFC 3339 UTC |
+| `messages[].size` | payload size in bytes |
+| `messages[].kind` | the `Mash-Kind` header |
+| `messages[].state` | `acked`, `undelivered` or `delivered-unacked-or-acked-out-of-order` (text form: `delivered, ack not confirmed`) |
+| `messages[].delivery_count`, `messages[].ack_time` | always `null` |
+| `limits` | the strings below |
+
+The state comes from the consumer's cursors alone: `acked` when the sequence is at or below `ack_floor.stream_seq`, `undelivered` when it is above `delivered.stream_seq`, otherwise `delivered-unacked-or-acked-out-of-order`, because NATS does not report acknowledgements above the ack floor. The trust label is worked out as the receiving endpoint does, except that the signer is looked up by the name it signed (one directory key read) instead of by listing the directory: a signature by a key that is not on that name's record is `unknown-signer`, and a signed header with no name is too.
+
+Limits, also in the `limits` array: per-message delivery count and ack time are not kept by JetStream or mash; the consumer's `num_redelivered` is the aggregate. A message above the ack floor and at or below the last delivered sequence may be unacknowledged or acknowledged out of order, and the server does not say which.
+
+See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`, `num_redelivered`, `pending`, `ack_pending`) the audit reports per inbox.
 
 ## Retiring an endpoint
 
