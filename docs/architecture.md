@@ -329,6 +329,8 @@ Nothing is kept past 30 days. An archive was planned in the design and not built
 
 A full threat model is maintained separately: threat-model.md.
 
+How mash enforces who may mail, prompt, probe and watch whom, with diagrams and the limits it cannot remove: [policy-enforcement.md](policy-enforcement.md).
+
 **What "trust" means in mash.** A trust label states how far mash has proven *who sent* a message. It is the result of
 two checks. The first is cryptographic: does the SAP §13 signature verify against the user key in the header, over this
 subject and this body? The second is a lookup: does mash's directory map that user key to the claimed endpoint name?
