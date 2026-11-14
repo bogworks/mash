@@ -105,7 +105,9 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	queuePlain, _ := splitConditions(t, q.QueueConditions)
 	for _, c := range append(append([]string{}, queuePlain...), q.MergeConditions...) {
 		mm := check.FindStringSubmatch(c)
-		if mm == nil || mm[1] == "codex-review" {
+		// codex-review and lead-review are commit statuses posted outside the workflows (scripts/review-pr,
+		// scripts/lead-approve), so no job carries their name.
+		if mm == nil || mm[1] == "codex-review" || mm[1] == "lead-review" {
 			continue
 		}
 		if _, ok := names[mm[1]]; !ok {
@@ -164,6 +166,24 @@ func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(m.Protections.AutoMerge, "\n"), "label != hold") {
 		t.Error("auto_merge_conditions must honour the hold label")
+	}
+}
+
+// The lead's review is a commit status on the exact head (ADR 0116). It must be a plain queue_conditions entry: not in
+// merge_protections (the queue draft's commit has no such status, the #424 deadlock) and not inside the or group (a
+// bare check inside an or is banned, ADR 0078). During the migration week it is required beside the approval gate.
+func TestMergify_queueNeedsLeadReviewStatus(t *testing.T) {
+	m := loadMergify(t)
+	plain, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	if !contains(plain, "check-success = lead-review") {
+		t.Errorf("queue_conditions lack the plain entry `check-success = lead-review`: %v", plain)
+	}
+	for _, g := range ors {
+		for _, c := range g {
+			if strings.Contains(c, "lead-review") {
+				t.Errorf("or member %q: lead-review must be a plain entry during the migration week", c)
+			}
+		}
 	}
 }
 
