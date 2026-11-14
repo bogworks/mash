@@ -46,6 +46,23 @@ func (e *StaleBaseError) Error() string {
 // Is reports whether target is ErrStaleBase.
 func (e *StaleBaseError) Is(target error) bool { return target == ErrStaleBase }
 
+// ErrUnchanged is matched, through errors.Is, by the *UnchangedError Accept returns for a list set whose content is
+// the content of the list set in force.
+var ErrUnchanged = errors.New("same content as the list set in force")
+
+// UnchangedError is the error Accept returns when the list set has the content in force. It matches ErrUnchanged.
+type UnchangedError struct {
+	// InForce is the generation in force, whose content the list set repeats.
+	InForce uint64
+}
+
+func (e *UnchangedError) Error() string {
+	return fmt.Sprintf("list set refused: same content as generation %d in force", e.InForce)
+}
+
+// Is reports whether target is ErrUnchanged.
+func (e *UnchangedError) Is(target error) bool { return target == ErrUnchanged }
+
 // Digest is a SHA-256 digest.
 type Digest [sha256.Size]byte
 
@@ -78,7 +95,12 @@ type Record struct {
 //
 // It refuses a list set whose Base is not inForce.Generation with a *StaleBaseError (matching ErrStaleBase) before it
 // validates or compiles anything, refuses one when the generation would overflow with ErrGenerationOverflow, and
-// refuses nil or empty received with ErrNoReceivedBytes (checked after the base, before compiling). Otherwise it runs Compile (which validates and checks) and returns the new Record, with Generation
+// refuses nil or empty received with ErrNoReceivedBytes (checked after the base, before compiling). It refuses a list
+// set whose compiled output digests to inForce.Signed, when something is in force, with an *UnchangedError (matching
+// ErrUnchanged), so a submission that changes nothing uses no generation. Record.Content cannot be compared, because
+// DigestListSet covers Base, which differs between any two submissions; the compiled digest leaves Base out and holds
+// however the entries are ordered or encoded. It is checked after Compile, so an invalid list set is still refused
+// as invalid. Otherwise it runs Compile (which validates and checks) and returns the new Record, with Generation
 // inForce.Generation+1, together with the compiled output. On any error it returns the zero Record and nil, so the
 // caller keeps inForce and signs nothing. A zero inForce means nothing is in force, and ls.Base must then be 0.
 //
@@ -93,6 +115,18 @@ type Record struct {
 // That path belongs to the apply work, under REQ-011's applied-policy gate (contract mash-messaging-policy), and is
 // not built here.
 func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
+	return accept(inForce, ls, received, false)
+}
+
+// AcceptRotationStep is Accept for a submission that starts or completes a planned submitter rotation (ADR 0112). It
+// makes every check Accept makes except the unchanged one: content equal to the content in force is accepted as the
+// next generation, because the rotation completes only after a successful apply and the digest does not cover
+// next_submitter (ADR 0119). The caller, not this function, decides that a submission is a rotation step.
+func AcceptRotationStep(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
+	return accept(inForce, ls, received, true)
+}
+
+func accept(inForce Record, ls ListSet, received []byte, rotationStep bool) (Record, *Compiled, error) {
 	if ls.Base != inForce.Generation {
 		return Record{}, nil, &StaleBaseError{Stated: ls.Base, InForce: inForce.Generation}
 	}
@@ -105,6 +139,12 @@ func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, err
 	c, err := Compile(ls)
 	if err != nil {
 		return Record{}, nil, err
+	}
+	// DigestListSet covers Base, which differs between any two submissions, so it cannot show that content repeats.
+	// The digest of what is signed (DigestCompiled) leaves Base out and is order independent, so equal to
+	// inForce.Signed means the same content, however it is encoded or ordered.
+	if !rotationStep && inForce.Generation > 0 && DigestCompiled(c) == inForce.Signed {
+		return Record{}, nil, &UnchangedError{InForce: inForce.Generation}
 	}
 	return Record{
 		Generation: inForce.Generation + 1,

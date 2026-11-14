@@ -1171,3 +1171,43 @@ func TestBusyLockRetriesAndDoesNotRefuse(t *testing.T) {
 		t.Error("the wait was not logged")
 	}
 }
+
+// The intake marks a document that starts a rotation, or is the next key's first document, as a rotation step, so
+// the applier applies it even when its content is the content in force (ADR 0119). Any other document is not one.
+func TestRotationStepIsMarkedForTheApplier(t *testing.T) {
+	r := newRig(t, true)
+	next := newUser(t)
+	r.start(r.intake())
+
+	// A plain document: no next_submitter, no rotation pending.
+	r.put(sign(t, r.submitter, r.doc(1, 0)))
+	r.waitApplied(1)
+	if d := r.app.applied()[0]; d.RotationStep {
+		t.Fatalf("a plain document is marked as a rotation step: %+v", d)
+	}
+
+	// Leg 1: it carries next_submitter.
+	p := r.doc(2, 1)
+	p.NextSubmitter = next.pub
+	r.put(sign(t, r.submitter, p))
+	r.waitApplied(2)
+	if d := r.app.applied()[1]; !d.RotationStep || d.NextSubmitter != next.pub {
+		t.Fatalf("leg 1 is not marked: %+v", d)
+	}
+	eventually(t, "next recorded", func() bool { return r.current().NextSubmitter == next.pub })
+
+	// Leg 2: a rotation is pending and the next key signs its first document.
+	r.put(sign(t, next, r.doc(3, 2)))
+	r.waitApplied(3)
+	if d := r.app.applied()[2]; !d.RotationStep {
+		t.Fatalf("leg 2 is not marked: %+v", d)
+	}
+	eventually(t, "promoted", func() bool { m := r.current(); return m.Submitter == next.pub && m.NextSubmitter == "" })
+
+	// After promotion a plain document is not a rotation step.
+	r.put(sign(t, next, r.doc(4, 3)))
+	r.waitApplied(4)
+	if d := r.app.applied()[3]; d.RotationStep {
+		t.Fatalf("a plain document after promotion is marked: %+v", d)
+	}
+}

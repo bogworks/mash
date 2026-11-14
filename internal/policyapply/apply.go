@@ -28,6 +28,8 @@ type ApplyRequest struct {
 	// BaseGeneration is the generation the document states it is based on; it must equal ListSet.Base and the
 	// generation in force.
 	BaseGeneration uint64
+	// RotationStep is RunInput.RotationStep; the caller copies it from policyintake.Doc.RotationStep.
+	RotationStep bool
 }
 
 // ApplyDeps is what Apply needs besides the request. Every field but Provisioner, AfterPush and Now is required.
@@ -110,7 +112,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 	in := RunInput{
 		Cluster: deps.Cluster, Prober: deps.Prober, Witnesses: deps.Witnesses, Ledger: deps.Ledger,
 		Account: deps.Account, Inventory: deps.Inventory,
-		ListSet: req.ListSet, Received: req.Received,
+		ListSet: req.ListSet, Received: req.Received, RotationStep: req.RotationStep,
 		Previous: prev, Signer: deps.Signer,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
 		AfterPush: deps.AfterPush, BeforeWrite: deps.BeforeWrite, Now: deps.Now,

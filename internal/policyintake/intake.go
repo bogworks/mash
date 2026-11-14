@@ -95,6 +95,10 @@ type Doc struct {
 	Verified bool
 	// NextSubmitter is the planned rotation's next key, or "".
 	NextSubmitter string
+	// RotationStep is set by the intake when the document starts a planned rotation (it carries a next_submitter and
+	// none is pending) or completes one (a rotation is pending and this is the next key's first document). The
+	// applier passes it on, so the document applies even when its content is the content in force (ADR 0119).
+	RotationStep bool
 }
 
 // Result is what an Applier reports besides its error.
@@ -501,6 +505,7 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 
 	// 6. A planned rotation's next key is validated before anything is applied.
 	startRotation := !pending && doc.NextSubmitter != ""
+	doc.RotationStep = startRotation || pending
 	if startRotation {
 		heldKeys, err := in.HeldKeys()
 		if err != nil {

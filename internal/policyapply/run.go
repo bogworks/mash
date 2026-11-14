@@ -432,6 +432,9 @@ type RunInput struct {
 	// ListSet and Received are the submission and the exact bytes it was decoded from.
 	ListSet  listset.ListSet
 	Received []byte
+	// RotationStep is true when the submission starts or completes a planned submitter rotation (ADR 0112), so it
+	// applies even when its content is the content in force (ADR 0119).
+	RotationStep bool
 	// Previous is the Compiled of the generation in force (nil when none); PreviousRevoked are the keys it revokes.
 	Previous        *listset.Compiled
 	PreviousRevoked []string
@@ -502,6 +505,8 @@ type Accepted struct {
 // OK (a push failure with detail otherwise), because a server may hold content equal to the target without having
 // received it. A list set whose user JWTs exceed a server's limits (listset.SizeCheck over ServerLimits) is refused
 // with stage "size" before anything is signed or pushed.
+//
+// A list set whose content equals the content in force is refused with stage "unchanged" and uses no generation.
 //
 // A list set that fails validation comes back as a refused Status and a nil error. A stale base, a signing error or a
 // mismatch between the signed JWT and the accepted output (ErrSignedMismatch, before any push) come back as errors.
@@ -576,12 +581,19 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return Status{}, err
 		}
 	}
-	rec, compiled, err := listset.Accept(base, in.ListSet, in.Received)
+	accept := listset.Accept
+	if in.RotationStep {
+		accept = listset.AcceptRotationStep
+	}
+	rec, compiled, err := accept(base, in.ListSet, in.Received)
 	if err != nil {
 		var ve *listset.ValidationError
 		var ce *listset.CheckError
+		var ue *listset.UnchangedError
 		st := newStatus(listset.Record{}, StateRefused, in.Now)
 		switch {
+		case errors.As(err, &ue):
+			st.Refusals = []listset.Refusal{{Stage: StageUnchanged, Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", ue.InForce)}}
 		case errors.As(err, &ve):
 			st.Refusals = refusals("validate", ve.Problems)
 		case errors.As(err, &ce):
@@ -995,6 +1007,9 @@ func keepsRevocations(prev string, tracked bool, target string) error {
 	}
 	return nil
 }
+
+// StageUnchanged is the refusal stage of a list set whose content is the content in force (ADR 0119).
+const StageUnchanged = "unchanged"
 
 func refusals(stage string, ps []listset.Problem) []listset.Refusal {
 	out := make([]listset.Refusal, 0, len(ps))
