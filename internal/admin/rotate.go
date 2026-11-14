@@ -34,8 +34,8 @@ var (
 
 // ValidateNextSubmitter reports why next may not become the next submitter of the account whose marker is m: it must be
 // an nkey public key, not the account's own key, not the current submitter and not a key mash holds: the admin user
-// recorded in the marker, the exempt users and held, the public keys of the key store (operator, system, account,
-// zone and admin keys: see ctlkeys.Authority.HeldKeys). It never echoes a key.
+// recorded in the marker, the exempt users and held, the public keys of the key store (operator, system, account
+// and admin keys: see ctlkeys.Authority.HeldKeys). It never echoes a key.
 func ValidateNextSubmitter(account string, m store.Marker, next string, held []string) error {
 	if err := validateSubmitterKey(account, next); err != nil {
 		return err

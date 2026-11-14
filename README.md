@@ -20,7 +20,7 @@ A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), inclu
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
 JetStream and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
-Status: v0.3.0, pre-1.0, one host adapter (Claude Code). Known limits are listed in
+Status: v0.4.0, one host adapter (Claude Code). Known limits are listed in
 [the comparison](docs/comparison.md#9-known-limits).
 
 Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not supported. WSL 2 with the Linux binary is expected to work but has not been tested.
@@ -44,8 +44,8 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 
    ```sh
    export SYNADIA_API_TOKEN=...
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.3.0/quickstart-synadia.sh
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.3.0/SHA256SUMS
+   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.4.0/quickstart-synadia.sh
+   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.4.0/SHA256SUMS
    test "$(grep -c ' quickstart-synadia.sh$' SHA256SUMS)" = 1 &&
      grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
      bash quickstart-synadia.sh --dry-run --endpoint alice --endpoint bob &&
@@ -90,7 +90,7 @@ Requirements: Claude Code 2.1.312 or newer (the oldest version a live receipt pa
 You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `tls_ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
-go install github.com/bogworks/mash/cmd/mash@v0.3.0      # a tagged release (use @latest for the newest); `mash version` prints the tag
+go install github.com/bogworks/mash/cmd/mash@v0.4.0      # a tagged release (use @latest for the newest); `mash version` prints the tag
 claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings), then:
@@ -109,7 +109,7 @@ Operators provision endpoints with `mash admin` and their usual NATS tooling: se
 
 ## Status
 
-mash is pre-1.0 (0.3.0). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Interfaces may still change before 1.0. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.4.0 (released 2026-11-12; v0.5.0 is next and not released). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 

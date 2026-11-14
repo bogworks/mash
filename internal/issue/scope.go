@@ -51,7 +51,7 @@ func templateKey(t jwt.UserPermissionLimits) string {
 	return string(b)
 }
 
-// wantTemplate is the scoped signer template a compiled list set's group permissions make: what policy apply publishes
+// wantTemplate is the scoped signer template a compiled list set's group permissions make: what the issue service expects the account JWT to hold
 // (jwt.NewUserScope's defaults with the permissions set).
 func wantTemplate(p jwt.Permissions) jwt.UserPermissionLimits {
 	t := jwt.NewUserScope().Template

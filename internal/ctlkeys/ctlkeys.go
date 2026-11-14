@@ -409,10 +409,10 @@ func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 // ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
 var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
 
-// groupRE is one part of an owner group name "range.owner": the shape of a zone name.
+// groupRE is one part of an owner group name "range.owner": lower-case letters, digits and hyphens.
 var groupRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
-// validGroup reports whether g is "range.owner" with both parts of a zone name's shape. The shape keeps path
+// validGroup reports whether g is "range.owner" with both parts of that shape. The shape keeps path
 // separators out of file names; the single dot cannot make a name that climbs.
 func validGroup(g string) bool {
 	r, o, ok := strings.Cut(g, ".")
@@ -421,9 +421,8 @@ func validGroup(g string) bool {
 
 func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir) }
 
-// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk beside the
-// zones directory under the same custody rules; with create it generates and writes one if absent. It never
-// overwrites. Zone keys (ZoneKey) are the policy file's; group keys are the list set's.
+// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk under the same custody rules as the other
+// keys; with create it generates and writes one if absent. It never overwrites.
 func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
 	if !validGroup(group) {
 		return nil, fmt.Errorf("mashctl: invalid owner group %q: want range.owner, each part lower-case letters, digits and hyphens, up to 32 characters", group)
