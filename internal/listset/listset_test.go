@@ -475,7 +475,7 @@ func TestAT001TemplateNamesNoPeer(t *testing.T) {
 
 // Every required fixed grant, removed from the template or denied, is refused by Check.
 func TestCheckRequiresFixedGrants(t *testing.T) {
-	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", "foo_c_{{name()}}")
+	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", PolicySubject("foo"), "foo_c_{{name()}}")
 	subLines := []string{
 		"_INBOX.foo_c_{{name()}}.>",
 		"agents.prompt.foo.c.{{name()}}",
@@ -614,5 +614,39 @@ func TestExpandListLimitCounting(t *testing.T) {
 	}
 	if _, err := expandList([]string{"{{tag(allow)}}.{{tag(allow)}}"}, "n", allowTags(64), false); err != nil {
 		t.Fatalf("64x64: %v", err)
+	}
+}
+
+// Every template carries the policy responder's subject as a fixed publish line, and Check refuses a template
+// without it.
+func TestTemplateHasPolicyGrant(t *testing.T) {
+	c, err := Compile(at001())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PolicySubject(c.Range)
+	if want != "agents.policy."+c.Range {
+		t.Fatalf("PolicySubject = %q", want)
+	}
+	for _, tpl := range c.Templates {
+		if !slices.Contains(tpl.Permissions.Pub.Allow, want) {
+			t.Errorf("template %s lacks publish line %q", tpl.Group, want)
+		}
+		if slices.Contains(tpl.Permissions.Sub.Allow, want) {
+			t.Errorf("template %s subscribes to %q", tpl.Group, want)
+		}
+	}
+	for i := range c.Templates {
+		var kept []string
+		for _, l := range c.Templates[i].Permissions.Pub.Allow {
+			if l != want {
+				kept = append(kept, l)
+			}
+		}
+		c.Templates[i].Permissions.Pub.Allow = kept
+	}
+	err = Check(at001(), c)
+	if err == nil || !strings.Contains(err.Error(), "policy responder") {
+		t.Fatalf("Check without the policy grant = %v", err)
 	}
 }

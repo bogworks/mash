@@ -35,6 +35,8 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
                                                endpoints, and who is online (--long: role, host, labels, lease);
                                                filters AND; --names one per line; --json a stable array
   mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
+  mash policy show [--json]                    what you may reach under the list set in force (only your own entry)
+  mash policy explain RECEIVER [--json]        whether you may mail, prompt, probe and watch RECEIVER, and why
   mash status                                  what a session would see (name, config, creds, channel allowlist), before launch;
                                                connects to nothing; the live parts say they need a running session
   mash admin <verb> ...                        deprecated; use mashctl
@@ -135,6 +137,7 @@ var verbUsage = map[string]string{
 	"inbox":   "usage: mash inbox [--limit N] [--after SEQ]",
 	"who":     whoUsage,
 	"prompt":  "usage: mash prompt <to> <text...>",
+	"policy":  policyUsage,
 }
 
 // runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads, so that a
@@ -218,6 +221,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send", "read", "inbox", "who", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
+	case "policy":
+		return policyCmd(cfg, args[1:], stdout, stderr)
 	case "admin":
 		return adminCmd(cfg, args[1:], stdout, stderr)
 	}

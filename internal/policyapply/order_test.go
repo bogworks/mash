@@ -469,6 +469,9 @@ type pendingFails struct{ *MemLedger }
 
 func (pendingFails) SetPending(listset.Record) error { return errors.New("ledger down") }
 
+// SetPendingJWT fails too: Run records the pending JWT through it when the ledger keeps one.
+func (pendingFails) SetPendingJWT(listset.Record, string) error { return errors.New("ledger down") }
+
 // TestRunOrderedPendingNotRecordedIsError (H2): a provisioning failure whose pending marker could not be recorded is an
 // error, not a partial status with a nil error.
 func TestRunOrderedPendingNotRecordedIsError(t *testing.T) {

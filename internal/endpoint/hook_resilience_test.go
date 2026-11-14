@@ -227,11 +227,12 @@ func TestWakeBackoffDoublesToTheCap(t *testing.T) {
 	}
 }
 
-// A busy session (a hook drains the spool every ~100 ms) never idles for the configured wake, so mail over several wake
-// periods costs no channel event: all of it is shown through the spool.
+// A busy session (a hook drains the spool as soon as mail lands) never idles for the configured wake, so mail over several
+// wake periods costs no channel event: all of it is shown through the spool. Each tick waits for the spool to confirm the
+// message and drains at once, so the test does not depend on a sleep landing inside the idle window.
 func TestBusySessionGetsNoWake(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	f.idle = 300 * time.Millisecond
+	f.idle = time.Second // a slow runner cannot let a whole second pass between a spool and the drain
 	var mu sync.Mutex
 	var wakes []string
 	deliver := func(text string, _ map[string]string) error {
@@ -254,13 +255,14 @@ func TestBusySessionGetsNoWake(t *testing.T) {
 			}
 		}
 	}
-	const n = 12 // 12 x 100 ms = 4 idle-wake periods
+	const n = 16 // 16 x 250 ms = 4 idle-wake periods
 	for i := 0; i < n; i++ {
 		if _, err := b.Send(context.Background(), "a", "tick "+strconv.Itoa(i), 0); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		until(t, "the tick is spooled", func() bool { return len(waiting(t, sp)) > 0 })
 		drain()
+		time.Sleep(250 * time.Millisecond) // pacing only: the mail is already shown
 	}
 	until(t, "every message drained via the spool", func() bool { drain(); return len(seen) == n })
 	time.Sleep(f.idle + 200*time.Millisecond)

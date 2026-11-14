@@ -190,6 +190,39 @@ func TestBoundaryInboxCapWithMaxSizeMessages(t *testing.T) {
 	t.Logf("%d sent, #%d..#%d kept, %d bytes of %d", total, st.FirstSeq, st.LastSeq, st.Bytes, store.InboxMaxBytes)
 }
 
+// spoolStall is how long the spooled count may sit still before waitSpooledProgress gives up; spoolHardCap ends a run
+// that keeps creeping forward but never finishes.
+const (
+	spoolStall   = 20 * time.Second
+	spoolHardCap = 5 * time.Minute
+)
+
+// waitSpooledProgress waits until want messages are spooled. It fails only when the count has not grown for spoolStall
+// (or the whole wait passes spoolHardCap), not on a fixed total deadline: serve spools a synced file per message, so
+// how long a burst takes measures the runner's throughput, and this test is about the wake logic.
+func waitSpooledProgress(t *testing.T, sp spool.Spool, want int) {
+	t.Helper()
+	start := time.Now()
+	last, lastMove := -1, start
+	for {
+		n := len(waiting(t, sp))
+		if n == want {
+			return
+		}
+		now := time.Now()
+		if n != last {
+			last, lastMove = n, now
+		}
+		if now.Sub(lastMove) > spoolStall {
+			t.Fatalf("%d of %d spooled: no progress for %s, after %s", n, want, spoolStall, now.Sub(start).Round(time.Second))
+		}
+		if now.Sub(start) > spoolHardCap {
+			t.Fatalf("%d of %d spooled after the %s hard cap", n, want, spoolHardCap)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // Held fyi mail wakes the session at the backlog thresholds only. A burst of 600 fyi, past SpoolWakeCount (500), gives
 // exactly ONE wake (the crowded rule wakes at once, at the 500th held message; the 100 after it add none, and the
 // re-wake is backed off to 2x the idle wake). An urgent task sent last, behind the backlog, rings once more at once
@@ -223,11 +256,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for start := time.Now(); len(waiting(t, sp)) != fyi; time.Sleep(50 * time.Millisecond) {
-		if time.Since(start) > 20*time.Second {
-			t.Fatalf("%d of %d spooled after 20 s", len(waiting(t, sp)), fyi)
-		}
-	}
+	waitSpooledProgress(t, sp, fyi)
 	got := ev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(time.Second)
 	if got = ev.all(); len(got) != 1 || strings.HasPrefix(got[0], "urgent") {

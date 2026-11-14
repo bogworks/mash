@@ -14,7 +14,7 @@ import (
 // template (the subject_label and six-token mail lines). It is read-only and needs the system account view of the
 // resolver, so it can be asked only where that exists (mashctl); an endpoint user cannot ask it.
 //
-// It reads the newest verified copy any server holds. A lookup that fails, or a copy that does not verify, is an error:
+// It checks every distinct verified copy the servers hold, so an older copy with a zone scope counts. A lookup that fails, or a copy that does not verify, is an error:
 // the caller must not treat "could not tell" as "no policy". An account with no JWT yet has no policy.
 func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, servers int) (bool, error) {
 	acctKP, acctPub, err := ks.Account()
@@ -30,12 +30,12 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 	if serr != nil {
 		return false, fmt.Errorf("cannot confirm the server set: %w", serr)
 	}
-	base, err := lookupBase(ctx, r, acctPub, trust, serverExpect(set, servers), "look up the account JWT")
-	if err != nil {
-		return false, err
+	toks, err := r.LookupAll(ctx, acctPub, serverExpect(set, servers))
+	if err != nil && len(toks) == 0 {
+		return false, fmt.Errorf("look up the account JWT: %w", err)
 	}
-	if base.short != "" {
-		return false, fmt.Errorf("not every server was checked: %s", base.short)
+	if expect := serverExpect(set, servers); expect > 0 && len(toks) < expect {
+		return false, fmt.Errorf("not every server was checked: only %d of %d servers answered the account lookup", len(toks), expect)
 	}
 	groups, err := ks.GroupPublics()
 	if err != nil {
@@ -45,7 +45,24 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 	for _, pub := range groups {
 		groupKeys[pub] = true
 	}
-	return HasZoneScope(base.claims, groupKeys), nil
+	// Every distinct copy is checked, not just the newest: a server still holding an older JWT with a zone scope is
+	// a zone policy the upgrade must not pass over. A copy that does not verify is an error, never "no policy".
+	seen := map[string]bool{}
+	applied := false
+	for _, t := range toks {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		claims, verr := VerifyAccountJWT(t, acctPub, trust)
+		if verr != nil {
+			return false, fmt.Errorf("refusing the resolver's account JWT: %w", verr)
+		}
+		if HasZoneScope(claims, groupKeys) {
+			applied = true
+		}
+	}
+	return applied, nil
 }
 
 // HasZoneScope is true when claims lists a scoped signing key that is not an owner group signer (groupKeys: the issue
