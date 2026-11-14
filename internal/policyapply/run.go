@@ -944,6 +944,12 @@ func rollbackLacking(ctx context.Context, in RunInput, rollbackJWT string) (lack
 	return lacking, ""
 }
 
+// ServerRevocationJWTs is serverRevocationJWTs for a caller that is not Run (the first-list-set reconcile): the
+// non-empty account JWTs of every server, failing closed.
+func ServerRevocationJWTs(ctx context.Context, c Cluster, account string, inventory int) ([]string, error) {
+	return serverRevocationJWTs(ctx, RunInput{Cluster: c, Account: account, Inventory: inventory})
+}
+
 // serverRevocationJWTs reads the account JWT of every server and returns the non-empty ones, so a retry can keep
 // every revocation any server holds. It fails closed: an error reading the server set or the JWTs, an incomplete
 // server set, a server missing from the answer or a JWT that does not decode is an error wrapping ErrSignedMismatch.
@@ -981,6 +987,12 @@ func serverRevocationJWTs(ctx context.Context, in RunInput) ([]string, error) {
 // the ledger stores the in-force JWT and a generation is in force; an empty prev then fails closed. It returns an
 // error wrapping ErrSignedMismatch naming the keys that are missing or lowered.
 func keepsRevocations(prev string, tracked bool, target string) error {
+	return KeepsRevocations(prev, tracked, target)
+}
+
+// KeepsRevocations is the check Run makes before it pushes: target must revoke every key the in-force JWT prev
+// revokes, each at a time no earlier than in prev. tracked says a generation is in force and the ledger stores its JWT.
+func KeepsRevocations(prev string, tracked bool, target string) error {
 	if !tracked {
 		return nil
 	}

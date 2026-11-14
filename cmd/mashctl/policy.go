@@ -12,6 +12,7 @@ import (
 // list-set service are its subcommands.
 const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY | --show [--json]
        mashctl policy serve --range RANGE [--servers N] [--sys-creds FILE]
+       mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
 `
 
 // policyOpts are the flags and positional arguments of a policy verb.
@@ -54,6 +55,9 @@ func runPolicy(args []string, env func(string) string, lookup config.Lookup, std
 	}
 	if len(args) > 0 && args[0] == "serve" { // a long-running service for one adopted account
 		return runPolicyServe(args[1:], env, lookup, stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "reconcile" { // the first-list-set reconcile: a dry run (AT-015)
+		return runPolicyReconcile(args[1:], env, lookup, stdout, stderr)
 	}
 	if len(args) > 0 {
 		fmt.Fprintf(stderr, "mashctl: policy: unknown subcommand %s\n", config.RejectedArg(args[0]))
