@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/policy"
@@ -227,5 +228,28 @@ func TestWitnessClosedByPush(t *testing.T) {
 		if got := witnessClosedByPush(c.at, c.exp); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+var errOptionSeen = errors.New("the connection option was applied")
+
+// The options of a LiveProber and of LiveWitnesses reach every connection they make: here an option that refuses the
+// connection stands for the TLS options of the deployment.
+func TestLiveTransportsPassTheirOptions(t *testing.T) {
+	acct, _ := nkeys.CreateAccount()
+	acctPub, _ := acct.PublicKey()
+	sk, _ := nkeys.CreateAccount()
+	m := &ProbeMinter{Signer: scopedSigner{"foo.c": sk}, Account: acctPub, Record: &MemIssueRecord{}}
+	p := ProbeCred{Sender: "foo.c.core", Name: "core", Tags: []string{"allow:c.docs"}}
+	opt := func(*nats.Options) error { return errOptionSeen }
+	urls := map[string]string{"s1": "nats://127.0.0.1:1"}
+
+	prober := &LiveProber{URLs: urls, Mint: m, Options: []nats.Option{opt}}
+	if _, err := prober.Refused(context.Background(), "s1", p, OpPub, "x.y"); !errors.Is(err, errOptionSeen) {
+		t.Errorf("the prober did not pass its options: %v", err)
+	}
+	w := &LiveWitnesses{Options: []nats.Option{opt}}
+	if err := w.Open(context.Background(), urls, m, []ProbeCred{p}); !errors.Is(err, errOptionSeen) {
+		t.Errorf("the witnesses did not pass their options: %v", err)
 	}
 }
