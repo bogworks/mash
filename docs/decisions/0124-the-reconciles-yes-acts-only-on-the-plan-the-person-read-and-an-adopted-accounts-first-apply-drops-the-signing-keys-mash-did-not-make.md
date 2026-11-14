@@ -64,6 +64,20 @@ an exempt user's issuer would go, refused as before when the issuers are not con
 `--yes` (a stale `--plan` refused and nothing changed), and `TestPolicyReconcileAT015Live`, which applies the first list
 set through the production signer and runs `policy reconcile --yes --plan`.
 
+## Pros and Cons of the Options
+
+### A digest of the plan read, and the first apply drops non-mash keys (chosen)
+
+* Good, because a one-way revocation happens only for the plan a person read.
+* Good, because the account can take its first list set.
+* Bad, because a stale dry run has to be run again.
+
+### Act on the plan computed under the lock; keep refusing non-mash keys
+
+* Good, because it needs no digest.
+* Bad, because `--yes` can revoke a key the person never saw in a plan.
+* Bad, because an account holding a key mash did not make can never take its first list set.
+
 ## More Information
 
 * Amends ADR-0121 (`--yes`) and ADR-0059 (signing keys mashctl did not create, for an adopted account's apply). Related: ADR-0122 (`policy serve`'s inbox rule).
