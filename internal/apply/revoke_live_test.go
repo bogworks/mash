@@ -191,9 +191,17 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 	if !nc.IsClosed() {
 		t.Fatal("the revoked user's connection is still open 5s after the update was acknowledged")
 	}
-	mu.Lock()
-	why := lastErr
-	mu.Unlock()
+	// The client's handlers run on their own goroutine after the connection is marked closed, so the reason may arrive
+	// a moment after IsClosed turns true.
+	var why error
+	for reasonDeadline := time.Now().Add(5 * time.Second); time.Now().Before(reasonDeadline); time.Sleep(20 * time.Millisecond) {
+		mu.Lock()
+		why = lastErr
+		mu.Unlock()
+		if why != nil {
+			break
+		}
+	}
 	if why == nil || !(errors.Is(why, nats.ErrAuthorization) || strings.Contains(strings.ToLower(why.Error()), "revoked")) {
 		t.Fatalf("the connection closed, but not for an authorization reason: %v", why)
 	}
