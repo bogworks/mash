@@ -39,7 +39,7 @@ type Applier struct {
 	// Range is the range this service applies list sets for (--range).
 	Range string
 	// Ledger is the account's ledger in the policy bucket; it keeps the record in force and writes the status.
-	Ledger *policyapply.KVLedger
+	Ledger Ledger
 	// Sys is a connection authenticated as a system account user.
 	Sys *nats.Conn
 	// Keys is the key store.
@@ -71,8 +71,12 @@ type Applier struct {
 	Now func() time.Time
 
 	markersOnce sync.Once
-	markers     *policyapply.KVProvisionMarkers
+	markers     policyapply.ProvisionMarkers
 	markersErr  error
+
+	// applyFn and readServers are seams for the tests; nil means policyapply.Apply and ReadServers.
+	applyFn     func(context.Context, policyapply.ApplyRequest, policyapply.ApplyDeps) (policyapply.Status, error)
+	readServers func(ctx context.Context) ([]ServerInfo, error)
 }
 
 var _ policyintake.Applier = (*Applier)(nil)
@@ -84,8 +88,14 @@ type IssueRecord interface {
 }
 
 // markersFor builds the provisioning markers of the Applier's account once and keeps them for every document.
+// A nil KV gives in-memory markers: that is a test-only path (the unit tests run over a MemLedger with no bucket);
+// production always sets KV (cmd/mashctl/policy_serve.go), so its markers are always durable.
 func (a *Applier) markersFor() (policyapply.ProvisionMarkers, error) {
 	a.markersOnce.Do(func() {
+		if a.KV == nil {
+			a.markers = policyapply.NewMemProvisionMarkers()
+			return
+		}
 		a.markers, a.markersErr = policyapply.NewKVProvisionMarkers(a.KV, a.Account, policyapply.DefaultProvisionOpTimeout)
 	})
 	if a.markersErr != nil {
@@ -93,6 +103,15 @@ func (a *Applier) markersFor() (policyapply.ProvisionMarkers, error) {
 	}
 	return a.markers, nil
 }
+
+// Ledger is what the Applier needs of the account's ledger: the record and list set in force, what Apply needs, and
+// the write of a refusal. *policyapply.KVLedger is one.
+type Ledger interface {
+	policyapply.DetailLedger
+	WriteRefusal(ctx context.Context, st policyapply.Status) error
+}
+
+var _ Ledger = (*policyapply.KVLedger)(nil)
 
 func (a *Applier) errorf(msg string, args ...any) {
 	if a.Log != nil {
@@ -159,6 +178,10 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	if err != nil {
 		return policyintake.Result{}, err
 	}
+	// Only the stale base is checked here, and only so that the checks below (the sizes, the expectations) never run
+	// against a list set in force that the document was not based on: it is the very test Apply makes first, and it
+	// refuses nothing else. The unchanged-content rule, the rotation step (ADR 0119) and the generation arithmetic are
+	// decided by policyapply.Apply alone: a submission on the generation in force, unchanged or a rotation step, passes.
 	if cur.Generation != doc.BaseGeneration {
 		return policyintake.Result{}, &listset.StaleBaseError{Stated: doc.BaseGeneration, InForce: cur.Generation}
 	}
@@ -175,7 +198,8 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 			return policyintake.Result{}, fmt.Errorf("compile the list set in force (generation %d): %w", cur.Generation, err)
 		}
 	}
-	req := policyapply.ApplyRequest{ListSet: doc.ListSet, Received: d.Raw, Generation: doc.Generation, BaseGeneration: doc.BaseGeneration}
+	req := policyapply.ApplyRequest{ListSet: doc.ListSet, Received: d.Raw, Generation: doc.Generation, BaseGeneration: doc.BaseGeneration,
+		RotationStep: d.RotationStep}
 	issuer := &Issuer{
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
 		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
@@ -197,11 +221,15 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	}
 	if cerr != nil {
 		// A list set that does not validate is refused by Apply, with its own status, before anything is signed or pushed.
-		return a.finish(policyapply.Apply(ctx, req, deps))
+		return a.finish(a.apply(ctx, req, deps))
 	}
 
 	// What the servers allow. Fewer answers than servers is a refusal: the limits are never guessed.
-	servers, err := ReadServers(ctx, a.Sys, a.Servers)
+	read := a.readServers
+	if read == nil {
+		read = func(ctx context.Context) ([]ServerInfo, error) { return ReadServers(ctx, a.Sys, a.Servers) }
+	}
+	servers, err := read(ctx)
 	if err != nil {
 		return policyintake.Result{}, fmt.Errorf("refusing to apply: %w; nothing was pushed", err)
 	}
@@ -305,7 +333,14 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		}
 		deps.AfterPush = policyapply.RotationsAfterPush(plan)
 	}
-	return a.finish(policyapply.Apply(ctx, req, deps))
+	return a.finish(a.apply(ctx, req, deps))
+}
+
+func (a *Applier) apply(ctx context.Context, req policyapply.ApplyRequest, deps policyapply.ApplyDeps) (policyapply.Status, error) {
+	if a.applyFn != nil {
+		return a.applyFn(ctx, req, deps)
+	}
+	return policyapply.Apply(ctx, req, deps)
 }
 
 // transports makes the live prober and witnesses, with the deployment's connection options.
