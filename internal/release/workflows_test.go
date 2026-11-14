@@ -361,7 +361,7 @@ var jobConditions = map[string]string{
 // the job id, a condition or a matrix on a required job would silently make the gate refuse every candidate.
 func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 	for jn, j := range load(t, "ci.yml").Jobs {
-		if want, ok := map[string]string{"test": "test (linux)", "test-macos": "test (macos)"}[jn]; ok {
+		if want, ok := map[string]string{"test": "test (linux)", "test-eph": "test (linux, eph)", "test-macos": "test (macos)"}[jn]; ok {
 			// The check name differs from the job id on purpose, and no matrix may rename it.
 			if j.Name != want {
 				t.Errorf("the %s job is named %q, want exactly %s", jn, j.Name, want)
@@ -454,7 +454,7 @@ func TestWorkflows_noBareDoubleBracketUnderSetE(t *testing.T) {
 // One OS failing must not hide the other's result: the two legs are separate jobs that do not need each other.
 func TestCI_osLegsAreIndependentJobs(t *testing.T) {
 	w := load(t, "ci.yml")
-	for _, jn := range []string{"test", "test-macos"} {
+	for _, jn := range []string{"test", "test-eph", "test-macos"} {
 		j := w.Jobs[jn]
 		if len(j.Strategy.Matrix) != 0 {
 			t.Errorf("%s must not be matrixed", jn)
@@ -1216,8 +1216,8 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 // ciOnlyJobs are ci.yml's jobs that the release gate does not require: changes (does a pull request touch code?) and
 // pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
 // review starts on; it gates neither a merge nor a release).
-// test (macos) is advisory (ADR 0079, TODO(macos-gate) in ci.yml): visible, but it gates neither a merge nor a release.
-var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check", "test (macos)"}
+// test (macos) is advisory (ADR 0079, TODO(macos-gate) in ci.yml) and so is test (linux, eph) (ADR 0123): visible, but they gate neither a merge nor a release.
+var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check", "test (linux, eph)", "test (macos)"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -2336,5 +2336,38 @@ func TestRelease_everyUploadArtifactKeepsOneDay(t *testing.T) {
 	}
 	if n == 0 {
 		t.Error("release.yml has no upload-artifact step")
+	}
+}
+
+// test (linux, eph) is advisory (ADR 0123): it is not in pr-check's needs or its verdict, not in RequiredChecks, and
+// .mergify.yml never names it, so it gates no merge and no release.
+func TestCI_ephShadowJobGatesNothing(t *testing.T) {
+	w := load(t, "ci.yml")
+	if _, ok := w.Jobs["test-eph"]; !ok {
+		t.Fatal("ci.yml has no test-eph job")
+	}
+	if strings.Contains(fmt.Sprint(w.Jobs["pr-check"].Needs), "test-eph") {
+		t.Errorf("pr-check needs test-eph, which is advisory (ADR 0123): %v", w.Jobs["pr-check"].Needs)
+	}
+	for _, st := range w.Jobs["pr-check"].Steps {
+		if strings.Contains(st.Run, "eph") || strings.Contains(fmt.Sprint(st.Env), "test-eph") {
+			t.Errorf("pr-check reads test-eph: %+v", st)
+		}
+	}
+	for _, c := range RequiredChecks {
+		if strings.Contains(c, "eph") {
+			t.Errorf("RequiredChecks names %q: test (linux, eph) is advisory", c)
+		}
+	}
+	b, err := os.ReadFile("../../.mergify.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "eph") {
+		t.Error(".mergify.yml mentions the eph job: it must not be a queue condition")
+	}
+	tj, ej := w.Jobs["test"], w.Jobs["test-eph"]
+	if ej.If != tj.If || ej.TimeoutMinutes != tj.TimeoutMinutes || fmt.Sprint(ej.Needs) != fmt.Sprint(tj.Needs) || ej.ContinueOnError != nil {
+		t.Errorf("test-eph must match test in if, timeout and needs, and never use continue-on-error: %+v", ej)
 	}
 }
