@@ -112,11 +112,15 @@ func (c NATSCluster) AccountJWTs(ctx context.Context, account string) (map[strin
 	return out, ctx.Err()
 }
 
+// maxAccountzReply bounds a raw ACCOUNTZ reply. The reply carries the account JWT plus its decoded claims and server
+// fields, so it is larger than the JWT; the JWT itself is held to policy.AccountJWTLimit separately.
+const maxAccountzReply = 4 * policy.AccountJWTLimit
+
 // foldAccountz adds one ACCOUNTZ reply to out. An unreadable reply, or one naming no server, is ignored (the server
 // then counts as not answered); a repeat of a server already seen is ignored.
 func foldAccountz(out map[string]string, data []byte) error {
-	if len(data) > policy.AccountJWTLimit {
-		return fmt.Errorf("reply of %d bytes over the limit of %d bytes: refusing", len(data), policy.AccountJWTLimit)
+	if len(data) > maxAccountzReply {
+		return fmt.Errorf("reply of %d bytes over the limit of %d bytes: refusing", len(data), maxAccountzReply)
 	}
 	var r struct {
 		Server struct {
@@ -151,6 +155,9 @@ func foldAccountz(out map[string]string, data []byte) error {
 	tok := ""
 	if r.Error == nil && r.Data != nil && r.Data.Account != nil {
 		tok = r.Data.Account.JWT
+	}
+	if len(tok) > policy.AccountJWTLimit {
+		return fmt.Errorf("account JWT of %d bytes from %s over the limit of %d bytes: refusing", len(tok), name, policy.AccountJWTLimit)
 	}
 	out[name] = tok
 	return nil

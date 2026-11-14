@@ -41,8 +41,17 @@ func TestFoldAccountz(t *testing.T) {
 func TestFoldAccountzRefusesNeverTruncates(t *testing.T) {
 	out := map[string]string{}
 	big := `{"server":{"name":"s1"},"data":{"account_detail":{"jwt":"` + strings.Repeat("a", policy.AccountJWTLimit) + `"}}}`
-	if err := foldAccountz(out, []byte(big)); err == nil || len(out) != 0 {
-		t.Errorf("err = %v, out = %v", err, out)
+	if err := foldAccountz(out, []byte(big)); err != nil || out["s1"] == "" {
+		t.Errorf("a JWT at the limit in a larger reply: err = %v", err)
+	}
+	delete(out, "s1")
+	over := `{"server":{"name":"s1"},"data":{"account_detail":{"jwt":"` + strings.Repeat("a", policy.AccountJWTLimit+1) + `"}}}`
+	if err := foldAccountz(out, []byte(over)); err == nil || len(out) != 0 {
+		t.Errorf("JWT over the limit: err = %v, out = %v", err, out)
+	}
+	huge := `{"server":{"name":"s1"},"data":{"account_detail":{"jwt":"x"},"pad":"` + strings.Repeat("a", maxAccountzReply) + `"}}`
+	if err := foldAccountz(out, []byte(huge)); err == nil || len(out) != 0 {
+		t.Errorf("reply over the bound: err = %v, out = %v", err, out)
 	}
 	long := `{"server":{"name":"` + strings.Repeat("n", maxServerNameBytes+1) + `"},"data":{}}`
 	if err := foldAccountz(out, []byte(long)); err == nil || len(out) != 0 {
@@ -200,5 +209,23 @@ func TestRevokeProbes(t *testing.T) {
 	}
 	if err := RevokeProbes(ctx, rv, rec, nil, at); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestWitnessClosedByPush(t *testing.T) {
+	exp := time.Unix(1000, 0)
+	for _, c := range []struct {
+		name    string
+		at, exp time.Time
+		want    bool
+	}{
+		{"before expiry", exp.Add(-time.Second), exp, true},
+		{"at expiry", exp, exp, false},
+		{"after expiry", exp.Add(time.Second), exp, false},
+		{"unknown expiry", exp.Add(time.Hour), time.Time{}, true},
+	} {
+		if got := witnessClosedByPush(c.at, c.exp); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -270,8 +270,61 @@ type LiveWitnesses struct {
 	Grace time.Duration
 
 	mu    sync.Mutex
-	conns map[WitnessKey][]*nats.Conn
+	conns map[WitnessKey][]*witnessConn
 	m     minted
+}
+
+// witnessConn is one witness connection with what is needed to tell a push-driven close from an expiry close.
+type witnessConn struct {
+	nc *nats.Conn
+	// expires is when the credential's user JWT expires; zero when unknown.
+	expires time.Time
+	mu      sync.Mutex
+	// closedAt is when the connection was seen to close; zero until then.
+	closedAt time.Time
+}
+
+func (c *witnessConn) markClosed() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closedAt.IsZero() {
+		c.closedAt = time.Now()
+	}
+}
+
+// closed reports whether the connection closed as evidence of the push: it is closed and it closed strictly before
+// its credential expired.
+func (c *witnessConn) closed() bool {
+	if !c.nc.IsClosed() {
+		return false
+	}
+	c.mu.Lock()
+	at := c.closedAt
+	c.mu.Unlock()
+	if at.IsZero() {
+		at = time.Now() // closed, the handler not yet run: no earlier than now is known
+	}
+	return witnessClosedByPush(at, c.expires)
+}
+
+// witnessClosedByPush decides whether a connection that closed at closedAt counts as closed by the push. NATS closes a
+// connection when its user JWT expires, so a close at or after expiry is not evidence; with no known expiry any close
+// counts.
+func witnessClosedByPush(closedAt, expires time.Time) bool {
+	return expires.IsZero() || closedAt.Before(expires)
+}
+
+// credExpiry returns the expiry of the user JWT in a creds file, or the zero time when it has none or cannot be read.
+func credExpiry(creds []byte) time.Time {
+	tok, err := jwt.ParseDecoratedJWT(creds)
+	if err != nil {
+		return time.Time{}
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil || uc.Expires == 0 {
+		return time.Time{}
+	}
+	return time.Unix(uc.Expires, 0)
 }
 
 var _ Witnesses = (*LiveWitnesses)(nil)
@@ -289,16 +342,16 @@ func (w *LiveWitnesses) Open(ctx context.Context, urls map[string]string, minter
 		servers = append(servers, s)
 	}
 	sort.Strings(servers)
-	var opened []*nats.Conn
+	var opened []*witnessConn
 	fail := func(err error) error {
 		for _, nc := range opened {
-			nc.Close()
+			nc.nc.Close()
 		}
 		return err
 	}
 	type entry struct {
 		key WitnessKey
-		nc  *nats.Conn
+		wc  *witnessConn
 	}
 	var added []entry
 	for _, s := range servers {
@@ -308,21 +361,24 @@ func (w *LiveWitnesses) Open(ctx context.Context, urls map[string]string, minter
 				return fail(err)
 			}
 			w.m.add(pub)
-			nc, err := connectTo(ctx, s, urls[s], cr, timeout)
+			wc := &witnessConn{expires: credExpiry(cr)}
+			nc, err := connectTo(ctx, s, urls[s], cr, timeout,
+				nats.ClosedHandler(func(*nats.Conn) { wc.markClosed() }))
 			if err != nil {
 				return fail(err)
 			}
-			opened = append(opened, nc)
-			added = append(added, entry{WitnessKey{s, c.Sender}, nc})
+			wc.nc = nc
+			opened = append(opened, wc)
+			added = append(added, entry{WitnessKey{s, c.Sender}, wc})
 		}
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.conns == nil {
-		w.conns = map[WitnessKey][]*nats.Conn{}
+		w.conns = map[WitnessKey][]*witnessConn{}
 	}
 	for _, e := range added {
-		w.conns[e.key] = append(w.conns[e.key], e.nc)
+		w.conns[e.key] = append(w.conns[e.key], e.wc)
 	}
 	return nil
 }
@@ -330,7 +386,9 @@ func (w *LiveWitnesses) Open(ctx context.Context, urls map[string]string, minter
 // Minted returns the public keys of every credential minted for a witness, sorted.
 func (w *LiveWitnesses) Minted() []string { return w.m.list() }
 
-// Closed reports, per server and sender, whether every witness connection is closed. It waits until all are closed,
+// Closed reports, per server and sender, whether every witness connection is closed. A connection that closed at or
+// after its credential's expiry does not count: NATS closes an expired user, so that close is not evidence the push
+// did it. It waits until all are closed,
 // the grace has passed or ctx is done, so a server that closes the connection a moment after the push is not
 // missed; it returns at once when all are closed.
 func (w *LiveWitnesses) Closed(ctx context.Context) (map[WitnessKey]bool, error) {
@@ -359,8 +417,8 @@ func (w *LiveWitnesses) snapshot() (map[WitnessKey]bool, bool) {
 	all := true
 	for k, ncs := range w.conns {
 		closed := true
-		for _, nc := range ncs {
-			if !nc.IsClosed() {
+		for _, wc := range ncs {
+			if !wc.closed() {
 				closed = false
 			}
 		}
@@ -375,8 +433,8 @@ func (w *LiveWitnesses) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, ncs := range w.conns {
-		for _, nc := range ncs {
-			nc.Close()
+		for _, wc := range ncs {
+			wc.nc.Close()
 		}
 	}
 	w.conns = nil
