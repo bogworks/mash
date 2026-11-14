@@ -185,6 +185,8 @@ An edit refuses, naming the line, to change a flow-style (`{...}`) `endpoints:` 
 
 A command that edits the file saves it atomically and refuses, leaving the file as it is, if the file changed on disk since the command loaded it.
 
+The enforcement behind a policy (compiled templates, tags and the live server) is tested on every release and on every change of the NATS server version: see [Policy tests on every release](release.md#policy-tests-on-every-release).
+
 ## What the file is not
 
 It is not a place for content rules, rate limits or anything about what a message says: it decides reachability between endpoints and nothing else. A rule that lets a sender mail a recipient lets it ask for anything. It does not stop one endpoint asking another to forward a message (relay by asking), and it does not replace the receiving agent's judgement.
