@@ -161,6 +161,45 @@ mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
 - The list-set key is the only key of the bucket the outside system's credential may write; give it publish permission on `$KV.<bucket>.listset.>` and nothing else in the bucket, so that it cannot write the `status.` keys.
 - It stops cleanly on SIGINT or SIGTERM.
 
+## Reconciling an adopted account
+
+```
+mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+```
+
+Adopting an account does not change what is already in it. An account may hold user credentials issued before the first list set and signing keys that are not mash's. `policy reconcile` is the operator command that plans their removal (AT-015; [ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md) records the exempt keys and the plan). Run it after the first list set is applied. It needs the admin credentials (the marker, the issue record, the ledger) and the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`; the connections of every server, and with `--listset` the account JWT the servers hold), and the declared server count when the cluster is named (`--servers N` or `MASH_SERVERS`, as `issued check`). The account must be adopted, with the exempt keys recorded.
+
+**It is a dry run.** It prints the plan, changes nothing, takes no lease and no lock. `--yes` is refused in this version: it exits 1 with exactly `mashctl: policy reconcile: no signer configured: run without --yes to see the plan` before it connects to anything. The executor exists as a library (`internal/reconcile`) and is tested with a test signer; `--yes` is wired to it when mashctl has a signer for the account JWT.
+
+**Where the list set comes from.** By default the list set in force, read from the account's ledger in the range's policy bucket: `--bucket NAME`, or `MASH_POLICY_BUCKET` as a pattern with `--range R` filling `{range}`; `--account KEY` names the account (default the key store's). It needs generation 1 or later. `--listset FILE` instead reads a list set document from a file (the signature is not checked) and previews against it, before the first apply; that plan is never executable.
+
+**Signing keys.** A non-mash signing key is any key of the account JWT that is not one of the list set's scoped keys. The scoped key of each owner group is the key the key store holds for it (`groups/<range>.<owner>.nk`); where the store holds none, it is the one scoped key of the JWT in force whose role is the group (the gate of the first apply required exactly those keys). The first apply removes every other signing key, because the gate refuses extra signers; the reconcile never pushes for them. For the JWT in force it reports each one still there: `signing key KEY: still present`, a finding. With `--listset` it reports each one the apply would remove: `signing key KEY: removed by the first apply`. Under each, the connected users it signed (CONNZ's issuer key). The dry run exits 1 when the admin user (the `iss` of the admin credentials) or a connected exempt user is signed by a signing key that does not stay (the account's own key and the scoped keys stay): reissue them under the account key first. The plan is printed and the error goes to stderr.
+
+**Revocations.** The plan revokes:
+
+1. a recorded issued user whose sender (the record's address) is not in the list set: `recorded, sender not in the list set`;
+2. a connected user that is none of recorded, exempt or issued under the list set: `connected, untracked`.
+
+Each revoke line names the key, the sender or the connection (the user's name, the client's name, host, server, connection id) and the revocation time, the later of now and the connected JWT's `iat`. Everything the plan cannot prove is a finding and is left alone:
+
+- a recorded key whose issue-record history cannot be shown complete (ADR 0115: the bucket's `mash_issued_history` marker, no revision at the history cap) or that has a future-dated revision;
+- a connected user with no record whose JWT was signed by one of the list set's scoped keys: `a list-set credential without its record`;
+- every connected user with no record, when the issue bucket cannot prove that no record was lost (it must deny deletes and purges and carry the history marker `full` or `raised:N:S`);
+- a recorded admin user that is not exempt, a revoked key still connected, and a connection scan that was incomplete (a server that did not answer).
+
+Exempt keys are in no action and no finding. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed, 1 the issuer check failed or a failure (including `--yes`), 2 usage.
+
+Sample, before the first apply (`--listset first.json`):
+
+```
+account ADZ...: preview against a list set from a file (not applied; nothing here can be executed)
+signing key AA5...: removed by the first apply
+  signed connected user UCA... (user "plain-lane", client "plain-client", host 127.0.0.1, server s1, cid 25)
+revoke UCA...: connected, untracked [at 2026-11-14T19:47:31Z] connected: user "plain-lane", client "plain-client", host 127.0.0.1, server s1, cid 25
+revoke UDW... (sender foo.alice.gone): recorded, sender not in the list set [at 2026-11-14T19:47:31Z] connected: user "gone-lane", host 127.0.0.1, server s1, cid 24
+reconciled: 2 actions
+```
+
 ## Labels
 
 ```sh

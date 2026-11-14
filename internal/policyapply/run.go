@@ -981,6 +981,12 @@ func serverRevocationJWTs(ctx context.Context, in RunInput) ([]string, error) {
 // the ledger stores the in-force JWT and a generation is in force; an empty prev then fails closed. It returns an
 // error wrapping ErrSignedMismatch naming the keys that are missing or lowered.
 func keepsRevocations(prev string, tracked bool, target string) error {
+	return KeepsRevocations(prev, tracked, target)
+}
+
+// KeepsRevocations is the check Run makes before it pushes: target must revoke every key the in-force JWT prev
+// revokes, each at a time no earlier than in prev. tracked says a generation is in force and the ledger stores its JWT.
+func KeepsRevocations(prev string, tracked bool, target string) error {
 	if !tracked {
 		return nil
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
@@ -230,6 +231,62 @@ type issuedCheck struct {
 	Summary       issuedSummary        `json:"summary"`
 }
 
+// connScan is what every server's CONNZ said about the account's connections, and how much of the picture it is.
+type connScan struct {
+	Conns []apply.ConnzServer
+	// Answered and Missing are the servers that answered the connection list and those that answered the ping only.
+	Answered, Missing []string
+	// Expected is how many servers there should be.
+	Expected int
+	// Incomplete says why the scan is not the whole picture ("" when it is): the server set is incomplete, a server did
+	// not answer the connection list, or a list was not read whole.
+	Incomplete string
+}
+
+// scanConnections reads the connections of account from every server over nc (a system account connection). It is the
+// gathering `issued check` and `policy reconcile` share. An error is a failure to ask at all; a partial answer is
+// reported in Incomplete, never passed over.
+func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers int) (connScan, error) {
+	res := apply.NATS{Conn: nc, Inventory: servers}
+	set, err := res.Servers(ctx)
+	if err != nil {
+		return connScan{}, err
+	}
+	conns, err := res.Connz(ctx, account, set.Names, 0)
+	if err != nil {
+		return connScan{}, err
+	}
+	sc := connScan{Conns: conns, Answered: []string{}, Missing: []string{}, Expected: max(set.Expected, servers, len(set.Names))}
+	answered := map[string]bool{}
+	var unreconciled []string
+	for _, s := range conns {
+		answered[s.Name] = true
+		sc.Answered = append(sc.Answered, s.Name)
+		if s.Incomplete != "" {
+			unreconciled = append(unreconciled, s.Incomplete)
+		}
+	}
+	for _, n := range set.Names {
+		if !answered[n] {
+			sc.Missing = append(sc.Missing, n)
+		}
+	}
+	switch {
+	case !set.Complete(servers):
+		sc.Incomplete = set.Why(servers)
+	case len(sc.Missing) > 0:
+		sc.Incomplete = fmt.Sprintf("%d server(s) answered the ping but not the connection list: %s", len(sc.Missing), config.Clean(strings.Join(sc.Missing, ", ")))
+	}
+	if len(unreconciled) > 0 {
+		why := strings.Join(unreconciled, "; ")
+		if sc.Incomplete != "" {
+			why = sc.Incomplete + "; " + why
+		}
+		sc.Incomplete = why
+	}
+	return sc, nil
+}
+
 func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "mashctl: issued check: %s\n", fmt.Sprintf(format, a...))
@@ -251,45 +308,14 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	res := apply.NATS{Conn: nc, Inventory: servers}
-	set, err := res.Servers(ctx)
+	scan, err := scanConnections(ctx, nc, account, servers)
 	if err != nil {
 		return fail("%v", err)
 	}
-	conns, cerr := res.Connz(ctx, account, set.Names, 0)
-	if cerr != nil {
-		return fail("%v", cerr)
-	}
-
+	conns := scan.Conns
 	rep := issuedCheck{Account: account, RecordPresent: present, Unrecorded: []issuedFindingOut{}, RevokedConn: []issuedRevokedConn{}, NotConnected: []issuedNotConnected{}}
-	rep.Servers = issuedServers{Answered: []string{}, Missing: []string{}, Expected: max(set.Expected, servers, len(set.Names))}
-	answered := map[string]bool{}
-	var unreconciled []string
-	for _, s := range conns {
-		answered[s.Name] = true
-		rep.Servers.Answered = append(rep.Servers.Answered, s.Name)
-		if s.Incomplete != "" {
-			unreconciled = append(unreconciled, s.Incomplete)
-		}
-	}
-	for _, n := range set.Names {
-		if !answered[n] {
-			rep.Servers.Missing = append(rep.Servers.Missing, n)
-		}
-	}
-	switch {
-	case !set.Complete(servers):
-		rep.Incomplete = set.Why(servers)
-	case len(rep.Servers.Missing) > 0:
-		rep.Incomplete = fmt.Sprintf("%d server(s) answered the ping but not the connection list: %s", len(rep.Servers.Missing), config.Clean(strings.Join(rep.Servers.Missing, ", ")))
-	}
-	if len(unreconciled) > 0 {
-		why := strings.Join(unreconciled, "; ")
-		if rep.Incomplete != "" {
-			why = rep.Incomplete + "; " + why
-		}
-		rep.Incomplete = why
-	}
+	rep.Servers = issuedServers{Answered: scan.Answered, Missing: scan.Missing, Expected: scan.Expected}
+	rep.Incomplete = scan.Incomplete
 	rep.Complete = rep.Incomplete == ""
 
 	recorded := map[string]store.Issued{}

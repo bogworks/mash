@@ -1,0 +1,75 @@
+{
+  "account": "<ACCOUNT>",
+  "source": "listset_file",
+  "generation": 0,
+  "signing_keys": [
+    {
+      "key": "AA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCS47C",
+      "state": "removed_by_first_apply",
+      "signed": [
+        {
+          "key": "UCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZJPJO",
+          "connection": {
+            "server": "mash-local",
+            "host": "127.0.0.1",
+            "name": "plain-lane",
+            "client": "client-of-UCAT",
+            "cid": 0
+          }
+        }
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "key": "UCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZJPJO",
+      "address": "",
+      "reason": "connected, untracked",
+      "at": "<TIME>",
+      "connections": [
+        {
+          "server": "mash-local",
+          "host": "127.0.0.1",
+          "name": "plain-lane",
+          "client": "client-of-UCAT",
+          "cid": 0
+        }
+      ]
+    },
+    {
+      "key": "UCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVZ45L",
+      "address": "",
+      "reason": "connected, untracked",
+      "at": "<TIME>",
+      "connections": [
+        {
+          "server": "mash-local",
+          "host": "127.0.0.1",
+          "name": "legacy-lane",
+          "client": "client-of-UCFI",
+          "cid": 0
+        }
+      ]
+    },
+    {
+      "key": "UDWUSKGGFDI4FRXK5EBTRECZSVQSSWJHHJOGH6JWG3AUMFFMQ435C2U4",
+      "address": "foo.alice.gone",
+      "reason": "recorded, sender not in the list set",
+      "at": "<TIME>",
+      "connections": [
+        {
+          "server": "mash-local",
+          "host": "127.0.0.1",
+          "name": "gone-lane",
+          "client": "client-of-UDWU",
+          "cid": 0
+        }
+      ]
+    }
+  ],
+  "findings": [],
+  "issuer_problems": [],
+  "actions": 3,
+  "unknown": 0,
+  "status": "reconciled: 3 actions"
+}
