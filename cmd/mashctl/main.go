@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -41,6 +42,10 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
+	case "issue": // the issue service: runs until interrupted
+		return runIssue(args[1:], env, lookup, stdout, stderr)
+	case "wrangler": // the static wrangler registry of a test account: a file in the key store, no server
+		return runWrangler(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the policy file; the server only with --sync
@@ -61,12 +66,12 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer) error {
+	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error {
 		n, err := parseServers(env)
 		if err != nil {
 			return err
 		}
-		return revokeUsers(ctx, cfg, env, n, users, stdout, nil)
+		return revokeUsers(ctx, cfg, env, n, users, stdout, now)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)

@@ -201,3 +201,65 @@ func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 		t.Fatalf("findings %+v", fs)
 	}
 }
+
+// groupSignerSetup registers an owner group signer in the key store and publishes it in the resolver's JWT as a
+// scoped signer, as the issue service needs it.
+func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, pub string) {
+	t.Helper()
+	ks, fk = setup(t)
+	kp, err := ks.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub = pubOf(t, kp)
+	kp.Wipe()
+	op, _, _ := ks.Operator()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = pub, "foo.c"
+		sc.Template.Permissions.Pub.Allow.Add("foo.c.>")
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	return ks, fk, pub
+}
+
+func TestGroupPublicsListsRegisteredGroupSigners(t *testing.T) {
+	ks, _, pub := groupSignerSetup(t)
+	got, err := ks.GroupPublics()
+	if err != nil || len(got) != 1 || got["foo.c"] != pub {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// A scoped signer that matches no key-store file stays unknown even when a group signer is registered.
+func TestGroupSignerRegistrationDoesNotExcuseOtherKeys(t *testing.T) {
+	ks, fk, _ := groupSignerSetup(t)
+	other, _ := nkeys.CreateAccount()
+	op, _, _ := ks.Operator()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = pubOf(t, other), "foo.c"
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})
+	if err == nil || !strings.Contains(err.Error(), pubOf(t, other)) {
+		t.Fatalf("revoke: %v", err)
+	}
+}
+
+// Revocation works with a registered group signer in the account JWT.
+func TestRevokeUsersAcceptsARegisteredGroupSigner(t *testing.T) {
+	ks, fk, pub := groupSignerSetup(t)
+	u := userKey(t)
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{u}); err != nil {
+		t.Fatal(err)
+	}
+	if !revokedIn(t, fk.token, u) {
+		t.Fatal("not revoked")
+	}
+	cl, _ := jwt.DecodeAccountClaims(fk.token)
+	if _, ok := cl.SigningKeys.GetScope(pub); !ok {
+		t.Fatal("the group signer was dropped")
+	}
+}

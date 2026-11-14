@@ -12,6 +12,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -33,6 +35,7 @@ const (
 	accountFile  = "account.nk"
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
+	groupsDir    = "groups"
 	seedExt      = ".nk"
 )
 
@@ -121,6 +124,11 @@ func ownerErr(fi fs.FileInfo, path, what string) error {
 	return nil
 }
 
+// CheckOwned refuses a file or directory (described by fi, named path, called what in the error) that the effective
+// uid does not own: the owner check the key store applies to its own files, for a caller that holds a file of the same
+// custody. It is a no-op where the platform reports no owner.
+func CheckOwned(fi fs.FileInfo, path, what string) error { return ownerErr(fi, path, what) }
+
 // CheckParentDir refuses a directory that is not a real directory (a symlink is refused), is not owned by the
 // effective uid, or is writable by other users (group-writable is allowed: under the usual user-private-group umask 002 a config directory is 0775 and the group is the owner alone): a place where a creds file may be created without another user
 // being able to swap or replace it. A missing directory is an error wrapping fs.ErrNotExist.
@@ -144,10 +152,36 @@ func CheckParentDir(d string) error {
 	return nil
 }
 
+// CheckStrictParentDir is the rule for a directory that holds a file deciding who may be issued a credential (the
+// wrangler registry, its lock file, the issue service's list set): a real directory (a symlink is refused) that the
+// effective uid owns and that no group or other user can write (mode & 0022 == 0). Unlike CheckParentDir it refuses a
+// group-writable directory too, because another member of the group could replace the file by rename. A missing
+// directory is an error wrapping fs.ErrNotExist.
+func CheckStrictParentDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("directory %s is a symlink: refusing it", d)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", d)
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("directory %s has mode %04o: a group or other user can write it and could replace the files in it. Run: chmod go-w %s", d, fi.Mode().Perm(), d)
+	}
+	return ownerErr(fi, d, "directory")
+}
+
 // checkDirs checks the key dir; with create it makes it if missing (0700). A zones directory left by an older release
 // is not read, checked or removed: its seeds are the operator's to keep or destroy (ADR 0091).
-func (a *Authority) checkDirs(create bool) error {
-	for _, d := range []string{a.dir} {
+func (a *Authority) checkDirs(create bool) error { return a.checkDirsIn(create) }
+
+// checkDirsIn checks the key dir and the sub directories subs (the key dir's own); with create it makes missing
+// ones (0700).
+func (a *Authority) checkDirsIn(create bool, subs ...string) error {
+	for _, d := range append([]string{a.dir}, subs...) {
 		ok, err := checkDir(d)
 		if err != nil {
 			return err
@@ -370,6 +404,87 @@ func (a *Authority) InitAccount() (pub string, created bool, err error) {
 // Account returns the account signing key pair and its public key.
 func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
+}
+
+// ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
+var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
+
+// groupRE is one part of an owner group name "range.owner": the shape of a zone name.
+var groupRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+// validGroup reports whether g is "range.owner" with both parts of a zone name's shape. The shape keeps path
+// separators out of file names; the single dot cannot make a name that climbs.
+func validGroup(g string) bool {
+	r, o, ok := strings.Cut(g, ".")
+	return ok && groupRE.MatchString(r) && groupRE.MatchString(o)
+}
+
+func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir) }
+
+// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk beside the
+// zones directory under the same custody rules; with create it generates and writes one if absent. It never
+// overwrites. Zone keys (ZoneKey) are the policy file's; group keys are the list set's.
+func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
+	if !validGroup(group) {
+		return nil, fmt.Errorf("mashctl: invalid owner group %q: want range.owner, each part lower-case letters, digits and hyphens, up to 32 characters", group)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.checkDirsIn(create, a.groupsPath()); err != nil {
+		return nil, err
+	}
+	kp, _, err := getOrCreate(filepath.Join(a.groupsPath(), group+seedExt), accountKind, create)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w %q", ErrNoGroupKey, group)
+	}
+	return kp, err
+}
+
+// Groups lists the owner groups that have a key file, sorted.
+func (a *Authority) Groups() ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.checkDirsIn(false, a.groupsPath()); err != nil {
+		return nil, err
+	}
+	ents, err := os.ReadDir(a.groupsPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mashctl: list owner groups: %w", err)
+	}
+	var out []string
+	for _, e := range ents {
+		if g, ok := strings.CutSuffix(e.Name(), seedExt); ok && validGroup(g) && !e.IsDir() {
+			out = append(out, g)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// GroupPublics maps every owner group with a key file to the public key of that key. Each key pair is wiped after its
+// public key is read; no seed leaves this function.
+func (a *Authority) GroupPublics() (map[string]string, error) {
+	groups, err := a.Groups()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(groups))
+	for _, g := range groups {
+		kp, err := a.GroupKey(g, false)
+		if err != nil {
+			return nil, err
+		}
+		pub, err := kp.PublicKey()
+		kp.Wipe()
+		if err != nil {
+			return nil, err
+		}
+		out[g] = pub
+	}
+	return out, nil
 }
 
 // ErrDifferentKey is wrapped by ImportOperator and ImportAccount when the store already holds another key.
