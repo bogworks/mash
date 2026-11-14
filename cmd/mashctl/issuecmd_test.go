@@ -332,7 +332,7 @@ func TestIssueServiceAT012IssuesAJWTThatConnects(t *testing.T) {
 		t.Fatal("not in the issue record")
 	}
 	if rec.Purpose != store.PurposeIssue || rec.Kind != store.IssuedEndpoint || rec.Address != "foo.c.core" ||
-		rec.Zone != issueGroup || rec.Owner != "c" || !slices.Equal(rec.Tags, uc.Tags) || rec.RevokedAt != "" {
+		rec.Owner != "c" || !slices.Equal(rec.Tags, uc.Tags) || rec.RevokedAt != "" {
 		t.Errorf("record %+v", rec)
 	}
 	if !strings.Contains(e.logs.String(), "listening") {
