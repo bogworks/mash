@@ -291,21 +291,58 @@ func readInForce(ctx context.Context, nc *nats.Conn, account string, o reconcile
 	if err != nil {
 		return listset.Record{}, listset.ListSet{}, "", err
 	}
-	rec, ls, ok, err := l.InForceView()
+	var (
+		rec listset.Record
+		ls  listset.ListSet
+		tok string
+	)
+	err = readStable(func() (uint64, error) {
+		r, err := l.InForce()
+		return r.Generation, err
+	}, func() error {
+		var ok bool
+		var err error
+		if rec, ls, ok, err = l.InForceView(); err != nil {
+			return err
+		}
+		if !ok || rec.Generation == 0 {
+			return errors.New("no list set is in force: apply the first list set, or pass --listset FILE to preview the signing keys the first apply would remove")
+		}
+		if tok, err = l.InForceJWT(); err != nil {
+			return err
+		}
+		if tok == "" {
+			return fmt.Errorf("the ledger stores no account JWT for generation %d", rec.Generation)
+		}
+		return nil
+	})
 	if err != nil {
 		return rec, ls, "", err
-	}
-	if !ok || rec.Generation == 0 {
-		return rec, ls, "", errors.New("no list set is in force: apply the first list set, or pass --listset FILE to preview the signing keys the first apply would remove")
-	}
-	tok, err := l.InForceJWT()
-	if err != nil {
-		return rec, ls, "", err
-	}
-	if tok == "" {
-		return rec, ls, "", fmt.Errorf("the ledger stores no account JWT for generation %d", rec.Generation)
 	}
 	return rec, ls, tok, nil
+}
+
+// readStable runs read between two reads of the generation in force. The list set and the JWT are separate ledger
+// reads, so a generation that changed between them could pair one generation's list set with another's JWT: it
+// reads again, up to 3 times, then fails. (The executor rebuilds the plan under the lease.)
+func readStable(generation func() (uint64, error), read func() error) error {
+	for range 3 {
+		before, err := generation()
+		if err != nil {
+			return err
+		}
+		if err := read(); err != nil {
+			return err
+		}
+		after, err := generation()
+		if err != nil {
+			return err
+		}
+		if before == after {
+			return nil
+		}
+	}
+	return errors.New("the list set in force changed while reading: run it again")
 }
 
 // heldAccountClaims reads the account JWT every server holds and returns the first, with the signing keys of all of

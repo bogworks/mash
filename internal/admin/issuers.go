@@ -47,17 +47,20 @@ func (e *IssuersNotKeptError) Error() string {
 // CheckIssuersKept refuses when the admin user, or any connected exempt user, is signed by a key that is not kept.
 // account is the account's own identity key, which always counts as kept; kept holds the signing keys that stay: every
 // scoped key the key store holds for an owner group of any range, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; exemptIssuers maps the public
-// key of each connected exempt user to the issuer CONNZ reported for it. An empty issuer is not known to be kept, so it
+// key of each connected exempt user to every issuer CONNZ reported for it, one per connection (two connections of one
+// user may carry JWTs signed by different keys, and every one of them must be kept). An empty issuer is not known to be kept, so it
 // is refused. The error is an *IssuersNotKeptError naming every user and key, sorted; nothing is changed.
-func CheckIssuersKept(account, adminUser, adminIssuer string, exemptIssuers map[string]string, kept map[string]bool) error {
+func CheckIssuersKept(account, adminUser, adminIssuer string, exemptIssuers map[string][]string, kept map[string]bool) error {
 	ok := func(issuer string) bool { return issuer != "" && (issuer == account || kept[issuer]) }
 	var ps []IssuerProblem
 	if !ok(adminIssuer) {
 		ps = append(ps, IssuerProblem{Role: "admin", User: adminUser, Issuer: adminIssuer})
 	}
-	for user, issuer := range exemptIssuers {
-		if !ok(issuer) {
-			ps = append(ps, IssuerProblem{Role: "exempt", User: user, Issuer: issuer})
+	for user, issuers := range exemptIssuers {
+		for _, issuer := range issuers {
+			if !ok(issuer) {
+				ps = append(ps, IssuerProblem{Role: "exempt", User: user, Issuer: issuer})
+			}
 		}
 	}
 	if len(ps) == 0 {
@@ -67,7 +70,10 @@ func CheckIssuersKept(account, adminUser, adminIssuer string, exemptIssuers map[
 		if c := strings.Compare(a.Role, b.Role); c != 0 {
 			return c
 		}
-		return strings.Compare(a.User, b.User)
+		if c := strings.Compare(a.User, b.User); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Issuer, b.Issuer)
 	})
 	return &IssuersNotKeptError{Problems: ps}
 }

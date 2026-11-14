@@ -17,7 +17,7 @@ func TestCheckIssuersKept(t *testing.T) {
 	kept := map[string]bool{scoped: true}
 
 	// the account key and a kept scoped key are fine, for the admin user and for an exempt user
-	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string]string{"USVC": scoped, "USVC2": acct}, kept); err != nil {
+	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {scoped}, "USVC2": {acct}}, kept); err != nil {
 		t.Errorf("kept issuers refused: %v", err)
 	}
 	// nothing connected is exempt: only the admin is checked
@@ -26,7 +26,7 @@ func TestCheckIssuersKept(t *testing.T) {
 	}
 
 	// the admin user and an exempt user under keys that do not stay are refused, each named with its key
-	err := admin.CheckIssuersKept(acct, "UADMIN", plain, map[string]string{"USVC": plain2, "UOK": acct}, kept)
+	err := admin.CheckIssuersKept(acct, "UADMIN", plain, map[string][]string{"USVC": {plain2}, "UOK": {acct}}, kept)
 	var nk *admin.IssuersNotKeptError
 	if !errors.As(err, &nk) {
 		t.Fatalf("err = %v", err)
@@ -44,11 +44,17 @@ func TestCheckIssuersKept(t *testing.T) {
 		t.Errorf("a user under the account key is named: %v", err)
 	}
 
+	// two connections of one exempt user, one issuer kept and one not: refused, naming the one that leaves
+	err = admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {scoped, plain}}, kept)
+	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0] != (admin.IssuerProblem{Role: "exempt", User: "USVC", Issuer: plain}) {
+		t.Errorf("a user with one kept and one removed issuer: %v", err)
+	}
+
 	// an issuer that is not known is not known to stay
 	if err := admin.CheckIssuersKept(acct, "UADMIN", "", nil, kept); err == nil {
 		t.Error("an empty admin issuer passed")
 	}
-	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string]string{"USVC": ""}, kept); err == nil {
+	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {""}}, kept); err == nil {
 		t.Error("an empty exempt issuer passed")
 	}
 }

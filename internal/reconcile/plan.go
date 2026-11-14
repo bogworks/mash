@@ -238,9 +238,16 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 		scoped[k] = true
 	}
 	kept := KeptSigners(in.Claims, in.Held, in.Signers)
+	adminUnrecorded := false
 	exempt := map[string]bool{}
 	for _, k := range in.Exempt {
 		exempt[k] = true
+	}
+	// The admin user key in use is exempt whether or not the marker records it (the credentials may have been rotated
+	// after adoption): it is never in any action. A marker that lacks it is a finding.
+	if in.AdminUser != "" && !exempt[in.AdminUser] {
+		exempt[in.AdminUser] = true
+		adminUnrecorded = true
 	}
 	p := Plan{Account: in.Account, Source: in.Source, Generation: in.Generation,
 		SigningKeys: []SigningKey{}, Revocations: []Revocation{}, Findings: []Finding{}, IssuerProblems: []admin.IssuerProblem{}}
@@ -376,15 +383,18 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 				At: revokeAt(cs).Format(time.RFC3339), Connections: connsOf(cs)})
 		}
 	}
+	if adminUnrecorded {
+		finding(in.AdminUser, "the admin user KEY in use is not in the adoption marker's exempt set: run `mashctl policy adopt` again to record it")
+	}
 	if in.ScanIncomplete != "" {
 		finding("", "the connection scan is incomplete: %s", in.ScanIncomplete)
 	}
 
 	// The issuer check: the users that must keep working must not be signed by a key that leaves.
-	exIssuers := map[string]string{}
+	exIssuers := map[string][]string{}
 	for k := range exempt {
 		for _, cn := range byKey[k] {
-			exIssuers[k] = cn.issuer
+			exIssuers[k] = append(exIssuers[k], cn.issuer)
 		}
 	}
 	var nk *admin.IssuersNotKeptError

@@ -221,3 +221,18 @@ func TestPolicyReconcileIssuerCheckFailureExitsOne(t *testing.T) {
 		t.Errorf("json: %d\n%s", jcode, jout)
 	}
 }
+
+func TestReadStableRetriesWhenTheGenerationChangesThenFails(t *testing.T) {
+	gens := []uint64{1, 2, 2, 2} // read 1 sees 1 then 2: retried; read 2 sees 2 and 2: kept
+	i, reads := 0, 0
+	gen := func() (uint64, error) { g := gens[i]; i++; return g, nil }
+	if err := readStable(gen, func() error { reads++; return nil }); err != nil || reads != 2 {
+		t.Fatalf("err %v after %d reads", err, reads)
+	}
+	n := uint64(0)
+	reads = 0
+	err := readStable(func() (uint64, error) { n++; return n, nil }, func() error { reads++; return nil })
+	if err == nil || !strings.Contains(err.Error(), "the list set in force changed while reading: run it again") || reads != 3 {
+		t.Errorf("err %v after %d reads", err, reads)
+	}
+}

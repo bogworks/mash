@@ -481,3 +481,43 @@ func TestScopedKeyNotHeldIsNonMash(t *testing.T) {
 		t.Errorf("issuer problems = %+v", p.IssuerProblems)
 	}
 }
+
+// The admin user key in use is exempt even when the adoption marker does not record it (rotated credentials): it is
+// never revoked, and the plan says to adopt again.
+func TestAdminKeyInUseNotInTheMarkerIsNeverRevoked(t *testing.T) {
+	w := newWorld(t)
+	rotated := userKey(t)
+	w.connect(w.conn(rotated, w.acct, "admin", w.now.Add(-time.Hour).Unix()))
+	p, err := Build(context.Background(), Input{
+		Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
+		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Servers: w.servers, Issued: w.issued, AdminUser: rotated, AdminIssuer: w.acct})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := revocation(p, rotated); ok || p.Actions != 0 {
+		t.Errorf("the admin key in use was revoked: %+v", p.Revocations)
+	}
+	f, ok := finding(p, rotated)
+	if !ok || !strings.Contains(f.Detail, "admin user KEY in use is not in the adoption marker's exempt set: run `mashctl policy adopt` again to record it") {
+		t.Fatalf("finding = %+v %v", f, ok)
+	}
+	if !strings.HasPrefix(p.Status, "reconciled: partial") {
+		t.Errorf("status %q", p.Status)
+	}
+}
+
+// Two connections of one exempt user whose JWTs are signed by different keys: the issuer that is not kept is refused
+// even though the other one is kept.
+func TestExemptUserWithOneConnectionUnderARemovedIssuerIsRefused(t *testing.T) {
+	w := newWorld(t)
+	w.connect(w.conn(w.exempt, w.plain, "svc", w.now.Add(-time.Hour).Unix()), w.conn(w.exempt, w.acct, "svc", w.now.Add(-time.Hour).Unix()))
+	w.claims.SigningKeys.Add(w.plain)
+	p := w.build()
+	if len(p.IssuerProblems) != 1 || p.IssuerProblems[0] != (admin.IssuerProblem{Role: "exempt", User: w.exempt, Issuer: w.plain}) {
+		t.Fatalf("issuer problems = %+v", p.IssuerProblems)
+	}
+	if p.IssuerErr() == nil {
+		t.Error("no issuer error")
+	}
+}
