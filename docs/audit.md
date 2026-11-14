@@ -37,7 +37,6 @@ or token; it ties a `--compare` file to one deployment), `creds_dirs` (the direc
 | `identity` | `agent`, `owner` and `name`. An old-form record has the agent token `cc` |
 | `form` | `legacy` (the old form: a bare name under the account's owner) or `new` (three tokens) |
 | `user` | the user public key the record names (a public key, never a seed) |
-| `zone` | the record's zone, only when it has one |
 | `alias` | `owner` and `name` of the old-form identity a new-form record also answers to; only when it has one |
 | `running` | `true` when the lease bucket holds a live lease under the record's key, `false` when it holds none or only a deprovision tombstone. A lease expires 90 seconds after its last refresh, so `running` is the state at the moment of the read |
 | `inbox` | the record's inbox stream, below |
@@ -146,7 +145,7 @@ The text form prints `retired markers N (final F, pending P)` with the bucket, b
 ### `problems`
 
 Things the audit could not read, each with `what` (`record`, `creds` or `retired`), `item` and `error`: a directory value that
-does not parse as a record, a record that names no identity, a record whose alias names no legacy identity (the record stays in `records`, and the inbox the alias's name would give is not reported as an orphan), a creds file or staged creds file that cannot be read (for example one that
+does not parse as a record, a record that still carries a zone (zones are removed: run `mashctl unzone NAME`), a record that names no identity, a record whose alias names no legacy identity (the record stays in `records`, and the inbox the alias's name would give is not reported as an orphan), a creds file or staged creds file that cannot be read (for example one that
 other users can read). A problem is not a verdict on the item: fix it and run again. A directory entry that does not
 parse still exists, so the audit claims by its key the inbox stream and the lease it would own, and by its raw `user`
 field the creds file of that user; those are not listed as orphans (the problem is the finding).

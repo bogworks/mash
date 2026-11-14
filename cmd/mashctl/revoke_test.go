@@ -63,7 +63,7 @@ func stubRevoke(t *testing.T) *revokeStub {
 func init() { revokeUsers = (&revokeStub{}).fn }
 
 func TestRetireRevokesBeforeDeleting(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	u := h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.probe = h.records
@@ -87,22 +87,21 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 }
 
 func TestRetireRefusedWhenRevokeFails(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("a")
-	before := h.policyText()
 	s := stubRevoke(t)
 	s.err = errors.New("no system account credentials")
 	out, errb, code := h.run("retire", "a")
 	if code != 1 || strings.Contains(out, "retired") || !strings.Contains(errb, "no system account credentials") || !strings.Contains(errb, "--no-revoke") || !strings.Contains(errb, "nothing was removed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if len(h.records()) != 1 || h.policyText() != before {
+	if len(h.records()) != 1 {
 		t.Error("retire removed something though the revoke failed")
 	}
 }
 
 func TestRetireNoRevokeSkips(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("must not be called")
@@ -117,7 +116,7 @@ func TestRetireNoRevokeSkips(t *testing.T) {
 }
 
 func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	s := stubRevoke(t)
 	out, errb, code := h.run("retire", "a", "--force")
 	if code != 0 || len(s.calls) != 0 || !strings.Contains(errb, "nothing was revoked") {
@@ -126,7 +125,7 @@ func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
 }
 
 func TestRetireBadServersAndUsage(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.env["MASH_SERVERS"] = "zero"
 	if _, errb, code := h.run("retire", "a"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
 		t.Fatalf("%d %q", code, errb)
@@ -140,7 +139,7 @@ func TestRetireBadServersAndUsage(t *testing.T) {
 }
 
 func TestDeprovisionRejectsRemovedFlags(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	for _, f := range []string{"--sys-creds=/s.creds", "--servers=2"} {
@@ -161,7 +160,7 @@ func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
 }
 
 func TestDeprovisionRevokesBeforeRemoving(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	u := h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.probe = h.records
@@ -176,7 +175,7 @@ func TestDeprovisionRevokesBeforeRemoving(t *testing.T) {
 }
 
 func TestDeprovisionRefusedWhenRevokeFailsAndNoRevoke(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	u := h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("not confirmed")
@@ -199,7 +198,7 @@ func TestDeprovisionRefusedWhenRevokeFailsAndNoRevoke(t *testing.T) {
 }
 
 func TestDeprovisionUserFormAndMismatch(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	u := h.provisionDeclared("a")
 	_, other := h.e.Mint(t, "other")
 	s := stubRevoke(t)
@@ -298,7 +297,7 @@ func (h *addEnv) shortUser(name, user string) {
 }
 
 func TestDeprovisionWithAShortUserValueDoesNotPanic(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("w")
 	h.shortUser("w", "abc")
 	s := stubRevoke(t)
@@ -315,7 +314,7 @@ func TestDeprovisionWithAShortUserValueDoesNotPanic(t *testing.T) {
 }
 
 func TestRetireWithAShortUserValueDoesNotPanic(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	h.shortUser("b", "abc")
 	s := stubRevoke(t)

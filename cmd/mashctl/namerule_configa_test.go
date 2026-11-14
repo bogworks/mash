@@ -45,7 +45,7 @@ func (h *addEnv) assertNothingCreated(names ...string) {
 }
 
 func TestConfigAMashctlAdd(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	// An endpoint added before the rule came: adding its name again is refused by the rule, before the directory is
 	// read ("already provisioned" would mean it was).
@@ -53,7 +53,6 @@ func TestConfigAMashctlAdd(t *testing.T) {
 		t.Fatalf("add before the rule: %d %q", code, errb)
 	}
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
-	before, _ := os.ReadFile(h.policy)
 	recsBefore := h.records()
 
 	cases := []struct {
@@ -96,9 +95,6 @@ func TestConfigAMashctlAdd(t *testing.T) {
 		})
 	}
 	h.assertNothingCreated("fresh", "mash", "cc_acme_gone", "mash_acme_gone", "cc.acme.gone")
-	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
-		t.Error("a refused add changed the policy")
-	}
 	if got := h.records(); strings.Join(got, ",") != strings.Join(recsBefore, ",") {
 		t.Errorf("a refused add changed the records: %v -> %v", recsBefore, got)
 	}
@@ -106,7 +102,7 @@ func TestConfigAMashctlAdd(t *testing.T) {
 
 // `mashctl provision` is the same entry point through the other verb: the rule is applied through ctl.Run's admin.
 func TestConfigAMashctlProvision(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
 	recsBefore := h.records()
 	for _, name := range []string{"fresh", "mash", "gone"} {
@@ -126,7 +122,6 @@ func TestConfigAMashctlProvision(t *testing.T) {
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
 		{"list"}, {"init"}, {"limits"}, {"provision", "x", "--user", "U", "--account", "A"},
-		{"policy", "check"}, {"policy", "apply", "--dry-run"}, {"policy", "drift"},
 		{"add", "x"}, {"label", "x", "k=v"}, {"retire", "x"}, {"reissue", "x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
@@ -169,7 +164,7 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 
 // With a rule file, name_rule_required lets mashctl start; the file decides what is refused.
 func TestConfigAMashctlRequiredWithFile(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	h.env["MASH_NAME_RULE_REQUIRED"] = "true"
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
@@ -187,7 +182,7 @@ func TestConfigAMashctlRequiredWithFile(t *testing.T) {
 // directions: a permissive config.json does not weaken an environment that names configuration A, and a
 // configuration-A config.json does not override a permissive environment.
 func TestConfigAMashctlRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	fakeKeyRevoked(t, false, nil)
 	a := writeRule(t, h.dir, "rule-a.json", configAMashctlRule)
 	permissive := writeRule(t, h.dir, "rule-none.json", configAMashctlEmpty)

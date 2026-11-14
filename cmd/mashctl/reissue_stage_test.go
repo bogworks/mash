@@ -42,7 +42,7 @@ func (h *addEnv) noStaged(name string) {
 
 // A failed creds write after the revoke and the record update leaves the staged seed; the same reissue finishes it.
 func TestReissueResumesAfterFailedWrite(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag) // narrowing: rotates
 	_, oldPub := h.credsClaims("a")
 	before, _ := os.ReadFile(h.creds("a"))
@@ -90,7 +90,7 @@ func TestReissueResumesAfterFailedWrite(t *testing.T) {
 
 // A revoke that fails after staging leaves the record alone; the re-run reuses the staged key.
 func TestReissueResumesAfterFailedRevoke(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	_, oldPub := h.credsClaims("a")
 	fakeRevoke(t, errors.New("sys down"))
@@ -124,18 +124,13 @@ func TestReissueResumesAfterFailedRevoke(t *testing.T) {
 
 // A staged file for another name or account is refused and nothing changes.
 func TestReissueRefusesBadStagedFile(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	_, oldPub := h.credsClaims("a")
 	before, _ := os.ReadFile(h.creds("a"))
 	calls := fakeRevoke(t, nil)
 
-	data, _ := os.ReadFile(h.policy)
-	_, c, err := compileBytes(data, h.e.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := mint.Mint(h.keys(), c, "b", nil) // a staged file carrying name b
+	m, err := mint.Mint(h.keys(), h.e.Owner, "b", nil) // a staged file carrying name b
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +164,7 @@ func TestReissueRefusesBadStagedFile(t *testing.T) {
 
 // A normal rotation leaves no staged file.
 func TestReissueRotationLeavesNoStagedFile(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	fakeRevoke(t, nil)
 	out, errb, code := h.run("reissue", "a")
@@ -191,7 +186,7 @@ func TestReissueRefusesFutureIssuedOldJWT(t *testing.T) {
 		{"revoked key", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newAddEnv(t, addPolicy)
+			h := newAddEnv(t)
 			h.seedWith("a", tc.edit)
 			_, oldPub := h.credsClaims("a")
 			before, _ := os.ReadFile(h.creds("a"))
@@ -232,7 +227,7 @@ func TestReissueRefusesFutureIssuedOldJWT(t *testing.T) {
 
 // A name lock that is no longer held before staging stops the rotation: nothing staged, no revoke call.
 func TestReissueRefusesToStageWithoutLock(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	h.seedWith("a", extraTag)
 	before, _ := os.ReadFile(h.creds("a"))
 	recs := h.records()

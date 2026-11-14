@@ -1,6 +1,6 @@
 // Package bootstrap stands up the configuration of a local operator-mode NATS server with JetStream for one
 // developer (`mashctl init --local`, ADR 0052): keys through the ctlkeys store, the operator, system account, MASH
-// account and two user JWTs, a server.conf that preloads them, an open policy file and a config.json. Build computes
+// account and two user JWTs, a server.conf that preloads them and a config.json. Build computes
 // every file's content and creates the keys; Plan.Write puts the files down without clobbering anything.
 package bootstrap
 
@@ -18,7 +18,6 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
-	"github.com/bogworks/mash/internal/policy"
 )
 
 // File names inside the server directory.
@@ -49,19 +48,11 @@ const (
 	jsConsumers = 128
 )
 
-// OpenPolicy is the policy file written when none exists: everything allowed, which is what the account permissions
-// give today.
-const OpenPolicy = `# The policy file: who may mail whom. See docs/policy-file.md.
-# Everything is open until you add rules; mashctl compiles this file into NATS permissions.
-default: allow
-`
-
 // Params says what to build.
 type Params struct {
 	Dir        string // the server directory (absolute)
 	Owner      string
 	Port       int
-	PolicyPath string // where an open policy file goes if none exists; "" skips it
 	ConfigPath string // where config.json goes if none exists; "" skips it
 }
 
@@ -71,12 +62,11 @@ type File struct {
 	Data []byte
 }
 
-// Plan is everything Build decided: the files to create, with the config.json and policy outcomes.
+// Plan is everything Build decided: the files to create, with the config.json outcome.
 type Plan struct {
 	Params
 	Files    []File // the server directory's files
 	Dirs     []string
-	Policy   *File // nil when a policy file exists or no path was given
 	Config   *File // nil when a config.json exists or no path was given
 	URL      string
 	Creds    string // the admin creds path
@@ -209,16 +199,6 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		{p.path(SysCreds), sysCreds},
 		{p.ConfPath(), []byte(serverConfFor(p, sysPub, sysJWT, acctPub, acctJWT))},
 	}
-	if p.PolicyPath != "" && config.Absent(p.PolicyPath) {
-		pf, err := policy.Parse([]byte(OpenPolicy))
-		if err != nil {
-			return nil, fmt.Errorf("mashctl: built-in policy does not parse: %w", err)
-		}
-		if r := pf.Check(); len(r.Errors) > 0 || len(r.Warnings) > 0 {
-			return nil, errors.New("mashctl: built-in policy does not check clean")
-		}
-		pl.Policy = &File{p.PolicyPath, []byte(OpenPolicy)}
-	}
 	if p.ConfigPath != "" && config.Absent(p.ConfigPath) {
 		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"insecure_loopback\": true\n}\n",
 			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds)))}
@@ -309,9 +289,6 @@ func (pl *Plan) Write() (err error) {
 		}
 	}
 	files := append([]File(nil), pl.Files...)
-	if pl.Policy != nil {
-		files = append(files, *pl.Policy)
-	}
 	if pl.Config != nil {
 		files = append(files, *pl.Config)
 	}

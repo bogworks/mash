@@ -51,7 +51,7 @@ func zonedFixture(t *testing.T, e *applyEnv, applyPolicyFirst bool) {
 }
 
 func TestUnzoneRefusesWhileAZonePolicyIsApplied(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	zonedFixture(t, e, true)
 	out, errb, code := e.run("unzone", "alpha")
 	if code != 1 || !strings.Contains(errb, policyAppliedMsg) || strings.Contains(out, "unzoned") {
@@ -80,7 +80,7 @@ func openTestAdmin(t *testing.T, e *applyEnv) *madmin.Admin {
 }
 
 func TestUnzoneWithNoPolicyMovesTheEndpointAndRerunsAsANoOp(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	zonedFixture(t, e, false)
 	// Detection is false on an account with no zone policy.
 	if applied, err := apply.AppliedZonePolicy(context.Background(), applyResolver(t, e), e.ks, 0); err != nil || applied {
@@ -102,13 +102,9 @@ func TestUnzoneWithNoPolicyMovesTheEndpointAndRerunsAsANoOp(t *testing.T) {
 	if err := store.FirstZonedRecord(recs); err != nil {
 		t.Fatal(err)
 	}
-	// Apply now runs: the directory is five-token and there is no zone policy; it gets past the guards to
-	// the refusal that says there is no replacement yet (ADR 0091).
-	if out, errb, code := e.run("policy", "apply"); code != 1 || !strings.Contains(errb, "no replacement until the label policy model ships") || strings.Contains(errb, "zone policy is applied") {
-		t.Fatalf("apply: %d %s %s", code, out, errb)
-	}
+	// The account is still free of a zone policy afterwards.
 	if applied, err := apply.AppliedZonePolicy(context.Background(), applyResolver(t, e), e.ks, 0); err != nil || applied {
-		t.Fatalf("AppliedZonePolicy after apply: %v %v", applied, err)
+		t.Fatalf("AppliedZonePolicy after unzone: %v %v", applied, err)
 	}
 }
 
@@ -129,7 +125,7 @@ func applyResolver(t *testing.T, e *applyEnv) apply.Resolver {
 // With no system credentials the applied-policy check cannot be made: unzone refuses and changes nothing. There is no
 // flag that skips the check: --no-policy-check is an unknown argument and changes nothing either.
 func TestUnzoneWithoutSysCredsRefusesAndHasNoBypass(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	zonedFixture(t, e, false)
 	// The default sys.creds is found next to the admin creds: put a copy of the admin creds where there is none.
 	raw, err := os.ReadFile(e.pl.Creds)

@@ -24,13 +24,8 @@ func (h *addEnv) provisionDeclared(name string) string {
 	return u
 }
 
-func (h *addEnv) policyText() string {
-	b, _ := os.ReadFile(h.policy)
-	return string(b)
-}
-
-func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+func TestRetireRemovesRecordAndInboxAndSetsTheCredsAside(t *testing.T) {
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c", "--label", "net=red"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -45,16 +40,13 @@ func TestRetireRemovesRecordInboxAndEntryKeepsCreds(t *testing.T) {
 	if r := h.records(); len(r) != 0 {
 		t.Errorf("records %v", r)
 	}
-	if p := h.policyText(); strings.Contains(p, "  c:") || !strings.Contains(p, "# a keeps its comment") || !strings.Contains(p, "# team x may mail any tool") {
-		t.Errorf("policy:\n%s", p)
-	}
 	if _, err := os.Lstat(h.creds("c")); !os.IsNotExist(err) {
 		t.Errorf("creds still at the old name: %v", err)
 	}
 }
 
 func TestRetireRenamesCredsByDefault(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -85,7 +77,7 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 }
 
 func TestRetireNoCredsFileIsFine(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	out, errb, code := h.run("retire", "a")
 	if code != 0 || strings.Contains(out, "renamed") {
@@ -93,21 +85,16 @@ func TestRetireNoCredsFileIsFine(t *testing.T) {
 	}
 }
 
-func TestRetireUndeclaredOrphanSaysFix(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
-	h.provisionDeclared("zz")
-	_, errb, code := h.run("retire", "zz")
-	if code != 1 || !strings.Contains(errb, "zz looks like an interrupted add (a directory record or creds file exists but the policy file has no endpoint zz): run mashctl retire zz --force --delete-creds, then mashctl add zz again") {
-		t.Fatalf("%d %q", code, errb)
-	}
-	_, errb, code = h.run("retire", "nothing-here")
-	if code != 1 || strings.Contains(errb, "interrupted") || !strings.Contains(errb, "not declared") {
+func TestRetireWithNoRecordSaysSo(t *testing.T) {
+	h := newFleetEnv(t)
+	_, errb, code := h.run("retire", "nothing-here")
+	if code != 1 || !strings.Contains(errb, "no directory record on the server") || !strings.Contains(errb, "mashctl deprovision nothing-here") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
 
 func TestRetireDeleteCredsAndSymlink(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	if _, errb, code := h.run("add", "c"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -152,75 +139,44 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 	}
 }
 
-const retirePolicyTests = `default: deny
-endpoints:
-  a: {labels: {net: red, team: x}}
-  b: {labels: {net: red}}
-rules:
-  - {name: ab, action: allow, from: {team: x}, to: {net: red}}
-tests:
-  - {from: a, to: b, expect: allow}
-`
-
-func TestRetireRefusesWhileTestsNameItForceOverrides(t *testing.T) {
-	h := newFleetEnv(t, retirePolicyTests)
-	h.provisionDeclared("b")
-	before := h.policyText()
-	out, errb, code := h.run("retire", "b")
-	if code != 1 || !strings.Contains(errb, "tests still name b: tests[1] a->b") || !strings.Contains(errb, "remove them first") {
+// With no directory record, --force handles the creds file only: nothing is revoked, and it says so.
+func TestRetireForceWithNoRecordHandlesCredsOnly(t *testing.T) {
+	h := newFleetEnv(t)
+	if err := os.WriteFile(h.creds("zz"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, code := h.run("retire", "zz"); code != 1 || !strings.Contains(errb, "no directory record") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	if _, err := os.Lstat(h.creds("zz")); err != nil {
+		t.Error("a refusal moved the creds file")
+	}
+	out, errb, code := h.run("retire", "zz", "--force", "--delete-creds")
+	if code != 0 || !strings.Contains(errb, "no directory record on the server") || !strings.HasPrefix(out, "retired zz\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if h.policyText() != before || len(h.records()) != 1 {
-		t.Error("a refused retire changed something")
-	}
-	out, errb, code = h.run("retire", "b", "--force")
-	if code != 1 || !strings.Contains(errb, "removed from the server, but still declared") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if h.policyText() != before {
-		t.Error("the unparsable edit was saved")
-	}
-	if len(h.records()) != 0 {
-		t.Error("record left after --force")
+	if _, err := os.Lstat(h.creds("zz")); !os.IsNotExist(err) {
+		t.Error("creds left")
 	}
 }
 
-func TestRetireUndeclaredNeedsForce(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+// A record is retired whatever its labels say, and the others are left alone.
+func TestRetireRemovesOnlyThatRecord(t *testing.T) {
+	h := newFleetEnv(t)
 	h.provisionDeclared("a")
-	h.provisionDeclared("zz") // provisioned, never declared
-	before := h.policyText()
-	_, errb, code := h.run("retire", "zz")
-	if code != 1 || !strings.Contains(errb, "not declared") {
-		t.Fatalf("%d %q", code, errb)
-	}
-	if len(h.records()) != 2 {
-		t.Error("refusal removed a record")
-	}
-	out, errb, code := h.run("retire", "zz", "--force")
+	h.provisionDeclared("zz")
+	out, errb, code := h.run("retire", "zz")
 	if code != 0 || !strings.HasPrefix(out, "retired zz\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if h.policyText() != before {
-		t.Error("policy changed for an undeclared endpoint")
 	}
 	if r := h.records(); len(r) != 1 || !strings.HasPrefix(r[0], "a/") {
 		t.Errorf("records %v", r)
 	}
-	// with no record at all: refused, and --force says so
-	if _, errb, code := h.run("retire", "a2"); code != 1 || !strings.Contains(errb, "no directory record") {
-		t.Fatalf("%d %q", code, errb)
-	}
-	out, errb, code = h.run("retire", "a2", "--force")
-	if code != 0 || !strings.Contains(errb, "no directory record on the server") || strings.Contains(h.policyText(), "  a2:") {
-		t.Fatalf("%d %q %q\n%s", code, out, errb, h.policyText())
-	}
 }
 
 func TestRetireLeavesAReplacedRecord(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	before := h.policyText()
 	rs := stubRevoke(t)
 	other := ""
 	afterRetireRead = func() {
@@ -239,9 +195,6 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 	if code != 1 || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if h.policyText() != before {
-		t.Error("policy changed")
-	}
 	if len(rs.calls) != 0 {
 		t.Errorf("the replaced record's endpoint had a key revoked: %v", rs.calls)
 	}
@@ -251,46 +204,23 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 }
 
 func TestRetireServerFailureChangesNothing(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	before := h.policyText()
 	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
 	out, errb, code := h.run("retire", "b", "--delete-creds")
 	if code != 1 || strings.Contains(out, "retired") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if h.policyText() != before {
-		t.Error("policy changed")
-	}
-}
-
-func TestRetireSavesNothingWhenPolicyChanged(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
-	h.provisionDeclared("b")
-	afterRetireRead = func() {
-		f, _ := os.OpenFile(h.policy, os.O_APPEND|os.O_WRONLY, 0)
-		f.WriteString("# edited by hand\n")
-		f.Close()
-	}
-	t.Cleanup(func() { afterRetireRead = nil })
-	out, errb, code := h.run("retire", "b")
-	if code != 1 || !strings.Contains(errb, "changed since it was loaded") || !strings.Contains(errb, "already removed from the server") ||
-		!strings.Contains(errb, "edit the file by hand") || strings.Contains(out, "retired") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if !strings.Contains(h.policyText(), "  b:") || len(h.records()) != 0 {
-		t.Error("state after a changed-file failure")
-	}
 }
 
 func TestRetireConsequencesAndUsage(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	out, errb, code := h.run("retire", "b")
 	if code != 0 || strings.Contains(out, "needed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	for _, args := range [][]string{{"retire"}, {"retire", "a", "b"}, {"retire", "a", "--bogus"}} {
+	for _, args := range [][]string{{"retire"}, {"retire", "a", "b"}, {"retire", "a", "--bogus"}, {"retire", "a", "--policy", "p.yaml"}} {
 		if _, _, code := h.run(args...); code != 2 {
 			t.Errorf("%v: %d", args, code)
 		}
@@ -304,9 +234,9 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 }
 
 // newFleetEnv is newAddEnv: there are no zone signing keys to make any more (ADR 0091).
-func newFleetEnv(t *testing.T, src string) *addEnv {
+func newFleetEnv(t *testing.T) *addEnv {
 	t.Helper()
-	return newAddEnv(t, src)
+	return newAddEnv(t)
 }
 
 // failAfterPurge makes the guarded removal fail the way a broken lease fence does: the record and inbox are gone.
@@ -321,24 +251,20 @@ func failAfterPurge(t *testing.T) {
 }
 
 func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	before := h.policyText()
 	failAfterPurge(t)
 	out, errb, code := h.run("retire", "b")
 	if code != 1 || strings.Contains(out, "retired") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	for _, w := range []string{"PARTIAL", "mashctl deprovision b", "retire b --force", "lease fence: connection lost"} {
+	for _, w := range []string{"PARTIAL", "mashctl deprovision b", "lease fence: connection lost"} {
 		if !strings.Contains(errb, w) {
 			t.Errorf("stderr lacks %q: %q", w, errb)
 		}
 	}
 	if strings.Contains(errb, "nothing was changed") {
 		t.Errorf("a partial failure said nothing was changed: %q", errb)
-	}
-	if h.policyText() != before {
-		t.Error("policy changed")
 	}
 
 	// the record is gone: a retry refuses and points at deprovision and --force
@@ -347,23 +273,19 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	if code != 1 || !strings.Contains(errb, "no directory record") || !strings.Contains(errb, "mashctl deprovision b") || !strings.Contains(errb, "--force") {
 		t.Fatalf("%d %q", code, errb)
 	}
-	if h.policyText() != before {
-		t.Error("policy changed by the retry")
-	}
 
-	// the stand-in removed everything, so deprovision has nothing left to finish and says so; --force removes the
-	// policy entry
+	// the stand-in removed everything, so deprovision has nothing left to finish and says so
 	if _, errb, code := h.run("deprovision", "b"); code != 1 || !strings.Contains(errb, "no endpoint named b") {
 		t.Fatal(code, errb)
 	}
 	out, errb, code = h.run("retire", "b", "--force")
-	if code != 0 || !strings.HasPrefix(out, "retired b\n") || strings.Contains(h.policyText(), "  b:") {
-		t.Fatalf("%d %q %q\n%s", code, out, errb, h.policyText())
+	if code != 0 || !strings.HasPrefix(out, "retired b\n") {
+		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
 
 func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	afterRetireRead = func() {
 		adm, _ := admin.New(h.e.Conn(t, h.e.AdminCreds), h.e.Owner)
@@ -380,7 +302,7 @@ func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
 }
 
 func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
 	t.Cleanup(func() { retireNow = time.Now })
 	var seeds []string

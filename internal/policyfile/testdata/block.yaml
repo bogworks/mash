@@ -1,6 +1,0 @@
-default: allow
-endpoints:
-    a:
-      labels:
-        net: x
-rules: []

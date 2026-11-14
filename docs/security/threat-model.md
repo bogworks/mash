@@ -163,7 +163,7 @@ Subscribing to another address's inbox, prompt and status subjects, or to a wide
 | API token leaks | I | Read from `SYNADIA_API_TOKEN` (then unset, so no child inherits it), one line on stdin, or an echo-off prompt on the terminal (`scripts/quickstart-synadia.sh:114-122`). Never in argv: `api()` hands it to curl as `-K <(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN")`, a config read through a descriptor, and `printf` is a shell builtin, so neither curl's nor printf's argv holds it (`:126-130`, checked by reading, no `ps` test exists). Never stored. Error messages name the status and path only, never a body (`:124-138`). No `set -x` (`:22`). | `SYNADIA_API_TOKEN` in a shell profile or CI env outlives the run. The token equals the account signing key for that account. The base-URL gap is now closed (next row). | L |
 | Token sent to an attacker's API URL | I, S | **Fixed in #182.** `SYNADIA_API_URL` is checked before the token is read (`scripts/quickstart-synadia.sh:40-48`, token read at `:115`): `https://HOST[:port][/path]` with no user info, or `http://127.0.0.1` / `http://localhost` only; anything else exits (`:44-47`). A look-alike such as `http://localhost.evil.com` fails the pattern (`:45`). curl is not given `-L`, so it follows no redirect (`:128`, inferred from the flags). The header comment and `docs/synadia.md:33` name the override as test-only (`:34-35`). | Any `https://` host is still accepted, so someone who sets the script's environment can send the token to a host they run, over TLS. That needs control of the environment, which can also read the token (inferred). The binary had the same limit. | L, fixed (#182) |
 | Script fetched from a mutable branch | T, E | **Fixed in #182.** The README now fetches the script and `SHA256SUMS` from the `v0.3.0` release, not from `main` (`README.md:24-25`), and runs nothing unless the script's line in `SHA256SUMS` appears exactly once and `sha256sum -c` passes; the `&&` chain stops at the first failure (`README.md:26-29`, `:32`). The release workflow copies the tagged script into the release and lists it in `SHA256SUMS` (`.github/workflows/release.yml:93-96,110`, #182's tree). The release gate checks the script is byte-equal to the file at the tagged commit before the draft is published (`docs/release.md:41`, #182's tree). | `SHA256SUMS` comes from the same release as the script, so one who can replace release assets replaces both and the check still passes. It guards against a bad merge to `main` after the tag and a damaged download, not against a hijacked release. `SHA256SUMS` is unsigned until [PR #164](https://github.com/bogworks/mash/pull/164) lands; once it does, the README flow still only runs `sha256sum -c` and does not check the signature (`README.md:26-29`), so the gain needs a README step too. The version is pinned in the README text (`v0.3.0`), so each release must update it, and until v0.3.0 is published the links fail closed (inferred). | L, fixed (#182); residual L |
-| Same-UID access to the key store and admin creds | E | The key store (`operator.nk`, `account.nk`, zone keys) and `mashadmin.creds` are 0600 in 0700 directories (see `docs/operations.md`, "Where the key store lives"). | Modes stop other users, not other processes of the same UID, and agent sessions on the operator host run as that UID: the account seed is unrestricted, account-wide authority. Run `mashctl` and keep the key store under a separate UID or mount, and give each host's agents only their own creds. | M, deployment |
+| Same-UID access to the key store and admin creds | E | The key store (`operator.nk`, `system.nk`, `account.nk`) and `mashadmin.creds` are 0600 in 0700 directories (see `docs/operations.md`, "Where the key store lives"). | Modes stop other users, not other processes of the same UID, and agent sessions on the operator host run as that UID: the account seed is unrestricted, account-wide authority. Run `mashctl` and keep the key store under a separate UID or mount, and give each host's agents only their own creds. | M, deployment |
 | Script dependencies | T | Needs `bash`, `curl`, `jq` and a `mash` binary, plus `od`, `tr`, `sed`, `grep`, `mktemp` from the host (`scripts/quickstart-synadia.sh:7,76-78,300`). It resolves `mash` to an absolute path first, so its own wrapper cannot recurse (`:78`). It unsets `MASH_URL`, `MASH_OWNER`, `MASH_CREDS`, `MASH_NAME`, `MASH_ADMIN_CREDS` and `MASH_LAUNCH_TOKEN` from the environment and says so (`:107-111`). | No `nsc` or `nats` CLI is used. Every tool is taken from `PATH` as is, and one that is replaced sees the token (curl) or the admin creds (`mash`). The `PATH` hijack in 5.2 applies. No version or checksum check on any of them. | L |
 | Temporary admin user is broad | E | `$JS.API.>`, `$KV.>`, `_INBOX.>` to publish and `_INBOX.>`, `$JS.EVENT.>` to subscribe, no expiry, for the minutes the script runs (`scripts/quickstart-synadia.sh:302`). Deleted on every exit through an `EXIT` trap, which also runs on INT and TERM, and again right after provisioning (`:140-178,378`). If the delete fails, the script says so, names the user id and exits non-zero (`:148-149`). | **Lost control:** the binary also warned about leftover admin users from crashed runs; the script does not look (`:24-29`, `docs/synadia.md:32`). A `kill -9` or a lost network leaves the user, with full JetStream control, until someone deletes it in the console. | L |
 | Admin creds on disk during the run | I | The script writes the admin creds to `$TMP/admin.creds` (`mktemp -d`, `umask 077`, then `chmod 600`) and removes the directory in the `EXIT` trap (`scripts/quickstart-synadia.sh:299-306,173-176`). The binary kept them in memory only and said they were "never written anywhere" (`internal/initsynadia/initsynadia.go:6` on `origin/main`). | **New:** a `kill -9` leaves a usable admin cred file in the temp directory, next to the leftover user it opens. If restoring the previous `config.json` fails, the script keeps the temp directory so the backup survives (`:170`, `TMP=""`); the admin user is deleted first, so those creds are dead unless that delete failed too (inferred). Same OS user only; the leftover user is deleted in the console. | L |
@@ -283,7 +283,7 @@ do if it leaks. It describes what the code does today (`internal/ctlkeys`, `inte
 seed appears in the issue record. "The operator host" is the machine that runs `mashctl`; the control plane is the
 account that holds the key store.
 
-Custody rule: the account's scoped (zone) signing keys, and every key above them, stay with the minting authority
+Custody rule: the account signing key, and every key above it, stay with the minting authority
 (`mashctl`'s key store). No sender's host holds one; a sender's host holds only its own endpoint creds.
 
 **Operator key** (`operator.nk`)
@@ -306,25 +306,12 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
 - If it leaks: every user it signed is as strong as the key. Replace the account (a new account key under the operator,
   re-issued users), and revoke the old account's users.
 
-**Zone (scoped) signing keys** (`zones/<zone>.nk`)
-- Lives: `<config dir>/keys/zones/<zone>.nk`, 0600 in 0700, one per zone. The public halves are published in the account
-  JWT as scoped signers (`mashctl policy apply`), each with its permission template.
-- Held by: the operator host's user (the minting authority) only.
-- A holder can: sign a user JWT that the account accepts and that takes the zone's template. The signer chooses the
-  user's name and tags, and the template expands them: the user gets the per-name grants of whatever name it carries
-  (own inbox, lease key, prompt, status and heartbeat subjects), the zone's wildcard mail lines, and a mail line for
-  every `allow` tag. A user signed this way is not in mash's issue record, which only `mashctl` writes.
-  Policy rules limit what the key's honest users get; they do not limit the key's holder.
-- If it leaks: `mashctl policy apply --replace-zone-key ZONE` replaces the key in the account JWT, which stops users
-  signed by the old key from authenticating; then `mashctl reissue` the zone's endpoints. Run `mashctl issued check` to
-  see what is connected that mash did not issue, and revoke those keys.
-
 **Owner group signing keys** (`groups/<range>.<owner>.nk`)
-- Lives: `<config dir>/keys/groups/<range>.<owner>.nk`, 0600 in 0700, beside the zone keys and under the same rules. The
+- Lives: `<config dir>/keys/groups/<range>.<owner>.nk`, 0600 in 0700, under the same rules as the other keys. The
   public half is published in the account JWT as a scoped signer with the group's template. `mashctl issue serve` reads
   it and never creates it.
 - Held by: the operator host's user (the minting authority) only.
-- A holder can: sign a user JWT that takes the group's template, with any name and tags, like a zone key. The issue
+- A holder can: sign a user JWT that takes the group's template, with any name and tags, with a scoped signer's reach. The issue
   service signs only for a public key and an address, with the tags of mash's table.
 - If it leaks: replace the key in the account JWT and re-issue the group's senders.
 
@@ -373,7 +360,7 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   NAME` when the key is already revoked or the policy narrows; the old key stays revoked.
 
 **The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
-- Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk`, `zones/*.nk` (0600), `operator.jwt` (a
+- Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk` (0600), `operator.jwt` (a
   public JWT) and the `apply.lock` file. `mashctl` refuses a key directory that is a symlink, not a directory, readable
   or writable by group or other, or owned by another user.
 - Held by: the control plane's user. The modes stop other users and not other processes of the same UID, so keep it
@@ -386,7 +373,7 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   has revoked the key, the revocation time. Only the admin
   connection `mashctl` holds writes it; endpoint users have no permission on it, and the stream refuses rollup, delete and
   purge. It holds no seed or JWT. It is written before the creds are handed out.
-- What it does not do: it does not stop a copy of a zone key signing a user elsewhere; it makes that user visible.
+- What it does not do: it does not stop a copy of the account signing key signing a user elsewhere; it makes that user visible.
   `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
   issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
@@ -397,7 +384,7 @@ Custody rule: the account's scoped (zone) signing keys, and every key above them
   marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
   permission on the bucket or its stream subjects, and a test asserts it.
 - Held by: the outside system.
-- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a zone key, change the
+- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a signing key, change the
   account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
   refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
   name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key

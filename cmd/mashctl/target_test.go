@@ -150,7 +150,7 @@ func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
 // The verbs, in process against a real server.
 
 func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	showTarget(t)
 	h.env["MASH_NAME"] = "sessionagent"
 
@@ -161,20 +161,14 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	if _, errb, _ := h.run("permissions", "a", "--nsc"); strings.Contains(errb, "target server") {
 		t.Errorf("permissions: %q", errb)
 	}
-	if _, errb, _ := h.run("policy", "check", "--policy", h.policy); strings.Contains(errb, "target server") {
-		t.Errorf("policy check: %q", errb)
-	}
-	if _, errb, _ := h.run("label", "a2", "team=x", "--policy", h.policy); strings.Contains(errb, "target server") {
-		t.Errorf("label without --sync: %q", errb)
-	}
-	if _, errb, _ := h.run("reissue", "a", "--policy", h.policy); strings.Contains(errb, "target server") {
-		t.Errorf("reissue: %q", errb)
+	if _, errb, _ := h.run("policy"); strings.Contains(errb, "target server") {
+		t.Errorf("policy: %q", errb)
 	}
 	if _, errb, _ := h.run("init", "--local", "--dir", filepath.Join(h.dir, "nope"), "--help"); strings.Contains(errb, "target server") {
 		t.Errorf("init --local: %q", errb)
 	}
 
-	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"add", "zz", "--policy", h.policy}} {
+	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"add", "zz"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_URL), owner " + h.e.Owner + " (from MASH_OWNER), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {
@@ -187,7 +181,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 }
 
 func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
-	h := newFleetEnv(t, addPolicy)
+	h := newFleetEnv(t)
 	showTarget(t)
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"url":"tls://scratch.example:4222","owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
 		t.Fatal(err)

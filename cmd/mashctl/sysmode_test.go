@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/bogworks/mash/internal/bootstrap"
+	"github.com/bogworks/mash/internal/config"
 )
 
 // TestSysCredsModeIsChecked: system account credentials are held to the same mode check as admin and endpoint
 // credentials (no group or other bits, a symlink is followed), and a missing file keeps its own error.
 func TestSysCredsModeIsChecked(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	src, err := os.ReadFile(filepath.Join(e.pl.Dir, bootstrap.SysCreds))
 	if err != nil {
 		t.Fatal(err)
@@ -30,16 +31,21 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 		}
 		return p
 	}
-	// `policy drift` is the verb that reads only the system credentials (the others also need the admin connection):
-	// it reports the account as UNKNOWN with the credentials error in its output.
-	drift := func(args ...string) (string, int) {
-		out, errb, code := e.run(append([]string{"policy", "drift"}, args...)...)
-		return out + errb, code
+	// connectSys is what every verb that revokes or checks keys uses: it reports the credentials error, with nothing
+	// of their content, before it connects.
+	drift := func(flagVal string) (string, int) {
+		cfg := config.Config{URL: e.srv.ClientURL(), InsecureLoopback: true}
+		nc, err := connectSys(cfg, flagVal, func(k string) string { return e.env[k] })
+		if err != nil {
+			return err.Error(), 1
+		}
+		nc.Close()
+		return "", 0
 	}
 	for _, mode := range []os.FileMode{0o644, 0o640} {
 		p := write("loose.creds", mode)
 		e.env["MASH_SYS_CREDS"] = p
-		all, code := drift()
+		all, code := drift("")
 		if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "chmod 600 "+p) {
 			t.Fatalf("mode %04o: %d %q", mode, code, all)
 		}
@@ -47,14 +53,14 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 			t.Fatal("the refusal printed creds content")
 		}
 		// the flag form is checked too
-		if all, code := drift("--sys-creds", p); code == 0 || !strings.Contains(all, "chmod 600 "+p) {
+		if all, code := drift(p); code == 0 || !strings.Contains(all, "chmod 600 "+p) {
 			t.Fatalf("--sys-creds mode %04o: %d %q", mode, code, all)
 		}
 	}
 
 	ok := write("ok.creds", 0o600)
 	e.env["MASH_SYS_CREDS"] = ok
-	if all, _ := drift(); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+	if all, _ := drift(""); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
 		t.Fatalf("0600: %q", all)
 	}
 
@@ -63,13 +69,13 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.env["MASH_SYS_CREDS"] = link
-	if all, _ := drift(); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+	if all, _ := drift(""); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
 		t.Fatalf("symlink to 0600: %q", all)
 	}
 
 	missing := filepath.Join(dir, "nope.creds")
 	e.env["MASH_SYS_CREDS"] = missing
-	all, code := drift()
+	all, code := drift("")
 	if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "no such file") || strings.Contains(all, "chmod") {
 		t.Fatalf("missing: %d %q", code, all)
 	}
@@ -77,7 +83,7 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 
 // TestReadCredsRefusesLooseModes: the reader the audit and reissue paths use (credsUserKey) refuses a loose file.
 func TestReadCredsRefusesLooseModes(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	src, err := os.ReadFile(filepath.Join(e.pl.Dir, bootstrap.SysCreds))
 	if err != nil {
 		t.Fatal(err)

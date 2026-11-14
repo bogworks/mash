@@ -37,7 +37,7 @@ func withRevokeNow(t *testing.T, f func() time.Time) {
 }
 
 func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -64,7 +64,7 @@ func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 }
 
 func TestDeprovisionWarnsAndRevokesWithoutARecord(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	u := h.provisionDeclared("a") // not minted by mashctl add: no issue record
 	calls := fakeRevoke(t, nil)
 	out, errb, code := h.run("deprovision", "a")
@@ -81,7 +81,7 @@ func TestDeprovisionWarnsAndRevokesWithoutARecord(t *testing.T) {
 
 // The check and the revocation share one reading of the clock.
 func TestDeprovisionRevokesAtTheCheckedTime(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
 		t.Fatal(errb)
 	}
@@ -104,7 +104,7 @@ func TestDeprovisionRevokesAtTheCheckedTime(t *testing.T) {
 }
 
 func TestCheckNotFutureIssued(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	var pubs []string
 	for _, n := range []string{"p", "q", "r"} {
 		if _, errb, code := h.run("add", n, "--label", "env=green"); code != 0 {
@@ -177,7 +177,7 @@ func TestCheckNotFutureIssuedLookupErrorRefuses(t *testing.T) {
 // A record whose issued_at is missing or not a time refuses deprovision before anything is revoked or removed.
 func TestDeprovisionRefusesAMalformedIssueTime(t *testing.T) {
 	for _, bad := range []string{"", "yesterday-ish"} {
-		h := newAddEnv(t, addPolicy)
+		h := newAddEnv(t)
 		if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
 			t.Fatal(errb)
 		}
@@ -235,7 +235,7 @@ func (h *addEnv) recordRevisions(pub string, ats ...time.Time) {
 
 func deprovisionAfterRevisions(t *testing.T, ats func() []time.Time) (h *addEnv, pub string, calls *[]revokeCall, out, errb string, code int) {
 	t.Helper()
-	h = newAddEnv(t, addPolicy)
+	h = newAddEnv(t)
 	if _, e, c := h.run("add", "n", "--label", "env=green"); c != 0 {
 		t.Fatal(e)
 	}
@@ -302,7 +302,7 @@ func TestDeprovisionRefusesAtTheHistoryCap(t *testing.T) {
 
 // A malformed older revision refuses even when the latest is fine.
 func TestDeprovisionRefusesAMalformedOlderRevision(t *testing.T) {
-	h := newAddEnv(t, addPolicy)
+	h := newAddEnv(t)
 	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
 		t.Fatal(errb)
 	}
