@@ -244,3 +244,42 @@ func TestApplyReplayIsStaleBase(t *testing.T) {
 		t.Errorf("status written: %+v", stored)
 	}
 }
+
+// A list set with the content in force is refused as unchanged before anything is signed or pushed; the record in
+// force keeps its generation and nothing becomes pending (ADR 0119).
+func TestRunSameContentRefusedAsUnchanged(t *testing.T) {
+	w := newWorld(t)
+	set := set1()
+	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1, ListSet: &set})
+	same := set1()
+	same.Base = 1
+	in := w.run(l, same, "bytes-same")
+	signed := false
+	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) {
+		signed = true
+		return "", errors.New("signed")
+	})
+	st, err := Run(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != StateRefused || st.InForce || len(st.Refusals) != 1 {
+		t.Fatalf("%+v", st)
+	}
+	want := listset.Refusal{Stage: StageUnchanged, Reason: "same content as generation 1 in force; nothing to apply"}
+	if st.Refusals[0] != want {
+		t.Errorf("refusal = %+v, want %+v", st.Refusals[0], want)
+	}
+	if signed || len(w.cluster.pushes) != 0 {
+		t.Errorf("signed %v, pushes %d", signed, len(w.cluster.pushes))
+	}
+	if rec, _ := l.InForce(); rec != w.rec1() {
+		t.Errorf("in force = %+v", rec)
+	}
+	if _, has, _ := l.Pending(); has {
+		t.Error("a generation is pending")
+	}
+	if got, _ := l.InForceJWT(); got != w.j1 {
+		t.Error("the stored JWT changed")
+	}
+}

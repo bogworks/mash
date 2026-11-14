@@ -503,6 +503,8 @@ type Accepted struct {
 // received it. A list set whose user JWTs exceed a server's limits (listset.SizeCheck over ServerLimits) is refused
 // with stage "size" before anything is signed or pushed.
 //
+// A list set whose content equals the content in force is refused with stage "unchanged" and uses no generation.
+//
 // A list set that fails validation comes back as a refused Status and a nil error. A stale base, a signing error or a
 // mismatch between the signed JWT and the accepted output (ErrSignedMismatch, before any push) come back as errors.
 // When the final state is not applied nothing is committed and the Status says partial with the failures. If
@@ -580,8 +582,11 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if err != nil {
 		var ve *listset.ValidationError
 		var ce *listset.CheckError
+		var ue *listset.UnchangedError
 		st := newStatus(listset.Record{}, StateRefused, in.Now)
 		switch {
+		case errors.As(err, &ue):
+			st.Refusals = []listset.Refusal{{Stage: StageUnchanged, Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", ue.InForce)}}
 		case errors.As(err, &ve):
 			st.Refusals = refusals("validate", ve.Problems)
 		case errors.As(err, &ce):
@@ -995,6 +1000,9 @@ func keepsRevocations(prev string, tracked bool, target string) error {
 	}
 	return nil
 }
+
+// StageUnchanged is the refusal stage of a list set whose content is the content in force (ADR 0119).
+const StageUnchanged = "unchanged"
 
 func refusals(stage string, ps []listset.Problem) []listset.Refusal {
 	out := make([]listset.Refusal, 0, len(ps))
