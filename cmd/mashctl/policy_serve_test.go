@@ -461,7 +461,7 @@ func TestPolicyServeRefusesBadArguments(t *testing.T) {
 		{[]string{"policy", "serve"}, nil, "--range is required"},
 		{[]string{"policy", "serve", "--range", "foo", "--servers", "0"}, nil, "whole number of servers"},
 		{[]string{"policy", "serve", "--range", "foo"}, map[string]string{"MASH_SERVERS": ""}, "--servers (or MASH_SERVERS) is required"},
-		{[]string{"policy", "serve", "--range", "foo", "--zone", "z"}, nil, "unknown"},
+		{[]string{"policy", "serve", "--range", "foo", "--bogus", "z"}, nil, "unknown"},
 		{[]string{"policy", "serve", "--range", "foo"}, map[string]string{"MASH_POLICY_BUCKET": ""}, "MASH_POLICY_BUCKET"},
 	} {
 		saved := map[string]string{}
