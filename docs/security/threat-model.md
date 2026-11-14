@@ -119,6 +119,32 @@ interface mash uses, and the internals of the NATS server.
 | Fake presence | S | `mash serve` no longer listens to heartbeats ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)); presence comes from `$SRV.INFO` answers, which need a valid `id_sig` whose key is the directory's for that name (`applyPresence` in `internal/endpoint/directory.go`). | A peer can replay a captured `$SRV.INFO` answer, which SAP says re-announces the registration (`SAP:L1037`), so `who` can show an offline endpoint online for a while (inferred). The same forged answer to `mash prompt`'s discovery can only make an offline target look online, costing the caller a 60 s timeout: since [#178](https://github.com/bogworks/mash/pull/178) `Discover` accepts only the SAP-derived prompt subject. Known limit: `id_sig` has no freshness. | L |
 | Unsigned live-prompt chunks and status replies | S | SAP leaves replies unsigned (`SAP:L1052`). Since [#178](https://github.com/bogworks/mash/pull/178) a prompt's reply subject is 128 random bits, seen only by the caller, the target and the server. A status request goes to the target's own status subject, which only the target may subscribe to (`permissions.go:44`), and its reply inbox is never broadcast. | Known limit, accepted: the only parties that can answer are the target (whose answer it is) and the server (which can already forge, H2). Holds only while the inbox deployment requirement holds (mitigation 17). | L |
 
+### 5.3.1 What a raw client reaches on the open subjects (list-set enforcement)
+
+A raw client is a plain NATS client holding one sender's creds file (its signed user JWT: tags and no permissions of its
+own). Under list-set enforcement ([ADR 0102](decisions/0102-list-set-compile-templates-and-tags.md)) it publishes mail, prompt and status only to the
+addresses its lists give, and it cannot subscribe to another address's inbox, prompt or status subjects. A few lines of
+every template stay open to every sender, because replies, discovery and the directory need them. The table is what a
+raw client of `foo.c.core` reaches on them, measured against a real nats-server by
+`TestAT020OpenReplyAndPlumbingSubjectsArePinned` (`internal/listset/at_live_test.go`). The test pins the table: a
+change that widens or narrows what is reachable fails it, and the maintainer who changes the test updates this table.
+
+| Subject (as the raw client publishes it) | Server | Reaches another address | Why it stays open |
+|---|---|---|---|
+| `_INBOX.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (section 6.4). |
+| `$SRV.INFO.agents`, `$SRV.PING` and the rest of `$SRV.>` | accepted | yes: delivered to every sender (each subscribes to `$SRV.>`) | Discovery and live prompts are service requests to every endpoint ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). |
+| `_INBOX.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
+| `$JS.API.INFO`, `$JS.API.STREAM.INFO.KV_mash-directory`, `$JS.API.DIRECT.GET.KV_mash-directory.>`, `$JS.API.STREAM.INFO.KV_mash-leases` | accepted | no: server API reads; the directory is readable by every sender | Needed to resolve names and read the lease bucket state; read only. |
+| Another address's lease key (`$KV.mash-leases.<flat>`), a read of it, and any write to `$KV.mash-directory.>` | refused | no | A sender writes only its own lease and never the directory. |
+| Another address's inbox stream: `STREAM.INFO`, `CONSUMER.INFO`, `CONSUMER.CREATE`, `CONSUMER.DURABLE.CREATE`, `CONSUMER.MSG.NEXT`, `$JS.ACK`, `STREAM.MSG.GET`, `DIRECT.GET`, `STREAM.DELETE`, `STREAM.PURGE` | refused | no | Every JetStream line names the sender's own inbox stream only. |
+| Another address's heartbeat | refused | no | Publish only to its own heartbeat. |
+
+What a raw client can therefore do: send an unlisted address a reply-prefix publish (`_INBOX.<other>.<id>`), or a
+`$SRV.>` request, and what the receiver does with it rests on its own checks (verified callers, random reply subjects), not on the server. It
+cannot mail, prompt or probe an address its lists do not give, and it cannot read, consume or delete another inbox.
+Subscribing to another address's inbox, prompt and status subjects, or to a wider reply prefix (`_INBOX.>`, `agents.>`,
+`$JS.API.>`), is refused; the same test checks each.
+
 ### 5.4 B4: server, provider and key holders
 
 | Threat | STRIDE | Today | Gap | Rating |
