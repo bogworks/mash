@@ -312,9 +312,35 @@ How to adopt: run `mashctl policy adopt --submitter KEY` with the account's admi
 
 What is not done yet, and the account is stuck with until it is:
 
-- **The list-set intake.** Nothing yet reads a list set from the submitter, checks its signature and base generation, or logs a refusal. An adopted account's policy cannot be changed at all until the intake exists.
+- **Running the list-set intake.** The intake exists as a package (see [List-set intake](#list-set-intake)) but no command runs it yet, so an adopted account's policy still cannot be changed. `mashctl policy serve` is assembled later, once the apply stack it hands list sets to is in.
 - **The first-list-set reconcile.** Adoption does not yet remove signing keys that are not mash's scoped keys or revoke user credentials issued outside the first list set. The plan, not built: it removes non-mash signing keys, revokes recorded issued users that are not in the first list set and connected unrecorded keys that are neither recorded nor exempt, reports anything else it cannot name as a finding with the status `reconciled: partial (N unknown)`, prints a dry run and acts only with `--yes`; the exempt keys are never touched. Adopting an account does not change what is already in it.
 - **Un-adoption.** There is no command. If one is ever built it is admin-only, logged in the marker's revision history and never goes through a list set; today the way back is an operator acting on the account directly. The marker's bucket refuses deletes and purges, even to the admin.
+
+### List-set intake
+
+The intake (`internal/policyintake`) is what takes an adopted account's list sets from the outside system that owns them. It is not wired into any command yet: nothing runs it in this version, and `mashctl policy serve`, which will, is assembled later. Adopting a real account stays a live-account step taken only on an explicit go from the maintainers.
+
+**What it reads.** It watches one key, `listset.<account public key>`, of the range's policy bucket (`homerange_<range>_policy`). The value is a compact JWS signed by the submitter's key whose payload is the list set. The outside system writes only `listset.*` keys; mash writes only `status.*` keys, and the bucket's permissions enforce that. The intake never writes a list set.
+
+**What it checks, in this order, for each revision it is delivered** (one at a time, in order; a delete or purge of the key is logged and ignored):
+
+1. The adoption marker, read again for every revision and never cached. An account with no marker is not adopted: the revision is refused at stage `adoption` and nothing is applied. If the marker cannot be read the intake does not refuse the document: it retries, waiting 2 seconds and doubling up to a minute, until the read works, a newer revision arrives (the older one is then dropped) or the intake stops.
+2. Whether the revision is the document already in force (the digest of its bytes equals the one the applier last took). A restart replays the latest value of the key; the applied document is skipped silently, so a replay never becomes a refusal that overwrites an `applied` status. A failure to read what is in force is retried like a marker read.
+3. The signature, against the key the marker expects: the next submitter if one is pending, else the submitter. A bad or missing signature, an unsigned document or another signer is stage `signature`; a document that is malformed or of a schema mash does not know is stage `document`, with the decoder's message.
+4. That the document is verified, names this account (stage `account`; the key name is the account) and this range (stage `range`).
+5. For a planned rotation, that a `next_submitter` the document carries is an nkey public key that is not the current submitter, the account's own key, or a key mash holds (the admin user and the exempt users in the marker, and the operator, system, account and zone keys of the key store, as `policy adopt` refuses for a submitter); otherwise stage `document`. A key store that cannot be read refuses the rotation, and the same check is made again when the marker is written.
+6. The applier. It writes the status value of everything it handles (a stale base generation, an oversized credential, the applied-policy gate). Only if it fails without having written a status does the intake report a refusal, at stage `apply`, with the error text cut to 500 bytes.
+
+A refusal never applies anything and leaves the generation in force alone. The detail of a refusal never holds the document and never more than the first 8 characters of a public key; the log is held to the same rule.
+
+**Rotating the submitter key.** There are two ways, and both end with the old key refused.
+
+- *Planned.* A list set signed by the current submitter carries `next_submitter`. After it is applied, the intake records the key in the marker (action `rotate`). From then on only the new key's list sets are accepted: the old key is refused at stage `signature`. The first list set signed by the new key that is applied makes it the submitter and clears the pending key (action `rotate`); a `next_submitter` that document carries is ignored, and starts a rotation only on the next one. The marker is written only after the apply succeeds, with a compare-and-set on its last revision, and a failed write is retried, loudly logged, until it lands: the rotation is not lost. Do not stop the intake in that window: if it stops before the write lands, run `mashctl policy adopt` again to put the marker right.
+- *Recovery.* The operator runs `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once, because the marker is read for every revision, and any pending next key is cleared.
+
+**Concurrency with an adoption.** The intake holds the account lock (the one `mashctl policy adopt` and every other policy change take) while it processes one revision: it reads the marker and its revision, verifies, applies and records a rotation, then releases it. A recovery adopt therefore waits for an apply in flight and cannot land between the verification and the apply or the rotation write. If the lock is busy the intake waits and retries, logging that an adoption or policy change is in progress; it does not refuse the document. As a second check, just before applying it confirms that it still holds the lock and that the marker is still at the revision it verified under; if not, it applies nothing and processes the revision again, so a document signed by a key the adopt replaced is then refused. The applier is handed the same check and runs it before each write it cannot undo, so a lock that expires during a long apply stops the apply at its next write and the revision is processed again. The rotation writes are bound to that revision too: if the marker changed, the write fails, is logged loudly and is abandoned, and the key the recovery adopt set stays the expected signer. A marker write whose answer is lost is read back: if the marker is the intended end state at the very next revision, the write is taken as done.
+
+The marker's revisions record every adoption, rotation and recovery.
 
 ## Removing an endpoint
 

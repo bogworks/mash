@@ -39,6 +39,18 @@ const (
 // adoptionCASTries is how many times Adopt retries after losing a race for the marker.
 const adoptionCASTries = 8
 
+// validateSubmitterKey is the check a submitter key passes at adoption and at a planned rotation: an nkey public key
+// that is not the account's own.
+func validateSubmitterKey(account, submitter string) error {
+	if _, err := nkeys.FromPublicKey(submitter); err != nil {
+		return ErrSubmitterInvalid
+	}
+	if submitter == account {
+		return ErrSubmitterIsAccount
+	}
+	return nil
+}
+
 // adoptionKV returns the adoption bucket, creating it hardened when it does not exist (the minting authority's admin
 // connection is the only one that can). An existing bucket that is not as mash makes it is an error.
 func (a *Admin) adoptionKV(ctx context.Context) (jetstream.KeyValue, error) {
@@ -83,23 +95,43 @@ func readMarker(ctx context.Context, kv jetstream.KeyValue) (m store.Marker, rev
 	return m, e.Revision(), true, nil
 }
 
+// AdoptionRev is Adoption with the revision of the marker that was read (0 when not adopted). A rotation write is
+// bound to it (SetNextSubmitter, PromoteSubmitter).
+func (a *Admin) AdoptionRev(ctx context.Context) (m store.Marker, rev uint64, found bool, err error) {
+	kv, err := a.existingAdoptionKV(ctx)
+	if err != nil || kv == nil {
+		return store.Marker{}, 0, false, err
+	}
+	return readMarker(ctx, kv)
+}
+
 // Adoption reads the adoption marker. found is false when the account is not adopted: the bucket does not exist, or
 // it holds no marker. Any other outcome is an error, never "not adopted": a bucket that is not as mash makes it, a
 // read that fails and a value that cannot be understood all return an error, so a caller refuses (fail closed). It
 // never creates or changes anything, and it reads the latest revision each time, so there is nothing to cache.
 func (a *Admin) Adoption(ctx context.Context) (m store.Marker, found bool, err error) {
-	kv, err := a.js.KeyValue(ctx, store.AdoptionBucket)
-	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		return store.Marker{}, false, nil
-	}
-	if err != nil {
-		return store.Marker{}, false, fmt.Errorf("mash: adoption bucket: %w", err)
-	}
-	if err := store.VerifyAdoptionBucket(ctx, a.js); err != nil {
+	kv, err := a.existingAdoptionKV(ctx)
+	if err != nil || kv == nil {
 		return store.Marker{}, false, err
 	}
 	m, _, found, err = readMarker(ctx, kv)
 	return m, found, err
+}
+
+// existingAdoptionKV returns the adoption bucket, or nil (and no error) when it does not exist. A bucket that is not
+// as mash makes it is an error. It never creates or changes anything.
+func (a *Admin) existingAdoptionKV(ctx context.Context) (jetstream.KeyValue, error) {
+	kv, err := a.js.KeyValue(ctx, store.AdoptionBucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mash: adoption bucket: %w", err)
+	}
+	if err := store.VerifyAdoptionBucket(ctx, a.js); err != nil {
+		return nil, err
+	}
+	return kv, nil
 }
 
 // normalizeExempt validates every key as an nkey user public key and returns them sorted and de-duplicated (nil for
@@ -125,14 +157,11 @@ func normalizeExempt(keys []string) ([]string, error) {
 // set. exempt is the public keys of the users the later reconcile must never touch (see store.Marker.Exempt). The read and the write are made under the account lock (see AccountLock), and the write is a compare-and-set on the marker's last
 // revision, retried when another writer got there first. The bucket is created, hardened, when it does not exist.
 func (a *Admin) Adopt(ctx context.Context, account, submitter, by string, exempt []string) (store.Marker, string, error) {
-	if _, err := nkeys.FromPublicKey(submitter); err != nil {
-		return store.Marker{}, "", ErrSubmitterInvalid
-	}
 	if _, err := nkeys.FromPublicKey(account); err != nil {
 		return store.Marker{}, "", errors.New("mash: adoption: the account key is not an nkey public key")
 	}
-	if submitter == account {
-		return store.Marker{}, "", ErrSubmitterIsAccount
+	if err := validateSubmitterKey(account, submitter); err != nil {
+		return store.Marker{}, "", err
 	}
 	if _, err := nkeys.FromPublicKey(by); err != nil {
 		return store.Marker{}, "", errors.New("mash: adoption: the admin user key is not an nkey public key")
