@@ -26,6 +26,9 @@ type GateInput struct {
 	Compiled *listset.Compiled
 	// Previous is the generation before the target, nil for the first.
 	Previous *Candidate
+	// PreviousJWT is the signed account JWT of the generation in force, when known; Converge refuses a rollback JWT that
+	// lowers a revocation time in it.
+	PreviousJWT string
 	// Expect is NewExpect for this change; its RevokedKeys are the target's.
 	Expect Expect
 	// Signers are the expected scoped signing keys of the target (see Candidate.Signers). Required: Gate fails

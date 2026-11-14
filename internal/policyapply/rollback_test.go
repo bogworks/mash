@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/policy"
 )
 
 func freshUserPub(t *testing.T) string {
@@ -355,5 +356,142 @@ func TestRunKeepsInForceRevocationsFinalAndFailClosed(t *testing.T) {
 	}
 	if len(w.cluster.pushes) != pushes {
 		t.Error("pushed with no stored JWT")
+	}
+}
+
+// buildAt is build with the revocation time of each key given.
+func (k keys) buildAt(t *testing.T, c *listset.Compiled, at map[string]int64) string {
+	t.Helper()
+	claims := jwt.NewAccountClaims(k.acctPub)
+	for _, tpl := range c.Templates {
+		sc := jwt.NewUserScope()
+		sc.Key = k.signers[tpl.Group]
+		sc.Role = tpl.Group
+		sc.Template.Permissions = tpl.Permissions
+		claims.SigningKeys.AddScopedSigner(sc)
+	}
+	claims.Revocations = jwt.RevocationList{}
+	for key, ts := range at {
+		claims.Revocations[key] = ts
+	}
+	tok, err := claims.Encode(k.acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+// A retry of a pending generation keeps the revocations the earlier attempt pushed: a target that lacks one, or lowers
+// its time, is refused before any push.
+func TestRetryOfPendingKeepsEarlierRevocations(t *testing.T) {
+	w := newWorld(t)
+	extra := freshUserPub(t)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	signAt := func(at map[string]int64) func(listset.Record, *listset.Compiled) (string, error) {
+		return func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.buildAt(t, c, at), nil }
+	}
+	final := w.k.buildAt(t, w.c2, map[string]int64{w.k.revoked: 1000, extra: 2000})
+	in := w.run(l, set2(), "bytes-2")
+	in.Signer = withSign(in.Signer, signAt(map[string]int64{w.k.revoked: 1000}))
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) {
+		return map[string][]string{"": {extra}}, nil, final, errors.New("rotation interrupted")
+	}
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("first attempt succeeded")
+	}
+	if pj, _ := l.PendingJWT(); pj != final {
+		t.Fatalf("pending JWT = %q, want the final JWT", pj)
+	}
+	pushes := len(w.cluster.pushes)
+	for name, at := range map[string]map[string]int64{
+		"lacks K":  {w.k.revoked: 1000},
+		"lowers K": {w.k.revoked: 1000, extra: 1999},
+	} {
+		retry := w.run(l, set2(), "bytes-2")
+		retry.Signer = withSign(retry.Signer, signAt(at))
+		if _, err := Run(context.Background(), retry); !errors.Is(err, ErrSignedMismatch) {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+		if len(w.cluster.pushes) != pushes {
+			t.Fatalf("%s: pushed before refusing", name)
+		}
+	}
+	retry := w.run(l, set2(), "bytes-2")
+	retry.Signer = withSign(retry.Signer, signAt(map[string]int64{w.k.revoked: 1000, extra: 2000}))
+	if _, err := Run(context.Background(), retry); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.cluster.pushes) == pushes {
+		t.Fatal("the retry with K kept did not push")
+	}
+	if pj, _ := l.PendingJWT(); pj != "" {
+		t.Errorf("pending JWT left after the commit: %q", pj)
+	}
+}
+
+// A rollback JWT that revokes a key at an earlier time than the target (or the JWT in force) is not pushed.
+func TestRollbackLoweredRevocationTimeIsNotPushed(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		inForce, fin, prev map[string]int64
+	}{
+		{"target", nil, map[string]int64{"R": 2000, "X": 2000}, map[string]int64{"R": 2000, "X": 1000}},
+		{"in force", map[string]int64{"R": 2000}, map[string]int64{"R": 2000}, map[string]int64{"R": 1000}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			extra := freshUserPub(t)
+			rename := func(m map[string]int64) map[string]int64 {
+				out := map[string]int64{}
+				for k, v := range m {
+					if k == "R" {
+						k = w.k.revoked
+					} else {
+						k = extra
+					}
+					out[k] = v
+				}
+				return out
+			}
+			w.cluster.failPush["s2"] = true
+			l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.k.buildAt(t, w.c1, rename(tc.inForce))})
+			final := w.k.buildAt(t, w.c2, rename(tc.fin))
+			bad := w.k.buildAt(t, w.c1, rename(tc.prev))
+			in := w.run(l, set2(), "bytes-2")
+			in.Signer = withSign(withSignPrevious(in.Signer, func(PreviousClaims, []string) (string, error) { return bad, nil }),
+				func(listset.Record, *listset.Compiled) (string, error) { return final, nil })
+			in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) { return nil, nil, final, nil }
+			st, err := Run(context.Background(), in)
+			if err != nil || !hasFailure(st, "", "", CheckRollback) || slices.Contains(w.cluster.pushes, bad) {
+				t.Fatalf("%+v %v", st, err)
+			}
+		})
+	}
+}
+
+// The final JWT from AfterPush and the rollback JWT are held to the size limit as the target is.
+func TestFinalAndRollbackJWTSizeLimit(t *testing.T) {
+	w := newWorld(t)
+	big := strings.Repeat("a", policy.AccountJWTLimit+1)
+	l := NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1})
+	in := w.run(l, set2(), "bytes-2")
+	in.AfterPush = func(context.Context) (map[string][]string, []string, string, error) { return nil, nil, big, nil }
+	if _, err := Run(context.Background(), in); !errors.Is(err, ErrAccountJWTTooLarge) || slices.Contains(w.cluster.pushes, big) {
+		t.Fatalf("final: err = %v", err)
+	}
+	if g, _ := l.InForce(); g.Generation != 1 {
+		t.Fatalf("committed generation %d", g.Generation)
+	}
+	if _, ok, _ := l.Pending(); !ok {
+		t.Error("not pending")
+	}
+
+	w = newWorld(t)
+	w.cluster.failPush["s2"] = true
+	in = w.run(NewMemLedgerWith(listset.Record{Generation: 1}, InForceDetail{JWT: w.j1}), set2(), "bytes-2")
+	in.Signer = withSignPrevious(in.Signer, func(PreviousClaims, []string) (string, error) { return big, nil })
+	st, err := Run(context.Background(), in)
+	if err != nil || !hasFailure(st, "", "", CheckRollback) || slices.Contains(w.cluster.pushes, big) {
+		t.Fatalf("rollback: %+v %v", st, err)
 	}
 }
