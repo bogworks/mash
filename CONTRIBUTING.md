@@ -16,23 +16,6 @@ These are the same checks CI runs on Linux and macOS. CI also builds every relea
 
 Product code carries no personal convention: every path, name, host, org and long timeout is a setting, flag or environment variable with a neutral default. `go test ./internal/portable/` scans `cmd/`, `internal/` and `scripts/` (non-test Go, shell scripts) and `.github/workflows/` for personal names (R1), home and temp paths (R2), foreign GitHub orgs (R3), inline timeouts over 30 s (R4) and the R1 names in shell (R5). `internal/portable/baseline.txt` records the hits that exist today and can only shrink: a new violation fails the test, and so does a row above the real count (run `MASH_PORTABLE_UPDATE=1 go test ./internal/portable/` to lower it). A new row needs a reason a stranger installing mash could not hit. See [ADR 0044](docs/decisions/0044-product-code-carries-no-personal-convention-a-ratchet-lint-enforces-it.md).
 
-## Fuzzing the policy file
-
-A policy file that silently loses a rule can weaken permissions (GHSA-cp58: a key spelled `null` was dropped by the YAML decoder, so deny rules keyed by it never compiled). Go fuzz targets guard that class: `FuzzParse` and `FuzzCheckCompile` in `internal/policy`, `FuzzLoadEdit` in `internal/policyfile`. They assert:
-
-- the key-drop invariant: when `Parse` accepts a file, the parsed endpoints, rules and tests equal what an independent YAML decode of the same bytes declares, and an edit through `policyfile` never removes an endpoint it was not asked to;
-- no panic anywhere in parse, check, compile, explain, show and edit, whatever the bytes or the owner name;
-- bounded time: an input must finish within 2 s;
-- the decisions agree: `Explain` denies every pair a deny rule matches, and agrees with the compiled recipients.
-
-`go test ./...` runs the seed corpus only (well under 3 s). CI's lint job fuzzes each target for a fixed 20 s. To look further, run one target at a time:
-
-```sh
-go test ./internal/policy -run '^$' -fuzz '^FuzzParse$' -fuzztime 10m
-```
-
-A finding is written under `testdata/fuzz/<Target>/`. If it shows a policy that can silently weaken permissions, report it privately (see [SECURITY.md](SECURITY.md)), not in an issue or pull request. Otherwise open an issue. Never commit a crashing input without the fix that makes it pass.
-
 ## Repo layout
 
 - `cmd/mash`: the `mash` binary.

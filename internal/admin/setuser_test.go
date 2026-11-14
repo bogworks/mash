@@ -16,12 +16,12 @@ func TestSetUser(t *testing.T) {
 	ctx := context.Background()
 	_, u1 := e.Mint(t, "alpha")
 	_, u2 := e.Mint(t, "alpha2")
-	meta := admin.Meta{Role: "r", Zone: "z", Labels: map[string]string{"team": "x"}}
+	meta := admin.Meta{Role: "r", Labels: map[string]string{"team": "x"}}
 	if _, err := a.Provision(ctx, "alpha", u1, e.Account, "n", meta); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := a.SetUser(ctx, "alpha", e.Account, u1, u2)
-	if err != nil || rec.User != u2 || rec.Role != "r" || rec.Labels["team"] != "x" || rec.Note != "n" || rec.Zone != "z" {
+	if err != nil || rec.User != u2 || rec.Role != "r" || rec.Labels["team"] != "x" || rec.Note != "n" {
 		t.Fatalf("%+v %v", rec, err)
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)

@@ -873,7 +873,7 @@ func (e *SendTimeoutError) ambiguousClause() string {
 	if !e.Ambiguous {
 		return ""
 	}
-	return "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl policy explain shows whether the pair is allowed)"
+	return "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl permissions NAME shows what an endpoint may publish)"
 }
 
 // DuplicateWindowText is the inbox stream's duplicate window in words ("2 minutes"), for messages and docs.

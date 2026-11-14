@@ -75,9 +75,9 @@ func TestPromptNoticeWorstCaseArithmetic(t *testing.T) {
 func hostileRecord() store.Record {
 	bad := func(s string) string { return s + "\x1b[31m\x07\u009b" }
 	return store.Record{Name: "ops1", Owner: "acme", Agent: "cc", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: store.MailSubjectFor("acme", "", "ops1"), Created: "2026-01-01T00:00:00Z",
+		MailSubject: store.MailSubjectFor("acme", "ops1"), Created: "2026-01-01T00:00:00Z",
 		Note: bad("note"), Role: bad("role"), Host: bad("host"), Description: bad("desc"),
-		Caps: []string{bad("cap")}, Zone: bad("zone"), Labels: map[string]string{bad("lk"): bad("lv")}}
+		Caps: []string{bad("cap")}, Labels: map[string]string{bad("lk"): bad("lv")}}
 }
 
 func TestWhoTextEscapesRecordFields(t *testing.T) {
@@ -92,7 +92,7 @@ func TestWhoTextEscapesRecordFields(t *testing.T) {
 		}
 	}
 	long := whoText(ps, true, nil)
-	for _, k := range []string{"role", "host", "desc", "cap", "zone", "lk"} {
+	for _, k := range []string{"role", "host", "desc", "cap", "lk"} {
 		if !strings.Contains(long, k+`\x1b[31m`) {
 			t.Errorf("%s not shown escaped: %q", k, long)
 		}

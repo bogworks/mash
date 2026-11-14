@@ -6,7 +6,6 @@ import "testing"
 
 const (
 	goldenN48 = "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl"
-	goldenZ32 = "z0123456789abcdefghijklmnopqrstu"
 )
 
 func TestGoldenBucketAndConsumerNames(t *testing.T) {
@@ -22,16 +21,13 @@ func TestGoldenBucketAndConsumerNames(t *testing.T) {
 }
 
 func TestGoldenMailSubjectFor(t *testing.T) {
-	for _, c := range []struct{ owner, zone, name, want string }{
-		{"o", "", "a", "agents.mail.cc.o.a"},
-		{"o", "z", "a", "agents.mail.cc.o.z.a"},
-		{"acme-corp", "", "build-1", "agents.mail.cc.acme-corp.build-1"},
-		{"acme-corp", "default", "build-1", "agents.mail.cc.acme-corp.default.build-1"},
-		{goldenN48, "", goldenN48, "agents.mail.cc." + goldenN48 + "." + goldenN48},
-		{goldenN48, goldenZ32, goldenN48, "agents.mail.cc." + goldenN48 + "." + goldenZ32 + "." + goldenN48},
+	for _, c := range []struct{ owner, name, want string }{
+		{"o", "a", "agents.mail.cc.o.a"},
+		{"acme-corp", "build-1", "agents.mail.cc.acme-corp.build-1"},
+		{goldenN48, goldenN48, "agents.mail.cc." + goldenN48 + "." + goldenN48},
 	} {
-		if got := MailSubjectFor(c.owner, c.zone, c.name); got != c.want {
-			t.Errorf("MailSubjectFor(%q,%q,%q) = %q, want %q", c.owner, c.zone, c.name, got, c.want)
+		if got := MailSubjectFor(c.owner, c.name); got != c.want {
+			t.Errorf("MailSubjectFor(%q,%q) = %q, want %q", c.owner, c.name, got, c.want)
 		}
 	}
 }
@@ -56,12 +52,6 @@ func TestGoldenInboxStreamConfig(t *testing.T) {
 	c := InboxConfig("o", "a")
 	if c.Name != "inbox-a" || len(c.Subjects) != 1 || c.Subjects[0] != "agents.mail.*.o.a" || c.Description != "mash inbox for a" {
 		t.Errorf("legacy inbox config: %q %q %q", c.Name, c.Subjects, c.Description)
-	}
-	z := InboxConfigZoned(goldenN48, goldenZ32, goldenN48, DefaultLimits())
-	if z.Name != "inbox-"+goldenN48 || len(z.Subjects) != 2 ||
-		z.Subjects[0] != "agents.mail.*."+goldenN48+"."+goldenN48 ||
-		z.Subjects[1] != "agents.mail.*."+goldenN48+"."+goldenZ32+"."+goldenN48 {
-		t.Errorf("zoned inbox config: %q %q", z.Name, z.Subjects)
 	}
 }
 

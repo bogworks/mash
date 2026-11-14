@@ -422,7 +422,7 @@ func setup(ctx context.Context, url, name string, n, replicas int, created *atom
 	for i := range n {
 		name := fmt.Sprintf("e%04d", i)
 		rec := store.Record{Name: name, Owner: owner, Agent: "A" + name, AgentToken: "tok-" + name + "-0123456789abcdef0123456789abcdef",
-			Account: "ACCT0123456789", User: "U" + name + "0123456789", MailSubject: store.MailSubjectFor(owner, "", name),
+			Account: "ACCT0123456789", User: "U" + name + "0123456789", MailSubject: store.MailSubjectFor(owner, name),
 			Created: "2026-11-02T00:00:00Z", Role: "bench", Host: "bench-host"}
 		b, _ := json.Marshal(rec)
 		if _, err := kv.Put(ctx, name, b); err != nil {

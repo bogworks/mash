@@ -17,10 +17,10 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-func provisionFor(t *testing.T, e *testenv.Env, a *admin.Admin, name, zone string) {
+func provisionFor(t *testing.T, e *testenv.Env, a *admin.Admin, name string) {
 	t.Helper()
 	_, u := e.Mint(t, name)
-	if _, err := a.Provision(context.Background(), name, u, e.Account, "", admin.Meta{Zone: zone}); err != nil {
+	if _, err := a.Provision(context.Background(), name, u, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -37,8 +37,8 @@ func publishRefused(t *testing.T, js jetstream.JetStream, subj string) {
 func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "default")
-	if _, err := js.Publish(ctx, "agents.mail.cc.o.default.alpha", []byte("before")); err != nil {
+	provisionFor(t, e, a, "alpha")
+	if _, err := js.Publish(ctx, "agents.mail.cc.o.alpha", []byte("before")); err != nil {
 		t.Fatal(err)
 	}
 	st, err := a.Suspend(ctx, "alpha")
@@ -49,7 +49,7 @@ func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 		t.Fatalf("subjects %v", got)
 	}
 	publishRefused(t, js, "agents.mail.cc.o.alpha")
-	publishRefused(t, js, "agents.mail.cc.o.default.alpha")
+	publishRefused(t, js, "agents.mail.cc.o.alpha")
 	// The message stored before the suspension is still read through the durable consumer.
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	c, err := s.Consumer(ctx, store.Consumer)
@@ -75,9 +75,8 @@ func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 func TestResumeRestoresSubjectsAndDelivery(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "legacy", "")
-	provisionFor(t, e, a, "zoned", "default")
-	for name, subj := range map[string]string{"legacy": "agents.mail.cc.o.legacy", "zoned": "agents.mail.cc.o.default.zoned"} {
+	provisionFor(t, e, a, "legacy")
+	for name, subj := range map[string]string{"legacy": "agents.mail.cc.o.legacy"} {
 		want := inboxSubjects(t, js, name)
 		if _, err := a.Suspend(ctx, name); err != nil {
 			t.Fatal(err)
@@ -106,7 +105,7 @@ func TestResumeRestoresSubjectsAndDelivery(t *testing.T) {
 func TestSuspendResumeIdempotent(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	if err := a.Resume(ctx, "alpha"); err != nil {
 		t.Fatalf("resume of a live inbox: %v", err)
 	}
@@ -133,7 +132,7 @@ func TestSuspendResumeIdempotent(t *testing.T) {
 func TestSuspendLastSeqAfterBurst(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	const n = 25
 	for i := 0; i < n; i++ {
 		if _, err := js.Publish(ctx, "agents.mail.cc.o.alpha", []byte("x")); err != nil {
@@ -169,9 +168,8 @@ func TestSuspendMissingAndBadName(t *testing.T) {
 func TestEnsureInboxAcceptsSuspended(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "legacy", "")
-	provisionFor(t, e, a, "zoned", "default")
-	for _, name := range []string{"legacy", "zoned"} {
+	provisionFor(t, e, a, "legacy")
+	for _, name := range []string{"legacy"} {
 		if _, err := a.Suspend(ctx, name); err != nil {
 			t.Fatal(err)
 		}
@@ -192,22 +190,12 @@ func TestEnsureInboxAcceptsSuspended(t *testing.T) {
 	if _, err := a.EnsureInbox(ctx, "legacy"); err == nil || !strings.Contains(err.Error(), "max_msgs") {
 		t.Fatalf("EnsureInbox: %v", err)
 	}
-	// A zoned record whose suspended stream saved only the legacy subject is a subjects difference.
-	s, _ = js.Stream(ctx, "inbox-zoned")
-	cfg = s.CachedInfo().Config
-	cfg.Metadata[store.MetaSuspendedSubjects] = `["agents.mail.*.o.zoned"]`
-	if _, err := js.UpdateStream(ctx, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.EnsureInbox(ctx, "zoned"); err == nil || !strings.Contains(err.Error(), "subjects") {
-		t.Fatalf("EnsureInbox: %v", err)
-	}
 }
 
 func TestApplyLimitsKeepsSuspension(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "default")
+	provisionFor(t, e, a, "alpha")
 	if _, err := a.Suspend(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +218,7 @@ func TestApplyLimitsKeepsSuspension(t *testing.T) {
 	if err := a.Resume(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha", "agents.mail.*.o.default.alpha"}) {
+	if got := inboxSubjects(t, js, "alpha"); !reflect.DeepEqual(got, []string{"agents.mail.*.o.alpha"}) {
 		t.Fatalf("subjects after resume %v", got)
 	}
 }
@@ -264,7 +252,7 @@ func TestProvisionRefusesSuspended(t *testing.T) {
 func TestDeprovisionSuspended(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	if _, err := a.Suspend(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +267,7 @@ func TestDeprovisionSuspended(t *testing.T) {
 func TestParkedSubjectWithoutMetadataIsNotSuspended(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	cfg := s.CachedInfo().Config
 	cfg.Subjects = []string{"mash.suspended.alpha"}
@@ -297,7 +285,7 @@ func TestParkedSubjectWithoutMetadataIsNotSuspended(t *testing.T) {
 func TestSuspendKeepsOtherMetadata(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	s, _ := js.Stream(ctx, "inbox-alpha")
 	cfg := s.CachedInfo().Config
 	cfg.Metadata = map[string]string{"keep": "me"}
@@ -341,7 +329,7 @@ func updateInbox(t *testing.T, js jetstream.JetStream, name string, f func(*jets
 func TestSuspendReparksWhenMetadataButSubjectsNotParked(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	updateInbox(t, js, "alpha", func(c *jetstream.StreamConfig) {
 		c.Metadata = map[string]string{store.MetaSuspendedSubjects: `["stale.subject"]`, store.MetaSuspendedAt: "2000-01-01T00:00:00Z", store.MetaSuspendedID: "stale-id"}
 	})
@@ -363,7 +351,7 @@ func TestSuspendReparksWhenMetadataButSubjectsNotParked(t *testing.T) {
 func TestResumeParkedWithoutMetadataErrors(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "")
+	provisionFor(t, e, a, "alpha")
 	updateInbox(t, js, "alpha", func(c *jetstream.StreamConfig) { c.Subjects = []string{"mash.suspended.alpha"} })
 	if st, err := a.Suspended(ctx, "alpha"); err != nil || st.Suspended {
 		t.Fatalf("Suspended: %+v %v", st, err)
@@ -386,7 +374,7 @@ func TestResumeParkedWithoutMetadataErrors(t *testing.T) {
 func TestResumeClearsStaleMetadataKeepsSubjects(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provisionFor(t, e, a, "alpha", "default")
+	provisionFor(t, e, a, "alpha")
 	want := inboxSubjects(t, js, "alpha")
 	updateInbox(t, js, "alpha", func(c *jetstream.StreamConfig) {
 		c.Metadata = map[string]string{"keep": "me", store.MetaSuspendedSubjects: `["x.y"]`, store.MetaSuspendedAt: "2000-01-01T00:00:00Z"}
@@ -451,7 +439,7 @@ func intact(t *testing.T, a *admin.Admin, js jetstream.JetStream, name string) {
 func TestDeprovisionDrained(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "d", "")
+	provisionFor(t, e, a, "d")
 	if _, err := js.Publish(ctx, "agents.mail.cc.o.d", []byte("one")); err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +499,7 @@ func TestDeprovisionDrained(t *testing.T) {
 func TestDeprovisionDrainedRefusesOldSuspensionOfReprovisionedName(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "r", "")
+	provisionFor(t, e, a, "r")
 	old, err := a.Suspend(ctx, "r")
 	if err != nil || old.ID == "" {
 		t.Fatalf("%+v %v", old, err)
@@ -519,7 +507,7 @@ func TestDeprovisionDrainedRefusesOldSuspensionOfReprovisionedName(t *testing.T)
 	if err := a.DeprovisionDrained(ctx, "r", old.ID, old.LastSeq); err != nil {
 		t.Fatal(err)
 	}
-	provisionFor(t, e, a, "r", "")
+	provisionFor(t, e, a, "r")
 	cur, err := a.Suspend(ctx, "r")
 	if err != nil || cur.LastSeq != old.LastSeq || cur.ID == old.ID {
 		t.Fatalf("new suspension %+v old %+v %v", cur, old, err)
@@ -537,7 +525,7 @@ func TestDeprovisionDrainedRefusesOldSuspensionOfReprovisionedName(t *testing.T)
 func TestDeprovisionDrainedEmptyIDNeverMatches(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "h", "")
+	provisionFor(t, e, a, "h")
 	updateInbox(t, js, "h", func(c *jetstream.StreamConfig) {
 		c.Metadata = map[string]string{store.MetaSuspendedSubjects: `["agents.mail.cc.o.h"]`}
 		c.Subjects = []string{store.SuspendedSubject("h")}
@@ -600,7 +588,7 @@ func parked(t *testing.T, a *admin.Admin, name, id string) {
 func TestDeprovisionDrainedRefusesReplacedRecord(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "p", "")
+	provisionFor(t, e, a, "p")
 	st, err := a.Suspend(ctx, "p")
 	if err != nil {
 		t.Fatal(err)
@@ -617,7 +605,7 @@ func TestDeprovisionDrainedRefusesReplacedRecord(t *testing.T) {
 func TestDeprovisionDrainedRefusesNoRecord(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "n", "")
+	provisionFor(t, e, a, "n")
 	st, err := a.Suspend(ctx, "n")
 	if err != nil {
 		t.Fatal(err)
@@ -638,7 +626,7 @@ func TestDeprovisionDrainedRefusesNoRecord(t *testing.T) {
 func TestDeprovisionDrainedRefusesSuspendedWithoutRecord(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "w", "")
+	provisionFor(t, e, a, "w")
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
 	if err := kv.Purge(ctx, "w"); err != nil {
 		t.Fatal(err)
@@ -648,13 +636,13 @@ func TestDeprovisionDrainedRefusesSuspendedWithoutRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A record appears afterwards; the suspension saved no user, so it proves nothing.
-	provisionFor(t, e, a, "w2", "")
+	provisionFor(t, e, a, "w2")
 	_ = st
 	rec, err := store.GetRecord(ctx, kv, "w2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec.Name, rec.MailSubject = "w", store.MailSubjectFor(rec.Owner, rec.Zone, "w")
+	rec.Name, rec.MailSubject = "w", store.MailSubjectFor(rec.Owner, "w")
 	b, _ := json.Marshal(rec)
 	if _, err := kv.Put(ctx, "w", b); err != nil {
 		t.Fatal(err)
@@ -674,7 +662,7 @@ func TestDeprovisionDrainedRefusesSuspendedWithoutRecord(t *testing.T) {
 func TestDeprovisionDrainedRefusesRecordChangedBeforePurge(t *testing.T) {
 	ctx := context.Background()
 	e, a, js := setup(t)
-	provisionFor(t, e, a, "c", "")
+	provisionFor(t, e, a, "c")
 	st, err := a.Suspend(ctx, "c")
 	if err != nil {
 		t.Fatal(err)

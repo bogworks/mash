@@ -98,20 +98,9 @@ func (l Limits) Validate() error {
 	return nil
 }
 
-// InboxConfigFor is InboxConfig under limits l.
+// InboxConfigFor is InboxConfig under limits l: one stream filtered on the five-token mail subject of name under owner.
 func InboxConfigFor(owner, name string, l Limits) jetstream.StreamConfig {
-	return InboxConfigZoned(owner, "", name, l)
-}
-
-// InboxConfigZoned is InboxConfigFor for an endpoint in zone. A non-empty zone adds the exact filter of that zone next
-// to the legacy one, so mail from a sender that still publishes to the legacy subject lands too, and mail addressed
-// to any other zone does not (ADR 0054).
-func InboxConfigZoned(owner, zone, name string, l Limits) jetstream.StreamConfig {
-	subjects := []string{sap.MailFilter(owner, name)}
-	if zone != "" {
-		subjects = append(subjects, sap.MailFilterZone(owner, zone, name))
-	}
-	return inboxStreamConfig(name, subjects, l)
+	return inboxStreamConfig(name, []string{sap.MailFilter(owner, name)}, l)
 }
 
 // InboxConfigIdentity is the inbox stream of the endpoint id under limits l: inbox-<flat key> filtered on the
@@ -259,9 +248,9 @@ type Record struct {
 	// set by the admin. Readers from before these fields ignore them, and set-meta keeps fields it does not know.
 	Description string   `json:"description,omitempty"`
 	Caps        []string `json:"caps,omitempty"`
-	// Zone is the zone token in the endpoint's mail subject (ADR 0054). Empty means the legacy 5-token mail subject,
-	// not the default zone. Readers from before this field ignore it and, for a zoned endpoint, still reach it
-	// because its inbox stream keeps the legacy subject too.
+	// Zone is parse-only (ADR 0091): zones are removed and nothing writes it. It is read from a directory record a
+	// zoned release wrote, so the upgrade guards (ZonedRecordError) and "mashctl unzone" can find it. A record
+	// with a zone is refused at upgrade until unzone removes it.
 	Zone string `json:"zone,omitempty"`
 	// Alias is the legacy identity a new-form record answers to during the transition window (ADR 0076). Only a
 	// new-form record may carry it, only provisioning writes it, and the endpoint never does. Readers from before
@@ -275,12 +264,9 @@ type Alias struct {
 	Name  string `json:"name"`
 }
 
-// MailSubjectFor is the mail subject an endpoint with this owner, zone and name has: the legacy one when zone is empty.
-func MailSubjectFor(owner, zone, name string) string {
-	if zone == "" {
-		return sap.For(owner, name).Mail
-	}
-	return sap.ForZone(owner, zone, name).Mail
+// MailSubjectFor is the mail subject of an endpoint with this owner and name: always five tokens (ADR 0091).
+func MailSubjectFor(owner, name string) string {
+	return sap.For(owner, name).Mail
 }
 
 // MaxMetaLen is the longest Role, Host or label value.
@@ -364,10 +350,14 @@ func legacyCheck(key string, r Record) error {
 	if r.Name != key || r.User == "" || r.MailSubject == "" {
 		return fmt.Errorf("directory %s: incomplete record", key)
 	}
-	if r.Zone != "" && !sap.ValidZone(r.Zone) {
-		return fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+	if r.Zone != "" {
+		// Parse-only: a record a zoned release wrote still reads, so the guards can name it (ADR 0091).
+		if z, ok := sap.LegacyZoneOfMailSubject(r.MailSubject, r.Owner, r.Name); !ok || z != r.Zone {
+			return fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
+		}
+		return nil
 	}
-	if want := MailSubjectFor(r.Owner, r.Zone, r.Name); r.MailSubject != want {
+	if want := MailSubjectFor(r.Owner, r.Name); r.MailSubject != want {
 		return fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
 	}
 	return nil

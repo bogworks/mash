@@ -48,7 +48,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runWrangler(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
-	case "label", "unlabel": // the policy file; the server only with --sync
+	case "label", "unlabel": // the labels on the directory record
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, lookup, stdout, stderr)

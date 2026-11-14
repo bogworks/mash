@@ -101,7 +101,7 @@ func mustT[T any](v T, err error) T {
 // newIssueEnvNoService builds everything except the registry and the service.
 func newIssueEnvNoService(t *testing.T) *issueEnv {
 	t.Helper()
-	e := &issueEnv{applyEnv: newApplyEnv(t, twoZones), logs: &syncBuf{}, captured: &syncBuf{}}
+	e := &issueEnv{applyEnv: newApplyEnv(t), logs: &syncBuf{}, captured: &syncBuf{}}
 	e.env["MASH_ADMIN_CREDS"] = e.pl.AdminCredsPath()
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)
@@ -332,7 +332,7 @@ func TestIssueServiceAT012IssuesAJWTThatConnects(t *testing.T) {
 		t.Fatal("not in the issue record")
 	}
 	if rec.Purpose != store.PurposeIssue || rec.Kind != store.IssuedEndpoint || rec.Address != "foo.c.core" ||
-		rec.Zone != issueGroup || rec.Owner != "c" || !slices.Equal(rec.Tags, uc.Tags) || rec.RevokedAt != "" {
+		rec.Owner != "c" || !slices.Equal(rec.Tags, uc.Tags) || rec.RevokedAt != "" {
 		t.Errorf("record %+v", rec)
 	}
 	if !strings.Contains(e.logs.String(), "listening") {
@@ -639,7 +639,7 @@ func TestIssueServeChecksTheCustodyOfAnOverriddenRegistry(t *testing.T) {
 }
 
 func TestWranglerCommandsRoundTrip(t *testing.T) {
-	e := newApplyEnv(t, twoZones)
+	e := newApplyEnv(t)
 	path := wranglerreg.Path(e.keyDir)
 	k1 := mustT(mustT(nkeys.CreateUser()).PublicKey())
 	k2 := mustT(mustT(nkeys.CreateUser()).PublicKey())
