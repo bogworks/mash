@@ -19,7 +19,7 @@ import (
 	"github.com/bogworks/mash/internal/release"
 )
 
-// The policy-tests step (REQ-020): the tests of AT-001, AT-003, AT-004, AT-005, AT-010 and AT-020 run on every
+// The policy-tests step (REQ-020): the tests of AT-001, AT-003, AT-004, AT-005, AT-010, AT-011 and AT-020 run on every
 // release, and on every change of the NATS server version mash ships with, and the release is refused when one fails.
 // policytests.txt is the one list; a required test that was renamed, deleted or skipped did not run, and that refuses.
 
