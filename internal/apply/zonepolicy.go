@@ -10,7 +10,7 @@ import (
 )
 
 // AppliedZonePolicy reports whether the account JWT the servers hold carries a zone policy (ADR 0091): any scoped
-// signing key (jwt.UserScope), which is what `policy apply` publishes for each compiled zone, with its permission
+// signing key (jwt.UserScope), which is what an older release's `policy apply` published for each compiled zone, with its permission
 // template (the subject_label and six-token mail lines). It is read-only and needs the system account view of the
 // resolver, so it can be asked only where that exists (mashctl); an endpoint user cannot ask it.
 //

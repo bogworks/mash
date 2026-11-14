@@ -197,7 +197,7 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 
 // CurrentAccountClaims is the account's newest JWT, verified against trust, for a reader that acts on it (the issue
 // service checks a signing key's scope with it). servers is the declared server count (--servers, MASH_SERVERS; 0 none
-// given). It returns an error unless the server set is complete (ServerSet.Complete, as policy apply needs) and every
+// given). It returns an error unless the server set is complete (ServerSet.Complete) and every
 // expected server answered the lookup: a silent server may hold a newer JWT that removed or narrowed a key, so the
 // answers of the others do not decide. A lookup error on any answering server is an error, not a skipped reply. Only a
 // complete set is compared: the highest iat wins (see chooseBase, which refuses a copy that does not verify and two

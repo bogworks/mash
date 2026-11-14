@@ -89,7 +89,7 @@ func (r adminRecord) RecordChecked(ctx context.Context, rec store.Issued) error 
 }
 
 // liveClaims is the issue.AccountClaims over the system account: the newest account JWT the servers hold, verified
-// against the operator key and its signing keys, as policy apply reads it.
+// against the operator key and its signing keys, as mashctl reads it.
 type liveClaims struct {
 	res     apply.Resolver
 	account string
