@@ -432,6 +432,9 @@ type RunInput struct {
 	// ListSet and Received are the submission and the exact bytes it was decoded from.
 	ListSet  listset.ListSet
 	Received []byte
+	// RotationStep is true when the submission starts or completes a planned submitter rotation (ADR 0112), so it
+	// applies even when its content is the content in force (ADR 0119).
+	RotationStep bool
 	// Previous is the Compiled of the generation in force (nil when none); PreviousRevoked are the keys it revokes.
 	Previous        *listset.Compiled
 	PreviousRevoked []string
@@ -578,7 +581,11 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 			return Status{}, err
 		}
 	}
-	rec, compiled, err := listset.Accept(base, in.ListSet, in.Received)
+	accept := listset.Accept
+	if in.RotationStep {
+		accept = listset.AcceptRotationStep
+	}
+	rec, compiled, err := accept(base, in.ListSet, in.Received)
 	if err != nil {
 		var ve *listset.ValidationError
 		var ce *listset.CheckError

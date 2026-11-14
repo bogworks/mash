@@ -115,6 +115,18 @@ type Record struct {
 // That path belongs to the apply work, under REQ-011's applied-policy gate (contract mash-messaging-policy), and is
 // not built here.
 func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
+	return accept(inForce, ls, received, false)
+}
+
+// AcceptRotationStep is Accept for a submission that starts or completes a planned submitter rotation (ADR 0112). It
+// makes every check Accept makes except the unchanged one: content equal to the content in force is accepted as the
+// next generation, because the rotation completes only after a successful apply and the digest does not cover
+// next_submitter (ADR 0119). The caller, not this function, decides that a submission is a rotation step.
+func AcceptRotationStep(inForce Record, ls ListSet, received []byte) (Record, *Compiled, error) {
+	return accept(inForce, ls, received, true)
+}
+
+func accept(inForce Record, ls ListSet, received []byte, rotationStep bool) (Record, *Compiled, error) {
 	if ls.Base != inForce.Generation {
 		return Record{}, nil, &StaleBaseError{Stated: ls.Base, InForce: inForce.Generation}
 	}
@@ -131,7 +143,7 @@ func Accept(inForce Record, ls ListSet, received []byte) (Record, *Compiled, err
 	// DigestListSet covers Base, which differs between any two submissions, so it cannot show that content repeats.
 	// The digest of what is signed (DigestCompiled) leaves Base out and is order independent, so equal to
 	// inForce.Signed means the same content, however it is encoded or ordered.
-	if inForce.Generation > 0 && DigestCompiled(c) == inForce.Signed {
+	if !rotationStep && inForce.Generation > 0 && DigestCompiled(c) == inForce.Signed {
 		return Record{}, nil, &UnchangedError{InForce: inForce.Generation}
 	}
 	return Record{

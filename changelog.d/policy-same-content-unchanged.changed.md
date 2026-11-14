@@ -1,0 +1,1 @@
+A list set whose content is the list set in force is now refused as unchanged (stage `unchanged`) and uses no generation; nothing is signed or pushed. A set that starts or completes a planned submitter rotation still applies (ADR 0119).

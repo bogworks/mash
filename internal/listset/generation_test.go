@@ -296,3 +296,21 @@ func TestAccept_ChangedContentStillAccepted(t *testing.T) {
 		t.Fatalf("changed content: %+v %v", got, err)
 	}
 }
+
+func TestAcceptRotationStep_SameContentAccepted(t *testing.T) {
+	first, _, err := Accept(Record{}, at001(), recv(at001()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := based(at001(), first.Generation)
+	if _, _, err := Accept(first, same, recv(same)); !errors.Is(err, ErrUnchanged) {
+		t.Fatalf("Accept err = %v, want ErrUnchanged", err)
+	}
+	rec, c, err := AcceptRotationStep(first, same, recv(same))
+	if err != nil || c == nil || rec.Generation != first.Generation+1 || rec.Signed != first.Signed {
+		t.Fatalf("rec %+v err %v", rec, err)
+	}
+	if _, _, err := AcceptRotationStep(first, at001(), recv(at001())); !errors.Is(err, ErrStaleBase) {
+		t.Errorf("a stale base is still refused: %v", err)
+	}
+}

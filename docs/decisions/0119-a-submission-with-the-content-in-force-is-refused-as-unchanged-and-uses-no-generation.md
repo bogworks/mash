@@ -36,6 +36,13 @@ encoding or order, so a reordered resubmission is unchanged too. `Run` turns it 
 stage `unchanged`, "same content as generation N in force; nothing to apply". No generation is used, nothing is signed
 or pushed, and the record in force, the pending record and the stored list set and JWT are untouched.
 
+One exception: a submission that starts a planned submitter rotation (it carries a `next_submitter` and none is
+pending) or completes one (a rotation is pending and this is the next key's first set) is not refused as unchanged. It
+applies as a new generation, signed, pushed, gated and committed, because ADR 0112 completes a rotation only after a
+successful apply and the compiled digest does not cover `next_submitter`. The intake sets `Doc.RotationStep` for these
+two cases, the applier passes it on as `RunInput.RotationStep`, and `Run` then calls `listset.AcceptRotationStep`, which
+makes every check `Accept` makes except the unchanged one.
+
 ### Consequences
 
 * Good, because every generation is a signed, pushed and gated change.
@@ -49,7 +56,11 @@ or pushed, and the record in force, the pending record and the stored list set a
 ### Confirmation
 
 Unit tests: `TestAccept_SameContentRefusedAsUnchanged` and `TestAccept_ChangedContentStillAccepted` in
-`internal/listset`, and `TestRunSameContentRefusedAsUnchanged` in `internal/policyapply`.
+`internal/listset`, and `TestRunSameContentRefusedAsUnchanged` in `internal/policyapply`. For the rotation exception:
+`TestAcceptRotationStep_SameContentAccepted` in `internal/listset`, `TestRunRotationStepAppliesSameContent` in
+`internal/policyapply` (same content with `RotationStep` applies as the next generation), and
+`TestRotationStepIsMarkedForTheApplier` in `internal/policyintake` (leg 1, leg 2 and a plain document, with the next
+submitter recorded and promoted).
 
 ## Pros and Cons of the Options
 
