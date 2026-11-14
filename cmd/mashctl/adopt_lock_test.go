@@ -267,7 +267,7 @@ func TestLostLockStopsAddBeforeCredsAndPolicy(t *testing.T) {
 	before := h.policyText()
 	afterProvision = func() { loseLock(t, h) }
 	t.Cleanup(func() { afterProvision = nil })
-	out, errb, code := h.run("add", "c", "--zone", "red")
+	out, errb, code := h.run("add", "c", "--label", "env=red")
 	if code != 1 || !strings.Contains(errb, "lock") || strings.Contains(out, "added") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

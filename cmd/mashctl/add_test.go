@@ -155,8 +155,8 @@ func TestAddAndReissue(t *testing.T) {
 	h.seed("a")
 	h.seed("b")
 
-	out, errb, code := h.run("add", "g", "--zone", "green", "--tool", "--label", "team=y", "--note", "first")
-	if code != 0 || !strings.HasPrefix(out, "added g (zone green) creds "+h.creds("g")+"\n") {
+	out, errb, code := h.run("add", "g", "--label", "zone=green", "--tool", "--label", "team=y", "--note", "first")
+	if code != 0 || !strings.HasPrefix(out, "added g creds "+h.creds("g")+"\n") {
 		t.Fatalf("add: %d %q %q", code, out, errb)
 	}
 	// a green zone is new: the account JWT needs the new key; team x (a) gets a tag for the new tool
@@ -173,7 +173,7 @@ func TestAddAndReissue(t *testing.T) {
 		t.Errorf("name %q", uc.Name)
 	}
 	recs := h.records()
-	if !slices.Contains(recs, "g/green/"+userPub) || len(recs) != 3 { // a and b are seeded with records
+	if !slices.Contains(recs, "g//"+userPub) || len(recs) != 3 { // a and b are seeded with records
 		t.Fatalf("records %v (user %s)", recs, userPub)
 	}
 	got, _ := os.ReadFile(h.policy)
@@ -194,7 +194,7 @@ func TestAddAndReissue(t *testing.T) {
 
 	// a is in team x: a second tool changes its allow tags again
 	oldTags, userA := h.credsClaims("a")
-	out, errb, code = h.run("add", "g2", "--zone", "blue", "--tool")
+	out, errb, code = h.run("add", "g2", "--label", "zone=blue", "--tool")
 	if code != 0 {
 		t.Fatalf("add g2: %d %q", code, errb)
 	}
@@ -286,7 +286,7 @@ func TestAddRefusesExistingZoneWithLostKey(t *testing.T) {
 	}
 	before, _ := os.ReadFile(h.policy)
 	recs := h.records()
-	out, errb, code := h.run("add", "n", "--zone", "red")
+	out, errb, code := h.run("add", "n", "--label", "zone=red")
 	if code != 1 || out != "" || !strings.Contains(errb, "the signing key for zone red is missing") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -312,7 +312,7 @@ func TestAddNewZoneReusesLeftoverKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	want, _ := kp.PublicKey()
-	out, errb, code := h.run("add", "g", "--zone", "green")
+	out, errb, code := h.run("add", "g", "--label", "zone=green")
 	if code != 0 || !strings.Contains(out, "account update needed: run mashctl policy apply") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -398,10 +398,10 @@ func TestAddRefusals(t *testing.T) {
 		{[]string{"add", "0"}, "NAME is not a valid endpoint name", 2},
 		{[]string{"add", "Zed"}, "NAME is not a valid endpoint name", 2},
 		{[]string{"add", "a"}, "already declared", 1},
-		{[]string{"add", "d", "--zone", "red", "--label", "zone=blue"}, "conflicts", 1},
+		{[]string{"add", "d", "--tool", "--label", "kind=x"}, "conflicts", 1},
 		{[]string{"add", "d", "--label", "novalue"}, "--label wants k=v", 2},
 		{[]string{"add", "d", "--bogus"}, "unknown option", 2},
-		{[]string{"add", "d", "--zone", "Not Valid"}, "zone", 1},
+		{[]string{"add", "d", "--zone", "red"}, "unknown option", 2},
 	} {
 		_, errb, code := h.run(tc.args...)
 		if code != tc.code || !strings.Contains(errb, tc.want) {
@@ -496,7 +496,7 @@ func TestAddRefusedOverBudget(t *testing.T) {
 
 	h := newAddEnv(t, src)
 	before, _ := os.ReadFile(h.policy)
-	_, errb, code := h.run("add", "big", "--zone", "red", "--label", "id=big")
+	_, errb, code := h.run("add", "big", "--label", "zone=red", "--label", "id=big")
 	if code != 1 || !strings.Contains(errb, "adding big would make the policy unusable") ||
 		!strings.Contains(errb, "user JWT of big") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("add: %d %q", code, errb)
@@ -590,7 +590,7 @@ func TestFailingPolicyTestsRefuseAddAndReissue(t *testing.T) {
 	polBefore, _ := os.ReadFile(h.policy)
 	recs := h.records()
 
-	out, errb, code := h.run("add", "g", "--zone", "green", "--tool")
+	out, errb, code := h.run("add", "g", "--label", "zone=green", "--tool")
 	if code != 1 || !strings.Contains(out, "FAIL a->b expect allow got deny") || !strings.Contains(errb, "refusing: 1 of 1 policy tests in "+h.policy+" fail (nothing was changed, no key or creds file was created") {
 		t.Fatalf("add: %d %q %q", code, out, errb)
 	}
@@ -622,7 +622,7 @@ func TestFailingPolicyTestsRefuseAddAndReissue(t *testing.T) {
 	if err := os.WriteFile(h.policy, []byte(good), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := h.run("add", "g", "--zone", "green", "--tool"); code != 0 {
+	if out, errb, code := h.run("add", "g", "--label", "zone=green", "--tool"); code != 0 {
 		t.Fatalf("add with passing tests: %d %q %q", code, out, errb)
 	}
 	if out, errb, code := h.run("reissue", "a"); code != 0 || !strings.HasPrefix(out, "reissued a ") {
@@ -639,7 +639,7 @@ func TestAddAndReissueRefuseAFileThatDoesNotCheck(t *testing.T) {
 	if err := os.WriteFile(h.policy, []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := h.run("add", "n", "--zone", "red"); code != 1 || !strings.Contains(errb, "set allow_empty: true on the rule") {
+	if _, errb, code := h.run("add", "n", "--label", "zone=red"); code != 1 || !strings.Contains(errb, "set allow_empty: true on the rule") {
 		t.Fatalf("add: %d %q", code, errb)
 	}
 	if _, err := os.Lstat(h.creds("n")); err == nil {
@@ -663,7 +663,7 @@ func TestAddAppliesTheNameRule(t *testing.T) {
 	}
 	h.env["MASH_NAME_RULE_FILE"] = rule
 	before, _ := os.ReadFile(h.policy)
-	_, errb, code := h.run("add", "g", "--zone", "green")
+	_, errb, code := h.run("add", "g", "--label", "zone=green")
 	if code != 1 || !strings.Contains(errb, `name rule "no-g"`) || !strings.Contains(errb, "g is retired") {
 		t.Fatalf("refused add: %d %q", code, errb)
 	}
@@ -676,7 +676,7 @@ func TestAddAppliesTheNameRule(t *testing.T) {
 	if after, _ := os.ReadFile(h.policy); !bytes.Equal(before, after) {
 		t.Error("a refused add changed the policy")
 	}
-	if out, errb, code := h.run("add", "h", "--zone", "green"); code != 0 {
+	if out, errb, code := h.run("add", "h", "--label", "zone=green"); code != 0 {
 		t.Fatalf("allowed add: %d %q %q", code, out, errb)
 	}
 }
