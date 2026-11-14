@@ -64,6 +64,9 @@ type KVLedgerOptions struct {
 	Now func() time.Time
 	// Poll is how long Lock waits before looking at a held lease again; zero means 200 ms.
 	Poll time.Duration
+	// MaxValue is the largest value written to the bucket; zero means the connection's MaxPayload less headroom when
+	// it is known, else DefaultMaxValue.
+	MaxValue int
 	// OpTimeout bounds each KV operation of the Ledger methods, which take no context; zero means 10 s.
 	OpTimeout time.Duration
 }
@@ -86,6 +89,8 @@ type KVLedgerOptions struct {
 type KVLedger struct {
 	kv       jetstream.KeyValue
 	key      string
+	pendKey  string
+	maxValue int
 	leaseKey string
 	holder   string
 	ttl      time.Duration
@@ -121,8 +126,14 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 	if err != nil {
 		return nil, fmt.Errorf("policy ledger: bucket %s: %w", bucket, err)
 	}
-	l := &KVLedger{kv: kv, key: StatusKey(account), leaseKey: LeaseKey(account), holder: opts.Holder, ttl: opts.LeaseTTL,
+	l := &KVLedger{kv: kv, key: StatusKey(account), pendKey: PendingJWTKey(account), maxValue: opts.MaxValue, leaseKey: LeaseKey(account), holder: opts.Holder, ttl: opts.LeaseTTL,
 		poll: opts.Poll, opTO: opts.OpTimeout, now: opts.Now, sem: make(chan struct{}, 1)}
+	if l.maxValue <= 0 {
+		l.maxValue = DefaultMaxValue
+		if c := js.Conn(); c != nil && c.MaxPayload() > 0 {
+			l.maxValue = max(int(c.MaxPayload())-16<<10, 1)
+		}
+	}
 	if l.ttl <= 0 {
 		l.ttl = DefaultLeaseTTL
 	}
@@ -154,6 +165,8 @@ var (
 	_ DetailLedger     = (*MemLedger)(nil)
 	_ PendingJWTLedger = (*KVLedger)(nil)
 	_ PendingJWTLedger = (*MemLedger)(nil)
+	_ RollbackLedger   = (*KVLedger)(nil)
+	_ RollbackLedger   = (*MemLedger)(nil)
 )
 
 // recordValue is a listset.Record in the status value: digests are their strings.
@@ -173,10 +186,25 @@ type statusValue struct {
 	InForceJWT     string          `json:"in_force_jwt,omitempty"`
 	InForceListSet json.RawMessage `json:"in_force_listset,omitempty"`
 	Pending        *recordValue    `json:"pending,omitempty"`
-	// PendingJWT is the last account JWT pushed for the pending record.
+	// PendingJWT is read only, for a value written before the pending JWT had its own key (PendingJWTKey); never written.
 	PendingJWT string  `json:"pending_jwt,omitempty"`
 	Status     *Status `json:"status,omitempty"`
 }
+
+// pendingJWTValue is the value at the pending JWT key: the last account JWT pushed for Record. It counts only while
+// the status value's pending record is Record; an empty JWT is the cleared value.
+type pendingJWTValue struct {
+	Schema string       `json:"schema"`
+	Record *recordValue `json:"record,omitempty"`
+	JWT    string       `json:"jwt,omitempty"`
+}
+
+// DefaultMaxValue is the largest value the ledger writes when the connection's MaxPayload is not known: the server's
+// default max payload (1 MiB) less headroom for the subject and headers of the write.
+const DefaultMaxValue = 1<<20 - 16<<10
+
+// ErrValueTooLarge is returned when a value the ledger would write is over the size limit. Nothing is written.
+var ErrValueTooLarge = errors.New("the policy ledger value is over the size limit")
 
 // leaseValue is the value at the lease key.
 type leaseValue struct {
@@ -270,12 +298,68 @@ func (l *KVLedger) write(ctx context.Context, v statusValue, rev uint64) error {
 	if err != nil {
 		return err
 	}
+	if len(b) > l.maxValue {
+		return fmt.Errorf("policy ledger %s: %w: the status value is %d bytes, limit %d", l.key, ErrValueTooLarge, len(b), l.maxValue)
+	}
 	if rev == 0 {
 		_, err = l.kv.Create(ctx, l.key, b)
 	} else {
 		_, err = l.kv.Update(ctx, l.key, b, rev)
 	}
 	return err
+}
+
+// readPendingJWT returns the pending JWT value and its revision; an absent key is the empty value at revision 0.
+func (l *KVLedger) readPendingJWT(ctx context.Context) (pendingJWTValue, uint64, error) {
+	e, err := l.kv.Get(ctx, l.pendKey)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return pendingJWTValue{}, 0, nil
+	}
+	if err != nil {
+		return pendingJWTValue{}, 0, fmt.Errorf("policy ledger %s: %w", l.pendKey, err)
+	}
+	var pv pendingJWTValue
+	if err := json.Unmarshal(e.Value(), &pv); err != nil {
+		return pendingJWTValue{}, 0, fmt.Errorf("policy ledger %s: unreadable: %w", l.pendKey, err)
+	}
+	return pv, e.Revision(), nil
+}
+
+// writePendingJWT stores jwt for rec at the pending JWT key by compare-and-set, fenced by the lease. rec nil and an
+// empty jwt is the cleared value, which is not written when the key is absent or already clear. The key is never
+// deleted: the bucket may refuse it.
+func (l *KVLedger) writePendingJWT(ctx context.Context, rec *recordValue, jwt string) error {
+	for range casTries {
+		cur, rev, err := l.readPendingJWT(ctx)
+		if err != nil {
+			return err
+		}
+		if jwt == "" && cur.JWT == "" {
+			return nil
+		}
+		if err := l.checkLease(ctx); err != nil {
+			return err
+		}
+		b, err := json.Marshal(pendingJWTValue{Schema: StatusSchema, Record: rec, JWT: jwt})
+		if err != nil {
+			return err
+		}
+		if len(b) > l.maxValue {
+			return fmt.Errorf("policy ledger %s: %w: the pending JWT value is %d bytes, limit %d", l.pendKey, ErrValueTooLarge, len(b), l.maxValue)
+		}
+		if rev == 0 {
+			_, err = l.kv.Create(ctx, l.pendKey, b)
+		} else {
+			_, err = l.kv.Update(ctx, l.pendKey, b, rev)
+		}
+		if err == nil {
+			return nil
+		}
+		if !casLost(err) {
+			return fmt.Errorf("policy ledger %s: %w", l.pendKey, err)
+		}
+	}
+	return fmt.Errorf("policy ledger %s: changed by other writers too often; try again", l.pendKey)
 }
 
 // mutate is a read-modify-write of the status value: change edits the value read and the result is written at the
@@ -357,20 +441,22 @@ func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	return r, err == nil, err
 }
 
-// SetPending implements Ledger.
+// SetPending implements Ledger. The JWT kept for the pending record stays with it when the record is the same, and
+// is ignored (PendingJWT) when the record is another.
 func (l *KVLedger) SetPending(rec listset.Record) error {
-	return l.mutate(func(v *statusValue) error {
-		if nv := recordToValue(rec); v.Pending == nil || *v.Pending != *nv {
-			v.PendingJWT = ""
-		}
-		v.Pending = recordToValue(rec)
-		return nil
-	})
+	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = recordToValue(rec), ""; return nil })
 }
 
-// SetPendingJWT implements PendingJWTLedger.
+// SetPendingJWT implements PendingJWTLedger. The JWT is written to its own key first (the status value never holds
+// it), then the pending record to the status value, so a pending record is never without the JWT stored for it.
 func (l *KVLedger) SetPendingJWT(rec listset.Record, jwt string) error {
-	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = recordToValue(rec), jwt; return nil })
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	rv := recordToValue(rec)
+	if err := l.writePendingJWT(ctx, rv, jwt); err != nil {
+		return err
+	}
+	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = rv, ""; return nil })
 }
 
 // PendingJWT implements PendingJWTLedger.
@@ -384,12 +470,42 @@ func (l *KVLedger) PendingJWT() (string, error) {
 	if v.Pending == nil {
 		return "", nil
 	}
-	return v.PendingJWT, nil
+	pv, _, err := l.readPendingJWT(ctx)
+	if err != nil {
+		return "", err
+	}
+	if pv.Record != nil && *pv.Record == *v.Pending {
+		return pv.JWT, nil
+	}
+	return v.PendingJWT, nil // a value written before the pending JWT had its own key
 }
 
 // ClearPending implements Ledger.
 func (l *KVLedger) ClearPending() error {
-	return l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = nil, ""; return nil })
+	if err := l.mutate(func(v *statusValue) error { v.Pending, v.PendingJWT = nil, ""; return nil }); err != nil {
+		return err
+	}
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	return l.writePendingJWT(ctx, nil, "")
+}
+
+// CommitRollback implements RollbackLedger: jwt becomes the JWT in force and the pending record is cleared, in one
+// write of the status value (the record in force and its list set are unchanged); the pending JWT key is cleared
+// after it. The lease is checked first, as for a commit.
+func (l *KVLedger) CommitRollback(jwt string) error {
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	if err := l.checkLease(ctx); err != nil {
+		return err
+	}
+	if err := l.mutate(func(v *statusValue) error {
+		v.InForceJWT, v.Pending, v.PendingJWT = jwt, nil, ""
+		return nil
+	}); err != nil {
+		return err
+	}
+	return l.writePendingJWT(ctx, nil, "")
 }
 
 // WriteStatus stores st as the latest status, keeping the record in force and the pending record. Only a run under
@@ -478,6 +594,32 @@ func (l *KVLedger) CompareAndCommit(base uint64, rec listset.Record) error {
 // d.ListSet as in_force_listset (json.Marshal of listset.ListSet), in the same write as the record.
 func (l *KVLedger) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
 	return l.commit(base, rec, d)
+}
+
+// CheckCommitSize implements CommitSizeChecker: it encodes the status value as the commit of rec with jwt and ls
+// would write it (the pending record still set, as it is until the commit is done) and returns an error wrapping
+// ErrValueTooLarge when it is over the limit. Nothing is written.
+func (l *KVLedger) CheckCommitSize(rec listset.Record, jwt string, ls listset.ListSet) error {
+	lsb, err := json.Marshal(ls)
+	if err != nil {
+		return fmt.Errorf("policy ledger %s: %w", l.key, err)
+	}
+	ctx, cancel := l.opCtx()
+	defer cancel()
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return err
+	}
+	rv := recordToValue(rec)
+	v.Schema, v.InForce, v.InForceJWT, v.InForceListSet, v.Pending = StatusSchema, rv, jwt, lsb, rv
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	if len(b) > l.maxValue {
+		return fmt.Errorf("policy ledger %s: %w: the status value of generation %d would be %d bytes, limit %d", l.key, ErrValueTooLarge, rec.Generation, len(b), l.maxValue)
+	}
+	return nil
 }
 
 func (l *KVLedger) commit(base uint64, rec listset.Record, d InForceDetail) error {
