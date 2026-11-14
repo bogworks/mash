@@ -101,5 +101,5 @@ not arrivals.
 
 ## More Information
 
-* Issue 130, whose author's retirement design depends on it.
+* Issue #130, whose author's retirement design depends on it. Shipped in [PR #154](https://github.com/bogworks/mash/pull/154) (mash 0.3.3); issue #130 is satisfied.
 * Accepted by the maintainer 2026-11-02.
