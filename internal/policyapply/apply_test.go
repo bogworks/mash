@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,7 +289,8 @@ func TestApplyRefusesIncompleteInventory(t *testing.T) {
 	}
 }
 
-// With the record, OldKeys carries each unrevoked key with its issue time; an already revoked key is not inventory.
+// With the record, OldKeys carries each credential key with its issue time, an already revoked key included: the gate
+// must see that a server's revocation of it is not older than the credential.
 func TestOldKeysFromRecord(t *testing.T) {
 	w, _, deps := applyWorld(t)
 	rec := deps.IssueRecord.(*MemIssueRecord)
@@ -312,8 +314,17 @@ func TestOldKeysFromRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k := got["foo.c.core"]; len(k) != 1 || k[0].PublicKey != w.k.revoked || !k[0].IssuedAt.Equal(time.Unix(1000, 0)) {
-		t.Errorf("core = %+v", k)
+	core := got["foo.c.core"]
+	if len(core) != 2 {
+		t.Fatalf("core = %+v", core)
+	}
+	for _, k := range core {
+		switch {
+		case k.PublicKey == w.k.revoked && k.IssuedAt.Equal(time.Unix(1000, 0)):
+		case k.PublicKey == "UREV" && k.IssuedAt.Equal(at):
+		default:
+			t.Errorf("unexpected core key %+v", k)
+		}
 	}
 	if k := got["foo.c.docs"]; len(k) != 1 || k[0].PublicKey != "UDOCS" {
 		t.Errorf("docs = %+v", k)
@@ -397,5 +408,88 @@ func TestOldKeysFromAdminRecordUsesMaxIssued(t *testing.T) {
 	f.histErr = map[string]error{w.k.revoked: &admin.IncompleteHistoryError{Key: w.k.revoked}}
 	if _, err := oldKeysFromRecord(ctx, r, prev, set2()); !errors.Is(err, ErrIncompleteInventory) {
 		t.Errorf("incomplete history: err = %v", err)
+	}
+}
+
+// ownMarkersLedger is a MemLedger that keeps its provisioning markers itself.
+type ownMarkersLedger struct {
+	*MemLedger
+	*MemProvisionMarkers
+}
+
+// A retry with no Provisioner still honours a marker a crashed run left: the rollback is refused and the generation
+// stays pending, whether the markers come from deps or from the ledger itself.
+func TestApplyWithoutProvisionerRefusesRollbackWhileMarkerStands(t *testing.T) {
+	for name, setup := range map[string]func(deps *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers){
+		"deps markers":   func(d *ApplyDeps, _ *MemLedger, pm *MemProvisionMarkers) { d.ProvisionMarkers = pm },
+		"ledger markers": func(d *ApplyDeps, l *MemLedger, pm *MemProvisionMarkers) { d.Ledger = ownMarkersLedger{l, pm} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w, l, deps := applyWorld(t)
+			pm := NewMemProvisionMarkers()
+			if err := pm.MarkProvisioning("foo.c.new", 2); err != nil {
+				t.Fatal(err)
+			}
+			setup(&deps, l, pm)
+			w.cluster.dropN["s2"] = dropTargetPushes // the gate fails and the run would roll back
+			_, err := Apply(context.Background(), applyReq(), deps)
+			if !errors.Is(err, ErrProvisioningMarker) {
+				t.Fatalf("err = %v, want ErrProvisioningMarker", err)
+			}
+			if pend, ok, _ := l.Pending(); !ok || pend.Generation != 2 {
+				t.Errorf("pending = %+v %v: the generation must stay pending", pend, ok)
+			}
+			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+				t.Errorf("markers = %v, want the marker to stand", got)
+			}
+		})
+	}
+}
+
+// With markers kept and none standing, a failed gate still rolls back and clears the pending record.
+func TestApplyWithoutProvisionerRollsBackWithNoMarker(t *testing.T) {
+	w, l, deps := applyWorld(t)
+	deps.ProvisionMarkers = NewMemProvisionMarkers()
+	w.cluster.dropN["s2"] = dropTargetPushes // the rollback push reaches s2, so the rollback is confirmed
+	if _, err := Apply(context.Background(), applyReq(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := l.Pending(); ok {
+		t.Error("pending stayed after a rollback")
+	}
+}
+
+// A retry after an earlier revocation that was too early: the old key is already marked revoked in the record, but a
+// credential for it was issued with a time after that revocation. The key stays in the inventory with its issue time,
+// so the gate sees the revocation on the servers is older than the credential and the change is not applied.
+func TestApplyRevokedFutureDatedOldKeyFailsTheGate(t *testing.T) {
+	w, l, deps := applyWorld(t)
+	ctx := context.Background()
+	const future = time.Hour
+	issued := time.Now().Add(future)
+	rec := &MemIssueRecord{}
+	if err := rec.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: issued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.MarkRevoked(ctx, w.k.revoked, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	deps.IssueRecord = rec
+	st, err := Apply(ctx, applyReq(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State == StateApplied || st.InForce {
+		t.Fatalf("applied although the revocation is older than the credential: %+v", st)
+	}
+	var named bool
+	for _, f := range st.Failing {
+		named = named || (f.Check == CheckRevoked && strings.Contains(f.Detail, "older than the credential"))
+	}
+	if !named {
+		t.Errorf("the early revocation is not named: %+v", st.Failing)
+	}
+	if got, _ := l.InForce(); got.Generation != 1 {
+		t.Errorf("in force = %d", got.Generation)
 	}
 }

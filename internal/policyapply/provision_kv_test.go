@@ -5,6 +5,11 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/bogworks/mash/internal/listset"
 )
 
 func newKVMarkers(t *testing.T, e *kvEnv) *KVProvisionMarkers {
@@ -143,4 +148,82 @@ func TestKVProvisionMarkersUnreadableMarkerIsAnError(t *testing.T) {
 	if got, err := m.Provisioning(2); err != nil || len(got) != 0 {
 		t.Errorf("tombstone: %v, %v", got, err)
 	}
+}
+
+// expiringKV is a bucket whose key lister, like the library's, closes its channel without keys when the context
+// expires: a timeout that looks like an empty listing.
+type expiringKV struct{ jetstream.KeyValue }
+
+type closedLister struct{ ch chan string }
+
+func (l closedLister) Keys() <-chan string { return l.ch }
+func (closedLister) Stop() error           { return nil }
+
+func (expiringKV) ListKeysFiltered(ctx context.Context, _ ...string) (jetstream.KeyLister, error) {
+	<-ctx.Done()
+	ch := make(chan string)
+	close(ch)
+	return closedLister{ch}, nil
+}
+
+// A listing that ended because the context expired is not "no markers": Provisioning fails, so a rollback is refused.
+func TestKVProvisionMarkersExpiredListingIsAnError(t *testing.T) {
+	e := newKVEnv(t)
+	m := newKVMarkers(t, e)
+	if err := m.MarkProvisioning("foo.c.new", 2); err != nil {
+		t.Fatal(err)
+	}
+	const expiry = 20 * time.Millisecond
+	slow, err := NewKVProvisionMarkers(expiringKV{e.kv}, kvAccount, expiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := slow.Provisioning(2); err == nil {
+		t.Fatalf("got %v, nil; want an error for the expired listing", got)
+	}
+	// A context that is already over when the call starts is an error too.
+	const tiny = time.Nanosecond
+	over, err := NewKVProvisionMarkers(e.kv, kvAccount, tiny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := over.Provisioning(2); err == nil {
+		t.Fatalf("got %v, nil; want an error for the expired context", got)
+	}
+}
+
+// The wrappers keep every optional ledger interface Run looks for, and a rollback through them is recorded as one.
+func TestProvisionWrappersForwardOptionalLedgerInterfaces(t *testing.T) {
+	w := newWorld14(t)
+	check := func(t *testing.T, l Ledger) {
+		t.Helper()
+		if _, ok := l.(PendingJWTLedger); !ok {
+			t.Error("not a PendingJWTLedger")
+		}
+		if _, ok := l.(CommitSizeChecker); !ok {
+			t.Error("not a CommitSizeChecker")
+		}
+		rl, ok := l.(RollbackLedger)
+		if !ok {
+			t.Fatal("not a RollbackLedger")
+		}
+		if err := w.ledger.SetPending(listset.Record{Generation: 2}); err != nil {
+			t.Fatal(err)
+		}
+		const rollback = "rollback-jwt"
+		if err := rl.CommitRollback(rollback); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := w.ledger.InForceJWT(); got != rollback {
+			t.Errorf("JWT in force = %q, want the rollback JWT", got)
+		}
+		if _, pending, _ := w.ledger.Pending(); pending {
+			t.Error("pending stayed")
+		}
+	}
+	t.Run("WithProvisionMarkers", func(t *testing.T) { check(t, WithProvisionMarkers(w.ledger, NewMemProvisionMarkers())) })
+	t.Run("guard", func(t *testing.T) {
+		in, _ := withProvisionGuard(RunInput{Ledger: WithProvisionMarkers(w.ledger, NewMemProvisionMarkers())}, nil)
+		check(t, in.Ledger)
+	})
 }

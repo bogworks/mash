@@ -57,9 +57,9 @@ func needsInventory(prev *listset.Compiled, ls listset.ListSet) (need []string, 
 
 // oldKeysFromRecord builds RunInput.OldKeys for Apply from the issue record (ADR 0113, ADR 0114).
 //
-// Each sender of either generation whose record holds an issue or rotation credential gets an entry: its keys not yet
-// revoked, each with its issue time (the gate needs it, because a server refuses a user JWT only when the revocation
-// is at or after its issue time). A sender whose credentials are all revoked has an empty entry. Probes are not
+// Each sender of either generation whose record holds an issue or rotation credential gets an entry: its keys, revoked
+// ones included, each with its issue time (the gate needs it, because a server refuses a user JWT only when the
+// revocation is at or after its issue time). Probes are not
 // inventory. It refuses (ErrIncompleteInventory) a credential without an issue time, and a sender the gate needs
 // the inventory of that the record holds no credential for, so an empty inventory never stands in for a missing one.
 // With a nil record the inventory is not built: that is allowed only when no sender needs one.
@@ -83,13 +83,16 @@ func oldKeysFromRecord(ctx context.Context, rec IssueInventory, prev *listset.Co
 		if _, ok := out[e.Address]; !ok {
 			out[e.Address] = []OldKey{}
 		}
-		// A key already revoked in the record is not inventory here. RunInput.OldKeys cannot carry revoked-in-record
-		// keys to the gate without a change in run.go, but none is needed: Rotate hands every revocable old key of a
-		// narrowed sender to the Revoker again on a resumed attempt, even one the record already marks revoked, and
-		// Run merges what AfterPush returns into both the gate's OldKeys and the revocations of the final JWT.
-		// A sender removed in a retry, with no AfterPush entry for it, is covered by RemoveSender, which skips
-		// revoked keys: see the report of this change.
-		if e.RevokedAt != nil {
+		// A key already revoked in the record stays in the inventory, with its issue time: an earlier revocation may have
+		// been dated before a credential issued later (a future-dated one), and a server refuses that credential only
+		// when the revocation is at or after its issue time. The gate checks each key against the revocation each
+		// server holds, and Rotate and RemoveSender hand revoked keys to the Revoker again, which raises an older
+		// revocation to the current time (never lowers one). A revoked key with no issue time is listed with a zero
+		// time, which the gate checks for presence only.
+		if e.RevokedAt != nil && e.IssuedAt.IsZero() {
+			if !slices.ContainsFunc(out[e.Address], func(o OldKey) bool { return o.PublicKey == e.PublicKey }) {
+				out[e.Address] = append(out[e.Address], OldKey{PublicKey: e.PublicKey})
+			}
 			continue
 		}
 		if e.IssuedAt.IsZero() {

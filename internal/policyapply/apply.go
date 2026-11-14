@@ -63,7 +63,9 @@ type ApplyDeps struct {
 	// Provisioner, if set, provisions new addresses inside the run (RunOrdered); if nil, Run is used.
 	Provisioner Provisioner
 	// ProvisionMarkers keeps the provisioning markers of RunOrdered (see ProvisionMarkers). Required when Provisioner is
-	// set, unless Ledger implements ProvisionMarkers itself (Apply then refuses with ErrNoProvisionMarkers). Apply gives
+	// set, unless Ledger implements ProvisionMarkers itself (Apply then refuses with ErrNoProvisionMarkers). When markers are
+	// kept (here or in the ledger) Apply installs the rollback guard on the run without a Provisioner too: a marker a
+	// crashed run left then refuses a rollback (ErrProvisioningMarker), though nothing can remove its inbox. Apply gives
 	// the run the ledger wrapped with WithProvisionMarkers; DetailLedger and StatusWriter are kept, which are the only
 	// optional interfaces Run and RunOrdered use. The caller's own Ledger value is unchanged, so StatusReader and
 	// RefusalWriter stay available on it.
@@ -97,14 +99,12 @@ type ApplyDeps struct {
 // deps.AfterPush.
 func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error) {
 	runLedger := deps.Ledger
-	if deps.Provisioner != nil {
-		_, own := deps.Ledger.(ProvisionMarkers)
-		switch {
-		case deps.ProvisionMarkers != nil:
-			runLedger = WithProvisionMarkers(deps.Ledger, deps.ProvisionMarkers)
-		case !own:
-			return Status{}, ErrNoProvisionMarkers
-		}
+	_, own := deps.Ledger.(ProvisionMarkers)
+	switch {
+	case deps.ProvisionMarkers != nil:
+		runLedger = WithProvisionMarkers(deps.Ledger, deps.ProvisionMarkers)
+	case deps.Provisioner != nil && !own:
+		return Status{}, ErrNoProvisionMarkers
 	}
 	cur, err := deps.Ledger.InForce()
 	if err != nil {
@@ -152,5 +152,8 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		os, err := RunOrdered(ctx, in, deps.Provisioner)
 		return os.Status, err
 	}
+	// Without a Provisioner there is no remover, but a marker a crashed run left must still refuse a rollback: a retry
+	// that finds the gate failing would otherwise roll back and expose the inbox that run created.
+	in, _ = withProvisionGuard(in, nil) // a no-op when the ledger keeps no markers
 	return Run(ctx, in)
 }

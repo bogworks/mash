@@ -84,7 +84,7 @@ func (g provisionGuard) release(ctx context.Context) error {
 
 // guardLedger is the Ledger a run uses when markers are kept: ClearPending is refused while a marker stands.
 type guardLedger struct {
-	Ledger
+	optForward
 	g provisionGuard
 }
 
@@ -95,11 +95,54 @@ func (l guardLedger) ClearPending() error {
 	return l.Ledger.ClearPending()
 }
 
+// optForward forwards, for a ledger wrapper, the optional interfaces Run looks for that need no other interface:
+// PendingJWTLedger and CommitSizeChecker. When the wrapped ledger lacks one, the method does what Run does for a ledger
+// without it (SetPending, no stored pending JWT, no size check), so claiming the interface changes nothing.
+type optForward struct{ Ledger }
+
+func (l optForward) SetPendingJWT(rec listset.Record, jwt string) error {
+	if pl, ok := l.Ledger.(PendingJWTLedger); ok {
+		return pl.SetPendingJWT(rec, jwt)
+	}
+	return l.Ledger.SetPending(rec)
+}
+
+func (l optForward) PendingJWT() (string, error) {
+	if pl, ok := l.Ledger.(PendingJWTLedger); ok {
+		return pl.PendingJWT()
+	}
+	return "", nil
+}
+
+func (l optForward) CheckCommitSize(rec listset.Record, jwt string, ls listset.ListSet) error {
+	if cs, ok := l.Ledger.(CommitSizeChecker); ok {
+		return cs.CheckCommitSize(rec, jwt, ls)
+	}
+	return nil
+}
+
+// commitRollback is RollbackLedger.CommitRollback of l, or ClearPending when l is not a RollbackLedger, which is what
+// Run does for such a ledger.
+func commitRollback(l Ledger, jwt string) error {
+	if rl, ok := l.(RollbackLedger); ok && jwt != "" {
+		return rl.CommitRollback(jwt)
+	}
+	return l.ClearPending()
+}
+
 // guardDetail, guardStatus and guardBoth keep the optional interfaces of the ledger a run was given, so wrapping does
-// not change what Run does with it.
+// not change what Run does with it. A guardDetail is a RollbackLedger: its CommitRollback is refused while a marker
+// stands, like ClearPending.
 type guardDetail struct {
 	guardLedger
 	dl DetailLedger
+}
+
+func (l guardDetail) CommitRollback(jwt string) error {
+	if err := l.g.release(context.Background()); err != nil {
+		return err
+	}
+	return commitRollback(l.guardLedger.Ledger, jwt)
 }
 
 func (l guardDetail) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
@@ -135,7 +178,7 @@ func withProvisionGuard(in RunInput, prov Provisioner) (RunInput, ProvisionMarke
 	}
 	remover, _ := prov.(InboxRemover)
 	g := provisionGuard{ledger: in.Ledger, markers: pm, remover: remover}
-	gl := guardLedger{Ledger: in.Ledger, g: g}
+	gl := guardLedger{optForward{in.Ledger}, g}
 	dl, hasDetail := in.Ledger.(DetailLedger)
 	sw, hasStatus := in.Ledger.(StatusWriter)
 	switch {

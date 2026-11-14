@@ -72,13 +72,18 @@ func (x markerMethods) ClearProvisioning(a string, g uint64) error {
 }
 
 type markedLedger struct {
-	Ledger
+	optForward
 	markerMethods
 }
 
 type markedDetail struct {
 	markedLedger
 	dl DetailLedger
+}
+
+// CommitRollback forwards RollbackLedger, so a ledger wrapped for markers still records a confirmed rollback.
+func (l markedDetail) CommitRollback(jwt string) error {
+	return commitRollback(l.markedLedger.Ledger, jwt)
 }
 
 func (l markedDetail) CompareAndCommitDetail(base uint64, rec listset.Record, d InForceDetail) error {
@@ -106,10 +111,10 @@ func (l markedBoth) WriteStatus(ctx context.Context, st Status) error {
 }
 
 // WithProvisionMarkers returns l with the ProvisionMarkers methods backed by m, so the provisioning-marker guard of
-// RunOrdered is active. The DetailLedger and StatusWriter interfaces of l are kept when l has them. Other optional
-// interfaces of l (StatusReader, RefusalWriter) are not forwarded; callers that need them use the ledger directly.
+// RunOrdered is active. The DetailLedger, RollbackLedger, PendingJWTLedger, CommitSizeChecker and StatusWriter
+// interfaces of l are kept when l has them. Other optional interfaces of l (StatusReader, RefusalWriter) are not forwarded; callers that need them use the ledger directly.
 func WithProvisionMarkers(l Ledger, m ProvisionMarkers) Ledger {
-	ml := markedLedger{l, markerMethods{m}}
+	ml := markedLedger{optForward{l}, markerMethods{m}}
 	dl, hasDetail := l.(DetailLedger)
 	sw, hasStatus := l.(StatusWriter)
 	switch {

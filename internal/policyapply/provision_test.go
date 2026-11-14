@@ -68,6 +68,9 @@ func (p *removerProv) RemoveInbox(_ context.Context, a string) error {
 	return nil
 }
 
+// dropTargetPushes is how many pushes a server loses before the rollback push: the target and the re-push of Converge.
+const dropTargetPushes = 2
+
 // provisionedThenGateFails: the first run creates the inbox and fails to issue the credential, so the generation is
 // pending; the second run finds the cluster split, which would roll the target back.
 func provisionedThenGateFails(t *testing.T, prov Provisioner, rp *recProv, w *world14) (markerLedger, OrderedStatus, error) {
@@ -82,10 +85,12 @@ func provisionedThenGateFails(t *testing.T, prov Provisioner, rp *recProv, w *wo
 		t.Fatalf("after the first run: pending %v, markers %d", ok, ml.count())
 	}
 	rp.fail("issue:foo.c.new", false)
-	// One server went back to the previous generation and refuses the push: the cluster is split, so the run rolls back.
+	// One server stays on the previous generation: it loses the target push and its re-push, so the cluster is split and
+	// the run rolls back. The rollback push reaches it, so the rollback is confirmed (every server holds the
+	// rollback JWT's revocations).
 	w.cl.mu.Lock()
 	w.cl.jwts["s2"] = w.j1
-	w.cl.failPush["s2"] = true
+	w.cl.dropN["s2"] = dropTargetPushes
 	w.cl.mu.Unlock()
 	os, err := RunOrdered(context.Background(), w.in, prov)
 	return ml, os, err

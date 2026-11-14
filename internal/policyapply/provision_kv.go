@@ -121,7 +121,12 @@ func (m *KVProvisionMarkers) Provisioning(generation uint64) ([]string, error) {
 	for k := range lister.Keys() {
 		keys = append(keys, k)
 	}
-	_ = lister.Stop()
+	// The lister closes its channel when the context expires too, so a closed channel alone does not mean the listing
+	// is complete: an expired context is an error, never "no markers" (a rollback would then be permitted).
+	_ = lister.Stop() // it reports "invalid subscription" once the listing is over
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("list provisioning markers: the listing did not finish: %w", err)
+	}
 	var out []string
 	for _, k := range keys {
 		e, err := m.kv.Get(ctx, k)

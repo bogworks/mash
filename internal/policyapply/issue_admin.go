@@ -124,20 +124,21 @@ func (r *AdminIssueRecord) All(ctx context.Context) ([]IssueEntry, error) {
 	return out, nil
 }
 
-// AllMaxIssued is All for the old-key inventory: for each issue or rotation key that is not revoked, IssuedAt is the
+// AllMaxIssued is All for the old-key inventory: for each issue or rotation key, revoked or not, IssuedAt is the
 // greatest issue time over every retained revision of the key, not the latest revision's (ADR 0115). A revocation
 // refuses a user JWT only when it is at or after the JWT's issue time, so it must be at or after the latest-dated one,
 // a future-dated one included. A key whose retained history cannot be shown complete (*admin.IncompleteHistoryError),
 // that is at the history cap (admin.IssuedTimes.Truncated, so an older, later-dated revision may have been dropped),
-// has none, or has a revision without a readable time, is refused with ErrIncompleteInventory. Revoked keys and
-// probes are returned as All returns them: they are not inventory.
+// has none, or has a revision without a readable time, is refused with ErrIncompleteInventory. A revoked key is
+// included because an earlier revocation may be older than a later-dated credential, which the gate must see; probes
+// are returned as All returns them: they are not inventory.
 func (r *AdminIssueRecord) AllMaxIssued(ctx context.Context) ([]IssueEntry, error) {
 	all, err := r.All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for i, e := range all {
-		if !revocable(e) || e.RevokedAt != nil {
+		if !revocable(e) {
 			continue
 		}
 		t, found, err := r.admin.IssuedHistoryByKey(ctx, e.PublicKey)

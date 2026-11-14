@@ -931,8 +931,9 @@ func TestAdminIssueRecordAllMaxIssued(t *testing.T) {
 	}
 }
 
-// A revoked key needs no history: its incomplete history does not refuse the inventory.
-func TestAdminIssueRecordAllMaxIssuedSkipsRevoked(t *testing.T) {
+// A revoked key's issue time is the greatest over its revisions too, so its incomplete history refuses the inventory:
+// an early revocation of a later-dated credential must not pass unseen.
+func TestAdminIssueRecordAllMaxIssuedRevokedKeyNeedsHistory(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeIssued{histErr: map[string]error{"UR": &admin.IncompleteHistoryError{Key: "UR"}}}
 	r := NewAdminIssueRecord(f)
@@ -942,8 +943,8 @@ func TestAdminIssueRecordAllMaxIssuedSkipsRevoked(t *testing.T) {
 	if err := r.MarkRevoked(ctx, "UR", time.Unix(2, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AllMaxIssued(ctx); err != nil {
-		t.Errorf("err = %v", err)
+	if _, err := r.AllMaxIssued(ctx); !errors.Is(err, ErrIncompleteInventory) {
+		t.Errorf("err = %v, want ErrIncompleteInventory", err)
 	}
 }
 
