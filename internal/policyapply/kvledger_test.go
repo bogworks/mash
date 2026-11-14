@@ -315,7 +315,7 @@ func TestKVLedgerConcurrentRunsSingleWinner(t *testing.T) {
 	w := newWorld(t)
 	watch := &pushWatch{Cluster: w.cluster}
 	ledgers := []*KVLedger{e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond}), e.ledger(KVLedgerOptions{Poll: 10 * time.Millisecond})}
-	if err := ledgers[0].CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := ledgers[0].CompareAndCommit(0, w.rec1()); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -335,7 +335,7 @@ func TestKVLedgerConcurrentRunsSingleWinner(t *testing.T) {
 		switch {
 		case err == nil:
 			ok++
-		case errors.Is(err, listset.ErrStaleBase), errors.Is(err, ErrPendingGeneration):
+		case errors.Is(err, listset.ErrStaleBase), errors.Is(err, ErrPendingGeneration), errors.Is(err, ErrPreviousMismatch): // the loser saw the winner's generation in force
 			stale++
 		default:
 			t.Errorf("unexpected error %v", err)
@@ -370,7 +370,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
 		t.Fatal(err)
 	}
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
@@ -399,7 +399,7 @@ func TestKVLedgerStatusWritten(t *testing.T) {
 	w2 := newWorld(t)
 	w2.prober.allow["s1"] = true
 	l2 := e.ledger(KVLedgerOptions{})
-	if err := l2.CompareAndCommit(2, testRecord(1)); err != nil {
+	if err := l2.CompareAndCommit(2, w2.rec1()); err != nil {
 		t.Fatal(err)
 	}
 	st, err = Run(context.Background(), w2.run(l2, set2(), "bytes-2"))
@@ -426,7 +426,7 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 	e := newKVEnv(t)
 	w := newWorld(t)
 	l := e.ledger(KVLedgerOptions{})
-	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+	if err := l.CompareAndCommit(0, w.rec1()); err != nil {
 		t.Fatal(err)
 	}
 	ls := set2()
