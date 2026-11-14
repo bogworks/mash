@@ -147,6 +147,9 @@ type Params struct {
 	Servers int
 	// LockWait is how long an apply waits for the key directory lock (default 5s).
 	LockWait time.Duration
+	// BeforePush, when set, is called in Apply mode immediately before the account JWT is pushed; an error stops the
+	// apply there and nothing is pushed. mashctl uses it to check that the account lock is still held (ADR 0111).
+	BeforePush func(context.Context) error
 
 	// collectAll (drift only, with Mode Diff) makes build go on past a refusal and describe every zone, so a drift
 	// report lists everything at once; the zones with a conflict are skipped, the conflict being their finding.
@@ -391,6 +394,11 @@ func Run(ctx context.Context, p Params, out io.Writer) int {
 	// re-signed: the JWT the resolver already has (same token, same iat) is sent again, so that every server
 	// acknowledges it or is named. One resolver answering with the new claims does not show that the others hold
 	// them, and a retry after a partial push is how a lagging server is repaired.
+	if p.BeforePush != nil {
+		if err := p.BeforePush(ctx); err != nil {
+			return fail(fmt.Errorf("%w (nothing was pushed)", err))
+		}
+	}
 	what := "the claims update"
 	if !changed {
 		what = "the re-send of the unchanged claims"

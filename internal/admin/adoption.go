@@ -122,7 +122,7 @@ func normalizeExempt(keys []string) ([]string, error) {
 // clears any pending next_submitter, and the old submitter is refused from then on. A call with the submitter
 // already registered and the same exempt set writes nothing and returns AdoptUnchanged; with another exempt set it
 // writes a new revision (action adopt) and returns AdoptExemptUpdated. A recovery rotation also refreshes the exempt
-// set. exempt is the public keys of the users the later reconcile must never touch (see store.Marker.Exempt). The write is a compare-and-set on the marker's last
+// set. exempt is the public keys of the users the later reconcile must never touch (see store.Marker.Exempt). The read and the write are made under the account lock (see AccountLock), and the write is a compare-and-set on the marker's last
 // revision, retried when another writer got there first. The bucket is created, hardened, when it does not exist.
 func (a *Admin) Adopt(ctx context.Context, account, submitter, by string, exempt []string) (store.Marker, string, error) {
 	if _, err := nkeys.FromPublicKey(submitter); err != nil {
@@ -145,6 +145,14 @@ func (a *Admin) Adopt(ctx context.Context, account, submitter, by string, exempt
 	if err != nil {
 		return store.Marker{}, "", err
 	}
+	// The account lock, held through the read and the write: Adopt waits for a guarded command that is running (it
+	// started first and finishes first), and one that starts after the write reads the marker and is refused. When
+	// the lock stays held for the whole wait, nothing is written (ErrAccountBusy).
+	lk, err := a.LockAccount(ctx)
+	if err != nil {
+		return store.Marker{}, "", err
+	}
+	defer lk.Release()
 	for range adoptionCASTries {
 		cur, rev, found, err := readMarker(ctx, kv)
 		if err != nil {
@@ -167,6 +175,9 @@ func (a *Admin) Adopt(ctx context.Context, account, submitter, by string, exempt
 		}
 		b, err := json.Marshal(next)
 		if err != nil {
+			return store.Marker{}, "", err
+		}
+		if err := lk.Held(ctx); err != nil { // lost the lock: write nothing
 			return store.Marker{}, "", err
 		}
 		if found {

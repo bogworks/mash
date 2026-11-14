@@ -78,7 +78,7 @@ steps.
 **Adopting a real account is a live-account step**, taken only on an explicit go from the maintainers. This change was
 built and tested on test accounts only.
 
-`ctl.RefuseIfAdopted` is the guard. It reads the marker and returns `mashctl: <command> is refused: this account is
+`ctl.GuardAccount` (`ctl.GuardAccountFor` with no connection yet) is the guard. It takes the account lock (see Concurrency), reads the marker and returns `mashctl: <command> is refused: this account is
 adopted by an outside system (submitter <first 8 characters>...): list sets come only through the list-set path; nothing
 was changed`, or, when the marker cannot be read for any reason other than not existing, `... cannot tell whether this
 account is adopted: <error>; nothing was changed`. It is the first thing a command does, before any write, signing, key
@@ -90,6 +90,24 @@ or `unlabel` run with no server configured at all is a pure edit of the policy f
 allowed; with a server configured and no way to read the marker it refuses.
 
 Running one account both ways is not supported, and the operations guide says so in those words.
+
+**Concurrency.** Reading the marker and closing the connection before the command's writes would leave a gap in which
+`policy adopt` could succeed and an earlier-started `policy apply` (or another guarded command) would still change policy
+on the now-adopted account. So policy changes and adoption are serialised by one account lock, the lease-bucket name lock
+of ADR 0048 under the pseudo-name `_policy-account` (no endpoint can have it: the underscore is not a valid name
+character). `Admin.Adopt` holds it through its read and its write of the marker. A guarded command takes it first, then
+reads the marker (refusing, and releasing the lock, when the account is adopted), and holds it through all of its writes,
+releasing it on every exit path by `defer`. So an adoption waits for a command that is already running, which finishes
+under the old state, and a command that starts after the adoption reads the marker and is refused. A command that cannot
+get the lock within 30 seconds refuses with `another policy change or an adoption is in progress; nothing was changed`
+(exit 1); adopt refuses the same way and writes nothing. Read-only commands never take it. Unlike the limits locks, the
+account lock extends its own expiry in the background every 10 seconds while held (the expiry stays 30 seconds), because
+a `policy apply` with its gate, a `reissue` of many names or a `retire` can run for minutes. If the lock is lost anyway (a
+holder stalled past its expiry and another took the name), each guarded command checks `Held` before its writes and stops:
+`policy apply` before it pushes the account JWT, `add` before it makes a key, the issue record, the directory record, the
+creds file and the policy edit (rolling back what it wrote), `reissue` before each of its writes and each name, `retire`
+before the revocation and removal and before the policy edit and the creds move, `label` and `unlabel` before the policy
+edit and the directory label update, and `set-meta`, `set-zone` and `provision` before their single write.
 
 ### Consequences
 
@@ -114,7 +132,11 @@ nothing written, the re-adopt cases and a marker without the field); a live endp
 subjects, with the marker unchanged; every guarded command refused on an adopted account with the policy file, the key
 store, the creds directory, the account JWT, the directory and the issue record unchanged, and each run once on an
 account that is not adopted; read-only commands and `deprovision` working on an adopted account; and every guarded
-command refusing when the marker's value or bucket is not as mash reads it.
+command refusing when the marker's value or bucket is not as mash reads it; the race itself (a guarded command held
+between its guard and its write while `policy adopt` starts: adopt blocks until the command is done and the command's write
+goes through, and a command started after the adoption is refused), adopt and every guarded command refusing while the
+lock stays held, the lock freed on success, failure, refusal and panic, two commands serialising, a refreshed lock alive
+past several expiries, and a lost lock stopping `label`, `add` and `policy apply` before their next write.
 
 ## Pros and Cons of the Options
 

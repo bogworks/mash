@@ -591,9 +591,11 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	if !ok {
 		return 1
 	}
-	if adoptedRefusal(l.cfg, "policy repair", stderr) { // before the first step writes anything
+	guard, ok := accountGuard(l.cfg, "policy repair", stderr) // before the first step writes anything
+	if !ok {
 		return 1
 	}
+	defer guard.Release()
 	pf := func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }
 	pf("policy repair: %s\n", l.path)
 	if o.dryRun {
@@ -613,7 +615,7 @@ func runPolicyRepair(args []string, env func(string) string, lookup config.Looku
 	}
 	var applyOut bytes.Buffer
 	repairHook("snapshot")
-	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c}, env, lookup, &applyOut, stderr)
+	code := runPolicyApplyOpts("apply", o, &policySnapshot{path: l.path, f: l.f, c: l.c, guard: guard}, env, lookup, &applyOut, stderr)
 	repairHook("applied")
 	after, _ := l.keys.Zones()
 	var created []string

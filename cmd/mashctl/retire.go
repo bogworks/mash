@@ -119,9 +119,11 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if adoptedRefusal(cfg, "retire", stderr) {
+	guard, ok := accountGuard(cfg, "retire", stderr)
+	if !ok {
 		return 1
 	}
+	defer guard.Release()
 	path, err := policyPath(file, env, cfg)
 	if err != nil {
 		return fail("no policy file: use --policy FILE or MASH_POLICY (%v)", err)
@@ -231,6 +233,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
+		if err := guard.Held(); err != nil { // before the first server write: the revocation and the removal
+			return fail("%v; nothing was changed", err)
+		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
 				if msg, ok := ctl.AliasedRefusal(err, name); ok {
@@ -259,6 +264,12 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	if declared && !editPolicy {
 		fmt.Fprintf(stderr, "mashctl: retire %s: removed from the server, but still declared in %s: remove the tests that name it and its entry by hand\n", name, path)
 		return 1
+	}
+	if err := guard.Held(); err != nil { // before the policy file edit and the creds file move
+		if user != "" {
+			return fail("%v; %s is already removed from the server; the policy file and the creds file were not changed: run mashctl retire %s --force", err, name, name)
+		}
+		return fail("%v; the policy file and the creds file were not changed", err)
 	}
 	if editPolicy {
 		if err := doc.Save(); err != nil {
