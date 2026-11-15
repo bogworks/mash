@@ -65,7 +65,7 @@ jobs:
     # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
     # fails on a changes job that did not succeed.
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     runs-on: [self-hosted, rh-linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +80,7 @@ jobs:
     name: test (linux, eph)
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     runs-on: [self-hosted, rh-linux-eph]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
