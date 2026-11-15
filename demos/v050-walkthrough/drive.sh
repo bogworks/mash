@@ -64,8 +64,8 @@ die() {
 # ---- the port rules (before anything is created) ----
 [ -n "$PORT" ] || die "refusing: no port. Pass --port N (or env PORT): a port reserved with portwarden, never a live server's port"
 case "$PORT" in *[!0-9]*|'') die "refusing: --port must be a number" ;; esac
-# Ports that must never be used: the live server's. Default 4222 (NATS); MASH_DEMO_PROTECTED_PORTS="4222 5222" changes the list.
-for _p in ${MASH_DEMO_PROTECTED_PORTS:-4222}; do
+# Ports that must never be used: the live server's. 4222 (NATS) is always refused; MASH_DEMO_PROTECTED_PORTS="5222 6222" adds more.
+for _p in 4222 ${MASH_DEMO_PROTECTED_PORTS:-}; do   # 4222 is always refused; the variable adds more
   [ "$PORT" -ne "$_p" ] || die "refusing: port $PORT is on the protected list (a live server's port)"
 done
 [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "refusing: port $PORT is outside 1024..65535"
@@ -113,7 +113,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-mkdir -p "$T/home" "$T/cfg" "$T/keys" "$T/docs" "$T/ex" "$T/src" "$T/b" "$T/sign"
+mkdir -p "$T/home" "$T/state" "$T/cfg" "$T/keys" "$T/docs" "$T/ex" "$T/src" "$T/b" "$T/sign"
 chmod 700 "$T/keys"
 
 # ---- isolation ----
@@ -124,7 +124,7 @@ iso() {
   # shellcheck disable=SC2046
   $x env $(env | grep -o '^\(MASH\|NATS\)_[A-Za-z0-9_]*' | sed 's/^/-u /') \
       -u NATS_URL -u NATS_CREDS -u NATS_CONTEXT -u NATS_USER -u NATS_PASSWORD -u NATS_NKEY -u NATS_CA -u NATS_CERT -u NATS_KEY \
-      HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" \
+      HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state" MASH_STATE_DIR="$T/state" MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" \
       MASH_POLICY_BUCKET='homerange_{range}_policy' "$@"
 }
 mashctl() { iso "$T/mashctl" "$@"; }
@@ -507,7 +507,7 @@ Again       type  banner  or  cheatsheet.   Exit the shell to tear everything do
 EOF
   cat >"$T/rc.sh" <<EOF
 export PATH="$T/bin:\$PATH"
-export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config"
+export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state" MASH_STATE_DIR="$T/state"
 export MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" MASH_POLICY_BUCKET='homerange_{range}_policy'
 export MASH_URL="nats://127.0.0.1:$PORT" MASH_OWNER=lab MASH_ADMIN_CREDS="$T/server/mashadmin.creds"
 export HISTFILE="$T/home/.shell_history"
