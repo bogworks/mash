@@ -210,6 +210,8 @@ type DiffPlan struct {
 	unsigned bool
 	// adoptionUnchecked is true when the caller passed no marker source, so the adoption was not checked.
 	adoptionUnchecked bool
+	// inboxUnchecked is true when the caller passed no FailClosedFunc, so the inbox and narrowing checks were not run.
+	inboxUnchecked bool
 }
 
 // Rotation actions of a RotationAction.
@@ -317,6 +319,22 @@ func checkSigner(rc *RotationContext) []listset.Refusal {
 	return []listset.Refusal{{Stage: StageSignature, Entry: "signature", Reason: reason}}
 }
 
+// StageInbox is the stage of the refusal Diff reports for a change that adds an address whose inbox is missing or
+// suspended; the apply refuses it before pushing anything.
+const StageInbox = "inbox"
+
+// StageNarrowing is the stage of the refusal Diff reports for a change that narrows an existing sender by tags, which
+// the apply refuses before pushing anything (it needs a new credential for that sender).
+const StageNarrowing = "narrowing"
+
+// FailClosedFunc is the apply's own pre-push checks (policyserve.FailClosed, bound to the inbox source): the refusals
+// the Applier would give for moving from prev (nil when nothing is in force) to target, with its stages and texts.
+// policydoc cannot import policyserve, so the caller passes it in.
+type FailClosedFunc func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error)
+
+// InboxNotCheckedLine says the apply's inbox and narrowing checks were not run, when Diff got no FailClosedFunc.
+const InboxNotCheckedLine = "inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse"
+
 // StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
 const StageDocument = "document"
 
@@ -382,7 +400,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 // any would be refused. A document whose content is that in force is refused as the apply refuses it, with stage "unchanged", unless it starts or
 // completes a submitter rotation; one with no adoption marker (rc nil: not checked) or an account that is not adopted or
 // whose marker cannot be read is refused with stage "adoption".
-func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext) (DiffPlan, error) {
+func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext, failClosed FailClosedFunc) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
 		return DiffPlan{}, err
@@ -423,6 +441,7 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
 	dp.unsigned = rc == nil || rc.Signer == ""
 	dp.adoptionUnchecked = rc == nil
+	dp.inboxUnchecked = failClosed == nil
 	pre = append(pre, checkAdoption(rc, r.Account())...)
 	pre = append(pre, checkSigner(rc)...)
 	// The signer decides whether the document completes a pending rotation. Without --submitter it is told from the
@@ -456,6 +475,23 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 		} else if errors.Is(err, listset.ErrUnchanged) {
 			pre = append(pre, listset.Refusal{Stage: policyapply.StageUnchanged, Entry: "list_set",
 				Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", gen)})
+		}
+	}
+	// The apply refuses, before pushing, an added address with no usable inbox and a change that narrows a sender by tags.
+	// A document that does not compile is refused by DryRun already.
+	if failClosed != nil {
+		if target, cerr := listset.Compile(next.ListSet); cerr == nil {
+			var prev *listset.Compiled
+			if inForce != nil {
+				prev, cerr = listset.Compile(*inForce)
+			}
+			if cerr == nil {
+				rs, err := failClosed(ctx, prev, target)
+				if err != nil {
+					rs = []listset.Refusal{{Stage: StageInbox, Entry: "inbox", Reason: err.Error()}}
+				}
+				pre = append(pre, rs...)
+			}
 		}
 	}
 	p = dp.Plan

@@ -23,6 +23,7 @@ import (
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
+	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/nats-io/nkeys"
 )
 
@@ -323,6 +324,8 @@ func TestListSetExplainInvalidArgumentIsNotEchoed(t *testing.T) {
 	}
 }
 
+// A change that narrows an existing sender by tags is refused at stage narrowing with the apply's text: `policy serve`
+// would refuse it before pushing anything.
 func TestListSetDiffNarrowing(t *testing.T) {
 	e := newListSetEnv(t)
 	e.seedAdopted()
@@ -331,10 +334,31 @@ func TestListSetDiffNarrowing(t *testing.T) {
 	})
 	f := e.file("next.json", next)
 	out, errb, code := e.run("diff", f)
-	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted") || !strings.HasPrefix(out, "accepted: this would change\n"+policydoc.SizeLimitsLine+"\n") {
+	if code != 1 || errb != "" || !strings.HasPrefix(out, "refused: nothing would change\n  [narrowing] narrowing: "+policyserve.NarrowingDetail) {
 		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
 	}
 	e.golden("diff_narrowing", out)
+
+	out, _, code = e.run("diff", f, "--json")
+	var v map[string]any
+	if code != 1 || json.Unmarshal([]byte(out), &v) != nil || v["refused"] != true {
+		t.Fatalf("diff --json: %d\n%s", code, out)
+	}
+}
+
+// A change that does not narrow is accepted, and the plan says what the apply does not do.
+func TestListSetDiffChange(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedAdopted()
+	f := e.file("next.json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
+	}))
+	out, errb, code := e.run("diff", f)
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted: this would change\n"+policydoc.SizeLimitsLine+"\n") ||
+		!strings.Contains(out, "new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`)") {
+		t.Fatalf("diff: %d\n%s\n%s", code, out, errb)
+	}
+	e.golden("diff_change", out)
 
 	out, _, code = e.run("diff", f, "--json")
 	var v map[string]any
@@ -461,7 +485,7 @@ func TestRunPolicyListSetVerbs(t *testing.T) {
 	}
 
 	next := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
-		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
 	})
 	f := e.file("next.json", next)
 	out, errb, code = e.runPolicyVia("diff", f)
@@ -608,7 +632,7 @@ func TestListSetDiffSubmitterAgainstMarker(t *testing.T) {
 	good, goodPub := key()
 	bad, badPub := key()
 	payload := listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
-		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
 	})
 	goodF, badF := e.file("good.jwt", listSetSigned(t, good, payload)), e.file("bad.jwt", listSetSigned(t, bad, payload))
 
@@ -649,7 +673,8 @@ func TestListSetDiffLiteralBucketWithRange(t *testing.T) {
 	}
 	f := e.file("first.json", listSetDoc(t, e.acctPub, 1, 0, nil))
 	out, errb, code := e.run("diff", f, "--bucket", listSetBucket, "--range", listSetRange)
-	if code != 0 || errb != "" || !strings.HasPrefix(out, "accepted: this would change\n") {
+	// Nothing is in force and the test account has no directory, so the inbox check is the refusal here: the range passed.
+	if code != 1 || errb != "" || !strings.Contains(out, "[inbox]") || strings.Contains(out, "[range]") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
 	// The range is checked: another range is a refusal at stage range.
@@ -664,7 +689,7 @@ func TestListSetDiffNotAdoptedWithoutSubmitter(t *testing.T) {
 	e := newListSetEnv(t)
 	e.seedInForce()
 	out, errb, code := e.run("diff", e.file("next.json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) {
-		m["senders"].(map[string]any)["foo.c.core"] = map[string]any{"allow": []string{}, "deny": []string{}}
+		m["senders"].(map[string]any)["foo.c.lead"] = map[string]any{"allow": []string{"foo.c.core"}, "deny": []string{}}
 	})))
 	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] adoption: this account is not adopted: list sets are ignored") || strings.Contains(out, "accepted") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
