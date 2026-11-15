@@ -42,6 +42,8 @@ Chosen option: "Match through the directory record that serves each sender".
 * Any doubt is a finding, never a revocation. A finding is made when:
   * the record has no owner and carries a sender's name;
   * resolving a sender with the record's name failed;
+  * the list set names a sender of the record's name and owner, but no directory record serves it (for example after
+    `deprovision --no-revoke`); removing the sender from the list set is what lets the reconcile revoke the record;
   * one record serves several senders. That record counts as in the list set, and the finding names the senders.
 
 This amends ADR 0121's revocation rule: "whose sender is not in the list set" means that no sender of the list set is
