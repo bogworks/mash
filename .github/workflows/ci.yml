@@ -93,6 +93,8 @@ jobs:
         with:
           forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
           insights: "true"
+          # The pinned host tools' directory: the repository variable CI_TOOLS_DIR when set, else the runners' standard one.
+          tools-dir: ${{ vars.CI_TOOLS_DIR || '/opt/ci-tools/bin' }}
   # TODO(macos-gate): test (macos) is ADVISORY (ADR 0079): its result is visible on every pull request and push, but it
   # is not in pr-check's needs, not in release.RequiredChecks and not a required status check, so it gates no merge and
   # no release. It goes back into pr-check's needs (and RequiredChecks, docs/branch-protection.md) when x-lead confirms

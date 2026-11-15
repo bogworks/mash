@@ -314,8 +314,8 @@ func TestCI_insightsRunsOnlyInTheEphJobAndStillFailsOnFailingTests(t *testing.T)
 	if err := yaml.Unmarshal(b, &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.Inputs["tools-dir"].Default != "/opt/ci-tools/bin" {
-		t.Errorf("go-test action: input tools-dir must default to /opt/ci-tools/bin, got %q", a.Inputs["tools-dir"].Default)
+	if !strings.Contains(fmt.Sprint(e.Steps[1].With["tools-dir"]), "vars.CI_TOOLS_DIR") {
+		t.Errorf("test-eph must take the tools directory from the repository variable CI_TOOLS_DIR (default in the action): %v", e.Steps[1].With)
 	}
 	if a.Inputs["insights"].Default != "false" {
 		t.Errorf("go-test action: input insights must default to \"false\", got %q", a.Inputs["insights"].Default)
