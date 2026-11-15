@@ -25,6 +25,8 @@ import (
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policyintake"
 	"github.com/bogworks/mash/internal/policyserve"
+	"github.com/bogworks/mash/internal/policyview"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const policyServeUsage = `usage: mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
@@ -32,7 +34,8 @@ const policyServeUsage = `usage: mashctl policy serve --range RANGE --servers N 
               {range} is replaced by it
   --servers   the number of servers in the deployment, 1 or more (or MASH_SERVERS; required); every apply reads the limits and the account
               JWT from every one and refuses when any does not answer
-  (one process serves the one account the key store and the admin credentials belong to; it refuses to start unless
+  (it also answers "mash policy show" and "explain" on agents.policy.RANGE, and refuses to start without the
+  directory bucket; one process serves the one account the key store and the admin credentials belong to; it refuses to start unless
   that account is adopted)
 `
 
@@ -47,6 +50,12 @@ var policyServeReady = func() {}
 // policyServeProvisioner is a test seam: the provisioner of new addresses. Production leaves it nil, which is the
 // service's own (a change that adds an address is applied only if the address already has its inbox).
 var policyServeProvisioner policyapply.Provisioner
+
+// policyViewResolveTTL is how long the responder keeps the directory's key-to-address map before it reads it again.
+const policyViewResolveTTL = 10 * time.Second
+
+// policyViewStopFlush bounds the wait for the server to confirm the responder is gone when the service stops.
+const policyViewStopFlush = 5 * time.Second
 
 // policyServeSetup bounds what the service does before it starts watching.
 const policyServeSetup = 30 * time.Second
@@ -151,6 +160,10 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	if err != nil {
 		return fail("policy bucket %s: %v", bucket, err)
 	}
+	dirKV, err := js.KeyValue(setupCtx, store.DirectoryBucket)
+	if err != nil {
+		return fail("directory bucket %s: %v: the policy view answers `mash policy show` and `explain` from it; create it with `mashctl init` (or `mash admin init`)", store.DirectoryBucket, err)
+	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
@@ -178,10 +191,24 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 		HeldKeys: policyserve.HeldKeys(keys.HeldKeys, keys.GroupPublics, adminKey),
 		Log:      slog.NewLogLogger(logger.Handler(), slog.LevelInfo),
 	}
+	stopView, err := policyview.Mount(adm.Conn(), policyview.Options{
+		Range: rng, Store: ledger, ResolveAddress: policyview.DirectoryResolver(dirKV, policyViewResolveTTL),
+	})
+	if err != nil {
+		return fail("policy view: %v", err)
+	}
 	logger.Info("policy service listening", "key", policyintake.KeyPrefix+account, "bucket", bucket, "range", rng, "servers", servers)
 	policyServeReady()
-	if err := intake.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return fail("%v", err)
+	runErr := intake.Run(ctx)
+	if err := stopView(); err != nil {
+		logger.Warn("policy view did not stop cleanly", "error", err)
+	}
+	// Make the server drop the responder's subscription before the process goes on to close the connection.
+	if err := adm.Conn().FlushTimeout(policyViewStopFlush); err != nil {
+		logger.Warn("policy view: the server did not confirm the unsubscribe", "error", err)
+	}
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return fail("%v", runErr)
 	}
 	logger.Info("policy service stopped")
 	return 0
