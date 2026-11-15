@@ -91,6 +91,12 @@ witness, as does a reach whose group template did not change.
 * Bad, because a run with a lagging server takes two restarts to reach `applied`.
 * Neutral, because one more read of the account JWTs is made before the witnesses, only when a witness would be opened.
 
+The settlement reads the inventory form of the record (the greatest issue time over every retained revision of a key,
+ADR 0115), and an incomplete history settles nothing. It rests on the same assumption as the gate's inventory and
+`RemoveSender`: every credential mash issued is in the issue record. A credential made outside mash, or one the record
+never held, is not revoked by mash and is not seen by the shortcut either, so its connection is not proven closed by
+it; the first-list-set reconcile (ADR 0121) is where such credentials are found and removed.
+
 ### Confirmation
 
 Unit tests in `internal/policyserve`: `TestSettledSenders` (every server on the target; one server lagging; a server

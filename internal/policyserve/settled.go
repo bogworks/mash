@@ -19,7 +19,7 @@ import (
 // A scoped-template change closes every connection under the scoped key at the push (ADR 0097). When every server
 // already holds the target's templates, an earlier run pushed the change, so a connection opened now was opened under
 // the target and no witness opened now could be closed by the push: it would stay open for ever. A key revoked on every
-// server cannot connect again, and the connection it had was closed by the revocation. ADR 0125 gives the argument.
+// server cannot connect again, and the connection it had was closed by the revocation. ADR 0126 gives the argument.
 type settledState struct {
 	// Servers are the names of the servers that answered, set only when every server of the declared count did.
 	Servers []string

@@ -411,8 +411,24 @@ func (a *Applier) readSettled(ctx context.Context, deps policyapply.ApplyDeps, s
 		a.logf("settled", "error", err.Error())
 		return settledState{}
 	}
+	// The inventory read, not ByAddress: it carries the greatest issue time over every retained revision of a key, so a
+	// revocation older than a later-dated credential does not count as settling the sender (ADR 0115). An incomplete
+	// history settles nothing.
+	all, err := a.Record.AllMaxIssued(ctx)
+	if err != nil {
+		a.logf("settled", "error", err.Error())
+		return settledState{}
+	}
 	return settledSenders(jwts, deps.Inventory, a.Account, signers, prev, target, ex,
-		func(address string) ([]policyapply.IssueEntry, error) { return a.Record.ByAddress(ctx, address) })
+		func(address string) ([]policyapply.IssueEntry, error) {
+			var out []policyapply.IssueEntry
+			for _, e := range all {
+				if e.Address == address {
+					out = append(out, e)
+				}
+			}
+			return out, nil
+		})
 }
 
 // stepWitnesses is the Applier.Step seam on the gate's reads of the witnesses.
