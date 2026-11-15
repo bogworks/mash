@@ -82,11 +82,17 @@ jobs:
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-linux-eph]
+    # id-token: write lets the go-test action trade GitHub's ID token for a one-hour Mergify token (OIDC, no stored key,
+    # ADR 0127). This is the only job in this workflow with it.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/go-test
         with:
           forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
+          insights: "true"
   # TODO(macos-gate): test (macos) is ADVISORY (ADR 0079): its result is visible on every pull request and push, but it
   # is not in pr-check's needs, not in release.RequiredChecks and not a required status check, so it gates no merge and
   # no release. It goes back into pr-check's needs (and RequiredChecks, docs/branch-protection.md) when x-lead confirms

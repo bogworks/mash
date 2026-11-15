@@ -268,3 +268,90 @@ func TestWorkflows_goCacheStepInTheSharedTestAction(t *testing.T) {
 		}
 	}
 }
+
+// ADR 0127: only test (linux, eph) sends its JUnit file to Mergify CI Insights. The go-test action does it behind the input
+// insights: "true", which only test-eph passes, and test-eph alone holds id-token: write (OIDC, no stored key). The required
+// Linux test keeps the plain go test step, and the insights path still fails the job when the tests fail.
+func TestCI_insightsRunsOnlyInTheEphJobAndStillFailsOnFailingTests(t *testing.T) {
+	t.Parallel()
+	w := load(t, "ci.yml")
+	for jn, j := range w.Jobs {
+		if jn == "test-eph" {
+			continue
+		}
+		if len(j.Permissions) != 0 {
+			t.Errorf("ci.yml/%s sets permissions %v: only test-eph may (id-token: write)", jn, j.Permissions)
+		}
+		for _, st := range j.Steps {
+			if _, ok := st.With["insights"]; ok {
+				t.Errorf("ci.yml/%s passes insights: only test-eph may", jn)
+			}
+		}
+	}
+	if p := w.Permissions; len(p) != 1 || p["contents"] != "read" {
+		t.Errorf("ci.yml workflow permissions = %v, want contents: read only", p)
+	}
+	e := w.Jobs["test-eph"]
+	if len(e.Permissions) != 2 || e.Permissions["contents"] != "read" || e.Permissions["id-token"] != "write" {
+		t.Errorf("test-eph permissions = %v, want exactly contents: read and id-token: write", e.Permissions)
+	}
+	if len(e.Steps) != 2 || e.Steps[1].With["insights"] != "true" {
+		t.Errorf("test-eph must call the go-test action with insights: \"true\": %+v", e.Steps)
+	}
+
+	b, err := os.ReadFile("../../.github/actions/go-test/action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		Inputs map[string]struct {
+			Default string `yaml:"default"`
+		} `yaml:"inputs"`
+		Runs struct {
+			Steps []step `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(b, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.Inputs["insights"].Default != "false" {
+		t.Errorf("go-test action: input insights must default to \"false\", got %q", a.Inputs["insights"].Default)
+	}
+	var plain, tests, upload, verdict *step
+	for i := range a.Runs.Steps {
+		st := &a.Runs.Steps[i]
+		switch {
+		case st.Run == "go test -race -timeout 20m ./...":
+			plain = st
+		case st.ID == "gotest":
+			tests = st
+		case strings.Contains(st.Run, "mergify ci junit-process"):
+			upload = st
+		case strings.HasPrefix(st.Name, "Fail when the tests failed"):
+			verdict = st
+		}
+	}
+	if plain == nil || tests == nil || upload == nil || verdict == nil {
+		t.Fatalf("go-test action: missing a step (plain %v, gotest %v, upload %v, verdict %v)", plain != nil, tests != nil, upload != nil, verdict != nil)
+	}
+	if plain.If != "inputs.insights != 'true'" {
+		t.Errorf("the plain go test step must run exactly when insights is not true, if = %q", plain.If)
+	}
+	for _, st := range []*step{tests, upload, verdict} {
+		if !strings.Contains(st.If, "inputs.insights == 'true'") {
+			t.Errorf("go-test action: step %q is not behind inputs.insights == 'true': %q", st.Name, st.If)
+		}
+	}
+	if tests.ContinueOnError != true || !strings.Contains(tests.Run, "/opt/ci-tools/bin/gotestsum") || !strings.Contains(tests.Run, "-race -timeout 20m ./...") {
+		t.Errorf("go-test action: the insights test step must be the pinned gotestsum with the same go test flags and continue-on-error: %+v", tests)
+	}
+	if !strings.Contains(upload.If, "(success() || failure())") || !strings.Contains(upload.If, "github.event.pull_request.head.repo.fork != true") || !strings.Contains(upload.Run, "/opt/ci-tools/bin/mergify") {
+		t.Errorf("go-test action: the upload runs only on success() or failure(), never for a fork, with the pinned CLI: %+v", upload)
+	}
+	if strings.Contains(upload.Run, "--token") || strings.Contains(upload.Run, "MERGIFY_TOKEN") {
+		t.Errorf("go-test action: the upload must use OIDC, not a token: %q", upload.Run)
+	}
+	if !strings.Contains(verdict.If, "steps.gotest.outcome != 'success'") || !strings.Contains(verdict.Run, "exit 1") {
+		t.Errorf("go-test action: the last step must fail the job when the tests did not succeed: %+v", verdict)
+	}
+}

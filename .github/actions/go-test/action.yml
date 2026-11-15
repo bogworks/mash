@@ -5,6 +5,10 @@ inputs:
     description: The words internal to the maintainers, from the repository variable MASH_FORBIDDEN_WORDS (a composite action cannot read vars, so the calling job passes it in).
     required: false
     default: ""
+  insights:
+    description: 'Only the advisory test (linux, eph) job passes "true" (ADR 0127): the same go test, through gotestsum, then the JUnit file goes to Mergify CI Insights and the job still fails when the tests fail. Every other caller leaves it unset and runs the plain go test step.'
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -26,8 +30,38 @@ runs:
     # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
     # on a slow one. A real hang still fails.
     - name: go test
+      if: inputs.insights != 'true'
       shell: bash
       env:
         # The words internal to the maintainers (data through env): the standalone source scan in cmd/mash fails on any of them.
         MASH_FORBIDDEN_WORDS: ${{ inputs.forbidden-words }}
       run: go test -race -timeout 20m ./...
+    # The insights steps below run only when the caller passes insights: "true" (test (linux, eph) alone, ADR 0127). Pinned host
+    # tools (/opt/ci-tools, SHA-256 in bogworks/cicd runners/pins/pins.yaml), nothing downloaded in the job.
+    - name: go test (writes a JUnit file)
+      id: gotest
+      if: inputs.insights == 'true'
+      shell: bash
+      # The verdict is the last step of this action, which fails the job when this one failed.
+      continue-on-error: true
+      env:
+        MASH_FORBIDDEN_WORDS: ${{ inputs.forbidden-words }}
+      run: /opt/ci-tools/bin/gotestsum --format standard-quiet --junitfile "$RUNNER_TEMP/junit.xml" -- -race -timeout 20m ./...
+    - name: Upload the JUnit file to Mergify CI Insights
+      if: ${{ inputs.insights == 'true' && (success() || failure()) && github.event.pull_request.head.repo.fork != true }}
+      shell: bash
+      env:
+        TEST_OUTCOME: ${{ steps.gotest.outcome }}
+        MERGIFY_TEST_JOB_NAME: test (linux, eph)
+      run: |
+        set -uo pipefail
+        [ -s "$RUNNER_TEMP/junit.xml" ] || { echo "no JUnit file; nothing to upload"; exit 0; }
+        code=0; [ "$TEST_OUTCOME" = success ] || code=1
+        # Advisory: an upload problem never decides the job (the next step does).
+        /opt/ci-tools/bin/mergify ci junit-process --test-exit-code "$code" "$RUNNER_TEMP/junit.xml" || echo "::warning::the Mergify CI Insights upload did not complete"
+    - name: Fail when the tests failed
+      if: ${{ !cancelled() && inputs.insights == 'true' && steps.gotest.outcome != 'success' }}
+      shell: bash
+      run: |
+        echo "the tests failed (go test step outcome: ${{ steps.gotest.outcome }})" >&2
+        exit 1
