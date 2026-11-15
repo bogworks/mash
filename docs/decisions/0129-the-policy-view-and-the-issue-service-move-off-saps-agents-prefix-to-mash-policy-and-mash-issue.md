@@ -86,7 +86,25 @@ Chosen option: "Move both, serve both for one release, push the template once".
 * From v0.6.0, `listset.Compile` emits only `mash.policy.<range>` as the fixed publish line.
 * For the window release, `Check` accepts a template carrying either line, the old or the new. A list set compiled by
   v0.5.0 is therefore not refused, and an account can stay on its old template until its push.
-* The push is the next apply on that account under v0.6.0. That apply changes every group's template.
+* **Comparisons with what is already signed or published accept the old form for the window release.**
+  * Until its push, an account's in-force generation was signed, and its scoped templates published, with the old line.
+  * Every check that compares a fresh compile with them would fail on that one line alone. So, for the window release,
+    `listset.Compile` can produce either form of the fixed line, and each such check accepts the old form as well:
+    * The apply's check that the previous generation's compiled output digests to what that generation signed
+      (`internal/policyapply/run.go:585`). The list set in force is compiled with the new line first. When that does
+      not match the signed digest, it is compiled again with the old line, and that compile is the previous. Any other
+      mismatch is refused, as now.
+    * The issue service's check that an owner group's published scoped signer carries the list set's template
+      (`internal/issue/scope.go`, `template_mismatch`). It accepts a published template equal to the compile in either
+      form, so `issue serve` keeps issuing on an account that has not had its push.
+    * Any other place that compares a compile with a signed or published template, which the implementing pull
+      request lists. It gets the same either-form rule, and nothing else.
+  * The old form is accepted only where it is compared with something already signed or published. Nothing new is ever
+    compiled, signed or pushed with it.
+* **The push is the next apply on that account under v0.6.0.** That apply changes every group's template.
+  * Its compiled output differs from the generation in force by the fixed line. A resubmission of the list set in force
+    is therefore not refused as unchanged (`listset.Accept`), and is applied as the next generation.
+  * So the submitter can make the push without changing any list.
 * By ADR 0097, the apply closes the connection of every sender in the range once. No credential is reissued: a user JWT
   issued under a scoped key takes the template at connect.
 * It is a stop point. It runs on an adopted live account only on an explicit go, as for any reconnect-causing apply.
@@ -152,6 +170,13 @@ with ADR 0110's error. It does not fail open.
 
   None gives the open answer for a list-set credential.
 * The issue-service test that no template reaches the issue subject checks `mash.issue.<range>.<owner>`.
+* Two tests prove the window's old-form acceptance:
+  * **An apply on top of a generation signed with the old line succeeds:** the previous is compiled in the old form and
+    digests to what was signed, and the push carries only the new line.
+  * **`issue serve` issues against a published template in the old form, and in the new form.** It refuses any other
+    difference with `template_mismatch`.
+* A resubmission of the list set in force, made under v0.6.0 on an account still on the old line, is accepted as the
+  next generation.
 * The two-server and real-send tests run again on the new subjects.
 
 ## Pros and Cons of the Options
