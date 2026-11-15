@@ -97,6 +97,10 @@ Chosen option: "Move both, serve both for one release, push the template once".
     * The issue service's check that an owner group's published scoped signer carries the list set's template
       (`internal/issue/scope.go`, `template_mismatch`). It accepts a published template equal to the compile in either
       form, so `issue serve` keeps issuing on an account that has not had its push.
+    * `mashctl policy diff`, which shows what an apply would change. It compiles the generation in force the same way
+      as the apply does: in the form whose digest matches what that generation signed. It therefore shows the policy
+      line's change in every group's template, and says that the apply will close every sender's connection
+      (ADR 0097), before anyone gives the go for the push.
     * Any other place that compares a compile with a signed or published template, which the implementing pull
       request lists. It gets the same either-form rule, and nothing else.
   * The old form is accepted only where it is compared with something already signed or published. Nothing new is ever
@@ -177,6 +181,8 @@ with ADR 0110's error. It does not fail open.
     difference with `template_mismatch`.
 * A resubmission of the list set in force, made under v0.6.0 on an account still on the old line, is accepted as the
   next generation.
+* For that resubmission, `mashctl policy diff` shows the policy line's change in every group's template, and the
+  reconnect.
 * The two-server and real-send tests run again on the new subjects.
 
 ## Pros and Cons of the Options
