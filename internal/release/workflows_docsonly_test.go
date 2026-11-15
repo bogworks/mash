@@ -40,7 +40,7 @@ func TestDocsOnly_noWorkflowLevelPathFilter(t *testing.T) {
 // Each heavy job needs changes and is skipped by the changes output; every cheap or required job is not.
 func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 	heavy := map[string][]string{
-		"ci.yml":       {"test", "test-macos", "reproducible", "conformance"},
+		"ci.yml":       {"test", "test-eph", "test-macos", "reproducible", "conformance"},
 		"lint.yml":     {"lint"},
 		"security.yml": {"govulncheck", "codeql"},
 	}
@@ -65,7 +65,7 @@ func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 			}
 		}
 	}
-	for _, jn := range []string{"test", "test-macos", "reproducible"} {
+	for _, jn := range []string{"test", "test-eph", "test-macos", "reproducible"} {
 		if got := load(t, "ci.yml").Jobs[jn].If; got != heavyIf {
 			t.Errorf("ci.yml/%s if = %q, want %q", jn, got, heavyIf)
 		}

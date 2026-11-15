@@ -3,3 +3,4 @@ self-hosted-runner:
     - rh-linux
     - rh-macos
     - rh-gate
+    - rh-linux-eph
