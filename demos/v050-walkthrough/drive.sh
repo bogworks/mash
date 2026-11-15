@@ -124,7 +124,7 @@ iso() {
   # shellcheck disable=SC2046
   $x env $(env | grep -o '^\(MASH\|NATS\)_[A-Za-z0-9_]*' | sed 's/^/-u /') \
       -u NATS_URL -u NATS_CREDS -u NATS_CONTEXT -u NATS_USER -u NATS_PASSWORD -u NATS_NKEY -u NATS_CA -u NATS_CERT -u NATS_KEY \
-      HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state" MASH_STATE_DIR="$T/state" MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" \
+      HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state" MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" \
       MASH_POLICY_BUCKET='homerange_{range}_policy' "$@"
 }
 mashctl() { iso "$T/mashctl" "$@"; }
@@ -507,7 +507,7 @@ Again       type  banner  or  cheatsheet.   Exit the shell to tear everything do
 EOF
   cat >"$T/rc.sh" <<EOF
 export PATH="$T/bin:\$PATH"
-export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state" MASH_STATE_DIR="$T/state"
+export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" XDG_STATE_HOME="$T/home/.local/state"
 export MASH_CONFIG_DIR="$T/cfg" MASH_KEYS_DIR="$T/keys" MASH_POLICY_BUCKET='homerange_{range}_policy'
 export MASH_URL="nats://127.0.0.1:$PORT" MASH_OWNER=lab MASH_ADMIN_CREDS="$T/server/mashadmin.creds"
 export HISTFILE="$T/home/.shell_history"
