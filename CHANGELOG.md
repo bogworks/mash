@@ -20,6 +20,7 @@ Steps 1 and 2 are required, and the order matters.
 4. **Run `mash admin init` once.** It creates the new buckets (`mash-issued`, `mash-adoption`) and marks the issue record so that a revocation can show the record is complete.
 5. **`mashctl add` and `reissue` now need the system-account credentials** (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` beside the admin credentials), to check that no zone policy is applied. `reissue --all` and `--changed` list what they would do and act only with `--yes`.
 6. **Do not adopt a live account unless you mean to keep it adopted.** Nothing adopts an account by itself. `mashctl policy adopt` has no undo in this release, and from then on the account's policy changes only through signed list sets. Running one account both ways is not supported.
+7. **Plugin pinning.** The plugin published with this tag is not pinned to a binary. The plugin release that follows it (`0.5.0-pin.1`) pins the launcher to v0.5.0. If you set `MASH_PLUGIN_REQUIRE_VERIFIED`, do so only after updating to that pinned plugin.
 
 ### What is not in this release
 
