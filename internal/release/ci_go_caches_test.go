@@ -314,6 +314,9 @@ func TestCI_insightsRunsOnlyInTheEphJobAndStillFailsOnFailingTests(t *testing.T)
 	if err := yaml.Unmarshal(b, &a); err != nil {
 		t.Fatal(err)
 	}
+	if a.Inputs["tools-dir"].Default != "/opt/ci-tools/bin" {
+		t.Errorf("go-test action: input tools-dir must default to /opt/ci-tools/bin, got %q", a.Inputs["tools-dir"].Default)
+	}
 	if a.Inputs["insights"].Default != "false" {
 		t.Errorf("go-test action: input insights must default to \"false\", got %q", a.Inputs["insights"].Default)
 	}
@@ -342,10 +345,10 @@ func TestCI_insightsRunsOnlyInTheEphJobAndStillFailsOnFailingTests(t *testing.T)
 			t.Errorf("go-test action: step %q is not behind inputs.insights == 'true': %q", st.Name, st.If)
 		}
 	}
-	if tests.ContinueOnError != true || !strings.Contains(tests.Run, "/opt/ci-tools/bin/gotestsum") || !strings.Contains(tests.Run, "-race -timeout 20m ./...") {
+	if tests.ContinueOnError != true || !strings.Contains(tests.Run, "gotestsum --format") || !strings.Contains(tests.Run, "-race -timeout 20m ./...") {
 		t.Errorf("go-test action: the insights test step must be the pinned gotestsum with the same go test flags and continue-on-error: %+v", tests)
 	}
-	if !strings.Contains(upload.If, "(success() || failure())") || !strings.Contains(upload.If, "github.event.pull_request.head.repo.fork != true") || !strings.Contains(upload.Run, "/opt/ci-tools/bin/mergify") {
+	if !strings.Contains(upload.If, "(success() || failure())") || !strings.Contains(upload.If, "github.event.pull_request.head.repo.fork != true") || !strings.Contains(upload.Run, "mergify ci junit-process") {
 		t.Errorf("go-test action: the upload runs only on success() or failure(), never for a fork, with the pinned CLI: %+v", upload)
 	}
 	if strings.Contains(upload.Run, "--token") || strings.Contains(upload.Run, "MERGIFY_TOKEN") {

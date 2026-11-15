@@ -9,6 +9,10 @@ inputs:
     description: 'Only the advisory test (linux, eph) job passes "true" (ADR 0127): the same go test, through gotestsum, then the JUnit file goes to Mergify CI Insights and the job still fails when the tests fail. Every other caller leaves it unset and runs the plain go test step.'
     required: false
     default: "false"
+  tools-dir:
+    description: 'Where the pinned host tools (gotestsum, mergify) live; it is put first on PATH for the insights steps. Default: the runners'' /opt/ci-tools/bin. Missing gotestsum fails the step with a clear error; a missing mergify only warns.'
+    required: false
+    default: /opt/ci-tools/bin
 runs:
   using: composite
   steps:
@@ -46,19 +50,27 @@ runs:
       continue-on-error: true
       env:
         MASH_FORBIDDEN_WORDS: ${{ inputs.forbidden-words }}
-      run: /opt/ci-tools/bin/gotestsum --format standard-quiet --junitfile "$RUNNER_TEMP/junit.xml" -- -race -timeout 20m ./...
+        TOOLS_DIR: ${{ inputs.tools-dir }}
+      run: |
+        set -uo pipefail
+        PATH="$TOOLS_DIR:$PATH"
+        command -v gotestsum >/dev/null || { echo "::error::gotestsum is not in $TOOLS_DIR or on PATH (pinned host tool, bogworks/cicd runners/pins/pins.yaml)"; exit 1; }
+        gotestsum --format standard-quiet --junitfile "$RUNNER_TEMP/junit.xml" -- -race -timeout 20m ./...
     - name: Upload the JUnit file to Mergify CI Insights
       if: ${{ inputs.insights == 'true' && (success() || failure()) && github.event.pull_request.head.repo.fork != true }}
       shell: bash
       env:
         TEST_OUTCOME: ${{ steps.gotest.outcome }}
         MERGIFY_TEST_JOB_NAME: test (linux, eph)
+        TOOLS_DIR: ${{ inputs.tools-dir }}
       run: |
         set -uo pipefail
+        PATH="$TOOLS_DIR:$PATH"
+        command -v mergify >/dev/null || { echo "::warning::mergify is not in $TOOLS_DIR or on PATH; nothing uploaded"; exit 0; }
         [ -s "$RUNNER_TEMP/junit.xml" ] || { echo "no JUnit file; nothing to upload"; exit 0; }
         code=0; [ "$TEST_OUTCOME" = success ] || code=1
         # Advisory: an upload problem never decides the job (the next step does).
-        /opt/ci-tools/bin/mergify ci junit-process --test-exit-code "$code" "$RUNNER_TEMP/junit.xml" || echo "::warning::the Mergify CI Insights upload did not complete"
+        mergify ci junit-process --test-exit-code "$code" "$RUNNER_TEMP/junit.xml" || echo "::warning::the Mergify CI Insights upload did not complete"
     - name: Fail when the tests failed
       if: ${{ !cancelled() && inputs.insights == 'true' && steps.gotest.outcome != 'success' }}
       shell: bash
