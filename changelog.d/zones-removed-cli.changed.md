@@ -1,1 +1,0 @@
-`mashctl set-zone` and `--zone` (on `provision` and `add`) are removed, as is the zone in `mashctl list` and `audit --json`; mail keeps its five-token subject ([ADR 0091](docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)).

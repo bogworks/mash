@@ -1,1 +1,0 @@
-A `mashctl policy serve` that is stopped after it pushed a change and before it committed the generation now resumes to applied when it is started again, instead of staying partial with "a connection open before the change is still open".

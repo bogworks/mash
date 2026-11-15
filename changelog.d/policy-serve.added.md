@@ -1,1 +1,0 @@
-New `mashctl policy serve --range RANGE --servers N` runs the list-set service for an adopted account: it applies each signed list set written to the range's policy bucket, reports the outcome (applied or refused, with the reason) in the account's status value, and refuses to start for an account that is not adopted.
