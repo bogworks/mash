@@ -173,9 +173,20 @@ func TestSameSessionEarlierServeStepsDown(t *testing.T) {
 	defer cancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- first.Run(ctx, (&events{}).deliver) }()
-	second, err := Open(context.Background(), f.cfg("a"))
-	if err != nil {
-		t.Fatalf("the later serve of the same session must take over: %v", err)
+	// A takeover is a compare-and-set on the revision it read, so it loses to a refresh of the earlier serve written in
+	// between (the refresh is 100 ms here) and says the endpoint is in use; the later serve is then started again, as a
+	// session's launcher would. Only that refusal is retried.
+	var second *Endpoint
+	for attempt := 0; ; attempt++ {
+		second, err = Open(context.Background(), f.cfg("a"))
+		var held *LeaseHeldError
+		if err == nil {
+			break
+		}
+		if !errors.As(err, &held) || !held.SameSession || attempt >= 20 {
+			t.Fatalf("the later serve of the same session must take over: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	defer second.Close()
 	select {
