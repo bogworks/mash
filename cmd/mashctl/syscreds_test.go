@@ -32,6 +32,7 @@ type applyEnv struct {
 	env     map[string]string
 	ks      *ctlkeys.Authority
 	acctPub string
+	tlsCA   string // the CA of a TLS server (empty for a plain one): the helpers that connect directly trust it
 }
 
 func newApplyEnv(t *testing.T) *applyEnv {
@@ -117,7 +118,7 @@ func (e *applyEnv) run(args ...string) (string, string, int) {
 // accountJWT reads the MASH account's JWT from the resolver through the system account.
 func (e *applyEnv) accountJWT() string {
 	e.t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
+	nc, err := nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))...)
 	if err != nil {
 		e.t.Fatal(err)
 	}

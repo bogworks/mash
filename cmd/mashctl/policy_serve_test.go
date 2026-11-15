@@ -136,7 +136,7 @@ func newServeEnvFull(t *testing.T, adopt bool, tweak func(e *applyEnv), optsHook
 			t.Fatalf("adopt: %d %s %s", code, out, errb)
 		}
 	}
-	e.nc = mustT(nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.env["MASH_ADMIN_CREDS"])))
+	e.nc = mustT(nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), natsauth.UserCredentials(e.env["MASH_ADMIN_CREDS"]))...))
 	t.Cleanup(e.nc.Close)
 	js := mustT(jetstream.New(e.nc))
 	ctx, cancel := context.WithTimeout(context.Background(), serveWait)
@@ -154,14 +154,14 @@ func newServeEnvFull(t *testing.T, adopt bool, tweak func(e *applyEnv), optsHook
 	uc.Permissions = submitterPerms()
 	tok := mustT(uc.Encode(akp))
 	e.subErrs = make(chan error, 16)
-	e.subNC = mustT(nats.Connect(e.srv.ClientURL(),
+	e.subNC = mustT(nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""),
 		nats.UserJWT(func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return ukp.Sign(n) }),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 			select {
 			case e.subErrs <- err:
 			default:
 			}
-		})))
+		}))...))
 	t.Cleanup(e.subNC.Close)
 	e.subKV = mustT(mustT(jetstream.New(e.subNC)).KeyValue(ctx, serveBucket))
 	return e
