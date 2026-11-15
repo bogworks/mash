@@ -155,7 +155,7 @@ issues NATS users ([ADR-0008][0008]), the agent host, and any file store that ma
 | mash | The `mail` verb, declared in metadata and the heartbeat and not registered | A registered endpoint would answer JetStream's storage acknowledgement ([ADR-0004][0004]) |
 | mash | The directory: name to NATS user and mail subject, written by the admin | Mail must reach an endpoint that is offline, which SAP discovery cannot. This bends a SAP "MUST" ([ADR-0011][0011]) |
 | mash | Trust labels `unknown-signer` and `stale`, and quoted bodies | A valid key may not be a known endpoint, and a stored message can be replayed ([ADR-0019][0019], [ADR-0021][0021]) |
-| mash | Signed marks `Mash-Urgent` and `Mash-Sender-Instance`. Unsigned `Mash-Kind` and `Mash-In-Reply-To` | Trust-bearing marks are bound to one message. Scheduling hints need no proof ([ADR-0018][0018]) |
+| mash | Signed marks `Mash-Urgent`, `Mash-Sender-Instance`, `Mash-In-Reply-To` and `Mash-Via`. Unsigned `Mash-Kind` | Trust-bearing marks are bound to one message. Scheduling hints need no proof ([ADR-0018][0018]). In-reply-to is signed and `Mash-Via` declares a relay, each shown only when it verifies ([ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md)) |
 | mash | Lease, takeover and tombstone | Nothing in NATS stops two processes using one user ([ADR-0013][0013]) |
 | mash | Endpoint manager, hook, spool, batching, kinds, wake timing | Delivery into an agent host at low turn cost ([ADR-0022][0022] to [ADR-0029][0029]) |
 | mash | Host adapter, Claude Code plugin, text contract | Isolate and package the agent host specifics ([ADR-0032][0032] to [ADR-0034][0034]) |
@@ -344,7 +344,8 @@ this endpoint, over this exact subject and body, within 5 minutes before the ser
 - that the agent session wrote it, rather than any process on that host that can read the credentials file;
 - that a human approved it;
 - the account field, which is the signer's own claim (SAP §13.7.2);
-- the kind or the reply reference, which are unsigned;
+- the kind, which is unsigned;
+- that a relay declared with `Mash-Via` has anything to do with the message it names: it is the sender's own signed claim, and its absence means nothing ([ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md));
 - that the named sender instance is genuine beyond "this key chose to name it" ([ADR-0018][0018]).
 
 **Assets.** Mail content and history. Each endpoint's private user seed, in its credentials file. The directory, which
@@ -576,6 +577,7 @@ the 0.3.0 tree.
 | No mail kinds or urgency | Five kinds and a signed urgent mark | [0027][0027], [0029][0029] |
 | Duplicates dropped on user and nonce in session memory | Plus sends made at-most-once with a key, and remembered stream sequences | [0031][0031] |
 | No sender instance | A signed `Mash-Sender-Instance` header | [0018][0018] |
+| `Mash-In-Reply-To` unsigned and never shown | Signed under its own domain, with a signed `Mash-Via`; each shown only when it verifies | [ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md) |
 | A name is unique within an owner | Unique within the account, since keys carry the name only | [0006][0006] |
 | Other agents later, with their own agent token | A host adapter seam, Claude Code the only host, every endpoint still `cc` | [0032][0032] |
 | (Not in the design) | Rendered text and plugin commands became a contract | [0034][0034] |
@@ -695,6 +697,8 @@ idle wake.
 |---|---|
 | Endpoint name, owner | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-48 characters: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
 | Subjects | `agents.mail.cc.<owner>.<name>`, `agents.prompt.cc.<owner>.<name>`, `agents.status.cc.<owner>.<name>`, `agents.hb.cc.<owner>.<name>` |
+| Policy view subject | `agents.policy.<range>`: a signed request from a sender, answered by `mashctl policy serve` with that sender's own reach. Every list-set template carries this one publish line ([ADR 0110](decisions/0110-a-sender-sees-only-its-own-reach-through-a-signed-policy-view-request.md)) |
+| Issue subject | `agents.issue.<range>.<owner>`: a wrangler's request to the `mash-issue` service of `mashctl issue serve`. Its second token is none of the verbs `mail`, `prompt`, `status`, `hb`, and no compiled template reaches it ([ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md)) |
 | Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token. Mail has one five-token subject; zones were removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) |
 | Inbox stream, consumer | `inbox-<name>`, `deliver` |
 | Buckets, keys | `mash-directory` and `mash-leases`, keyed by `<name>` |
@@ -703,8 +707,8 @@ idle wake.
 | Directory labels | At most 64. Key `^[a-z][a-z0-9_.-]{0,31}$`. Values, role and host: at most 64 printable characters, no tab or newline. A grouping field from older records is read as a label. Labels are unsigned metadata: the record carries no signature, so anyone who can write the directory can set them, and nothing may make a security decision on a label. Authority comes from the signed user JWT. `mashctl label` and `unlabel` set and clear them on the directory record |
 | Idempotency key | 1-128 printable ASCII characters, no spaces |
 | Launch token | At most 128 of `A-Z a-z 0-9 . _ -` |
-| Headers | `Agent-Sender` (SAP), `Nats-Msg-Id` (NATS), `Mash-Sender-Instance`, `Mash-Urgent`, `Mash-Kind`, `Mash-In-Reply-To` |
-| Signature domains | `AGENT-SENDER-V1` (SAP), `MASH-SENDER-INSTANCE-V1`, `MASH-URGENT-V1`. Send nonces hash `mash-send-id-v1` with sender, recipient and key |
+| Headers | `Agent-Sender` (SAP), `Nats-Msg-Id` (NATS), `Mash-Sender-Instance`, `Mash-Urgent`, `Mash-Kind`, `Mash-In-Reply-To`, `Mash-Via` |
+| Signature domains | `AGENT-SENDER-V1` (SAP), `MASH-SENDER-INSTANCE-V1`, `MASH-URGENT-V1`, `MASH-IN-REPLY-TO-V1`, `MASH-VIA-V1`. Send nonces hash `mash-send-id-v1` with sender, recipient and key |
 | Shown sender | The endpoint name. `owner/name` for another owner. A name that is not valid is shown as a short key fragment (`UABC…WXYZ`). `?` when there is no header |
 | Message header line | `--- #<seq> from <sender> [<trust>] at <time>`, then optional `urgent: yes` and `instance:` lines, then `kind: <kind>`, then the body with each line prefixed `> ` |
 | Files | `~/.config/mash/config.json`, `~/.config/mash/<name>.creds`, `~/.config/mash/policy.md`. `$XDG_STATE_HOME/mash/spool/<owner>/<name>/` and `$XDG_STATE_HOME/mash/hook.log` |
