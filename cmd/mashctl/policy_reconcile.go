@@ -242,7 +242,7 @@ func runPolicyReconcile(args []string, env func(string) string, lookup config.Lo
 		if err != nil {
 			return reconcile.Plan{}, nil, err
 		}
-		in := reconcile.Input{Account: account, Held: held, Now: time.Now(), Exempt: marker.Exempt, Issued: adm, AdminUser: adminUser, AdminIssuer: adminIssuer}
+		in := reconcile.Input{Account: account, Held: held, Now: time.Now(), Exempt: marker.Exempt, Issued: adm, Resolver: adm, AdminUser: adminUser, AdminIssuer: adminIssuer}
 		sctx, cancel := context.WithTimeout(ctx, applyDeadline)
 		defer cancel()
 		if fileDoc != nil {
