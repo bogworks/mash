@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -185,7 +186,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if err != nil {
 		return res0, err
 	}
-	tok, err := in.Signer.SignPrevious(policyapply.PreviousClaims{JWT: prevJWT}, slices.Clone(keys))
+	tok, err := in.Signer.SignPrevious(policyapply.PreviousClaims{JWT: prevJWT, RevokeAt: maps.Clone(at)}, slices.Clone(keys))
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: sign: %w", err)
 	}
