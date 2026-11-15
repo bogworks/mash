@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -105,6 +106,10 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	} else if adminAcct != account {
 		return fail("the admin credentials belong to another account than the key store's account key")
 	}
+	adminIssuer, err := credsIssuer(cfg.AdminCreds)
+	if err != nil {
+		return fail("admin credentials: %s", config.Clean(err.Error()))
+	}
 	trust, err := apply.LoadTrust(keys)
 	if err != nil {
 		return fail("%v", err)
@@ -164,6 +169,7 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 			return nats.Connect(u, opts...)
 		},
 	}
+	policyServeDropFields(app, adm, sys, adminKey, adminIssuer)
 	intake := &policyintake.Intake{
 		Account: account, Range: rng, KV: kv,
 		Marker: policyintake.AdminMarker{Admin: adm}, Lock: policyintake.AdminLock{Admin: adm},
@@ -188,5 +194,29 @@ func policyServeVet(insecureLoopback bool) func(string) error {
 	return func(u string) error {
 		_, err := natsauth.RequireTLS(u, insecureLoopback)
 		return err
+	}
+}
+
+// policyServeDropFields sets on the Applier what lets its Issuer drop the account JWT's non-mash signing keys: the admin
+// user and the `iss` of the admin credentials' user JWT, and the exempt-issuer source (policyServeExemptIssuers).
+func policyServeDropFields(app *policyserve.Applier, adm *admin.Admin, sys *nats.Conn, adminUser, adminIssuer string) {
+	app.AdminUser, app.AdminIssuer = adminUser, adminIssuer
+	app.ExemptIssuers = policyServeExemptIssuers(adm, sys, app.Account, app.Servers, adminUser)
+}
+
+// policyServeExemptIssuers is the Applier's ExemptIssuers: on each call it reads the adoption marker again (it can
+// change) and the issuers of the connections of its exempt users and the admin user (exemptIssuerSource), so a non-mash
+// signing key is dropped only when every one of them stays signed by a kept key. A marker that records no exempt keys,
+// or an incomplete connection scan, is an error: that apply is refused.
+func policyServeExemptIssuers(adm *admin.Admin, sys *nats.Conn, account string, servers int, adminUser string) func(context.Context) (map[string][]string, error) {
+	return func(ctx context.Context) (map[string][]string, error) {
+		marker, found, err := adm.Adoption(ctx)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("read the adoption marker: %w", err)
+		case !found || !marker.ExemptRecorded():
+			return nil, errors.New("the adoption marker records no exempt keys: run `mashctl policy adopt` again")
+		}
+		return exemptIssuerSource(sys, account, servers, append(slices.Clone(marker.Exempt), adminUser))(ctx)
 	}
 }

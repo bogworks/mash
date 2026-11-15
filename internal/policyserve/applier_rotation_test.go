@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
@@ -143,3 +144,68 @@ func TestApplierAppliesAnAddressWhoseInboxExists(t *testing.T) {
 type makeKeys struct{ memKeys }
 
 func (makeKeys) GroupKey(string, bool) (nkeys.KeyPair, error) { return nkeys.CreateAccount() }
+
+// The production Applier carries the drop fields to the Issuer it builds: on the first apply (nothing in force) a
+// non-mash signing key is dropped once the exempt users stay under kept keys, where without the fields it is refused.
+func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testing.T) {
+	w := newDropWorld(t)
+	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
+		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1", w.acct))
+	exempt := map[string][]string{"UEXEMPT": {w.acct, w.otherRange}}
+	for _, set := range []bool{false, true} {
+		a := &Applier{
+			Account: w.acct, Range: "foo", Ledger: memLedger{policyapply.NewMemLedger(listset.Record{})}, Record: anyRecord{}, Servers: 1,
+			URL: "nats://127.0.0.1:4222", Keys: w.keys, Trust: w.iss.Trust, Now: w.iss.Now,
+			Provisioner: nopProvisioner{},
+			keptFn:      func(context.Context) (map[string]string, error) { return map[string]string{}, nil },
+			readServers: func(context.Context) ([]ServerInfo, error) {
+				return []ServerInfo{{Name: "s1", Host: "127.0.0.1", Port: 4222}}, nil
+			},
+		}
+		if set {
+			a.AdminUser, a.AdminIssuer = "UADMIN", w.acct
+			a.ExemptIssuers = func(context.Context) (map[string][]string, error) { return exempt, nil }
+		}
+		var signed string
+		var signErr error
+		a.applyFn = func(_ context.Context, req policyapply.ApplyRequest, deps policyapply.ApplyDeps) (policyapply.Status, error) {
+			iss, ok := deps.Signer.(*Issuer)
+			if !ok {
+				t.Fatalf("signer is %T", deps.Signer)
+			}
+			iss.Resolver = oneJWT{w.iss.Resolver.(oneJWT).tok} // the account JWT with the non-mash key; no server to read
+			c, err := listset.Compile(req.ListSet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signed, signErr = iss.Sign(listset.Record{Generation: req.Generation}, c)
+			return policyapply.Status{State: policyapply.StateApplied, Generation: req.Generation}, nil
+		}
+		if _, err := a.Apply(context.Background(), policyintake.Doc{Raw: raw}, okGuard{}); err != nil {
+			t.Fatal(err)
+		}
+		if !set {
+			if signErr == nil || !strings.Contains(signErr.Error(), "not an owner group key of the key store") {
+				t.Fatalf("without the fields: %v", signErr)
+			}
+			continue
+		}
+		if signErr != nil {
+			t.Fatal(signErr)
+		}
+		got, err := jwt.DecodeAccountClaims(signed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got.SigningKeys.GetScope(w.plain); ok {
+			t.Error("the non-mash key stays")
+		}
+		scopeOf(t, got, w.otherRange)
+	}
+}
+
+type nopProvisioner struct{}
+
+func (nopProvisioner) CreateInbox(context.Context, string) error     { return nil }
+func (nopProvisioner) IssueCredential(context.Context, string) error { return nil }

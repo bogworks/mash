@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
@@ -141,5 +143,182 @@ func TestSignPreviousRefusesAnotherAccountsJWT(t *testing.T) {
 	foreignTok, _ := jwt.NewAccountClaims(pubOf(mine)).Encode(stranger)
 	if _, err := iss.SignPrevious(policyapply.PreviousClaims{JWT: foreignTok}, nil); err == nil {
 		t.Error("a JWT issued by a key that is not the operator was re-signed")
+	}
+}
+
+// dropWorld is an account JWT with a plain (non-mash) signing key and another range's held group key, and an Issuer
+// for range foo over it.
+type dropWorld struct {
+	keys        storeKeys
+	acct        string
+	plain       string
+	otherRange  string
+	iss         *Issuer
+	compiled    *listset.Compiled
+	targetGroup string
+}
+
+func newDropWorld(t *testing.T) *dropWorld {
+	t.Helper()
+	op, _ := nkeys.CreateOperator()
+	acct, _ := nkeys.CreateAccount()
+	w := &dropWorld{acct: pubOf(acct), plain: pubOf(newGroupKey()), targetGroup: "foo.c"}
+	w.keys = storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey(), "bar.d": newGroupKey()}}
+	w.otherRange = pubOf(w.keys.groups["bar.d"])
+	ac := jwt.NewAccountClaims(w.acct)
+	ac.SigningKeys.Add(w.plain)
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = w.otherRange, "bar.d"
+	sc.Template.Pub.Allow.Add("keep.bar.d")
+	ac.SigningKeys.AddScopedSigner(sc)
+	tok, err := ac.Encode(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := apply.NewTrust(pubOf(op), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.compiled, err = listset.Compile(listset.ListSet{
+		Range: "foo",
+		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
+			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
+		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(5 * time.Second)
+	w.iss = &Issuer{Ctx: context.Background(), Keys: w.keys, Resolver: oneJWT{tok}, Account: w.acct, Trust: trust, Servers: 1, Range: "foo",
+		Now: func() time.Time { return now }}
+	return w
+}
+
+// enable sets the drop fields: the admin user signed by adminIssuer, and the connected exempt users' issuers.
+func (w *dropWorld) enable(adminIssuer string, exempt map[string][]string) {
+	w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", adminIssuer
+	w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return exempt, nil }
+}
+
+func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
+	w := newDropWorld(t)
+	for name, set := range map[string]func(){
+		"none":             func() {},
+		"no exempt source": func() { w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", w.acct },
+		"no admin issuer": func() {
+			w.iss.AdminIssuer = ""
+			w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return nil, nil }
+		},
+	} {
+		w.iss.AdminUser, w.iss.AdminIssuer, w.iss.ExemptIssuers = "", "", nil
+		set()
+		_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+		if err == nil || !strings.Contains(err.Error(), "not an owner group key of the key store") || !strings.Contains(err.Error(), w.plain[:8]) {
+			t.Errorf("%s: err %v", name, err)
+		}
+		if _, err := w.iss.Kept(context.Background(), 1); err == nil {
+			t.Errorf("%s: Kept accepted a non-mash key", name)
+		}
+	}
+}
+
+func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T) {
+	w := newDropWorld(t)
+	other := newGroupKey()
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
+		t.Fatal("an exempt user under an unknown key passed the check")
+	}
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := jwt.DecodeAccountClaims(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.SigningKeys.GetScope(w.plain); ok {
+		t.Error("the non-mash key stays")
+	}
+	if us := scopeOf(t, got, w.otherRange); us.Role != "bar.d" {
+		t.Errorf("the other range's key changed: %+v", us)
+	}
+	scopeOf(t, got, pubOf(w.keys.groups["foo.c"]))
+	if len(got.SigningKeys) != 2 {
+		t.Errorf("signing keys: %d", len(got.SigningKeys))
+	}
+	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
+		t.Errorf("Kept: %v %v", k, err)
+	}
+}
+
+func TestSignRefusesWhenTheAdminIssuerIsANonMashKey(t *testing.T) {
+	w := newDropWorld(t)
+	w.enable(w.plain, nil)
+	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	var nk *admin.IssuersNotKeptError
+	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "admin" || nk.Problems[0].Issuer != w.plain {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestSignRefusesWhenAConnectedExemptUserIsUnderANonMashKey(t *testing.T) {
+	w := newDropWorld(t)
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.plain}})
+	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	var nk *admin.IssuersNotKeptError
+	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "exempt" || nk.Problems[0].User != "UEXEMPT" {
+		t.Fatalf("err %v", err)
+	}
+	// an unreadable scan refuses too
+	w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return nil, errors.New("scan incomplete") }
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil || !strings.Contains(err.Error(), "scan incomplete") {
+		t.Errorf("err %v", err)
+	}
+}
+
+func TestSignWithOnlyMashKeysNeedsNoDropFields(t *testing.T) {
+	w := newDropWorld(t)
+	w.iss.Resolver = oneJWT{tokOf(t, w, false)}
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// tokOf is the world's account JWT without the plain key.
+func tokOf(t *testing.T, w *dropWorld, plain bool) string {
+	t.Helper()
+	ac := jwt.NewAccountClaims(w.acct)
+	if plain {
+		ac.SigningKeys.Add(w.plain)
+	}
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = w.otherRange, "bar.d"
+	ac.SigningKeys.AddScopedSigner(sc)
+	tok, err := ac.Encode(w.keys.op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
+	w := newDropWorld(t)
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
+		t.Fatalf("generation 1: %v", err)
+	}
+	if _, err := w.iss.Kept(context.Background(), 1); err != nil {
+		t.Fatalf("Kept generation 1: %v", err)
+	}
+	for _, g := range []uint64{0, 2, 7} {
+		_, err := w.iss.Sign(listset.Record{Generation: g}, w.compiled)
+		if err == nil || !strings.Contains(err.Error(), "remove it before a list set can be applied") || !strings.Contains(err.Error(), w.plain[:8]) {
+			t.Errorf("generation %d: err %v", g, err)
+		}
+		if _, err := w.iss.Kept(context.Background(), g); err == nil {
+			t.Errorf("generation %d: Kept accepted a non-mash key", g)
+		}
 	}
 }
