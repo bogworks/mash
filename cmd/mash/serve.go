@@ -23,6 +23,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -196,6 +197,15 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
+	// The activity tracker reads herdr and the hook command's record, and stops with serve's context. It starts a
+	// goroutine only for a source that is configured. A spool directory that cannot be determined leaves the hooks
+	// source out.
+	adir, derr := endpoint.SpoolDir(cfg)
+	if derr != nil {
+		adir = ""
+	}
+	src.tracker = activity.New(activity.Options{Env: os.Getenv, Dir: adir, Off: cfg.Activity == "off", Log: stderr})
+	src.tracker.Start(ctx)
 	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
 	var policy []byte

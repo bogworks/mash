@@ -478,6 +478,15 @@ What this means for operators:
 - **A hook without serve does nothing.** It never creates a spool, so it is silent until serve has made one.
 - **Test failpoints.** `MASH_HOOK_FAILPOINT` (`before-print`, `after-print`, `after-first-drained`) makes `mash hook` print `mash hook: failpoint <name>` on stderr and block, and `MASH_SERVE_FAILPOINT=before-ack` makes `mash serve` print `mash serve: failpoint before-ack #<seq>` and block just before it acks a message a hook has drained (it never acks it), so a test can SIGKILL the process there. Both are for the crash tests only; never set them outside those.
 
+## Session activity source
+
+`mash serve` can tell what the session it runs under is doing: a state (`idle`, `working`, `done`, `blocked`, `error`) and, when blocked, why (`permission`, `question`, `auth`). `MASH_ACTIVITY=auto|off` (or `activity` in config.json; the environment wins) turns it on or off. `auto` is the default and reads the two sources below; `off` reads neither, and the `status` tool says `activity: off`. Any other value is a configuration error.
+
+- **herdr.** When `HERDR_SOCKET_PATH` and `HERDR_PANE_ID` are set, serve talks to herdr over that socket with read-only calls only: `ping`, `pane.get` and `events.subscribe`. This is the only source that can say `idle`, because it looks at the screen.
+- **Hooks.** The plugin's `mash hook` command (which the plugin runs on `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `PreCompact` and `PostCompact`) also records the hook event: it writes the latest main-session event to `activity.json` in the endpoint's spool directory, and serve reads it. The recording connects to nothing, takes no lock, writes nothing when serve has not made the spool directory, and ignores subagents' events.
+
+Two rules hold. Hooks never say idle: no hook fires when a dialog is refused or a turn is abandoned, so a hooks-only answer is `working`, `done` or `blocked`. Absent is not idle: when neither source can say, the `status` tool says `activity: absent (...)` with the reason, and nothing may read that as free. The state is for the local `status` tool only for now; it is not yet sent to peers.
+
 ## Relay tracing
 
 `mash serve` traces relay by asking: a session that receives a request from one endpoint and soon asks a third endpoint the same thing, passing a message along. It only traces ([ADR 0064](decisions/0064-relay-by-asking-is-traced-not-blocked-content-free-trace-lines-and-counters.md)). It never blocks, delays or changes a message, and it never reads a message body: the trace comes from signed headers (the sender's name, the signed `Mash-Via` of [ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md)) and from the time each mail arrived and each send was made. There is no pattern matching and no operator-supplied rule. There is no flag; the lines go to serve's stderr.

@@ -18,12 +18,18 @@ import (
 // Several sessions of one user share one Claude Code config dir, so the installed plugin at version N runs against
 // mash binaries N and N-1. Changing the plugin's commands breaks sessions whose binary is N-1: a new command may ship
 // only once the previous release has it. The golden below and pluginMinMash are updated deliberately, together.
+// The activity events add no command: they run the same `mash hook`, which an older binary ignores for an event it does not know.
 const pluginMinMash = "0.2.0"
 
-// pluginCommandsGolden is every command line the plugin runs: the hook commands (SessionStart prefetch, PostToolUse, UserPromptSubmit) with their matchers in brackets and the MCP server.
+// pluginCommandsGolden is every command line the plugin runs: the hook commands (SessionStart prefetch, PostToolUse, UserPromptSubmit, and the activity events that `mash hook` also records) with their matchers in brackets and the MCP server.
 var pluginCommandsGolden = []string{
+	`PermissionRequest [*]: ` + hookCmd,
+	`PostCompact []: ` + hookCmd,
 	`PostToolUse [*]: ` + hookCmd,
+	`PreCompact []: ` + hookCmd,
+	`PreToolUse [*]: ` + hookCmd,
 	`SessionStart []: ` + prefetchCmd,
+	`Stop []: ` + hookCmd,
 	`UserPromptSubmit []: ` + hookCmd,
 	`mcp: ${CLAUDE_PLUGIN_ROOT}/scripts/mash serve`,
 }
