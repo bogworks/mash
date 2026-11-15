@@ -1,3 +1,9 @@
+> **Status: not shipped in v0.5.0.** The policy commands (`mashctl policy`, `mashctl issue serve`, `mashctl wrangler`,
+> `mash policy show` and `mash policy explain`) are not part of v0.5.0, and nothing in this release adopts an account.
+> The engine this document describes is internal: its packages and tests stay, and the release gate still runs its
+> tests. A command line for it follows in 0.5.5. The decision is [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md). Where this text names a command, read it as
+> a description of the design, not of a command you can run.
+
 # How mash enforces the messaging policy
 
 > **Drafting status.** This document is written so that an outside reader can check each claim against code, a test or
@@ -399,6 +405,8 @@ a deny tag, or is signed by a different key, and it never re-signs a key the acc
 
 ### 5.3 Issuing a credential: the issue service and the issue record
 
+> **Not shipped in v0.5.0.** The issue service (`mashctl issue serve`) and the outside-submitter workflow are not in this release. The issue record is: `mashctl` writes it, and `mashctl issued list|check` read it. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+
 **The issue record (on `main`).** [ADR 0101](decisions/0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md)
 records every user JWT `mashctl` issues in the KV bucket `mash-issued`, keyed by public key. An entry holds the public
 key, address, owner, kind, tags, generation, issue time, purpose (`issue`, `rotation` or `probe`) and a revocation time
@@ -588,6 +596,8 @@ and the sender is not told, because those are core NATS publishes (section 4). M
 
 ### 6.6 What the policy covers, and running one account both ways
 
+> **Not shipped in v0.5.0.** Adoption (`mashctl policy adopt`), the adoption marker and the refusals on an adopted account are not in this release. Nothing can adopt an account. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+
 The lists cover four verbs: mail, prompt, status and heartbeat. Every verb must be stated for every owner group, and mash
 never infers one verb's switch from another (REQ-002). Other traffic is not under the lists: the reply and plumbing
 subjects (section 6.1), and the directory reads that every sender needs.
@@ -624,6 +634,8 @@ store stop other users and not other processes of the same user; the threat mode
 or on a mount agent sessions cannot read.
 
 ### 6.8 The static wrangler registry is for test accounts
+
+> **Not shipped in v0.5.0.** The wrangler registry and `mashctl wrangler` are not in this release. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
 
 How a real wrangler's key comes to be registered for a host and owner group is **not decided** (contract DEC-002, open
 part). Until it is, mash ships only a static registry, `wranglers.json` in the key store directory, managed by `mashctl

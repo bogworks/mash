@@ -1,6 +1,6 @@
 # mashctl: adding, re-issuing, labeling and retiring endpoints
 
-The policy file is gone: endpoints are declared in the directory, by `mashctl add`, and every endpoint carries the same kind of permission set, the owner-line set `admin.Permissions(owner, name)` (it may mail the endpoints of its own owner and read what it needs to; the address is the fence). `mashctl add` and `mashctl reissue` mint NATS users for them. A user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there are no zones, no per-zone signing keys and no tags ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md). See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md); [ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) is amended by ADR 0091. The `mashctl policy` group has `adopt`, `serve`, `reconcile`, `show`, `explain` and `diff`: `adopt`, `serve` and `reconcile` are [below](#adopting-the-account-an-outside-owner-of-the-list-sets), and `show`, `explain` and `diff` read the list set in force ([Reading the list set](#reading-the-list-set)).
+The policy file is gone: endpoints are declared in the directory, by `mashctl add`, and every endpoint carries the same kind of permission set, the owner-line set `admin.Permissions(owner, name)` (it may mail the endpoints of its own owner and read what it needs to; the address is the fence). `mashctl add` and `mashctl reissue` mint NATS users for them. A user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there are no zones, no per-zone signing keys and no tags ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md). See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md); [ADR 0053](decisions/0053-who-may-mail-whom-is-a-policy-file-compiled-by-mashctl-into-nats-permissions.md) is amended by ADR 0091.
 
 ## Prerequisites
 
@@ -76,177 +76,6 @@ Every user JWT `mashctl` issues is written to the issue record, the `mash-issued
 `issued list` prints the latest entry of each key, with its purpose and, when set, `revoked TIME` (`--json`: `present`, `count`, `issued`, each entry with `purpose` and, when set, `revoked_at`).
 
 `issued check` asks every server, through the system account (`--sys-creds FILE`, else `MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `retire` does). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
-
-## The issue service and the wrangler registry
-
-```
-mashctl issue serve --test-account [--list-set FILE] [--registry FILE] [--sys-creds FILE] [--servers N]
-mashctl wrangler init --test-account
-mashctl wrangler add --host H --group G --key PUB
-mashctl wrangler list
-mashctl wrangler remove --host H --group G
-```
-
-`issue serve` runs the issue service until it is interrupted ([ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md)). It connects with the admin credentials, as the other admin commands do, and with the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`, as `policy serve`) to read the account JWT, and it needs the declared server set (`--servers N` or `MASH_SERVERS`, as `policy serve`; a named cluster needs it): it reads the JWT from every expected server and refuses, signing and recording nothing, with `signing_key_unavailable` when the set is not complete or any expected server does not answer (`only N of M servers answered`), because a silent server may hold a newer JWT that removed the key; the newest copy decides only when all answered, and a failed read is not kept. Once it has the JWT: before it signs it checks that the owner group's key is published there as a scoped signer whose template equals the list set's, and refuses with `signing_key_not_scoped` or `template_mismatch` otherwise (the answer is kept for 3 seconds). The record write refuses a revoked key or one bound to another address, so a revocation or a second issuer cannot slip in after the early check; a request refused for any reason keeps its nonce free (a dedicated user would be better and is left to operations), and logs to stderr, one line per refusal. It takes a request over NATS that holds a sender's public key and the address it is for, countersigned by the wrangler on the sender's host, signs a user JWT for that key with the owner group's scoped signing key and the tags of mash's own table, writes it to the issue record (purpose `issue`) and returns it. No private key is made, received, stored or logged. Tags, permissions, limits, a name or an expiry in a request are ignored.
-
-- Subject: `agents.issue.<range>.<owner>`, the owner group of the address; the service listens on `agents.issue.<range>.*` as the micro service `mash-issue`.
-- Request: `{"version": 1, "address": "range.owner.name", "public_key": "U...", "host": "H", "nonce": "<base64url, 16 to 64 random bytes>", "expires": <unix seconds, at most 5 minutes ahead>, "proof": "<base64url ed25519 signature>", "wrangler": "U..."}`, at most 4096 bytes. `proof` is the wrangler's signature over `mash-issue-v1\n<address>\n<public_key>\n<host>\n<nonce>\n<expires>`.
-- Reply: `{"jwt": "..."}` or `{"error": "...", "code": "..."}` with a stable code (`malformed_request`, `request_too_large`, `invalid_public_key`, `expired`, `expiry_too_far`, `replayed_nonce`, `wrangler_not_registered`, `bad_proof`, `address_not_listed`, `key_revoked`, `key_bound_elsewhere`, `signing_key_unavailable`, `no_list_set`, `record_failed`, `address_subject_mismatch`, `busy`, `internal`, `signing_key_not_scoped`, `template_mismatch`).
-- `--list-set FILE` (default `<config dir>/listset.json`): the list set in force, a JSON object shaped like the list set (`Range`, `Switches` of `Group`, `Verb`, `Switch`, and `Senders` of `Sender`, `Allow`, `Deny`), because the list set's file format is not decided. It is read again whenever it changes; a file that does not compile means no issue. The generation recorded is 0 until the policy gate lands.
-- The owner group's signing key is the key store's `groups/<range>.<owner>.nk` (0600, like a zone key); the service never creates one.
-- A key already bound to a different address in the issue record, or marked revoked there, is refused.
-
-**The static wrangler registry is for test accounts only.** `issue serve` requires `--test-account`, your own declaration that this account is a test account; the registry file must say `test_account` too, and the file alone does not start the service. The registry file, at the default path or the one `--registry` names, must be a regular file owned by you that group and others cannot write, in a directory that is not a symlink, is owned by you and that group and others cannot write (`chmod go-w DIR`; the lock file lives in the same directory). The list set file (`--list-set`, or the default) is held to the same rule: it is opened without following a symlink, must be a regular file owned by you that group and others cannot write (others may read it; it is not secret), and sits in a directory only you can write. These checks run at every request, so a list set that is swapped or loosened while the service runs is refused with `no_list_set`, nothing is signed, and the reason is logged. How a real wrangler's key comes to be registered for a host and an owner group is not decided yet. `wrangler init --test-account` writes `wranglers.json` in the key store directory (`--registry FILE` on `serve` names another), 0600, naming this account and flagged `test_account`; `add`, `list` and `remove` change it (the file is replaced atomically and keeps mode 0600; `init`, `add` and `remove` are serialised by a lock file, `wranglers.json.lock`, held from reading the registry to writing it, so a concurrent edit cannot undo another, while `list` and the service read without waiting). `issue serve` refuses to start, saying `no wrangler registry for this account: the static registry is for test accounts only; real wrangler registration is not decided yet`, when there is no registry, when it names another account, or when it is not flagged `test_account`. A removal takes effect at the next request.
-## Reading the list set
-
-```sh
-mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
-mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
-mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
-```
-
-These three verbs read the list set in force, and the status of its application, from the account's entry in the policy bucket over the admin connection. They change nothing: they take no lease and write no bucket entry, record or file.
-
-- `show` prints the list set in force and how far it is applied: its generation, its state, and the generation each server holds. With nothing in force it says so.
-- `explain SENDER RECEIVER` says whether the sender may mail the receiver under the list set in force, and which entries decide it. SENDER and RECEIVER are three-part addresses (`range.owner.name`).
-- `diff FILE` reads a list-set document (canonical JSON or a compact JWS) and prints what applying it would do to the list set in force, without applying it. The plan is accepted or refused, and a refusal names the reasons. `diff` also runs the checks `policy serve` makes before it pushes anything, the same code with the same texts: a change that adds an address whose inbox is missing or suspended is refused at stage `inbox`, and one that narrows an existing sender by tags (which needs a new credential for that sender, not in this release) at stage `narrowing`; the inbox is read over the admin connection, and a plan from a caller that passes no inbox source says `inbox not checked`. The `first credential` and `new credential` sections of the text plan name the senders that need a credential; applying the list set issues none: each sender's credential comes from the issue service (`mashctl issue serve`), on the wrangler's request. A document whose content is the same as the list set in force is refused at stage `unchanged` (`same content as generation N in force; nothing to apply`), as the apply refuses it, unless it starts or completes a submitter rotation. An account that is not adopted, or whose adoption marker cannot be read, is refused at stage `adoption`. `diff` checks the signature only when `--submitter` is given; without it the file is read as it is. A `next_submitter` is checked against the same held keys the intake gets (the key store's keys, the owner groups' keys and the admin user's key). A marker that names another account than the one diffed is refused at stage `adoption`. During a pending rotation, a JWS is checked against the marker's pending and current keys to tell whether it completes the rotation; a document whose signer cannot be told is not refused as `unchanged`, and the plan says the outcome cannot be checked without `--submitter`. The JSON plan has a `rotation` object, `{"action": "starts"|"completes"|"pending", "next_submitter": KEY}` (`"unknown": true` when the signer could not be told), and `null` when the document does nothing to a rotation or the plan is refused.
-
-Flags:
-
-- `--json` prints the result as JSON in place of the text.
-- `--bucket NAME` names the policy bucket and overrides the setting below.
-- `--range RANGE` fills `{range}` in the bucket name and is required when the bucket name has `{range}`. With a literal bucket name it fills nothing; `diff` uses it only as the range to validate the document against, which a first list set needs when nothing is in force.
-- `--account KEY` is the account public key. It defaults to the account key in the key store.
-- `--submitter PUBKEY` (`diff` only) is the public key that must have signed FILE.
-
-The bucket is named by the `MASH_POLICY_BUCKET` setting, a bucket name pattern that may contain `{range}` (letters, digits, `-` and `_`). Set it or pass `--bucket`; with neither, the verb fails with `no policy bucket`. A value that is not a valid bucket name is named by its source and never printed back.
-
-Exit codes: 0 on success; 1 for a failure (no bucket, no connection, an unreadable file) and, for `diff`, a refused plan; 2 for a usage error (a missing or extra argument, an unknown flag, an address or key that fails validation).
-
-## Adopting the account: an outside owner of the list sets
-
-```sh
-mashctl policy adopt --submitter NKEY_PUBLIC_KEY [--sys-creds FILE] [--exempt USER_KEY]...
-mashctl policy adopt --show [--json]
-```
-
-An outside system may own the account's list sets (who may mail whom). `policy adopt` is how the operator tells mash so ([ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md)). Run it with the account's admin credentials and key store, like the other verbs that write to the server. It writes the adoption marker, one key (`account`) in the `mash-adoption` bucket, holding the submitter's public key, the account's public key, the time, the admin user that ran the command and the action (`adopt`, `recover`; `rotate` is reserved for the list-set intake) and the exempt keys. The bucket is made as the issue record's is: file storage, no TTL, history 64 (the revisions are the audit trail), rollup, delete and purge refused, no endpoint permission on it. `mashctl init` creates it, and `policy adopt` creates it when it is missing.
-
-- `--submitter` takes any valid nkey public key; the contract says an Ed25519 nkey public key and does not fix the prefix, so mash checks that it is a public key (a seed is refused, and neither is echoed) and nothing about its type. It must be a key mash does not hold: the account's own key, the operator and system keys, a zone signing key and the admin user's key are refused, and nothing is written.
-- The first run adopts the account. A second run with the same key writes nothing and says so. A run with a **different** key is the recovery rotation: it records the action `recover`, and the old key is refused from then on, at once, because mash reads the marker each time and keeps no copy.
-- The marker also records the **exempt keys**: public keys of the users the later first-list-set reconcile must never touch. `adopt` records the admin user's key (from the admin credentials in use), the system user's key (from the system credentials: `--sys-creds`, `MASH_SYS_CREDS`, or the `sys.creds` beside the admin credentials; adopt refuses, writing nothing, when they cannot be found) and each `--exempt KEY` (repeatable; a hand-made service user; it must be an nkey user public key, and the operator, system, account and zone keys are refused). Only public keys are read from the credentials; a seed is never printed or kept. The same submitter with another exempt set writes a new `adopt` revision ("exempt keys updated"); the same submitter and set writes nothing; a different submitter is the recovery rotation and refreshes the set.
-- `--show` prints the marker and its exempt keys (`--json`: `adopted`, `marker`); for a marker without any it says `exempt: none recorded: run adopt again before the reconcile`, or `not adopted`. It exits 1 when the marker cannot be read; it never calls an unreadable marker "not adopted".
-- There is no un-adopt command. Un-adoption is not supported yet; whether and how it should be is an open question for the maintainer. `next_submitter` is in the marker's schema, `--show` prints it, and only the list-set intake (`policy serve`) writes it.
-- **Adopting a real account is a live-account step**, taken only on an explicit go from the maintainers. This change was built and tested on test accounts only.
-- An adopted account's list sets can be changed only by the submitter, through `policy serve`, and not through mashctl. Adopt only when you mean to hand the list sets over.
-
-### What an adopted account refuses
-
-On an adopted account these refuse before they touch anything (no policy-file edit, no key, no signing, no push, no creds file, no directory or issue record) with `mashctl: <command> is refused: this account is adopted by an outside system (submitter UABCDEFG...): list sets come only through the list-set path; nothing was changed` and exit 1. A marker that cannot be read (the server answers with an error, the bucket is not as mash makes it, the value is not one this version understands) refuses too, with `cannot tell whether this account is adopted: ...` instead: the guard fails closed.
-
-| Command | On an adopted account |
-|---|---|
-| `add`, `reissue` | refused |
-| `label`, `unlabel` (also `--dry-run` and `--sync`: the policy-file edit is the policy change) | refused |
-| `retire` | refused (it edits the policy file and revokes in the account JWT) |
-| `set-meta` with `--label` | refused (labels are the policy's) |
-| `provision` with `--label` (also `mash admin provision`) | refused (a label is a policy change) |
-| `set-meta` without `--label` (role, host, description, capabilities), `provision` without `--label`, `deprovision`, `suspend`, `resume`, `suspended`, `limits`, `init`, `list` | allowed: operator housekeeping of one endpoint, not a list set. `deprovision` still revokes that endpoint's user in the account JWT; that only removes one user |
-| `policy diff`, `show`, `explain`, `adopt --show`; `audit`, `issued`, `inbox inspect`, `who` | allowed: read-only |
-
-Policy changes and adoption are serialised by an account lock. Every guarded command takes it first, reads the marker, and holds the lock through all of its writes; `policy adopt` takes the same lock for its write. So an adoption waits for a guarded command that is already running (which finishes first), and a command started after the adoption is refused. A command, or `policy adopt`, that cannot take the lock within 30 seconds exits 1 with `another policy change or an adoption is in progress; nothing was changed`: another guarded command or an adoption holds it, so try again in a moment. The lock extends itself while a long command runs; a command that finds the lock lost stops before its next write and says so. Read-only commands never take it.
-
-| Command | Writes after the guard, each preceded by a lock check |
-| --- | --- |
-| `add` | the zone key (when new); the issue record; the directory record and inbox; the creds file; the policy file edit |
-| `reissue` (key kept) | the issue record; the creds file replacement |
-| `reissue` (key rotated) | the issue record of the new key; the staging of the new creds; the revocation of the old user key (account JWT push); the record of the revocation; the directory record update; the creds file replacement |
-| `retire` | the removal of the directory record and inbox; the revocation of the user key; the record of the revocation; the policy file edit; the move or removal of the creds file |
-| `label`, `unlabel` | the policy file edit; with `--sync`, the update of the directory labels |
-| `set-meta --label`, `provision` with a label | the one record write |
-
-A check that fails stops the command before that write and every later one, and the message names the step that was not taken and what was already done (for a reissue: the new key is recorded and its creds are staged, the old key is or is not revoked; run `mashctl reissue NAME` again, which resumes from the staged file). `add` also undoes the record and creds file it wrote (the issue record is append-only and stays). Not preceded by a check: undoing a command's own earlier write on the way out, the removal of a reissue's leftover staged file, and the writes inside one guarded admin call (for example the inbox stream and the record of one `provision`), which are one step.
-
-The residual window is the time between a check and its write, microseconds to one request. A lock lost in that window can still let one write through. The account is not left in an unknown state by it: the next guarded command reads the marker again and is refused if the account is adopted.
-
-The guard needs the server: it reads the marker over the admin connection first. So a guarded command needs the admin credentials as well as any system credentials it already used. Where no server is configured at all (no `url`, no `MASH_URL`), the one command that can run that way, a `label` or `unlabel` that only edits the policy file, is allowed and says nothing about adoption: mash has nothing to ask. With a server configured and the marker unreadable (no admin credentials, no connection), it refuses.
-
-## Applying list sets: `policy serve`
-
-```
-mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
-```
-
-`policy serve` is a long-running service that applies the list sets of one adopted account. It watches the key `listset.<account public key>` in the range's policy bucket. The bucket is named by `MASH_POLICY_BUCKET`, a bucket name in which `{range}` is replaced by `--range`; operations creates the bucket and mash never does, so the service refuses to start when it is missing. For each document written there it checks, in this order, that the account is adopted, that the document is not the one already in force, that its signature verifies under the submitter the adoption marker expects, and that it names this account and this range. A document that passes is applied: the account JWT is signed with the operator key and one scoped signing key per owner group, pushed to every server, and checked by the applied-policy gate before the generation is recorded as in force. The outcome of every document, applied or refused, is the value at `status.<account public key>` in the same bucket; a refusal names its stage (`adoption`, `signature`, `document`, `account`, `range`, `size` or `apply`) and a short reason, and changes nothing. The service uses the same configuration as the other verbs: the admin credentials and the key store (`MASH_KEYS_DIR`), the system credentials (`--sys-creds`, `MASH_SYS_CREDS` or the `sys.creds` beside the admin credentials) and the server URL. The service also answers `mash policy show` and `mash policy explain` on `agents.policy.<range>`: it works out who asked from the signed request, using the `mash-directory` bucket, and answers with that sender's own reach. It refuses to start when the directory bucket is missing (create it with `mashctl init` or `mash admin init`), and the responder stops with the service. It logs what it does and never a key.
-
-- `--range` is required. One process serves one account, the one the key store and the admin credentials belong to; it refuses when the admin credentials belong to another account than the key store's account key, and when the account is not adopted.
-- `--servers N` (or `MASH_SERVERS`) is required: the number of servers in the deployment, 1 or more. Before each apply the service reads every server's `max_control_line` and `max_payload` through the system account, waits until that many servers have answered or a 4-second deadline passes, and checks the list set against them (the size of each sender's credential and of the account JWT). The smallest limit of any server decides, and a refusal at stage `size` names that server and its limit. If fewer servers answer than declared, it refuses that document and pushes nothing: the limits are never guessed. A server is reached at the host it reports; one that reports a wildcard host (`0.0.0.0`, `::`) is reached at the configured URL in the same position, which needs the configured `url` to list exactly `N` comma-separated URLs in the order of the server names, and otherwise the document is refused (no host is ever invented). Every derived URL is held to the same rule as the admin connection (TLS, or loopback only with `insecure_loopback`) before anything connects to it, and the probe and witness connections use the configured CA and client certificate.
-- A list set that narrows an existing sender by tags (it takes an allow away from a sender that is already in force) cannot be applied yet: replacing that sender's credential is not part of this release. It is refused before anything is pushed, with the reason in the status, and nothing changes.
-- A list set may add addresses, but only addresses that already have an inbox. The service makes no inbox and issues no credential: the endpoint behind each address is made first, with `mashctl add` (before the account is adopted, because `add` is refused afterwards) or through the issue service. An address `range.owner.name` has its inbox when its own inbox stream and reader exist, or when the endpoint `mashctl add` made under the same owner and name has its inbox, which receives the same mail. Before anything is pushed the service checks every added address; if one has no inbox the list set is refused and the status names the address (up to three, then a count) and says it has no inbox yet and that the endpoint must be provisioned, with a credential from the issue service, first. An inbox that exists but was changed from what mail needs is refused with the setting named. Nothing is changed by the check, and the list set can be submitted again once the endpoint exists. See ADR 0122.
-- The list-set key is the only key of the bucket the outside system's credential may write; give it publish permission on `$KV.<bucket>.listset.>` and nothing else in the bucket, so that it cannot write the `status.` keys.
-- It stops cleanly on SIGINT or SIGTERM.
-
-## Reconciling an adopted account
-
-```
-mashctl policy reconcile [--json] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
-mashctl policy reconcile --yes --plan DIGEST [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
-```
-
-Adopting an account does not change what is already in it. An account may hold user credentials issued before the first list set and signing keys that are not mash's. `policy reconcile` is the operator command that plans their removal (AT-015; [ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md) records the exempt keys and the plan). Run it after the first list set is applied. It needs the admin credentials (the marker, the issue record, the ledger) and the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`; the connections of every server, and with `--listset` the account JWT the servers hold), and the declared server count when the cluster is named (`--servers N` or `MASH_SERVERS`, as `issued check`). The account must be adopted, with the exempt keys recorded.
-
-**Without `--yes` it is a dry run.** It prints the plan, changes nothing, takes no lease and no lock. The plan ends with `plan: sha256:<hex>` (just before the status line) and, when it revokes anything and the issuer check passed, with `run again with --yes --plan sha256:<hex> to revoke`.
-
-**`--yes --plan DIGEST` executes it, one way.** `--plan` is required: without it `--yes` exits 2 with `--yes needs --plan DIGEST from a dry run`; `--listset` (a preview, never executable) and `--json` with `--yes` are usage errors (exit 2). It computes the plan, refuses when its digest is not DIGEST, takes the account lock (the lock every guarded policy change takes) and the ledger lease, computes the plan again under them and refuses again on a different digest (`the plan changed since the dry run: run it again`, nothing changed), signs the in-force account JWT with each planned key also revoked, with the key store's operator key (the production signer, `policyserve.Issuer`), pushes it to every server, gates it, commits it as the JWT in force (so the next list set keeps the revocations) and only then marks each recorded key revoked in the issue record. It prints each key (`revoked KEY: REASON`) and then `reconciled: N revoked`, and exits 0; any refusal exits 1 with nothing changed. A plan with nothing to revoke prints `reconciled: 0 revoked`. If the revocations are on every server but the issue record could not be marked, it prints what it revoked and exits 1; running it again marks nothing twice.
-
-**The digest** is `sha256:` and the SHA-256 of the plan's canonical JSON: the account, the source, the generation, each non-mash signing key and its state, each revocation's key, sender and reason, the findings, the issuer problems and the status. It leaves out every time (a revocation's `at` is the later of now and a JWT's `iat`, so it moves on every run) and the connection details (connection ids, hosts, the users a key signed): a client that reconnects does not change what is revoked. A new connected untracked user, a changed issue record, a new generation or a new finding changes it. `--json` carries it as `plan_digest`. A preview has none.
-
-**Where the list set comes from.** By default the list set in force, read from the account's ledger in the range's policy bucket: `--bucket NAME`, or `MASH_POLICY_BUCKET` as a pattern with `--range R` filling `{range}`; `--account KEY` names the account (default the key store's). It needs generation 1 or later. `--listset FILE` instead reads a list set document from a file (the signature is not checked) and previews against it, before the first apply; that plan is never executable.
-
-**Signing keys.** mash's signing keys are the scoped keys the key store holds as owner group keys (`groups/<range>.<owner>.nk`), of this range or any other; the key store is the authority, and a group with no key in the store is an error. A non-mash signing key is any other key of the account JWT. The first apply removes them, because the gate refuses extra signers; the reconcile never pushes for them. For the JWT in force it reports each one still there: `signing key KEY: still present`, a finding. With `--listset` it reports each one the apply would remove: `signing key KEY: removed by the first apply`. Under each, the connected users it signed (CONNZ's issuer key). The dry run exits 1 when the admin user (the `iss` of the admin credentials) or a connected exempt user is signed by a signing key that does not stay (the account's own key and the scoped keys stay): reissue them under the account key first. The plan is printed and the error goes to stderr.
-
-**Revocations.** The plan revokes:
-
-1. a recorded issued user whose sender (the record's address) is not in the list set: `recorded, sender not in the list set`;
-2. a connected user that is none of recorded, exempt or issued under the list set: `connected, untracked`.
-
-Each revoke line names the key, the sender or the connection (the user's name, the client's name, host, server, connection id) and the revocation time, the later of now and the connected JWT's `iat`. Everything the plan cannot prove is a finding and is left alone:
-
-- a recorded key whose issue-record history cannot be shown complete (ADR 0115: the bucket's `mash_issued_history` marker, no revision at the history cap) or that has a future-dated revision;
-- a connected user with no record whose JWT was signed by one of the list set's scoped keys: `a list-set credential without its record`;
-- a connected user with no record whose connection reports no issuer, or an issuer that is neither the account key nor a signing key of the account JWT: `connection with no reported issuer: cannot tell whether a list-set key signed it`;
-- every connected user with no record, when the issue bucket cannot prove that no record was lost (it must deny deletes and purges and carry the history marker `full` or `raised:N:S`);
-- a recorded admin user that is not exempt, a revoked key still connected, and a connection scan that was incomplete (a server that did not answer).
-
-Exempt keys are in no action and no finding. A dry run that lists at least one revoke ends, before the status line, with `a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way`; `--json` then carries `"one_way": true`. The executor keeps every revocation any server holds. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed (`--yes`: executed), 1 the issuer check failed or a failure (including a refused `--yes`), 2 usage.
-
-Sample, before the first apply (`--listset first.json`):
-
-```
-account ADZ...: preview against a list set from a file (not applied; nothing here can be executed)
-signing key AA5...: removed by the first apply
-  signed connected user UCA... (user "plain-lane", client "plain-client", host 127.0.0.1, server s1, cid 25)
-revoke UCA...: connected, untracked [at 2026-11-14T19:47:31Z] connected: user "plain-lane", client "plain-client", host 127.0.0.1, server s1, cid 25
-revoke UDW... (sender foo.alice.gone): recorded, sender not in the list set [at 2026-11-14T19:47:31Z] connected: user "gone-lane", host 127.0.0.1, server s1, cid 24
-reconciled: 2 actions
-```
-
-Sample, after the first apply, the dry run and then `--yes`:
-
-```
-$ mashctl policy reconcile --bucket mash_foo_policy
-account ADZ...: list set generation 1 in force
-revoke UBM...: connected, untracked [at 2026-11-14T22:44:56Z] connected: user "legacy-lane", client "legacy-client", host 127.0.0.1, server s1, cid 24
-revoke UBV... (sender foo.alice.gone): recorded, sender not in the list set [at 2026-11-14T22:44:56Z] connected: user "gone-lane", client "gone-client", host 127.0.0.1, server s1, cid 26
-a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way
-run again with --yes --plan sha256:2ab5...a70 to revoke
-plan: sha256:2ab5...a70
-reconciled: 2 actions
-$ mashctl policy reconcile --bucket mash_foo_policy --yes --plan sha256:2ab5...a70
-revoked UBM...: connected, untracked
-revoked UBV...: recorded, sender not in the list set
-reconciled: 2 revoked
-```
 
 ## Labels
 
@@ -341,7 +170,7 @@ The three-token form of `provision` and `deprovision` (`--agent A [--owner O] [-
 
 ## Exit codes and arguments
 
-`mashctl policy` with no subcommand, or one it does not have (it has `adopt`, `serve`, `reconcile`, `show`, `explain` and `diff`), prints its usage to stderr and exits 2. `mashctl policy --help` (or `-h`) and `mashctl policy VERB --help` print the usage to stdout and exit 0, and so do `mash policy show --help` and `mash policy explain --help`; the verb does not run. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get a narrower, per-endpoint set in their JWT.
+Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl deprovision NAME` for a name with no record and no inbox prints `no endpoint named NAME` and exits 1; the admin operation itself stays idempotent, only the verb looks first. `mashctl permissions NAME` prints the legacy wide mail permission set for hand-made users; it says so on stderr (stdout stays the JSON or the `--nsc` flags), because endpoints added by `mashctl add` get a narrower, per-endpoint set in their JWT.
 
 ## Zones were removed
 

@@ -1,2 +1,0 @@
-refused: nothing would change
-  [narrowing] narrowing: this change narrows what an existing sender may reach by tags, which needs a new credential for that sender. Replacing a sender's credential is not part of this release, so there is nothing to do about it yet: the change was refused and nothing was pushed. Submit a list set that does not narrow an existing sender by tags.

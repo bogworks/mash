@@ -203,11 +203,6 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	guard, ok := accountGuard(cfg, "add", stderr)
-	if !ok {
-		return 1
-	}
-	defer guard.Release()
 	// The name rule comes before any key or record: a refused name creates nothing.
 	if err := admin.CheckProvision(cfg.NameRule, cfg.Owner, o.name); err != nil {
 		return fail("%v", err)
@@ -271,17 +266,11 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 
 	// (2) The issue record comes before the directory record and the creds file: a user that can connect is always in
 	// it. A failure here issues nothing (the creds are in memory only).
-	if err := guard.Before("the issue record"); err != nil {
-		return fail("%v; nothing was issued", err)
-	}
 	if err := adm.RecordIssued(ctx, issuedOf(m, cfg.Owner, store.PurposeIssue)); err != nil {
 		return fail("%v; nothing was issued", err)
 	}
 
 	// (3) the directory record and inbox.
-	if err := guard.Before("the directory record and inbox"); err != nil {
-		return fail("%v; nothing was issued", err)
-	}
 	meta := admin.Meta{Labels: labels, Description: o.describe, Caps: o.caps}
 	if _, err := adm.Provision(ctx, o.name, m.UserPub, m.AccountPub, o.note, meta); err != nil {
 		if strings.Contains(err.Error(), "is already provisioned") {
@@ -301,9 +290,6 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 	}
 
 	// (4) the creds file, never overwriting.
-	if err := guard.Before("the creds file"); err != nil {
-		return fail("%v%s", err, rollbackProvision())
-	}
 	if _, err := writeCredsNew(credsPath, m.Creds); err != nil {
 		return fail("%v%s", err, rollbackProvision())
 	}

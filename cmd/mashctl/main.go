@@ -32,8 +32,6 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
-	case "policy": // offline: no server, no admin credentials
-		return runPolicy(args[1:], env, lookup, stdout, stderr)
 	case "adopt": // takes over a server you already run: the config and the key store, not a server
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
@@ -42,10 +40,6 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
-	case "issue": // the issue service: runs until interrupted
-		return runIssue(args[1:], env, lookup, stdout, stderr)
-	case "wrangler": // the static wrangler registry of a test account: a file in the key store, no server
-		return runWrangler(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the labels on the directory record

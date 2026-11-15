@@ -587,3 +587,13 @@ func issuedRecords(t *testing.T, adm *admin.Admin) ([]store.Issued, error) {
 	recs, _, err := adm.Issued(context.Background())
 	return recs, err
 }
+
+// adminOf is an Admin on the addEnv server.
+func (h *addEnv) adminOf() *admin.Admin {
+	h.t.Helper()
+	a, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return a
+}

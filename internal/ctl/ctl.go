@@ -113,10 +113,8 @@ func Usage(prog string) string {
 		adoptLines(line)
 		mintLines(line)
 		issuedLines(line)
-		issueServiceLines(line)
 		retireLines(line)
 		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
-		policyLines(line)
 	}
 	return b.String()
 }
@@ -135,34 +133,10 @@ func issuedLines(line func(left, right string)) {
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
-func issueServiceLines(line func(left, right string)) {
-	line("issue serve [--list-set FILE] [--registry FILE]", "run the issue service: sign a user JWT for a public key a registered wrangler countersigned, with the tags of the list set (test accounts only; runs until interrupted)")
-	line("wrangler init --test-account | add --host H --group G --key PUB | list | remove --host H --group G", "the static wrangler registry for a test account (the key store's wranglers.json)")
-}
-
 func retireLines(line func(left, right string)) {
 	line("retire NAME [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox")
 	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
 	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
-}
-
-func policyLines(line func(left, right string)) {
-	line("policy adopt --submitter KEY | --show [--json]", "mark the account as owned by an outside system and register the one key allowed to hand in list sets (a different key later is the recovery rotation); --show prints the marker; there is no un-adopt")
-	line("policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]", "after the first applied list set of an adopted account: the dry run that plans what to remove (signing keys that are not the list set's, recorded users whose sender is not in it, connected keys that are untracked) and changes nothing; --listset FILE previews the signing keys the first apply removes; exit 1 when an admin or exempt user is signed by a signing key that does not stay; --yes needs a signer and is refused in this version")
-	line("policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "the list set in force and how far it is applied (reads the policy bucket; changes nothing)")
-	line("policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]", "whether SENDER may mail RECEIVER under the list set in force, and why")
-	line("policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]", "what applying the list-set document FILE would do; exits 1 when the plan is refused")
-}
-
-// accountLockWait is how long a guarded command waits for the account lock; SetAccountLockWait changes it for tests.
-var accountLockWait = madmin.AccountLockWait
-
-// SetAccountLockWait sets how long guarded commands wait for the account lock and returns a func that restores the
-// wait. It is for tests; production uses madmin.AccountLockWait.
-func SetAccountLockWait(d time.Duration) (restore func()) {
-	old := accountLockWait
-	accountLockWait = d
-	return func() { accountLockWait = old }
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -201,7 +175,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		nc.Close()
 		return nil, nil, nil, err
 	}
-	a = a.WithNameRule(cfg.NameRule).WithAccountLockWait(accountLockWait)
+	a = a.WithNameRule(cfg.NameRule)
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err
@@ -261,11 +235,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(err)
 	}
 	defer closeAdmin()
-	// The account lock of a command that changes policy (provision with labels, set-meta with labels):
-	// taken with the marker check, held through the write, released on every exit.
-	var acct *madmin.AccountLock
-	defer func() { acct.Release() }()
-
 	switch args[0] {
 	case "init":
 		if err := a.Init(ctx); err != nil {
@@ -290,16 +259,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		meta, err := provisionMeta(prog, args, opt)
 		if err != nil {
 			return usage(err)
-		}
-		if len(meta.Labels) > 0 { // a label is the policy's; a plain provision of an inbox is not
-			lk, err := guardAccount(ctx, a, pfx, "provision")
-			if err != nil {
-				return fail(err)
-			}
-			acct = lk
-		}
-		if err := acct.Before(ctx, "the provision"); err != nil {
-			return fail(err)
 		}
 		if nf != nil {
 			if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
@@ -344,16 +303,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		u, err := setMetaUpdate(prog, args)
 		if err != nil {
 			return usage(err)
-		}
-		if len(u.Labels) > 0 { // labels are the policy's; a role, host, description or capability is not
-			lk, err := guardAccount(ctx, a, pfx, "set-meta")
-			if err != nil {
-				return fail(err)
-			}
-			acct = lk
-		}
-		if err := acct.Before(ctx, "the record's update"); err != nil {
-			return fail(err)
 		}
 		rec, err := a.SetMeta(ctx, args[1], u)
 		if err != nil {

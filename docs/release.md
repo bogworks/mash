@@ -333,6 +333,8 @@ blocks the release (REQ-020). `scripts/release-check <X> <version>` runs them as
 (REQ-020)", in a fresh clone of X, under the gate's pinned Go settings (`-race` needs cgo, so `CGO_ENABLED` is the one
 setting it turns back on). They need no network: the live tests start an in-process nats-server.
 
+In v0.5.0 these tests check the internal policy engine; no command line for it ships in this release ([ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)).
+
 The list is `scripts/releasecheck/policytests.txt`, one row per test: AT id, package, test name, `required` or `pending`.
 
 | AT | What | Status |

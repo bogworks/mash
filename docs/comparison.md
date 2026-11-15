@@ -177,44 +177,21 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 
 ### 2a. Authorization: who may reach whom
 
-*This subsection is about mash only, checked 2026-11-14 against `main`. It makes no claim about the other columns,
+*This subsection is about mash only, checked 2026-11-15 against `main`. It makes no claim about the other columns,
 whose cells above do not cover authorization.* The table's "Per-message sender proof" row says who sent a message. This
 is the other question: who may send it.
 
-mash lets an operator decide who may mail, prompt, probe and watch whom, and the NATS server enforces that decision, not
-the receiving session. The decision is a signed list set:
+In v0.5.0 the NATS server enforces one fixed rule, not a per-sender policy:
 
-- **Source.** The list set is handed in by one registered submitter for an adopted account (`mashctl policy adopt`). On
-  an adopted account `mashctl` refuses every other policy change (`add`, `reissue`, `retire`, `label` and the rest), so
-  two writers never disagree. The intake takes each revision only if it is signed by that submitter's key. It is
-  run by `mashctl policy serve`.
-- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are in v0.5.0. An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
-  responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
-  generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
-  whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
-  credential, gets the local answer `this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)` without asking. A list-set
-  credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
-  responder is mounted by `mashctl policy serve`; where that service is not running, nothing answers.
-- **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user
-  carries only tags, so the server expands the owner group's template with them. Compiling checks its own output against
-  the lists and refuses anything the server would not enforce exactly.
-- **Model.** Addresses are exact; wildcards are refused. Each owner group has a `shared` or `closed` switch for each of
-  four verbs (mail, prompt, status, heartbeat). A sender's allow list reaches beyond its own group; a deny list works
-  only inside the sender's own owner group, and only against a shared verb.
-- **Narrowing.** The apply code rotates a sender whose reach narrows to a new key and revokes its old keys, so the old
-  credential cannot keep the old reach, and a rollback never un-revokes a key. `mashctl policy serve` does not run that
-  path in v0.5.0: it refuses a list set that narrows an existing sender, and changes nothing.
+- **Enforcement.** NATS permissions on each endpoint's user. Every endpoint's permissions are the owner-line set that
+  `mashctl add` issues, so the server, not the receiving session, decides what a credential may publish and subscribe to.
 - **No zones.** Zones are gone (ADR 0091): mail keeps the five-token subject and the address is the fence. `mashctl
   unzone` is the upgrade helper for an older record.
-- **A size limit, not a count limit.** A sender's exceptions travel as tags in its connect line, and the server's
-  default limit is 4096 bytes. mash measures the line and refuses what would not fit; it never refuses on a count. With
-  the sender and receiver names L characters long and the receiver's owner part 4 characters, 111 exceptions fit at 7
-  characters, 83 at 14 and 50 at 32. A longer owner part leaves room for fewer: 93, 73 and 46 at an owner part of 8; 75,
-  61 and 41 at 14; 57, 48 and 35 at 24. The refusal names the sender, the count, the size
-  and the limit. The full table is in `internal/listset/at007_size_test.go`.
+- **Record of issue.** Every credential `mashctl` issues is recorded in a bucket only the admin connection writes, and
+  `mashctl issued check` reports a connected key mash did not issue.
 
-What this does not do: it does not encrypt mail, and whoever holds the account's keys can still mint credentials
-(see "What you run" in section 2). The model is described in `docs/policy-enforcement.md`.
+What this does not do: it does not encrypt mail, it has no per-sender allow or deny list, and whoever holds the account's
+keys can still mint credentials (see "What you run" in section 2). A command line for finer rules is not part of v0.5.0.
 
 ## 3. Choose mash when, choose something else when
 
@@ -430,9 +407,6 @@ queue, not as the work queue.
   `mashctl init --local --owner NAME --start` sets up and starts a loopback nats-server in one command, but needs a
   `nats-server` binary on your `PATH`.
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.
-- **Policy enforcement has limits in v0.5.0.** `mashctl policy serve` refuses a list set that narrows an existing
-  sender, and one that adds an address with no inbox yet. Adoption has no undo. The issue service signs credentials for
-  test accounts only. The list in the release notes ("What is not in this release") is the full one.
 - **Maturity.** v0.5.0 (released 2026-11-15), repository created 2026-11-01, one
   maintainer. Interfaces may change before the next major revision. SAP is a single-vendor 0.3 draft with no licence on
   its spec.
@@ -444,9 +418,8 @@ unless a date is given):
 
 - **mash:** `docs/architecture.md` §1-§4 and Appendix B; ADRs 0006, 0010, 0011, 0024, 0026-0029, 0031 and 0037; live
   receipts `docs/evidence/2026-10-22-live-e2e.md` and `docs/evidence/2026-10-29-default-kind-live-v0.2.6/RECEIPT.md`.
-  Re-read on 2026-11-14 for revision 4, on `main`: `LICENSE`; `docs/release.md`; `docs/policy-enforcement.md`;
-  `docs/mashctl.md`; `docs/operations.md`; `docs/install.md`; `docs/security/threat-model.md`; ADRs 0091, 0111, 0112,
-  0114 and 0117; `internal/listset`, `internal/policyapply`, `internal/kind`, `internal/host` and
+  Re-read on 2026-11-14 for revision 4, on `main`: `LICENSE`; `docs/release.md`;
+  `docs/mashctl.md`; `docs/operations.md`; `docs/install.md`; `docs/security/threat-model.md`; ADRs 0091, 0114 and 0117; `internal/kind`, `internal/host` and
   `internal/sap/sender.go`.
 - **SAP:** https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md (0.3.0);
   https://github.com/synadia-ai/synadia-agent-sdk-docs (no licence, 13 stars, 1 contributor);

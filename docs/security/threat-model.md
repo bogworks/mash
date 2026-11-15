@@ -121,6 +121,8 @@ interface mash uses, and the internals of the NATS server.
 
 ### 5.3.1 What a raw client reaches on the open subjects (list-set enforcement)
 
+*Not shipped in v0.5.0: no command applies list-set enforcement in this release ([ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)). The table describes the internal engine, which its release-gate tests still check.*
+
 A raw client is a plain NATS client holding one sender's creds file (its signed user JWT: tags and no permissions of its
 own). Under list-set enforcement ([ADR 0102](decisions/0102-list-set-compile-templates-and-tags.md)) it publishes mail, prompt and status only to the
 addresses its lists give, and it cannot subscribe to another address's inbox, prompt or status subjects. A few lines of
@@ -306,26 +308,7 @@ Custody rule: the account signing key, and every key above it, stay with the min
 - If it leaks: every user it signed is as strong as the key. Replace the account (a new account key under the operator,
   re-issued users), and revoke the old account's users.
 
-**Owner group signing keys** (`groups/<range>.<owner>.nk`)
-- Lives: `<config dir>/keys/groups/<range>.<owner>.nk`, 0600 in 0700, under the same rules as the other keys. The
-  public half is published in the account JWT as a scoped signer with the group's template. `mashctl issue serve` reads
-  it and never creates it.
-- Held by: the operator host's user (the minting authority) only.
-- A holder can: sign a user JWT that takes the group's template, with any name and tags, with a scoped signer's reach. The issue
-  service signs only for a public key and an address, with the tags of mash's table.
-- If it leaks: replace the key in the account JWT and re-issue the group's senders.
-
-**Wrangler keys and the wrangler registry** (`wranglers.json`)
-- Lives: the registry is `<config dir>/keys/wranglers.json`, 0600, public keys only, in the key store directory. The
-  wrangler's private key stays on the wrangler's host. The registry exists only for test accounts: how a real wrangler's
-  key is registered is not decided (ADR 0104), and `mashctl issue serve` refuses an account without a test registry.
-- Held by: the registry by the operator host's user; the wrangler key by the wrangler on each sender's host.
-- A holder can: the wrangler key signs issue requests for the host and owner group it is registered for: it can have any
-  address of that group signed for a public key it chooses, so a compromised wrangler compromises that group's addresses
-  on that host, never another group's (the address is inside the signed bytes). Whoever can write the registry can
-  register a wrangler key, which is why the file is 0600 and read only if no one else can write it.
-- If it leaks: `mashctl wrangler remove --host H --group G` (takes effect at the next request), then revoke the keys the
-  issue record shows for that group's addresses on that host and re-issue.
+**Owner group signing keys** and **wrangler keys**: not used in v0.5.0. The commands that made and used them are not part of this release ([ADR 0129](../decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)). A key store from an earlier build may hold a `groups/` directory or a `wranglers.json` file; mash v0.5.0 does not read them.
 
 **System account key** (`system.nk`) and **system creds** (`sys.creds`)
 - Lives: the key at `<config dir>/keys/system.nk` (0600 in 0700), only for a server `init --local` stood up. The creds
@@ -353,11 +336,11 @@ Custody rule: the account signing key, and every key above it, stay with the min
 - Lives: `<config dir>/<name>.creds`, 0600; `mashctl add` refuses a parent directory that others can write, and a
   creds file readable by others is refused when read. It holds the endpoint's user JWT and seed.
 - Held by: the host that runs that one endpoint.
-- A holder can: be that endpoint: connect as it, send mail under the policy's lines for it, read its inbox, and sign
+- A holder can: be that endpoint: connect as it, send mail within the permissions of its user, read its inbox, and sign
   `Agent-Sender` headers with its seed. It cannot mint, read or write the directory's records beyond reading them, and
   has no access to the issue record: its permissions grant nothing on `mash-issued` (a test asserts it).
 - If it leaks: `mashctl retire NAME` revokes the user key (it also removes the record and inbox), or `mashctl reissue
-  NAME` when the key is already revoked or the policy narrows; the old key stays revoked.
+  NAME` when the key is already revoked or its permissions changed; the old key stays revoked.
 
 **The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
 - Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk` (0600), `operator.jwt` (a
@@ -377,23 +360,6 @@ Custody rule: the account signing key, and every key above it, stay with the min
   `mashctl issued check` compares the keys connected to every server with the record and reports any key mash did not
   issue, and any key it recorded as revoked that is still connected (the revocation did not take effect). It sees connections open at the moment of the check, not users that connected and left, and a holder of the
   admin creds can add a record.
-
-**The submitter key** (held by an outside system; its public half is in the adoption marker, `mash-adoption` bucket)
-- Lives: the private half with the outside system that owns the account's list sets, never on the operator host and
-  never in mash's key store (`mashctl policy adopt` refuses a key the store holds). The public half is in the adoption
-  marker, written by `mashctl policy adopt --submitter KEY` over the admin connection only; no endpoint has any
-  permission on the bucket or its stream subjects, and a test asserts it.
-- Held by: the outside system.
-- A holder can: only hand in list sets, signed, for the account. It cannot sign a user, reach a signing key, change the
-  account JWT directly or write the marker. The list-set intake (`internal/policyintake`, not yet run by any command)
-  refuses a list set signed by any other key, reading the marker for every revision. A list set it signs can also
-  name `next_submitter`, which starts a planned rotation to a key it names; it cannot name the account's own key, a key
-  mash holds or its own key, and the rotation completes only after a list set signed by the new key is applied. A list
-  set cannot touch the marker in any other way, the exempt set among them. Until a command runs the intake an adopted
-  account takes no list set at all.
-- If it leaks: run `mashctl policy adopt --submitter NEWKEY` with the admin credentials. The old key is refused at once
-  and the marker's history records the recovery. Whoever holds the admin credentials can replace the submitter, so the
-  marker protects against the submitter's key and against direct policy commands, not against the admin credentials.
 
 ## 11. Keeping it current
 
