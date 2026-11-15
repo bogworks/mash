@@ -85,7 +85,7 @@ func TestWitnessSenders(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := sendersOf(witnessSenders(c.prev, c.target, ex))
+			got := sendersOf(witnessSenders(c.prev, c.target, ex, settledState{}))
 			slices.Sort(got)
 			if !slices.Equal(got, c.want) {
 				t.Errorf("witnesses for %v, want %v", got, c.want)

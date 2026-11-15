@@ -51,6 +51,9 @@ var policyServeReady = func() {}
 // service's own (a change that adds an address is applied only if the address already has its inbox).
 var policyServeProvisioner policyapply.Provisioner
 
+// policyServeStep is a test seam, nil in production: the Applier's Step hook (see policyserve.Applier).
+var policyServeStep func(ctx context.Context, step string) error
+
 // policyViewResolveTTL is how long the responder keeps the directory's key-to-address map before it reads it again.
 const policyViewResolveTTL = 10 * time.Second
 
@@ -175,7 +178,7 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	connOpts := append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...)
 	app := &policyserve.Applier{
 		Account: account, Range: rng, Ledger: ledger, Sys: sys, Keys: keys, Trust: trust, Record: policyapply.NewAdminIssueRecord(adm), KV: kv,
-		Servers: servers, URL: cfg.URL, Vet: policyServeVet(cfg.InsecureLoopback), Options: connOpts, Log: logger, Inboxes: adm, Provisioner: policyServeProvisioner,
+		Servers: servers, URL: cfg.URL, Vet: policyServeVet(cfg.InsecureLoopback), Options: connOpts, Log: logger, Inboxes: adm, Provisioner: policyServeProvisioner, Step: policyServeStep,
 		Load: func(ctx context.Context, u string) (*nats.Conn, error) {
 			opts := append(slices.Clone(connOpts), natsauth.UserCredentials(cfg.AdminCreds),
 				nats.Name("mashctl-policy-serve"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
