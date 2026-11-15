@@ -338,10 +338,19 @@ func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, lev := f.run(t, "old")
-	until(t, "next holder shown all three", func() bool {
+	shown := func() bool {
 		got := joined(lev)
 		return strings.Contains(got, "> legacy-1") && strings.Contains(got, "> legacy-2") && strings.Contains(got, "> legacy-3")
-	})
+	}
+	for deadline := time.Now().Add(5 * time.Second); !shown(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			// A bare timeout does not say why the three messages did not reach the next holder: name the state of both
+			// consumers (are they pending, awaiting an ack, or waiting for a redelivery that never came) and what each
+			// session showed.
+			t.Fatalf("timed out: next holder shown all three\nnext holder showed:\n%s\nold holder showed:\n%s\nlegacy consumer: %s\nown consumer: %s",
+				joined(lev), joined(ev), consumerCounters(legacyConsumerInfo(t, f, "inbox-old")), consumerCounters(legacyConsumerInfo(t, f, "inbox-ag_team_new")))
+		}
+	}
 	time.Sleep(300 * time.Millisecond)
 	for _, b := range []string{"legacy-1", "legacy-2", "legacy-3"} {
 		if n := strings.Count(joined(lev), "> "+b); n != 1 {
@@ -711,4 +720,10 @@ func TestLegacyLeaseLostBeforeChannelDeliveryFencesLegacyMail(t *testing.T) {
 	if own.acks != 1 || own.naks != 0 || lost2.acks != 0 || lost2.naks != 1 {
 		t.Fatalf("mixed: own acks=%d naks=%d, legacy acks=%d naks=%d", own.acks, own.naks, lost2.acks, lost2.naks)
 	}
+}
+
+// consumerCounters is a consumer's counters in one line, for a failure message.
+func consumerCounters(i *jetstream.ConsumerInfo) string {
+	return fmt.Sprintf("delivered stream %d, ack floor stream %d, pending %d, ack pending %d, redelivered %d, waiting %d",
+		i.Delivered.Stream, i.AckFloor.Stream, i.NumPending, i.NumAckPending, i.NumRedelivered, i.NumWaiting)
 }
