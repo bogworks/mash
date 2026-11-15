@@ -29,7 +29,7 @@ Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not suppo
 
 This path needs no Synadia account and no server you run by hand. You need:
 
-- A Go toolchain, with `~/go/bin` on your `PATH`.
+- A Go toolchain, with the directory `go install` writes to on your `PATH` (`go env GOBIN`, or `$(go env GOPATH)/bin` when `GOBIN` is empty; `~/go/bin` by default).
 - `nats-server`, a current 2.x release with JetStream, on your `PATH`. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases) (this repository builds and tests against 2.15).
 - Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry).
 
