@@ -48,7 +48,7 @@ func sendArgsError(raw json.RawMessage) error {
 	var unknown []string
 	for k := range args {
 		switch k {
-		case "to", "text", "in_reply_to", "via", "urgent", "kind", "id":
+		case "to", "text", "in_reply_to", "via", "urgent", "kind", "id", "answer", "answer_within":
 		default:
 			unknown = append(unknown, k)
 		}
@@ -252,6 +252,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		instr += retryingLine
 	}
 	src.state = &state
+	// The open-ask table of answer=now sends (endpoint/askwake.go): in this process, persisted in the state dir, and
+	// installed on the endpoint below so the mail loop can match replies. In memory only when the state location is unknown.
+	asksPath := ""
+	if o, n, err := endpoint.StateLocation(cfg); err == nil {
+		asksPath = endpoint.AskTablePath(cfg.StateDir, o, n)
+	}
+	src.asks = endpoint.OpenAskTable(asksPath)
 	srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, tools(&state, src))
 	src.srv.Store(srv)
 	// Each ended tool call is evidence for the hookless detector (endpoint/hookless.go): a hook runs after every
@@ -282,6 +289,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
+		ep.SetReplyWaker(src.asks)
 		select {
 		case <-srv.ChannelReady():
 		case <-ctx.Done():
@@ -612,6 +620,9 @@ func kindProp() map[string]any {
 		"description": "optional, default task: blocker|question|task wake an idle recipient; result|fyi (opt-in) wait for its next turn"}
 }
 
+// answerNowLine is the receipt line of an answer=now send. The deadline wording is added to this sentence.
+const answerNowLine = "will wake you on the reply"
+
 // recipientStateLine is the advisory line a send receipt carries: what the recipient reports about itself, waiting for
 // the answer at most until PeerActivityTimeout after the send started.
 func recipientStateLine(peer <-chan endpoint.PeerState, started time.Time) string {
@@ -669,6 +680,10 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					"recipients see 'relayed from <sender> #N' when the declaration verifies; omit it for ordinary mail"),
 				"urgent": flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
 				"kind":   kindProp(),
+				"answer": map[string]any{"type": "string", "enum": []string{"now"},
+					"description": "optional: `now` means you need the reply as soon as it exists. Your own mash then wakes you when the recipient's verified reply to this message arrives, whatever its kind. " +
+						"A local instruction: it changes nothing on the wire and nothing for the recipient. At most 20 such asks are open at once."},
+				"answer_within": str("optional with answer=now: how long you mean to wait for the reply, a duration such as 10m (default 10m, at most 24h); refused without answer=now"),
 				"id": str("optional idempotency key (1-128 printable ASCII characters, no spaces). A send repeated with the same id to the same " +
 					"recipient within the stream's duplicate window (2 minutes) is stored once and reports a duplicate, so a retry after a timeout cannot deliver twice; " +
 					"after the window a repeated id is a new message")}, "to", "text"),
@@ -681,12 +696,27 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					Urgent    bool      `json:"urgent"`
 					Kind      string    `json:"kind"`
 					ID        string    `json:"id"`
+					Answer    string    `json:"answer"`
+					Within    string    `json:"answer_within"`
 				}
 				if err := json.Unmarshal(raw, &a); err != nil {
 					return "", err
 				}
 				if a.Text == "" {
 					return "", sendArgsError(raw)
+				}
+				// Checked before anything is sent: a refused ask sends nothing.
+				within, answerNow, err := endpoint.ParseAnswerWithin(a.Answer, a.Within)
+				if err != nil {
+					return "", err
+				}
+				if answerNow {
+					if src.asks == nil {
+						return "", errors.New("mash: answer=now needs a running mash serve")
+					}
+					if err := src.asks.Check(); err != nil {
+						return "", err
+					}
 				}
 				inReplyTo, err := declaredSeq(ep, "in_reply_to", a.InReplyTo)
 				if err != nil {
@@ -730,6 +760,12 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				if peer != nil {
 					receipt += "\n" + recipientStateLine(peer, started)
+				}
+				if answerNow {
+					if _, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within); err != nil {
+						return "", fmt.Errorf("%s\nthe message was sent, but the answer=now ask could not be recorded: %v", receipt, err)
+					}
+					receipt += "\n" + answerNowLine
 				}
 				return receipt, nil
 			})},

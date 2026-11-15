@@ -33,17 +33,18 @@ type Entry struct {
 	Seq uint64 `json:"seq"`
 	// Stream names the stream Seq is a sequence of; empty for the endpoint's own (primary) stream, and then absent
 	// from the file, so a single-stream entry is byte-identical to one written before streams were keyed.
-	Stream   string    `json:"stream,omitempty"`
-	From     string    `json:"from"`
-	Trust    string    `json:"trust"`
-	Instance string    `json:"instance,omitempty"`
-	Owner    string    `json:"owner,omitempty"` // the sender's owner
-	Urgent   bool      `json:"urgent,omitempty"`
-	Kind     string    `json:"kind,omitempty"`     // blocker, question, task, result or fyi; empty (an older serve) reads as task
-	ReplyTo  uint64    `json:"reply_to,omitempty"` // the verified #seq the sender says this answers
-	Via      string    `json:"via,omitempty"`      // the verified relay declaration, "<origin> #<seq>"
-	At       time.Time `json:"at"`
-	Body     []byte    `json:"body"`
+	Stream     string    `json:"stream,omitempty"`
+	From       string    `json:"from"`
+	Trust      string    `json:"trust"`
+	Instance   string    `json:"instance,omitempty"`
+	Owner      string    `json:"owner,omitempty"` // the sender's owner
+	Urgent     bool      `json:"urgent,omitempty"`
+	AnswerWake bool      `json:"answer_wake,omitempty"` // local: the first verified reply to an ask marked answer=now; wakes like urgent, shows nothing
+	Kind       string    `json:"kind,omitempty"`        // blocker, question, task, result or fyi; empty (an older serve) reads as task
+	ReplyTo    uint64    `json:"reply_to,omitempty"`    // the verified #seq the sender says this answers
+	Via        string    `json:"via,omitempty"`         // the verified relay declaration, "<origin> #<seq>"
+	At         time.Time `json:"at"`
+	Body       []byte    `json:"body"`
 	// Epoch is the legacy-lease epoch current when a legacy-stream entry was written (see epoch.go); absent for an
 	// own-stream entry and in files written before it existed.
 	Epoch uint64 `json:"epoch,omitempty"`

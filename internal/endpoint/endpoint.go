@@ -115,7 +115,9 @@ type Endpoint struct {
 	pre prefetched
 
 	dropped atomic.Int64
-	service *service
+	// replyWaker is the open-ask table of a serve (askwake.go); nil outside one.
+	replyWaker atomic.Pointer[ReplyWaker]
+	service    *service
 
 	// The hook hand-over (hook.go): nil until SetSpool; since is when this session began, so only a hook run in this
 	// session switches delivery to the spool.

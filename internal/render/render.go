@@ -30,6 +30,10 @@ type Mail struct {
 	Owner string
 	// Urgent is a verified sender's signed urgent mark.
 	Urgent bool
+	// AnswerWake is set locally, never by the sender: the mail is the first verified reply to an ask this session marked
+	// answer=now. It raises the delivery schedule like an urgent mark (see Rings) and changes nothing shown: not the
+	// trust label, not the text, not the urgent line.
+	AnswerWake bool
 	// Kind is the sender's kind (blocker, question, task, result, fyi); the zero value reads as task.
 	Kind kind.Kind
 	// ReplyTo is the #seq the sender says this answers, only when its signature on it verified; 0 otherwise.
@@ -278,3 +282,7 @@ func Sender(owner string, m Mail) string {
 	}
 	return m.Owner + "/" + m.From
 }
+
+// Rings reports whether the message wakes a session at once, whatever its kind: a verified urgent mark, or the local
+// answer-wake of an ask the session marked answer=now (ADR 0027: delivery schedule only, never trust).
+func (m Mail) Rings() bool { return m.Urgent || m.AnswerWake }

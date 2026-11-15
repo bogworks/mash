@@ -473,7 +473,16 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
 				Kind:   kind.Of(m.Headers().Get(KindHeader))}}
 			e.relayInboundRef(ref, from, trust, via)
-			e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
+			// Delivery schedule only (ADR 0027: a kind schedules, it never grants trust). An ask this session marked
+			// answer=now is answered by the first message that is verified, whose signed in-reply-to verifies (ADR 0063;
+			// senderMarks gives 0 otherwise) and equals the ask's receipt sequence, from the ask's recipient: it rings like
+			// an urgent mail whatever its Mash-Kind. Urgent itself, the trust label and the text are not touched.
+			if trust == sap.TrustVerified && replyTo != 0 {
+				if w := e.replyWaker.Load(); w != nil && (*w).AnswerClosed(h.User, replyTo) {
+					p.mail.AnswerWake = true
+				}
+			}
+			e.waking.add(refOf(p.mail), p.mail.Rings() || p.mail.Kind.Wakes())
 			select {
 			case queue <- p:
 			case <-quit:
@@ -821,6 +830,8 @@ type SendOptions struct {
 type SendResult struct {
 	Seq       uint64 // the recipient-inbox sequence; for a duplicate, the original message's
 	Duplicate bool   // the stream already held a message with this key and stored nothing new
+	// RecipientUser is the recipient's user key from its directory record: what a verified reply's sender header names.
+	RecipientUser string
 }
 
 // MaxSendIDLen is the longest idempotency key.
@@ -1046,7 +1057,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	if !ack.Duplicate {
 		e.relaySent(to, o.Via, viaOrigin)
 	}
-	return SendResult{Seq: ack.Sequence, Duplicate: ack.Duplicate}, nil
+	return SendResult{Seq: ack.Sequence, Duplicate: ack.Duplicate, RecipientUser: rec.User}, nil
 }
 
 // viaOrigin names the sender of message seq of this endpoint's own inbox, for a Mash-Via declaration. The original need

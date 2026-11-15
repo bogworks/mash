@@ -343,7 +343,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 		// (codex H1 on #23). Judged live: an entry
 		// the hook drained after the loop above read it was shown.
 		for seq, p := range h.msgs {
-			if p.mail.Urgent && !e.spool.IsDrained(seq) {
+			if p.mail.Rings() && !e.spool.IsDrained(seq) {
 				delete(h.rung, seq)
 			}
 		}
@@ -386,10 +386,10 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		if h.listed[seq] {
 			continue
 		}
-		if (p.mail.Urgent || (prehook && p.mail.Kind.Wakes())) && !h.rung[seq] && !e.spool.IsDrained(seq) {
+		if (p.mail.Rings() || (prehook && p.mail.Kind.Wakes())) && !h.rung[seq] && !e.spool.IsDrained(seq) {
 			ring = append(ring, seq)
 		}
-		if t := h.at[seq]; (crowded || p.mail.Urgent || p.mail.Kind.Wakes()) && (oldest.IsZero() || t.Before(oldest)) {
+		if t := h.at[seq]; (crowded || p.mail.Rings() || p.mail.Kind.Wakes()) && (oldest.IsZero() || t.Before(oldest)) {
 			oldest = t
 		}
 	}
@@ -427,7 +427,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	}
 	urgent := false
 	for _, seq := range ring {
-		if h.msgs[seq].mail.Urgent {
+		if h.msgs[seq].mail.Rings() {
 			urgent = true
 			break
 		}
@@ -598,13 +598,13 @@ func (e *Endpoint) healHeld(h *held) {
 // EntryOf is a message as the spool keeps it.
 func EntryOf(m render.Mail) spool.Entry {
 	return spool.Entry{Seq: m.Seq, Stream: m.Stream, From: m.From, Trust: string(m.Trust), Instance: m.Instance, Owner: m.Owner, At: m.At, Body: m.Body,
-		Urgent: m.Urgent, Kind: string(m.Kind.Norm()), ReplyTo: m.ReplyTo, Via: m.Via}
+		Urgent: m.Urgent, AnswerWake: m.AnswerWake, Kind: string(m.Kind.Norm()), ReplyTo: m.ReplyTo, Via: m.Via}
 }
 
 // MailOf is a spooled message as render shows it.
 func MailOf(e spool.Entry) render.Mail {
 	return render.Mail{Seq: e.Seq, Stream: e.Stream, From: e.From, Trust: sap.Trust(e.Trust), Instance: e.Instance, Owner: e.Owner, At: e.At, Body: e.Body,
-		Urgent: e.Urgent, Kind: kind.Of(e.Kind), ReplyTo: e.ReplyTo, Via: e.Via, Redelivered: e.Redelivered}
+		Urgent: e.Urgent, AnswerWake: e.AnswerWake, Kind: kind.Of(e.Kind), ReplyTo: e.ReplyTo, Via: e.Via, Redelivered: e.Redelivered}
 }
 
 // wakeMax caps the re-wake backoff.

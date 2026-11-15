@@ -44,6 +44,8 @@ type statusSource struct {
 	// cli is `mash status` from a shell: nothing is connected, so the live-only lines (connection, delivery) say
 	// that a running session reports them instead of printing a state they cannot know.
 	cli bool
+	// asks is the open-ask table of answer=now sends; set by serve before its tools are built.
+	asks *endpoint.AskTable
 }
 
 // settings reads Claude Code's managed sources and the home they were read from. home is "" when it is unknown.
