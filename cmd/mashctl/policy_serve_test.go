@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -27,6 +28,9 @@ import (
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
 	"github.com/bogworks/mash/internal/policyserve"
+	"github.com/bogworks/mash/internal/policyview"
+	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const (
@@ -825,5 +829,70 @@ func TestPolicyServeVetsEveryDerivedURL(t *testing.T) {
 		if err := policyServeVet(c.insecure)(c.url); (err == nil) != c.ok {
 			t.Errorf("%s insecure=%v: %v", c.url, c.insecure, err)
 		}
+	}
+}
+
+// The service answers a signed `show` of an endpoint of the account once generation 1 is applied.
+func TestPolicyServeAnswersPolicyShow(t *testing.T) {
+	e := newServeEnvNoService(t, false)
+	// `add` makes legacy endpoints, which the directory resolver names no address for; the responder answers
+	// three-token endpoints, so these are provisioned with the agent token set.
+	seeds := map[string][]byte{}
+	e.env["MASH_AGENT_TOKEN"] = serveRange
+	for _, n := range []string{"core", "lead"} {
+		kp := mustT(nkeys.CreateUser())
+		seeds[n] = mustT(kp.Seed())
+		if out, errb, code := e.run("provision", n, "--agent", serveRange, "--user", mustT(kp.PublicKey()), "--account", e.acctPub); code != 0 {
+			t.Fatalf("provision %s: %d %s %s", n, code, out, errb)
+		}
+	}
+	delete(e.env, "MASH_AGENT_TOKEN")
+	e.adoptLater()
+	e.start()
+	e.put(signed(t, e.sub, e.ownerDoc(1, 0, "core", "lead")))
+	e.waitStatus("generation 1 applied", func(s *policyapply.Status) bool { return s.Generation == 1 && s.State == policyapply.StateApplied })
+
+	id := mustT(sap.NewIdentity(seeds["core"], e.acctPub))
+	subject := policyview.Subject(serveRange)
+	payload := mustT(json.Marshal(policyview.Request{Op: policyview.OpShow}))
+	h := mustT(id.Sign(subject, payload, "core", time.Now(), ""))
+	m := nats.NewMsg(subject)
+	m.Data = payload
+	m.Header.Set(sap.HeaderName, h.Encode())
+	ctx, cancel := context.WithTimeout(context.Background(), serveWait)
+	defer cancel()
+	resp, err := e.nc.RequestMsgWithContext(ctx, m)
+	if err != nil {
+		t.Fatalf("no answer: %v", err)
+	}
+	var r policyview.ShowReply
+	if err := json.Unmarshal(resp.Data, &r); err != nil || r.Sender != serveRange+"."+e.env["MASH_OWNER"]+".core" || r.Generation != 1 || !r.InForce {
+		t.Fatalf("answer %s (%v)", resp.Data, err)
+	}
+	if code := e.shutdown(); code != 0 {
+		t.Fatalf("exit %d: %s", code, e.logs.String())
+	}
+	m2 := nats.NewMsg(subject)
+	m2.Data = payload
+	if _, err := e.nc.RequestMsgWithContext(ctx, m2); !errors.Is(err, nats.ErrNoResponders) {
+		t.Errorf("after the service stopped: %v, want no responders", err)
+	}
+}
+
+// Without the directory bucket the service refuses to start and says how to make it.
+func TestPolicyServeRefusesWithoutTheDirectoryBucket(t *testing.T) {
+	e := newServeEnvNoService(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), serveWait)
+	defer cancel()
+	if err := mustT(jetstream.New(e.nc)).DeleteKeyValue(ctx, store.DirectoryBucket); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	old := policyServeContext
+	policyServeContext = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+	t.Cleanup(func() { policyServeContext = old })
+	code := runEnv([]string{"policy", "serve", "--range", serveRange, "--servers", "1"}, func(k string) string { return e.env[k] }, &out, &errb)
+	if code != 1 || !strings.Contains(errb.String(), store.DirectoryBucket) || !strings.Contains(errb.String(), "mashctl init") {
+		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 }
