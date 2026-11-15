@@ -177,8 +177,9 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			fmt.Fprintln(stdout, out)
 		}
 	case "prompt":
-		if len(args) < 3 {
-			return fail(fmt.Errorf("usage: mash prompt <to> <text...>"))
+		envelope := len(args) > 2 && args[2] == "--envelope"
+		if len(args) < 3 || (envelope && len(args) != 4) {
+			return fail(fmt.Errorf("usage: mash prompt <to> [--envelope] <text...>"))
 		}
 		c, cc := short()
 		subj, err := ep.DiscoverRecipient(c, args[1])
@@ -186,7 +187,12 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		if err != nil {
 			return fail(err)
 		}
-		if err := endpoint.Prompt(ctx, ep.Conn(), ep.Identity(), ep.Key(), subj, strings.Join(args[2:], " "), stdout); err != nil {
+		send := endpoint.Prompt
+		text := strings.Join(args[2:], " ")
+		if envelope {
+			send, text = endpoint.PromptEnvelope, args[3]
+		}
+		if err := send(ctx, ep.Conn(), ep.Identity(), ep.Key(), subj, text, stdout); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintln(stdout)

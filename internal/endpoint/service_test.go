@@ -403,3 +403,28 @@ func TestPromptLimit(t *testing.T) {
 		t.Fatalf("%d request ids are open after refused prompts", open)
 	}
 }
+
+func TestPromptPayloadCarriesTextUnchanged(t *testing.T) {
+	for _, text := range []string{
+		"what time?",
+		"  plain with leading space",
+		`{"ask":"herd-state"}`,
+		"\n\t {\"ask\":\"herd-state\"}",
+		`{"prompt":"x"}`,
+		"{",
+	} {
+		payload := PromptPayload(text)
+		trimmed := strings.TrimLeft(text, "\t\n\r ")
+		if trimmed == "" || trimmed[0] != '{' {
+			if payload != text {
+				t.Errorf("PromptPayload(%q) = %q, want it unchanged", text, payload)
+			}
+		} else if want, _ := json.Marshal(map[string]string{"prompt": text}); payload != string(want) {
+			t.Errorf("PromptPayload(%q) = %q, want %q", text, payload, want)
+		}
+		got, err := promptText([]byte(payload))
+		if err != nil || got != text {
+			t.Errorf("promptText(PromptPayload(%q)) = %q, %v", text, got, err)
+		}
+	}
+}

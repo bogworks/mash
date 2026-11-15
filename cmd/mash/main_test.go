@@ -263,6 +263,58 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 	}
 }
 
+// livePromptViaCLI runs `mash prompt a <args...>` from b against a served session, answers it, and returns the channel
+// content the session received and the CLI's output and exit code.
+func livePromptViaCLI(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
+	w := newWorld(t, "a", "b")
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if out, _ := w.cli(t, "b", "who"); strings.Contains(out, "a\tonline") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a never came online")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	type res struct {
+		out  string
+		code int
+	}
+	done := make(chan res, 1)
+	go func() { o, c := w.cli(t, "b", append([]string{"prompt", "a"}, args...)...); done <- res{o, c} }()
+	ev := s.await(t, 5*time.Second, isChannel)
+	p := ev["params"].(map[string]any)
+	meta := p["meta"].(map[string]any)
+	s.send(t, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"reply","arguments":{"request_id":"`+meta["request_id"].(string)+`","text":"ok"}}}`)
+	s.await(t, 5*time.Second, idIs(4))
+	select {
+	case r := <-done:
+		return p["content"].(string), r.out, r.code
+	case <-time.After(10 * time.Second):
+		t.Fatal("prompt never finished")
+	}
+	return "", "", 0
+}
+
+func TestPromptViaCLITreatsJSONTextAsText(t *testing.T) {
+	got, out, code := livePromptViaCLI(t, `{"ask":"herd-state"}`)
+	if code != 0 || strings.TrimSpace(out) != "ok" || !strings.Contains(got, `{"ask":"herd-state"}`) {
+		t.Fatalf("exit %d out %q content %q", code, out, got)
+	}
+}
+
+func TestPromptViaCLIEnvelopeIsSentRaw(t *testing.T) {
+	got, out, code := livePromptViaCLI(t, "--envelope", `{"prompt":"hello"}`)
+	if code != 0 || strings.TrimSpace(out) != "ok" || !strings.Contains(got, "hello") || strings.Contains(got, `"prompt"`) {
+		t.Fatalf("exit %d out %q content %q", code, out, got)
+	}
+}
+
 func TestServeLeaseConflict(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a", "b")

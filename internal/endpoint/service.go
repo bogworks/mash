@@ -480,13 +480,41 @@ func discoverSubject(ctx context.Context, nc *nats.Conn, owner, want, name strin
 	return "", fmt.Errorf("mash: %s is not online (no SAP registration answered)", sap.Display(name))
 }
 
+// PromptPayload is the wire payload for prompt text. Plain text goes as it is; text whose first non-space byte is '{'
+// would be read by the receiver as a JSON envelope (§5.3), so it goes inside the envelope {"prompt": text}, which
+// carries it unchanged.
+func PromptPayload(text string) string {
+	if t := strings.TrimLeft(text, "\t\n\r "); t != "" && t[0] == '{' {
+		b, _ := json.Marshal(map[string]string{"prompt": text})
+		return string(b)
+	}
+	return text
+}
+
 // Prompt sends a signed live prompt to subject and writes the streamed reply
 // to out (SAP §5-§6, §13). It fails on an error chunk or 60 s of silence.
+// The text is always prompt text: see PromptEnvelope for sending a raw envelope.
 func Prompt(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
+	if err := checkPromptSize(text); err != nil {
+		return err
+	}
+	return promptSend(ctx, nc, id, name, subject, PromptPayload(text), out)
+}
+
+// PromptEnvelope is Prompt for a caller that built the SAP envelope itself: the payload is sent as given, and the
+// size limit applies to it.
+func PromptEnvelope(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, payload string, out io.Writer) error {
+	if err := checkPromptSize(payload); err != nil {
+		return err
+	}
+	return promptSend(ctx, nc, id, name, subject, payload, out)
+}
+
+func checkPromptSize(text string) error {
 	if len(text) > MaxPromptBytes {
 		return fmt.Errorf("mash: prompt refused: %s %s (this one is %d)", PromptTooLargeCode, promptTooLarge, len(text))
 	}
-	return promptSend(ctx, nc, id, name, subject, text, out)
+	return nil
 }
 
 // promptSend is Prompt without the size pre-check, so a test can send what the service must refuse.
