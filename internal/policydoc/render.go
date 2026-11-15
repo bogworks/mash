@@ -140,7 +140,7 @@ func (p DiffPlan) signatureNote() string {
 		s = InboxNotCheckedLine + "\n"
 	}
 	if p.adoptionUnchecked {
-		s = "adoption not checked: the adoption marker was not read\n"
+		s += "adoption not checked: the adoption marker was not read\n"
 	}
 	if p.unsigned {
 		s += "signature not checked: give --submitter to check it against the adoption marker\n"
