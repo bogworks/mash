@@ -430,6 +430,12 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			}
 			continue
 		}
+		// A sender the directory no longer serves is still named by the list set: its recorded issuance is not
+		// outside the list set, and revoking it is irreversible. Removing the sender from the list set revokes it.
+		if by := sm.absent[recKey{r.Address, r.Owner}]; len(by) > 0 {
+			finding(r.PublicKey, "recorded as %q owner %q, the list set names %s but no directory record serves it: not revoked; remove the sender from the list set to revoke it", r.Address, r.Owner, strings.Join(by, ", "))
+			continue
+		}
 		if why := sm.doubt(r); why != "" {
 			finding(r.PublicKey, "recorded as %q owner %q, which may be a sender of the list set, but %s: not revoked", r.Address, r.Owner, why)
 			continue
@@ -572,11 +578,14 @@ type senderMap struct {
 	// holds the senders whose resolution failed, by sender.
 	names map[string][]string
 	errs  map[string]error
+	// absent maps the (directory name, owner) a sender would be recorded under, as its bare name or its flat key, to
+	// the senders for which no directory record was found.
+	absent map[recKey][]string
 }
 
 // resolveSenders resolves every sender of the list set to the record that serves it. A nil resolver resolves none.
 func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) senderMap {
-	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}}
+	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, absent: map[recKey][]string{}}
 	if rs == nil {
 		return m
 	}
@@ -604,6 +613,11 @@ func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) send
 		if found {
 			k := recKey{target.Flat(), target.Owner}
 			m.match[k] = append(m.match[k], u.Sender)
+		} else {
+			for _, n := range []string{id.Name, id.Flat()} {
+				k := recKey{n, id.Owner}
+				m.absent[k] = append(m.absent[k], u.Sender)
+			}
 		}
 	}
 	return m

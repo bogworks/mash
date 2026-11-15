@@ -681,6 +681,27 @@ func TestNewFormRecordServingASenderIsNotRevoked(t *testing.T) {
 	}
 }
 
+func TestRecordOfASenderWithNoDirectoryRecordIsAFindingNotARevoke(t *testing.T) {
+	w := newWorld(t)
+	legacy, newForm, otherOwner := userKey(t), userKey(t), userKey(t)
+	w.recordOwned(legacy, "core", "c")        // after `mashctl deprovision --no-revoke` the directory record is gone
+	w.recordOwned(newForm, "foo_c_core", "c") // the new-form directory name
+	w.recordOwned(otherOwner, "core", "zz")   // the same name under another owner: no sender's
+	p := w.buildWith(fakeResolver{})          // found=false for every sender
+	for name, k := range map[string]string{"legacy": legacy, "new-form": newForm} {
+		if r, ok := revocation(p, k); ok {
+			t.Errorf("%s: the record of a listed sender with no directory record was revoked: %+v", name, r)
+		}
+		f, ok := finding(p, k)
+		if !ok || !strings.Contains(f.Detail, "no directory record serves it") || !strings.Contains(f.Detail, "foo.c.core") {
+			t.Errorf("%s: finding = %+v %v", name, f, ok)
+		}
+	}
+	if r, ok := revocation(p, otherOwner); !ok || r.Reason != ReasonRecorded {
+		t.Errorf("the same name under another owner is revoked as before: %+v %v", r, ok)
+	}
+}
+
 func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
 	w := newWorld(t)
 	k := userKey(t)
