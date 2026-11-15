@@ -1,1 +1,0 @@
-`mashctl policy reconcile` no longer plans to revoke an endpoint made by `mashctl add` (its directory name is the bare name, under its owner) when the list set's sender for that name and owner is served by it, as the apply's inbox check already accepts. A record it cannot match to a sender with certainty is reported as a finding, not revoked.

@@ -1,1 +1,0 @@
-The upgrade guard (ADR 0091) now refuses to start `serve` when a directory record could not be read, since that record may be a zoned one, and `AppliedZonePolicy` checks the account JWT of every server for a zone scope, not only the newest copy.
