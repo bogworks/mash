@@ -267,8 +267,13 @@ func (s *Issuer) SignPrevious(prev policyapply.PreviousClaims, revoked []string)
 	if ac.Issuer != opub {
 		return "", errors.New("the previous account JWT was not issued by the operator key: it is not re-signed")
 	}
+	now := time.Now()
 	for _, k := range revoked {
-		ac.Revoke(k)
+		if t, ok := prev.RevokeAt[k]; ok && t.After(now) {
+			ac.RevokeAt(k, t)
+		} else {
+			ac.Revoke(k)
+		}
 	}
 	if err := s.waitAfter(s.Ctx, ac.IssuedAt); err != nil {
 		return "", err
