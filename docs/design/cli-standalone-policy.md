@@ -144,6 +144,10 @@ Seven facts about v0.5.0 shape every story. They come first.
   (narrowing) is refused before the push (`internal/policyserve/failclosed.go:217-218`; `applier.go:291-297`). The
   rotation code exists (`internal/policyapply/rotate.go:124, 266-291`), but the Applier fills only the leaving senders
   (`applier.go:373-381`). [fact]
+  The first deny in an owner group also changes the tags of every other sender of that group: each gets the sentinel
+  tag `deny:_none` (`internal/listset/compile.go:109-110`), so each needs a new credential (`dryrun.go:299-305`). The
+  engine says the sentinel "only keeps a user of a deny key able to connect" (`compile.go:22-27`; `dryrun.go:100-103`).
+  I read this and did not run it, so that the old credential stops connecting is [open] (O9). [fact for the tag change]
 - F6. A first policy must state all four switches for every owner group that has a sender
   (`internal/listset/validate.go:180-186`). [fact]
 - F7. No command creates the policy bucket. The ledger code refuses when it is missing
@@ -213,6 +217,8 @@ Seven facts about v0.5.0 shape every story. They come first.
   (`internal/issue/issuer.go:205-207, 234-236`, refusals for a revoked key); every connection under a changed template's
   key is cut (`dryrun.go:81-83`); a generation number only goes up, and there is no rollback verb (`decode.go:189`). A
   revert is a new generation with the old content. [fact]
+- Also irreversible in this release: an allow entry. Removing it is narrowing, which the Applier refuses before the push
+  (`internal/policyserve/failclosed.go:28-31, 217-218`). [fact]
 - Target: impact first, then what is irreversible, then what to type (mockup iii).
 
 ### Story 7: a new agent must report to its lead
@@ -361,6 +367,8 @@ Common to every command, unless a row says otherwise. [choice]
   6 error.
 - JSON keys: `plan` (the engine's `refused`, `refusals`, `receivers`, `templates`, `tags`, `rotate_and_revoke`,
   `new_credential`, `revoke`, `first_credential`, `size_limits`), `checks[]`, `credential_work[]`, `message`.
+  `new_credential` includes the senders whose tags change only by the deny sentinel `deny:_none` (the first deny in a
+  group; `compile.go:109-110`).
 - Idempotent: yes. A document equal to the policy in force is outcome `unchanged`, exit 0, "No changes needed".
 
 #### `policy apply FILE`
@@ -368,11 +376,23 @@ Common to every command, unless a row says otherwise. [choice]
 - Synopsis: `mashctl policy apply FILE|- [--dry-run] [--yes] [--servers N] [--sys-creds FILE] [--json]`.
 - Reads: as `diff`. Writes: scoped signing keys for new owner groups (`applier.go:301-313`), the account JWT on every
   server, the ledger (generation and status), and revocations for leaving senders. It issues no credential.
-- Confirmation: required when the plan has `templates[].disconnects` true or a non-empty `revoke`
-  (`internal/listset/dryrun.go:58-59, 81-91`). On a terminal it asks for the account's name. `--yes` answers it. With no
-  terminal and no `--yes` it exits 2 and names `--yes` (cli r15). [choice]
+- Confirmation: required when the plan has `templates[].disconnects` true, a non-empty `revoke`, or a non-empty
+  `new_credential` caused by the deny sentinel (`internal/listset/dryrun.go:58-59, 81-91, 299-305`). The sentinel case
+  is a sender whose old and new tags differ only by `deny:_none` (the first deny in a group; `compile.go:109-110`). Its
+  current credential stops connecting, so it is a confirmation case even where the plan lists no other disconnect. On a
+  terminal the command asks for the account's name. `--yes` answers it. With no terminal and no `--yes` it exits 2 and
+  names `--yes` (cli r15). [choice]
+- `--yes` matters only when one of those three conditions holds. When none holds the command applies without a prompt and
+  prints `No confirmation needed: nothing is disconnected or revoked.` A `new_credential` from a new allow does not need
+  confirmation: the current credential keeps its old reach (`dryrun.go:100-107`). [choice]
 - Exit: as `diff`, plus 3 cancelled and 5 partial (the push began and the gate did not pass on every server).
 - JSON keys: `generation`, `base_generation`, `plan`, `checks[]`, `states` (section 3.4), `credential_work[]`, `message`.
+  `plan.new_credential` is the engine's key (`dryrun.go:55-57`). It includes the senders whose tags change only by the
+  deny sentinel. Each `credential_work[]` entry has a `reason` of `first_credential`, `new_credential` or `sentinel`, and
+  `effect`: `current_keeps_working` (new allow), `current_stops_connecting` (sentinel), or `reconnects_same` (switch
+  change; no credential work). [choice]
+- Exit when the sentinel case is in the plan: the same as any other change (0 for `planned` and `applied`); the plan
+  and the text name the senders whose current credential stops connecting.
 - Idempotent: re-running the same file after a stop finishes it. A stopped apply leaves a pending generation, and only
   the same content may follow (`read.go:435-440`; restart tests, `audit-policy` section 2.2, "When the host dies"). Re-
   running a finished file is `unchanged`. [fact for the pending rule; open for the resume, which I did not run]
@@ -429,11 +449,26 @@ Common to every command, unless a row says otherwise. [choice]
   (`validate.go:159-170`). [fact]
 - `rule delete` of an allow entry or a new deny entry is narrowing: outcome `unsupported` until N8 (F5). Removing a deny
   entry or flipping a switch is not narrowing (`dryrun.go:100-120`). [fact]
-- Confirmation: as `policy apply`, and also when the policy is the first one and it closes an owner line that credentials
-  from `add` use (F2, F3).
+- Confirmation: as `policy apply` (disconnect, revoke, or a sentinel `new_credential`), and also when the policy is the
+  first one and it closes an owner line that credentials from `add` use (F2, F3). Whether `mashctl` can tell that such a
+  credential exists is O11. When no condition holds the output says `No confirmation needed: nothing is disconnected or
+  revoked.`
+- Output lines the dry run and the apply carry. [choice]
+  - For an allow: `Cannot be undone in this release: removing this rule is not supported yet (narrowing).` An allow is
+    a one-way door: removing it is narrowing, which is refused (`failclosed.go:217-218`; `dryrun.go:100-107`). A deny is
+    not one-way: removing a deny is not narrowing.
+  - For a deny that is the first in its group: a `New credential:` line naming every other sender of the group, with the
+    reason `first deny in <group>; their current credentials will stop connecting`, and the command
+    `mashctl credential create ADDRESS`. A deny can be added only for a sender that is new to the policy, because
+    adding one for an existing sender is narrowing (F5; `dryrun.go:114-117`).
+  - For every created allow, the receiver: `<receiver> needs a credential to be online and answer. Replies need no rule
+    back.` Replies go to the caller's `_INBOX` subjects, which every template allows (`compile.go:183`, line
+    `_INBOX.>` in `fixedPub`).
+  - After an apply, per sender, one line by case (mockup iii, after the apply).
 - Idempotent: creating a rule that exists is `unchanged`, exit 0.
-- JSON keys: as `policy apply`, plus `request{from,to,effect,operations}` and `credential_work[]` naming each address
-  that needs `credential create`.
+- JSON keys: as `policy apply` (so `plan.new_credential` includes the sentinel case), plus
+  `request{from,to,effect,operations}`, `irreversible[]` (for an allow, the entry and `narrowing`) and `credential_work[]`
+  naming each address that needs `credential create`. [choice]
 
 #### `endpoint create` and `credential create`
 
@@ -599,9 +634,12 @@ human wording and shows the machine word in brackets in detail views. [choice] "
 
 Every mock output is built from the code's real facts. The data is invented and consistent: one account, owner groups
 `home.dev` (mail, prompt, status and heartbeat all closed) and `home.ops` (mail, status and heartbeat shared, prompt
-closed). Senders: `home.dev.lead` allows `home.ops.alice`; `home.dev.x` and `home.dev.y` each allow `home.dev.lead`;
-`home.ops.alice` denies `home.ops.bob`; `home.ops.bob` and `home.ops.carol` have no entries. `home` is a working value of
-the first part (section 1.2). A line marked "needs new work" shows output mash cannot print today.
+closed). Senders: `home.dev.lead` may mail `home.ops.alice`; `home.dev.x` and `home.dev.y` may each mail `home.dev.lead`;
+`home.ops.alice` may not mail `home.ops.bob`; `home.ops.bob` and `home.ops.carol` have no entries. An allow covers all
+four operations. A deny takes away only the operations the group shares. Bob and carol carry the deny sentinel
+`deny:_none` (`compile.go:109-110`). Mockup iii also uses owner group `home.lab` (mail shared; prompt, status and
+heartbeat closed) with senders `home.lab.p` and `home.lab.q` and no deny. `home` is a working value of the first part
+(section 1.2). A line marked "needs new work" shows output mash cannot print today.
 
 ### Mockup i: the rule-row view (`policy show`)
 
@@ -612,6 +650,8 @@ The data exists in `listset.View` and `policydoc.ShowResult` (`internal/listset/
 $ mashctl policy show
 POLICY  account AB7K...2QD                    Generation 7 (applied, 3 of 3 servers)
 Rules for four mash operations: mail, prompt, status, heartbeat
+  shared: everyone in the group may reach everyone in it for that operation. closed: only ALLOW rows reach anyone.
+  Closed is per operation. An ALLOW row adds all four operations whatever the switches are.
 Credential: not checked    Live: not checked
 
      ACTION  FROM                  TO                     OPERATIONS
@@ -622,13 +662,15 @@ Credential: not checked    Live: not checked
   5  ALLOW   home.dev.y            home.dev.lead          mail, prompt, status, heartbeat
 
 Nothing else is allowed. Owner group home.dev shares no operation.
+Rules are one-way: FROM is the sender. A DENY stops FROM reaching TO; TO can still reach FROM.
 How a decision is made, for one sender, one receiver and one operation:
-  1. A DENY row that names the receiver wins, if the operation is shared in the sender's own group.
+  1. A DENY row takes TO out of FROM's group sharing for that operation. (A DENY has effect only for an operation the group shares.)
   2. Otherwise an ALLOW row that names the receiver allows it, for all four operations.
   3. Otherwise a GROUP row allows it if the receiver is in the sender's own group and the operation is shared.
   4. Otherwise it is denied.
 Row numbers are for reference. Order does not matter. A GROUP row covers every address of the group,
 including addresses this policy does not list. An allow and a deny for the same pair cannot both exist.
+ALLOW rows are one-way doors: removing one is not supported in this release (narrowing). A DENY row can be removed.
 Scope: these rules decide who may mail, prompt, probe and watch whom. They do not decide who may communicate
 at all: a raw client can send data to any address over the reply and plumbing subjects.
 Credentials made by "mashctl add" are not covered by any rule: they keep the owner-line permissions.   [needs new work]
@@ -692,9 +734,10 @@ owner-line permissions: they reach every endpoint of owner dev.` [needs new work
 
 ### Mockup iii: change review before an irreversible act
 
-Applying a file that removes sender `home.dev.old`, closes status sharing in `home.ops` and adds one allow rule. The plan lines come from
-the engine's `Plan` (`internal/listset/dryrun.go:35-62`). Needs new work: the wording, the impact block first, the
-confirmation. Every impact line is a plan field.
+Applying a file that removes sender `home.dev.old`, closes status sharing in `home.ops`, adds one allow rule, and adds
+sender `home.lab.r`, who may not mail `home.lab.q` (the first deny in `home.lab`). The plan lines come from the engine's
+`Plan` (`internal/listset/dryrun.go:35-62`). Needs new work: the wording, the impact block first, the confirmation. Every
+impact line is a plan field.
 
 ```text
 $ mashctl policy apply p.json --dry-run
@@ -703,28 +746,63 @@ Preview only. No changes made.
 Impact:
   Disconnects now:  home.ops.alice, home.ops.bob, home.ops.carol  (template of home.ops changes; they reconnect
                     and are bound by the new template, no new credential)
+                    home.lab.p, home.lab.q  (template of home.lab changes; see New credential)
   Revokes:          home.dev.old  (every key issued for it; a revoked key cannot be issued again)
-  New credential:   home.dev.x  (gains an allow rule; the apply does not issue it)
-NOT REVERSIBLE: the revocation. The disconnect lasts until the clients reconnect.
+  New credential:   home.dev.x  (gains an allow rule; its current credential keeps working without the new rule
+                    until you run credential create; the apply does not issue it)
+                    home.lab.p, home.lab.q  (first deny in home.lab; their current credentials will stop connecting)
+                    run: mashctl credential create home.lab.p ; mashctl credential create home.lab.q
+  First credential: home.lab.r  (new sender)
+  Cannot be undone in this release: removing the rule home.dev.x -> home.dev.y is not supported yet (narrowing).
+NOT REVERSIBLE: the revocation of home.dev.old, and the allow rule home.dev.x -> home.dev.y.
+                The disconnects last until the clients reconnect.
 
 Change:  REMOVE sender home.dev.old   CHANGE template home.ops (status: shared -> closed)
          ADD ALLOW home.dev.x -> home.dev.y   mail, prompt, status, heartbeat
+         ADD sender home.lab.r   ADD DENY home.lab.r -> home.lab.q   mail
 Checks:  document valid (checked)   base generation 7 (checked)   inbox of added addresses (checked)
          size within limits of 3 servers (checked, from the servers)   narrowing (none)
 Next:    to apply, run: mashctl policy apply p.json   (type the account name to confirm)
-         then run:      mashctl credential create home.dev.x
+         then run:      mashctl credential create home.dev.x ; home.lab.p ; home.lab.q ; home.lab.r
 ```
 
 The prompt answers to `--yes`. Without a terminal and without `--yes` the command exits 2 and names `--yes` (cli r15).
-[choice] The "bound by the new template" statement is `TemplateChange` (`dryrun.go:81-91`). [fact]
+[choice] The "bound by the new template" statement is `TemplateChange` (`dryrun.go:81-91`). [fact] The `home.lab`
+lines come from the sentinel: the new deny gives the group's template deny lines, and every sender of the group without
+a deny gets `deny:_none` (`compile.go:109-110`, `128-146`). The tags change, so `new_credential` lists them
+(`dryrun.go:299-305`). A sender that is new to the policy, such as `home.lab.r`, is `first_credential`. [fact]
+
+After the apply of this file, the output prints one line per sender, by case. [choice]
+
+```text
+Applied generation 8 on 3 of 3 servers.
+home.dev.x: current credential keeps working without the new rule until you run credential create
+home.lab.p: current credential will stop connecting; run credential create
+home.lab.q: current credential will stop connecting; run credential create
+home.lab.r: no credential yet; run credential create
+home.ops.alice, home.ops.bob, home.ops.carol: reconnect with the same credential; no credential work
+```
+
+Which cases need a new credential, and what the old one does. [fact unless marked]
+
+- A new allow: the tags change and the template does not. The old credential keeps its old reach and lacks the new
+  rule until a new one is signed (`dryrun.go:55-57, 100-107, 299-305`).
+- A switch change: no tag changes. The group is disconnected and reconnects with the same credential; no credential
+  work (`dryrun.go:81-91, 106-107`).
+- The first deny in a group: the tags change by the sentinel and the template changes. Per the engine's own comment
+  the old credential cannot connect (`compile.go:22-27`; `dryrun.go:100-103`). I did not run it. [open: O9]
+- A sender new to the policy: no credential exists yet (`dryrun.go:296-298`).
 
 ### Mockup iv: Randy's story, end to end
 
-Part a: a solo developer. Existing commands print as they do today and are not repeated. The five lines marked new are
+Part a: a solo developer. Existing commands print as they do today and are not repeated. The lines marked new are
 output mash cannot print today.
 
 ```text
 $ mashctl init --local --owner dev --start                    (existing; writes keys, server, creds, buckets)
+Account home; your owner group is home.dev.                    [needs new work: the line is not printed today; the
+                                                                first address part depends on core's rename (section 1.2);
+                                                                this document uses home as a working name]
 $ mashctl policy init                                          [new: N1]
 Created the policy bucket mash-policy. No policy is in force.
 
@@ -742,12 +820,17 @@ This is the first policy. It makes owner group home.dev closed for all four oper
 Change:   ADD sender home.dev.x, home.dev.y   ADD ALLOW home.dev.x -> home.dev.y   mail, prompt, status, heartbeat
 Impact:   Disconnects: nobody (no credential is connected under the new template yet).
           Credentials made by "mashctl add" keep the owner-line permissions; this policy does not govern them.
+          Cannot be undone in this release: removing this rule is not supported yet (narrowing).
+          home.dev.y needs a credential to be online and answer. Replies need no rule back.
 Credential work: home.dev.x and home.dev.y need a first credential. Applying does not issue it.
 Checks:   document valid (checked)   base generation 0 (checked)   inbox of home.dev.x, home.dev.y (checked)
           size within limits (checked, from the server)   narrowing (none)
+No confirmation needed: nothing is disconnected or revoked.
 
 $ mashctl policy rule create --from home.dev.x --to home.dev.y
 Applied generation 1 on 1 of 1 servers.
+home.dev.x: no credential yet; it cannot use the rule until you run credential create
+home.dev.y: no credential yet; it cannot answer until you run credential create
 Credential work: mashctl credential create home.dev.x ; mashctl credential create home.dev.y
 
 $ mashctl credential create home.dev.x --creds-out ~/.mash/creds/x.creds           [new: N6]
@@ -759,9 +842,23 @@ Policy       generation 1 applied. home.dev.x may mail, prompt, probe and watch 
 Servers      1 of 1 hold generation 1                                                          checked
 Credential   issued with tags [allow:dev.y]; the policy needs [allow:dev.y]. Key not connected. checked
 Live         not checked (run with --live)                                                     [needs new work: N9]
+
+Then, as home.dev.x: mash prompt home.dev.y "status?"       (needs home.dev.y online; see below)
+Status is the probe; one rule also allows mail, prompt and heartbeat watching.
 ```
 
-The last block is the point of the four states. In a version of the story where `credential create` has not run, the
+The agent-side step uses what exists today. [fact unless marked]
+
+- `mash prompt <to> <text...>` sends a live, signed prompt and prints the reply (`cmd/mash/main.go:37`). It needs the
+  target online and listening for prompts. `mash who` shows who is online (`cmd/mash/main.go:34-36`). `mash` reads
+  its address from `MASH_AGENT_TOKEN`, `MASH_OWNER` and `MASH_NAME`, and the credential from `MASH_CREDS` (as set in
+  `cmd/mash/agent_token_refused_test.go:14-18`), so `home.dev.x` is `MASH_AGENT_TOKEN=home MASH_OWNER=dev MASH_NAME=x`.
+- A prompt is the live check that the rule works. It is not the status operation. `mash prompt` sends a prompt; no
+  `mash` command sends a status request to a peer. Needs new work: a status request to a peer (peer status; the issue
+  or pull request is not merged). Until it exists the rule grants status and nothing in mash can use it. [open: O10]
+- I did not check how `mash prompt` writes a three-part target address. [open: O10]
+
+The status block is the point of the four states. In a version of the story where `credential create` has not run, the
 same command prints `Credential   none issued: home.dev.x cannot use this rule yet` and exits 1. The tag shown is the
 engine's own form, `allow:` plus `owner.name` (`compile.go:104`). [fact]
 
@@ -782,7 +879,7 @@ $ mashctl policy apply - --servers 3 --sys-creds sys.creds --yes --json < p.json
 {"schema":"mash.policy.apply","outcome":"applied","exit":0,"generation":7,"base_generation":6,
  "states":{"policy":{"result":"checked","value":"applied"},"servers":{"result":"checked","value":"3 of 3"},
  "credential":{"result":"not_checked"},"live":{"result":"not_checked"}},
- "credential_work":[{"address":"home.dev.x","reason":"new_credential"}]}
+ "credential_work":[{"address":"home.dev.x","reason":"new_credential","effect":"current_keeps_working"}]}
 $ mashctl credential create home.dev.x --json
 {"schema":"mash.credential.create","outcome":"applied","exit":0,"address":"home.dev.x","tags":["allow:dev.y"],
  "generation":7,"jwt":"eyJ0eXAi...","creds_path":null}
@@ -800,15 +897,20 @@ First lines of the text form. Needs new work: wording. The words are `review` se
 
 ```text
 Invalid policy: sender "home.dev.x": allow "bar.d.build": first part "bar" is not the account's "home".   exit 1
-Cannot remove permissions in this release: home.dev.x loses home.dev.lead; replacing a credential is not built.   exit 1
+Cannot remove permissions in this release: narrowing needs a key rotation, which is not built.   exit 1
 Policy changed since this document was prepared: it is based on generation 6 and generation 7 is in force.   exit 1
 Blocked: home.dev.new has no inbox. Run: mashctl endpoint create home.dev.new                           exit 1
 No changes needed. Same content as generation 7 in force.                                               exit 0
+Applied generation 8 on 3 of 3 servers. home.dev.x: current credential keeps working without the new rule until you run credential create   exit 0
+Applied generation 8 on 3 of 3 servers. home.lab.p: current credential will stop connecting; run credential create     exit 0
 Preview only. No changes made.                                                                          exit 0
 Not applied: 2 of 3 servers hold generation 8 (n3: unknown). Run "mashctl policy status" for the checks.  exit 5
 Not authorized: the admin credentials were refused. Check MASH_ADMIN_CREDS.                             exit 4
 Could not complete: no connection to tls://n1:4222. Check MASH_URL and that the server runs.             exit 6
 ```
+
+The refused change (`home.dev.x loses home.dev.lead`) is in `refusals[]` and in `--details`. The first line keeps one
+sentence. [choice]
 
 [fact for the refusal stages: `internal/listset/dryrun.go:10-20`, `internal/policydoc/read.go:180-189, 322-328`; choice
 for the words and codes]
@@ -899,6 +1001,10 @@ Sizes: S 1 to 2 working days, M 3 to 5, L 6 to 10, each with tests. "Depends" na
 | N11 | Command-tree test, help text with examples, exit-code reference page | verbs fixed (question 1) | S |
 | N12 | Central-host items 7, 10 and 11 of section 4 | none | S, M, S |
 
+Out of scope for wording: making the deny sentinel not a per-user tag change. Today the first deny in a group changes the
+tags of every other sender of the group, which forces a new credential on each (`compile.go:109-110`; `dryrun.go:299-305`).
+A change in the engine would avoid that. It is core's and is not in this list. It is open point O8. [open]
+
 First slice: a usable standalone "allow X to Y" end to end, on one host. It is N1, N2, N3, N4, N5, N6, N10 and the part
 of N7 for `rule create`, `status` and the preview, plus N11 for the commands in it. [choice] That is the sequence of
 mockup iv, part a. It leaves out: `rule delete` of an allow entry (returns `unsupported`), the live check, the
@@ -924,6 +1030,18 @@ much each blocks a wrapper (`audit-json` section 4) and which need an answer fir
 - O6. The refusal texts that name the issue service (`internal/policyserve/failclosed.go:26-27`) must change in
   standalone: "with a credential from the issue service" is wrong. [fact for the text; choice for the change]
 - O7. Whether the reason codes (`allow_tag`, `no_entry`) stay in the JSON under their names. They are the engine's.
+- O8. For core: the deny sentinel is a per-user tag. The first deny in a group gives every other sender of the group the
+  tag `deny:_none` (`internal/listset/compile.go:109-110`; the tag and its reason, `compile.go:22-27`), so each needs a new
+  credential (`dryrun.go:299-305`). Whether the engine can avoid that change is not decided. The wording work in this
+  document only shows it.
+- O9. That an old credential, without the sentinel, stops connecting once the group's template has deny lines. The engine
+  comment says the sentinel "only keeps a user of a deny key able to connect" (`dryrun.go:100-103`). I did not run it
+  against a server.
+- O10. Peer status: no `mash` command sends a status request to a peer, so in mockup iv the agent-side step is `mash
+  prompt`. A status request to a peer needs new work (peer status; the issue or pull request is not merged). Whether
+  `mash prompt` takes a three-part address as written is not checked.
+- O11. Whether `mashctl` can tell that a credential made by `add` exists in an owner group, which decides the
+  first-policy confirmation (section 3.2, `rule create`).
 
 ### 10.3 Questions Randy must answer
 
@@ -968,6 +1086,22 @@ Each question gives options. Only question 5 and question 7 carry a recommendati
    check in 0.5.5.
 10. The existing commands' exit codes: change them in 0.5.5 and list each, or keep them documented in a "legacy" column
     until the major revision? (section 5). The `3` and the `issued` `2` do not fit the table in either case.
+
+### 10.4 Cold-read check
+
+A cold-read check of the mockups and help text was run on 2026-11-15 (spike 5): 7 respondents, 5 Claude Sonnet and 2
+codex (another model family), each given only the help text and mockups and five questions. [fact]
+
+- Questions 1, 2 and 5 (direction, `closed`, the commands for X to get status from Y): 21 of 21 correct.
+- Questions 3 and 4 (is an old credential usable after an apply; what cannot be undone): 0 of 14 complete, all partial.
+  Two behaviours the mockups did not show caused it: the deny sentinel and the allow that cannot be removed. [fact]
+- Changes made because of it: the direction line and the rewritten data prose; legend step 1; the definitions of
+  shared and closed; the `New credential` and `Cannot be undone` lines (mockups iii and iv, `rule create`); the
+  per-sender credential lines after an apply; the agent-side step and the `Account home` line in mockup iv; the
+  confirmation conditions in 3.2; the reworded line in mockup v. [fact]
+- Model respondents read every line and copy the nearest mockup, so 21 of 21 is an upper bound. The packet is `packet.md`
+  and `questions.md` in the spike folder; they are not in this repository. Rerun the same packet with people before Randy
+  relies on this design. [open]
 
 ## Appendix A: how the outside review is answered
 
