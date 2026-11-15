@@ -62,9 +62,12 @@ die() {
 }
 
 # ---- the port rules (before anything is created) ----
-[ -n "$PORT" ] || die "refusing: no port. Pass --port N (or env PORT): a port reserved with portwarden, never 4222"
+[ -n "$PORT" ] || die "refusing: no port. Pass --port N (or env PORT): a port reserved with portwarden, never a live server's port"
 case "$PORT" in *[!0-9]*|'') die "refusing: --port must be a number" ;; esac
-[ "$PORT" -ne 4222 ] || die "refusing: port 4222 is the live server's port"
+# Ports that must never be used: the live server's. Default 4222 (NATS); MASH_DEMO_PROTECTED_PORTS="4222 5222" changes the list.
+for _p in ${MASH_DEMO_PROTECTED_PORTS:-4222}; do
+  [ "$PORT" -ne "$_p" ] || die "refusing: port $PORT is on the protected list (a live server's port)"
+done
 [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "refusing: port $PORT is outside 1024..65535"
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   die "refusing: something is already listening on 127.0.0.1:$PORT (not a free reserved port)"
@@ -156,8 +159,8 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/sap"
+	"MASHMOD/internal/admin"
+	"MASHMOD/internal/sap"
 )
 
 // usercreds ACCOUNT_SEEDFILE USER_SEEDFILE agent.owner.name: a .creds file on stdout for a new-form endpoint, signed
@@ -323,6 +326,10 @@ func main() {
 	fmt.Print(in + "." + e.EncodeToString(sig))
 }
 EOF
+# the helper imports the selected repository's own packages: take the module path from its go.mod
+MASHMOD=$(awk '$1=="module"{print $2; exit}' "$T/src/go.mod")
+[ -n "$MASHMOD" ] || die "no module line in $T/src/go.mod"
+sed "s|MASHMOD|$MASHMOD|g" "$T/src/cmd/signdoc/main.go" >"$T/src/cmd/signdoc/main.go.tmp" && mv "$T/src/cmd/signdoc/main.go.tmp" "$T/src/cmd/signdoc/main.go"
 (cd "$T/src" && go build -o "$T/signdoc" ./cmd/signdoc) || die "could not build the signing helper"
 SIGN_HOW="built inside the extracted source copy (it needs the repo's internal packages for usercreds; the repo itself untouched)"
 echo "== signer: $SIGN_HOW" >&2
