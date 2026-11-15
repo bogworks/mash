@@ -28,6 +28,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -60,6 +61,11 @@ type IssueSource interface {
 	IssuedBucketProof(ctx context.Context) (ok bool, why string, err error)
 }
 
+// Resolver resolves an address to the directory record that serves it. *admin.Admin is one (ServingIdentity).
+type Resolver interface {
+	ServingIdentity(ctx context.Context, id sap.EndpointIdentity) (target sap.EndpointIdentity, legacy bool, found bool, err error)
+}
+
 // Input is everything the planner needs. It does no I/O of its own beyond reading Issued.
 type Input struct {
 	Account string
@@ -83,6 +89,10 @@ type Input struct {
 	Servers        []apply.ConnzServer
 	ScanIncomplete string
 	Issued         IssueSource
+	// Resolver maps each sender of the list set to the directory record that serves it, so that an issued record made
+	// under a legacy directory name (`mashctl add`: Address "l1", Owner "h1") is the sender lab.h1.l1's. Nil: a record
+	// is the sender's only when its Address is the sender's address as the list set spells it.
+	Resolver Resolver
 	// AdminUser and AdminIssuer are the public key and the `iss` of the admin credentials' user JWT.
 	AdminUser, AdminIssuer string
 }
@@ -301,6 +311,7 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	for _, u := range c.Users {
 		senders[u.Sender] = true
 	}
+	sm := resolveSenders(ctx, in.Resolver, c.Users)
 	scoped := map[string]bool{}
 	for _, k := range in.Signers {
 		scoped[k] = true
@@ -408,6 +419,25 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 		cs := byKey[r.PublicKey]
 		if r.Kind == store.IssuedAdmin {
 			finding(r.PublicKey, "recorded admin user %q is not in the exempt set: not revoked; exempt it by running adopt again, or revoke it by hand", r.Address)
+			continue
+		}
+		// A record is a sender's when it is the directory record that serves the sender's address: a legacy record
+		// (Address the bare name) is matched on name and owner together, because legacy names repeat across owners.
+		// Doubt is a finding, never a revoke (ADR 0121).
+		if by := sm.match[recKey{r.Address, r.Owner}]; len(by) > 0 {
+			if len(by) > 1 {
+				finding(r.PublicKey, "recorded as %q owner %q, the directory record that serves %s: not revoked; one record serving several senders is ambiguous", r.Address, r.Owner, strings.Join(by, ", "))
+			}
+			continue
+		}
+		// A sender the directory no longer serves is still named by the list set: its recorded issuance is not
+		// outside the list set, and revoking it is irreversible. Removing the sender from the list set revokes it.
+		if by := sm.absent[recKey{r.Address, r.Owner}]; len(by) > 0 {
+			finding(r.PublicKey, "recorded as %q owner %q, the list set names %s but no directory record serves it: not revoked; remove the sender from the list set to revoke it", r.Address, r.Owner, strings.Join(by, ", "))
+			continue
+		}
+		if why := sm.doubt(r); why != "" {
+			finding(r.PublicKey, "recorded as %q owner %q, which may be a sender of the list set, but %s: not revoked", r.Address, r.Owner, why)
 			continue
 		}
 		t, found, herr := in.Issued.IssuedHistoryByKey(ctx, r.PublicKey)
@@ -535,4 +565,85 @@ func anyIn(keys []string, set map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// recKey is how an issued record names the endpoint: its directory name and its owner.
+type recKey struct{ name, owner string }
+
+// senderMap is what the senders of the list set resolve to.
+type senderMap struct {
+	// match maps the (directory name, owner) of the record serving each sender to those senders.
+	match map[recKey][]string
+	// names maps a directory name a sender can be recorded under (its bare name, its flat key) to the senders; errs
+	// holds the senders whose resolution failed, by sender.
+	names map[string][]string
+	errs  map[string]error
+	// errOwner is the owner of each sender in errs that parsed as range.owner.name; a sender in errs with no entry has
+	// an unknown owner.
+	errOwner map[string]string
+	// absent maps the (directory name, owner) a sender would be recorded under, as its bare name or its flat key, to
+	// the senders for which no directory record was found.
+	absent map[recKey][]string
+}
+
+// resolveSenders resolves every sender of the list set to the record that serves it. A nil resolver resolves none.
+func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) senderMap {
+	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, errOwner: map[string]string{}, absent: map[recKey][]string{}}
+	if rs == nil {
+		return m
+	}
+	for _, u := range users {
+		parts := strings.Split(u.Sender, ".")
+		var id sap.EndpointIdentity
+		var err error
+		if len(parts) == 3 {
+			id, err = sap.New(parts[0], parts[1], parts[2])
+		} else {
+			err = fmt.Errorf("sender %q is not range.owner.name", u.Sender)
+		}
+		if err != nil {
+			m.names[parts[len(parts)-1]] = append(m.names[parts[len(parts)-1]], u.Sender)
+			m.errs[u.Sender] = err
+			continue
+		}
+		m.errOwner[u.Sender] = id.Owner
+		m.names[id.Name] = append(m.names[id.Name], u.Sender)
+		m.names[id.Flat()] = append(m.names[id.Flat()], u.Sender)
+		target, _, found, err := rs.ServingIdentity(ctx, id)
+		if err != nil {
+			m.errs[u.Sender] = err
+			continue
+		}
+		if found {
+			k := recKey{target.Flat(), target.Owner}
+			m.match[k] = append(m.match[k], u.Sender)
+		} else {
+			for _, n := range []string{id.Name, id.Flat()} {
+				k := recKey{n, id.Owner}
+				m.absent[k] = append(m.absent[k], u.Sender)
+			}
+		}
+	}
+	return m
+}
+
+// doubt is why a record that no sender is known to own may still be one's, or "" when it cannot be: its owner is
+// missing, or the resolution of a sender it could belong to (same owner, or an unknown one) failed.
+func (m senderMap) doubt(r store.Issued) string {
+	senders := m.names[r.Address]
+	if len(senders) == 0 {
+		return ""
+	}
+	if r.Owner == "" {
+		return "has no owner, so it cannot be matched to " + strings.Join(senders, ", ")
+	}
+	for _, s := range senders {
+		if err := m.errs[s]; err != nil {
+			if o, known := m.errOwner[s]; known && o != r.Owner {
+				continue // the owners rule out a match
+			}
+			return fmt.Sprintf("resolving %s failed (%v)", s, err)
+		}
+	}
+	return ""
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -604,5 +605,169 @@ func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
 				t.Errorf("issuer problems = %+v", p.IssuerProblems)
 			}
 		})
+	}
+}
+
+// fakeResolver serves each sender from a table keyed by the sender's canonical address.
+type fakeResolver struct {
+	byAddr map[string]sap.EndpointIdentity // the serving identity
+	errs   map[string]error
+}
+
+func (f fakeResolver) ServingIdentity(_ context.Context, id sap.EndpointIdentity) (sap.EndpointIdentity, bool, bool, error) {
+	if err := f.errs[id.String()]; err != nil {
+		return sap.EndpointIdentity{}, false, false, err
+	}
+	t, ok := f.byAddr[id.String()]
+	return t, t.IsLegacy(), ok, nil
+}
+
+func legacyID(t *testing.T, owner, name string) sap.EndpointIdentity {
+	t.Helper()
+	id, err := sap.Legacy(owner, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// buildWith builds the plan with a resolver.
+func (w *world) buildWith(rs Resolver) Plan {
+	w.t.Helper()
+	p, err := Build(context.Background(), Input{
+		Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
+		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Servers: w.servers, Issued: w.issued, Resolver: rs, AdminUser: w.admin, AdminIssuer: w.acct})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return p
+}
+
+func (w *world) recordOwned(key, address, owner string) {
+	w.record(key, address, w.now.Add(-time.Hour))
+	w.issued.recs[len(w.issued.recs)-1].Owner = owner
+}
+
+func TestLegacyRecordServingASenderIsNotRevoked(t *testing.T) {
+	w := newWorld(t)
+	mine, otherOwner := userKey(t), userKey(t)
+	w.recordOwned(mine, "core", "c")        // made by `mashctl add core`, owner c: serves foo.c.core
+	w.recordOwned(otherOwner, "core", "zz") // the same name under another owner, no sender
+	rs := fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": legacyID(t, "c", "core")}}
+	p := w.buildWith(rs)
+	if r, ok := revocation(p, mine); ok {
+		t.Errorf("the legacy record that serves foo.c.core was revoked: %+v", r)
+	}
+	if f, ok := finding(p, mine); ok {
+		t.Errorf("unexpected finding: %+v", f)
+	}
+	if r, ok := revocation(p, otherOwner); !ok || r.Reason != ReasonRecorded {
+		t.Errorf("the same name under another owner is not revoked as before: %+v %v", r, ok)
+	}
+}
+
+func TestNewFormRecordServingASenderIsNotRevoked(t *testing.T) {
+	w := newWorld(t)
+	k := userKey(t)
+	w.recordOwned(k, "foo_c_core", "c") // the directory name of a new-form record is agent_owner_name
+	id, err := sap.New("foo", "c", "core")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := w.buildWith(fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": id}})
+	if r, ok := revocation(p, k); ok {
+		t.Errorf("the new-form record that serves foo.c.core was revoked: %+v", r)
+	}
+}
+
+func TestRecordOfASenderWithNoDirectoryRecordIsAFindingNotARevoke(t *testing.T) {
+	w := newWorld(t)
+	legacy, newForm, otherOwner := userKey(t), userKey(t), userKey(t)
+	w.recordOwned(legacy, "core", "c")        // after `mashctl deprovision --no-revoke` the directory record is gone
+	w.recordOwned(newForm, "foo_c_core", "c") // the new-form directory name
+	w.recordOwned(otherOwner, "core", "zz")   // the same name under another owner: no sender's
+	p := w.buildWith(fakeResolver{})          // found=false for every sender
+	for name, k := range map[string]string{"legacy": legacy, "new-form": newForm} {
+		if r, ok := revocation(p, k); ok {
+			t.Errorf("%s: the record of a listed sender with no directory record was revoked: %+v", name, r)
+		}
+		f, ok := finding(p, k)
+		if !ok || !strings.Contains(f.Detail, "no directory record serves it") || !strings.Contains(f.Detail, "foo.c.core") {
+			t.Errorf("%s: finding = %+v %v", name, f, ok)
+		}
+	}
+	if r, ok := revocation(p, otherOwner); !ok || r.Reason != ReasonRecorded {
+		t.Errorf("the same name under another owner is revoked as before: %+v %v", r, ok)
+	}
+}
+
+func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
+	w := newWorld(t)
+	k := userKey(t)
+	w.recordOwned(k, "core", "c")
+	p := w.buildWith(fakeResolver{errs: map[string]error{"foo.c.core": errors.New("directory unreadable")}})
+	if _, ok := revocation(p, k); ok {
+		t.Fatal("a record whose sender could not be resolved was revoked")
+	}
+	f, ok := finding(p, k)
+	if !ok || !strings.Contains(f.Detail, "directory unreadable") || !strings.Contains(f.Detail, `"core"`) {
+		t.Errorf("finding = %+v %v", f, ok)
+	}
+}
+
+func TestResolverErrorDoubtsOnlyTheSendersOwnRecords(t *testing.T) {
+	w := newWorld(t)
+	other, same := userKey(t), userKey(t)
+	w.recordOwned(other, "core", "zed") // foo.c.core is owned by c: the owners rule it out
+	w.recordOwned(same, "core", "c")
+	p := w.buildWith(fakeResolver{errs: map[string]error{"foo.c.core": errors.New("directory unreadable")}})
+	if r, ok := revocation(p, other); !ok || r.Reason != ReasonRecorded {
+		t.Errorf("a record under another owner is revoked despite the resolver error: %+v %v", r, ok)
+	}
+	if _, ok := revocation(p, same); ok {
+		t.Error("the record under the failing sender's owner was revoked")
+	}
+	if f, ok := finding(p, same); !ok || !strings.Contains(f.Detail, "directory unreadable") {
+		t.Errorf("finding = %+v %v", f, ok)
+	}
+}
+
+func TestEmptyOwnerRecordNamedLikeASenderIsAFindingNotARevoke(t *testing.T) {
+	w := newWorld(t)
+	k := userKey(t)
+	w.recordOwned(k, "core", "")
+	p := w.buildWith(fakeResolver{})
+	if _, ok := revocation(p, k); ok {
+		t.Fatal("an ownerless record named like a sender was revoked")
+	}
+	if f, ok := finding(p, k); !ok || !strings.Contains(f.Detail, "no owner") {
+		t.Errorf("finding = %+v %v", f, ok)
+	}
+}
+
+func TestTwoSendersOnOneLegacyRecordIsInTheListSetWithAFinding(t *testing.T) {
+	w := newWorld(t)
+	k := userKey(t)
+	w.recordOwned(k, "core", "c")
+	both := legacyID(t, "c", "core")
+	p := w.buildWith(fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": both, "foo.c.docs": both}})
+	if _, ok := revocation(p, k); ok {
+		t.Error("a record that serves two senders was revoked")
+	}
+	if f, ok := finding(p, k); !ok || !strings.Contains(f.Detail, "ambiguous") {
+		t.Errorf("finding = %+v %v", f, ok)
+	}
+}
+
+func TestPlanDigestCoversTheResolverFindings(t *testing.T) {
+	w := newWorld(t)
+	w.recordOwned(userKey(t), "core", "")
+	a := w.buildWith(fakeResolver{}).Digest()
+	if b := w.buildWith(fakeResolver{}).Digest(); a != b {
+		t.Error("the same state gives a different digest")
+	}
+	if c := w.build().Digest(); a == c {
+		t.Error("the digest ignores the finding the resolver adds")
 	}
 }
