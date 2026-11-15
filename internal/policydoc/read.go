@@ -422,7 +422,12 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	} else if rng == "" {
 		return DiffPlan{}, ErrRangeNeeded
 	}
-	p := listset.DryRun(inForce, next.ListSet, servers)
+	var p listset.Plan
+	if cur.committed {
+		p = listset.DryRunSigned(inForce, cur.rec.Signed, next.ListSet, servers)
+	} else {
+		p = listset.DryRun(inForce, next.ListSet, servers)
+	}
 	var pre []listset.Refusal
 	if rng != "" && next.Range != rng {
 		pre = append(pre, listset.Refusal{Stage: StageRange, Entry: "range",

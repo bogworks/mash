@@ -586,3 +586,40 @@ func TestRunRotationStepAppliesSameContent(t *testing.T) {
 		t.Errorf("in force = %d, want 2", rec.Generation)
 	}
 }
+
+// TestApplyPreviousSignedInTheOtherPolicyForm: the generation in force was signed with the other form of the policy
+// line than the default (ADR 0129); Apply compiles it in that form, so the previous digests to what was signed and
+// there is no ErrPreviousMismatch.
+func TestApplyPreviousSignedInTheOtherPolicyForm(t *testing.T) {
+	for name, form := range map[string]listset.PolicyForm{"agents": listset.PolicyFormAgents, "mash": listset.PolicyFormMash} {
+		t.Run(name, func(t *testing.T) {
+			w, l, deps := applyWorld(t)
+			set := set1()
+			c1, err := listset.CompileForm(set, form)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if form != listset.DefaultPolicyForm && listset.DigestCompiled(c1) == listset.DigestCompiled(w.c1) {
+				t.Fatal("the two forms digest alike")
+			}
+			j1 := w.k.build(t, c1)
+			w.cluster = newCluster(j1, w.servers...)
+			w.prober = fakeProber{cluster: w.cluster, byGen: map[uint64]*listset.Compiled{1: c1, 2: w.c2}, allow: map[string]bool{}}
+			l = NewMemLedgerWith(listset.Record{Generation: 1, Signed: listset.DigestCompiled(c1)}, InForceDetail{JWT: j1, ListSet: &set})
+			deps.Ledger, deps.Cluster, deps.Prober = l, w.cluster, w.prober
+			deps.Signer = SignerFuncs{
+				SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return w.k.build(t, c1, revoked...), nil },
+				SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
+					return w.k.build(t, c, w.k.revoked), nil
+				},
+			}
+			st, err := Apply(context.Background(), applyReq(), deps)
+			if errors.Is(err, ErrPreviousMismatch) {
+				t.Fatalf("previous mismatch: %v", err)
+			}
+			if err != nil || st.State != StateApplied {
+				t.Fatalf("%+v %v", st, err)
+			}
+		})
+	}
+}

@@ -127,7 +127,21 @@ func Check(ls ListSet, c *Compiled) error {
 		}
 		// Every fixed grant the sender needs must be present and survive the deny lines.
 		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), flat) {
+		// The window release accepts either form of the policy line, exactly one of them (ADR 0129).
+		form := DefaultPolicyForm
+		var held []PolicyForm
+		for _, f := range []PolicyForm{PolicyFormAgents, PolicyFormMash} {
+			if slices.Contains(p.pubAllow, PolicySubjectForm(s.addr.rng, f)) {
+				held = append(held, f)
+			}
+		}
+		switch len(held) {
+		case 1:
+			form = held[0]
+		case 2:
+			bad(who, "more than one policy publish grant, %q and %q; a sender holds exactly one", PolicySubjectForm(s.addr.rng, PolicyFormAgents), PolicySubjectForm(s.addr.rng, PolicyFormMash))
+		}
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubjectForm(s.addr.rng, form), flat) {
 			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
 				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
 			}
@@ -230,10 +244,11 @@ func reachVerb(v Verb) string {
 	return "publish " + string(v) + " to"
 }
 
-// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range>: three tokens, no address.
+// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range> or mash.policy.<range>
+// (ADR 0129): three tokens, no address.
 func isPolicySubject(line string) bool {
 	toks := strings.Split(line, ".")
-	return len(toks) == 3 && toks[0] == "agents" && toks[1] == "policy"
+	return len(toks) == 3 && (toks[0] == "agents" || toks[0] == "mash") && toks[1] == "policy"
 }
 
 func subj(address string, v Verb) string { return "agents." + v.subject() + "." + address }
@@ -332,9 +347,11 @@ func universeOf(m *model) []string {
 // fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
 func fixedLines(s sender) (pub, sub []string) {
 	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", PolicySubject(s.addr.rng), flat) {
-		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
-			pub = append(pub, l)
+	for _, f := range []PolicyForm{PolicyFormAgents, PolicyFormMash} {
+		for _, l := range fixedPub("", PolicySubjectForm(s.addr.rng, f), flat) {
+			if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" && !slices.Contains(pub, l) {
+				pub = append(pub, l)
+			}
 		}
 	}
 	return pub, []string{"_INBOX." + flat + ".>", "$SRV.>"}

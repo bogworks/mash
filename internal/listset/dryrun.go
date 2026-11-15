@@ -129,6 +129,17 @@ var stageRank = map[string]int{StageInForce: 0, StageValidate: 1, StageCheck: 2,
 // no changes. A list set in force that does not itself compile is reported as an in_force refusal, because there
 // is nothing sound to compare with.
 func DryRun(inForce *ListSet, next ListSet, servers []ServerLimits) Plan {
+	return dryRun(inForce, nil, next, servers)
+}
+
+// DryRunSigned is DryRun for a list set in force whose signed digest is known. It compiles the list set in force in
+// the policy-line form that digests to signed (as CompilePrevious does), so a generation signed in the other form
+// shows the policy line change that the next push makes to every group (ADR 0129).
+func DryRunSigned(inForce *ListSet, signed Digest, next ListSet, servers []ServerLimits) Plan {
+	return dryRun(inForce, &signed, next, servers)
+}
+
+func dryRun(inForce *ListSet, signed *Digest, next ListSet, servers []ServerLimits) Plan {
 	p := Plan{
 		Refusals: []Refusal{}, Receivers: []ReceiverChange{}, Templates: []TemplateChange{}, Tags: []TagChange{},
 		RotateAndRevoke: []string{}, NewCredential: []string{}, Revoke: []string{}, FirstCredential: []string{},
@@ -147,6 +158,11 @@ func DryRun(inForce *ListSet, next ListSet, servers []ServerLimits) Plan {
 			refuse(StageInForce, problemsOf(err))
 		} else {
 			oldM, oldC = m, build(m)
+			if signed != nil && DigestCompiled(oldC) != *signed {
+				if alt := buildForm(m, DefaultPolicyForm.other()); DigestCompiled(alt) == *signed {
+					oldC = alt
+				}
+			}
 		}
 	}
 

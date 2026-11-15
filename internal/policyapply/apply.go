@@ -135,7 +135,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		if !ok {
 			return Status{}, fmt.Errorf("%w: generation %d", ErrNoInForceListSet, cur.Generation)
 		}
-		if prev, err = listset.Compile(ls); err != nil {
+		if prev, err = listset.CompilePrevious(ls, cur.Signed); err != nil {
 			return Status{}, fmt.Errorf("compile the list set in force (generation %d): %w", cur.Generation, err)
 		}
 	}

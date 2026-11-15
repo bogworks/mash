@@ -210,7 +210,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		if !ok {
 			return policyintake.Result{}, fmt.Errorf("%w: generation %d", policyapply.ErrNoInForceListSet, cur.Generation)
 		}
-		if prev, err = listset.Compile(ls); err != nil {
+		if prev, err = listset.CompilePrevious(ls, cur.Signed); err != nil {
 			return policyintake.Result{}, fmt.Errorf("compile the list set in force (generation %d): %w", cur.Generation, err)
 		}
 	}

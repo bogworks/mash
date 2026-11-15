@@ -155,7 +155,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if !ok {
 		return res0, policyapply.ErrNoInForceListSet
 	}
-	compiled, err := listset.Compile(ls)
+	compiled, err := listset.CompilePrevious(ls, rec.Signed) // the form the generation in force was signed in (ADR 0129)
 	if err != nil {
 		return res0, fmt.Errorf("compile the list set in force (generation %d): %w", rec.Generation, err)
 	}

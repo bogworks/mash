@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+
+	"github.com/bogworks/mash/internal/listset"
 )
 
 // AccountClaims fetches the account's current JWT claims, verified: the issue service asks it which signing keys the
@@ -60,10 +63,13 @@ func wantTemplate(p jwt.Permissions) jwt.UserPermissionLimits {
 }
 
 // checkScope verifies, before anything is signed, that pub is published in the account JWT as a scoped signer whose
-// template equals want. It returns CodeNoScope (absent, or published unscoped), CodeTemplate (scoped with another
+// template equals want, or want with its policy line in the other form (ADR 0129). It returns CodeNoScope (absent, or published unscoped), CodeTemplate (scoped with another
 // template) or CodeNoSigningKey (the account JWT could not be read from every expected server), "" when the key is fit to sign with.
 func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Permissions) (string, jwt.RevocationList) {
-	wk := templateKey(wantTemplate(want))
+	rng, _, _ := strings.Cut(group, ".")
+	wk1 := templateKey(wantTemplate(want))
+	wk2 := templateKey(wantTemplate(listset.OtherPolicyForm(rng, want)))
+	wk := wk1 + "\n" + wk2 // the cache key covers both forms
 	now := is.now()
 	c := &is.scopes
 	c.mu.Lock()
@@ -92,7 +98,7 @@ func (is *Issuer) checkScope(ctx context.Context, group, pub string, want jwt.Pe
 		switch {
 		case !found || !scoped || us == nil:
 			code = CodeNoScope
-		case templateKey(us.Template) != wk:
+		case templateKey(us.Template) != wk1 && templateKey(us.Template) != wk2:
 			code = CodeTemplate
 		}
 	}

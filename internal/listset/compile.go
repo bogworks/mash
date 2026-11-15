@@ -61,12 +61,15 @@ type User struct {
 
 // Compile validates ls, derives the templates and tags, and checks its own output with Check. On any error it
 // returns nil and the error: a *ValidationError, or a *CheckError.
-func Compile(ls ListSet) (*Compiled, error) {
+func Compile(ls ListSet) (*Compiled, error) { return CompileForm(ls, DefaultPolicyForm) }
+
+// CompileForm is Compile with the form of the fixed policy line given (ADR 0129).
+func CompileForm(ls ListSet, form PolicyForm) (*Compiled, error) {
 	m, err := validate(ls)
 	if err != nil {
 		return nil, err
 	}
-	c := build(m)
+	c := buildForm(m, form)
 	if err := Check(ls, c); err != nil {
 		return nil, err
 	}
@@ -75,7 +78,9 @@ func Compile(ls ListSet) (*Compiled, error) {
 
 // build derives the templates and tags of a validated model. It does not check them; DryRun uses it to collect the
 // refusals of Check and SizeCheck together.
-func build(m *model) *Compiled {
+func build(m *model) *Compiled { return buildForm(m, DefaultPolicyForm) }
+
+func buildForm(m *model, form PolicyForm) *Compiled {
 	c := &Compiled{Range: m.rng}
 
 	denyKey := map[string]bool{}
@@ -95,7 +100,7 @@ func build(m *model) *Compiled {
 	sort.Strings(names)
 	for _, g := range names {
 		a := groups[g]
-		c.Templates = append(c.Templates, Template{Group: g, Permissions: template(m, a.rng, a.owner, denyKey[g])})
+		c.Templates = append(c.Templates, Template{Group: g, Permissions: template(m, a.rng, a.owner, denyKey[g], form)})
 	}
 
 	for _, s := range m.senders {
@@ -125,7 +130,7 @@ func build(m *model) *Compiled {
 // The fixed lines name the sender through {{name()}} and the key's own range and owner, never through a tag: the
 // sender's own heartbeat, its inbox stream and consumer, its reply prefix, its own prompt and status subjects, the
 // directory and its lease.
-func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
+func template(m *model, rng, owner string, withDeny bool, form PolicyForm) jwt.Permissions {
 	group := rng + "." + owner
 	selfSubj := func(v Verb) string { return "agents." + v.subject() + "." + group + "." + nameFn }
 	var pub, sub, pubDeny, subDeny []string
@@ -147,7 +152,7 @@ func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
 	sub = append(sub, "agents.hb."+rng+"."+allowT)
 
 	flat := rng + "_" + owner + "_" + nameFn
-	pub = append(pub, fixedPub(selfSubj(Heartbeat), PolicySubject(rng), flat)...)
+	pub = append(pub, fixedPub(selfSubj(Heartbeat), PolicySubjectForm(rng, form), flat)...)
 	sub = append(sub,
 		"_INBOX."+flat+".>",
 		selfSubj(Prompt),
@@ -163,10 +168,80 @@ func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
 	return p
 }
 
-// PolicySubject is the subject of the policy responder of range rng: "agents.policy.<range>". Every sender may publish
-// to it, so `mash policy show` and `mash policy explain` can ask it; the answer returns on the sender's own _INBOX
-// prefix. It has three tokens, so it is no address subject and no reach.
-func PolicySubject(rng string) string { return "agents.policy." + rng }
+// PolicyForm is the form of the policy responder's subject in a template's fixed publish line (ADR 0129).
+type PolicyForm int
+
+const (
+	// PolicyFormAgents is the old form, "agents.policy.<range>".
+	PolicyFormAgents PolicyForm = iota
+	// PolicyFormMash is the new form, "mash.policy.<range>".
+	PolicyFormMash
+)
+
+// DefaultPolicyForm is the form Compile emits. It stays the old form until the release that flips it.
+var DefaultPolicyForm = PolicyFormAgents
+
+// other is the form that is not f.
+func (f PolicyForm) other() PolicyForm {
+	if f == PolicyFormMash {
+		return PolicyFormAgents
+	}
+	return PolicyFormMash
+}
+
+// PolicySubjectForm is the subject of the policy responder of range rng in the given form.
+func PolicySubjectForm(rng string, form PolicyForm) string {
+	if form == PolicyFormMash {
+		return "mash.policy." + rng
+	}
+	return "agents.policy." + rng
+}
+
+// PolicySubject is the subject of the policy responder of range rng in the default form: "agents.policy.<range>"
+// until the default flips. Every sender may publish to it, so `mash policy show` and `mash policy explain` can ask it;
+// the answer returns on the sender's own _INBOX prefix. It has three tokens, so it is no address subject and no reach.
+func PolicySubject(rng string) string { return PolicySubjectForm(rng, DefaultPolicyForm) }
+
+// PolicySubjects are both subjects of the policy responder of range rng, the new form first.
+func PolicySubjects(rng string) []string {
+	return []string{PolicySubjectForm(rng, PolicyFormMash), PolicySubjectForm(rng, PolicyFormAgents)}
+}
+
+// OtherPolicyForm returns p with its policy publish line, whichever form it holds, in the other form. rng is the
+// range of the template's group. p is not changed. A caller that compares a template with a published one accepts p
+// and its OtherPolicyForm (ADR 0129).
+func OtherPolicyForm(rng string, p jwt.Permissions) jwt.Permissions {
+	oldL, newL := PolicySubjectForm(rng, PolicyFormAgents), PolicySubjectForm(rng, PolicyFormMash)
+	var out jwt.Permissions
+	out = p
+	out.Pub.Allow = nil
+	for _, l := range p.Pub.Allow {
+		switch l {
+		case oldL:
+			l = newL
+		case newL:
+			l = oldL
+		}
+		out.Pub.Allow = append(out.Pub.Allow, l)
+	}
+	return out
+}
+
+// CompilePrevious compiles ls as the generation in force whose signed digest is signed. The window release accepts
+// either form of the policy line (ADR 0129), so a generation signed in the other form than the default must be
+// compiled in that form to reproduce what was signed. It compiles the default form; if that does not digest to
+// signed, it compiles the other form and returns it when that does. Otherwise it returns the default-form compile,
+// so the caller's own mismatch check still refuses.
+func CompilePrevious(ls ListSet, signed Digest) (*Compiled, error) {
+	c, err := CompileForm(ls, DefaultPolicyForm)
+	if err != nil || DigestCompiled(c) == signed {
+		return c, err
+	}
+	if alt, aerr := CompileForm(ls, DefaultPolicyForm.other()); aerr == nil && DigestCompiled(alt) == signed {
+		return alt, nil
+	}
+	return c, nil
+}
 
 // fixedPub is the part of a sender's publish allow list that names only the sender itself and the shared plumbing:
 // its heartbeat, replies, the service API, and the JetStream and KV subjects of its own inbox, the directory and its

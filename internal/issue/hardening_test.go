@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -384,5 +386,42 @@ func TestKeyRevokedOnlyInAccountJWTIsRefused(t *testing.T) {
 	defer f.rec.mu.Unlock()
 	if len(f.rec.recs) != 0 {
 		t.Fatalf("a refused issue recorded %d record(s)", len(f.rec.recs))
+	}
+}
+
+// ADR 0129: the published template may hold the policy line in either form; any other difference is template_mismatch.
+func TestSigningKeyTemplateInEitherPolicyForm(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		publish func(f *fixture) jwt.Permissions
+		want    string
+	}{
+		{"the compiled form", func(f *fixture) jwt.Permissions { return f.tpl }, ""},
+		{"the other policy form", func(f *fixture) jwt.Permissions { return listset.OtherPolicyForm("foo", f.tpl) }, ""},
+		{"the other form with an extra line", func(f *fixture) jwt.Permissions {
+			p := listset.OtherPolicyForm("foo", f.tpl)
+			p.Pub.Allow.Add("mash.>")
+			return p
+		}, CodeTemplate},
+		{"the other form without the policy line", func(f *fixture) jwt.Permissions {
+			p := listset.OtherPolicyForm("foo", f.tpl)
+			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "mash.policy.foo" })
+			return p
+		}, CodeTemplate},
+		{"the other form of another range", func(f *fixture) jwt.Permissions {
+			p := listset.OtherPolicyForm("foo", f.tpl)
+			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "mash.policy.foo" })
+			p.Pub.Allow.Add("mash.policy.bar")
+			return p
+		}, CodeTemplate},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			p := c.publish(f)
+			f.claims.publish(f.gpub, &p)
+			if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != c.want {
+				t.Fatalf("got %v, want %q", err, c.want)
+			}
+		})
 	}
 }
