@@ -38,8 +38,8 @@ only on `success() || failure()` and never for a pull request from a fork, and i
 did not succeed, so the job's result is the same as a plain `go test`. Both tools are pinned by version and SHA-256 in
 bogworks/cicd (`runners/pins/pins.yaml`) and installed read-only in `/opt/ci-tools/bin` on the runners. `test-eph` alone
 gets `id-token: write`; the CLI trades GitHub's ID token (audience `https://api.mergify.com`) for a one-hour Mergify token
-limited to this repository, under a trust policy in the Mergify dashboard that allows `push` and `merge_group` for this
-workflow only. No application key exists.
+limited to this repository, under a trust policy in the Mergify dashboard (`mash-ci-test-upload`) that allows this repository only, the events `push`,
+`merge_group` and `pull_request`, and the workflow file `ci.yml` only; the upload step itself skips pull requests from forks. No application key exists.
 
 **What leaves the runner.** To api.mergify.com: the JUnit file (test names, durations, results), the repository, branch,
 commit and job name. For a failing test the file holds that test's full output, so **failure output, stack traces and
