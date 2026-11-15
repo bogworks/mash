@@ -74,7 +74,7 @@ git -C "$REPO" rev-parse --verify -q "$REF^{commit}" >/dev/null || die "ref $REF
 COMMIT=$(git -C "$REPO" rev-parse "$REF^{commit}")
 
 # ---- temp dir and teardown ----
-T=$(mktemp -d /tmp/mash-policy.XXXXXX) || die "mktemp failed"
+T=$(mktemp -d "${TMPDIR:-/tmp}/mash-policy.XXXXXX") || die "mktemp failed"   # TMPDIR chooses the scratch location
 chmod 700 "$T"
 if [ "$NARRATE" = 1 ]; then
   exec 2>"$T/stderr.log"   # setup chatter goes to a log; the terminal shows one line
@@ -87,7 +87,7 @@ declare -A APPLY_STATE
 stop_pid() { # stop_pid PID WHY: only a process whose command line is under $T (so one this run started)
   local pid=$1 i
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
-  if ! tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -qF "$T"; then
+  if ! ps -ww -o command= -p "$pid" 2>/dev/null | grep -qF "$T"; then   # ps, not /proc: the same on Linux and macOS
     echo "teardown: pid $pid is not a process started under $T; leaving it alone" >&2
     return 0
   fi
