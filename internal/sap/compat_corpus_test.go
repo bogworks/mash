@@ -41,7 +41,13 @@ import (
 // (absent), a string v (malformed), an account of "$G" or a name (verified), and extra unknown members (verified).
 // None of the differences is a mash leniency over an invalid signature: where mash says verified and the SDK does not,
 // the signature is valid and only the header's form is outside the SDK's stricter rules. They are the open decision
-// for adopting the SDK's parser: after a swap those stored headers would read malformed instead of verified.
+// for adopting the SDK's parser. After the swap (P1-2) mash's classifier is the SDK's: each of those cases (and the two
+// sig-form cases, forged before) now reads malformed in mash too, and its why says what mash gave before. Only the
+// empty header value and the second Agent-Sender value still differ: mash's API takes one string, not a header map.
+
+// adopted starts the why of a case where mash moved to the SDK parser: both now give the same label, and the why
+// records the label mash gave before.
+const adopted = "mash adopted the SDK parser (P1-2); was "
 
 type compatCase struct {
 	name       string
@@ -160,11 +166,11 @@ func (k compatKit) cases() []compatCase {
 		{name: "tampered payload", hdr: std(), subject: subCC, payload: `{"text":"HELLO"}`, expectMash: TrustForged, expectSDK: TrustForged},
 		{name: "wrong sub (signed for another subject)", hdr: members(k.base(acct, "agents.mail.zz.o.n", ts, nonce, pay)...), subject: subCC, payload: pay, expectMash: TrustForged, expectSDK: TrustForged},
 		{name: "arrival subject differs from sub", hdr: std(), subject: "agents.mail.other.o.n", payload: pay, expectMash: TrustForged, expectSDK: TrustForged},
-		{name: "signature valid base64url, wrong length", hdr: strings.Replace(std(), `"sig":"`, `"sig":"AAAA`, 1), subject: subCC, payload: pay, expectMash: TrustForged, expectSDK: TrustMalformed,
-			why: "a sig that is base64url but 4 characters over the 86 of 64 bytes: mash only fails the signature check (forged), the SDK rejects the length first (malformed)"},
+		{name: "signature valid base64url, wrong length", hdr: strings.Replace(std(), `"sig":"`, `"sig":"AAAA`, 1), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "forged"},
 		{name: "signature of right form, does not verify", hdr: strings.Replace(std(), k.sig(acct, subCC, ts, nonce, pay), base64.RawURLEncoding.EncodeToString(make([]byte, 64)), 1), subject: subCC, payload: pay, expectMash: TrustForged, expectSDK: TrustForged},
-		{name: "signature not base64", hdr: strings.Replace(std(), `"sig":"`, `"sig":"!!`, 1), subject: subCC, payload: pay, expectMash: TrustForged, expectSDK: TrustMalformed,
-			why: "sig is not base64url: mash forged (verifySig false), SDK malformed"},
+		{name: "signature not base64", hdr: strings.Replace(std(), `"sig":"`, `"sig":"!!`, 1), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "forged"},
 		{name: "wrong signer key", hdr: strings.Replace(std(), k.id.User, otherUser(k.t), 1), subject: subCC, payload: pay, expectMash: TrustForged, expectSDK: TrustForged},
 		{name: "sig present, sub missing", hdr: members(`"v":1`, `"account":`+q(acct), `"user":`+q(k.id.User), `"ts":`+q(ts), `"nonce":`+q(nonce), `"sig":`+q(k.sig(acct, "", ts, nonce, pay))), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed},
 		{name: "empty sub with sig", hdr: members(k.base(acct, "", ts, nonce, pay)...), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed},
@@ -174,25 +180,25 @@ func (k compatKit) cases() []compatCase {
 		{name: "nonce 65 chars", hdr: members(k.base(acct, subCC, ts, strings.Repeat("n", 65), pay)...), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed},
 
 		{name: "ts with fractional seconds and Z", hdr: members(k.base(acct, subCC, "2026-11-15T12:00:00.123Z", nonce, pay)...), subject: subCC, payload: pay, expectMash: vv, expectSDK: vv},
-		{name: "ts with +01:00 offset", hdr: members(k.base(acct, subCC, "2026-11-15T13:00:00+01:00", nonce, pay)...), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "ts must be UTC with Z; mash accepts any offset"},
+		{name: "ts with +01:00 offset", hdr: members(k.base(acct, subCC, "2026-11-15T13:00:00+01:00", nonce, pay)...), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
 		{name: "ts not RFC3339", hdr: members(k.base(acct, subCC, "yesterday", nonce, pay)...), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed},
 
-		{name: "duplicate user member", hdr: strings.Replace(std(), `"user":`, `"user":"UXXX","user":`, 1), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "a repeated member name is malformed; mash's map decode keeps the last"},
-		{name: "duplicate name member", hdr: withName(`"name":"a","name":"b"`), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "a repeated member name is malformed; mash's map decode keeps the last"},
-		{name: "header over 2048 bytes", hdr: std(`"pad":` + q(strings.Repeat("p", 2100))), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "value over 2048 bytes is malformed; mash has no size cap"},
-		{name: "name with a control character", hdr: withName(`"name":"a\u0001b"`), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "control characters are not allowed in name"},
+		{name: "duplicate user member", hdr: strings.Replace(std(), `"user":`, `"user":"UXXX","user":`, 1), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
+		{name: "duplicate name member", hdr: withName(`"name":"a","name":"b"`), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
+		{name: "header over 2048 bytes", hdr: std(`"pad":` + q(strings.Repeat("p", 2100))), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
+		{name: "name with a control character", hdr: withName(`"name":"a\u0001b"`), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
 		{name: "name of 64 chars", hdr: withName(`"name":` + q(strings.Repeat("n", 64))), subject: subCC, payload: pay, expectMash: vv, expectSDK: vv},
-		{name: "name of 65 chars", hdr: withName(`"name":` + q(strings.Repeat("n", 65))), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "name over 64 UTF-16 units"},
-		{name: "name with an unpaired surrogate escape", hdr: withName(`"name":"a\ud800b"`), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "a lone surrogate escape in name"},
-		{name: "sub with a space", hdr: members(k.base(acct, "agents.mail.a b.o.n", ts, nonce, pay)...), subject: "agents.mail.a b.o.n", payload: pay, expectMash: vv, expectSDK: TrustMalformed,
-			why: strict + "sub must have the shape of a NATS subject (no whitespace)"},
+		{name: "name of 65 chars", hdr: withName(`"name":` + q(strings.Repeat("n", 65))), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
+		{name: "name with an unpaired surrogate escape", hdr: withName(`"name":"a\ud800b"`), subject: subCC, payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
+		{name: "sub with a space", hdr: members(k.base(acct, "agents.mail.a b.o.n", ts, nonce, pay)...), subject: "agents.mail.a b.o.n", payload: pay, expectMash: TrustMalformed, expectSDK: TrustMalformed,
+			why: adopted + "verified"},
 		{name: "two Agent-Sender values", hdr: k.signed(subCC, pay, "x"), extraHdr: k.signed(subCC, pay, "y"), subject: subCC, payload: pay, expectMash: vv, expectSDK: TrustMalformed,
 			why: "mash reads the first value of the header; the SDK refuses more than one value"},
 	}
@@ -256,7 +262,7 @@ func TestCompatCorpusStored(t *testing.T) {
 			if mash != sdk && c.why == "" {
 				t.Errorf("mash %s and SDK %s differ with no why", mash, sdk)
 			}
-			if mash == sdk && c.why != "" {
+			if mash == sdk && c.why != "" && !strings.HasPrefix(c.why, adopted) {
 				t.Errorf("why is set but both say %s", mash)
 			}
 		})

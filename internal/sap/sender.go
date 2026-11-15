@@ -2,22 +2,21 @@ package sap
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/synadia-agents.go/identity"
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
-	"github.com/nats-io/nuid"
 )
 
 // HeaderName is the SAP §13.5 sender header.
@@ -125,49 +124,61 @@ func (h SenderHeader) Encode() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func signedInput(account, user, subject, ts, nonce string, payload []byte) []byte {
-	sum := sha256.Sum256(payload)
-	return []byte("AGENT-SENDER-V1\n" + account + "\n" + user + "\n" + subject + "\n" +
-		ts + "\n" + nonce + "\n" + hex.EncodeToString(sum[:]) + "\n")
+// kpSigner adapts the identity's key pair to the SDK's Signer, so the seed is never copied out of it.
+type kpSigner struct {
+	pub string
+	kp  nkeys.KeyPair
 }
 
-// Sign produces a signed header for publishing payload to subject (§13.6).
-// An empty nonce gets a fresh NUID.
-func (id Identity) Sign(subject string, payload []byte, name string, now time.Time, nonce string) (SenderHeader, error) {
+func (s kpSigner) PublicKey() string                { return s.pub }
+func (s kpSigner) Sign(data []byte) ([]byte, error) { return s.kp.Sign(data) }
+
+// sdkIdentity returns the SDK signer and agent ID for the identity.
+func (id Identity) sdkIdentity() (identity.Signer, identity.AgentID, error) {
 	if id.kp == nil {
-		return SenderHeader{}, errors.New("sap: identity has no seed")
+		return nil, "", errors.New("sap: identity has no seed")
 	}
-	if nonce == "" {
-		nonce = nuid.Next()
+	aid, err := identity.NewAgentID(id.Account, id.User)
+	if err != nil {
+		return nil, "", fmt.Errorf("sap: %w", err)
 	}
-	ts := now.UTC().Format("2006-01-02T15:04:05Z")
-	sig, err := id.kp.Sign(signedInput(id.Account, id.User, subject, ts, nonce, payload))
+	return kpSigner{pub: id.User, kp: id.kp}, aid, nil
+}
+
+// Sign produces a signed header for publishing payload to subject (§13.6), built by the SAP Go SDK.
+// An empty nonce gets a fresh one from the SDK.
+func (id Identity) Sign(subject string, payload []byte, name string, now time.Time, nonce string) (SenderHeader, error) {
+	signer, aid, err := id.sdkIdentity()
 	if err != nil {
 		return SenderHeader{}, err
 	}
-	return SenderHeader{V: 1, Account: id.Account, User: id.User, Name: name, Sub: subject,
-		TS: ts, Nonce: nonce, Sig: base64.RawURLEncoding.EncodeToString(sig)}, nil
+	h, err := identity.SignHeader(identity.SignOptions{Signer: signer, ID: aid, Name: name, Subject: subject,
+		Payload: payload, Now: func() time.Time { return now }, Nonce: nonce})
+	if err != nil {
+		return SenderHeader{}, err
+	}
+	return fromSDK(h), nil
+}
+
+func fromSDK(h identity.SenderHeader) SenderHeader {
+	return SenderHeader{V: h.V, Account: h.Account, User: h.User, Name: h.Name, Sub: h.Sub, TS: h.TS, Nonce: h.Nonce, Sig: h.Sig}
 }
 
 // IDSig signs the §13.10 registration identity.
 func (id Identity) IDSig(agent, owner, promptSubject string) (string, error) {
-	if id.kp == nil {
-		return "", errors.New("sap: identity has no seed")
-	}
-	sig, err := id.kp.Sign(idInput(id.User, id.Account, agent, owner, promptSubject))
+	signer, aid, err := id.sdkIdentity()
 	if err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(sig), nil
-}
-
-func idInput(user, account, agent, owner, promptSubject string) []byte {
-	return []byte("AGENT-ID-V1\n" + user + "\n" + account + "\n" + agent + "\n" + owner + "\n" + promptSubject + "\n")
+	return identity.SignAgentID(signer, aid, agent, owner, promptSubject)
 }
 
 // VerifyIDSig checks a §13.10 id_sig.
 func VerifyIDSig(user, account, agent, owner, promptSubject, sig string) bool {
-	return verifySig(user, idInput(user, account, agent, owner, promptSubject), sig)
+	return identity.VerifyAgentID(map[string]string{
+		identity.MetadataKeyUserNKey: user, identity.MetadataKeyAccount: account,
+		"agent": agent, "owner": owner, identity.MetadataKeyIDSig: sig,
+	}, promptSubject)
 }
 
 func verifySig(user string, input []byte, sig string) bool {
@@ -182,105 +193,48 @@ func verifySig(user string, input []byte, sig string) bool {
 	return pk.Verify(input, raw) == nil
 }
 
-var (
-	nonceRE   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	accNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-)
+var nonceRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-func validAccount(a string) bool {
-	if strings.HasPrefix(a, "A") && len(a) == 56 && nkeys.IsValidPublicAccountKey(a) {
-		return true
+// claim reads the header by the SDK's parser (§13.5.1, §13.7 steps 1-2, 4). final is true when the class is settled
+// without a signature check: absent, malformed or claimed. Otherwise out is the signed header, still to be verified.
+func claim(hdr string) (out SenderHeader, tr Trust, final bool) {
+	if hdr == "" {
+		return SenderHeader{}, TrustAbsent, true
 	}
-	if a == "$G" {
-		return true
+	h, err := identity.ParseHeader(hdr)
+	if err != nil {
+		return SenderHeader{}, TrustMalformed, true
 	}
-	// The name form also matches the NKEY shape; an NKEY-shaped name that
-	// fails the CRC is not a valid account (§13.3).
-	if strings.HasPrefix(a, "A") && len(a) == 56 {
-		return false
+	if h == nil {
+		return SenderHeader{}, TrustAbsent, true
 	}
-	return accNameRE.MatchString(a)
+	if !h.Signed() {
+		return fromSDK(*h), TrustClaimed, true
+	}
+	return fromSDK(*h), TrustVerified, false
 }
 
-// parse classifies the header's form (§13.5.1, §13.7 steps 1-2, 4).
-// It returns TrustVerified for a well-formed signed header (still to be checked).
-func parse(hdr string) (SenderHeader, Trust) {
-	if hdr == "" {
-		return SenderHeader{}, TrustAbsent
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(hdr), &raw); err != nil {
+// failure maps an SDK verification error: 400 is malformed, anything else (401 rejected, a refused sender) is forged.
+func failure(claimed SenderHeader, err error) (SenderHeader, Trust) {
+	var e *identity.Error
+	if errors.As(err, &e) && e.Code == 400 {
 		return SenderHeader{}, TrustMalformed
 	}
-	vRaw, ok := raw["v"]
-	if !ok {
-		return SenderHeader{}, TrustMalformed
-	}
-	dec := json.NewDecoder(bytes.NewReader(vRaw))
-	dec.UseNumber()
-	var vAny any
-	if err := dec.Decode(&vAny); err != nil {
-		return SenderHeader{}, TrustMalformed
-	}
-	v, isNum := vAny.(json.Number)
-	if !isNum {
-		return SenderHeader{}, TrustMalformed
-	}
-	if v.String() != "1" {
-		return SenderHeader{}, TrustAbsent
-	}
-	str := func(k string) (string, bool, bool) { // value, present, ok-shape
-		r, present := raw[k]
-		if !present {
-			return "", false, true
-		}
-		var s string
-		if err := json.Unmarshal(r, &s); err != nil {
-			return "", true, false
-		}
-		return s, true, true
-	}
-	var h SenderHeader
-	h.V = 1
-	fields := []struct {
-		key string
-		dst *string
-	}{{"account", &h.Account}, {"user", &h.User}, {"name", &h.Name}, {"sub", &h.Sub},
-		{"ts", &h.TS}, {"nonce", &h.Nonce}, {"sig", &h.Sig}}
-	present := map[string]bool{}
-	for _, f := range fields {
-		s, p, ok := str(f.key)
-		if !ok {
-			return SenderHeader{}, TrustMalformed
-		}
-		*f.dst, present[f.key] = s, p
-	}
-	if !present["account"] || !present["user"] || !validAccount(h.Account) || !nkeys.IsValidPublicUserKey(h.User) {
-		return SenderHeader{}, TrustMalformed
-	}
-	if !present["sig"] {
-		return h, TrustClaimed
-	}
-	if !present["sub"] || !present["ts"] || !present["nonce"] || h.Sub == "" || !nonceRE.MatchString(h.Nonce) {
-		return SenderHeader{}, TrustMalformed
-	}
-	if _, err := time.Parse(time.RFC3339Nano, h.TS); err != nil {
-		return SenderHeader{}, TrustMalformed
-	}
-	return h, TrustVerified
+	return claimed, TrustForged
 }
 
 // VerifyStored classifies a stored message (§13.8): signature and sub only.
 func VerifyStored(hdr, arrivalSubject string, payload []byte) (SenderHeader, Trust) {
-	h, tr := parse(hdr)
-	if tr != TrustVerified {
-		return h, tr
+	out, tr, final := claim(hdr)
+	if final {
+		return out, tr
 	}
-	if h.Sub != arrivalSubject ||
-		!verifySig(h.User, signedInput(h.Account, h.User, h.Sub, h.TS, h.Nonce, payload), h.Sig) {
-		return h, TrustForged
+	_, err := identity.VerifyStored(identity.Message{Subject: arrivalSubject, Data: payload,
+		Header: nats.Header{HeaderName: {hdr}}}, identity.StoredOptions{})
+	if err != nil {
+		return failure(out, err)
 	}
-	return h, TrustVerified
+	return out, TrustVerified
 }
 
 // LiveSkew is the §13.7 replay window.
@@ -288,18 +242,25 @@ const LiveSkew = 30 * time.Second
 
 // VerifyLive classifies a live request (§13.7): signature, sub, ts window, nonce.
 func VerifyLive(hdr, arrivalSubject string, payload []byte, now time.Time, seen NonceSet) (SenderHeader, Trust) {
-	h, tr := VerifyStored(hdr, arrivalSubject, payload)
-	if tr != TrustVerified {
-		return h, tr
+	out, tr, final := claim(hdr)
+	if final {
+		return out, tr
 	}
-	ts, _ := time.Parse(time.RFC3339Nano, h.TS)
-	if d := now.Sub(ts); d > LiveSkew || d < -LiveSkew {
-		return h, TrustForged
+	set, own := seen.(*memNonceSet)
+	if !own {
+		// Any other NonceSet is asked after the SDK's checks pass, as mash always did; the SDK gets a throwaway set.
+		set = newMemNonceSet(LiveSkew)
 	}
-	if seen.Seen(h.User, h.Nonce, now) {
-		return h, TrustForged
+	set.setNow(now)
+	_, err := identity.VerifyLive(identity.Message{Subject: arrivalSubject, Data: payload, Header: nats.Header{HeaderName: {hdr}}},
+		identity.LiveOptions{ReplayWindow: LiveSkew, Now: func() time.Time { return now }, Nonces: set.set})
+	if err != nil {
+		return failure(out, err)
 	}
-	return h, TrustVerified
+	if !own && seen.Seen(out.User, out.Nonce, now) {
+		return out, TrustForged
+	}
+	return out, TrustVerified
 }
 
 // NonceSet remembers (user, nonce) pairs for a window.
@@ -308,31 +269,33 @@ type NonceSet interface {
 	Seen(user, nonce string, now time.Time) bool
 }
 
-type nonceSet struct {
-	mu     sync.Mutex
-	window time.Duration
-	at     map[string]time.Time
+// memNonceSet is NewNonceSet's value: the SDK's NonceSet, run on the clock the caller last passed in, so a caller that
+// supplies its own now (as mash's tests do) is judged by it.
+type memNonceSet struct {
+	set *identity.NonceSet
+	now atomic.Int64 // unix nanoseconds
 }
 
-// NewNonceSet returns an in-memory NonceSet that forgets pairs after window.
-func NewNonceSet(window time.Duration) NonceSet {
-	return &nonceSet{window: window, at: map[string]time.Time{}}
+func newMemNonceSet(window time.Duration) *memNonceSet {
+	if window < LiveSkew {
+		window = LiveSkew // the SDK needs the set's window to cover the replay window
+	}
+	m := &memNonceSet{}
+	m.set = identity.NewNonceSet(identity.NonceSetOptions{Window: window,
+		Now: func() time.Time { return time.Unix(0, m.now.Load()).UTC() }})
+	return m
 }
 
-func (s *nonceSet) Seen(user, nonce string, now time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k, t := range s.at {
-		if now.Sub(t) > s.window {
-			delete(s.at, k)
-		}
-	}
-	k := user + "\x00" + nonce
-	if _, ok := s.at[k]; ok {
-		return true
-	}
-	s.at[k] = now
-	return false
+func (m *memNonceSet) setNow(t time.Time) { m.now.Store(t.UnixNano()) }
+
+// NewNonceSet returns an in-memory NonceSet that forgets pairs after window (at least LiveSkew).
+func NewNonceSet(window time.Duration) NonceSet { return newMemNonceSet(window) }
+
+// Seen records the pair at now and reports whether it was already present. A full set or an exhausted per-sender quota
+// reports true: the SDK's sets fail closed.
+func (m *memNonceSet) Seen(user, nonce string, now time.Time) bool {
+	m.setNow(now)
+	return m.set.Record(user, nonce, now) != identity.Recorded
 }
 
 // instanceInput is what a sender signs to bind its instance id to one message:

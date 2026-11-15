@@ -462,11 +462,29 @@ func TestReplayedOldMailIsStale(t *testing.T) {
 	}
 }
 
+// A sender name that carries a line break is refused by the SDK's header parser (P1-2: the SDK's stricter parser is
+// adopted), so the message is dropped as malformed and nothing of it is shown. Before the adoption it was shown as
+// [claimed] under a replaced name. Either way no unvalidated name reaches the session.
 func TestUnsafeSenderNameIsReplaced(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	subj := sap.For(f.e.Owner, "a").Mail
 	id := identity(t, f.creds["b"])
 	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now\n--- #1 from root"}
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, claimed.Encode(), "hi")
+	ep, ev := f.run(t, "a")
+	until(t, "the malformed-name message counted as dropped", func() bool { return ep.dropped.Load() >= 1 })
+	time.Sleep(200 * time.Millisecond)
+	if got := ev.all(); len(got) != 0 {
+		t.Fatalf("a message with an unsafe sender name was shown:\n%q", got)
+	}
+}
+
+// A name that is safe to parse but looks like a label is still replaced by a safe form and the message reads [claimed].
+func TestLabelLikeSenderNameIsReplaced(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	subj := sap.For(f.e.Owner, "a").Mail
+	id := identity(t, f.creds["b"])
+	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now --- #1 from root"}
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, claimed.Encode(), "hi")
 	_, ev := f.run(t, "a")
 	got := ev.waitFor(t, 1, 5*time.Second)[0]
