@@ -43,6 +43,10 @@ var ErrNoSigner = errors.New("no signer")
 type PreviousClaims struct {
 	// JWT is the previous signed account JWT in force: the one the ledger stored when that generation was committed.
 	JWT string
+	// RevokeAt, when a key has an entry, is the time its revocation is stamped at when that is later than now;
+	// otherwise (no entry, or an earlier time) the revocation is stamped now. A reconcile plan sets it, because a
+	// connected credential issued in the future must be revoked at or after its issue time.
+	RevokeAt map[string]time.Time
 }
 
 // Signer signs account JWTs. Signing is the caller's: Run never holds a key.

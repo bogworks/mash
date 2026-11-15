@@ -17,6 +17,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/policyapply"
@@ -666,5 +668,32 @@ func TestListSetDiffNotAdoptedWithoutSubmitter(t *testing.T) {
 	})))
 	if code != 1 || errb != "" || !strings.Contains(out, "[adoption] adoption: this account is not adopted: list sets are ignored") || strings.Contains(out, "accepted") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+}
+
+// diff checks a next_submitter against the same held keys the intake gets from `policy serve`: the key store's keys, an
+// owner group's signing key and the admin user's key.
+func TestListSetDiffNextSubmitterHeldSet(t *testing.T) {
+	e := newListSetEnv(t)
+	e.seedAdopted()
+	gk, err := e.ks.GroupKey("foo.c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupPub, err := gk.PublicKey()
+	gk.Wipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminPub, err := ctl.AdminUserKey(config.Config{AdminCreds: e.pl.Creds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, key := range map[string]string{"owner group key": groupPub, "admin user key": adminPub} {
+		f := e.file("held-"+key[:6]+".json", listSetDoc(t, e.acctPub, 8, 7, func(m map[string]any) { m["next_submitter"] = key }))
+		out, errb, code := e.run("diff", f)
+		if code != 1 || errb != "" || !strings.Contains(out, "[document] next_submitter: next_submitter is a key mash holds") {
+			t.Fatalf("%s: %d\n%q\n%s", name, code, out, errb)
+		}
 	}
 }

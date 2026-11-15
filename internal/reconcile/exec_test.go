@@ -116,8 +116,48 @@ func newFirst(t *testing.T) *first {
 	f.ledger = policyapply.NewMemLedgerWith(rec, policyapply.InForceDetail{JWT: f.jwt, ListSet: &f.ls})
 	f.cluster = newCluster(f.jwt, "s1", "s2")
 	f.marker = &fakeMarker{marked: map[string]time.Time{}, unrecorded: map[string]bool{}}
-	f.signer = f.signerAt(func(string) int64 { return time.Now().Unix() })
+	f.signer = f.issuerLike()
 	return f
+}
+
+// issuerLike behaves as (*policyserve.Issuer).SignPrevious: a revocation is stamped now, or at the planned time
+// PreviousClaims.RevokeAt gives when that is later.
+func (f *first) issuerLike() Signer {
+	return policyapply.SignerFuncs{SignPreviousFn: func(prev policyapply.PreviousClaims, revoked []string) (string, error) {
+		c, err := jwt.DecodeAccountClaims(prev.JWT)
+		if err != nil {
+			return "", err
+		}
+		now := time.Now()
+		for _, k := range revoked {
+			if t, ok := prev.RevokeAt[k]; ok && t.After(now) {
+				c.RevokeAt(k, t)
+			} else {
+				c.Revoke(k)
+			}
+		}
+		return c.Encode(f.acct)
+	}}
+}
+
+// A connected credential issued in the future (clock skew) is planned for revocation at its issue time: the signer is
+// told that time, so the signed JWT carries it and the revocation runs.
+func TestExecuteRevokesAtAFutureIssueTime(t *testing.T) {
+	f := newFirst(t)
+	k := userKey(t)
+	future := time.Now().Add(time.Hour).Truncate(time.Second).UTC()
+	p := f.plan(k)
+	p.Revocations[0].At = future.Format(time.RFC3339)
+	res, err := f.exec(p)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if res.Status.State != policyapply.StateApplied {
+		t.Fatalf("state = %v", res.Status.State)
+	}
+	if got := revocationsOf(t, f.inForceJWT())[k]; got != future.Unix() {
+		t.Errorf("revocation at %d, want %d", got, future.Unix())
+	}
 }
 
 // signerAt is the test signer: it re-signs the previous claims with the keys also revoked at the time at gives for each.
