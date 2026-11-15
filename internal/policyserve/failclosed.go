@@ -9,6 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
+	"github.com/bogworks/mash/internal/policydoc"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -177,4 +178,44 @@ var _ policyapply.Deliverer = FailClosedDeliverer{}
 // Deliver implements policyapply.Deliverer.
 func (FailClosedDeliverer) Deliver(context.Context, string, string) error {
 	return errors.New("delivering a rotated credential is " + ErrNotDecided.Error())
+}
+
+// FailClosed is the checks the Applier makes before it signs or pushes anything, in its order: every address the change
+// adds must already have its inbox (a suspended one first, then a missing one; made only when checkInbox is true, as
+// the Applier makes it only when it provisions), then the change must not narrow an existing sender by tags. prev is
+// the list set in force, nil when none. It returns the refusals, each with the stage and the exact reason text the
+// Applier gives (the first is the one Apply reports), or none when the change passes. The error is a read of an inbox
+// that failed, worded as Apply words it. `mashctl policy diff` calls this too, so the two cannot say different things.
+func FailClosed(ctx context.Context, prev, target *listset.Compiled, inboxes InboxChecker, checkInbox bool) ([]listset.Refusal, error) {
+	ex, err := policyapply.NewExpect(prev, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []listset.Refusal
+	if checkInbox {
+		svc := Provisioner{Sets: []*listset.Compiled{prev, target}, Inboxes: inboxes}
+		var missing, suspended []string
+		for _, na := range policyapply.NewOrder(prev, target, ex).NewAddresses {
+			m, err := svc.MissingInbox(ctx, na.Address)
+			if err != nil {
+				return nil, fmt.Errorf("the inbox of %s cannot be used: %w; nothing was pushed", na.Address, err)
+			}
+			switch {
+			case strings.HasPrefix(m, na.Address+SuspendedReason):
+				suspended = append(suspended, na.Address)
+			case m != "":
+				missing = append(missing, na.Address)
+			}
+		}
+		if len(suspended) > 0 {
+			out = append(out, listset.Refusal{Stage: policydoc.StageInbox, Entry: "inbox", Reason: SuspendedInboxDetail(suspended)})
+		}
+		if len(missing) > 0 {
+			out = append(out, listset.Refusal{Stage: policydoc.StageInbox, Entry: "inbox", Reason: NoInboxDetail(missing)})
+		}
+	}
+	if len(ex.CredentialOnly) > 0 {
+		out = append(out, listset.Refusal{Stage: policydoc.StageNarrowing, Entry: "narrowing", Reason: NarrowingDetail})
+	}
+	return out, nil
 }

@@ -298,7 +298,10 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 		return 1
 	}
 	defer closeFn()
-	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env))
+	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env),
+		func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error) {
+			return policyserve.FailClosed(ctx, prev, target, rd.adm, true)
+		})
 	if errors.Is(err, policydoc.ErrRangeNeeded) {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 		return 2
