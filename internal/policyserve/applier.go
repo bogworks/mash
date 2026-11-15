@@ -282,35 +282,18 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		}
 		return policyintake.Result{StatusWritten: true}, errors.New("the list set does not fit the servers' limits (see the status)")
 	}
-	// The change must not need a step that is not available.
+	// The change must not need a step that is not available. The checks are FailClosed's, the ones `mashctl policy diff`
+	// runs too; the inbox check is made only when the service provisions (production).
 	ex, err := policyapply.NewExpect(prev, target, nil)
 	if err != nil {
 		return policyintake.Result{}, err
 	}
-	if production {
-		// Every added address must already have its inbox: refused here, before anything is signed or pushed.
-		var missing, suspended []string
-		for _, na := range policyapply.NewOrder(prev, target, ex).NewAddresses {
-			m, err := svc.MissingInbox(ctx, na.Address)
-			if err != nil {
-				return policyintake.Result{}, fmt.Errorf("the inbox of %s cannot be used: %w; nothing was pushed", na.Address, err)
-			}
-			switch {
-			case strings.HasPrefix(m, na.Address+SuspendedReason):
-				suspended = append(suspended, na.Address)
-			case m != "":
-				missing = append(missing, na.Address)
-			}
-		}
-		if len(suspended) > 0 {
-			return policyintake.Result{}, errors.New(SuspendedInboxDetail(suspended))
-		}
-		if len(missing) > 0 {
-			return policyintake.Result{}, errors.New(NoInboxDetail(missing))
-		}
+	refusals, err := FailClosed(ctx, prev, target, a.Inboxes, production)
+	if err != nil {
+		return policyintake.Result{}, err
 	}
-	if len(ex.CredentialOnly) > 0 {
-		return policyintake.Result{}, errors.New(NarrowingDetail)
+	if len(refusals) > 0 {
+		return policyintake.Result{}, errors.New(refusals[0].Reason)
 	}
 	if err := g.Before(ctx, "keys"); err != nil {
 		return policyintake.Result{}, err

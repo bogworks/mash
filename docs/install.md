@@ -142,7 +142,7 @@ MASH_NAME=design mash policy explain agent.owner.review  # for one receiver: all
 MASH_NAME=design mash policy show --json                 # the same answer as stable JSON
 ```
 
-`explain` takes the receiver as `range.owner.name`. Both commands exit 1 when the responder refuses the request, for example for a request that is not signed or for a key that names no endpoint of the range. When no responder answers, the range has no list set in force, and `mash policy` prints `open: owner line only, no list set in force` and exits 0. The answer does not close the reply and plumbing subjects (`_INBOX`, `$SRV`, the JetStream and directory subjects): the lists govern who may mail, prompt, probe and watch whom, not who may communicate at all.
+`explain` takes the receiver as `range.owner.name`. Both commands exit 1 when the responder refuses the request, for example for a request that is not signed or for a key that names no endpoint of the range. When the credential is a legacy name or is not a list-set credential, `mash policy` does not ask the responder: it prints `this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)` and exits 0. The answer does not close the reply and plumbing subjects (`_INBOX`, `$SRV`, the JetStream and directory subjects): the lists govern who may mail, prompt, probe and watch whom, not who may communicate at all.
 
 ### Sessions and resume
 

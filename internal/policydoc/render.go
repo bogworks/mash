@@ -101,7 +101,7 @@ func RenderPlan(p DiffPlan) string {
 		}
 		return b.String()
 	}
-	if p.rotation == "" && !p.completes && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
+	if p.rotation == "" && !p.completes() && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
 		return "accepted: nothing would change\n" + SizeLimitsLine + "\n" + p.signatureNote()
 	}
@@ -126,9 +126,9 @@ func RenderPlan(p DiffPlan) string {
 		fmt.Fprintf(&b, "tags %s: %s -> %s\n", t.Sender, list(t.Old), list(t.New))
 	}
 	section("rotate and revoke", p.RotateAndRevoke)
-	section("new credential", p.NewCredential)
+	section("new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`)", p.NewCredential)
 	section("revoke", p.Revoke)
-	section("first credential", p.FirstCredential)
+	section("first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`)", p.FirstCredential)
 	b.WriteString(p.signatureNote())
 	return b.String()
 }
@@ -136,8 +136,11 @@ func RenderPlan(p DiffPlan) string {
 // signatureNote is the line that says the document's signature was not checked, when no --submitter was given.
 func (p DiffPlan) signatureNote() string {
 	var s string
+	if p.inboxUnchecked {
+		s = InboxNotCheckedLine + "\n"
+	}
 	if p.adoptionUnchecked {
-		s = "adoption not checked: the adoption marker was not read\n"
+		s += "adoption not checked: the adoption marker was not read\n"
 	}
 	if p.unsigned {
 		s += "signature not checked: give --submitter to check it against the adoption marker\n"

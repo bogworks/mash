@@ -18,6 +18,7 @@ import (
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
+	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -297,7 +298,10 @@ func policyListSetDiff(args []string, env func(string) string, lookup config.Loo
 		return 1
 	}
 	defer closeFn()
-	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env))
+	plan, err := policydoc.Diff(rd.ctx, rd.r, file, o.rng, listSetServerLimits(), rotationContext(rd, file, o.submitter, env),
+		func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error) {
+			return policyserve.FailClosed(ctx, prev, target, rd.adm, true)
+		})
 	if errors.Is(err, policydoc.ErrRangeNeeded) {
 		fmt.Fprintf(stderr, "%s%v\n", pfx, err)
 		return 2
@@ -331,13 +335,13 @@ func rotationContext(rd *listSetReader, file []byte, signer string, env func(str
 	if d, err := policydoc.Decode(file, policydoc.DecodeOptions{}); err != nil || d.NextSubmitter == "" || m.NextSubmitter != "" {
 		return rc // the held keys only matter for a rotation that would start
 	}
+	// The same held set the intake gets from `policy serve`: the key store's keys, the owner groups' keys and the admin
+	// user's key.
 	keys, err := openKeys(rd.cfg, env)
 	if err == nil {
-		var held map[string]string
-		if _, held, err = keys.HeldKeys(); err == nil {
-			for k := range held {
-				rc.Held = append(rc.Held, k)
-			}
+		var adminKey string
+		if adminKey, err = ctl.AdminUserKey(rd.cfg); err == nil {
+			rc.Held, err = policyserve.HeldKeys(keys.HeldKeys, keys.GroupPublics, adminKey)()
 		}
 	}
 	if err != nil {

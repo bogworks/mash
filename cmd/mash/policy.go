@@ -25,7 +25,7 @@ import (
 const policyUsage = "usage: mash policy show [--json] | mash policy explain RECEIVER [--json]"
 
 // noResponderText is what an account with no list set answers locally: with no responder there are no lists.
-const noResponderText = "open: owner line only, no list set in force"
+const noResponderText = "this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)"
 
 // policyCmd runs `mash policy show` and `mash policy explain`: it asks the range's policy responder what this
 // endpoint may reach, as a signed request, and prints the answer.
@@ -40,6 +40,12 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) == 0 {
 		return usage("")
+	}
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" { // the usage, and the verb does not run
+			fmt.Fprintln(stdout, policyUsage)
+			return 0
+		}
 	}
 	req := policyview.Request{Op: args[0]}
 	asJSON := false

@@ -201,14 +201,44 @@ type DiffPlan struct {
 	SizeLimits string `json:"size_limits"`
 	// NextSubmitter is the document's next_submitter (a planned submitter rotation, ADR 0112); empty when it has none.
 	NextSubmitter string `json:"next_submitter"`
-	// rotation is the text of the rotation line, after "rotation: "; completes is true when the document would
-	// complete a pending rotation. A plan with a next_submitter or one that completes a rotation is a change.
-	rotation  string
-	completes bool
+	// Rotation is what the document does to the submitter rotation: nil when nothing (and for a refused plan). A plan
+	// with a Rotation is a change.
+	Rotation *RotationAction `json:"rotation"`
+	// rotation is the text of the rotation line, after "rotation: ".
+	rotation string
 	// unsigned is true when no --submitter was given, so the document's signature was not checked.
 	unsigned bool
 	// adoptionUnchecked is true when the caller passed no marker source, so the adoption was not checked.
 	adoptionUnchecked bool
+	// inboxUnchecked is true when the caller passed no FailClosedFunc, so the inbox and narrowing checks were not run.
+	inboxUnchecked bool
+}
+
+// Rotation actions of a RotationAction.
+const (
+	// RotationStarts: the document's next_submitter would be recorded as a planned rotation.
+	RotationStarts = "starts"
+	// RotationCompletes: the document, signed by the pending next submitter, would complete the pending rotation.
+	RotationCompletes = "completes"
+	// RotationPending: a rotation is pending and the document does not complete it, or (Unknown) whether it does
+	// cannot be told.
+	RotationPending = "pending"
+)
+
+// RotationAction is the part of a plan that concerns the submitter rotation (ADR 0112).
+type RotationAction struct {
+	// Action is "starts", "completes" or "pending".
+	Action string `json:"action"`
+	// NextSubmitter is the key the rotation is to: the document's next_submitter for "starts", the marker's pending
+	// next submitter for "completes" and "pending".
+	NextSubmitter string `json:"next_submitter"`
+	// Unknown is true when the signer could not be told (not a JWS the marker's keys verify) and no --submitter was
+	// given, so whether the document completes the pending rotation cannot be checked.
+	Unknown bool `json:"unknown,omitempty"`
+}
+
+func (p DiffPlan) completes() bool {
+	return p.Rotation != nil && p.Rotation.Action == RotationCompletes
 }
 
 // RotationContext is what the intake would check a document's next_submitter against: the adoption marker and the keys
@@ -248,7 +278,7 @@ func shortKey(k string) string {
 // checkAdoption is the intake's first check: an account that is not adopted has every list set ignored, so no
 // submission to it is accepted. A marker that cannot be read is a refusal too. A nil rc means the caller read no marker:
 // nothing is checked and the plan says so.
-func checkAdoption(rc *RotationContext) []listset.Refusal {
+func checkAdoption(rc *RotationContext, account string) []listset.Refusal {
 	if rc == nil {
 		return nil
 	}
@@ -260,6 +290,11 @@ func checkAdoption(rc *RotationContext) []listset.Refusal {
 	}
 	if !rc.Adopted {
 		return refuse("this account is not adopted: list sets are ignored")
+	}
+	// The marker is read over the admin connection, whose adoption bucket holds one marker and cannot be addressed by
+	// account: a marker for another account is not this account's adoption (the intake refuses it too).
+	if rc.Marker.Account != "" && rc.Marker.Account != account {
+		return refuse("the adoption marker names another account: list sets are ignored")
 	}
 	return nil
 }
@@ -284,6 +319,22 @@ func checkSigner(rc *RotationContext) []listset.Refusal {
 	return []listset.Refusal{{Stage: StageSignature, Entry: "signature", Reason: reason}}
 }
 
+// StageInbox is the stage of the refusal Diff reports for a change that adds an address whose inbox is missing or
+// suspended; the apply refuses it before pushing anything.
+const StageInbox = "inbox"
+
+// StageNarrowing is the stage of the refusal Diff reports for a change that narrows an existing sender by tags, which
+// the apply refuses before pushing anything (it needs a new credential for that sender).
+const StageNarrowing = "narrowing"
+
+// FailClosedFunc is the apply's own pre-push checks (policyserve.FailClosed, bound to the inbox source): the refusals
+// the Applier would give for moving from prev (nil when nothing is in force) to target, with its stages and texts.
+// policydoc cannot import policyserve, so the caller passes it in.
+type FailClosedFunc func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error)
+
+// InboxNotCheckedLine says the apply's inbox and narrowing checks were not run, when Diff got no FailClosedFunc.
+const InboxNotCheckedLine = "inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse"
+
 // StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
 const StageDocument = "document"
 
@@ -298,6 +349,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 	if rc == nil {
 		if next.NextSubmitter != "" {
 			p.rotation = "next submitter " + next.NextSubmitter + " would be recorded (not validated: the adoption marker and the keys mash holds were not read)"
+			p.Rotation = &RotationAction{Action: RotationStarts, NextSubmitter: next.NextSubmitter}
 		}
 		return nil
 	}
@@ -315,7 +367,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 	}
 	pending := rc.Adopted && rc.Marker.NextSubmitter != ""
 	if pending && rc.Signer != "" && rc.Signer == rc.Marker.NextSubmitter {
-		p.completes = true
+		p.Rotation = &RotationAction{Action: RotationCompletes, NextSubmitter: rc.Marker.NextSubmitter}
 		p.rotation = "generation would complete the pending rotation to " + rc.Marker.NextSubmitter
 		return nil
 	}
@@ -324,6 +376,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 	}
 	if pending {
 		p.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending"
+		p.Rotation = &RotationAction{Action: RotationPending, NextSubmitter: rc.Marker.NextSubmitter}
 		return nil
 	}
 	if err := admin.ValidateNextSubmitter(next.Account, rc.Marker, next.NextSubmitter, rc.Held); err != nil {
@@ -334,6 +387,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 		return refuse(StageDocument, detail)
 	}
 	p.rotation = "next submitter " + next.NextSubmitter + " would be recorded"
+	p.Rotation = &RotationAction{Action: RotationStarts, NextSubmitter: next.NextSubmitter}
 	return nil
 }
 
@@ -346,7 +400,7 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 // any would be refused. A document whose content is that in force is refused as the apply refuses it, with stage "unchanged", unless it starts or
 // completes a submitter rotation; one with no adoption marker (rc nil: not checked) or an account that is not adopted or
 // whose marker cannot be read is refused with stage "adoption".
-func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext) (DiffPlan, error) {
+func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext, failClosed FailClosedFunc) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
 		return DiffPlan{}, err
@@ -387,24 +441,62 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
 	dp.unsigned = rc == nil || rc.Signer == ""
 	dp.adoptionUnchecked = rc == nil
-	pre = append(pre, checkAdoption(rc)...)
+	dp.inboxUnchecked = failClosed == nil
+	pre = append(pre, checkAdoption(rc, r.Account())...)
 	pre = append(pre, checkSigner(rc)...)
-	pre = append(pre, rotate(&dp, next, rc)...)
+	// The signer decides whether the document completes a pending rotation. Without --submitter it is told from the
+	// JWS: the key of the marker (the pending next submitter, or the current one) that verifies the signature.
+	rotRC, signerKnown := rc, rc != nil && rc.Signer != ""
+	if rc != nil && !signerKnown && rc.Adopted && rc.MarkerErr == nil && rc.Err == nil {
+		if k := signerFromJWS(file, rc.Marker); k != "" {
+			c := *rc
+			c.Signer, rotRC, signerKnown = k, &c, true
+		}
+	}
+	pre = append(pre, rotate(&dp, next, rotRC)...)
 	// The apply refuses a list set whose compiled content is that in force (ADR 0119), unless the submission starts or
 	// completes a submitter rotation: it asks listset.Accept, or AcceptRotationStep for a rotation step.
 	if cur.committed {
 		pendingRotation := rc != nil && rc.Adopted && rc.Marker.NextSubmitter != ""
 		accept := listset.Accept
-		if dp.completes || next.NextSubmitter != "" && !pendingRotation {
+		if dp.completes() || next.NextSubmitter != "" && !pendingRotation {
 			accept = listset.AcceptRotationStep
 		}
-		if _, _, err := accept(cur.rec, next.ListSet, file); errors.Is(err, listset.ErrUnchanged) {
+		if _, _, err := accept(cur.rec, next.ListSet, file); errors.Is(err, listset.ErrUnchanged) && pendingRotation && !signerKnown && rc.Err == nil && rc.MarkerErr == nil {
+			// The intake completes the pending rotation when the pending key signed this document, which cannot be
+			// told: not a refusal.
+			note := "whether this document completes the pending rotation cannot be checked without --submitter"
+			if dp.rotation == "" {
+				dp.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending; " + note
+			} else {
+				dp.rotation += "; " + note
+			}
+			dp.Rotation = &RotationAction{Action: RotationPending, NextSubmitter: rc.Marker.NextSubmitter, Unknown: true}
+		} else if errors.Is(err, listset.ErrUnchanged) {
 			pre = append(pre, listset.Refusal{Stage: policyapply.StageUnchanged, Entry: "list_set",
 				Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", gen)})
 		}
 	}
+	// The apply refuses, before pushing, an added address with no usable inbox and a change that narrows a sender by tags.
+	// A document that does not compile is refused by DryRun already.
+	if failClosed != nil {
+		if target, cerr := listset.Compile(next.ListSet); cerr == nil {
+			var prev *listset.Compiled
+			if inForce != nil {
+				prev, cerr = listset.Compile(*inForce)
+			}
+			if cerr == nil {
+				rs, err := failClosed(ctx, prev, target)
+				if err != nil {
+					rs = []listset.Refusal{{Stage: StageInbox, Entry: "inbox", Reason: err.Error()}}
+				}
+				pre = append(pre, rs...)
+			}
+		}
+	}
 	p = dp.Plan
 	if len(pre) > 0 {
+		dp.Rotation = nil // nothing is applied, so no rotation step is taken
 		p.Refusals = append(pre, p.Refusals...)
 		p.Refused = true
 		p.Receivers, p.Templates, p.Tags = []listset.ReceiverChange{}, []listset.TemplateChange{}, []listset.TagChange{}
@@ -412,4 +504,18 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	}
 	dp.Plan = p
 	return dp, nil
+}
+
+// signerFromJWS returns the key of m that signed file (a JWS): the pending next submitter, else the current one;
+// "" when the file is not a JWS or neither verifies.
+func signerFromJWS(file []byte, m store.Marker) string {
+	for _, k := range []string{m.NextSubmitter, m.Submitter} {
+		if k == "" {
+			continue
+		}
+		if d, err := Decode(file, DecodeOptions{Submitter: k}); err == nil && d.Verified {
+			return k
+		}
+	}
+	return ""
 }
