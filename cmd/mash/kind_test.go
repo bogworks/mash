@@ -56,16 +56,16 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 		r := s.call(t, id, "send", args)
 		return resultText(r), r["isError"] == true
 	}
-	if txt, bad := send(10, `{"to":"a","text":"do it","kind":"task"}`); bad || txt != "sent #1 to a" {
+	if txt, bad := send(10, `{"to":"a","text":"do it","kind":"task"}`); bad || firstLine(txt) != "sent #1 to a" {
 		t.Fatalf("task: %v %s", bad, txt)
 	}
 	if txt, bad := send(11, `{"to":"a","text":"ok, done","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #2 to a (tagged fyi: short reply with no question)" {
 		t.Fatalf("tagged: %v %s", bad, txt)
 	}
-	if txt, bad := send(12, `{"to":"a","text":"ok?","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #3 to a" {
+	if txt, bad := send(12, `{"to":"a","text":"ok?","in_reply_to":1,"kind":"question"}`); bad || firstLine(txt) != "sent #3 to a" {
 		t.Fatalf("question mark: %v %s", bad, txt)
 	}
-	if txt, bad := send(13, `{"to":"a","text":"stuck","in_reply_to":1,"kind":"blocker"}`); bad || txt != "sent #4 to a" {
+	if txt, bad := send(13, `{"to":"a","text":"stuck","in_reply_to":1,"kind":"blocker"}`); bad || firstLine(txt) != "sent #4 to a" {
 		t.Fatalf("blocker: %v %s", bad, txt)
 	}
 	if txt, bad := send(14, `{"to":"a","text":"hi","kind":"loud"}`); !bad || !strings.Contains(txt, "blocker|question|task|result|fyi") {
@@ -139,7 +139,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 	if via == nil || via["type"] != "integer" || !strings.Contains(via["description"].(string), "relayed from <sender> #N") {
 		t.Fatalf("send schema via: %v", via)
 	}
-	if r := s.call(t, 30, "send", `{"to":"a","text":"fwd","via":1,"in_reply_to":9}`); r["isError"] == true || resultText(r) != "sent #1 to a" {
+	if r := s.call(t, 30, "send", `{"to":"a","text":"fwd","via":1,"in_reply_to":9}`); r["isError"] == true || firstLine(resultText(r)) != "sent #1 to a" {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	out, _ := w.cli(t, "a", "read", "1")

@@ -612,6 +612,39 @@ func kindProp() map[string]any {
 		"description": "optional, default task: blocker|question|task wake an idle recipient; result|fyi (opt-in) wait for its next turn"}
 }
 
+// recipientStateLine is the advisory line a send receipt carries: what the recipient reports about itself, waiting for
+// the answer at most until PeerActivityTimeout after the send started.
+func recipientStateLine(peer <-chan endpoint.PeerState, started time.Time) string {
+	var st endpoint.PeerState
+	select {
+	case st = <-peer:
+	default:
+		t := time.NewTimer(time.Until(started.Add(endpoint.PeerActivityTimeout)))
+		defer t.Stop()
+		select {
+		case st = <-peer:
+		case <-t.C:
+			return "recipient: state unknown"
+		}
+	}
+	switch st.Outcome {
+	case endpoint.PeerReported:
+		line := "recipient: " + st.State
+		if st.Kind != "" {
+			line += " (" + st.Kind + ")"
+		}
+		if st.State == "blocked" {
+			line += "; your ask will wait until it is answered there"
+		}
+		return line
+	case endpoint.PeerNotReported:
+		return "recipient: online, not reporting what it is doing"
+	case endpoint.PeerRefused:
+		return "recipient: state not available to this endpoint"
+	}
+	return "recipient: no answer to a status request (offline, or unreachable)"
+}
+
 func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 	name := src.cfg.DisplayName()
 	callTimeout := src.cfg.CallTimeout
@@ -629,7 +662,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 		}
 	}
 	return append([]mcp.Tool{
-		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
+		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox). For kinds that wake the recipient (and urgent sends) the receipt adds the recipient's self-reported state: unsigned and advisory, and `not reporting` is not idle. `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
 			Schema: schema(map[string]any{"to": str("endpoint name"), "text": str("message body (markdown)"),
 				"in_reply_to": sendRefProp(src.cfg, "optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
 				"via": sendRefProp(src.cfg, "optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; "+
@@ -668,6 +701,17 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					return "", err
 				}
 				k, tagged := kind.Tag(k, inReplyTo, a.Text)
+				// For mail that wakes, ask the recipient its state alongside the publish; the receipt never waits for it
+				// longer than PeerActivityTimeout after the send started and never fails because of it.
+				var peer <-chan endpoint.PeerState
+				started := time.Now()
+				if k.Wakes() || a.Urgent {
+					pctx, pcancel := context.WithCancel(ctx)
+					defer pcancel()
+					ch := make(chan endpoint.PeerState, 1)
+					go func() { ch <- ep.PeerActivity(pctx, a.To) }()
+					peer = ch
+				}
 				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: inReplyTo, Via: via, Urgent: a.Urgent, Kind: k, ID: a.ID})
 				if err != nil {
 					return "", err
@@ -676,10 +720,14 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				if res.Duplicate {
 					return fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID), nil
 				}
+				receipt := fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To)))
 				if tagged {
-					return fmt.Sprintf("sent #%d to %s %s", seq, sap.Display(sap.KeyOf(a.To)), kind.TaggedNote), nil
+					receipt += " " + kind.TaggedNote
 				}
-				return fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To))), nil
+				if peer != nil {
+					receipt += "\n" + recipientStateLine(peer, started)
+				}
+				return receipt, nil
 			})},
 		{Name: "read", Description: readDescription(src.cfg),
 			// Only after the result is written to the client has the model the body. That counts as seen, so serve
