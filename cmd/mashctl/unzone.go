@@ -9,10 +9,10 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 )
 
-const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE]\n  unzone does not reissue the endpoint's user; afterwards run: mashctl permissions NAME --nsc\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
+const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE]\n  unzone gives the endpoint no new credential; afterwards run mashctl reissue NAME where its creds file is, or run the nsc flags that mashctl permissions NAME --nsc prints and regenerate the creds file\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
 
 // runUnzone is `mashctl unzone` (ADR 0091): it makes a zoned record five-token, moves its inbox stream's subjects to the
-// five-token mail subject without losing stored mail (admin.Unzone) and says how to reissue its permissions. It
+// five-token mail subject without losing stored mail (admin.Unzone) and says how to give it a five-token credential. It
 // refuses when a zone policy is applied: mash builds no migration for one. Re-running it is safe at any point.
 //
 // The applied-policy check reads the account JWT, which needs the system account credentials and the key store. It
@@ -76,6 +76,6 @@ func runUnzone(args []string, env func(string) string, lookup config.Lookup, std
 		return 0
 	}
 	fmt.Fprintf(stdout, "unzoned %s: its record and inbox are five-token and its stored mail is kept\n", name)
-	fmt.Fprintf(stdout, "reissue its user with the five-token permissions (mash holds no user seed to do it): mashctl permissions %s --nsc\n", name)
+	fmt.Fprintf(stdout, "give it a five-token credential: run mashctl reissue %s where its creds file is, or run the nsc flags that mashctl permissions %s --nsc prints and regenerate the creds file\n", name, name)
 	return 0
 }

@@ -115,7 +115,7 @@ func Usage(prog string) string {
 		issuedLines(line)
 		issueServiceLines(line)
 		retireLines(line)
-		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It does not reissue the endpoint's user: run `mashctl permissions NAME --nsc` afterwards")
+		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
 		policyLines(line)
 	}
 	return b.String()
