@@ -89,6 +89,7 @@ type InspectedMessage struct {
 	MsgID    string
 	Sender   string
 	Trust    string
+	Reason   string // why a malformed or forged header was refused (sap.VerifyStoredWhy); empty otherwise
 	StoredAt time.Time
 	Size     int
 	Kind     string
@@ -287,7 +288,7 @@ func (a *Admin) InspectInbox(ctx context.Context, flat string, opts InspectOptio
 		if m.Seq == 0 {
 			m.Seq = seq
 		}
-		m.Sender, m.Trust = a.inspectSender(ctx, senders, raw)
+		m.Sender, m.Trust, m.Reason = a.inspectSender(ctx, senders, raw)
 		m.State = DeliveryState(m.Seq, out.Consumer)
 		out.Messages = append(out.Messages, m)
 	}
@@ -307,17 +308,17 @@ type senderCache struct {
 // inspectSender names a message's sender and its trust label the way the receiving endpoint does, with the directory
 // asked by the signer's own name (one key read) instead of listing it. A signed name that is not a directory key, or
 // whose record holds another user key, is unknown-signer.
-func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jetstream.RawStreamMsg) (string, string) {
-	h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
+func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jetstream.RawStreamMsg) (string, string, string) {
+	h, trust, why := sap.VerifyStoredWhy(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
 	shown := config.Clean(h.Name)
 	switch trust {
 	case sap.TrustForged, sap.TrustMalformed, sap.TrustClaimed:
 		if shown == "" {
 			shown = "?"
 		}
-		return shown, string(trust)
+		return shown, string(trust), why
 	case sap.TrustAbsent:
-		return "?", string(trust)
+		return "?", string(trust), ""
 	}
 	user, seen := cache.users[h.Name]
 	if !seen {
@@ -343,12 +344,12 @@ func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jets
 		if shown == "" {
 			shown = "?"
 		}
-		return shown, string(sap.TrustUnknownSigner)
+		return shown, string(sap.TrustUnknownSigner), ""
 	}
 	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
 		if age := raw.Time.Sub(signed); age > inspectMaxSignedAge || age < -sap.LiveSkew {
-			return shown, string(sap.TrustStale)
+			return shown, string(sap.TrustStale), ""
 		}
 	}
-	return shown, string(sap.TrustVerified)
+	return shown, string(sap.TrustVerified), ""
 }

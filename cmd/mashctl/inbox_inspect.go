@@ -136,8 +136,9 @@ type inspectMessageJSON struct {
 	MsgID         string  `json:"msg_id"`
 	Sender        string  `json:"sender"`
 	Trust         string  `json:"trust"`
-	StoredAt      string  `json:"stored_at"` // the stream's store time, RFC 3339 UTC
-	Size          int     `json:"size"`      // payload bytes
+	Reason        string  `json:"reason,omitempty"` // why a malformed or forged header was refused; absent otherwise
+	StoredAt      string  `json:"stored_at"`        // the stream's store time, RFC 3339 UTC
+	Size          int     `json:"size"`             // payload bytes
 	Kind          string  `json:"kind"`
 	State         string  `json:"state"`
 	DeliveryCount *int    `json:"delivery_count"` // always null: not kept by JetStream or mash
@@ -165,7 +166,7 @@ func buildInspectReport(address string, in *admin.InboxInspection) inspectReport
 			NumPending: c.NumPending, NumRedelivered: c.NumRedelivered, NumAckPending: c.NumAckPending}
 	}
 	for _, m := range in.Messages {
-		r.Messages = append(r.Messages, inspectMessageJSON{Seq: m.Seq, MsgID: m.MsgID, Sender: m.Sender, Trust: m.Trust,
+		r.Messages = append(r.Messages, inspectMessageJSON{Seq: m.Seq, MsgID: m.MsgID, Sender: m.Sender, Trust: m.Trust, Reason: m.Reason,
 			StoredAt: m.StoredAt.UTC().Format(time.RFC3339), Size: m.Size, Kind: m.Kind, State: m.State})
 	}
 	return r
@@ -187,7 +188,11 @@ func writeInspectText(w io.Writer, r inspectReport) {
 		if t, ok := inspectStateText[state]; ok {
 			state = t
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", m.Seq, dash(m.MsgID), m.Sender, m.Trust, m.StoredAt, m.Size, dash(m.Kind), state)
+		trust := m.Trust
+		if m.Reason != "" {
+			trust += " (" + m.Reason + ")"
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", m.Seq, dash(m.MsgID), m.Sender, trust, m.StoredAt, m.Size, dash(m.Kind), state)
 	}
 	tw.Flush()
 	if len(r.Messages) == 0 {

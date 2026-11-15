@@ -96,29 +96,29 @@ func senderMarks(hdr nats.Header, trust sap.Trust, h sap.SenderHeader) (replyTo 
 
 // classify verifies a stored message and names its sender (spec section 4).
 // storedAt is when the stream stored it. ok is false for forged or malformed
-// mail, which is never shown.
-func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, storedAt time.Time) (from string, trust sap.Trust, h sap.SenderHeader, ok bool) {
-	h, trust = sap.VerifyStored(hdr.Get(sap.HeaderName), subject, data)
+// mail, which is never shown; why is then the reason class of the refusal (sap.VerifyStoredWhy), "" otherwise.
+func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, storedAt time.Time) (from string, trust sap.Trust, h sap.SenderHeader, ok bool, why string) {
+	h, trust, why = sap.VerifyStoredWhy(hdr.Get(sap.HeaderName), subject, data)
 	switch trust {
 	case sap.TrustForged, sap.TrustMalformed:
-		return "", trust, h, false
+		return "", trust, h, false, why
 	case sap.TrustAbsent:
-		return "?", trust, h, true
+		return "?", trust, h, true, ""
 	case sap.TrustClaimed:
-		return shownName(h), trust, h, true
+		return shownName(h), trust, h, true, ""
 	}
 	e.mu.RLock()
 	name := e.byUser[h.User]
 	e.mu.RUnlock()
 	if name == "" || (h.Name != "" && h.Name != name) {
-		return shownName(h), sap.TrustUnknownSigner, h, true
+		return shownName(h), sap.TrustUnknownSigner, h, true, ""
 	}
 	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
 		if age := storedAt.Sub(signed); age > MaxSignedAge || age < -sap.LiveSkew {
-			return name, sap.TrustStale, h, true
+			return name, sap.TrustStale, h, true, ""
 		}
 	}
-	return name, sap.TrustVerified, h, true
+	return name, sap.TrustVerified, h, true, ""
 }
 
 // seenSet is the recipient's memory of signed mail already shown, keyed by (user, nonce) with the stream sequence and
@@ -450,10 +450,17 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			defer e.waking.received(ref)
 			// The sender's signature binds the subject the message was stored under, so classify checks it against the
 			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
-			from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
+			from, trust, h, ok, why := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
 			if !ok {
-				e.dropped.Add(1)
-				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
+				// Refused: not shown, not spooled, acked below; the inbox stream keeps it until its limits drop it.
+				// The log names the class only: no body, no header text, no claimed name. The claimed user is printed
+				// for a forged header only (it parsed as a user key); a malformed one has no trusted fields.
+				e.refuse(why)
+				if trust == sap.TrustForged {
+					e.log.Printf("refused #%s: forged sender header, reason %s, subject %s (claimed user %s)", FormatMsgRef(ref), why, m.Subject(), h.User)
+				} else {
+					e.log.Printf("refused #%s: malformed sender header, reason %s, subject %s", FormatMsgRef(ref), why, m.Subject())
+				}
 				if e.verdictFor(stream) == verdictHeld {
 					_ = m.Ack()
 				}
@@ -1126,7 +1133,7 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 }
 
 func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
-	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
+	from, trust, h, ok, _ := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}

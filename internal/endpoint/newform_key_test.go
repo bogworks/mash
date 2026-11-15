@@ -86,7 +86,7 @@ func TestClassifyNewFormKeys(t *testing.T) {
 	}
 	for _, c := range cases {
 		hdr, subj, data := signedHeader(t, c.id, c.name)
-		from, trust, _, ok := e.classify(subj, hdr, data, time.Now())
+		from, trust, _, ok, _ := e.classify(subj, hdr, data, time.Now())
 		if !ok || trust != c.trust || (c.from != "" && from != c.from) || (c.trust == sap.TrustUnknownSigner && from == key) {
 			t.Errorf("%s: got (%q,%s,%v) want (%q,%s)", c.desc, from, trust, ok, c.from, c.trust)
 		}
@@ -94,7 +94,7 @@ func TestClassifyNewFormKeys(t *testing.T) {
 	// Only the new-form record: the bare name token alone is nobody.
 	e = keyEndpoint(map[string]store.Record{key: {Name: "ops1", User: nf.User}})
 	hdr, subj, data := signedHeader(t, nf, "ops1")
-	if _, trust, _, _ := e.classify(subj, hdr, data, time.Now()); trust != sap.TrustUnknownSigner {
+	if _, trust, _, _, _ := e.classify(subj, hdr, data, time.Now()); trust != sap.TrustUnknownSigner {
 		t.Errorf("name token alone: %s", trust)
 	}
 }

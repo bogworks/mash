@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/sap"
@@ -76,5 +77,58 @@ func TestStatusCLIHasNoInboxLine(t *testing.T) {
 	out, code := w.cli(t, "a", "status")
 	if code != 0 || strings.Contains(out, "inbox: WARN") {
 		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
+
+// Mail refused for its sender header is reported by the status tool, with the count by reason class and the command to
+// list it; with nothing refused there is no line.
+func TestStatusToolShowsRefusedMail(t *testing.T) {
+	w := newWorld(t, "a")
+	js, err := jetstream.New(w.e.Conn(t, w.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subj := sap.For(w.e.Owner, "a").Mail
+	for _, hdr := range []string{
+		`{"v":1,"pad":"` + strings.Repeat("p", 2100) + `"}`, // size
+		`{"v":1,"pad":"` + strings.Repeat("q", 2100) + `"}`, // size
+		"not json", // encoding
+	} {
+		m := nats.NewMsg(subj)
+		m.Data = []byte("hostile body")
+		m.Header.Set(sap.HeaderName, hdr)
+		if _, err := js.PublishMsg(context.Background(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	var out string
+	id := 30
+	eventually(t, 10*time.Second, "refused line shows", func() bool {
+		id++
+		out = statusOf(t, s, id)
+		return strings.Contains(out, "mail refused: 3 ")
+	})
+	wantAll(t, "refused line", statusLine(t, out, "mail refused: "), "since this session started (encoding 1, size 2)",
+		"kept in your inbox stream, not shown; see the log", "Next: run mashctl inbox inspect a to list them")
+	if strings.Contains(out, "hostile body") {
+		t.Fatalf("status shows a body:\n%s", out)
+	}
+}
+
+// Nothing refused: no line, from a shell and in a running session.
+func TestStatusHasNoRefusedLineWhenNothingWasRefused(t *testing.T) {
+	w := newWorld(t, "a")
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	eventually(t, 10*time.Second, "connected", func() bool {
+		return strings.Contains(statusOf(t, s, 40), "connection: OK")
+	})
+	if out := statusOf(t, s, 41); strings.Contains(out, "mail refused") {
+		t.Fatalf("a line with nothing refused:\n%s", out)
+	}
+	if out, _ := w.cli(t, "a", "status"); strings.Contains(out, "mail refused") {
+		t.Fatalf("CLI status has a refused line:\n%s", out)
 	}
 }

@@ -225,16 +225,80 @@ func failure(claimed SenderHeader, err error) (SenderHeader, Trust) {
 
 // VerifyStored classifies a stored message (§13.8): signature and sub only.
 func VerifyStored(hdr, arrivalSubject string, payload []byte) (SenderHeader, Trust) {
+	h, tr, _ := VerifyStoredWhy(hdr, arrivalSubject, payload)
+	return h, tr
+}
+
+// Refusal reason classes of VerifyStoredWhy. Only these words are ever reported: never the header value, a name, the
+// payload or a signature.
+const (
+	ReasonSize            = "size"
+	ReasonEncoding        = "encoding"
+	ReasonDuplicateMember = "duplicate-member"
+	ReasonVersionOrField  = "version-or-field"
+	ReasonName            = "name"
+	ReasonSubject         = "subject"
+	ReasonTimestamp       = "timestamp"
+	ReasonNonce           = "nonce"
+	ReasonSigFormat       = "signature-format"
+	ReasonSignature       = "signature"
+	ReasonOther           = "other"
+)
+
+// VerifyStoredWhy is VerifyStored plus a short reason class for a malformed or forged header ("" for verified,
+// claimed and absent). The class comes from the SDK error's stable Detail prefix.
+func VerifyStoredWhy(hdr, arrivalSubject string, payload []byte) (SenderHeader, Trust, string) {
 	out, tr, final := claim(hdr)
 	if final {
-		return out, tr
+		if tr == TrustMalformed {
+			_, err := identity.ParseHeader(hdr)
+			return out, tr, reasonOf(err)
+		}
+		return out, tr, ""
 	}
 	_, err := identity.VerifyStored(identity.Message{Subject: arrivalSubject, Data: payload,
 		Header: nats.Header{HeaderName: {hdr}}}, identity.StoredOptions{})
 	if err != nil {
-		return failure(out, err)
+		h, t := failure(out, err)
+		return h, t, reasonOf(err)
 	}
-	return out, TrustVerified
+	return out, TrustVerified, ""
+}
+
+// reasonOf maps an SDK refusal to a reason class. A 401 is a failed signature or sub check (forged); a 400 is
+// classified by its Detail prefix.
+func reasonOf(err error) string {
+	var e *identity.Error
+	if !errors.As(err, &e) {
+		return ReasonOther
+	}
+	if e.Code == 401 {
+		return ReasonSignature
+	}
+	d := e.Detail
+	has := strings.HasPrefix
+	switch {
+	case has(d, "value exceeds"):
+		return ReasonSize
+	case has(d, "value is not valid UTF-8"), has(d, "not a JSON object"):
+		return ReasonEncoding
+	case has(d, "a member name is repeated"):
+		return ReasonDuplicateMember
+	case has(d, "`name` contains"), has(d, "`name` is not a valid"):
+		return ReasonName
+	case has(d, "`sub` is not"):
+		return ReasonSubject
+	case has(d, "`ts` is not"):
+		return ReasonTimestamp
+	case has(d, "`nonce` must match"):
+		return ReasonNonce
+	case has(d, "`sig` is not base64url"):
+		return ReasonSigFormat
+	case has(d, "`sig` requires"), strings.HasSuffix(d, "` is missing"), strings.HasSuffix(d, "` must be a string"),
+		strings.HasSuffix(d, "` must be a JSON number"):
+		return ReasonVersionOrField
+	}
+	return ReasonOther
 }
 
 // LiveSkew is the §13.7 replay window.

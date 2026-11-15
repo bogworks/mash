@@ -134,6 +134,9 @@ func statusText(src *statusSource) string {
 	if l := inboxLine(src); l != "" {
 		lines = append(lines, l)
 	}
+	if l := refusedLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	if l := legacyInboxEvictionLine(src); l != "" {
 		lines = append(lines, l)
 	}
@@ -518,6 +521,34 @@ func inboxLine(src *statusSource) string {
 		return redactText(l)
 	}
 	return ""
+}
+
+// refusedLine says how many messages this session's endpoint refused (a forged or malformed sender header) and why, by
+// reason class. They are not shown, but the inbox stream keeps them until its limits drop them. Empty when none was
+// refused, from a shell (`mash status` has no live endpoint: only the status tool inside `mash serve` knows the count)
+// and with no running endpoint.
+func refusedLine(src *statusSource) string {
+	if src.cli || src.state == nil {
+		return ""
+	}
+	st := src.state.Load()
+	if st == nil || st.ep == nil {
+		return ""
+	}
+	total, by := st.ep.Refused()
+	if total == 0 {
+		return ""
+	}
+	reasons := make([]string, 0, len(by))
+	for r := range by {
+		reasons = append(reasons, r)
+	}
+	slices.Sort(reasons)
+	for i, r := range reasons {
+		reasons[i] = fmt.Sprintf("%s %d", r, by[r])
+	}
+	return fmt.Sprintf("mail refused: %d since this session started (%s): kept in your inbox stream, not shown; see the log. Next: run mashctl inbox inspect %s to list them",
+		total, strings.Join(reasons, ", "), src.cfg.DisplayName())
 }
 
 // leaseBucketLine says when the lease bucket still allows rollup writes. Empty when there is nothing to say, from a

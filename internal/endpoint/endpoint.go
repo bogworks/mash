@@ -111,8 +111,10 @@ type Endpoint struct {
 	// pre is what the first wave of a one-shot client read for the command that follows.
 	pre prefetched
 
-	dropped atomic.Int64
-	service *service
+	dropped   atomic.Int64 // refused mail in total (the same as the sum of refusedBy)
+	refusedMu sync.Mutex
+	refusedBy map[string]int64 // refused mail by reason class (sap.VerifyStoredWhy)
+	service   *service
 
 	// The hook hand-over (hook.go): nil until SetSpool; since is when this session began, so only a hook run in this
 	// session switches delivery to the spool.
@@ -857,8 +859,35 @@ func (e *Endpoint) Display() string { return e.ident.String() }
 // EndpointIdentity is this endpoint's identity (agent, owner and name tokens).
 func (e *Endpoint) EndpointIdentity() sap.EndpointIdentity { return e.ident }
 
-// Dropped counts forged or malformed mail that was discarded.
+// Dropped counts forged or malformed mail that was discarded (not shown, not spooled, acked; the inbox stream keeps it).
 func (e *Endpoint) Dropped() int64 { return e.dropped.Load() }
+
+// refuse counts one refused message under its reason class.
+func (e *Endpoint) refuse(why string) {
+	if why == "" {
+		why = sap.ReasonOther
+	}
+	e.refusedMu.Lock()
+	if e.refusedBy == nil {
+		e.refusedBy = map[string]int64{}
+	}
+	e.refusedBy[why]++
+	e.refusedMu.Unlock()
+	e.dropped.Add(1)
+}
+
+// Refused is the number of messages refused since this endpoint opened (forged or malformed sender header), in total
+// and by reason class. The map is a copy.
+func (e *Endpoint) Refused() (total int64, byReason map[string]int64) {
+	e.refusedMu.Lock()
+	defer e.refusedMu.Unlock()
+	byReason = make(map[string]int64, len(e.refusedBy))
+	for k, v := range e.refusedBy {
+		byReason[k] = v
+		total += v
+	}
+	return total, byReason
+}
 
 // Conn exposes the connection (for the CLI's live prompts).
 func (e *Endpoint) Conn() *nats.Conn { return e.nc }

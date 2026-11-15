@@ -279,11 +279,27 @@ func inspectFixture(t *testing.T) (*auditFixture, string) {
 	return f, sap.InboxStream("box")
 }
 
+// The reason class shows next to a forged or malformed label in the text form, and nowhere else.
+func TestInboxInspectShowsRefusalReason(t *testing.T) {
+	f, _ := inspectFixture(t)
+	out, errb, code := ctlRun(t, f.e, "inbox", "inspect", "box")
+	if code != 0 {
+		t.Fatalf("exit %d: %q", code, errb)
+	}
+	if !strings.Contains(out, "forged (signature)") {
+		t.Errorf("no reason next to forged:\n%s", out)
+	}
+	if strings.Contains(out, "verified (") || strings.Contains(out, "claimed (") || strings.Contains(out, "absent (") {
+		t.Errorf("a reason on a label that is not malformed or forged:\n%s", out)
+	}
+}
+
 type inspectMsgOut struct {
 	Seq           uint64  `json:"seq"`
 	MsgID         string  `json:"msg_id"`
 	Sender        string  `json:"sender"`
 	Trust         string  `json:"trust"`
+	Reason        string  `json:"reason"`
 	StoredAt      string  `json:"stored_at"`
 	Size          int     `json:"size"`
 	Kind          string  `json:"kind"`
@@ -328,6 +344,9 @@ func TestInboxInspectLive(t *testing.T) {
 	for i, m := range r.Messages {
 		if m.Seq != uint64(i+1) || m.Trust != wantTrust[i] || m.State != wantState[i] || m.Size != wantSize[i] || m.MsgID != fmt.Sprintf("msg-%d", i+1) {
 			t.Errorf("message %d: %+v, want trust %s state %s size %d", i+1, m, wantTrust[i], wantState[i], wantSize[i])
+		}
+		if wantReason := map[int]string{2: "signature"}[i]; m.Reason != wantReason {
+			t.Errorf("message %d: reason %q, want %q", i+1, m.Reason, wantReason)
 		}
 		if m.DeliveryCount != nil || m.AckTime != nil {
 			t.Errorf("message %d: delivery_count and ack_time must be null: %+v", i+1, m)
