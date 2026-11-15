@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
 
+	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -57,6 +58,9 @@ type Endpoint struct {
 	headMu sync.Mutex // guards the stream-headroom cache (streamHasHeadroom)
 	headAt time.Time
 	headOK bool
+
+	// activity reads what the harness is doing, for the status reply (SetActivity); nil for none.
+	activity atomic.Pointer[func() (activity.Activity, bool)]
 
 	cfg config.Config
 	// ident is the endpoint's identity (cfg.Identity()) and key its directory/stream/lease key, ident.Flat(): the bare

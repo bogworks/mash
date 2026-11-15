@@ -299,6 +299,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			}
 			clearWaiter() // this serve now holds the lease
 		}
+		ep.SetActivity(src.tracker.Current)
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
 		select {

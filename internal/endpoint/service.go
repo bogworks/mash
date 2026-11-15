@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go/micro"
 	"github.com/nats-io/nuid"
 
+	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -199,6 +200,44 @@ func (e *Endpoint) heartbeat() []byte {
 	return b
 }
 
+// SetActivity gives the endpoint the reader of what the harness is doing; nil, or a reader that reports absent,
+// means the status reply is the plain heartbeat.
+func (e *Endpoint) SetActivity(f func() (activity.Activity, bool)) {
+	if f == nil {
+		e.activity.Store(nil)
+		return
+	}
+	e.activity.Store(&f)
+}
+
+// statusPayload is the status reply: the heartbeat's fields plus, when the activity reader reports one, `state`
+// and, for a blocked state with a kind, `kind` (SAP 0.3.1 §8.7.2). Nothing else of the activity (since, source)
+// goes on the wire. The published heartbeat never carries them.
+func (e *Endpoint) statusPayload() []byte {
+	hb := e.heartbeat()
+	fp := e.activity.Load()
+	if fp == nil {
+		return hb
+	}
+	a, ok := (*fp)()
+	if !ok || a.State == "" {
+		return hb
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(hb, &m) != nil {
+		return hb
+	}
+	m["state"], _ = json.Marshal(string(a.State))
+	if a.State == activity.StateBlocked && a.Kind != "" {
+		m["kind"], _ = json.Marshal(string(a.Kind))
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return hb
+	}
+	return b
+}
+
 func (e *Endpoint) publishHeartbeat() {
 	payload := e.heartbeat()
 	var hb struct {
@@ -262,7 +301,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		if _, tr := sap.VerifyLive(r.Headers().Get(sap.HeaderName), r.Subject(), r.Data(), time.Now(), s.nonces); tr != sap.TrustVerified && tr != sap.TrustAbsent {
 			e.log.Printf("status probe with a %s sender header", tr)
 		}
-		_ = r.Respond(e.heartbeat())
+		_ = r.Respond(e.statusPayload())
 	}), micro.WithEndpointSubject(e.subj.Status), micro.WithEndpointQueueGroup(sap.QueueGroup)); err != nil {
 		return fmt.Errorf("mash: status endpoint: %w", err)
 	}
