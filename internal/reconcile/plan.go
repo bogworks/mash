@@ -578,6 +578,9 @@ type senderMap struct {
 	// holds the senders whose resolution failed, by sender.
 	names map[string][]string
 	errs  map[string]error
+	// errOwner is the owner of each sender in errs that parsed as range.owner.name; a sender in errs with no entry has
+	// an unknown owner.
+	errOwner map[string]string
 	// absent maps the (directory name, owner) a sender would be recorded under, as its bare name or its flat key, to
 	// the senders for which no directory record was found.
 	absent map[recKey][]string
@@ -585,7 +588,7 @@ type senderMap struct {
 
 // resolveSenders resolves every sender of the list set to the record that serves it. A nil resolver resolves none.
 func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) senderMap {
-	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, absent: map[recKey][]string{}}
+	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, errOwner: map[string]string{}, absent: map[recKey][]string{}}
 	if rs == nil {
 		return m
 	}
@@ -603,6 +606,7 @@ func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) send
 			m.errs[u.Sender] = err
 			continue
 		}
+		m.errOwner[u.Sender] = id.Owner
 		m.names[id.Name] = append(m.names[id.Name], u.Sender)
 		m.names[id.Flat()] = append(m.names[id.Flat()], u.Sender)
 		target, _, found, err := rs.ServingIdentity(ctx, id)
@@ -624,7 +628,7 @@ func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) send
 }
 
 // doubt is why a record that no sender is known to own may still be one's, or "" when it cannot be: its owner is
-// missing, or the resolution of a sender it could belong to failed.
+// missing, or the resolution of a sender it could belong to (same owner, or an unknown one) failed.
 func (m senderMap) doubt(r store.Issued) string {
 	senders := m.names[r.Address]
 	if len(senders) == 0 {
@@ -635,6 +639,9 @@ func (m senderMap) doubt(r store.Issued) string {
 	}
 	for _, s := range senders {
 		if err := m.errs[s]; err != nil {
+			if o, known := m.errOwner[s]; known && o != r.Owner {
+				continue // the owners rule out a match
+			}
 			return fmt.Sprintf("resolving %s failed (%v)", s, err)
 		}
 	}

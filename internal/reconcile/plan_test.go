@@ -716,6 +716,23 @@ func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
 	}
 }
 
+func TestResolverErrorDoubtsOnlyTheSendersOwnRecords(t *testing.T) {
+	w := newWorld(t)
+	other, same := userKey(t), userKey(t)
+	w.recordOwned(other, "core", "zed") // foo.c.core is owned by c: the owners rule it out
+	w.recordOwned(same, "core", "c")
+	p := w.buildWith(fakeResolver{errs: map[string]error{"foo.c.core": errors.New("directory unreadable")}})
+	if r, ok := revocation(p, other); !ok || r.Reason != ReasonRecorded {
+		t.Errorf("a record under another owner is revoked despite the resolver error: %+v %v", r, ok)
+	}
+	if _, ok := revocation(p, same); ok {
+		t.Error("the record under the failing sender's owner was revoked")
+	}
+	if f, ok := finding(p, same); !ok || !strings.Contains(f.Detail, "directory unreadable") {
+		t.Errorf("finding = %+v %v", f, ok)
+	}
+}
+
 func TestEmptyOwnerRecordNamedLikeASenderIsAFindingNotARevoke(t *testing.T) {
 	w := newWorld(t)
 	k := userKey(t)
