@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -117,8 +118,90 @@ func TestKVLedgerMissingBucket(t *testing.T) {
 	if !errors.Is(err, ErrNoPolicyBucket) {
 		t.Fatalf("err = %v", err)
 	}
+	if want := "no policy has been applied here yet (the bucket nope does not exist); applying policy creates it"; err.Error() != want {
+		t.Fatalf("message = %q, want %q", err, want)
+	}
 	if _, err := js.KeyValue(context.Background(), "nope"); err == nil {
 		t.Error("the ledger created the bucket")
+	}
+}
+
+// With Create the ledger makes the missing bucket as store.CreatePolicyBucket does, and works end to end in it.
+func TestKVLedgerCreatesTheBucket(t *testing.T) {
+	js, err := jetstream.New(newJetStreamConn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	l, err := NewKVLedger(ctx, js, kvAccount, KVLedgerOptions{Bucket: DefaultPolicyBucket, Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifyPolicyBucket(ctx, js, DefaultPolicyBucket); err != nil {
+		t.Fatalf("the bucket is not as mash makes it: %v", err)
+	}
+	unlock, err := l.Lock(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetPending(testRecord(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteStatus(ctx, Status{Generation: 1, State: StateApplied, InForce: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.ClearPending(); err != nil {
+		t.Fatal(err)
+	}
+	unlock() // writes an expired lease value: never a delete or purge
+	if rec, err := l.InForce(); err != nil || rec != testRecord(1) {
+		t.Fatalf("in force: %+v %v", rec, err)
+	}
+	// A second ledger with Create set uses the bucket there is.
+	if _, err := NewKVLedger(ctx, js, kvAccount, KVLedgerOptions{Bucket: DefaultPolicyBucket, Create: true}); err != nil {
+		t.Fatalf("second ledger: %v", err)
+	}
+}
+
+// A bucket made by anyone else, with another configuration, is used as it is and never reconfigured, with or without Create.
+func TestKVLedgerUsesAnOutsideMadeBucketUnchanged(t *testing.T) {
+	e := newKVEnv(t) // made by hand: History 8, rollup allowed, no deny flags
+	ctx := context.Background()
+	js, err := jetstream.New(connectJS(t, e.url))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := func() jetstream.StreamConfig {
+		s, err := js.Stream(ctx, "KV_"+kvBucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := s.Info(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Config
+	}
+	before := stream()
+	for i, create := range []bool{false, true} {
+		l := e.ledger(KVLedgerOptions{Create: create})
+		unlock, err := l.Lock(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.CompareAndCommit(uint64(i), testRecord(uint64(i+1))); err != nil {
+			t.Fatalf("create=%v: %v", create, err)
+		}
+		unlock()
+		if after := stream(); !reflect.DeepEqual(before, after) {
+			t.Fatalf("create=%v: the bucket was reconfigured:\nbefore %+v\nafter  %+v", create, before, after)
+		}
+	}
+	if err := store.VerifyPolicyBucket(ctx, js, kvBucket); err == nil {
+		t.Error("the outside-made bucket now verifies as mash's: it was changed")
 	}
 }
 
@@ -744,7 +827,8 @@ func TestPolicyBucket(t *testing.T) {
 		{"{range}-{range}", "a", "a-a", true},
 		{"fixed_policy", "", "fixed_policy", true},
 		{"fixed_policy", "ignored", "fixed_policy", true},
-		{"", "r1", "", false},
+		{"", "r1", DefaultPolicyBucket, true},
+		{"", "", DefaultPolicyBucket, true},
 		{"mgr_{range}_policy", "", "", false},
 		{"mgr_{range}_policy", "a.b", "", false},
 		{"mgr.{range}", "r1", "", false},

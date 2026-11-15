@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // StatusSchema is the schema of the status value. A value with another schema is refused, never guessed at.
@@ -30,9 +31,9 @@ var ErrLeaseLost = errors.New("the run lease was lost: another run may have take
 // ErrUnknownSchema is returned when the status value carries a schema this code does not know.
 var ErrUnknownSchema = errors.New("the status value has an unknown schema")
 
-// ErrNoPolicyBucket is returned by NewKVLedger when the range's policy bucket does not exist. Operations creates it;
-// mash never does.
-var ErrNoPolicyBucket = errors.New("the policy bucket does not exist")
+// ErrNoPolicyBucket is returned by NewKVLedger when the policy bucket does not exist and the options do not ask for it
+// to be created: nothing has been applied here yet. Applying policy creates the bucket (KVLedgerOptions.Create).
+var ErrNoPolicyBucket = errors.New("no policy has been applied here yet")
 
 // StatusWriter is implemented by a Ledger that also keeps the latest Status. Run writes the Status of every run to it.
 type StatusWriter interface {
@@ -55,6 +56,10 @@ type RefusalWriter interface {
 type KVLedgerOptions struct {
 	// Bucket is the resolved name of the policy bucket (see PolicyBucket). Required.
 	Bucket string
+	// Create makes the bucket, as store.CreatePolicyBucket does, when it does not exist. A command that applies or
+	// writes sets it; a command that only reads leaves it false and gets ErrNoPolicyBucket. A bucket that exists, made
+	// by anyone with any configuration, is used as it is and never reconfigured.
+	Create bool
 	// LeaseTTL is how long the run lease lasts without renewal; zero means DefaultLeaseTTL. The lease is renewed at
 	// half of it while held.
 	LeaseTTL time.Duration
@@ -85,7 +90,8 @@ type KVLedgerOptions struct {
 // ErrLeaseLost. Unlock releases it by writing an expired value (never Delete or Purge: the bucket may refuse them).
 // Expiry is judged by the clocks of the processes, so keep them close compared to the TTL.
 //
-// The ledger does not create the bucket.
+// The bucket is mash's: NewKVLedger creates it when opts.Create is set and it does not exist, and uses an existing
+// bucket as it is.
 type KVLedger struct {
 	kv       jetstream.KeyValue
 	key      string
@@ -109,8 +115,8 @@ type KVLedger struct {
 
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// NewKVLedger returns the ledger of account in the policy bucket opts.Bucket. It fails, wrapping
-// ErrNoPolicyBucket, when the bucket does not exist.
+// NewKVLedger returns the ledger of account in the policy bucket opts.Bucket. When the bucket does not exist it is
+// created if opts.Create is set, else NewKVLedger fails wrapping ErrNoPolicyBucket.
 func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, opts KVLedgerOptions) (*KVLedger, error) {
 	if opts.Bucket == "" {
 		return nil, fmt.Errorf("policy ledger: no policy bucket name; set %s", PolicyBucketEnv)
@@ -121,7 +127,12 @@ func NewKVLedger(ctx context.Context, js jetstream.JetStream, account string, op
 	bucket := opts.Bucket
 	kv, err := js.KeyValue(ctx, bucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		return nil, fmt.Errorf("%w: bucket %s is created by operations; ask for it before applying policy", ErrNoPolicyBucket, bucket)
+		if !opts.Create {
+			return nil, fmt.Errorf("%w (the bucket %s does not exist); applying policy creates it", ErrNoPolicyBucket, bucket)
+		}
+		if kv, err = store.CreatePolicyBucket(ctx, js, bucket); err != nil {
+			return nil, fmt.Errorf("policy ledger: creating bucket %s: %w", bucket, err)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("policy ledger: bucket %s: %w", bucket, err)

@@ -19,6 +19,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -427,5 +428,69 @@ func TestAdoptRecordsTheExemptSet(t *testing.T) {
 	}
 	if _, action, err := a.Adopt(ctx, acct, s2, by, []string{u1}); err != nil || action != admin.AdoptExemptUpdated {
 		t.Fatalf("%q %v", action, err)
+	}
+}
+
+// policyBucketSubjects are the subjects a client would use to write, read, list or remove anything in the policy bucket
+// called bucket.
+func policyBucketSubjects(bucket string) []string {
+	stream := store.PolicyStreamName(bucket)
+	return []string{
+		"$KV." + bucket + "." + policyapply.StatusKey(kvAccountForTest),
+		"$KV." + bucket + ".listset." + kvAccountForTest,
+		"$KV." + bucket + ".>",
+		"$JS.API.DIRECT.GET." + stream + ".$KV." + bucket + "." + policyapply.StatusKey(kvAccountForTest),
+		"$JS.API.DIRECT.GET." + stream,
+		"$JS.API.STREAM.INFO." + stream,
+		"$JS.API.STREAM.PURGE." + stream,
+		"$JS.API.STREAM.DELETE." + stream,
+		"$JS.API.STREAM.UPDATE." + stream,
+		"$JS.API.STREAM.MSG.GET." + stream,
+		"$JS.API.STREAM.MSG.DELETE." + stream,
+		"$JS.API.CONSUMER.CREATE." + stream,
+		"$JS.API.CONSUMER.CREATE." + stream + ".x.$KV." + bucket + ".>",
+		"$JS.API.CONSUMER.DURABLE.CREATE." + stream + ".x",
+	}
+}
+
+const kvAccountForTest = "ACCOUNTKEY"
+
+// No permission list mash gives an endpoint grants anything on the policy bucket, whether it has the default name or one
+// a {range} pattern gives.
+func TestEndpointPermissionsGrantNothingOnPolicyBucket(t *testing.T) {
+	id, err := sap.New("claude", "o", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nf, err := admin.NewFormPermissions(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lists := map[string]jwt.Permissions{
+		"Permissions":   admin.Permissions("o", "a"),
+		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
+		"NewForm":       nf,
+	}
+	expanded, err := policyapply.PolicyBucket("mgr_{range}_policy", "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def, err := policyapply.PolicyBucket("", ""); err != nil || def != policyapply.DefaultPolicyBucket {
+		t.Fatalf("default bucket = %q, %v", def, err)
+	}
+	for _, bucket := range []string{policyapply.DefaultPolicyBucket, expanded} {
+		for name, p := range lists {
+			allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)
+			for _, g := range allow {
+				if strings.Contains(g, bucket) || strings.Contains(g, strings.ReplaceAll(bucket, "-", "_")) {
+					t.Errorf("%s: a grant names the policy bucket %s: %q", name, bucket, g)
+				}
+				for _, s := range policyBucketSubjects(bucket) {
+					if server.SubjectsCollide(g, s) {
+						t.Errorf("%s: grant %q covers policy bucket subject %q", name, g, s)
+					}
+				}
+			}
+		}
 	}
 }

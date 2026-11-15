@@ -7,16 +7,19 @@ import (
 	"strings"
 )
 
-// The seam with the range manager that writes list sets. Operations creates one KV bucket per range, shared with that
-// manager, which writes listset.<account public key> there; mash writes one value per account at
-// status.<account public key> and nothing else, and only mash writes status.* keys.
+// The policy bucket is mash's: mash creates it on the first apply (see KVLedgerOptions.Create) and owns it. It holds
+// one value per account at status.<account public key>, with the pending JWT and the run lease beside it; only mash
+// writes status.* keys. An outside system that wants to submit a list set may write listset.<account public key> into
+// the bucket, with a credential limited to $KV.<bucket>.listset.>. The key names below are the interface of that
+// submission channel; a change of them is a one-line change in this file, and nothing else in the package spells a key.
 //
-// The bucket name is configuration, not a built-in name, because the seam (decision D211) is pending. The proposed
-// pattern is "<manager>_{range}_policy", set by the operator in PolicyBucketEnv; {range} is replaced by the range
-// name. The key names below are the proposal too. A change of the key names is a one-line change in this file;
-// nothing else in the package spells a key.
+// The bucket is named DefaultPolicyBucket unless the operator sets PolicyBucketEnv to another name. The setting is a
+// pattern: {range} is replaced by the range name, for an operator who keeps one bucket per range.
 
-// PolicyBucketEnv is the environment variable a command reads for the bucket name pattern.
+// DefaultPolicyBucket is the name of the policy bucket when PolicyBucketEnv is not set.
+const DefaultPolicyBucket = "mash-policy"
+
+// PolicyBucketEnv is the environment variable a command reads for the bucket name pattern. It is optional.
 const PolicyBucketEnv = "MASH_POLICY_BUCKET"
 
 const rangePlaceholder = "{range}"
@@ -24,11 +27,11 @@ const rangePlaceholder = "{range}"
 var bucketRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // PolicyBucket returns the name of the KV bucket of range rng. pattern is a bucket name that may contain the
-// placeholder {range}, which is replaced by rng. It refuses an empty pattern, an empty rng when the pattern has the
+// placeholder {range}, which is replaced by rng; an empty pattern means DefaultPolicyBucket. It refuses an empty rng when the pattern has the
 // placeholder, and a result that is not a valid KV bucket name (letters, digits, '-' and '_').
 func PolicyBucket(pattern, rng string) (string, error) {
 	if pattern == "" {
-		return "", fmt.Errorf("policy bucket: no bucket name pattern; set %s", PolicyBucketEnv)
+		return DefaultPolicyBucket, nil
 	}
 	name := pattern
 	if strings.Contains(pattern, rangePlaceholder) {
