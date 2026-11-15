@@ -678,6 +678,50 @@ func TestRecordOfASenderWithNoDirectoryRecordIsAFindingNotARevoke(t *testing.T) 
 	}
 }
 
+// A new-form record of a listed sender is checked against the directory: no record serving it is a finding, never a
+// revoke; a record serving it is silent; an unreadable directory is a finding; no resolver is a silent skip.
+func TestNewFormRecordWithNoDirectoryRecordIsAFinding(t *testing.T) {
+	newID, err := sap.New("agent", "c", "core")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		rs   Resolver
+		want string // a substring of the finding; "" for none
+	}{
+		{"no directory record", fakeResolver{}, "no directory record serves it"},
+		{"directory record serves it", fakeResolver{byAddr: map[string]sap.EndpointIdentity{"c.core": newID}}, ""},
+		{"resolver error", fakeResolver{errs: map[string]error{"c.core": errors.New("directory unreadable")}}, "could not be read"},
+		{"nil resolver", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			k, notListed := userKey(t), userKey(t)
+			w.recordOwned(k, "agent_c_core", "c")
+			w.recordOwned(notListed, "agent_zz_core", "zz")
+			p := w.buildWith(tc.rs)
+			if r, ok := revocation(p, k); ok {
+				t.Errorf("the new-form record of a listed sender was revoked: %+v", r)
+			}
+			f, ok := finding(p, k)
+			switch {
+			case tc.want == "" && ok:
+				t.Errorf("unexpected finding: %+v", f)
+			case tc.want != "" && (!ok || !strings.Contains(f.Detail, tc.want) || !strings.Contains(f.Detail, "c.core")):
+				t.Errorf("finding = %+v %v, want one containing %q", f, ok, tc.want)
+			}
+			if tc.name == "resolver error" && ok && !strings.Contains(f.Detail, "directory unreadable") {
+				t.Errorf("finding does not carry the error: %+v", f)
+			}
+			if r, ok := revocation(p, notListed); !ok || r.Reason != ReasonRecorded {
+				t.Errorf("a new-form record of an owner not in the list set is revoked as before: %+v %v", r, ok)
+			}
+		})
+	}
+}
+
 func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
 	w := newWorld(t)
 	k := userKey(t)

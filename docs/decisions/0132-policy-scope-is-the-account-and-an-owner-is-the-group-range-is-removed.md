@@ -114,7 +114,20 @@ Chosen option: the first. The pieces:
   14 characters, 81 exceptions fit (83 before).
 * Bad, because a holder of a group's scoped signing key can sign any `ep` tag, and so point a credential at another
   endpoint's inbox. That holder could already sign any tag, so the custody rules of the group key are unchanged
-  (threat model, owner group signing keys).
+  (threat model, owner group signing keys). What such a holder can do, stated plainly:
+  * mint a user JWT for any key it holds with any tag set of that group: any allow or deny tag, so any reach the list
+    set gives any sender of that owner group, and any `ep` tag, so the inbox, lease and reply lines of any endpoint
+    of any agent token, in that owner group or another (the template's inbox lines are keyed on the tag, not on the
+    group);
+  * read, fetch from, acknowledge and delete mail in the inbox of the endpoint it names, and take over that endpoint's
+    lease key and reply subjects;
+  * not widen what the template itself grants (the template is in the account JWT, signed by the account key), not
+    sign for another owner group's key, and not change the list set or its generation.
+  The rest of the account is unaffected, and the same holder could already mint any tag set, so what the `ep` tag adds
+  is the inbox reach of other owner groups' endpoints. It is the same trust the account key already carries, which
+  holds all of this and more. Mitigations are unchanged: the group keys stay with the minting authority, are never
+  on a sender's host, and a revoked key is refused by every server (ADR 0100, 0115). The issue record lists every
+  credential signed through mash; a credential signed outside mash is found by the reconcile (ADR 0121).
 * Bad, because the digest encoding changes: a stored `mash.listset.v1` digest no longer matches, which is acceptable
   because none was deployed.
 * Neutral: the identity of an endpoint is unchanged.

@@ -387,7 +387,25 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 		}
 		// A new-form record (Address the flat key agent_owner_name) of an owner and name the list set names is that
 		// sender's endpoint's, whatever its agent token.
+		// Without a resolver that is all that is known. With one, the directory is asked whether a record serves the
+		// record's full identity: none is a finding, as for a legacy record, and an unreadable directory is doubt.
 		if o, n, ok := flatOwnerName(r.Address); ok && o == r.Owner && len(sm.named[recKey{n, o}]) > 0 {
+			if in.Resolver == nil {
+				continue
+			}
+			by := strings.Join(sm.named[recKey{n, o}], ", ")
+			id, ferr := sap.FromFlat(r.Address)
+			if ferr != nil {
+				finding(r.PublicKey, "recorded as %q owner %q, which may be a sender of the list set (%s), but its address is not a valid new-form identity (%v): not revoked", r.Address, r.Owner, by, ferr)
+				continue
+			}
+			_, _, served, serr := in.Resolver.ServingIdentity(ctx, id)
+			switch {
+			case serr != nil:
+				finding(r.PublicKey, "recorded as %q owner %q, the list set names %s, but the directory record could not be read (%v): not revoked", r.Address, r.Owner, by, serr)
+			case !served:
+				finding(r.PublicKey, "recorded as %q owner %q, the list set names %s but no directory record serves it: not revoked; remove the sender from the list set to revoke it", r.Address, r.Owner, by)
+			}
 			continue
 		}
 		if why := sm.doubt(r); why != "" {
