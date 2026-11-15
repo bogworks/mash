@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -65,11 +66,17 @@ func newServeEnvCluster(t *testing.T, adopt bool) (*serveEnv, *server.Server) {
 	return e, second
 }
 
+// clusterSecondDir is the resolver directory of the second server of a cluster env, by env: a test that makes the server
+// refuse a push takes the write permission off it.
+var clusterSecondDir sync.Map
+
 // startClusterSecond starts the second server of the cluster over the first's operator and account JWTs.
 func startClusterSecond(t *testing.T, e *applyEnv, route int, routes []*url.URL) *server.Server {
 	t.Helper()
 	opts := mustT(server.ProcessConfigFile(e.pl.ConfPath()))
-	res := mustT(server.NewDirAccResolver(t.TempDir(), 0, clusterSync, server.NoDelete))
+	dir := t.TempDir()
+	clusterSecondDir.Store(e, dir)
+	res := mustT(server.NewDirAccResolver(dir, 0, clusterSync, server.NoDelete))
 	// The first server's JWTs are in its config, in the resolver preload; its resolver directory is not written yet.
 	conf := mustT(os.ReadFile(e.pl.ConfPath()))
 	for _, pub := range []string{e.pl.System, e.acctPub} {

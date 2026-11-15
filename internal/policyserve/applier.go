@@ -79,6 +79,12 @@ type Applier struct {
 	AdminUser, AdminIssuer string
 	ExemptIssuers          func(ctx context.Context) (map[string][]string, error)
 
+	// Step is a test seam, nil in production: it is called before every protected write of a run, with the label of
+	// policyapply.RunInput.BeforeWrite ("push", "revoke", "commit", ...) and with "witness" before each read of the
+	// witnesses by the gate, ahead of the intake's guard. An error it returns refuses that write (or fails that read),
+	// which is how a test makes a run stop at a named point as a crash would.
+	Step func(ctx context.Context, step string) error
+
 	markersOnce sync.Once
 	markers     policyapply.ProvisionMarkers
 	markersErr  error
@@ -225,6 +231,15 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		Ledger: a.Ledger, Cluster: issuer.Cluster, Signer: issuer, Account: a.Account, Inventory: a.Servers,
 		Provisioner: prov, ProvisionMarkers: markers, IssueRecord: a.Record, BeforeWrite: BeforeWrite(g), Now: a.Now,
 	}
+	if step := a.Step; step != nil {
+		guard := deps.BeforeWrite
+		deps.BeforeWrite = func(ctx context.Context, what string) error {
+			if err := step(ctx, what); err != nil {
+				return err
+			}
+			return guard(ctx, what)
+		}
+	}
 
 	target, cerr := listset.Compile(doc.ListSet)
 	svc := Provisioner{Keys: a.Keys, Sets: []*listset.Compiled{prev, target}, Inboxes: a.Inboxes}
@@ -333,12 +348,26 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 			loaders = append(loaders, c)
 		}
 	}
-	if creds := witnessSenders(prev, target, ex); len(creds) > 0 {
+	creds := witnessSenders(prev, target, ex, settledState{})
+	var settled settledState
+	if len(creds) > 0 {
+		// A run that was stopped after its push: what the servers already hold of the change is read, on every server of
+		// the declared count, and a sender the earlier push settled is not given a witness that nothing could close.
+		settled = a.readSettled(ctx, deps, signers, prev, target, ex)
+		creds = witnessSenders(prev, target, ex, settled)
+	}
+	if len(creds) > 0 {
 		if err := wit.Open(ctx, URLs(servers), minter, creds); err != nil {
 			return policyintake.Result{}, fmt.Errorf("open the witness connections: %w; nothing was pushed", err)
 		}
 	}
 	deps.Prober, deps.Witnesses = prober, wit
+	if skipped := settledWithoutWitness(ex, creds); len(skipped) > 0 && len(settled.Servers) > 0 {
+		deps.Witnesses = settledWitnesses{inner: wit, servers: settled.Servers, senders: skipped}
+	}
+	if a.Step != nil {
+		deps.Witnesses = stepWitnesses{inner: deps.Witnesses, step: a.Step}
+	}
 
 	// Senders that leave have their keys revoked after the push.
 	if len(ex.RemovedSenders) > 0 {
@@ -351,6 +380,51 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		deps.AfterPush = policyapply.RotationsAfterPush(plan)
 	}
 	return a.finish(a.apply(ctx, req, deps))
+}
+
+// readSettled reads the account JWT of every server and what the issue record holds for the senders concerned, and
+// returns what the servers already hold of the change. A read error settles nothing.
+func (a *Applier) readSettled(ctx context.Context, deps policyapply.ApplyDeps, signers map[string]string,
+	prev, target *listset.Compiled, ex policyapply.Expect) settledState {
+	if deps.Cluster == nil || a.Record == nil {
+		return settledState{}
+	}
+	jwts, err := deps.Cluster.AccountJWTs(ctx, a.Account)
+	if err != nil {
+		a.logf("settled", "error", err.Error())
+		return settledState{}
+	}
+	// The inventory read, not ByAddress: it carries the greatest issue time over every retained revision of a key, so a
+	// revocation older than a later-dated credential does not count as settling the sender (ADR 0115). An incomplete
+	// history settles nothing.
+	all, err := a.Record.AllMaxIssued(ctx)
+	if err != nil {
+		a.logf("settled", "error", err.Error())
+		return settledState{}
+	}
+	return settledSenders(jwts, deps.Inventory, a.Account, signers, prev, target, ex,
+		func(address string) ([]policyapply.IssueEntry, error) {
+			var out []policyapply.IssueEntry
+			for _, e := range all {
+				if e.Address == address {
+					out = append(out, e)
+				}
+			}
+			return out, nil
+		})
+}
+
+// stepWitnesses is the Applier.Step seam on the gate's reads of the witnesses.
+type stepWitnesses struct {
+	inner policyapply.Witnesses
+	step  func(ctx context.Context, step string) error
+}
+
+func (w stepWitnesses) Closed(ctx context.Context) (map[policyapply.WitnessKey]bool, error) {
+	if err := w.step(ctx, "witness"); err != nil {
+		return nil, err
+	}
+	return w.inner.Closed(ctx)
 }
 
 func (a *Applier) apply(ctx context.Context, req policyapply.ApplyRequest, deps policyapply.ApplyDeps) (policyapply.Status, error) {
@@ -441,28 +515,61 @@ func detailOf(st policyapply.Status) string {
 // for a failure. A removal Expect does not represent (a group-level one) changes the group's template, which closes
 // every connection under that key: when any group's template differs between prev and target, or a group appears or
 // disappears, every sender of the generation in force gets a witness. It returns nil when no sender needs one.
-func witnessSenders(prev, target *listset.Compiled, ex policyapply.Expect) []policyapply.ProbeCred {
+//
+// st is what the servers already hold of the change (settledSenders; the zero value settles nothing). When every
+// server already holds the target's templates the template reason is gone: a connection opened now was opened under the
+// target. A sender whose keys are all revoked on every server needs none for a removal, and a removed reach in a group
+// whose template changed and is on every server needs none for that reach. Any other sender keeps its witness.
+func witnessSenders(prev, target *listset.Compiled, ex policyapply.Expect, st settledState) []policyapply.ProbeCred {
 	if prev == nil {
 		return nil
 	}
-	need := map[string]bool{}
-	all := templatesChange(prev, target)
-	for _, r := range ex.Removed {
-		need[r.Sender] = true
-	}
-	for _, r := range ex.CredentialOnly {
-		need[r.Sender] = true
+	reach := map[string]bool{}  // a removed reach: the template, or a revoked key, closes it
+	remove := map[string]bool{} // the sender leaves: only its revoked keys settle it
+	all := templatesChange(prev, target) && !st.Templates
+	for _, r := range slices.Concat(ex.Removed, ex.CredentialOnly) {
+		reach[r.Sender] = true
 	}
 	for _, s := range ex.RemovedSenders {
-		need[s] = true
+		remove[s] = true
 	}
 	var creds []policyapply.ProbeCred
 	for _, u := range prev.Users {
-		if all || need[u.Sender] {
+		need := all
+		if reach[u.Sender] && !st.Revoked[u.Sender] && !(st.Templates && groupChanges(prev, target, groupOf(u.Sender))) {
+			need = true
+		}
+		if remove[u.Sender] && !st.Revoked[u.Sender] {
+			need = true
+		}
+		if need {
 			creds = append(creds, policyapply.ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
 		}
 	}
 	return creds
+}
+
+// settledWithoutWitness are the senders the gate asks a closed witness for that got none because the servers already
+// hold the change.
+func settledWithoutWitness(ex policyapply.Expect, creds []policyapply.ProbeCred) []string {
+	have := map[string]bool{}
+	for _, c := range creds {
+		have[c.Sender] = true
+	}
+	var out []string
+	add := func(s string) {
+		if !have[s] && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	for _, r := range slices.Concat(ex.Removed, ex.CredentialOnly) {
+		add(r.Sender)
+	}
+	for _, s := range ex.RemovedSenders {
+		add(s)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // templatesChange reports whether the push changes the scoped template of any owner group: one differs between prev and
