@@ -1,4 +1,0 @@
-refused: nothing would change
-  [range] range: the document is for range bar and the selected range is foo
-  [validate] sender "foo.c.core": range part "foo" is not the account's range "bar"
-  [validate] sender "foo.c.lead": range part "foo" is not the account's range "bar"

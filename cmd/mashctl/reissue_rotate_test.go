@@ -351,8 +351,8 @@ func TestReissueRotationNeedsServer(t *testing.T) {
 			calls := fakeRevoke(t, nil)
 			tc.edit(h)
 			out, errb, code := h.run("reissue", "a")
-			// The adoption guard asks the server first (REQ-016): with a server configured and no way to ask, it refuses.
-			if code != 1 || out != "" || !strings.Contains(errb, "reissue is refused: cannot tell whether this account is adopted") || !strings.Contains(errb, "nothing was changed") {
+			// A rotation reads the directory record first: with a server configured and no way to ask, it refuses.
+			if code != 1 || out != "" || !strings.Contains(errb, "needs the server and the admin credentials") || !strings.Contains(errb, "nothing was changed") {
 				t.Fatalf("%d %q %q", code, out, errb)
 			}
 			if after, _ := os.ReadFile(h.creds("a")); !bytes.Equal(before, after) {

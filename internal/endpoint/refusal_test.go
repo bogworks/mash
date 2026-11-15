@@ -17,11 +17,10 @@ import (
 
 const refusedText = "refused by policy: you may not mail "
 
-// refusedSuffix is the advice sentence of every refusal: stale or narrowed permissions, and the adopted-account case.
+// refusedSuffix is the advice sentence of every refusal: stale or narrowed permissions.
 const refusedSuffix = "." +
 	" If the recipient is an endpoint of this owner, your credentials may be older than the permissions mash issues now, or your permissions were narrowed:" +
-	" ask the admin to check them." +
-	" On an account mashctl does not issue credentials for (an adopted one), `mashctl reissue --changed` is refused and the admin changes the permissions where they are set instead."
+	" ask the admin to check them."
 
 // retrySuffix is the last sentence of a refusal that carries the send's key.
 func retrySuffix(key string) string {

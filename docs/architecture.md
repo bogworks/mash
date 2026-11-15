@@ -329,8 +329,6 @@ Nothing is kept past 30 days. An archive was planned in the design and not built
 
 A full threat model is maintained separately: threat-model.md.
 
-How mash enforces who may mail, prompt, probe and watch whom, with diagrams and the limits it cannot remove: [policy-enforcement.md](policy-enforcement.md).
-
 **What "trust" means in mash.** A trust label states how far mash has proven *who sent* a message. It is the result of
 two checks. The first is cryptographic: does the SAP §13 signature verify against the user key in the header, over this
 subject and this body? The second is a lookup: does mash's directory map that user key to the claimed endpoint name?
@@ -697,8 +695,6 @@ idle wake.
 |---|---|
 | Endpoint name, owner | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-48 characters: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
 | Subjects | `agents.mail.cc.<owner>.<name>`, `agents.prompt.cc.<owner>.<name>`, `agents.status.cc.<owner>.<name>`, `agents.hb.cc.<owner>.<name>` |
-| Policy view subject | `agents.policy.<range>`: a signed request from a sender, answered by `mashctl policy serve` with that sender's own reach. Every list-set template carries this one publish line ([ADR 0110](decisions/0110-a-sender-sees-only-its-own-reach-through-a-signed-policy-view-request.md)) |
-| Issue subject | `agents.issue.<range>.<owner>`: a wrangler's request to the `mash-issue` service of `mashctl issue serve`. Its second token is none of the verbs `mail`, `prompt`, `status`, `hb`, and no compiled template reaches it ([ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md)) |
 | Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token. Mail has one five-token subject; zones were removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) |
 | Inbox stream, consumer | `inbox-<name>`, `deliver` |
 | Buckets, keys | `mash-directory` and `mash-leases`, keyed by `<name>` |

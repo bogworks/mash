@@ -1,8 +1,0 @@
-accepted: this would change
-size checked against the default server limits; the apply checks each server's own
-rotation: next submitter NEXTKEY would be recorded
-rotate and revoke: (none)
-new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
-revoke: (none)
-first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
-signature not checked: give --submitter to check it against the adoption marker

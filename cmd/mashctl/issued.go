@@ -244,7 +244,7 @@ type connScan struct {
 }
 
 // scanConnections reads the connections of account from every server over nc (a system account connection). It is the
-// gathering `issued check` and `policy reconcile` share. An error is a failure to ask at all; a partial answer is
+// gathering `issued check` does. An error is a failure to ask at all; a partial answer is
 // reported in Incomplete, never passed over.
 func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers int) (connScan, error) {
 	res := apply.NATS{Conn: nc, Inventory: servers}
