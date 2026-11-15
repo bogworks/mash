@@ -39,33 +39,8 @@ func (a *Admin) CheckInbox(ctx context.Context, id sap.EndpointIdentity) (InboxC
 	if err := id.Validate(); err != nil {
 		return InboxCheck{}, fmt.Errorf("mash: check inbox: %w", err)
 	}
-	kv, err := a.dir(ctx)
-	if err != nil {
-		return InboxCheck{}, err
-	}
-	target := id
-	legacy := false
-	if !id.IsLegacy() {
-		ok, err := a.recordServes(ctx, kv, id.Flat(), id)
-		if err != nil {
-			return InboxCheck{}, err
-		}
-		if !ok {
-			// No record of its own: the legacy endpoint of the same owner and name receives its mail.
-			lid, err := sap.Legacy(id.Owner, id.Name)
-			if err != nil {
-				return InboxCheck{}, nil // the address has no legacy form, so no legacy endpoint
-			}
-			ok, err := a.recordServes(ctx, kv, lid.Flat(), lid)
-			if err != nil {
-				return InboxCheck{}, err
-			}
-			if !ok {
-				return InboxCheck{}, nil
-			}
-			target, legacy = lid, true
-		}
-	} else if ok, err := a.recordServes(ctx, kv, id.Flat(), id); err != nil || !ok {
+	target, legacy, found, err := a.ServingIdentity(ctx, id)
+	if err != nil || !found {
 		return InboxCheck{}, err
 	}
 	flat := target.Flat()
@@ -100,6 +75,41 @@ func (a *Admin) CheckInbox(ctx context.Context, id sap.EndpointIdentity) (InboxC
 	}
 	out.Consumer = true
 	return out, nil
+}
+
+// ServingIdentity resolves id to the directory record that serves its mail, and reads nothing else: the identity's own
+// record (the directory key id.Flat() holding id), or, for a new-form id with none, the legacy record of the same owner
+// and name (sap.Legacy), whose identity is target with legacy true. found is false when no record serves id. A record
+// that cannot be read is an error. A legacy name is not unique across owners, so a caller that compares the result with
+// a record must compare the owner as well as the name.
+func (a *Admin) ServingIdentity(ctx context.Context, id sap.EndpointIdentity) (target sap.EndpointIdentity, legacy, found bool, err error) {
+	if err := id.Validate(); err != nil {
+		return sap.EndpointIdentity{}, false, false, fmt.Errorf("mash: serving identity: %w", err)
+	}
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return sap.EndpointIdentity{}, false, false, err
+	}
+	ok, err := a.recordServes(ctx, kv, id.Flat(), id)
+	if err != nil {
+		return sap.EndpointIdentity{}, false, false, err
+	}
+	if ok {
+		return id, false, true, nil
+	}
+	if id.IsLegacy() {
+		return sap.EndpointIdentity{}, false, false, nil
+	}
+	// No record of its own: the legacy endpoint of the same owner and name receives its mail.
+	lid, err := sap.Legacy(id.Owner, id.Name)
+	if err != nil {
+		return sap.EndpointIdentity{}, false, false, nil // the address has no legacy form, so no legacy endpoint
+	}
+	ok, err = a.recordServes(ctx, kv, lid.Flat(), lid)
+	if err != nil || !ok {
+		return sap.EndpointIdentity{}, false, false, err
+	}
+	return lid, true, true, nil
 }
 
 // recordServes reports whether the directory holds a record under key that is the identity id.

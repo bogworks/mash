@@ -1,0 +1,1 @@
+A list set document that keys a group by an address (for example `lab.h1.l1`) now says the key must be an owner part only; it used to report the doubled name `lab.lab.h1.l1`. `mash policy show` and `mash policy explain` with a credential that is not a list-set credential no longer say no list set is in force: they say the credential is not covered by a list set.

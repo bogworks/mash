@@ -146,6 +146,37 @@ func TestSignPreviousRefusesAnotherAccountsJWT(t *testing.T) {
 	}
 }
 
+func TestSignPreviousStampsThePlannedRevocationTime(t *testing.T) {
+	op, _ := nkeys.CreateOperator()
+	acct, _ := nkeys.CreateAccount()
+	apub, _ := acct.PublicKey()
+	prevTok, err := jwt.NewAccountClaims(apub).Encode(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u1, _ := nkeys.CreateUser()
+	u2, _ := nkeys.CreateUser()
+	k1, _ := u1.PublicKey()
+	k2, _ := u2.PublicKey()
+	future := time.Now().Add(time.Hour).Truncate(time.Second)
+	iss := &Issuer{Ctx: context.Background(), Keys: memKeys{op}, Account: apub, Now: func() time.Time { return time.Now().Add(2 * time.Second) }}
+	before := time.Now().Unix()
+	tok, err := iss.SignPrevious(policyapply.PreviousClaims{JWT: prevTok, RevokeAt: map[string]time.Time{k1: future}}, []string{k1, k2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := jwt.DecodeAccountClaims(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Revocations[k1] != future.Unix() {
+		t.Errorf("planned key stamped %d, want %d", c.Revocations[k1], future.Unix())
+	}
+	if got := c.Revocations[k2]; got < before || got > before+5 {
+		t.Errorf("unplanned key stamped %d, want about now (%d)", got, before)
+	}
+}
+
 // dropWorld is an account JWT with a plain (non-mash) signing key and another range's held group key, and an Issuer
 // for range foo over it.
 type dropWorld struct {

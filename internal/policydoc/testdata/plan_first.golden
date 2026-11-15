@@ -11,7 +11,8 @@ template foo.c: added
 tags foo.c.core: (none) -> allow:d.build, deny:_none
 tags foo.c.lead: (none) -> deny:c.core
 rotate and revoke: (none)
-new credential: (none)
+new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
 revoke: (none)
-first credential: foo.c.core, foo.c.lead
+first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): foo.c.core, foo.c.lead
+inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse
 signature not checked: give --submitter to check it against the adoption marker

@@ -273,6 +273,61 @@ func TestPolicyReconcileAT015Live(t *testing.T) {
 	}
 }
 
+// An endpoint made by `mashctl add core` (the legacy form: directory name "core", owner alice) is the list set's sender
+// foo.alice.core: the apply's inbox check accepts it for that address, so the reconcile must not plan to revoke it as "a
+// recorded user whose sender is not in the list set". The same name under another owner is not the sender's and is.
+func TestPolicyReconcileKeepsALegacyEndpointOfAListSetSenderLive(t *testing.T) {
+	e := newApplyEnv(t).withDirectory()
+	ctx := context.Background()
+	if out, errb, code := e.run("add", "core"); code != 0 {
+		t.Fatalf("add core: %d %s %s", code, out, errb)
+	}
+	recs, _, err := e.adminOnly().Issued(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var added store.Issued
+	for _, r := range recs {
+		if r.Address == "core" {
+			added = r
+		}
+	}
+	if added.PublicKey == "" || added.Owner != "alice" {
+		t.Fatalf("`add core` recorded %+v", recs)
+	}
+	// a same-named record of another owner: nothing serves it
+	other := e.mintUser(mustAccountKP(t, e), "", "core")
+	if err := e.adminOnly().RecordIssued(ctx, store.Issued{PublicKey: other.pub, Address: "core", Owner: "zed", Kind: store.IssuedEndpoint,
+		Tags: []string{}, IssuedAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	if out, errb, code := e.run("policy", "adopt", "--submitter", userPub(t)); code != 0 {
+		t.Fatalf("adopt: %d %s %s", code, out, errb)
+	}
+	const bucket = "mash_foo_policy"
+	e.applyFirstProduction(t, bucket, at015ListSet(e.acctPub))
+
+	out, errb, code := e.run("policy", "reconcile", "--bucket", bucket, "--json")
+	if code != 0 {
+		t.Fatalf("dry run: %d %s %s", code, out, errb)
+	}
+	var plan reconcile.Plan
+	if err := json.Unmarshal([]byte(out), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := planRevocation(plan, added.PublicKey); ok {
+		t.Errorf("the legacy endpoint of foo.alice.core is planned for revocation: %+v", r)
+	}
+	if r, ok := planRevocation(plan, other.pub); !ok || r.Reason != reconcile.ReasonRecorded {
+		t.Errorf("the same name under another owner is not revoked: %+v %v", r, ok)
+	}
+	for _, f := range plan.Findings {
+		if f.Key == added.PublicKey {
+			t.Errorf("finding on the legacy endpoint: %+v", f)
+		}
+	}
+}
+
 // applyFirstProduction applies the first list set (raw, range foo) through policyserve.Applier.Apply, the Applier `policy
 // serve` builds, with the production provisioner (none set) and the drop fields serve sets (policyServeDropFields): its Issuer drops a non-mash signing key once the
 // admin user and the exempt users are shown to stay under kept keys. It creates the policy bucket and returns its ledger,
@@ -305,8 +360,11 @@ func (e *applyEnv) applyFirstProduction(t *testing.T, bucket string, raw []byte)
 	// The first list set adds foo.alice.core: its inbox is made as an operator's `mashctl add core` makes it (a legacy
 	// endpoint of the same owner and name serves the address), because `policy serve` checks it, verified and with
 	// nothing created (ADR 0122); the Applier below has no provisioner of its own.
-	if _, err := a.Provision(ctx, "core", userPub(t), e.acctPub, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
+	// A test that already ran `mashctl add core` has made it.
+	if made, err := a.Exists(ctx, "core"); err != nil || !made {
+		if _, err := a.Provision(ctx, "core", userPub(t), e.acctPub, "", admin.Meta{}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	adminUser, err := credsUserKey(e.pl.Creds)
 	if err != nil {

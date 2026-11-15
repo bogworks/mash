@@ -11,9 +11,10 @@ import (
 // policyUsage is the usage of the policy group. The policy file is gone (ADR 0091). adopt marks the account as owned by
 // an outside system; serve applies its list sets; reconcile plans the adoption reconcile; show, explain and diff read the
 // list set in force and change nothing.
-const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY | --show [--json]
+const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY [--sys-creds FILE] [--exempt USER_KEY]... | --show [--json]
        mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
-       mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+       mashctl policy reconcile [--json] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+       mashctl policy reconcile --yes --plan DIGEST [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
        mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
        mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]
        mashctl policy diff FILE [--json] [--submitter PUBKEY] [--range RANGE] [--bucket NAME] [--account KEY]
@@ -59,10 +60,38 @@ func parsePolicyArgs(args []string, allowed ...string) (policyOpts, error) {
 	return o, nil
 }
 
-// runPolicy handles `mashctl policy ...`: adopt, serve, reconcile, show, explain and diff. Any other subcommand prints
-// the usage
+// policyHelpUsage is the usage a help request prints for a verb: the verb's own constant where it has one, else the group's.
+func policyHelpUsage(verb string) string {
+	switch verb {
+	case "adopt":
+		return policyAdoptUsage
+	case "serve":
+		return policyServeUsage
+	case "reconcile":
+		return policyReconcileUsage
+	}
+	return policyUsage
+}
+
+// runPolicy handles `mashctl policy ...`: adopt, serve, reconcile, show, explain and diff. `--help` or `-h` (first, or
+// anywhere after a known verb) prints the usage to stdout and exits 0. Any other subcommand prints the usage to stderr
 // and exits 2.
 func runPolicy(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprint(stdout, policyUsage)
+		return 0
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "adopt", "serve", "reconcile", "show", "explain", "diff":
+			for _, a := range args[1:] {
+				if a == "--help" || a == "-h" {
+					fmt.Fprint(stdout, policyHelpUsage(args[0]))
+					return 0
+				}
+			}
+		}
+	}
 	if len(args) > 0 && args[0] == "adopt" { // needs the admin credentials: the marker lives on the server
 		return runPolicyAdopt(args[1:], env, lookup, stdout, stderr)
 	}
