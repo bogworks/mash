@@ -63,10 +63,12 @@ Chosen option: "standalone first; the outside-system paths are optional integrat
 
 ### What follows for v0.5.0
 
-v0.5.0 is held until the standalone path exists: a direct `mashctl policy apply` that runs the existing engine with the
-keys `mashctl` holds, a ledger bucket that mash creates, the first-apply reconcile available to any account, and
-`show`/`explain`/`diff` reading mash's own ledger. The work is listed in the assessment and sized there
-(about one to one and a half weeks of one worker's time).
+[ADR 0129](0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)
+takes the policy commands out of v0.5.0: the engine stays internal until it works standalone. The standalone path is
+the next release's work: a direct driver that runs the existing engine with the keys `mashctl` holds, a ledger bucket
+that mash creates, the first-apply reconcile available to any account, and `show`, `explain` and `diff` reading mash's
+own ledger. Its verbs, its default for a first policy and the set of endpoints a policy covers are for the maintainer
+to decide; nothing here presumes them.
 
 ### Consequences
 
