@@ -139,6 +139,22 @@ func TestDecodeRefusals(t *testing.T) {
 	}
 }
 
+func TestDecodeGroupKeyedByAddress(t *testing.T) {
+	for name, key := range map[string]string{"address": "lab.h1.l1", "range.owner": "lab.h1"} {
+		b := doc(7, 6, func(m map[string]any) {
+			m["range"] = "lab"
+			g := m["groups"].(map[string]any)
+			g[key] = g["c"]
+			delete(g, "c")
+		})
+		_, err := Decode(b, DecodeOptions{})
+		if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), `group "`+key+`"`) ||
+			!strings.Contains(err.Error(), "owner part") || strings.Contains(err.Error(), "lab.lab") {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}
+
 func TestNextSubmitter(t *testing.T) {
 	d, err := Decode(doc(7, 6, nil), DecodeOptions{})
 	if err != nil || d.NextSubmitter != "" {

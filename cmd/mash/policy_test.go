@@ -194,14 +194,17 @@ func TestPolicyOwnerLineCredentialAsksNothing(t *testing.T) {
 	if err := e.Conn(t, e.AdminCreds).Flush(); err != nil {
 		t.Fatal(err)
 	}
-	const want = "open: owner line only, no list set in force"
+	const want = noResponderText
+	if strings.Contains(want, "no list set in force") || !strings.Contains(want, "not covered by a list set") {
+		t.Fatalf("text: %q", want)
+	}
 	out, errs, code := policyRun(a, "policy", "show")
 	if code != 0 || strings.TrimSpace(out) != want {
 		t.Fatalf("show: %d %q %q", code, out, errs)
 	}
 	out, _, code = policyRun(a, "policy", "show", "--json")
 	var v policyview.ShowReply
-	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.State != "none" || !strings.Contains(v.Notice, "owner line only") {
+	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.State != "none" || v.Notice != want || strings.Contains(out, "no list set in force") {
 		t.Fatalf("show --json: %d %s", code, out)
 	}
 	out, _, code = policyRun(a, "policy", "explain", "r.o.b")
@@ -211,7 +214,7 @@ func TestPolicyOwnerLineCredentialAsksNothing(t *testing.T) {
 	out, _, code = policyRun(a, "policy", "explain", "r.o.b", "--json")
 	var x policyview.ExplainReply
 	if code != 0 || json.Unmarshal([]byte(out), &x) != nil || x.Receiver != "r.o.b" || x.State != "none" || len(x.Verbs) != 4 ||
-		x.Verbs[0].Reason != "no_list_set" || x.Verbs[0].Allowed || !strings.Contains(x.Verbs[0].Detail, "owner line only") ||
+		x.Verbs[0].Reason != "no_list_set" || x.Verbs[0].Allowed || x.Verbs[0].Detail != want || strings.Contains(out, "no list set in force") ||
 		strings.Contains(out, `"reach"`) {
 		t.Fatalf("explain --json: %d %s", code, out)
 	}
