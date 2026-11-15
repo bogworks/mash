@@ -14,10 +14,10 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/mint"
+	"github.com/bogworks/mash/internal/policyserve"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -237,60 +237,12 @@ type issuedCheck struct {
 	Summary       issuedSummary        `json:"summary"`
 }
 
-// connScan is what every server's CONNZ said about the account's connections, and how much of the picture it is.
-type connScan struct {
-	Conns []apply.ConnzServer
-	// Answered and Missing are the servers that answered the connection list and those that answered the ping only.
-	Answered, Missing []string
-	// Expected is how many servers there should be.
-	Expected int
-	// Incomplete says why the scan is not the whole picture ("" when it is): the server set is incomplete, a server did
-	// not answer the connection list, or a list was not read whole.
-	Incomplete string
-}
+// connScan and scanConnections are policyserve's: the gathering `issued check`, `policy reconcile` and the exempt-issuer
+// source of an apply share.
+type connScan = policyserve.ConnScan
 
-// scanConnections reads the connections of account from every server over nc (a system account connection). It is the
-// gathering `issued check` does. An error is a failure to ask at all; a partial answer is
-// reported in Incomplete, never passed over.
 func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers int) (connScan, error) {
-	res := apply.NATS{Conn: nc, Inventory: servers}
-	set, err := res.Servers(ctx)
-	if err != nil {
-		return connScan{}, err
-	}
-	conns, err := res.Connz(ctx, account, set.Names, 0)
-	if err != nil {
-		return connScan{}, err
-	}
-	sc := connScan{Conns: conns, Answered: []string{}, Missing: []string{}, Expected: max(set.Expected, servers, len(set.Names))}
-	answered := map[string]bool{}
-	var unreconciled []string
-	for _, s := range conns {
-		answered[s.Name] = true
-		sc.Answered = append(sc.Answered, s.Name)
-		if s.Incomplete != "" {
-			unreconciled = append(unreconciled, s.Incomplete)
-		}
-	}
-	for _, n := range set.Names {
-		if !answered[n] {
-			sc.Missing = append(sc.Missing, n)
-		}
-	}
-	switch {
-	case !set.Complete(servers):
-		sc.Incomplete = set.Why(servers)
-	case len(sc.Missing) > 0:
-		sc.Incomplete = fmt.Sprintf("%d server(s) answered the ping but not the connection list: %s", len(sc.Missing), config.Clean(strings.Join(sc.Missing, ", ")))
-	}
-	if len(unreconciled) > 0 {
-		why := strings.Join(unreconciled, "; ")
-		if sc.Incomplete != "" {
-			why = sc.Incomplete + "; " + why
-		}
-		sc.Incomplete = why
-	}
-	return sc, nil
+	return policyserve.ScanConnections(ctx, nc, account, servers)
 }
 
 func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, stdout, stderr io.Writer) int {

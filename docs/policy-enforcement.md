@@ -499,6 +499,39 @@ private key asked for this public key to be bound to this address from this host
 its senders apart and to ask only for the address a key pair belongs to. A compromised requester can have any address
 registered to its host and owner group signed for a key it chooses.
 
+### 5.4 Applying a policy directly
+
+A caller that holds the account's credentials can apply a list set to the account's servers without the list-set
+intake. The Go package `internal/policydirect` is that path; it is a package and no command yet (the verb, and what the
+first policy of an account says, are not decided). It is the same engine that `mashctl policy serve` runs, with the
+steps around the engine left out.
+
+- **Who holds the keys.** The caller does: the key store (operator, account and owner group keys), the admin connection
+  and a system-account connection. The package uses them and closes none of them.
+- **What is not there.** No submission bucket, no adoption marker to verify a submitter against, no document signature,
+  no intake queue and no process that stays up. The document is plain JSON, the list-set document itself; a signed one
+  (a compact JWS) is refused as invalid, not as a signature failure.
+- **What stays.** An account that carries an adoption marker is refused: its policy comes only through the list-set path
+  (section 6.6), and a marker that cannot be read refuses too. The account lock, which `mashctl policy adopt` and every
+  guarded policy change also take, is held for the whole apply and checked before each write that cannot be undone.
+  The apply creates the policy bucket (`mash-policy` unless the caller names another) when it does not exist.
+- **The base generation is as the document states it.** There is no default and no inference: a base that is not the
+  generation in force is `stale`, with the engine's message. Putting the same document again is `unchanged`.
+- **Dry run.** It decodes the document, compares it with the list set in force, checks the sizes against what the
+  servers report, checks that every added address already has its inbox, and returns the plan. It pushes nothing,
+  writes nothing, takes no lock and does not create the bucket: with no bucket, nothing is in force.
+- **Outcomes.** The result is JSON with an outcome, the engine's stage name when there is one, the checks (`document`,
+  `base_generation`, `size`, `servers`; `signature` is `not_applicable`) and the engine's status or plan. The outcome
+  words fall in exit-code groups:
+
+  | Exit | Outcomes |
+  | --- | --- |
+  | 0 | `applied` (the gate passed on every server), `planned` (a dry run found nothing wrong), `unchanged` (the content is the content in force) |
+  | 1 | `invalid` (malformed, or breaks a rule), `unsupported` (the engine cannot do it in this release, such as narrowing an existing sender), `stale`, `blocked` (an adopted account, an added address with no inbox, a size over a server's limit) |
+  | 4 | `signature_failed` (a direct apply submits no signature, so it never gives this) |
+  | 5 | `partial` (pushed, but the gate has not passed or the servers differ; the message names the servers; run it again or act on the servers) |
+  | 6 | `error` (a connection, the system-account read, an internal failure) |
+
 ## 6. The limits mash cannot remove
 
 ### 6.1 The open reply and plumbing subjects

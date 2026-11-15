@@ -29,6 +29,12 @@ var forbiddenExempt = []struct{ path, why string }{
 	{"internal/release/forbidden_words_test.go", "this guard names the words"},
 }
 
+// forbiddenKnownExceptions are files the scan does not cover (it reads .go and .md) that carry a word on purpose. Each
+// has a reason and is checked to still carry it, so the exception is retired when the word goes.
+var forbiddenKnownExceptions = []struct{ path, why string }{
+	{"scripts/gate", "dev tooling, owned by ops: its default review-store path names a layer above; rename with the watcher that reads that directory"},
+}
+
 func forbiddenScanned(rel string) bool {
 	if strings.HasSuffix(rel, "_test.go") {
 		return false // fixtures and tests are cleaned by hand; the guard covers shipped code and docs
@@ -77,5 +83,20 @@ func TestNoWordOfALayerAboveInShippedCodeAndDocs(t *testing.T) {
 	if len(bad) > 0 {
 		t.Fatalf("words of a layer above mash in shipped code or docs:\n  %s\nrename the concept in mash's own terms (ADR 0133)",
 			strings.Join(bad, "\n  "))
+	}
+}
+
+// TestKnownExceptionsStillCarryTheWord keeps the named exceptions honest: an exception whose word has gone is removed.
+func TestKnownExceptionsStillCarryTheWord(t *testing.T) {
+	root := repoRoot(t)
+	for _, e := range forbiddenKnownExceptions {
+		b, err := os.ReadFile(filepath.Join(root, e.path))
+		if err != nil {
+			t.Errorf("%s: %v: remove the exception if the file is gone", e.path, err)
+			continue
+		}
+		if !forbiddenWordRE.Match(b) {
+			t.Errorf("%s no longer carries a forbidden word: remove it from forbiddenKnownExceptions (%s)", e.path, e.why)
+		}
 	}
 }
