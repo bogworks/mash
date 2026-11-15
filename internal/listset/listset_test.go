@@ -625,7 +625,7 @@ func TestTemplateHasPolicyGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := PolicySubject(c.Range)
-	if want != "agents.policy."+c.Range {
+	if want != "mash.policy."+c.Range {
 		t.Fatalf("PolicySubject = %q", want)
 	}
 	for _, tpl := range c.Templates {

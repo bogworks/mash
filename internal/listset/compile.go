@@ -178,8 +178,9 @@ const (
 	PolicyFormMash
 )
 
-// DefaultPolicyForm is the form Compile emits. It stays the old form until the release that flips it.
-var DefaultPolicyForm = PolicyFormAgents
+// DefaultPolicyForm is the form Compile emits: the new form, "mash.policy.<range>" (ADR 0129). The old form is
+// still accepted by Check and by comparisons with what is already signed or published, for one release.
+var DefaultPolicyForm = PolicyFormMash
 
 // other is the form that is not f.
 func (f PolicyForm) other() PolicyForm {
@@ -197,9 +198,8 @@ func PolicySubjectForm(rng string, form PolicyForm) string {
 	return "agents.policy." + rng
 }
 
-// PolicySubject is the subject of the policy responder of range rng in the default form: "agents.policy.<range>"
-// until the default flips. Every sender may publish to it, so `mash policy show` and `mash policy explain` can ask it;
-// the answer returns on the sender's own _INBOX prefix. It has three tokens, so it is no address subject and no reach.
+// PolicySubject is the subject of the policy responder of range rng in the default form: "mash.policy.<range>". Every sender may publish to it,
+// so `mash policy show` and `mash policy explain` can ask it; the answer returns on the sender's own _INBOX prefix. It has three tokens, so it is no address subject and no reach.
 func PolicySubject(rng string) string { return PolicySubjectForm(rng, DefaultPolicyForm) }
 
 // PolicySubjects are both subjects of the policy responder of range rng, the new form first.

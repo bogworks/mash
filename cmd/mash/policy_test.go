@@ -145,7 +145,7 @@ func TestPolicyShowAndExplainAgainstAResponder(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("show: %d %s %s", code, out, errs)
 	}
-	for _, want := range []string{"sender: r.o.a", "list set: generation 2, applied, in force", "mail: r.o.a, r.o.b, r.p.x", "prompt: r.p.x", "agents.policy.r", "a raw client can send data"} {
+	for _, want := range []string{"sender: r.o.a", "list set: generation 2, applied, in force", "mail: r.o.a, r.o.b, r.p.x", "prompt: r.p.x", "mash.policy.r", "a raw client can send data"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show output lacks %q:\n%s", want, out)
 		}

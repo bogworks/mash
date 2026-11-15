@@ -183,7 +183,7 @@ func errorOf(b []byte) string {
 }
 
 func TestSubject(t *testing.T) {
-	if Subject("r") != "agents.policy.r" {
+	if Subject("r") != "mash.policy.r" {
 		t.Fatal(Subject("r"))
 	}
 }
@@ -208,7 +208,7 @@ func TestShowAnswersOnlyTheCallersOwnReach(t *testing.T) {
 	if v.RawClientLimit != listset.RawClientLimit || len(v.OpenSubjects.Publish) == 0 {
 		t.Fatalf("limit/open: %+v", v)
 	}
-	if !contains(v.OpenSubjects.Publish, "agents.policy.r") {
+	if !contains(v.OpenSubjects.Publish, "mash.policy.r") {
 		t.Fatalf("open subjects lack the responder: %v", v.OpenSubjects.Publish)
 	}
 	// The answer never names another sender: r.o.c is denied to the caller, and nobody else's lists appear.
@@ -339,7 +339,7 @@ func TestUnsignedClaimedAndForgedAreRefused(t *testing.T) {
 		t.Errorf("forged: %q", got)
 	}
 	// signed for another subject
-	h, _ := c.id.Sign("agents.policy.other", body, "x", r.now, "")
+	h, _ := c.id.Sign("mash.policy.other", body, "x", r.now, "")
 	m = nats.NewMsg(Subject("r"))
 	m.Data = body
 	m.Header.Set(sap.HeaderName, h.Encode())

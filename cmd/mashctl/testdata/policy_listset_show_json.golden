@@ -101,7 +101,7 @@
             "$KV.mash-leases.foo_c_core",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.foo"
+            "mash.policy.foo"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -155,7 +155,7 @@
             "$KV.mash-leases.foo_c_lead",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.foo"
+            "mash.policy.foo"
           ],
           "subscribe": [
             "$SRV.\u003e",

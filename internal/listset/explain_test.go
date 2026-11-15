@@ -118,7 +118,7 @@ func TestExplainOpenSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"_INBOX.>", "$SRV.>", "$JS.API.INFO", "agents.policy.r"} {
+	for _, s := range []string{"_INBOX.>", "$SRV.>", "$JS.API.INFO", "mash.policy.r"} {
 		if !slices.Contains(e.OpenSubjects.Publish, s) {
 			t.Errorf("publish lacks %q: %v", s, e.OpenSubjects.Publish)
 		}

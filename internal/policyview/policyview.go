@@ -1,6 +1,6 @@
 // Package policyview is the responder behind `mash policy show` and `mash policy explain` (REQ-010).
 //
-// A sender sees only its own reach. The responder answers a signed request on agents.policy.<range>, finds who the
+// A sender sees only its own reach. The responder answers a signed request on mash.policy.<range>, finds who the
 // caller is from the verified signature alone, and answers with that caller's own entry of the list set in force. It
 // never returns another sender's lists or reach; the full lists are the operator's view (mashctl).
 package policyview

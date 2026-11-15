@@ -36,7 +36,7 @@ func TestPolicySubjectForms(t *testing.T) {
 	if got := PolicySubjectForm("foo", PolicyFormMash); got != "mash.policy.foo" {
 		t.Errorf("mash form = %q", got)
 	}
-	if DefaultPolicyForm != PolicyFormAgents || PolicySubject("foo") != "agents.policy.foo" {
+	if DefaultPolicyForm != PolicyFormMash || PolicySubject("foo") != "mash.policy.foo" {
 		t.Errorf("the default form is %q", PolicySubject("foo"))
 	}
 	if got := PolicySubjects("foo"); !slices.Equal(got, []string{"mash.policy.foo", "agents.policy.foo"}) {
@@ -58,11 +58,11 @@ func TestCompileFormEmitsTheLinePerForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agents, err := CompileForm(at001(), PolicyFormAgents)
+	mash, err := CompileForm(at001(), PolicyFormMash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if DigestCompiled(def) != DigestCompiled(agents) {
+	if DigestCompiled(def) != DigestCompiled(mash) {
 		t.Error("Compile is not the default form")
 	}
 }
@@ -80,7 +80,7 @@ func TestCompilePrevious(t *testing.T) {
 	}{
 		"signed in the old form": {DigestCompiled(oldC), oldC},
 		"signed in the new form": {DigestCompiled(newC), newC},
-		"signed as neither":      {Digest{1}, oldC}, // the default-form compile, so the caller's check refuses
+		"signed as neither":      {Digest{1}, newC}, // the default-form compile, so the caller's check refuses
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := CompilePrevious(ls, tc.signed)
@@ -91,16 +91,6 @@ func TestCompilePrevious(t *testing.T) {
 				t.Errorf("got the wrong form: %v", policyLines(*fooTemplate(t, got)))
 			}
 		})
-	}
-	// with the default flipped, the old form is the alternative
-	old := DefaultPolicyForm
-	DefaultPolicyForm = PolicyFormMash
-	defer func() { DefaultPolicyForm = old }()
-	if got, _ := CompilePrevious(ls, DigestCompiled(oldC)); DigestCompiled(got) != DigestCompiled(oldC) {
-		t.Error("with the new default, a generation signed in the old form is not found")
-	}
-	if got, _ := CompilePrevious(ls, Digest{1}); DigestCompiled(got) != DigestCompiled(newC) {
-		t.Error("with the new default, no match is not the default-form compile")
 	}
 }
 
@@ -171,20 +161,20 @@ func TestCheckPolicyLineForms(t *testing.T) {
 		}
 	}
 	if err := mutate(func(*jwt.Permissions) {}); err != nil {
-		t.Errorf("the old line: %v", err)
-	}
-	if err := mutate(swap("agents.policy.foo", "mash.policy.foo")); err != nil {
 		t.Errorf("the new line: %v", err)
+	}
+	if err := mutate(swap("mash.policy.foo", "agents.policy.foo")); err != nil {
+		t.Errorf("the old line: %v", err)
 	}
 	for name, f := range map[string]func(p *jwt.Permissions){
 		"neither line": func(p *jwt.Permissions) {
 			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, isPolicySubject)
 		},
-		"both lines":                func(p *jwt.Permissions) { p.Pub.Allow.Add("mash.policy.foo") },
-		"an extra mash line":        func(p *jwt.Permissions) { p.Pub.Allow.Add("mash.other") },
-		"mash.>":                    func(p *jwt.Permissions) { p.Pub.Allow.Add("mash.>") },
-		"another range's mash line": swap("agents.policy.foo", "mash.policy.bar"),
-		"mash.> for the line":       swap("agents.policy.foo", "mash.>"),
+		"both lines":                  func(p *jwt.Permissions) { p.Pub.Allow.Add("agents.policy.foo") },
+		"an extra mash line":          func(p *jwt.Permissions) { p.Pub.Allow.Add("mash.other") },
+		"mash.>":                      func(p *jwt.Permissions) { p.Pub.Allow.Add("mash.>") },
+		"another range's policy line": swap("mash.policy.foo", "mash.policy.bar"),
+		"mash.> for the line":         swap("mash.policy.foo", "mash.>"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := mutate(f); err == nil {

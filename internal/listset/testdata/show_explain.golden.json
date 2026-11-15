@@ -100,7 +100,7 @@
             "$KV.mash-leases.r_o_a",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.r"
+            "mash.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -154,7 +154,7 @@
             "$KV.mash-leases.r_o_b",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.r"
+            "mash.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -214,7 +214,7 @@
             "$KV.mash-leases.r_o_c",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.r"
+            "mash.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -275,7 +275,7 @@
             "$KV.mash-leases.r_p_x",
             "$SRV.\u003e",
             "_INBOX.\u003e",
-            "agents.policy.r"
+            "mash.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
@@ -333,7 +333,7 @@
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
           "_INBOX.\u003e",
-          "agents.policy.r"
+          "mash.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -388,7 +388,7 @@
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
           "_INBOX.\u003e",
-          "agents.policy.r"
+          "mash.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -443,7 +443,7 @@
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
           "_INBOX.\u003e",
-          "agents.policy.r"
+          "mash.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
@@ -498,7 +498,7 @@
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
           "_INBOX.\u003e",
-          "agents.policy.r"
+          "mash.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",

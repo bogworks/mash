@@ -188,13 +188,13 @@ the receiving session. The decision is a signed list set:
   an adopted account `mashctl` refuses every other policy change (`add`, `reissue`, `retire`, `label` and the rest), so
   two writers never disagree. The intake takes each revision only if it is signed by that submitter's key. It is
   run by `mashctl policy serve`.
-- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are in v0.5.0. An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
+- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are in v0.5.0. An endpoint sends a signed request to `mash.policy.<range>` and the range's policy
   responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
   generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
   whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
   credential, gets the local answer `this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)` without asking. A list-set
-  credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
-  responder is mounted by `mashctl policy serve`; where that service is not running, nothing answers.
+  credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range> (after mash.policy.<range>)` (it asks the new subject, then the old one). The
+  responder is mounted by `mashctl policy serve`; where that service is not running, nothing answers. This release also answers `agents.policy.<range>`. An adopted account's next apply pushes the new template once, which closes every sender's connection ([ADR 0097](decisions/0097-a-template-change-on-a-scoped-signing-key-closes-open-connections-and-binds-the-reconnect.md)), so upgrade the endpoints before that push.
 - **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user
   carries only tags, so the server expands the owner group's template with them. Compiling checks its own output against
   the lists and refuses anything the server would not enforce exactly.

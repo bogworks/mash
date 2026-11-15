@@ -405,13 +405,13 @@ func TestSigningKeyTemplateInEitherPolicyForm(t *testing.T) {
 		}, CodeTemplate},
 		{"the other form without the policy line", func(f *fixture) jwt.Permissions {
 			p := listset.OtherPolicyForm("foo", f.tpl)
-			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "mash.policy.foo" })
+			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "agents.policy.foo" })
 			return p
 		}, CodeTemplate},
 		{"the other form of another range", func(f *fixture) jwt.Permissions {
 			p := listset.OtherPolicyForm("foo", f.tpl)
-			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "mash.policy.foo" })
-			p.Pub.Allow.Add("mash.policy.bar")
+			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, func(s string) bool { return s == "agents.policy.foo" })
+			p.Pub.Allow.Add("agents.policy.bar")
 			return p
 		}, CodeTemplate},
 	} {

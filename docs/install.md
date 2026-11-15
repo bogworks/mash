@@ -134,7 +134,7 @@ MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #12
 
 A live prompt is at most 32768 bytes; a longer one is refused with an error, so send the longer text as mail.
 
-When a list set is applied to the range, `mash policy` shows what the endpoint may reach under it. It asks the range's policy responder over a signed request on `agents.policy.<range>`, and the answer holds only the asking endpoint's own entry, never another endpoint's lists or reach:
+When a list set is applied to the range, `mash policy` shows what the endpoint may reach under it. It asks the range's policy responder over a signed request on `mash.policy.<range>`, and the answer holds only the asking endpoint's own entry, never another endpoint's lists or reach:
 
 ```sh
 MASH_NAME=design mash policy show                        # generation, state, reach per verb, open subjects
