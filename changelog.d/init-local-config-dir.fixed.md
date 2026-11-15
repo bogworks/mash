@@ -1,0 +1,1 @@
+`mashctl init --local` now writes to `$XDG_CONFIG_HOME/mash` on a first run when `XDG_CONFIG_HOME` is an absolute path and `~/.config/mash` does not exist, instead of creating `~/.config/mash`. An existing `~/.config/mash` is still used, so no install moves. `init --local` now prints `config dir: DIR (set MASH_CONFIG_DIR to change)` before it writes anything.

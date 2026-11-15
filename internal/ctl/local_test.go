@@ -292,3 +292,54 @@ func TestInitLocalRecordsOperatorJWTAndTheLoopbackOptIn(t *testing.T) {
 		t.Fatalf("second init: %d %s", code, errs)
 	}
 }
+
+// The first line init --local prints says which config directory it writes to, before anything is written.
+func TestInitLocalPrintsConfigDirFirst(t *testing.T) {
+	e := newLocalEnv(t)
+	code, out, errs := e.run("init", "--local", "--owner", "alice")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	want := "config dir: " + e.cfg.Dir + " (set MASH_CONFIG_DIR to change)"
+	if first, _, _ := strings.Cut(out, "\n"); first != want {
+		t.Fatalf("first line %q, want %q", first, want)
+	}
+	if strings.Count(out, "config dir:") != 1 {
+		t.Errorf("config dir line printed more than once:\n%s", out)
+	}
+	// The directory it names is the one it wrote config.json into.
+	if _, err := os.Stat(filepath.Join(e.cfg.Dir, "config.json")); err != nil {
+		t.Errorf("config.json is not in the named directory: %v", err)
+	}
+}
+
+func TestInitLocalPrintsConfigDirFromXDGOnAFreshHome(t *testing.T) {
+	root := t.TempDir()
+	home, xdg := filepath.Join(root, "home"), filepath.Join(root, "xdg")
+	t.Setenv("MASH_KEYS_DIR", "")
+	env := func(k string) string {
+		if k == "XDG_CONFIG_HOME" {
+			return xdg
+		}
+		return ""
+	}
+	dir := config.ConfigDir(env, home)
+	if dir != filepath.Join(xdg, "mash") {
+		t.Fatalf("ConfigDir %q, want the XDG directory on a fresh home", dir)
+	}
+	var out, errb bytes.Buffer
+	code := Run("mashctl", config.Config{Dir: dir}, []string{"init", "--local", "--owner", "alice"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out.String(), errb.String())
+	}
+	want := "config dir: " + filepath.Join(xdg, "mash") + " (set MASH_CONFIG_DIR to change)"
+	if first, _, _ := strings.Cut(out.String(), "\n"); first != want {
+		t.Fatalf("first line %q, want %q", first, want)
+	}
+	if _, err := os.Stat(filepath.Join(xdg, "mash", "config.json")); err != nil {
+		t.Errorf("config.json is not in the XDG directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config")); err == nil {
+		t.Errorf("wrote under the home directory")
+	}
+}

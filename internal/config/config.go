@@ -203,10 +203,15 @@ func explicitDir(env func(string) string, v string) (string, error) {
 	return filepath.Clean(d), nil
 }
 
-// ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds: an absolute
-// $MASH_CONFIG_DIR when set (an explicit choice, with no legacy fallback; Load rejects a relative one), else $XDG_CONFIG_HOME/mash
-// when XDG_CONFIG_HOME is absolute and that directory holds a config.json, else $HOME/.config/mash (where existing
-// installs keep theirs). With no home it is the XDG directory if one is set, else "": never a relative path.
+// ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds. In order:
+//  1. an absolute $MASH_CONFIG_DIR (an explicit choice, with no legacy fallback; Load rejects a relative one);
+//  2. with an absolute $XDG_CONFIG_HOME, $XDG_CONFIG_HOME/mash when it holds a config.json, or when the legacy
+//     directory $HOME/.config/mash does not exist at all (a fresh machine, so the first run lands where XDG says);
+//  3. $HOME/.config/mash, where existing installs keep theirs: it is used whenever it exists as a directory, with or
+//     without a config.json, so an install never moves because XDG_CONFIG_HOME was set later.
+//
+// A relative XDG_CONFIG_HOME is ignored. With no home it is the XDG directory if one is set, else "": never a
+// relative path.
 func ConfigDir(env func(string) string, home string) string {
 	if d, _ := explicitDir(env, "MASH_CONFIG_DIR"); d != "" {
 		return d
@@ -214,7 +219,7 @@ func ConfigDir(env func(string) string, home string) string {
 	xdg := ""
 	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
 		xdg = filepath.Join(x, "mash")
-		// Only a config.json that is absent falls back to the legacy directory. Any other error (permission denied,
+		// Only a config.json that is absent falls through to the legacy checks. Any other error (permission denied,
 		// I/O) keeps the XDG directory so Load's read fails loudly instead of silently using a different config.
 		if _, err := os.Stat(filepath.Join(xdg, "config.json")); err == nil ||
 			!(errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
@@ -222,7 +227,14 @@ func ConfigDir(env func(string) string, home string) string {
 		}
 	}
 	if home != "" {
-		return filepath.Join(home, ".config", "mash")
+		legacy := filepath.Join(home, ".config", "mash")
+		if xdg != "" {
+			// A legacy path that is not a directory (or cannot be examined) is not an existing install to keep.
+			if fi, err := os.Stat(legacy); err != nil || !fi.IsDir() {
+				return xdg
+			}
+		}
+		return legacy
 	}
 	return xdg
 }

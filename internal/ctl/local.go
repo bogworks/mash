@@ -73,6 +73,11 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	if port < 1 || port > 65535 {
 		return fail(fmt.Errorf("%s: port %d is out of range", pfx, port))
 	}
+	// Before anything is written (the key store below is the first write), say which config directory this run uses,
+	// so a wrong XDG_CONFIG_HOME or HOME is seen before it has put files in the wrong place.
+	if cfg.Dir != "" {
+		fmt.Fprintf(stdout, "config dir: %s (set MASH_CONFIG_DIR to change)\n", cfg.Dir)
+	}
 	keyDir, err := ctlkeys.DirFor(cfg, os.Getenv)
 	if err != nil {
 		return fail(err)

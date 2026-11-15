@@ -6,6 +6,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 ## Requirements
 
+- `nats-server`, a current 2.x release with JetStream, on your `PATH`, for the one-machine path in section 4 (`mashctl init --local --start`). Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15. You do not need it if you use a server that already runs, such as Synadia Cloud.
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones, `status` warns). The plugin and the `mash` binary should be the same release (major and minor); `status` warns when they are not.
 
 ## 1. The binary
@@ -29,7 +30,7 @@ go install github.com/bogworks/mash/cmd/mashctl@latest   # the admin tool
 mash version
 ```
 
-`mashctl` is built from source for now; it is not yet in the release assets.
+`mashctl` is not in the release assets: a release carries only the four `mash-<os>-<arch>` binaries, so install `mashctl` with `go install` as above. It needs a Go toolchain, and `~/go/bin` must be on your `PATH`.
 
 ## 2. The plugin
 
@@ -46,7 +47,23 @@ The plugin declares an MCP server, `mash serve` (started through the plugin's la
 
 Mail needs those hooks to run. They do not run with `disableAllHooks: true` in any Claude Code settings file, or under a managed `allowManagedHooksOnly` unless an administrator force-enables `mash@mash` in managed `enabledPlugins`. Then mash stops waking the session after a few tries and `status` reports `delivery: DEGRADED`; see [Hook delivery](operations.md).
 
-## 3. Allow the channel (once per machine)
+## 3. Allow the channel
+
+**This step is optional for one person on one machine.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or the development flag. For a solo developer the development flag is fine and needs no root:
+
+```sh
+MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+Claude Code asks you to confirm the flag at each launch; that is expected. When the allowlist is missing, `mash status` prints this line:
+
+```
+channel allowlist: MISSING - no managed source lists mash@mash. Next: see docs/install.md section 3
+```
+
+It is not an error for a solo developer. The managed settings file below is for teams and managed machines, where an administrator allowlists mash once so that `--channels plugin:mash@mash` works without a confirmation.
+
+### Managed settings (teams and managed machines)
 
 Mail itself is delivered by the hooks (section 2); the channel carries a one-line summary of waiting mail, which wakes an idle session so its next prompt runs the hook. Claude Code runs only allowlisted channel plugins without a confirmation dialog. Allowlist mash in the managed settings file:
 
@@ -66,7 +83,7 @@ Managed settings are written by an administrator (`sudo`). If the file already e
 
 > **If your organisation manages Claude Code.** Claude Code uses the highest-ranked managed source that delivers at least one policy key and ignores the rest ([how sources combine](https://code.claude.com/docs/en/managed-settings#how-claude-code-combines-managed-sources)). Server-managed settings, pushed from the Claude.ai admin console, rank first, so when your organisation uses them the local file above is ignored. An organisation Owner must add `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins` there and enable Channels (Organization settings > Claude Code > Channels). Bedrock, Agent Platform and Foundry have no channels. Without a channel, hooks still deliver mail at the next prompt or tool call, but the idle wake and live prompts are lost. If the policy sets `allowManagedHooksOnly`, the hooks need mash in the managed `enabledPlugins` as well (see [Hook delivery](operations.md)). `strictKnownMarketplaces` can also refuse `claude plugin marketplace add bogworks/mash`. Confirm what applies with `/status` ("Setting sources") and `claude doctor` ("Managed settings (remote)"); the mash `status` tool shows its own reading as the `channel allowlist:` line, and `/status` has the last word ([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)). The development flag below skips the allowlist but not `channelsEnabled`.
 
-Without this, `--channels plugin:mash@mash` is refused ("not on the approved channels allowlist") and the channel wake that rouses an idle session does not arrive. You can still try mash with `--dangerously-load-development-channels plugin:mash@mash`, which asks for confirmation on every launch.
+Without this, `--channels plugin:mash@mash` is refused ("not on the approved channels allowlist") and the channel wake that rouses an idle session does not arrive. The development flag at the top of this section still works, and asks for confirmation on every launch.
 
 ## 4. Configuration
 

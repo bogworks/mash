@@ -986,3 +986,80 @@ func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 func load(env func(string) string, home string) (Config, error) {
 	return Load(LookupFromFunc(env), home)
 }
+
+func TestConfigDirChoice(t *testing.T) {
+	mdir := t.TempDir()
+	cases := []struct {
+		name      string
+		xdg       string // "" unset, "abs" a fresh absolute dir, "rel" a relative one
+		noHome    bool
+		legacyDir bool   // $HOME/.config/mash exists
+		legacyCfg bool   // and holds a config.json
+		xdgCfg    bool   // $XDG_CONFIG_HOME/mash/config.json exists
+		explicit  bool   // MASH_CONFIG_DIR set
+		want      string // "xdg", "legacy", "explicit" or ""
+	}{
+		{name: "fresh machine, xdg set", xdg: "abs", want: "xdg"},
+		{name: "legacy dir without config.json, xdg set", xdg: "abs", legacyDir: true, want: "legacy"},
+		{name: "xdg config.json exists", xdg: "abs", legacyDir: true, xdgCfg: true, want: "xdg"},
+		{name: "xdg config.json and no legacy dir", xdg: "abs", xdgCfg: true, want: "xdg"},
+		{name: "legacy config.json, xdg has none", xdg: "abs", legacyDir: true, legacyCfg: true, want: "legacy"},
+		{name: "both have config.json, xdg wins", xdg: "abs", legacyDir: true, legacyCfg: true, xdgCfg: true, want: "xdg"},
+		{name: "explicit wins on a fresh machine", xdg: "abs", explicit: true, want: "explicit"},
+		{name: "explicit wins over both configs", xdg: "abs", legacyDir: true, legacyCfg: true, xdgCfg: true, explicit: true, want: "explicit"},
+		{name: "relative xdg ignored, fresh machine", xdg: "rel", want: "legacy"},
+		{name: "relative xdg ignored, legacy exists", xdg: "rel", legacyDir: true, want: "legacy"},
+		{name: "no xdg, fresh machine", want: "legacy"},
+		{name: "no home, xdg set", xdg: "abs", noHome: true, want: "xdg"},
+		{name: "no home, relative xdg", xdg: "rel", noHome: true, want: ""},
+		{name: "no home, no xdg", noHome: true, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home, xdgBase := t.TempDir(), t.TempDir()
+			legacy, xdgDir := filepath.Join(home, ".config", "mash"), filepath.Join(xdgBase, "mash")
+			if tc.legacyDir {
+				if err := os.MkdirAll(legacy, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.legacyCfg {
+				writeIn(t, legacy, `{}`)
+			}
+			if tc.xdgCfg {
+				writeIn(t, xdgDir, `{}`)
+			}
+			env := map[string]string{}
+			switch tc.xdg {
+			case "abs":
+				env["XDG_CONFIG_HOME"] = xdgBase
+			case "rel":
+				env["XDG_CONFIG_HOME"] = "rel"
+			}
+			if tc.explicit {
+				env["MASH_CONFIG_DIR"] = mdir
+			}
+			h := home
+			if tc.noHome {
+				h = ""
+			}
+			want := map[string]string{"xdg": xdgDir, "legacy": legacy, "explicit": mdir, "": ""}[tc.want]
+			if got := ConfigDir(envOf(env), h); got != want {
+				t.Fatalf("ConfigDir %q, want %q (%s)", got, want, tc.want)
+			}
+		})
+	}
+}
+
+func TestLegacyPathThatIsAFileDoesNotHoldTheConfigDir(t *testing.T) {
+	home, xdg := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "mash"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ConfigDir(envOf(map[string]string{"XDG_CONFIG_HOME": xdg}), home), filepath.Join(xdg, "mash"); got != want {
+		t.Fatalf("ConfigDir %q, want %q", got, want)
+	}
+}

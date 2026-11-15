@@ -25,9 +25,34 @@ Status: v0.5.0, one host adapter (Claude Code). Known limits are listed in
 
 Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not supported. WSL 2 with the Linux binary is expected to work but has not been tested.
 
+## Quick start: one machine, no account
+
+This path needs no Synadia account and no server you run by hand. You need:
+
+- A Go toolchain, with `~/go/bin` on your `PATH`.
+- `nats-server`, a current 2.x release with JetStream, on your `PATH`. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases) (this repository builds and tests against 2.15).
+- Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry).
+
+```sh
+go install github.com/bogworks/mash/cmd/mash@latest
+go install github.com/bogworks/mash/cmd/mashctl@latest    # mashctl is not in the release assets
+mashctl init --local --owner alice --start                # a loopback NATS server, keys and creds
+mashctl add design
+mashctl add review
+mash plugin export ~/.mash-plugin
+claude plugin marketplace add ~/.mash-plugin
+claude plugin install mash@mash
+MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
+MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+MASH_NAME=design mash send review "hello"                 # from a shell
+MASH_NAME=review mash inbox
+```
+
+The config and the credentials land in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`; `init --local` prints it. The development flag lets the plugin wake an idle session without a channel allowlist, and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local) covers the local server, including how to stop it and start it again.
+
 ## Quickstart on Synadia Cloud (free tier)
 
-The fastest way to try mash is a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
+This is the second path, for a server you do not run yourself. Use a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
 
 See it working first: [two Claude Code sessions exchanging mail, one woken by it](docs/demo/) (a recording to play with `asciinema play`).
 

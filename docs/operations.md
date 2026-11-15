@@ -10,6 +10,8 @@ For one developer on one machine, `mashctl init --local` writes the whole NATS s
 mashctl init --local --owner alice [--dir D] [--port P] [--start]
 ```
 
+You need `nats-server` on your `PATH`, a current 2.x release with JetStream (get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15). `init --local` prints the config directory it writes to (`~/.config/mash` by default, or `$MASH_CONFIG_DIR`).
+
 It creates, in `D` (default `<config dir>/server`; mode 0700): `server.conf` (an operator-mode server listening on `127.0.0.1:P`, default 4222, with JetStream on file storage and the accounts preloaded into a full resolver), `operator.jwt`, and the credentials `mashadmin.creds` (full access within the MASH account, for `mashctl`) and `sys.creds` (system account), all 0600. The operator, system-account and MASH-account signing seeds go to the `mashctl` key store (`operator.nk`, `system.nk`, `account.nk`, 0600, in `<config dir>/keys` or `$MASH_KEYS_DIR`); they are never printed. The MASH account gets the limits [below](#limits) describe (2G of disk, 64 streams, 128 consumers). If none exists it also writes a `config.json` with `url`, `owner` and `admin_creds`; an existing `config.json` is never touched, and the three settings to add are printed. No policy file is written: endpoints are declared in the directory by `mashctl add`.
 
 The server is loopback only and has no TLS: it is for development on this machine, not for remote endpoints. For those, follow the manual steps below with a TLS-terminated server.
