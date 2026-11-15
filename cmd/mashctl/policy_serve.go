@@ -53,6 +53,9 @@ var policyServeProvisioner policyapply.Provisioner
 // policyViewResolveTTL is how long the responder keeps the directory's key-to-address map before it reads it again.
 const policyViewResolveTTL = 10 * time.Second
 
+// policyViewStopFlush bounds the wait for the server to confirm the responder is gone when the service stops.
+const policyViewStopFlush = 5 * time.Second
+
 // policyServeSetup bounds what the service does before it starts watching.
 const policyServeSetup = 30 * time.Second
 
@@ -193,6 +196,10 @@ func runPolicyServe(args []string, env func(string) string, lookup config.Lookup
 	runErr := intake.Run(ctx)
 	if err := stopView(); err != nil {
 		logger.Warn("policy view did not stop cleanly", "error", err)
+	}
+	// Make the server drop the responder's subscription before the process goes on to close the connection.
+	if err := adm.Conn().FlushTimeout(policyViewStopFlush); err != nil {
+		logger.Warn("policy view: the server did not confirm the unsubscribe", "error", err)
 	}
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return fail("%v", runErr)

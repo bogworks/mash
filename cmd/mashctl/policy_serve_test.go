@@ -40,6 +40,9 @@ const (
 	serveBucket        = "ops_foo_policy"
 	// serveWait bounds every wait of these tests; a loaded runner under -race has taken several seconds for one apply.
 	serveWait = 60 * time.Second
+	// serveStopTry bounds one request after the service stopped; serveStopPoll is the wait between tries.
+	serveStopTry  = time.Second
+	serveStopPoll = 50 * time.Millisecond
 	// servePoll is how often a test reads the status again.
 	servePoll = 50 * time.Millisecond
 	// serveStopWait bounds how long the service has to stop once it is told to.
@@ -872,11 +875,20 @@ func TestPolicyServeAnswersPolicyShow(t *testing.T) {
 	if code := e.shutdown(); code != 0 {
 		t.Fatalf("exit %d: %s", code, e.logs.String())
 	}
-	m2 := nats.NewMsg(subject)
-	m2.Data = payload
-	if _, err := e.nc.RequestMsgWithContext(ctx, m2); !errors.Is(err, nats.ErrNoResponders) {
-		t.Errorf("after the service stopped: %v, want no responders", err)
+	// The server drops the stopped responder's subscription asynchronously, so a request right after the stop can still
+	// reach it and get no answer: ask again, each try bounded, until the server answers that nobody listens.
+	var last error
+	for deadline := time.Now().Add(serveWait); time.Now().Before(deadline); time.Sleep(serveStopPoll) {
+		m2 := nats.NewMsg(subject)
+		m2.Data = payload
+		tryCtx, tryCancel := context.WithTimeout(context.Background(), serveStopTry)
+		_, last = e.nc.RequestMsgWithContext(tryCtx, m2)
+		tryCancel()
+		if errors.Is(last, nats.ErrNoResponders) {
+			return
+		}
 	}
+	t.Errorf("after the service stopped: %v, want no responders", last)
 }
 
 // Without the directory bucket the service refuses to start and says how to make it.
