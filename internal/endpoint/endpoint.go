@@ -34,6 +34,9 @@ type Endpoint struct {
 	// refusals routes the connection's publish permission violations to the sends waiting on them (refusal.go).
 	refusals *refusals
 
+	// peers is the state of PeerActivity (peeractivity.go): its request limit and cache.
+	peers peerActivity
+
 	// The last answered ping of serve's MCP client (unix seconds, 0 for none), written into the lease.
 	mcpSeen atomic.Int64
 

@@ -47,10 +47,10 @@ func TestAdminProvisionAndSetMetaCLI(t *testing.T) {
 		t.Fatalf("list: %d %q", code, lout)
 	}
 	out, _ = w.cli(t, "a", "who", "--long")
-	if got := whoLine(t, out, "c"); got != "c\toffline\tthe note\trole reviewer\thost laptop\tlabel.team=acme\tlabel.tier=1" {
+	if got := whoLine(t, out, "c"); got != "c\toffline\tthe note\trole reviewer\thost laptop\tlabel.team=acme\tlabel.tier=1\tstate -" {
 		t.Fatalf("who --long: %q", got)
 	}
-	if got := whoLine(t, out, "a"); got != "a\toffline" {
+	if got := whoLine(t, out, "a"); got != "a\toffline\tstate -" {
 		t.Fatalf("who --long without metadata: %q", got)
 	}
 
@@ -60,7 +60,7 @@ func TestAdminProvisionAndSetMetaCLI(t *testing.T) {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
 	out, _ = w.cli(t, "a", "who", "--long")
-	if got := whoLine(t, out, "c"); got != "c\toffline\tthe note\trole builder\tlabel.env=prod\tlabel.team=acme" {
+	if got := whoLine(t, out, "c"); got != "c\toffline\tthe note\trole builder\tlabel.env=prod\tlabel.team=acme\tstate -" {
 		t.Fatalf("after set-meta: %q", got)
 	}
 	for _, bad := range [][]string{{"set-meta", "c"}, {"set-meta", "c", "--role"}, {"set-meta", "c", "--bogus", "x"}, {"set-meta", "c", "--label", "novalue"}, {"set-meta", "c", "--label", "Bad=x"},

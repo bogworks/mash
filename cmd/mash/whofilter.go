@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
@@ -14,7 +16,12 @@ import (
 const whoUsage = "usage: mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]"
 
 // whoOutput is how `mash who` renders its result.
-type whoOutput struct{ Long, JSON, Names bool }
+type whoOutput struct {
+	Long, JSON, Names bool
+	// Activity, when non-nil, adds the state column (text) or the activity object (JSON): what each online endpoint
+	// reports about itself, by directory key. An online endpoint missing from it did not answer in time.
+	Activity map[string]endpoint.PeerState
+}
 
 // ParseWhoFlags reads the arguments after `who`. A flag that takes a value accepts "--flag v" and "--flag=v".
 func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
@@ -106,6 +113,28 @@ type whoEntry struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Lease       *whoLease         `json:"lease,omitempty"`
 	Alias       *whoAlias         `json:"alias,omitempty"` // additive (ADR 0076): present only for a record that carries an alias
+	// Activity is what the peer says it is doing, present only when it reported a state; ActivityTrust is then "claimed"
+	// (the report is the peer's own and unsigned).
+	Activity      *whoActivity `json:"activity,omitempty"`
+	ActivityTrust string       `json:"activity_trust,omitempty"`
+}
+
+// whoActivity is the peer's reported state; kind only with blocked.
+type whoActivity struct {
+	State string `json:"state"`
+	Kind  string `json:"kind,omitempty"`
+}
+
+// whoStateCell is the state column of one entry: "-" offline or not reported, "?" no answer in time or refused.
+func whoStateCell(p endpoint.Presence, act map[string]endpoint.PeerState) string {
+	if !p.Online {
+		return "-"
+	}
+	st, ok := act[p.Record.KeyOrName()]
+	if !ok {
+		return "?"
+	}
+	return st.Display()
 }
 
 // whoAlias is the legacy identity a new-form record answers to.
@@ -117,6 +146,11 @@ type whoAlias struct {
 // whoJSON renders the presences as a JSON array (`[]` when none). Map keys encode sorted. lease is added only when
 // long is set and a live lease is known.
 func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo) string {
+	return whoJSONAct(ps, long, live, nil)
+}
+
+// whoJSONAct is whoJSON with the activity of the online endpoints in act (nil: none asked).
+func whoJSONAct(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo, act map[string]endpoint.PeerState) string {
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
@@ -139,6 +173,10 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if li, ok := live[r.KeyOrName()]; ok && long {
 			e.Lease = &whoLease{Host: li.Host, Version: li.Version}
 		}
+		if st, ok := act[r.KeyOrName()]; ok && p.Online && st.Outcome == endpoint.PeerReported {
+			e.Activity = &whoActivity{State: st.State, Kind: st.Kind}
+			e.ActivityTrust = "claimed"
+		}
 		out = append(out, e)
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
@@ -150,11 +188,44 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 func whoRender(ps []endpoint.Presence, o whoOutput, filtered bool, live map[string]endpoint.LeaseInfo) string {
 	switch {
 	case o.JSON:
-		return whoJSON(ps, o.Long, live)
+		return whoJSONAct(ps, o.Long, live, o.Activity)
 	case o.Names:
 		return whoNames(ps)
 	case len(ps) == 0 && filtered:
 		return ""
 	}
-	return whoText(ps, o.Long, live)
+	return whoTextAct(ps, o.Long, live, o.Activity)
+}
+
+// whoActivityBudget is the one overall time the state column may take, however many endpoints are online.
+const whoActivityBudget = 2 * time.Second
+
+// whoActivityOf asks every online endpoint of ps what it is doing, in parallel (PeerActivity holds the limit of 8 in
+// flight), within one overall whoActivityBudget. The result is never nil; an online endpoint that is not in it did not
+// answer in time and shows "?".
+func whoActivityOf(ctx context.Context, ep *endpoint.Endpoint, ps []endpoint.Presence) map[string]endpoint.PeerState {
+	act := map[string]endpoint.PeerState{}
+	ctx, cancel := context.WithTimeout(ctx, whoActivityBudget)
+	defer cancel()
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, p := range ps {
+		if !p.Online {
+			continue
+		}
+		key := p.Record.KeyOrName()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st := ep.PeerActivity(ctx, key)
+			if ctx.Err() != nil && st.Outcome == endpoint.PeerNoAnswer {
+				return // the budget ran out: not back
+			}
+			mu.Lock()
+			act[key] = st
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return act
 }

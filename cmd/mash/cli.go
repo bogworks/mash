@@ -173,7 +173,12 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		if whoO.Long {
 			live = liveLeases(c, ep)
 		}
-		if out := whoRender(whoF.Apply(ep.Who()), whoO, !whoF.IsZero(), live); out != "" {
+		ps := whoF.Apply(ep.Who())
+		// The default line is a launcher's contract (ADR 0034): no state column and no status requests for it.
+		if whoO.JSON || (whoO.Long && !whoO.Names) {
+			whoO.Activity = whoActivityOf(ctx, ep, ps)
+		}
+		if out := whoRender(ps, whoO, !whoF.IsZero(), live); out != "" {
 			fmt.Fprintln(stdout, out)
 		}
 	case "prompt":

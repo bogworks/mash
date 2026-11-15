@@ -86,6 +86,9 @@ type refusals struct {
 	flush func(ctx context.Context) error
 	// parse extracts the denied subject from a connection error; a test replaces it.
 	parse func(error) (string, bool)
+	// violated is when a publish permission violation was last seen for a subject (PeerActivity reads it: a refused
+	// request gets no reply, so the timeout is told from a refusal by this).
+	violated map[string]time.Time
 }
 
 func newRefusals() *refusals {
@@ -246,6 +249,10 @@ func (r *refusals) note(err error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.violated == nil || len(r.violated) > 256 {
+		r.violated = map[string]time.Time{}
+	}
+	r.violated[subject] = time.Now()
 	set := r.waiters[subject]
 	if set == nil {
 		return
@@ -260,6 +267,14 @@ func (r *refusals) note(err error) {
 		default:
 		}
 	}
+}
+
+// violatedSince reports whether a publish permission violation for subject was seen at or after t.
+func (r *refusals) violatedSince(subject string, t time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	at, ok := r.violated[subject]
+	return ok && !at.Before(t)
 }
 
 // sawAmbiguous reports whether no violation on subject can be taken as a definite refusal for its current waiters:

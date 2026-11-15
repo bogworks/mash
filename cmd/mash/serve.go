@@ -729,6 +729,8 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				return inboxText(ms), nil
 			})},
 		{Name: "who", Description: "List mash endpoints and whether each is online (asked of every endpoint now; the answer is reused for 30 seconds), with their role, host, description, capabilities and labels when recorded. " +
+			"online means the peer's mash answers, not that it can take a turn. The last column, state, is the peer's own unsigned report of what it is doing (idle, working, done, blocked with its kind, error; json: activity, with activity_trust \"claimed\"): " +
+			"- means not reported (never read it as idle; offline endpoints show it too) and ? means no answer in time. " +
 			"Optional filters (all must match): match (text in name, role, note, description, capabilities or labels), cap (capability words, all must be present), name, role (case-insensitive substrings), " +
 			"label (\"k\" or \"k=v\" strings), online (true: online only, false: offline only). format: text (default) or json.",
 			Schema: schema(map[string]any{
@@ -769,7 +771,8 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				if err != nil {
 					return "", fmt.Errorf("who: asking who is online: %w", err)
 				}
-				return whoRender(f.Apply(ps), whoOutput{Long: true, JSON: a.Format == "json"}, !f.IsZero(), liveLeases(ctx, ep)), nil
+				ps = f.Apply(ps)
+				return whoRender(ps, whoOutput{Long: true, JSON: a.Format == "json", Activity: whoActivityOf(ctx, ep, ps)}, !f.IsZero(), liveLeases(ctx, ep)), nil
 			})},
 		{Name: "reply", Description: "Answer a live prompt by its request_id. done=false streams a partial answer.",
 			Schema: schema(map[string]any{"request_id": str("from the prompt event"), "text": str("your answer"),
@@ -955,6 +958,11 @@ func promptNotice(p endpoint.PromptEvent) (string, bool) {
 // whoText renders the directory with presence. The default lines are parsed by other tools (a launcher): never change
 // them. long appends the optional directory metadata and, from live, the lease's host and version.
 func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo) string {
+	return whoTextAct(ps, long, live, nil)
+}
+
+// whoTextAct is whoText with, when act is non-nil, a last column "state X" for every endpoint (see whoStateCell).
+func whoTextAct(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo, act map[string]endpoint.PeerState) string {
 	if len(ps) == 0 {
 		return "no endpoints"
 	}
@@ -1000,6 +1008,9 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 					fmt.Fprintf(&b, "\tlease host %s differs from directory host %s", config.Clean(li.Host), config.Clean(r.Host))
 				}
 			}
+		}
+		if act != nil {
+			fmt.Fprintf(&b, "\tstate %s", whoStateCell(p, act))
 		}
 		b.WriteString("\n")
 	}
