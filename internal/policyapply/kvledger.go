@@ -449,6 +449,43 @@ func (l *KVLedger) InForceView() (listset.Record, listset.ListSet, bool, error) 
 	return rec, ls, true, nil
 }
 
+// InForceViewAndStatus returns the record and the list set in force, the pending record and the latest status, all from
+// one read of the status value, so they are one revision of the ledger: a commit between two reads cannot mix
+// generations. ok is false when nothing is committed; hasPending is true when a generation is pending; statusOK is
+// false when no status was written. A committed record with no stored list set (the ledger allows a commit without
+// that detail) is an error: it cannot be read. It takes no lease and writes nothing.
+func (l *KVLedger) InForceViewAndStatus(ctx context.Context) (rec listset.Record, ls listset.ListSet, ok bool, pending listset.Record, hasPending bool, st Status, statusOK bool, err error) {
+	fail := func(err error) (listset.Record, listset.ListSet, bool, listset.Record, bool, Status, bool, error) {
+		return listset.Record{}, listset.ListSet{}, false, listset.Record{}, false, Status{}, false, err
+	}
+	v, _, err := l.read(ctx)
+	if err != nil {
+		return fail(err)
+	}
+	if v.Status != nil {
+		st, statusOK = *v.Status, true
+	}
+	if v.Pending != nil {
+		if pending, err = v.Pending.record(); err != nil {
+			return fail(err)
+		}
+		hasPending = true
+	}
+	if rec, err = v.InForce.record(); err != nil {
+		return fail(err)
+	}
+	if len(v.InForceListSet) == 0 {
+		if rec.Generation >= 1 {
+			return fail(fmt.Errorf("policy ledger %s: the record in force (generation %d) has no stored list set: it cannot be read", l.key, rec.Generation))
+		}
+		return listset.Record{}, listset.ListSet{}, false, pending, hasPending, st, statusOK, nil
+	}
+	if err := json.Unmarshal(v.InForceListSet, &ls); err != nil {
+		return fail(fmt.Errorf("policy ledger %s: in_force_listset: %w", l.key, err))
+	}
+	return rec, ls, true, pending, hasPending, st, statusOK, nil
+}
+
 // Pending implements Ledger.
 func (l *KVLedger) Pending() (listset.Record, bool, error) {
 	ctx, cancel := l.opCtx()

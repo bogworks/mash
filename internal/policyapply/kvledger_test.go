@@ -1111,3 +1111,49 @@ func TestRunRefusesStatusValueOverLimitBeforePush(t *testing.T) {
 		t.Errorf("in force = %d", rec.Generation)
 	}
 }
+
+func TestKVLedgerInForceViewAndStatus(t *testing.T) {
+	e := newKVEnv(t)
+	ctx := context.Background()
+	l := e.ledger(KVLedgerOptions{})
+	if _, _, ok, _, hp, _, sok, err := l.InForceViewAndStatus(ctx); err != nil || ok || hp || sok {
+		t.Fatalf("empty ledger: ok=%v statusOK=%v err=%v", ok, sok, err)
+	}
+	set := set1()
+	if err := l.CompareAndCommitDetail(0, testRecord(1), InForceDetail{JWT: "jwt-1", ListSet: &set}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetPending(testRecord(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteRefusal(ctx, refusalStatus()); err != nil {
+		t.Fatal(err)
+	}
+	rec, ls, ok, pend, hp, st, sok, err := l.InForceViewAndStatus(ctx)
+	if err != nil || !ok || !sok || !hp || pend.Generation != 2 {
+		t.Fatalf("ok=%v pending=%+v/%v statusOK=%v err=%v", ok, pend, hp, sok, err)
+	}
+	wantRec, _ := l.InForce()
+	wantSt, _, _ := l.LatestStatus(ctx)
+	wantView, wantLS, _, _ := l.InForceView()
+	if rec != wantRec || rec != wantView || ls.Range != wantLS.Range || ls.Range != set.Range {
+		t.Errorf("in force %+v %q disagrees with %+v %+v", rec, ls.Range, wantRec, wantView)
+	}
+	if st.State != wantSt.State || st.State != StateRefused || st.Generation != wantSt.Generation {
+		t.Errorf("status %+v disagrees with %+v", st, wantSt)
+	}
+}
+
+// A committed record without its list set (the ledger allows the commit) cannot be read: an error, not "nothing in
+// force".
+func TestKVLedgerInForceViewAndStatusNoListSet(t *testing.T) {
+	e := newKVEnv(t)
+	l := e.ledger(KVLedgerOptions{})
+	if err := l.CompareAndCommit(0, testRecord(1)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, ok, _, _, _, _, err := l.InForceViewAndStatus(context.Background())
+	if err == nil || ok || !strings.Contains(err.Error(), "the record in force (generation 1) has no stored list set: it cannot be read") {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+}

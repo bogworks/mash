@@ -1,0 +1,12 @@
+accepted: this would change
+size checked against the default server limits; the apply checks each server's own
+receivers foo.c.core mail: added (none); removed foo.d.build
+receivers foo.c.core prompt: added (none); removed foo.d.build
+receivers foo.c.core status: added (none); removed foo.d.build
+receivers foo.c.core heartbeat: added (none); removed foo.d.build
+tags foo.c.core: allow:d.build, deny:_none -> deny:_none
+rotate and revoke: foo.c.core
+new credential: (none)
+revoke: (none)
+first credential: (none)
+signature not checked: give --submitter to check it against the adoption marker

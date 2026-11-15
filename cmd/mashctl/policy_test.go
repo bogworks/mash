@@ -12,7 +12,7 @@ func TestPolicyGroupHasNoSubcommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"policy"},
 		{"policy", "check"}, {"policy", "test"}, {"policy", "apply"}, {"policy", "apply", "--dry-run"},
-		{"policy", "drift"}, {"policy", "repair"}, {"policy", "explain", "a", "b"}, {"policy", "show"},
+		{"policy", "drift"}, {"policy", "repair"}, {"policy", "explain-all"}, {"policy", "shows"},
 		{"policy", "check", "--policy", "p.yaml"}, {"policy", "list"}, {"policy", "--json"},
 	} {
 		var out, errb bytes.Buffer
