@@ -1,4 +1,4 @@
-> **Status: not shipped in v0.5.0.** The policy commands (`mashctl policy`, `mashctl issue serve`, `mashctl wrangler`,
+> **Status: not shipped in v0.5.0.** The policy commands (`mashctl policy`, `mashctl issue serve`, `mashctl requester`,
 > `mash policy show` and `mash policy explain`) are not part of v0.5.0, and nothing in this release adopts an account.
 > The engine this document describes is internal: its packages and tests stay, and the release gate still runs its
 > tests. A command line for it follows in 0.5.5. The decision is [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md). Where this text names a command, read it as
@@ -437,7 +437,7 @@ issue record's `generation` field is 0 because mash has no generation yet (ADR 0
 
 - When a sender's tags narrow, mash issues the new credential to a **new public key**, waits until the servers show a
   connection with that key, then revokes every key the issue record holds for that address except the new one, and
-  pushes. A wrangler's report that the file is in place is not enough.
+  pushes. A requester's report that the file is in place is not enough.
 - A deadline bounds the handover. If no connection with the new key is seen by then, mash revokes the old keys anyway,
   reports the sender as not connected, and keeps the change not applied for that sender until it connects.
 - When a sender leaves the list set, mash revokes every key the issue record holds for it, and pushes.
@@ -472,16 +472,16 @@ once mash has revoked the key. It never holds a seed or a JWT.
 **The issue service (REQ-013).**
 
 [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) lets a
-wrangler on a sender's host ask for a credential for a public key, without any private key leaving the host.
+requester on a sender's host ask for a credential for a public key, without any private key leaving the host.
 `mashctl issue serve` answers on `mash.issue.<owner>`. The request names an address, a public key, a host, a
-nonce and an expiry, and carries the wrangler's signature over those fields. The service signs only if all of these
+nonce and an expiry, and carries the requester's signature over those fields. The service signs only if all of these
 hold:
 
 | Check | What it refuses |
 |---|---|
 | The request is well formed, within 4,096 bytes, and its subject names the address's owner group | malformed or oversize requests, a request on the wrong owner group's subject |
 | `expires` is in the future and no more than five minutes ahead | expired requests, an expiry set far ahead |
-| The wrangler key is registered for exactly this host and owner group, and the proof verifies over `mash-issue-v1`, address, public key, host, nonce and expiry | a forged or missing proof. A proof valid for `c.core` fails for `c.sdk`, because the address is in the signed bytes. |
+| The requester key is registered for exactly this host and owner group, and the proof verifies over `mash-issue-v1`, address, public key, host, nonce and expiry | a forged or missing proof. A proof valid for `c.core` fails for `c.sdk`, because the address is in the signed bytes. |
 | The nonce has not been seen | a replayed request |
 | The address is a sender in the list set in force | an unlisted address |
 | The public key is not revoked in the issue record and not bound there to another address | a revoked key, a key already bound elsewhere |
@@ -494,9 +494,9 @@ path; `TestIssueServiceAT012NoPrivateKeyAnywhere` scans the NATS payloads and th
 compiles has a line that reaches `mash.issue.>` (`TestIssueSubjectIsNotReachableByATemplate`), so an endpoint cannot
 publish to the service.
 
-What the countersignature proves, and what it trusts, from ADR 0104: it proves that the holder of the wrangler's
-private key asked for this public key to be bound to this address from this host, now. It trusts the wrangler to tell
-its senders apart and to ask only for the address a key pair belongs to. A compromised wrangler can have any address
+What the countersignature proves, and what it trusts, from ADR 0104: it proves that the holder of the requester's
+private key asked for this public key to be bound to this address from this host, now. It trusts the requester to tell
+its senders apart and to ask only for the address a key pair belongs to. A compromised requester can have any address
 registered to its host and owner group signed for a key it chooses.
 
 ## 6. The limits mash cannot remove
@@ -671,23 +671,23 @@ what to do when each leaks, is [threat model section 10](security/threat-model.m
 | System account creds | the operator host's user | Read connection state, push claims updates. The server accepts a pushed account JWT only if the operator signed it. |
 | Admin creds | the operator host's user | Everything within the account, including writing the issue record. |
 | Endpoint creds (user JWT and seed) | the host that runs that endpoint | Be that endpoint, under its permissions. No access to the issue record. |
-| Wrangler key (the countersigning key, public half in a registry) | the wrangler on each sender's host | Have any address of its registered host and owner group signed for a public key it chooses. |
+| Requester key (the countersigning key, public half in a registry) | the requester on each sender's host | Have any address of its registered host and owner group signed for a public key it chooses. |
 
 The custody rule: scoped signing keys stay with the minting authority, and a sender's host holds only its own creds.
 `mashctl issued check` shows a user signed outside the authority with a copied key (section 5.3). The modes on the key
 store stop other users and not other processes of the same user; the threat model says to keep it under a separate user
 or on a mount agent sessions cannot read.
 
-### 6.8 The static wrangler registry is for test accounts
+### 6.8 The static requester registry is for test accounts
 
-> **Not shipped in v0.5.0.** The wrangler registry and `mashctl wrangler` are not in this release. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+> **Not shipped in v0.5.0.** The requester registry and `mashctl requester` are not in this release. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
 
-How a real wrangler's key comes to be registered for a host and owner group is **not decided** (contract DEC-002, open
-part). Until it is, mash ships only a static registry, `wranglers.json` in the key store directory, managed by `mashctl
-wrangler init --test-account`, `add`, `list` and `remove`. `mashctl issue serve` needs the operator's own `--test-account`
-flag and a registry that says `test_account: true`, and refuses to start otherwise, with `no wrangler registry for this
-account: the static registry is for test accounts only; real wrangler registration is not decided yet`. This is not a
-statement that wrangler keys should be registered this way on a real account.
+How a real requester's key comes to be registered for a host and owner group is **not decided** (contract DEC-002, open
+part). Until it is, mash ships only a static registry, `requesters.json` in the key store directory, managed by `mashctl
+requester init --test-account`, `add`, `list` and `remove`. `mashctl issue serve` needs the operator's own `--test-account`
+flag and a registry that says `test_account: true`, and refuses to start otherwise, with `no requester registry for this
+account: the static registry is for test accounts only; real requester registration is not decided yet`. This is not a
+statement that requester keys should be registered this way on a real account.
 
 ## 7. How each claim is tested
 
@@ -745,7 +745,7 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | Revoke | List a key in the account JWT as no longer valid. Each server then closes that key's connections and refuses it. |
 | Connect line | The first line a client sends. It carries the user JWT. A default server caps it at 4,096 bytes. |
 | Minting authority | The service that signs user JWTs with the scoped signing keys. It runs with `mashctl`, where the keys sit. |
-| Wrangler | The component on each sender's host that makes the key pair and asks for a credential. It holds no signing key. |
+| Requester | The component on each sender's host that makes the key pair and asks for a credential. It holds no signing key. |
 | Raw client | A plain NATS client that uses one sender's creds file and nothing of mash. |
 | Applied | A list set is applied when the gate has passed on every server (section 5.1). |
 

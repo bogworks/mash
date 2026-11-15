@@ -115,15 +115,15 @@ func (f *fakeClaims) publish(pub string, p *jwt.Permissions) {
 }
 
 type fixture struct {
-	is       *Issuer
-	claims   *fakeClaims
-	tpl      jwt.Permissions
-	gpub     string
-	rec      *fakeRecord
-	wrangler nkeys.KeyPair
-	wpub     string
-	now      time.Time
-	logs     *bytes.Buffer
+	is        *Issuer
+	claims    *fakeClaims
+	tpl       jwt.Permissions
+	gpub      string
+	rec       *fakeRecord
+	requester nkeys.KeyPair
+	wpub      string
+	now       time.Time
+	logs      *bytes.Buffer
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -152,7 +152,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 	}
 	fc.publish(gpub, &tpl)
-	f := &fixture{claims: fc, tpl: tpl, gpub: gpub, rec: &fakeRecord{recs: map[string]store.Issued{}}, wrangler: w, wpub: wpub, now: time.Now(), logs: &bytes.Buffer{}}
+	f := &fixture{claims: fc, tpl: tpl, gpub: gpub, rec: &fakeRecord{recs: map[string]store.Issued{}}, requester: w, wpub: wpub, now: time.Now(), logs: &bytes.Buffer{}}
 	f.is = &Issuer{
 		Registry: fakeRegistry{"h|c": {wpub}}, ListSet: fakeSet{c}, Signer: fakeSigner{gk}, Record: f.rec, Claims: fc, AccountPub: apub,
 		Log: slog.New(slog.NewTextHandler(f.logs, nil)), Now: func() time.Time { return f.now },
@@ -167,9 +167,9 @@ func (f *fixture) req(t *testing.T, address string, ttl time.Duration) Request {
 	nb := make([]byte, MinNonceBytes)
 	_, _ = rand.Read(nb)
 	r := Request{Version: 1, Address: address, Endpoint: "claude-code." + address, PublicKey: pub, Host: "h", Nonce: base64.RawURLEncoding.EncodeToString(nb),
-		Expires: f.now.Add(ttl).Unix(), Wrangler: f.wpub}
+		Expires: f.now.Add(ttl).Unix(), Requester: f.wpub}
 	var err error
-	if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+	if r.Proof, err = SignProof(f.requester, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -290,7 +290,7 @@ func TestParseDropsUnknownFieldsAndCapsSize(t *testing.T) {
 	f := newFixture(t)
 	r := f.req(t, "c.core", time.Minute)
 	good := `{"version":1,"address":"` + r.Address + `","endpoint":"` + r.Endpoint + `","public_key":"` + r.PublicKey + `","host":"h","nonce":"` + r.Nonce +
-		`","expires":` + "1" + `,"proof":"` + r.Proof + `","wrangler":"` + r.Wrangler + `","tags":["x"],"permissions":{"pub":{"allow":[">"]}}}`
+		`","expires":` + "1" + `,"proof":"` + r.Proof + `","requester":"` + r.Requester + `","tags":["x"],"permissions":{"pub":{"allow":[">"]}}}`
 	got, rf := Parse([]byte(good))
 	if rf != nil || got.Address != "c.core" {
 		t.Fatalf("%+v %v", got, rf)
@@ -342,7 +342,7 @@ func TestARequestCannotSupplyTheEndpointTag(t *testing.T) {
 	r := f.req(t, "c.core", time.Minute)
 	raw, _ := json.Marshal(map[string]any{
 		"version": r.Version, "address": r.Address, "endpoint": r.Endpoint, "public_key": r.PublicKey, "host": r.Host,
-		"nonce": r.Nonce, "expires": r.Expires, "proof": r.Proof, "wrangler": r.Wrangler, "tags": []string{"ep:cc_c_lead"},
+		"nonce": r.Nonce, "expires": r.Expires, "proof": r.Proof, "requester": r.Requester, "tags": []string{"ep:cc_c_lead"},
 	})
 	got, rf := Parse(raw)
 	if rf != nil {
@@ -366,7 +366,7 @@ func TestIssuerRefusesAnEndpointTagForAnotherAddress(t *testing.T) {
 		r := f.req(t, "c.core", time.Minute)
 		r.Endpoint = ep
 		var err error
-		if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+		if r.Proof, err = SignProof(f.requester, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
 			t.Fatal(err)
 		}
 		out, err := f.is.Issue(context.Background(), r, store.PurposeIssue)

@@ -49,7 +49,7 @@ func TestValidMeta(t *testing.T) {
 }
 
 func TestUnknownKeyIgnored(t *testing.T) {
-	r, err := ParseRecord("a", []byte(`{`+baseRecord+`,"herd":"acme","role":"r"}`))
+	r, err := ParseRecord("a", []byte(`{`+baseRecord+`,"extra":"acme","role":"r"}`))
 	if err != nil || r.Name != "a" || r.Role != "r" || len(r.Labels) != 0 {
 		t.Fatalf("unknown key: %+v %v", r, err)
 	}

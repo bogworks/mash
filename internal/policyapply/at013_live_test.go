@@ -98,7 +98,7 @@ func newAT013Host(t *testing.T, e *at010Env, mode string) *at013Host {
 func (h *at013Host) Deliver(_ context.Context, _, userJWT string) error {
 	switch h.mode {
 	case "error":
-		return errors.New("the wrangler could not place the credential")
+		return errors.New("the requester could not place the credential")
 	case "silent":
 		return nil
 	}

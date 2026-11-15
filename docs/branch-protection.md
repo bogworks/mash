@@ -11,7 +11,7 @@ writing this file, except where a date and a test are named.
 **Ruleset 26308864 (`main-protection`) and the `update` rule (D204).** The ruleset has the `update` rule (restrict
 updates to `main`), so nothing can move `main` except an actor on the bypass list. Its **only** bypass actor is the
 Mergify app (integration 10562, mode `always`). There is **no user or role bypass**, because the lanes push as the
-org owner: a user bypass would let every lane push to `main`. Mergify's queue merges by fast-forward and pushes the
+org owner: a user bypass would let every contributor push to `main`. Mergify's queue merges by fast-forward and pushes the
 tested queue commit to `main` itself (`.mergify.yml`), which is why it is the one actor that bypasses. D204 was applied
 on 2026-11-12 at about 00:30Z, and the HTTP 405 refusal of a direct merge was verified then, on a test pull request
 (mash #423): a direct `gh pr merge` is refused, so the queue is the only way into `main`.

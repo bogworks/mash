@@ -1,9 +1,7 @@
-// Package policydoc decodes the list-set document: the one value per account that homerange keeps and mash applies. It
-// decodes the document (raw canonical JSON, or a compact JWS signed by the account's submitter key) into a
-// listset.ListSet and checks the format's rules.
-//
-// DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed homerange-mash
-// seam, not an agreement. Everything that spells them is in this file.
+// Package policydoc decodes the list-set document: the one value per account that an outside system may submit and mash
+// applies; the schema value and field names are mash's own. It decodes the document (raw canonical JSON, or a compact
+// JWS signed by the account's submitter key) into a listset.ListSet and checks the format's rules. Everything that
+// spells the schema value and the field names is in this file.
 package policydoc
 
 import (

@@ -14,9 +14,9 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// WranglerRegistry says which wrangler public keys are registered for a host and an owner group. How a wrangler's key
+// RequesterRegistry says which requester public keys are registered for a host and an owner group. How a requester's key
 // comes to be registered is open (DEC-002), so the issue service only asks. A nil or empty result registers no one.
-type WranglerRegistry interface {
+type RequesterRegistry interface {
 	Lookup(host, group string) []string
 }
 
@@ -41,7 +41,7 @@ type Record interface {
 	RecordChecked(ctx context.Context, r store.Issued) error
 }
 
-// MaxNonces caps the replay set; a service holding that many unexpired nonces refuses more (CodeBusy). A wrangler issues
+// MaxNonces caps the replay set; a service holding that many unexpired nonces refuses more (CodeBusy). A requester issues
 // a few requests an hour, so the cap is never met by honest use.
 const MaxNonces = 65536
 
@@ -49,7 +49,7 @@ const MaxNonces = 65536
 // restart is refused all the same once the request's expiry has passed, and the expiry is at most MaxWindow ahead of the
 // moment the request was made, so a restart opens a replay window of at most MaxWindow.
 type Issuer struct {
-	Registry WranglerRegistry
+	Registry RequesterRegistry
 	ListSet  ListSetInForce
 	Signer   Signer
 	Record   Record
@@ -150,8 +150,8 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	owner, _, _ := r.AddressParts()
 	group := owner
 
-	if is.Registry == nil || !keyIn(r.Wrangler, is.Registry.Lookup(r.Host, group)) {
-		return nil, refuse(CodeUnregistered, "that wrangler key is not registered for this host and owner group")
+	if is.Registry == nil || !keyIn(r.Requester, is.Registry.Lookup(r.Host, group)) {
+		return nil, refuse(CodeUnregistered, "that requester key is not registered for this host and owner group")
 	}
 	if !r.verifyProof() {
 		return nil, refuse(CodeBadProof, "the proof does not verify over the request")

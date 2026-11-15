@@ -216,7 +216,7 @@ func TestNaming21_ThreeTokenEndpointEndToEnd(t *testing.T) {
 	}
 }
 
-// (c) Two identities that differ only in owner share a lane name and coexist: separate streams, directory keys, reply
+// (c) Two identities that differ only in owner share a name and coexist: separate streams, directory keys, reply
 // prefixes and NATS users, all keyed on the flat form, and mail reaches only its addressee.
 func TestNaming21_TwoLeadsCoexist(t *testing.T) {
 	f := newFixture(t)
@@ -226,7 +226,7 @@ func TestNaming21_TwoLeadsCoexist(t *testing.T) {
 	if idx.Flat() != kx || idy.Flat() != ky {
 		t.Fatalf("flat %q %q", idx.Flat(), idy.Flat())
 	}
-	// Each lead gets mail from a peer of its own herd (a cross-owner sender needs policy grants and is not [verified] by default).
+	// Each lead gets mail from a peer of its own owner (a cross-owner sender needs policy grants and is not [verified] by default).
 	senderX := f.clientNF(t, f.provisionNF(t, "bogworks", "x", "sender", nil))
 	senderY := f.clientNF(t, f.provisionNF(t, "bogworks", "y", "sender", nil))
 	ex, xev := f.serveNF(t, idx, noPrompt)

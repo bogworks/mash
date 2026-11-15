@@ -2,7 +2,7 @@
 
 [ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): an author
 reviews their own diff before pushing, so findings come back into the same session in minutes instead of through a pull
-request comment hours later. The process is adopted from ADR 0047 of the sibling project at `randybias/rangehand`
+request comment hours later. The process is adopted from ADR 0047 of a sibling project
 (`docs/decisions/0047-review-is-a-gate-in-the-implementers-loop.md`), whose gate this one is a port of; this page says what
 differs for mash.
 

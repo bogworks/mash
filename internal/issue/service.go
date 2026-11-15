@@ -18,7 +18,7 @@ const ServiceName = "mash-issue"
 
 // SubjectPrefix opens the issue subject: mash.issue.<owner>. It does not begin with agents, so it is none of the
 // address subjects (agents.<verb>.<agent>.<owner>.<name>), and no permission template mash compiles has a line that
-// reaches it, so an endpoint cannot publish to it. A wrangler's permission to publish on it, and to receive the
+// reaches it, so an endpoint cannot publish to it. A requester's permission to publish on it, and to receive the
 // reply, belongs to account setup.
 const SubjectPrefix = "mash.issue"
 
@@ -28,7 +28,7 @@ const requestTimeout = 15 * time.Second
 // serveFlushWait bounds the wait for the server to confirm the service's subscription.
 const serveFlushWait = 10 * time.Second
 
-// Subject is the subject a wrangler publishes the issue request of owner group owner on.
+// Subject is the subject a requester publishes the issue request of owner group owner on.
 func Subject(owner string) string { return SubjectPrefix + "." + owner }
 
 // Serve registers the issue service on nc, listening on mash.issue.* in the queue group of the service, and returns
@@ -66,7 +66,7 @@ func handle(is *Issuer, req micro.Request) {
 	}
 	r, rf := Parse(req.Data())
 	if rf == nil {
-		// The subject names the group the wrangler believes it asks for; the address must be in it.
+		// The subject names the group the requester believes it asks for; the address must be in it.
 		owner, _, _ := r.AddressParts()
 		if req.Subject() != Subject(owner) {
 			rf = refuse(CodeSubject, "the address is not in the owner group of the subject")

@@ -26,12 +26,12 @@ const (
 
 var bg = context.Background()
 
-// reqFor builds a request for address and public key with the given nonce, proved by the fixture's wrangler.
+// reqFor builds a request for address and public key with the given nonce, proved by the fixture's requester.
 func (f *fixture) reqFor(t *testing.T, address, pub, nonce string) Request {
 	t.Helper()
-	r := Request{Version: 1, Address: address, Endpoint: "claude-code." + address, PublicKey: pub, Host: "h", Nonce: nonce, Expires: f.now.Add(hardenTTL).Unix(), Wrangler: f.wpub}
+	r := Request{Version: 1, Address: address, Endpoint: "claude-code." + address, PublicKey: pub, Host: "h", Nonce: nonce, Expires: f.now.Add(hardenTTL).Unix(), Requester: f.wpub}
 	var err error
-	if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+	if r.Proof, err = SignProof(f.requester, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
 		t.Fatal(err)
 	}
 	return r

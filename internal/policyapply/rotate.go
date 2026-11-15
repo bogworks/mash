@@ -21,7 +21,7 @@ type UserIssuer interface {
 	Issue(ctx context.Context, address, userPub, name string, tags []string) (userJWT string, err error)
 }
 
-// Deliverer places a credential where the sender's host picks it up (the wrangler). Success is NOT proof the
+// Deliverer places a credential where the sender's host picks it up (the requester). Success is NOT proof the
 // credential is in use: only a connection with the new key is.
 type Deliverer interface {
 	Deliver(ctx context.Context, address, userJWT string) error
