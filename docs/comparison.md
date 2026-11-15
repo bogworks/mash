@@ -1,7 +1,7 @@
 # mash compared with other agent communication mechanisms
 
-Revision 4. The mash column and mash's own claims were re-checked on **2026-11-14** against `main` (mash v0.4.0, released
-2026-11-12, plus what has merged since). The other columns, and every claim about another tool, were checked on
+Revision 4. The mash column and mash's own claims were re-checked on **2026-11-15** against `main` (mash v0.5.0, released
+2026-11-15). The other columns, and every claim about another tool, were checked on
 **2026-11-01** against the mechanism's own spec, docs or repo and are unchanged, unless a footnote says otherwise.
 Versions, host features and licences change fast: re-check them before you rely on them.
 
@@ -21,8 +21,7 @@ no per-agent server, open port or certificate. It does not mean no setup (see "W
 a speed claim (a model turn takes seconds and dominates; see section 5). The line that matters is trust, not size: two
 teams in one company that must not share an account's credentials are two trust domains, and mash does not span them.
 
-**Up front:** mash is v0.4.0 (released 2026-11-12; the repository was created 2026-11-01; v0.5.0 is next and is not
-released), with one maintainer, one host adapter (Claude Code), an idle wake that rests on a Claude Code research
+**Up front:** mash is v0.5.0 (released 2026-11-15; the repository was created 2026-11-01), with one maintainer, one host adapter (Claude Code), an idle wake that rests on a Claude Code research
 preview, single-replica inboxes and no end-to-end encryption of mail. It is Apache-2.0. See section 9.
 
 ## 2. The comparison
@@ -46,7 +45,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 | Wake an idle agent[^wake] | 🟡[^wake-mash] | 🟡[^wake-sap] | 🛑 | 🟡[^wake-a2a] | 🛑[^wake-mam] | ✅[^wake-ccx] | ✅[^wake-sub] | 🛑 |
 | Host independence | 🟡[^host-mash] | ✅[^host-sap] | ✅ | ✅ | ✅[^host-mam] | 🛑[^host-ccx] | 🛑 | ✅ |
 | Spec, licence | Apache-2.0[^lic-mash] | Draft, no licence[^lic-sap] | Apache-2.0, CNCF | Apache-2.0, Linux Foundation | MIT + Rider[^lic-mam] | Proprietary | Proprietary | Mixed[^lic-brk] |
-| Maturity | v0.4.0[^mat-mash] | 0.3.0[^mat-sap] | 2.15.2[^mat-js] | 1.0.0[^mat-a2a] | Rust rewrite[^mat-mam] | 2.1.224+[^mat-ccx] | Experimental[^mat-sub] | Current[^mat-brk] |
+| Maturity | v0.5.0[^mat-mash] | 0.3.0[^mat-sap] | 2.15.2[^mat-js] | 1.0.0[^mat-a2a] | Rust rewrite[^mat-mam] | 2.1.224+[^mat-ccx] | Experimental[^mat-sub] | Current[^mat-brk] |
 | What you run | NATS server[^run-mash] | NATS server[^run-sap] | NATS server[^run-js] | HTTP server per agent[^run-a2a] | HTTP server[^run-mam] | Nothing[^run-ccx] | – | Broker cluster[^run-brk] |
 
 **Also considered**, with the same marks and rows:
@@ -132,7 +131,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^lic-sap]: Draft; the spec repo has no licence; the SDK is Apache-2.0.
 [^lic-mam]: "MIT + Rider", not OSI-approved. The rider grants no rights to OpenAI, Anthropic or their affiliates.
 [^lic-brk]: Apache-2.0 (Kafka); MPL-2.0 (RabbitMQ); RSALv2/SSPL/AGPLv3 (Redis).
-[^mat-mash]: v0.4.0 (2026-11-12); repo created 2026-11-01; 1 maintainer. Checked 2026-11-14.
+[^mat-mash]: v0.5.0 (2026-11-15); repo created 2026-11-01; 1 maintainer. Checked 2026-11-15.
 [^mat-sap]: 0.3.0 (2026-09-21).
 [^mat-js]: nats-server 2.15.2 (2026-10-26).
 [^mat-a2a]: 1.0.0; 26k+ repo stars.
@@ -188,23 +187,23 @@ the receiving session. The decision is a signed list set:
 - **Source.** The list set is handed in by one registered submitter for an adopted account (`mashctl policy adopt`). On
   an adopted account `mashctl` refuses every other policy change (`add`, `reissue`, `retire`, `label` and the rest), so
   two writers never disagree. The intake takes each revision only if it is signed by that submitter's key. It is
-  merged as a package, and the command that runs it, `mashctl policy serve`, is landing (#594), not shipped.
-- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are on `main`
-  (in v0.5.0, not yet released). An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
+  run by `mashctl policy serve`.
+- **Asking what you may reach.** `mash policy show [--json]` and `mash policy explain RECEIVER [--json]` are in v0.5.0. An endpoint sends a signed request to `agents.policy.<range>` and the range's policy
   responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
   generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
   whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
   credential, gets the local answer `this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)` without asking. A list-set
   credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
-  responder is mounted by `mashctl policy serve` (#594, open), so until that lands it is not running anywhere.
+  responder is mounted by `mashctl policy serve`; where that service is not running, nothing answers.
 - **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user
   carries only tags, so the server expands the owner group's template with them. Compiling checks its own output against
   the lists and refuses anything the server would not enforce exactly.
 - **Model.** Addresses are exact; wildcards are refused. Each owner group has a `shared` or `closed` switch for each of
   four verbs (mail, prompt, status, heartbeat). A sender's allow list reaches beyond its own group; a deny list works
   only inside the sender's own owner group, and only against a shared verb.
-- **Narrowing.** When a sender's reach narrows, it is rotated to a new key and its old keys are revoked, so the old
-  credential cannot keep the old reach. A rollback never un-revokes a key.
+- **Narrowing.** The apply code rotates a sender whose reach narrows to a new key and revokes its old keys, so the old
+  credential cannot keep the old reach, and a rollback never un-revokes a key. `mashctl policy serve` does not run that
+  path in v0.5.0: it refuses a list set that narrows an existing sender, and changes nothing.
 - **No zones.** Zones are gone (ADR 0091): mail keeps the five-token subject and the address is the fence. `mashctl
   unzone` is the upgrade helper for an older record.
 - **A size limit, not a count limit.** A sender's exceptions travel as tags in its connect line, and the server's
@@ -431,13 +430,10 @@ queue, not as the work queue.
   `mashctl init --local --owner NAME --start` sets up and starts a loopback nats-server in one command, but needs a
   `nats-server` binary on your `PATH`.
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.
-- **Policy enforcement is landing.** The list-set model in section 2a is what `main` has: the compiler, the apply and
-  rotation code and the intake, and the endpoint side of the view: `mash policy show` and `mash policy explain` (#536,
-  in v0.5.0). The command that runs the intake and the responder the view asks, `mashctl policy serve` (#594), is open
-  and not merged, and so is the operator's `mashctl policy show`, `explain` and `diff` (#526). Until they land, no
-  responder is running, so `mash policy` has nothing to ask; treat section 2a as the design the code implements, not
-  as a shipped workflow.
-- **Maturity.** v0.4.0 (released 2026-11-12; v0.5.0 is next and not released), repository created 2026-11-01, one
+- **Policy enforcement has limits in v0.5.0.** `mashctl policy serve` refuses a list set that narrows an existing
+  sender, and one that adds an address with no inbox yet. Adoption has no undo. The issue service signs credentials for
+  test accounts only. The list in the release notes ("What is not in this release") is the full one.
+- **Maturity.** v0.5.0 (released 2026-11-15), repository created 2026-11-01, one
   maintainer. Interfaces may change before the next major revision. SAP is a single-vendor 0.3 draft with no licence on
   its spec.
 
