@@ -220,8 +220,16 @@ func TestLegacyLeaseLostStopsLegacyConsumptionOnly(t *testing.T) {
 	if strings.Contains(joined(ev), "> after the loss") {
 		t.Fatalf("legacy mail was consumed without the lease:\n%s", joined(ev))
 	}
-	if i := legacyConsumerInfo(t, f, "inbox-old"); i.NumAckPending != 0 || i.NumPending != 1 {
-		t.Fatalf("legacy consumer after the loss: %+v", i)
+	// The legacy consume loop is stopped after the loss is noticed, not with it. A loop still pulling when the mail was
+	// sent takes it and nak's it with a one second delay (so it does not spin), which shows as ack pending until the
+	// delay has passed. The mail must end up pending, not held and not acknowledged; wait for that rather than read once.
+	var i *jetstream.ConsumerInfo
+	until(t, "the mail sent after the loss is pending on the legacy consumer, not held or acknowledged", func() bool {
+		i = legacyConsumerInfo(t, f, "inbox-old")
+		return i.NumAckPending == 0 && i.NumPending == 1
+	})
+	if i.AckFloor.Stream != 1 {
+		t.Fatalf("legacy consumer acknowledged mail after the loss: %+v", i)
 	}
 	// Still in the own lease: the endpoint was not stopped.
 	if lv, ok := leaseKey(t, f, id.Flat()); !ok || lv.Instance != ep.instance {
