@@ -323,8 +323,9 @@ func TestDiffUnchangedRotationStep(t *testing.T) {
 	if err != nil || p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pendKey+"\n") {
 		t.Fatalf("completes a rotation: %+v, %v", p, err)
 	}
-	// Pending, but the signer is not the pending key (or none is named) and no next_submitter: not a step.
-	for _, signer := range []string{"", cur} {
+	// Pending, but the signer is not the pending key and no next_submitter: not a step. With no signer named and none
+	// to tell (raw JSON), the outcome is not known: see TestDiffUnchangedPendingSignerFromJWS.
+	for _, signer := range []string{cur} {
 		rc := &RotationContext{Adopted: true, Marker: store.Marker{Account: testAccount, Submitter: cur, NextSubmitter: pendKey}, Signer: signer}
 		p, err = Diff(ctx, r, withNext, "", nil, rc)
 		if err != nil || !p.Refused || p.Refusals[len(p.Refusals)-1].Stage != "unchanged" {
@@ -557,4 +558,100 @@ func mustDiff(t *testing.T, r Reader, file []byte, rc *RotationContext) DiffPlan
 		t.Fatal(err)
 	}
 	return p
+}
+
+func userKP(t *testing.T) (nkeys.KeyPair, string) {
+	t.Helper()
+	kp, err := nkeys.CreateUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kp, pub
+}
+
+// During a pending rotation, with no --submitter, a document of unchanged content is judged by who signed it, told from
+// the JWS: the pending key completes the rotation (as the intake does), the current key is refused as unchanged, and a
+// document whose signer cannot be told is not refused as unchanged: the outcome is reported as unknown.
+func TestDiffUnchangedPendingSignerFromJWS(t *testing.T) {
+	ctx := context.Background()
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	curKP, cur := userKP(t)
+	nextKP, next := userKP(t)
+	otherKP, _ := userKP(t)
+	rc := &RotationContext{Adopted: true, Marker: store.Marker{Account: testAccount, Submitter: cur, NextSubmitter: next}}
+	same := doc(8, 7, nil)
+
+	p, err := Diff(ctx, r, sign(t, nextKP, same), "", nil, rc)
+	if err != nil || p.Refused || p.Rotation == nil || p.Rotation.Action != RotationCompletes || p.Rotation.NextSubmitter != next {
+		t.Fatalf("signed by the pending key: %+v, %v", p, err)
+	}
+	if !strings.Contains(RenderPlan(p), "rotation: generation would complete the pending rotation to "+next+"\n") {
+		t.Fatalf("%q", RenderPlan(p))
+	}
+	p, err = Diff(ctx, r, sign(t, curKP, same), "", nil, rc)
+	if err != nil || !p.Refused || p.Refusals[len(p.Refusals)-1].Stage != "unchanged" {
+		t.Fatalf("signed by the old key: %+v, %v", p, err)
+	}
+	for name, file := range map[string][]byte{"raw JSON": same, "other key": sign(t, otherKP, same)} {
+		p, err = Diff(ctx, r, file, "", nil, rc)
+		if err != nil || p.Refused || p.Rotation == nil || p.Rotation.Action != RotationPending || !p.Rotation.Unknown {
+			t.Fatalf("%s: %+v, %v", name, p, err)
+		}
+		if !strings.Contains(RenderPlan(p), "cannot be checked without --submitter") {
+			t.Fatalf("%s: %q", name, RenderPlan(p))
+		}
+	}
+}
+
+// The plan's JSON says what the document does to the rotation, so a document that completes a pending rotation does not
+// read as "nothing would change".
+func TestDiffRotationJSON(t *testing.T) {
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	_, cur := userKP(t)
+	nextKP, next := userKP(t)
+	_, other := userKP(t)
+	rotation := func(file []byte, m store.Marker) string {
+		t.Helper()
+		m.Account, m.Submitter = testAccount, cur
+		b, err := json.Marshal(mustDiff(t, r, file, &RotationContext{Adopted: true, Marker: m, Held: []string{userKey(t)}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v struct {
+			Rotation json.RawMessage `json:"rotation"`
+		}
+		if err := json.Unmarshal(b, &v); err != nil || v.Rotation == nil {
+			t.Fatalf("%s: %v", b, err)
+		}
+		return string(v.Rotation)
+	}
+	if got, want := rotation(sign(t, nextKP, doc(8, 7, nil)), store.Marker{NextSubmitter: next}), `{"action":"completes","next_submitter":"`+next+`"}`; got != want {
+		t.Fatalf("completes: %s", got)
+	}
+	if got, want := rotation(doc(8, 7, func(m map[string]any) { m["next_submitter"] = other }), store.Marker{}), `{"action":"starts","next_submitter":"`+other+`"}`; got != want {
+		t.Fatalf("starts: %s", got)
+	}
+	if got := rotation(changedDoc(nil), store.Marker{}); got != "null" {
+		t.Fatalf("no rotation: %s", got)
+	}
+}
+
+// The adoption marker is read over the admin connection and holds one account: a marker that names another account than
+// the one diffed is refused at stage adoption, as the intake refuses it.
+func TestDiffMarkerOfAnotherAccount(t *testing.T) {
+	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
+	cur := userKey(t)
+	rc := &RotationContext{Adopted: true, Marker: store.Marker{Account: "ACXOTHER", Submitter: cur}}
+	p := mustDiff(t, r, changedDoc(nil), rc)
+	if !p.Refused || p.Refusals[0].Stage != StageAdoption || !strings.Contains(p.Refusals[0].Reason, "names another account") {
+		t.Fatalf("%+v", p)
+	}
+	rc.Marker.Account = testAccount
+	if p := mustDiff(t, r, changedDoc(nil), rc); p.Refused {
+		t.Fatalf("%+v", p)
+	}
 }

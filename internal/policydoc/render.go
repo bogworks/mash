@@ -101,7 +101,7 @@ func RenderPlan(p DiffPlan) string {
 		}
 		return b.String()
 	}
-	if p.rotation == "" && !p.completes && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
+	if p.rotation == "" && !p.completes() && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
 		return "accepted: nothing would change\n" + SizeLimitsLine + "\n" + p.signatureNote()
 	}
