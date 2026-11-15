@@ -16,11 +16,15 @@ import (
 // ServiceName is the name the issue service registers as a NATS micro service.
 const ServiceName = "mash-issue"
 
-// SubjectPrefix opens the issue subject: agents.issue.<range>.<owner>. Its second token, "issue", is none of the mail,
-// prompt, status or hb verbs (agents.<verb>.<range>.<owner>.<name>), and no permission template mash compiles has a line
-// that reaches it, so an endpoint cannot publish to it. A wrangler's permission to publish on it, and to receive the
-// reply, belongs to account setup.
-const SubjectPrefix = "agents.issue"
+// SubjectPrefix opens the issue subject: mash.issue.<range>.<owner>. The "mash." prefix holds mash-internal control
+// subjects, and no permission template mash compiles has a line that reaches either this prefix or LegacySubjectPrefix,
+// so an endpoint cannot publish to them. A wrangler's permission to publish on it, and to receive the reply, belongs to
+// account setup.
+const SubjectPrefix = "mash.issue"
+
+// LegacySubjectPrefix is the issue subject before ADR 0129: agents.issue.<range>.<owner>. The service answers on it for
+// the window release only, so a wrangler's permission can move to SubjectPrefix. It is removed in the next release.
+const LegacySubjectPrefix = "agents.issue"
 
 // requestTimeout bounds one request's reads and writes of the issue record.
 const requestTimeout = 15 * time.Second
@@ -31,8 +35,11 @@ const serveFlushWait = 10 * time.Second
 // Subject is the subject a wrangler publishes the issue request of owner group (range, owner) on.
 func Subject(rng, owner string) string { return SubjectPrefix + "." + rng + "." + owner }
 
-// Serve registers the issue service on nc, listening on agents.issue.<rng>.* in the queue group of the service, and
-// returns a stop func. Every request is answered with one Response; the purpose is always store.PurposeIssue.
+// LegacySubject is the legacy form of Subject, served for the window release only (ADR 0129).
+func LegacySubject(rng, owner string) string { return LegacySubjectPrefix + "." + rng + "." + owner }
+
+// Serve registers the issue service on nc, listening on mash.issue.<rng>.* and, for the window release, agents.issue.<rng>.*
+// in the queue group of the service, and returns a stop func. Every request is answered with one Response; the purpose is always store.PurposeIssue.
 func Serve(nc *nats.Conn, is *Issuer, rng, version string) (stop func() error, err error) {
 	if err := is.Check(); err != nil {
 		return nil, err
@@ -44,9 +51,11 @@ func Serve(nc *nats.Conn, is *Issuer, rng, version string) (stop func() error, e
 		return nil, fmt.Errorf("mash: issue service registration: %w", err)
 	}
 	h := micro.HandlerFunc(func(req micro.Request) { handle(is, rng, req) })
-	if err := svc.AddEndpoint("issue", h, micro.WithEndpointSubject(SubjectPrefix+"."+rng+".*"), micro.WithEndpointQueueGroup(ServiceName)); err != nil {
-		_ = svc.Stop()
-		return nil, fmt.Errorf("mash: issue service endpoint: %w", err)
+	for _, ep := range []struct{ name, prefix string }{{"issue", SubjectPrefix}, {"issue-legacy", LegacySubjectPrefix}} {
+		if err := svc.AddEndpoint(ep.name, h, micro.WithEndpointSubject(ep.prefix+"."+rng+".*"), micro.WithEndpointQueueGroup(ServiceName)); err != nil {
+			_ = svc.Stop()
+			return nil, fmt.Errorf("mash: issue service endpoint: %w", err)
+		}
 	}
 	// A subscription is registered on the server asynchronously. Serve returns, and the caller reports the service as
 	// listening, only after the server has acknowledged it, so a request published right after cannot go unanswered.
@@ -68,7 +77,8 @@ func handle(is *Issuer, rng string, req micro.Request) {
 	if rf == nil {
 		// The subject names the group the wrangler believes it asks for; the address must be in it, in this range.
 		id, _ := r.AddressParts()
-		if id.Agent != rng || req.Subject() != Subject(id.Agent, id.Owner) {
+		subj := req.Subject()
+		if id.Agent != rng || subj != Subject(id.Agent, id.Owner) && subj != LegacySubject(id.Agent, id.Owner) {
 			rf = refuse(CodeSubject, "the address is not in the owner group of the subject")
 		}
 	}

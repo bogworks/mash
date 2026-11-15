@@ -346,6 +346,18 @@ func reflectEmptyLimits(uc *jwt.UserClaims) bool {
 	return reflect.DeepEqual(uc.UserPermissionLimits, jwt.UserPermissionLimits{})
 }
 
+// The service answers on the new subject and, for the window release, on the legacy one, with the same result (ADR 0129).
+func TestIssueServiceAnswersOnBothSubjects(t *testing.T) {
+	e := newIssueEnv(t)
+	for _, subject := range []string{issue.Subject("foo", "c"), issue.LegacySubject("foo", "c")} {
+		r := e.newReq("foo.c.core").sign(t)
+		resp, raw := e.sendRaw(subject, mustT(json.Marshal(r.fields)))
+		if resp.JWT == "" {
+			t.Fatalf("%s: %s", subject, raw)
+		}
+	}
+}
+
 // No private key anywhere: the NATS payloads the account carried and the service's log hold no seed.
 func TestIssueServiceAT012NoPrivateKeyAnywhere(t *testing.T) {
 	e := newIssueEnv(t)
@@ -361,7 +373,7 @@ func TestIssueServiceAT012NoPrivateKeyAnywhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Wait for the capture subscription to have seen all four requests, instead of sleeping a fixed while.
-	for deadline := time.Now().Add(issueWait); strings.Count(e.captured.String(), "agents.issue.foo.c ") < 4; {
+	for deadline := time.Now().Add(issueWait); strings.Count(e.captured.String(), "mash.issue.foo.c ") < 4; {
 		if time.Now().After(deadline) {
 			break // the checks below report what the capture missed
 		}
@@ -375,7 +387,7 @@ func TestIssueServiceAT012NoPrivateKeyAnywhere(t *testing.T) {
 			t.Errorf("%s hold a seed-shaped string: %s...", name, m[:4])
 		}
 	}
-	if !strings.Contains(e.captured.String(), "agents.issue.foo.c ") {
+	if !strings.Contains(e.captured.String(), "mash.issue.foo.c ") {
 		t.Errorf("the capture did not see the issue traffic")
 	}
 	keyFiles, _ := filepath.Glob(filepath.Join(e.keyDir, "*", "*.nk"))
@@ -475,6 +487,10 @@ func TestIssueServiceAT012Refusals(t *testing.T) {
 	mism := e.newReq("foo.c.core").sign(t)
 	if resp, _ := e.sendRaw(issue.Subject("foo", "d"), mustT(json.Marshal(mism.fields))); resp.Code != issue.CodeSubject {
 		t.Errorf("subject mismatch: %+v", resp)
+	}
+
+	if resp, _ := e.sendRaw(issue.LegacySubject("foo", "d"), mustT(json.Marshal(mism.fields))); resp.Code != issue.CodeSubject {
+		t.Errorf("legacy subject mismatch: %+v", resp)
 	}
 
 	// A key already bound to another address: issued to foo.c.core, asked for foo.c.lead.
@@ -749,29 +765,31 @@ func TestIssueServiceDoesNotCreateAGroupKey(t *testing.T) {
 
 // No permission template mash compiles reaches the issue subject, so an endpoint cannot publish to it.
 func TestIssueSubjectIsNotReachableByATemplate(t *testing.T) {
-	subj := strings.Split(issue.Subject("foo", "c"), ".")
-	match := func(filter string) bool {
-		f := strings.Split(filter, ".")
-		for i, tok := range f {
-			if tok == ">" {
-				return len(subj) > i
+	for _, subject := range []string{issue.Subject("foo", "c"), issue.LegacySubject("foo", "c")} {
+		subj := strings.Split(subject, ".")
+		match := func(filter string) bool {
+			f := strings.Split(filter, ".")
+			for i, tok := range f {
+				if tok == ">" {
+					return len(subj) > i
+				}
+				if i >= len(subj) || (tok != "*" && tok != subj[i]) {
+					return false
+				}
 			}
-			if i >= len(subj) || (tok != "*" && tok != subj[i]) {
-				return false
+			return len(f) == len(subj)
+		}
+		for _, tpl := range mustT(listset.Compile(issueListSet())).Templates {
+			for _, line := range append(append([]string{}, tpl.Permissions.Pub.Allow...), tpl.Permissions.Sub.Allow...) {
+				if match(line) {
+					t.Errorf("%s: %q reaches %s", tpl.Group, line, subject)
+				}
 			}
 		}
-		return len(f) == len(subj)
-	}
-	for _, tpl := range mustT(listset.Compile(issueListSet())).Templates {
-		for _, line := range append(append([]string{}, tpl.Permissions.Pub.Allow...), tpl.Permissions.Sub.Allow...) {
-			if match(line) {
-				t.Errorf("%s: %q reaches %s", tpl.Group, line, strings.Join(subj, "."))
+		for _, s := range madminSubjectsOf() {
+			if match(s) {
+				t.Errorf("the owner permission line %q reaches %s", s, subject)
 			}
-		}
-	}
-	for _, s := range madminSubjectsOf() {
-		if match(s) {
-			t.Errorf("the owner permission line %q reaches the issue subject", s)
 		}
 	}
 }

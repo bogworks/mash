@@ -206,7 +206,7 @@ func runIssue(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	ctx, cancel := issueServeContext()
 	defer cancel()
-	log.Info("issue service listening", "subject", issue.SubjectPrefix+"."+compiled.Range+".*", "account", account, "registry", regFile, "list_set", listFile)
+	log.Info("issue service listening", "subject", issue.SubjectPrefix+"."+compiled.Range+".*", "legacy_subject", issue.LegacySubjectPrefix+"."+compiled.Range+".*", "account", account, "registry", regFile, "list_set", listFile)
 	issueServeReady()
 	<-ctx.Done()
 	if err := stop(); err != nil {

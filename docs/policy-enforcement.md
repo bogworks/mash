@@ -421,7 +421,7 @@ once mash has revoked the key. It never holds a seed or a JWT.
 
 [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) lets a
 wrangler on a sender's host ask for a credential for a public key, without any private key leaving the host.
-`mashctl issue serve` answers on `agents.issue.<range>.<owner>`. The request names an address, a public key, a host, a
+`mashctl issue serve` answers on `mash.issue.<range>.<owner>` and, for this release, also on `agents.issue.<range>.<owner>`. The request names an address, a public key, a host, a
 nonce and an expiry, and carries the wrangler's signature over those fields. The service signs only if all of these
 hold:
 
@@ -439,7 +439,7 @@ Tags, permissions, limits, a name or an expiry in a request are never read. The 
 compile of section 2). The record write comes before the reply and is the arbiter between concurrent requests: of two
 requests for one key and two addresses, exactly one succeeds. No private key is made, received, stored or logged on this
 path; `TestIssueServiceAT012NoPrivateKeyAnywhere` scans the NATS payloads and the log for seeds. No template mash
-compiles has a line that reaches `agents.issue.>` (`TestIssueSubjectIsNotReachableByATemplate`), so an endpoint cannot
+compiles has a line that reaches `mash.issue.<range>.<owner>` or `agents.issue.<range>.<owner>` (`TestIssueSubjectIsNotReachableByATemplate`), so an endpoint cannot
 publish to the service.
 
 What the countersignature proves, and what it trusts, from ADR 0104: it proves that the holder of the wrangler's
