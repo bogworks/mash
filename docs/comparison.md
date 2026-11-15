@@ -194,7 +194,7 @@ the receiving session. The decision is a signed list set:
   responder answers about that endpoint only, never about another's lists or reach. `show` prints the list-set
   generation and state, the receivers it may reach per verb, and the open subjects; `explain` says for one receiver
   whether each verb is allowed or refused, and why. A legacy endpoint name, or a credential that is not a list-set
-  credential, gets the local answer `open: owner line only, no list set in force` without asking. A list-set
+  credential, gets the local answer `this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)` without asking. A list-set
   credential that gets no answer fails with `policy view unavailable: no responder on agents.policy.<range>`. The
   responder is mounted by `mashctl policy serve` (#594, open), so until that lands it is not running anywhere.
 - **Enforcement.** NATS permissions: one scoped-key template per owner group, plus per-sender tags. A sender's user

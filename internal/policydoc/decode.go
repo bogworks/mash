@@ -214,6 +214,9 @@ func decodePayload(p []byte) (Document, error) {
 		if g == nil {
 			return Document{}, bad("group %q is null", o)
 		}
+		if strings.Contains(o, ".") {
+			return Document{}, bad("group %q: a group is keyed by its owner part only (no dots); the range is the document's, and a switch is set for an owner group, never for a single sender", o)
+		}
 		for _, v := range []struct {
 			verb listset.Verb
 			val  *string

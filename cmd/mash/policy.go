@@ -25,7 +25,7 @@ import (
 const policyUsage = "usage: mash policy show [--json] | mash policy explain RECEIVER [--json]"
 
 // noResponderText is what an account with no list set answers locally: with no responder there are no lists.
-const noResponderText = "open: owner line only, no list set in force"
+const noResponderText = "this credential is not covered by a list set: it has the owner line only (a list set may be in force for the account's other senders; only a list-set credential can ask the policy responder)"
 
 // policyCmd runs `mash policy show` and `mash policy explain`: it asks the range's policy responder what this
 // endpoint may reach, as a signed request, and prints the answer.
