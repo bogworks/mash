@@ -156,10 +156,7 @@ func (id EndpointIdentity) Subjects() Subjects {
 	if id.legacy {
 		return For(id.Owner, id.Name)
 	}
-	s := func(verb string) string {
-		return "agents." + verb + "." + id.Agent + "." + id.Owner + "." + id.Name
-	}
-	return Subjects{Prompt: s("prompt"), Status: s("status"), HB: s("hb"), Mail: s("mail")}
+	return endpointSubjects(id.Agent, id.Agent, id.Owner, id.Name)
 }
 
 // MailFilter is the subject filter of id's inbox stream. A legacy identity gets

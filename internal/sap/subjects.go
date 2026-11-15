@@ -3,15 +3,22 @@
 // "mail", which SAP does not reserve.
 package sap
 
-import "strings"
+import (
+	"strings"
+	"sync/atomic"
 
-// Protocol constants (SAP §2, §3, Appendix C).
+	agents "github.com/bogworks/synadia-agents.go"
+)
+
+// Protocol constants. ServiceName, QueueGroup and ProtocolVersion are the
+// SDK's (SAP §3, §11); AgentToken and AgentName are mash's own choices for its
+// agent (SAP Appendix C), which the SDK has no counterpart for.
 const (
 	AgentToken      = "cc"
 	AgentName       = "claude-code"
-	ServiceName     = "agents"
-	QueueGroup      = "agents"
-	ProtocolVersion = "0.3"
+	ServiceName     = agents.ServiceName
+	QueueGroup      = agents.QueueGroup
+	ProtocolVersion = agents.ProtocolVersion
 )
 
 // Subjects are one endpoint's SAP subjects.
@@ -19,12 +26,34 @@ type Subjects struct {
 	Prompt, Status, HB, Mail string
 }
 
+// subjectFallbacks counts how often endpointSubjects fell back to string
+// construction; tests read it to show the SDK builder accepts every name mash does.
+var subjectFallbacks atomic.Int64
+
+// endpointSubjects builds the four subjects of an endpoint: prompt, status and
+// heartbeat through the SDK's AgentSubject, mail (which SAP has no verb for) by
+// hand. agent is the agent identifier and token the third subject token (equal
+// to agent unless an abbreviation such as "cc" is in use). The SDK's token rule
+// is looser than mash's, so it only errs for a value mash's validators already
+// refuse (empty, or containing a dot); For and Subjects have no error return,
+// so such a value falls back to the plain construction, which never panics.
+func endpointSubjects(agent, token, owner, name string) Subjects {
+	mail := "agents.mail." + token + "." + owner + "." + name
+	var opts []agents.SubjectOption
+	if token != agent {
+		opts = append(opts, agents.WithSubjectToken(token))
+	}
+	if as, err := agents.NewAgentSubject(agent, owner, name, opts...); err == nil {
+		return Subjects{Prompt: as.Prompt(), Status: as.Status(), HB: as.Heartbeat(), Mail: mail}
+	}
+	subjectFallbacks.Add(1)
+	s := func(verb string) string { return "agents." + verb + "." + token + "." + owner + "." + name }
+	return Subjects{Prompt: s("prompt"), Status: s("status"), HB: s("hb"), Mail: mail}
+}
+
 // For returns the subjects of endpoint name under owner.
 func For(owner, name string) Subjects {
-	s := func(verb string) string {
-		return "agents." + verb + "." + AgentToken + "." + owner + "." + name
-	}
-	return Subjects{Prompt: s("prompt"), Status: s("status"), HB: s("hb"), Mail: s("mail")}
+	return endpointSubjects(AgentName, AgentToken, owner, name)
 }
 
 // MailFilter is the subject filter of name's inbox stream: mail to name
