@@ -90,52 +90,41 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	}
 	// Only a list-set credential may publish to the policy subject; any other has no grant there, and a publish
 	// would be a permissions violation, not "no responders". Decide from the client's own credential.
-	if !listSetCreds(cfg.Creds) {
+	if !isListSetCreds(cfg.Creds) {
 		return localOpen(stdout, asJSON, ep.Display(), req)
 	}
-	subject := policyview.Subject(ident.Agent)
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return fail(err)
 	}
-	h, err := ep.Identity().Sign(subject, payload, ep.Key(), time.Now(), "")
-	if err != nil {
-		return fail(err)
-	}
-	m := nats.NewMsg(subject)
-	m.Data = payload
-	m.Header.Set(sap.HeaderName, h.Encode())
-	rctx, rcancel := context.WithTimeout(ctx, cfg.CallTimeout)
-	defer rcancel()
-	// A permissions violation on this subject (and only this one) is reported as a refusal: a list-set credential
-	// should be able to ask, so it must not look like an open account. The handler replaces the endpoint's, which only
-	// logs.
-	var mu sync.Mutex
-	denied := false
-	ep.Conn().SetErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
-		if err != nil && strings.Contains(err.Error(), "ermissions Violation for Publish to "+strconv.Quote(subject)) {
-			mu.Lock()
-			denied = true
-			mu.Unlock()
-			rcancel()
-			return
+	// ADR 0129: the window serves both subjects. Ask the new one first; only a permissions violation on it (an old
+	// template) or no responder on it (an old serve) falls back, once, to the old one. Any other failure of the first
+	// attempt is reported as it is.
+	subjects := policyview.Subjects(ident.Agent)
+	var resp *nats.Msg
+	for i, subject := range subjects {
+		r, outcome, err := askPolicy(ctx, ep, cfg.CallTimeout, subject, payload, stderr)
+		if err != nil {
+			return fail(err)
 		}
-		fmt.Fprintf(stderr, "mash: nats: %v\n", err)
-	})
-	resp, err := ep.Conn().RequestMsgWithContext(rctx, m)
-	mu.Lock()
-	wasDenied := denied
-	mu.Unlock()
-	// This credential holds a list set, so silence is not "open": a stopped responder or an older template must not
-	// make an applied policy look absent.
-	if wasDenied {
-		return fail(errors.New("policy view refused: this credential may not ask the policy responder"))
-	}
-	if errors.Is(err, nats.ErrNoResponders) {
-		return fail(fmt.Errorf("policy view unavailable: no responder on %s", subject))
-	}
-	if err != nil {
-		return fail(fmt.Errorf("mash policy: no answer from the policy responder: %w", err))
+		if outcome == askAnswered {
+			resp = r
+			break
+		}
+		last := i == len(subjects)-1
+		if !last {
+			continue // denied or no responder on a subject with a fallback left
+		}
+		// This credential holds a list set, so silence is not "open": a stopped responder or an older template must
+		// not make an applied policy look absent. The error is the last attempt's, naming the first subject tried.
+		tried := ""
+		if i > 0 {
+			tried = " (after " + subjects[0] + ")"
+		}
+		if outcome == askDenied {
+			return fail(errors.New("policy view refused: this credential may not ask the policy responder" + tried))
+		}
+		return fail(fmt.Errorf("policy view unavailable: no responder on %s%s", subject, tried))
 	}
 	var e policyview.ErrorReply
 	if json.Unmarshal(resp.Data, &e) == nil && e.Error != "" {
@@ -162,6 +151,9 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprint(stdout, text)
 	return 0
 }
+
+// isListSetCreds is listSetCreds; a test seam.
+var isListSetCreds = listSetCreds
 
 // listSetCreds reports whether the user JWT in the creds file is a list-set credential: signed by a scoped signing
 // key (an issuer account is set and the issuer is not that account) and carrying no permission list of its own,
@@ -289,4 +281,54 @@ func explainText(r policyview.ExplainReply) string {
 	fmt.Fprintf(&b, "open subjects, subscribe: %s\n", joinOr(r.OpenSubjects.Subscribe, "none"))
 	fmt.Fprintf(&b, "%s\n", r.RawClientLimit)
 	return b.String()
+}
+
+type askOutcome int
+
+const (
+	askAnswered    askOutcome = iota
+	askDenied                 // a permissions violation on this attempt's subject
+	askNoResponder            // no responder on this attempt's subject
+)
+
+// askPolicy sends one signed request to subject and waits up to timeout. A permissions violation on this subject (and
+// only this one) is askDenied and no responder is askNoResponder, neither an error: the caller decides whether to
+// fall back. Any other failure is an error. The error handler it installs replaces the endpoint's, which only logs;
+// it logs everything but this subject's violation to stderr, as before.
+func askPolicy(ctx context.Context, ep *endpoint.Endpoint, timeout time.Duration, subject string, payload []byte, stderr io.Writer) (*nats.Msg, askOutcome, error) {
+	h, err := ep.Identity().Sign(subject, payload, ep.Key(), time.Now(), "")
+	if err != nil {
+		return nil, 0, err
+	}
+	m := nats.NewMsg(subject)
+	m.Data = payload
+	m.Header.Set(sap.HeaderName, h.Encode())
+	rctx, rcancel := context.WithTimeout(ctx, timeout)
+	defer rcancel()
+	var mu sync.Mutex
+	denied := false
+	ep.Conn().SetErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+		if err != nil && strings.Contains(err.Error(), "ermissions Violation for Publish to "+strconv.Quote(subject)) {
+			mu.Lock()
+			denied = true
+			mu.Unlock()
+			rcancel()
+			return
+		}
+		fmt.Fprintf(stderr, "mash: nats: %v\n", err)
+	})
+	resp, err := ep.Conn().RequestMsgWithContext(rctx, m)
+	mu.Lock()
+	wasDenied := denied
+	mu.Unlock()
+	if wasDenied {
+		return nil, askDenied, nil
+	}
+	if errors.Is(err, nats.ErrNoResponders) {
+		return nil, askNoResponder, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("mash policy: no answer from the policy responder: %w", err)
+	}
+	return resp, askAnswered, nil
 }

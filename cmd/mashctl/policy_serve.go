@@ -34,7 +34,8 @@ const policyServeUsage = `usage: mashctl policy serve --range RANGE --servers N 
               {range} is replaced by it
   --servers   the number of servers in the deployment, 1 or more (or MASH_SERVERS; required); every apply reads the limits and the account
               JWT from every one and refuses when any does not answer
-  (it also answers "mash policy show" and "explain" on agents.policy.RANGE, and refuses to start without the
+  (it also answers "mash policy show" and "explain" on mash.policy.RANGE and, for this
+  release, agents.policy.RANGE, and refuses to start without the
   directory bucket; one process serves the one account the key store and the admin credentials belong to; it refuses to start unless
   that account is adopted)
 `

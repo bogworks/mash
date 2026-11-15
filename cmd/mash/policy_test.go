@@ -54,6 +54,13 @@ func policyEndpoint(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, owner
 // permission list, with no grant to the policy subject.
 func policyEndpointWith(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, owner, name string, listSetCred bool) map[string]string {
 	t.Helper()
+	return policyEndpointPerms(t, e, adm, agent, owner, name, listSetCred, nil)
+}
+
+// policyEndpointPerms is policyEndpointWith; a non-nil deny replaces the permissions with ones that may publish
+// anywhere but the denied subjects.
+func policyEndpointPerms(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, owner, name string, listSetCred bool, deny []string) map[string]string {
+	t.Helper()
 	id, err := sap.New(agent, owner, name)
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +76,10 @@ func policyEndpointWith(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, o
 	}
 	if listSetCred {
 		perms = jwt.Permissions{}
+	}
+	if deny != nil {
+		perms = jwt.Permissions{}
+		perms.Pub.Deny.Add(deny...)
 	}
 	creds, user := e.MintRaw(t, id.Flat(), perms)
 	if _, err := adm.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
@@ -170,7 +181,7 @@ func TestPolicyListSetCredentialWithNoResponderIsAnError(t *testing.T) {
 	a := policyEndpoint(t, e, adm, "r", "o", "a")
 	for _, args := range [][]string{{"policy", "show"}, {"policy", "show", "--json"}, {"policy", "explain", "r.o.b"}} {
 		out, errs, code := policyRun(a, args...)
-		if code != 1 || out != "" || !strings.Contains(errs, "policy view unavailable: no responder on agents.policy.r") {
+		if code != 1 || out != "" || !strings.Contains(errs, "policy view unavailable: no responder on agents.policy.r (after mash.policy.r)") {
 			t.Fatalf("%v: %d %q %q", args, code, out, errs)
 		}
 	}
@@ -263,5 +274,125 @@ func TestPolicyUsage(t *testing.T) {
 	}
 	if out, _, code := policyRun(env, "policy", "--help"); code != 0 || !strings.Contains(out, "usage: mash policy show") {
 		t.Errorf("--help: %d %q", code, out)
+	}
+}
+
+// policyEndpointDenied is policyEndpoint with a credential that may not publish to the denied subjects, as a template
+// that lacks them. It carries a permission list, so listSetCreds would not call it a list-set credential; the test
+// says it is one.
+func policyEndpointDenied(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, owner, name string, denied ...string) map[string]string {
+	t.Helper()
+	env := policyEndpointPerms(t, e, adm, agent, owner, name, true, denied)
+	old := isListSetCreds
+	isListSetCreds = func(string) bool { return true }
+	t.Cleanup(func() { isListSetCreds = old })
+	return env
+}
+
+// policyFake answers on the given subjects and counts the requests per subject.
+func policyFake(t *testing.T, e *testenv.Env, subjects ...string) func(string) int {
+	t.Helper()
+	var mu sync.Mutex
+	seen := map[string]int{}
+	nc := e.Conn(t, e.AdminCreds)
+	for _, s := range subjects {
+		s := s
+		sub, err := nc.Subscribe(s, func(m *nats.Msg) {
+			mu.Lock()
+			seen[s]++
+			mu.Unlock()
+			_ = m.Respond([]byte(`{"describes":"x","state":"applied","sender":"r.o.a"}`))
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sub.Unsubscribe() })
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	return func(s string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return seen[s]
+	}
+}
+
+func TestPolicyAsksTheNewSubjectFirst(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpoint(t, e, adm, "r", "o", "a")
+	seen := policyFake(t, e, "mash.policy.r", "agents.policy.r")
+	out, errs, code := policyRun(a, "policy", "show", "--json")
+	if code != 0 || !strings.Contains(out, `"state":"applied"`) {
+		t.Fatalf("show: %d %q %q", code, out, errs)
+	}
+	if seen("mash.policy.r") != 1 || seen("agents.policy.r") != 0 {
+		t.Fatalf("new %d, old %d", seen("mash.policy.r"), seen("agents.policy.r"))
+	}
+}
+
+func TestPolicyFallsBackWhenTheTemplateLacksTheNewSubject(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpointDenied(t, e, adm, "r", "o", "a", "mash.policy.r")
+	seen := policyFake(t, e, "mash.policy.r", "agents.policy.r")
+	out, errs, code := policyRun(a, "policy", "show", "--json")
+	if code != 0 || !strings.Contains(out, `"state":"applied"`) {
+		t.Fatalf("show: %d %q %q", code, out, errs)
+	}
+	if seen("mash.policy.r") != 0 || seen("agents.policy.r") != 1 {
+		t.Fatalf("new %d, old %d", seen("mash.policy.r"), seen("agents.policy.r"))
+	}
+}
+
+func TestPolicyFallsBackWhenOnlyTheOldSubjectAnswers(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpoint(t, e, adm, "r", "o", "a")
+	seen := policyFake(t, e, "agents.policy.r")
+	out, errs, code := policyRun(a, "policy", "show", "--json")
+	if code != 0 || !strings.Contains(out, `"state":"applied"`) {
+		t.Fatalf("show: %d %q %q", code, out, errs)
+	}
+	if seen("agents.policy.r") != 1 {
+		t.Fatalf("old %d", seen("agents.policy.r"))
+	}
+}
+
+func TestPolicyNoResponderOnEitherNamesBothAndIsNeverOpen(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpoint(t, e, adm, "r", "o", "a")
+	out, errs, code := policyRun(a, "policy", "show")
+	if code != 1 || out != "" || !strings.Contains(errs, "policy view unavailable: no responder on agents.policy.r") ||
+		!strings.Contains(errs, "mash.policy.r") || strings.Contains(errs, noResponderText) {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+}
+
+func TestPolicyDeniedOnBothIsARefusalAndNeverOpen(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpointDenied(t, e, adm, "r", "o", "a", "mash.policy.r", "agents.policy.r")
+	seen := policyFake(t, e, "mash.policy.r", "agents.policy.r")
+	out, errs, code := policyRun(a, "policy", "show")
+	if code != 1 || out != "" || !strings.Contains(errs, "policy view refused") || !strings.Contains(errs, "mash.policy.r") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	if seen("mash.policy.r") != 0 || seen("agents.policy.r") != 0 {
+		t.Fatal("a denied request reached a responder")
+	}
+}
+
+func TestPolicyAnErrorReplyOnTheNewSubjectDoesNotFallBack(t *testing.T) {
+	e, adm := policyWorld(t)
+	a := policyEndpoint(t, e, adm, "r", "o", "a")
+	nc := e.Conn(t, e.AdminCreds)
+	sub, err := nc.Subscribe("mash.policy.r", func(m *nats.Msg) { _ = m.Respond([]byte(`{"error":"nope"}`)) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	seen := policyFake(t, e, "agents.policy.r")
+	_ = nc.Flush()
+	out, errs, code := policyRun(a, "policy", "show")
+	if code != 1 || out != "" || !strings.Contains(errs, "nope") || seen("agents.policy.r") != 0 {
+		t.Fatalf("%d %q %q old=%d", code, out, errs, seen("agents.policy.r"))
 	}
 }

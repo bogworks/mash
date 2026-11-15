@@ -61,6 +61,10 @@ type Options struct {
 // Subject is the subject of the responder of range rng.
 func Subject(rng string) string { return listset.PolicySubject(rng) }
 
+// Subjects are both subjects the responder of range rng answers on while the window is open (ADR 0129), the new
+// form first.
+func Subjects(rng string) []string { return listset.PolicySubjects(rng) }
+
 // Request is the body of a request.
 type Request struct {
 	Op       string `json:"op"`
@@ -118,7 +122,7 @@ type responder struct {
 	views    map[uint64]listset.View
 }
 
-// Mount serves the responder on nc: a micro service with one endpoint on Subject(opts.Range), in a queue group so
+// Mount serves the responder on nc: a micro service with one endpoint on each of Subjects(opts.Range), in a queue group so
 // several responders share the load. stop drains the service.
 func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
 	if opts.Range == "" {
@@ -144,10 +148,17 @@ func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("policyview: %w", err)
 	}
-	if err := svc.AddEndpoint("policy", micro.HandlerFunc(r.handle),
-		micro.WithEndpointSubject(Subject(opts.Range)), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
-		_ = svc.Stop()
-		return nil, fmt.Errorf("policyview: %w", err)
+	// Both subjects, one handler: handle verifies the signed header against the subject the request arrived on.
+	for i, subject := range Subjects(opts.Range) {
+		name := "policy"
+		if i > 0 {
+			name = "policy-legacy"
+		}
+		if err := svc.AddEndpoint(name, micro.HandlerFunc(r.handle),
+			micro.WithEndpointSubject(subject), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
+			_ = svc.Stop()
+			return nil, fmt.Errorf("policyview: %w", err)
+		}
 	}
 	return svc.Stop, nil
 }

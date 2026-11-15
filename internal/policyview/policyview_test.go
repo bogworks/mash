@@ -148,6 +148,19 @@ func (r *rig) signed(t *testing.T, c caller, payload []byte) *nats.Msg {
 	return m
 }
 
+// signedOn is signed for the given subject.
+func (r *rig) signedOn(t *testing.T, subject string, c caller, payload []byte) *nats.Msg {
+	t.Helper()
+	h, err := c.id.Sign(subject, payload, "x", r.now, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := nats.NewMsg(subject)
+	m.Data = payload
+	m.Header.Set(sap.HeaderName, h.Encode())
+	return m
+}
+
 func (r *rig) do(t *testing.T, m *nats.Msg) []byte {
 	t.Helper()
 	resp, err := r.nc.RequestMsg(m, 5*time.Second)
@@ -455,5 +468,39 @@ func TestDirectoryResolver(t *testing.T) {
 	}
 	if _, ok, err := resolve(ctx, "UNKNOWN"); err != nil || ok {
 		t.Fatalf("unknown: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestSubjectsAreNewFirstAndBothAreServed(t *testing.T) {
+	got := Subjects("r")
+	if len(got) != 2 || got[0] != "mash.policy.r" || got[1] != "agents.policy.r" {
+		t.Fatalf("Subjects: %v", got)
+	}
+	r := newRig(t)
+	body, _ := json.Marshal(Request{Op: OpShow})
+	c := r.callers["r.o.a"]
+	var answers [][]byte
+	for _, subject := range got {
+		answers = append(answers, r.do(t, r.signedOn(t, subject, c, body)))
+	}
+	if errorOf(answers[0]) != "" || len(answers[0]) == 0 {
+		t.Fatalf("new subject: %s", answers[0])
+	}
+	if string(answers[0]) != string(answers[1]) {
+		t.Errorf("the subjects answer differently:\n%s\n%s", answers[0], answers[1])
+	}
+	// A request signed for one subject and sent to the other is refused.
+	if e := errorOf(r.do(t, func() *nats.Msg {
+		m := r.signedOn(t, got[1], c, body)
+		m.Subject = got[0]
+		return m
+	}())); e != ErrSignatureRequired {
+		t.Errorf("cross-subject: %q", e)
+	}
+	// Unsigned on the new subject is refused as on the old.
+	m := nats.NewMsg(got[0])
+	m.Data = body
+	if string(r.do(t, m)) != `{"error":"signature required"}` {
+		t.Error("unsigned request on the new subject was not refused")
 	}
 }
