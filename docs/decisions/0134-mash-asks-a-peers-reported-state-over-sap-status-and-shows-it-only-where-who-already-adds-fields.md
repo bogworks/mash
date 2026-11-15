@@ -86,6 +86,14 @@ resolved as a send resolves a recipient, legacy form included.
 * JSON output carries `activity` (`state`, `kind`) and `"activity_trust": "claimed"`.
 * The tool's description says that `online` means the peer's mash answers, not that the peer can take a turn.
 
+**In a send's receipt.** The MCP `send` tool adds one advisory line about the recipient's reported state to its receipt.
+* It does so for the kinds that wake the recipient (`blocker`, `question`, `task`) and for any urgent send. `fyi`,
+  `result` and a duplicate get no line.
+* The status request runs alongside the publish. The line never delays the receipt more than 1 s after the send
+  started, and never fails the send. It reads `state unknown` when the answer is not back by then.
+* A blocked recipient's line says that the ask will wait until it is answered there.
+* The CLI `mash send` output is unchanged (ADR 0034).
+
 ### Consequences
 
 * Good, because a sender can see that a peer is blocked on its user before it waits, and nothing about the protocol
