@@ -41,6 +41,12 @@ func policyCmd(cfg config.Config, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return usage("")
 	}
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" { // the usage, and the verb does not run
+			fmt.Fprintln(stdout, policyUsage)
+			return 0
+		}
+	}
 	req := policyview.Request{Op: args[0]}
 	asJSON := false
 	var rest []string
