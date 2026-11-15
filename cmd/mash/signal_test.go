@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -34,7 +35,7 @@ func TestServeReleasesLeaseOnSignal(t *testing.T) {
 				cmd.Env = append(cmd.Env, k+"="+v)
 			}
 			stdin, _ := cmd.StdinPipe()
-			cmd.Stdout = io.Discard
+			stdout, _ := cmd.StdoutPipe()
 			cmd.Stderr = os.Stderr
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
@@ -56,6 +57,21 @@ func TestServeReleasesLeaseOnSignal(t *testing.T) {
 					t.Fatal("serve never took the lease")
 				}
 				time.Sleep(50 * time.Millisecond)
+			}
+			// The key is visible while serve's lease write may still be in flight: a signal then cancels the open after
+			// the server stored the lease, so the open fails and nothing releases it. serve answers initialize only once
+			// the endpoint is open and running, so wait for that reply before signalling.
+			replied := make(chan struct{})
+			go func() {
+				_, _ = bufio.NewReader(stdout).ReadString('\n')
+				close(replied)
+				_, _ = io.Copy(io.Discard, stdout)
+			}()
+			select {
+			case <-replied:
+			case <-time.After(10 * time.Second):
+				_ = cmd.Process.Kill()
+				t.Fatal("serve never answered initialize")
 			}
 			if err := cmd.Process.Signal(sig); err != nil {
 				t.Fatal(err)
