@@ -57,8 +57,11 @@ type ExecInput struct {
 	Inventory int
 	// Signers are the list set's scoped keys by group, as for policyapply.RunInput.Signers.
 	Signers map[string]string
-	Signer  Signer
-	Marker  IssueMarker
+	// Held is the key store's GroupPublics: the account JWT's scoped keys for another range's owner groups (not the list
+	// set's range) stay beside Signers (OtherRangesKept), so the generation checks and the gate count them as kept.
+	Held   map[string]string
+	Signer Signer
+	Marker IssueMarker
 	// BeforeWrite, when set, is called before the push ("push") and before the commit ("commit"): the caller's account
 	// lock fence (admin.AccountLock.Held). An error stops the step.
 	BeforeWrite func(ctx context.Context, what string) error
@@ -168,7 +171,15 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	}
 	slices.Sort(keys)
 
-	if g, ok := policyapply.GenerationOf(prevJWT, []policyapply.Candidate{{Generation: rec.Generation, Compiled: compiled, Signers: in.Signers}}); !ok || g != rec.Generation {
+	prevClaims, err := jwt.DecodeAccountClaims(prevJWT)
+	if err != nil {
+		return res0, fmt.Errorf("reconcile: the JWT in force does not decode: %w", err)
+	}
+	kept, err := OtherRangesKept(prevClaims, in.Held, ls.Range)
+	if err != nil {
+		return res0, fmt.Errorf("reconcile: %w", err)
+	}
+	if g, ok := policyapply.GenerationOf(prevJWT, []policyapply.Candidate{{Generation: rec.Generation, Compiled: compiled, Signers: in.Signers, Kept: kept}}); !ok || g != rec.Generation {
 		return res0, fmt.Errorf("reconcile: the JWT in force does not carry generation %d with the expected signers", rec.Generation)
 	}
 	serverJWTs, err := policyapply.ServerRevocationJWTs(ctx, in.Cluster, in.Account, in.Inventory)
@@ -179,7 +190,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: sign: %w", err)
 	}
-	if err := checkSigned(tok, prevJWT, serverJWTs, keys, at, rec, compiled, in.Signers); err != nil {
+	if err := checkSigned(tok, prevJWT, serverJWTs, keys, at, rec, compiled, in.Signers, kept); err != nil {
 		return res0, err
 	}
 	if cc, ok := in.Ledger.(policyapply.CommitSizeChecker); ok {
@@ -201,7 +212,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	gi := policyapply.GateInput{
 		Cluster: in.Cluster, Account: in.Account, Inventory: in.Inventory,
 		Record: rec, Compiled: compiled, PreviousJWT: prevJWT,
-		Expect: expect, Signers: in.Signers, TargetJWT: tok, Now: now,
+		Expect: expect, Signers: in.Signers, KeptSigners: kept, TargetJWT: tok, Now: now,
 		OldKeys: map[string][]policyapply.OldKey{"reconcile": old},
 	}
 	if err := fence(policyapply.FencePush); err != nil {
@@ -236,7 +247,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 }
 
 // checkSigned is what Execute requires of the signed JWT before it pushes it.
-func checkSigned(tok, prev string, serverJWTs []string, keys []string, at map[string]time.Time, rec listset.Record, c *listset.Compiled, signers map[string]string) error {
+func checkSigned(tok, prev string, serverJWTs []string, keys []string, at map[string]time.Time, rec listset.Record, c *listset.Compiled, signers, kept map[string]string) error {
 	if len(tok) > policy.AccountJWTLimit {
 		return policyapply.ErrAccountJWTTooLarge
 	}
@@ -244,7 +255,7 @@ func checkSigned(tok, prev string, serverJWTs []string, keys []string, at map[st
 	if err != nil {
 		return fmt.Errorf("reconcile: the signed JWT does not decode: %w", err)
 	}
-	if g, ok := policyapply.GenerationOf(tok, []policyapply.Candidate{{Generation: rec.Generation, Compiled: c, RevokedKeys: keys, Signers: signers}}); !ok || g != rec.Generation {
+	if g, ok := policyapply.GenerationOf(tok, []policyapply.Candidate{{Generation: rec.Generation, Compiled: c, RevokedKeys: keys, Signers: signers, Kept: kept}}); !ok || g != rec.Generation {
 		return fmt.Errorf("reconcile: the signed JWT does not carry generation %d with the expected signers and every key revoked, not pushed", rec.Generation)
 	}
 	if err := policyapply.KeepsRevocations(prev, true, tok); err != nil {

@@ -12,7 +12,7 @@ import (
 // an outside system; serve applies its list sets; reconcile plans the adoption reconcile; show, explain and diff read the
 // list set in force and change nothing.
 const policyUsage = `usage: mashctl policy adopt --submitter NKEY_PUBLIC_KEY | --show [--json]
-       mashctl policy serve --range RANGE [--servers N] [--sys-creds FILE]
+       mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
        mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
        mashctl policy show [--json] [--range RANGE] [--bucket NAME] [--account KEY]
        mashctl policy explain SENDER RECEIVER [--json] [--range RANGE] [--bucket NAME] [--account KEY]

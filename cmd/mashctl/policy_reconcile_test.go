@@ -140,21 +140,31 @@ func TestPolicyReconcileDryRunJSONGolden(t *testing.T) {
 	checkReconcileGolden(t, "policy_reconcile_dryrun.golden.json", normaliseReconcile(out))
 }
 
-// --yes is refused in this version with exactly one line, and changes nothing: the account JWT, the issue record and
-// the marker are as they were, and the legacy user is still connected.
-func TestPolicyReconcileYesIsRefused(t *testing.T) {
+// --yes without a usable --plan, or with --listset, is a usage error before anything connects, and changes nothing.
+func TestPolicyReconcileYesUsage(t *testing.T) {
 	p := newAdoptedPreview(t)
 	before := p.e.accountJWT()
-	for _, args := range [][]string{{"--yes"}, {"--yes", "--listset", p.file}, {"--json", "--yes"}} {
-		out, errb, code := p.e.run(append([]string{"policy", "reconcile"}, args...)...)
-		if code != 1 || out != "" || errb != "mashctl: policy reconcile: no signer configured: run without --yes to see the plan\n" {
-			t.Errorf("%v: %d %q %q", args, code, out, errb)
+	good := "sha256:" + strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--yes"}, "--yes needs --plan DIGEST from a dry run"},
+		{[]string{"--json", "--yes"}, "--yes needs --plan DIGEST from a dry run"},
+		{[]string{"--yes", "--listset", p.file}, "--listset is a preview of the dry run: it cannot be used with --yes"},
+		{[]string{"--yes", "--plan", good, "--listset", p.file}, "--listset is a preview of the dry run: it cannot be used with --yes"},
+		{[]string{"--yes", "--plan", "sha256:abc"}, "--plan is not a plan digest"},
+		{[]string{"--plan", good}, "--plan is for --yes"},
+	} {
+		out, errb, code := p.e.run(append([]string{"policy", "reconcile"}, tc.args...)...)
+		if code != 2 || out != "" || !strings.Contains(errb, tc.want) || !strings.Contains(errb, "usage: mashctl policy reconcile") {
+			t.Errorf("%v: %d %q %q", tc.args, code, out, errb)
 		}
 	}
-	// the same with nothing configured at all: it does not even connect
+	// nothing configured at all: it does not even connect
 	var out, errb strings.Builder
-	if code := runEnv([]string{"policy", "reconcile", "--yes"}, func(string) string { return "" }, &out, &errb); code != 1 ||
-		errb.String() != "mashctl: policy reconcile: no signer configured: run without --yes to see the plan\n" {
+	if code := runEnv([]string{"policy", "reconcile", "--yes"}, func(string) string { return "" }, &out, &errb); code != 2 ||
+		!strings.Contains(errb.String(), "--yes needs --plan DIGEST from a dry run") {
 		t.Errorf("bare --yes: %d %q", code, errb.String())
 	}
 	if p.e.accountJWT() != before || len(p.e.claims().Revocations) != 0 {

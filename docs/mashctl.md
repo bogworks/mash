@@ -183,19 +183,25 @@ mashctl policy serve --range RANGE --servers N [--sys-creds FILE]
 
 - `--range` is required. One process serves one account, the one the key store and the admin credentials belong to; it refuses when the admin credentials belong to another account than the key store's account key, and when the account is not adopted.
 - `--servers N` (or `MASH_SERVERS`) is required: the number of servers in the deployment, 1 or more. Before each apply the service reads every server's `max_control_line` and `max_payload` through the system account, waits until that many servers have answered or a 4-second deadline passes, and checks the list set against them (the size of each sender's credential and of the account JWT). The smallest limit of any server decides, and a refusal at stage `size` names that server and its limit. If fewer servers answer than declared, it refuses that document and pushes nothing: the limits are never guessed. A server is reached at the host it reports; one that reports a wildcard host (`0.0.0.0`, `::`) is reached at the configured URL in the same position, which needs the configured `url` to list exactly `N` comma-separated URLs in the order of the server names, and otherwise the document is refused (no host is ever invented). Every derived URL is held to the same rule as the admin connection (TLS, or loopback only with `insecure_loopback`) before anything connects to it, and the probe and witness connections use the configured CA and client certificate.
-- A list set that narrows an existing sender by tags (it takes an allow away from a sender that is already in force) cannot be applied yet: replacing that sender's credential is not part of this release. It is refused before anything is pushed, with the reason in the status, and nothing changes. The same holds for a list set that adds an address: its inbox can be made only for an endpoint provisioned under its own key, and `policy serve` cannot do that from a list set yet. Nothing is half-applied in either case, and the list set can be submitted again once the step exists.
+- A list set that narrows an existing sender by tags (it takes an allow away from a sender that is already in force) cannot be applied yet: replacing that sender's credential is not part of this release. It is refused before anything is pushed, with the reason in the status, and nothing changes.
+- A list set may add addresses, but only addresses that already have an inbox. The service makes no inbox and issues no credential: the endpoint behind each address is made first, with `mashctl add` (before the account is adopted, because `add` is refused afterwards) or through the issue service. An address `range.owner.name` has its inbox when its own inbox stream and reader exist, or when the endpoint `mashctl add` made under the same owner and name has its inbox, which receives the same mail. Before anything is pushed the service checks every added address; if one has no inbox the list set is refused and the status names the address (up to three, then a count) and says it has no inbox yet and that the endpoint must be provisioned, with a credential from the issue service, first. An inbox that exists but was changed from what mail needs is refused with the setting named. Nothing is changed by the check, and the list set can be submitted again once the endpoint exists. See ADR 0122.
 - The list-set key is the only key of the bucket the outside system's credential may write; give it publish permission on `$KV.<bucket>.listset.>` and nothing else in the bucket, so that it cannot write the `status.` keys.
 - It stops cleanly on SIGINT or SIGTERM.
 
 ## Reconciling an adopted account
 
 ```
-mashctl policy reconcile [--json] [--yes] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+mashctl policy reconcile [--json] [--listset FILE] [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
+mashctl policy reconcile --yes --plan DIGEST [--range R] [--bucket NAME] [--account KEY] [--sys-creds FILE] [--servers N]
 ```
 
 Adopting an account does not change what is already in it. An account may hold user credentials issued before the first list set and signing keys that are not mash's. `policy reconcile` is the operator command that plans their removal (AT-015; [ADR 0111](decisions/0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md) records the exempt keys and the plan). Run it after the first list set is applied. It needs the admin credentials (the marker, the issue record, the ledger) and the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`; the connections of every server, and with `--listset` the account JWT the servers hold), and the declared server count when the cluster is named (`--servers N` or `MASH_SERVERS`, as `issued check`). The account must be adopted, with the exempt keys recorded.
 
-**It is a dry run.** It prints the plan, changes nothing, takes no lease and no lock. `--yes` is refused in this version: it exits 1 with exactly `mashctl: policy reconcile: no signer configured: run without --yes to see the plan` before it connects to anything. The executor exists as a library (`internal/reconcile`) and is tested with a test signer; `--yes` is wired to it when mashctl has a signer for the account JWT.
+**Without `--yes` it is a dry run.** It prints the plan, changes nothing, takes no lease and no lock. The plan ends with `plan: sha256:<hex>` (just before the status line) and, when it revokes anything and the issuer check passed, with `run again with --yes --plan sha256:<hex> to revoke`.
+
+**`--yes --plan DIGEST` executes it, one way.** `--plan` is required: without it `--yes` exits 2 with `--yes needs --plan DIGEST from a dry run`; `--listset` (a preview, never executable) and `--json` with `--yes` are usage errors (exit 2). It computes the plan, refuses when its digest is not DIGEST, takes the account lock (the lock every guarded policy change takes) and the ledger lease, computes the plan again under them and refuses again on a different digest (`the plan changed since the dry run: run it again`, nothing changed), signs the in-force account JWT with each planned key also revoked, with the key store's operator key (the production signer, `policyserve.Issuer`), pushes it to every server, gates it, commits it as the JWT in force (so the next list set keeps the revocations) and only then marks each recorded key revoked in the issue record. It prints each key (`revoked KEY: REASON`) and then `reconciled: N revoked`, and exits 0; any refusal exits 1 with nothing changed. A plan with nothing to revoke prints `reconciled: 0 revoked`. If the revocations are on every server but the issue record could not be marked, it prints what it revoked and exits 1; running it again marks nothing twice.
+
+**The digest** is `sha256:` and the SHA-256 of the plan's canonical JSON: the account, the source, the generation, each non-mash signing key and its state, each revocation's key, sender and reason, the findings, the issuer problems and the status. It leaves out every time (a revocation's `at` is the later of now and a JWT's `iat`, so it moves on every run) and the connection details (connection ids, hosts, the users a key signed): a client that reconnects does not change what is revoked. A new connected untracked user, a changed issue record, a new generation or a new finding changes it. `--json` carries it as `plan_digest`. A preview has none.
 
 **Where the list set comes from.** By default the list set in force, read from the account's ledger in the range's policy bucket: `--bucket NAME`, or `MASH_POLICY_BUCKET` as a pattern with `--range R` filling `{range}`; `--account KEY` names the account (default the key store's). It needs generation 1 or later. `--listset FILE` instead reads a list set document from a file (the signature is not checked) and previews against it, before the first apply; that plan is never executable.
 
@@ -214,7 +220,7 @@ Each revoke line names the key, the sender or the connection (the user's name, t
 - every connected user with no record, when the issue bucket cannot prove that no record was lost (it must deny deletes and purges and carry the history marker `full` or `raised:N:S`);
 - a recorded admin user that is not exempt, a revoked key still connected, and a connection scan that was incomplete (a server that did not answer).
 
-Exempt keys are in no action and no finding. A dry run that lists at least one revoke ends, before the status line, with `a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way`; `--json` then carries `"one_way": true`. The executor rebuilds the plan under the account lock and the ledger lease right before signing, refuses (`the plan changed since the dry run: run it again`) when the revocations differ from the dry run's, and keeps every revocation any server holds. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed, 1 the issuer check failed or a failure (including `--yes`), 2 usage.
+Exempt keys are in no action and no finding. A dry run that lists at least one revoke ends, before the status line, with `a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way`; `--json` then carries `"one_way": true`. The executor keeps every revocation any server holds. The last line is `reconciled: nothing to do`, `reconciled: N actions`, or, when there is any finding or signing key still present, `reconciled: partial (N unknown)`. `--json` prints the same plan as stable JSON (snake_case, sorted, slices never null). Exit codes: 0 the plan was computed (`--yes`: executed), 1 the issuer check failed or a failure (including a refused `--yes`), 2 usage.
 
 Sample, before the first apply (`--listset first.json`):
 
@@ -225,6 +231,23 @@ signing key AA5...: removed by the first apply
 revoke UCA...: connected, untracked [at 2026-11-14T19:47:31Z] connected: user "plain-lane", client "plain-client", host 127.0.0.1, server s1, cid 25
 revoke UDW... (sender foo.alice.gone): recorded, sender not in the list set [at 2026-11-14T19:47:31Z] connected: user "gone-lane", host 127.0.0.1, server s1, cid 24
 reconciled: 2 actions
+```
+
+Sample, after the first apply, the dry run and then `--yes`:
+
+```
+$ mashctl policy reconcile --bucket mash_foo_policy
+account ADZ...: list set generation 1 in force
+revoke UBM...: connected, untracked [at 2026-11-14T22:44:56Z] connected: user "legacy-lane", client "legacy-client", host 127.0.0.1, server s1, cid 24
+revoke UBV... (sender foo.alice.gone): recorded, sender not in the list set [at 2026-11-14T22:44:56Z] connected: user "gone-lane", client "gone-client", host 127.0.0.1, server s1, cid 26
+a revoked credential cannot be reissued on an adopted account in this release: --yes is one-way
+run again with --yes --plan sha256:2ab5...a70 to revoke
+plan: sha256:2ab5...a70
+reconciled: 2 actions
+$ mashctl policy reconcile --bucket mash_foo_policy --yes --plan sha256:2ab5...a70
+revoked UBM...: connected, untracked
+revoked UBV...: recorded, sender not in the list set
+reconciled: 2 revoked
 ```
 
 ## Labels

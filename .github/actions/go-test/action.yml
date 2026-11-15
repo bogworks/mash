@@ -1,0 +1,33 @@
+name: go-test
+description: The Linux test steps shared by the test jobs of ci.yml (vet, then go test -race); the caller checks out first, because a local action is read from the checkout.
+inputs:
+  forbidden-words:
+    description: The words internal to the maintainers, from the repository variable MASH_FORBIDDEN_WORDS (a composite action cannot read vars, so the calling job passes it in).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Go caches
+      shell: bash
+      run: if [ -f scripts/ci-go-caches ]; then scripts/ci-go-caches race; fi
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache: false
+    - name: Verify the module cache against go.sum
+      shell: bash
+      run: |
+        set -euo pipefail
+        go mod verify
+    - name: go vet
+      shell: bash
+      run: go vet ./...
+    # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
+    # on a slow one. A real hang still fails.
+    - name: go test
+      shell: bash
+      env:
+        # The words internal to the maintainers (data through env): the standalone source scan in cmd/mash fails on any of them.
+        MASH_FORBIDDEN_WORDS: ${{ inputs.forbidden-words }}
+      run: go test -race -timeout 20m ./...

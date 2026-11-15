@@ -490,3 +490,44 @@ func TestExecuteRefusesAPlanSeenForAnotherGenerationAccountOrSource(t *testing.T
 		t.Error("preview: something was changed")
 	}
 }
+
+// TestExecuteKeepsAnotherRangesHeldKey: an account whose JWT also carries another range's held scoped key still passes
+// the generation checks and the gate, which count that key as kept; without it declared the exact signer count fails.
+func TestExecuteKeepsAnotherRangesHeldKey(t *testing.T) {
+	f := newFirst(t)
+	_, other := acctKey(t)
+	claims, err := jwt.DecodeAccountClaims(f.jwt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = other, "bar.c"
+	claims.SigningKeys.AddScopedSigner(sc)
+	if f.jwt, err = claims.Encode(f.acct); err != nil {
+		t.Fatal(err)
+	}
+	f.ledger = policyapply.NewMemLedgerWith(f.rec, policyapply.InForceDetail{JWT: f.jwt, ListSet: &f.ls})
+	f.cluster = newCluster(f.jwt, "s1", "s2")
+	k := userKey(t)
+	p := f.plan(k)
+	in := ExecInput{Build: func(context.Context) (Plan, error) { return p, nil }, Seen: &p, Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
+		Signers: f.signers, Signer: f.signer, Marker: f.marker, Now: func() time.Time { return f.now }}
+	if _, err := Execute(context.Background(), in); err == nil {
+		t.Fatal("another range's key not declared: the exact signer count should fail")
+	}
+	in.Held = map[string]string{"foo.c": f.signers["foo.c"], "bar.c": other}
+	res, err := Execute(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Revoked) != 1 || res.Revoked[0] != k {
+		t.Errorf("revoked %v", res.Revoked)
+	}
+	got, err := jwt.DecodeAccountClaims(f.inForceJWT())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.SigningKeys.GetScope(other); !ok {
+		t.Error("the other range's key left the committed JWT")
+	}
+}

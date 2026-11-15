@@ -337,7 +337,7 @@ func converge(ctx context.Context, in GateInput, targetJWT string, signPrevious 
 	if derr != nil {
 		return failRollback(fmt.Sprintf("rollback JWT does not decode, not pushed: %v", derr))
 	}
-	if g, ok := generationOfClaims(claims, []Candidate{{Generation: in.Previous.Generation, Compiled: in.Previous.Compiled}}); !ok || g != in.Previous.Generation {
+	if g, ok := generationOfClaims(claims, []Candidate{{Generation: in.Previous.Generation, Compiled: in.Previous.Compiled, Kept: in.Previous.Kept}}); !ok || g != in.Previous.Generation {
 		return failRollback(fmt.Sprintf("rollback JWT does not carry generation %d, not pushed", in.Previous.Generation))
 	}
 	var missing []string
@@ -453,8 +453,15 @@ type RunInput struct {
 	// (see Candidate.Signers). Signers is required: Run refuses a target without it.
 	Signers         map[string]string
 	PreviousSigners map[string]string
+	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that stay in the account JWT of
+	// the target, of the previous generation and of the rollback (see Candidate.Kept).
+	KeptSigners map[string]string
 	// OldKeys are the public keys of each sender's credentials issued before this change (see GateInput.OldKeys).
 	OldKeys map[string][]OldKey
+	// OldKeysFn, if set, is called under the ledger lock, after the stale-base check and right before the gate is
+	// built, and its result is merged over OldKeys (a sender it returns replaces that sender's entry). It reads the
+	// inventory at the moment that counts: a credential recorded between a caller's early read and the lock is in it.
+	OldKeysFn func(ctx context.Context) (map[string][]OldKey, error)
 	// ServerLimits are the servers' size limits for listset.SizeCheck; nil means the defaults.
 	ServerLimits []listset.ServerLimits
 	Now          func() time.Time
@@ -652,7 +659,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 	if acc != nil {
 		*acc = Accepted{Record: rec, Compiled: frozen, Expect: expect}
 	}
-	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
+	if g, ok := GenerationOf(tok, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: expect.RevokedKeys, Signers: in.Signers, Kept: in.KeptSigners}}); !ok || g != rec.Generation {
 		return Status{}, fmt.Errorf("%w: the account JWT does not carry generation %d", ErrSignedMismatch, rec.Generation)
 	}
 	// A retry of the pending content keeps every revocation the earlier attempt pushed, as well as those in force.
@@ -705,13 +712,25 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		return in.Ledger.SetPending(rec)
 	}
 
+	oldKeysNow := in.OldKeys
+	if in.OldKeysFn != nil {
+		fresh, err := in.OldKeysFn(ctx)
+		if err != nil {
+			return Status{}, err // nothing was pushed
+		}
+		oldKeysNow = maps.Clone(in.OldKeys)
+		if oldKeysNow == nil {
+			oldKeysNow = map[string][]OldKey{}
+		}
+		maps.Copy(oldKeysNow, fresh)
+	}
 	gi := GateInput{
 		Cluster: in.Cluster, Prober: in.Prober, Witnesses: in.Witnesses, Account: in.Account, Inventory: in.Inventory,
-		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, TargetJWT: tok, OldKeys: in.OldKeys, Now: in.Now,
+		Record: rec, Compiled: frozen, Expect: expect, Signers: in.Signers, KeptSigners: in.KeptSigners, TargetJWT: tok, OldKeys: oldKeysNow, Now: in.Now,
 		PreviousJWT: prevJWT,
 	}
 	if in.Previous != nil {
-		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked, Signers: in.PreviousSigners}
+		gi.Previous = &Candidate{Generation: base.Generation, Compiled: in.Previous, RevokedKeys: in.PreviousRevoked, Signers: in.PreviousSigners, Kept: in.KeptSigners}
 	}
 	if in.OnStatus != nil {
 		in.OnStatus(newStatus(rec, StateApplying, in.Now))
@@ -738,7 +757,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		// copy, the caller's map is not changed).
 		var all []string
 		oldKeys := map[string][]OldKey{}
-		for addr, keys := range in.OldKeys {
+		for addr, keys := range oldKeysNow {
 			oldKeys[addr] = slices.Clone(keys)
 		}
 		for addr, keys := range revoked {
@@ -791,7 +810,7 @@ func runLocked(ctx context.Context, in RunInput, acc *Accepted) (Status, error) 
 		if finalJWT != "" {
 			// The servers hold finalJWT, not tok: it is what is stored at commit, what a later rollback builds on and
 			// what Converge pushes again. It must still be the target and carry every revocation.
-			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers}}); !ok || g != rec.Generation {
+			if g, ok := GenerationOf(finalJWT, []Candidate{{Generation: rec.Generation, Compiled: frozen, RevokedKeys: gi.Expect.RevokedKeys, Signers: in.Signers, Kept: in.KeptSigners}}); !ok || g != rec.Generation {
 				perr := setPending(tok)
 				return Status{}, errors.Join(fmt.Errorf("%w: the account JWT after the revocations does not carry generation %d with every revoked key", ErrSignedMismatch, rec.Generation), perr)
 			}

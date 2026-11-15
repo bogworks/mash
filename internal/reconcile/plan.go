@@ -13,6 +13,9 @@ package reconcile
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -138,6 +141,52 @@ type Plan struct {
 	Unknown int `json:"unknown"`
 	// Status is the last line of the text form: reconciled: nothing to do, N actions, or partial (N unknown).
 	Status string `json:"status"`
+	// PlanDigest is Digest() of a plan against the list set in force ("" for a preview, which is never executed). It is
+	// what `--yes --plan` names.
+	PlanDigest string `json:"plan_digest,omitempty"`
+}
+
+// Digest is "sha256:" and the hex SHA-256 of the plan's canonical JSON, which `--yes --plan` must name. The canonical
+// form is the plan's decision and nothing that moves between two runs of the same state: the account, source and
+// generation; each non-mash signing key with its state; each revocation's key, sender and reason; the findings; the
+// issuer problems; and the status. It leaves out every time (a revocation's `at` is the later of now and a JWT's iat, so
+// it differs on every run) and the connection details (connection ids, hosts, which users a key signed): a client that
+// reconnects does not change what is revoked. The slices are already sorted, so the same state gives the same digest.
+func (p Plan) Digest() string {
+	type revocation struct {
+		Key     string `json:"key"`
+		Address string `json:"address"`
+		Reason  string `json:"reason"`
+	}
+	type signingKey struct {
+		Key   string `json:"key"`
+		State string `json:"state"`
+	}
+	c := struct {
+		Account        string                `json:"account"`
+		Source         Source                `json:"source"`
+		Generation     uint64                `json:"generation"`
+		SigningKeys    []signingKey          `json:"signing_keys"`
+		Revocations    []revocation          `json:"revocations"`
+		Findings       []Finding             `json:"findings"`
+		IssuerProblems []admin.IssuerProblem `json:"issuer_problems"`
+		Status         string                `json:"status"`
+	}{p.Account, p.Source, p.Generation, []signingKey{}, []revocation{}, p.Findings, p.IssuerProblems, p.Status}
+	for _, k := range p.SigningKeys {
+		c.SigningKeys = append(c.SigningKeys, signingKey{k.Key, k.State})
+	}
+	for _, r := range p.Revocations {
+		c.Revocations = append(c.Revocations, revocation{r.Key, r.Address, r.Reason})
+	}
+	if c.Findings == nil {
+		c.Findings = []Finding{}
+	}
+	if c.IssuerProblems == nil {
+		c.IssuerProblems = []admin.IssuerProblem{}
+	}
+	b, _ := json.Marshal(c) // fixed struct of strings and numbers: cannot fail
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // IssuerErr is nil when the admin user and every connected exempt user keep their issuer (admin.CheckIssuersKept).
@@ -164,29 +213,48 @@ func ExpectedSigners(groups []string, held map[string]string) (map[string]string
 	return out, nil
 }
 
-// KeptSigners is the account JWT's signing keys that are mash's and stay: every scoped key (*jwt.UserScope) whose
-// public key is one the key store holds for an owner group of any range (held, from GroupPublics), plus the list
-// set's expected signers. A key of another range is mash's too and the apply leaves it as it is. Every other signing
-// key, a scoped key the key store does not hold included, is non-mash.
-func KeptSigners(claims *jwt.AccountClaims, held, signers map[string]string) map[string]bool {
-	heldPub := map[string]bool{}
-	for _, pub := range held {
-		heldPub[pub] = true
+// OtherRangesKept is the scoped signing keys of the account JWT that stay beside the target's: every scoped key
+// (*jwt.UserScope) the key store holds (held, from GroupPublics) for an owner group of ANOTHER range (a group that is not
+// rng's: "rng.<name>"), group to public key. It is how policyserve.Issuer keeps them. A key of this range's is
+// rebuilt from the list set, so one the list set no longer names is not in it. rng is the list set's range.
+func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng string) (map[string]string, error) {
+	if rng == "" {
+		return nil, errors.New("no range: cannot tell this range's signing keys from another range's (the list set names none)")
+	}
+	out := map[string]string{}
+	if claims == nil {
+		return out, nil
+	}
+	for g, pub := range held {
+		if strings.HasPrefix(g, rng+".") {
+			continue
+		}
+		if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil {
+			if us, ok := sc.(*jwt.UserScope); ok && us != nil {
+				out[g] = pub
+			}
+		}
+	}
+	return out, nil
+}
+
+// KeptSigners is the account JWT's signing keys that are mash's and stay once the list set is applied, as
+// policyserve.Issuer.Sign keeps them: the list set's expected signers (the target's group keys) and the scoped keys the
+// key store holds for another range's owner groups (OtherRangesKept). A key of this range's that the list set no longer
+// names goes, so it is not kept. Every other signing key, a scoped key the key store does not hold included, is non-mash.
+func KeptSigners(claims *jwt.AccountClaims, held, signers map[string]string, rng string) (map[string]bool, error) {
+	other, err := OtherRangesKept(claims, held, rng)
+	if err != nil {
+		return nil, err
 	}
 	kept := map[string]bool{}
 	for _, k := range signers {
 		kept[k] = true
 	}
-	if claims != nil {
-		for k := range claims.SigningKeys {
-			if sc, _ := claims.SigningKeys.GetScope(k); sc != nil {
-				if us, ok := sc.(*jwt.UserScope); ok && us != nil && heldPub[k] {
-					kept[k] = true
-				}
-			}
-		}
+	for _, k := range other {
+		kept[k] = true
 	}
-	return kept
+	return kept, nil
 }
 
 // Groups is the owner groups of the list set's compiled templates, sorted.
@@ -237,7 +305,10 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	for _, k := range in.Signers {
 		scoped[k] = true
 	}
-	kept := KeptSigners(in.Claims, in.Held, in.Signers)
+	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Range)
+	if err != nil {
+		return Plan{}, err
+	}
 	adminUnrecorded := false
 	exempt := map[string]bool{}
 	for _, k := range in.Exempt {
@@ -426,6 +497,9 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 		p.Status = fmt.Sprintf("reconciled: %d actions", p.Actions)
 	default:
 		p.Status = "reconciled: nothing to do"
+	}
+	if p.Source == SourceInForce {
+		p.PlanDigest = p.Digest()
 	}
 	return p, nil
 }
