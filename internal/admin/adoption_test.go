@@ -456,7 +456,7 @@ func policyBucketSubjects(bucket string) []string {
 const kvAccountForTest = "ACCOUNTKEY"
 
 // No permission list mash gives an endpoint grants anything on the policy bucket, whether it has the default name or one
-// a {range} pattern gives.
+// the setting gives.
 func TestEndpointPermissionsGrantNothingOnPolicyBucket(t *testing.T) {
 	id, err := sap.New("claude", "o", "a")
 	if err != nil {
@@ -471,11 +471,11 @@ func TestEndpointPermissionsGrantNothingOnPolicyBucket(t *testing.T) {
 		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
 		"NewForm":       nf,
 	}
-	expanded, err := policyapply.PolicyBucket("mgr_{range}_policy", "foo")
+	expanded, err := policyapply.PolicyBucket("mgr_foo_policy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if def, err := policyapply.PolicyBucket("", ""); err != nil || def != policyapply.DefaultPolicyBucket {
+	if def, err := policyapply.PolicyBucket(""); err != nil || def != policyapply.DefaultPolicyBucket {
 		t.Fatalf("default bucket = %q, %v", def, err)
 	}
 	for _, bucket := range []string{policyapply.DefaultPolicyBucket, expanded} {

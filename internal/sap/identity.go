@@ -168,7 +168,7 @@ func (id EndpointIdentity) Subjects() Subjects {
 // wildcarded. The legacy wildcard also matches a new-form subject that has the
 // same owner and name under any other agent token, so while both forms exist a
 // caller must keep a new-form owner token from equalling a legacy owner (the
-// range-level name rule); this type does not know the other identities.
+// account-level name rule); this type does not know the other identities.
 func (id EndpointIdentity) MailFilter() string {
 	if id.legacy {
 		return MailFilter(id.Owner, id.Name)

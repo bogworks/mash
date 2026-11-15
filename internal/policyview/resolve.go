@@ -11,7 +11,7 @@ import (
 )
 
 // DirectoryResolver returns a ResolveAddress that reads mash's directory records: a record's user is the endpoint's
-// user public key, and its address is the three-part agent.owner.name of its identity (the range is the agent token).
+// user public key, and its address is the three-part agent.owner.name of its identity.
 // A legacy record has no three-part address and resolves to none. The key-to-address map is read from kv and kept for
 // ttl (zero means ten seconds), so a burst of requests reads the directory once.
 func DirectoryResolver(kv jetstream.KeyValue, ttl time.Duration) func(ctx context.Context, userPub string) (string, bool, error) {

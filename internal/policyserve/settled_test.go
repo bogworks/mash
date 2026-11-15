@@ -13,7 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/policyapply"
 )
 
-const settledGroup = "foo.c"
+const settledGroup = "c"
 
 // settledJWT is the account JWT of a server that holds the scoped templates of c, with the keys revoked at the times
 // given.
@@ -44,9 +44,9 @@ func settledJWT(t *testing.T, acct nkeys.KeyPair, groupPub string, c *listset.Co
 // server of the declared count was read and holds the target templates and, for a removed sender, the revocation of every
 // key the record has for it.
 func TestSettledSenders(t *testing.T) {
-	lead := listset.SenderLists{Sender: "foo.c.lead"}
-	sdk := listset.SenderLists{Sender: "foo.c.sdk"}
-	core := listset.SenderLists{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}}
+	lead := listset.SenderLists{Sender: "c.lead"}
+	sdk := listset.SenderLists{Sender: "c.sdk"}
+	core := listset.SenderLists{Sender: "c.core", Allow: []string{"c.lead"}}
 	prev := witnessSetWith(t, []listset.Verb{listset.Status}, core, lead, sdk)
 	target := witnessSet(t, core, lead)
 	ex, err := policyapply.NewExpect(prev, target, nil)
@@ -60,10 +60,10 @@ func TestSettledSenders(t *testing.T) {
 	signers := map[string]string{settledGroup: gpub}
 	issued := time.Now().Add(-time.Hour).Truncate(time.Second)
 	keyA, keyB := "UAKEYA", "UAKEYB"
-	record := map[string][]policyapply.IssueEntry{"foo.c.sdk": {
-		{Address: "foo.c.sdk", PublicKey: keyA, Purpose: policyapply.PurposeIssue, IssuedAt: issued},
-		{Address: "foo.c.sdk", PublicKey: keyB, Purpose: policyapply.PurposeRotation, IssuedAt: issued},
-		{Address: "foo.c.sdk", PublicKey: "UAPROBE", Purpose: policyapply.PurposeProbe, IssuedAt: issued},
+	record := map[string][]policyapply.IssueEntry{"c.sdk": {
+		{Address: "c.sdk", PublicKey: keyA, Purpose: policyapply.PurposeIssue, IssuedAt: issued},
+		{Address: "c.sdk", PublicKey: keyB, Purpose: policyapply.PurposeRotation, IssuedAt: issued},
+		{Address: "c.sdk", PublicKey: "UAPROBE", Purpose: policyapply.PurposeProbe, IssuedAt: issued},
 	}}
 	entries := func(a string) ([]policyapply.IssueEntry, error) { return record[a], nil }
 	after := issued.Add(time.Minute).Unix()
@@ -71,7 +71,7 @@ func TestSettledSenders(t *testing.T) {
 	onTarget := settledJWT(t, acct, gpub, target, both)
 	onPrev := settledJWT(t, acct, gpub, prev, both)
 
-	all := []string{"foo.c.core", "foo.c.lead", "foo.c.sdk"}
+	all := []string{"c.core", "c.lead", "c.sdk"}
 	cases := []struct {
 		name      string
 		jwts      map[string]string
@@ -86,17 +86,17 @@ func TestSettledSenders(t *testing.T) {
 		{"a server's JWT does not decode", map[string]string{"a": onTarget, "b": "garbage"}, 2, entries, all},
 		{"no server answered", map[string]string{}, 1, entries, all},
 		{"the record cannot be read", map[string]string{"a": onTarget}, 1,
-			func(string) ([]policyapply.IssueEntry, error) { return nil, errors.New("no record") }, []string{"foo.c.sdk"}},
+			func(string) ([]policyapply.IssueEntry, error) { return nil, errors.New("no record") }, []string{"c.sdk"}},
 		{"a revocation is earlier than the credential", map[string]string{"a": onTarget, "b": settledJWT(t, acct, gpub, target,
-			map[string]int64{keyA: after, keyB: issued.Unix() - 5})}, 2, entries, []string{"foo.c.sdk"}},
+			map[string]int64{keyA: after, keyB: issued.Unix() - 5})}, 2, entries, []string{"c.sdk"}},
 		{"a key is not revoked on one server", map[string]string{"a": onTarget, "b": settledJWT(t, acct, gpub, target,
-			map[string]int64{keyA: after})}, 2, entries, []string{"foo.c.sdk"}},
+			map[string]int64{keyA: after})}, 2, entries, []string{"c.sdk"}},
 		{"the removed sender has no key in the record", map[string]string{"a": onTarget}, 1,
-			func(string) ([]policyapply.IssueEntry, error) { return nil, nil }, []string{"foo.c.sdk"}},
+			func(string) ([]policyapply.IssueEntry, error) { return nil, nil }, []string{"c.sdk"}},
 		{"a key with no issue time", map[string]string{"a": onTarget}, 1,
 			func(string) ([]policyapply.IssueEntry, error) {
 				return []policyapply.IssueEntry{{PublicKey: keyA, Purpose: policyapply.PurposeIssue}}, nil
-			}, []string{"foo.c.sdk"}},
+			}, []string{"c.sdk"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -112,13 +112,13 @@ func TestSettledSenders(t *testing.T) {
 
 // With nothing read the zero state settles nothing and every affected sender keeps its witness, as on a first run.
 func TestSettledSendersWithoutServerStateSettlesNothing(t *testing.T) {
-	core := listset.SenderLists{Sender: "foo.c.core"}
-	sdk := listset.SenderLists{Sender: "foo.c.sdk"}
+	core := listset.SenderLists{Sender: "c.core"}
+	sdk := listset.SenderLists{Sender: "c.sdk"}
 	prev, target := witnessSetWith(t, []listset.Verb{listset.Mail}, core, sdk), witnessSet(t, core)
 	ex, _ := policyapply.NewExpect(prev, target, nil)
 	got := sendersOf(witnessSenders(prev, target, ex, settledState{}))
 	slices.Sort(got)
-	if want := []string{"foo.c.core", "foo.c.sdk"}; !slices.Equal(got, want) {
+	if want := []string{"c.core", "c.sdk"}; !slices.Equal(got, want) {
 		t.Errorf("witnesses for %v, want %v", got, want)
 	}
 }

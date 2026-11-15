@@ -7,8 +7,9 @@ import (
 )
 
 // AT-007 as the contract states it (draft-2) is '100 exceptions at 14-character names accepted; 59 at 32-character
-// names'; those two numbers do NOT hold at the 4096 default connect line (measured: 83 at 14 characters and 50 at 32,
-// owner part 4); the maintainer rules on the contract's numbers; this test pins the measured ones.
+// names'; those two numbers do NOT hold at the 4096 default connect line (measured: 81 at 14 characters and 48 at 32,
+// owner part 4, with the issuer's endpoint tag measured at a 32-character agent token, ADR 0132; before the
+// endpoint tag: 83 and 50); the maintainer rules on the contract's numbers; this test pins the measured ones.
 
 const exceptionCountsChanged = "the documented exception counts changed: report to the maintainer"
 
@@ -28,14 +29,13 @@ func ownerPart(first string, p int) string {
 // exceptionSet builds a sender with n allow entries, all four verbs Closed, no deny entries. Names are l characters
 // and owner parts p characters; the receivers sit in another owner group, which has a second sender for its template.
 func exceptionSet(n, p, l int) (ListSet, string) {
-	ga, gb := "foo."+ownerPart("a", p), "foo."+ownerPart("b", p)
+	ga, gb := ownerPart("a", p), ownerPart("b", p)
 	sender := ga + "." + padName("s0", l)
 	allow := make([]string, n)
 	for i := range allow {
 		allow[i] = gb + "." + padName(fmt.Sprintf("r%d", i), l)
 	}
 	return ListSet{
-		Range:    "foo",
 		Switches: concat(switches(ga, Closed, Closed, Closed, Closed), switches(gb, Closed, Closed, Closed, Closed)),
 		Senders: []SenderLists{
 			{Sender: sender, Allow: allow},
@@ -82,8 +82,8 @@ func TestAT007DocumentedExceptionLimit(t *testing.T) {
 	pinned := []struct {
 		l, n, jwtN, lineN, jwtOver, lineOver int
 	}{
-		{l: 14, n: 83, jwtN: 3728, lineN: 4074, jwtOver: 3765, lineOver: 4111},
-		{l: 32, n: 50, jwtN: 3720, lineN: 4066, jwtOver: 3781, lineOver: 4127},
+		{l: 14, n: 81, jwtN: 3730, lineN: 4076, jwtOver: 3768, lineOver: 4114},
+		{l: 32, n: 48, jwtN: 3698, lineN: 4044, jwtOver: 3760, lineOver: 4106},
 	}
 	for _, pc := range pinned {
 		t.Run(fmt.Sprintf("P=4 L=%d", pc.l), func(t *testing.T) {
@@ -109,15 +109,15 @@ func TestAT007DocumentedExceptionLimit(t *testing.T) {
 		})
 	}
 
-	t.Run("verbatim refusal at 84 exceptions, 14-character names", func(t *testing.T) {
-		ps, _ := measureExceptions(t, 84, 4, 14)
+	t.Run("verbatim refusal at 82 exceptions, 14-character names", func(t *testing.T) {
+		ps, _ := measureExceptions(t, 82, 4, 14)
 		if len(ps) != 1 {
 			t.Fatalf("problems = %v, want one; %s", ps, exceptionCountsChanged)
 		}
-		if want := `sender foo.aooo.s0xxxxxxxxxxxx, server "default"`; ps[0].Entry != want {
+		if want := `sender aooo.s0xxxxxxxxxxxx, server "default"`; ps[0].Entry != want {
 			t.Errorf("entry = %q, want %q", ps[0].Entry, want)
 		}
-		const want = `its connect line would be 4111 bytes (user JWT 3765 bytes with 84 tags, plus 346 bytes of connect options), over the 4096 byte limit of server "default": fewer exceptions for that sender, or a shared verb instead of a long list`
+		const want = `its connect line would be 4114 bytes (user JWT 3768 bytes with 82 tags, plus 346 bytes of connect options), over the 4096 byte limit of server "default": fewer exceptions for that sender, or a shared verb instead of a long list`
 		if ps[0].Reason != want {
 			t.Errorf("reason = %q\nwant     %q\n%s", ps[0].Reason, want, exceptionCountsChanged)
 		}
@@ -129,10 +129,10 @@ func TestAT007DocumentedExceptionLimit(t *testing.T) {
 		p    int
 		maxN [3]int
 	}{
-		{4, [3]int{111, 83, 50}},
-		{8, [3]int{93, 73, 46}},
-		{14, [3]int{75, 61, 41}},
-		{24, [3]int{57, 48, 35}},
+		{4, [3]int{109, 81, 48}},
+		{8, [3]int{91, 71, 44}},
+		{14, [3]int{73, 59, 39}},
+		{24, [3]int{55, 47, 33}},
 	}
 	for _, row := range table {
 		for i, l := range []int{7, 14, 32} {

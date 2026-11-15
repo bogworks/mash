@@ -33,7 +33,7 @@ var _ IssuedAdmin = (*admin.Admin)(nil)
 // bucket) through the admin connection that issues users.
 //
 // Mapping. An entry's Address, PublicKey, Tags, Generation and Purpose are stored as they are, its Kind is
-// store.IssuedEndpoint and its Owner is the owner part of the address (the middle part of a three-part address, else
+// store.IssuedEndpoint and its Owner is the owner part of the address (the first part of an owner.name address, the middle part of a three-part address, else
 // empty, which the admin fills with its own owner). IssuedAt is stored as RFC 3339 in UTC. Expires is NOT stored:
 // the record has no expiry, so a probe's expiry lives in its JWT only and entries read back with a zero Expires.
 //
@@ -186,9 +186,12 @@ func entryOf(s store.Issued) (IssueEntry, error) {
 	return e, nil
 }
 
-// ownerOf is the owner part of a three-part address (agent.owner.name), or "" for any other.
+// ownerOf is the owner part of an owner.name address or of a three-part address (agent.owner.name), or "" for any other.
 func ownerOf(address string) string {
 	p := strings.Split(address, ".")
+	if len(p) == 2 {
+		return p[0]
+	}
 	if len(p) == 3 {
 		return p[1]
 	}

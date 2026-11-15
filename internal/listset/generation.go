@@ -161,16 +161,15 @@ func accept(inForce Record, ls ListSet, received []byte, rotationStep bool) (Rec
 //
 // Encoding (every string is its length as a uvarint, then its bytes; every count is a uvarint):
 //
-//	"mash.listset.v1\x00" | Base as 8 bytes big-endian | Range
+//	"mash.listset.v2\x00" | Base as 8 bytes big-endian
 //	| count of switches | switches sorted by their encoding, each Group Verb Switch
 //	| count of senders  | senders sorted by their encoding, each Sender
 //	                        | count of allow | allow sorted | count of deny | deny sorted
 //
 // It gives Record.Content. Record.Received is a separate digest of the received bytes.
 func DigestListSet(ls ListSet) Digest {
-	e := newEnc("mash.listset.v1\x00")
+	e := newEnc("mash.listset.v2\x00")
 	e.u64(ls.Base)
-	e.str(ls.Range)
 
 	sw := make([]string, len(ls.Switches))
 	for i, s := range ls.Switches {
@@ -191,7 +190,7 @@ func DigestListSet(ls ListSet) Digest {
 //
 // Encoding (strings and counts as in DigestListSet):
 //
-//	"mash.compiled.v1\x00" | Range
+//	"mash.compiled.v2\x00"
 //	| count of templates | templates sorted by their encoding, each Group
 //	    | pub allow sorted | pub deny sorted | sub allow sorted | sub deny sorted
 //	    | response permission: 0, or 1 then MaxMsgs and Expires as 8 bytes big-endian
@@ -202,12 +201,10 @@ func DigestListSet(ls ListSet) Digest {
 // change the digest. User permission claims are covered too; a user with none adds nothing, so the digest of a
 // Compiled without them is unchanged.
 func DigestCompiled(c *Compiled) Digest {
-	e := newEnc("mash.compiled.v1\x00")
+	e := newEnc("mash.compiled.v2\x00")
 	if c == nil {
 		c = &Compiled{}
 	}
-	e.str(c.Range)
-
 	ts := make([]string, len(c.Templates))
 	for i, t := range c.Templates {
 		s := enc1(t.Group) +

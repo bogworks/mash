@@ -3,9 +3,12 @@ package listset
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // Size limits (REQ-007, REQ-008). They mirror internal/policy/budget.go, which this package does not import.
@@ -83,7 +86,7 @@ func SizeCheck(c *Compiled, servers []ServerLimits) []Problem {
 		}
 		if limit := s.accountJWT(); accountSize > limit {
 			ps = append(ps, Problem{
-				fmt.Sprintf("account %s, server %s", quote(c.Range), quote(s.Server)),
+				fmt.Sprintf("account, server %s", quote(s.Server)),
 				fmt.Sprintf("the account JWT with %d scoped signing keys would be %d bytes, over the %d byte limit of server %s",
 					len(c.Templates), accountSize, limit, quote(s.Server)),
 			})
@@ -155,6 +158,8 @@ func measure(c *Compiled) (map[string]int, int, error) {
 		uc.IssuerAccount = apub
 		uc.UserPermissionLimits = jwt.UserPermissionLimits{}
 		uc.Tags.Add(u.Tags...)
+		// The issuer adds the endpoint tag to every credential; measure it with the longest agent token.
+		uc.Tags.Add(EndpointTagName + ":" + strings.Repeat("a", sap.MaxTokenLen) + "_" + a.owner + "_" + a.name)
 		tok, err := uc.Encode(kp)
 		if err != nil {
 			return nil, 0, err

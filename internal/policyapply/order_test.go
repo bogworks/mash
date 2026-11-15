@@ -13,25 +13,23 @@ import (
 	"github.com/bogworks/mash/internal/listset"
 )
 
-// at014Prev is the previous generation of AT-014: mail is shared in foo.c, with two senders.
+// at014Prev is the previous generation of AT-014: mail is shared in c, with two senders.
 func at014Prev() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
-		Senders:  []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}},
+		Switches: switches("c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
+		Senders:  []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}},
 	}
 }
 
-// at014Target adds foo.c.new, which core must not reach, and newly denies the existing foo.c.docs to core.
+// at014Target adds c.new, which core must not reach, and newly denies the existing c.docs to core.
 func at014Target() listset.ListSet {
 	return listset.ListSet{
 		Base:     1,
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
+		Switches: switches("c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
-			{Sender: "foo.c.core", Deny: []string{"foo.c.docs", "foo.c.new"}},
-			{Sender: "foo.c.docs"},
-			{Sender: "foo.c.new"},
+			{Sender: "c.core", Deny: []string{"c.docs", "c.new"}},
+			{Sender: "c.docs"},
+			{Sender: "c.new"},
 		},
 	}
 }
@@ -42,10 +40,10 @@ func TestNewOrderAT014(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The previous owner line is shared, so it would have reached foo.c.new: Expect must hold core's removed reach.
+	// The previous owner line is shared, so it would have reached c.new: Expect must hold core's removed reach.
 	found := false
 	for _, r := range append(append([]RemovedReach{}, e.Removed...), e.CredentialOnly...) {
-		if r.Sender == "foo.c.core" && r.Receiver == "foo.c.new" && r.Verb == listset.Mail {
+		if r.Sender == "c.core" && r.Receiver == "c.new" && r.Verb == listset.Mail {
 			found = true
 		}
 	}
@@ -58,11 +56,11 @@ func TestNewOrderAT014(t *testing.T) {
 		t.Errorf("removed = %+v credential only = %+v", e.Removed, e.CredentialOnly)
 	}
 	o := NewOrder(c1, c2, e)
-	wantNew := []NewAddress{{Address: "foo.c.new", MustRefuse: []string{"foo.c.core"}}}
+	wantNew := []NewAddress{{Address: "c.new", MustRefuse: []string{"c.core"}}}
 	if !reflect.DeepEqual(o.NewAddresses, wantNew) {
 		t.Errorf("new addresses = %+v", o.NewAddresses)
 	}
-	wantDenied := []Denial{{Sender: "foo.c.core", Receiver: "foo.c.docs"}}
+	wantDenied := []Denial{{Sender: "c.core", Receiver: "c.docs"}}
 	if !reflect.DeepEqual(o.NewlyDenied, wantDenied) {
 		t.Errorf("newly denied = %+v", o.NewlyDenied)
 	}
@@ -71,14 +69,14 @@ func TestNewOrderAT014(t *testing.T) {
 func TestNewOrderNoRefuser(t *testing.T) {
 	c1 := compile(t, at014Prev())
 	ls := at014Target()
-	ls.Senders = []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}, {Sender: "foo.c.new"}}
+	ls.Senders = []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}, {Sender: "c.new"}}
 	c2 := compile(t, ls)
 	e, err := NewExpect(c1, c2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o := NewOrder(c1, c2, e)
-	want := []NewAddress{{Address: "foo.c.new", MustRefuse: []string{}}}
+	want := []NewAddress{{Address: "c.new", MustRefuse: []string{}}}
 	if !reflect.DeepEqual(o.NewAddresses, want) || len(o.NewlyDenied) != 0 {
 		t.Errorf("order = %+v", o)
 	}
@@ -92,31 +90,31 @@ func gen(g uint64) *uint64 { return &g }
 
 func TestSenderPassed(t *testing.T) {
 	ok := Status{Generation: 2, Servers: []ServerGeneration{{"s1", gen(2)}, {"s2", gen(2)}}}
-	if !SenderPassed(ok, "foo.c.core") {
+	if !SenderPassed(ok, "c.core") {
 		t.Error("clean status must pass")
 	}
-	if SenderPassed(Status{Generation: 2}, "foo.c.core") {
+	if SenderPassed(Status{Generation: 2}, "c.core") {
 		t.Error("no servers must not pass")
 	}
 	behind := Status{Generation: 2, Servers: []ServerGeneration{{"s1", gen(2)}, {"s2", gen(1)}}}
-	if SenderPassed(behind, "foo.c.core") {
+	if SenderPassed(behind, "c.core") {
 		t.Error("a server on another generation must not pass")
 	}
 	unknown := Status{Generation: 2, Servers: []ServerGeneration{{"s1", gen(2)}, {"s2", nil}}}
-	if SenderPassed(unknown, "foo.c.core") {
+	if SenderPassed(unknown, "c.core") {
 		t.Error("an unknown generation must not pass")
 	}
 	own := ok
-	own.Failing = []Failure{{Server: "s1", Sender: "foo.c.core", Check: CheckRefused}}
-	if SenderPassed(own, "foo.c.core") || !SenderPassed(own, "foo.c.docs") {
+	own.Failing = []Failure{{Server: "s1", Sender: "c.core", Check: CheckRefused}}
+	if SenderPassed(own, "c.core") || !SenderPassed(own, "c.docs") {
 		t.Error("a sender-specific failure counts against that sender only")
 	}
 	wide := ok
 	wide.Failing = []Failure{{Server: "s2", Check: CheckRevoked}}
-	if SenderPassed(wide, "foo.c.core") || SenderPassed(wide, "foo.c.docs") {
+	if SenderPassed(wide, "c.core") || SenderPassed(wide, "c.docs") {
 		t.Error("a server-wide failure counts against every sender")
 	}
-	if !Applied(own, Denial{Sender: "foo.c.docs", Receiver: "foo.c.core"}) || Applied(own, Denial{Sender: "foo.c.core", Receiver: "foo.c.docs"}) {
+	if !Applied(own, Denial{Sender: "c.docs", Receiver: "c.core"}) || Applied(own, Denial{Sender: "c.core", Receiver: "c.docs"}) {
 		t.Error("Applied follows the sender's gate")
 	}
 }
@@ -250,11 +248,11 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 	w.prov = &recProv{ev: w.ev}
 	w.cl = cl
 	w.in = RunInput{
-		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "foo.c.core", "foo.c.docs"),
+		Cluster: evCluster{cl, w.ev}, Prober: evProber{prober, w.ev}, Witnesses: witnessesFor(servers, "c.core", "c.docs"),
 		Ledger: WithProvisionMarkers(evLedger{w.ledger, w.ev}, NewMemProvisionMarkers()), Account: w.k.acctPub, ListSet: target, Received: []byte("x"),
 		Previous: w.c1, Now: fixedNow, RevokedKeys: []string{w.k.revoked},
 		Signers: w.k.signers, PreviousSigners: w.k.signers,
-		OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked}}, "foo.c.docs": {}},
+		OldKeys: map[string][]OldKey{"c.core": {{PublicKey: w.k.revoked}}, "c.docs": {}},
 		Signer: SignerFuncs{
 			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return w.k.build(t, w.c1, revoked...), nil },
 			SignFn:         func(_ listset.Record, c *listset.Compiled) (string, error) { return w.k.build(t, c, w.k.revoked), nil },
@@ -265,7 +263,7 @@ func newWorld14For(t *testing.T, target listset.ListSet) *world14 {
 
 func TestRunOrderedHoldsUntilGatePasses(t *testing.T) {
 	w := newWorld14(t)
-	w.in.Prober = senderWrong{Prober: w.in.Prober, sender: "foo.c.core"}
+	w.in.Prober = senderWrong{Prober: w.in.Prober, sender: "c.core"}
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err != nil {
 		t.Fatal(err)
@@ -278,14 +276,14 @@ func TestRunOrderedHoldsUntilGatePasses(t *testing.T) {
 			t.Errorf("provisioned or committed although the gate failed for core: %v", w.ev.get())
 		}
 	}
-	want := []HeldAddress{{Address: "foo.c.new", Reason: HeldSendersNotPassed, Blocking: []string{"foo.c.core"}}}
+	want := []HeldAddress{{Address: "c.new", Reason: HeldSendersNotPassed, Blocking: []string{"c.core"}}}
 	if !reflect.DeepEqual(os.Held, want) || len(os.Provisioned) != 0 {
 		t.Errorf("held = %+v provisioned = %v", os.Held, os.Provisioned)
 	}
-	if Applied(os.Status, Denial{Sender: "foo.c.core", Receiver: "foo.c.docs"}) {
+	if Applied(os.Status, Denial{Sender: "c.core", Receiver: "c.docs"}) {
 		t.Error("the denial of docs to core is applied although core's gate failed")
 	}
-	if !Applied(os.Status, Denial{Sender: "foo.c.docs", Receiver: "foo.c.core"}) {
+	if !Applied(os.Status, Denial{Sender: "c.docs", Receiver: "c.core"}) {
 		t.Error("docs passed its own gate")
 	}
 }
@@ -298,13 +296,13 @@ func TestRunOrderedProvisionsBeforeCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if os.Status.State != StateApplied || !Applied(os.Status, Denial{Sender: "foo.c.core", Receiver: "foo.c.docs"}) {
+	if os.Status.State != StateApplied || !Applied(os.Status, Denial{Sender: "c.core", Receiver: "c.docs"}) {
 		t.Fatalf("status = %+v", os.Status)
 	}
-	if got, want := w.ev.get(), []string{"push", "gate", "create:foo.c.new", "issue:foo.c.new", "commit"}; !reflect.DeepEqual(got, want) {
+	if got, want := w.ev.get(), []string{"push", "gate", "create:c.new", "issue:c.new", "commit"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("events = %v, want %v", got, want)
 	}
-	if !reflect.DeepEqual(os.Provisioned, []string{"foo.c.new"}) || len(os.Held) != 0 || len(os.Errors) != 0 {
+	if !reflect.DeepEqual(os.Provisioned, []string{"c.new"}) || len(os.Held) != 0 || len(os.Errors) != 0 {
 		t.Errorf("ordered status = %+v", os)
 	}
 	if rec, _ := w.ledger.InForce(); rec.Generation != 2 {
@@ -322,30 +320,30 @@ func TestRunOrderedHasNoOrderInput(t *testing.T) {
 	if _, err := RunOrdered(context.Background(), w.in, w.prov); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(w.prov.seen, map[string]bool{"foo.c.new": true}) {
-		t.Errorf("provisioned %v: only foo.c.new is in the accepted list set", w.prov.seen)
+	if !reflect.DeepEqual(w.prov.seen, map[string]bool{"c.new": true}) {
+		t.Errorf("provisioned %v: only c.new is in the accepted list set", w.prov.seen)
 	}
 	// A failed gate for the sender that must refuse the address holds it: no caller input can empty MustRefuse.
 	w = newWorld14(t)
-	w.in.Prober = senderWrong{Prober: w.in.Prober, sender: "foo.c.core"}
+	w.in.Prober = senderWrong{Prober: w.in.Prober, sender: "c.core"}
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
-	if err != nil || len(w.prov.seen) != 0 || len(os.Held) != 1 || os.Held[0].Address != "foo.c.new" {
+	if err != nil || len(w.prov.seen) != 0 || len(os.Held) != 1 || os.Held[0].Address != "c.new" {
 		t.Errorf("failed gate: %+v %v seen=%v", os, err, w.prov.seen)
 	}
 }
 
 func TestRunOrderedNoRefuserIsProvisioned(t *testing.T) {
 	ls := at014Target()
-	ls.Senders = []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}, {Sender: "foo.c.new"}}
+	ls.Senders = []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}, {Sender: "c.new"}}
 	w := newWorld14For(t, ls)
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := w.ev.get(), []string{"push", "create:foo.c.new", "issue:foo.c.new", "commit"}; !reflect.DeepEqual(got, want) {
+	if got, want := w.ev.get(), []string{"push", "create:c.new", "issue:c.new", "commit"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("events = %v, want %v", got, want)
 	}
-	if !reflect.DeepEqual(os.Provisioned, []string{"foo.c.new"}) {
+	if !reflect.DeepEqual(os.Provisioned, []string{"c.new"}) {
 		t.Errorf("provisioned = %v", os.Provisioned)
 	}
 }
@@ -361,7 +359,7 @@ func (failingStatus) WriteStatus(context.Context, Status) error { return errStat
 func TestRunOrderedProvisionFailureStatusWriteError(t *testing.T) {
 	w := newWorld14(t)
 	w.in.Ledger = WithProvisionMarkers(failingStatus{w.ledger}, NewMemProvisionMarkers())
-	w.prov.fail("create:foo.c.new", true)
+	w.prov.fail("create:c.new", true)
 	if _, err := RunOrdered(context.Background(), w.in, w.prov); !errors.Is(err, errStatusDown) {
 		t.Fatalf("err = %v, want the status write error", err)
 	}
@@ -370,7 +368,7 @@ func TestRunOrderedProvisionFailureStatusWriteError(t *testing.T) {
 // TestRunOrderedProvisionFailureResumes (H2): a failed provisioning step commits nothing and leaves the generation
 // pending; resubmitting the same content runs the steps again and commits.
 func TestRunOrderedProvisionFailureResumes(t *testing.T) {
-	for _, step := range []string{"create:foo.c.new", "issue:foo.c.new"} {
+	for _, step := range []string{"create:c.new", "issue:c.new"} {
 		t.Run(step, func(t *testing.T) {
 			w := newWorld14(t)
 			w.prov.fail(step, true)
@@ -391,7 +389,7 @@ func TestRunOrderedProvisionFailureResumes(t *testing.T) {
 			if strings.HasPrefix(step, "issue") {
 				wantStep = StepIssueCredential
 			}
-			if len(os.Errors) != 1 || os.Errors[0].Address != "foo.c.new" || os.Errors[0].Step != wantStep || len(os.Provisioned) != 0 {
+			if len(os.Errors) != 1 || os.Errors[0].Address != "c.new" || os.Errors[0].Step != wantStep || len(os.Provisioned) != 0 {
 				t.Errorf("ordered status = %+v", os)
 			}
 			if os.Status.State != StatePartial || os.Status.InForce || !hasFailure(os.Status, "", "", CheckProvision) {
@@ -399,7 +397,7 @@ func TestRunOrderedProvisionFailureResumes(t *testing.T) {
 			}
 			// A different submission on the same base is refused while pending.
 			other := w.in
-			other.ListSet.Senders = []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}, {Sender: "foo.c.new"}}
+			other.ListSet.Senders = []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}, {Sender: "c.new"}}
 			if _, err := RunOrdered(context.Background(), other, w.prov); !errors.Is(err, ErrPendingGeneration) {
 				t.Errorf("different content while pending: %v", err)
 			}
@@ -413,10 +411,10 @@ func TestRunOrderedProvisionFailureResumes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if os.Status.State != StateApplied || !os.Status.InForce || !reflect.DeepEqual(os.Provisioned, []string{"foo.c.new"}) || len(os.Errors) != 0 {
+			if os.Status.State != StateApplied || !os.Status.InForce || !reflect.DeepEqual(os.Provisioned, []string{"c.new"}) || len(os.Errors) != 0 {
 				t.Fatalf("resumed: %+v", os)
 			}
-			if got, want := w.ev.get(), []string{"push", "gate", "create:foo.c.new", "issue:foo.c.new", "commit"}; !reflect.DeepEqual(got, want) {
+			if got, want := w.ev.get(), []string{"push", "gate", "create:c.new", "issue:c.new", "commit"}; !reflect.DeepEqual(got, want) {
 				t.Errorf("events = %v, want %v", got, want)
 			}
 			if rec, _ := w.ledger.InForce(); rec.Generation != 2 {
@@ -436,13 +434,13 @@ func TestRunOrderedRefusedHoldsWithReason(t *testing.T) {
 		t.Fatal("want a stale base error")
 	}
 	w = newWorld14(t)
-	w.in.ListSet.Range = "" // fails validation: a refused status and no error
+	w.in.ListSet.Senders = append(w.in.ListSet.Senders, listset.SenderLists{Sender: "c.core"}) // a duplicate sender: fails validation: a refused status and no error
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err != nil || os.Status.State != StateRefused || len(os.Provisioned) != 0 {
 		t.Fatalf("refused: %+v %v", os, err)
 	}
 	// The gate never ran: the address is held for the refusal, and no sender is named as blocking.
-	want := []HeldAddress{{Address: "foo.c.new", Reason: HeldListSetRefused}}
+	want := []HeldAddress{{Address: "c.new", Reason: HeldListSetRefused}}
 	if !reflect.DeepEqual(os.Held, want) {
 		t.Errorf("held = %+v, want %+v", os.Held, want)
 	}
@@ -477,7 +475,7 @@ func (pendingFails) SetPendingJWT(listset.Record, string) error { return errors.
 func TestRunOrderedPendingNotRecordedIsError(t *testing.T) {
 	w := newWorld14(t)
 	w.in.Ledger = WithProvisionMarkers(pendingFails{w.ledger}, NewMemProvisionMarkers())
-	w.prov.fail("create:foo.c.new", true)
+	w.prov.fail("create:c.new", true)
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err == nil || !strings.Contains(err.Error(), "ledger down") {
 		t.Fatalf("err = %v", err)
@@ -496,7 +494,7 @@ func TestRunOrderedNoSignersHeldNotApplied(t *testing.T) {
 	if err != nil || os.Status.State != StatePartial {
 		t.Fatalf("%+v %v", os, err)
 	}
-	want := []HeldAddress{{Address: "foo.c.new", Reason: HeldNotApplied}}
+	want := []HeldAddress{{Address: "c.new", Reason: HeldNotApplied}}
 	if !reflect.DeepEqual(os.Held, want) {
 		t.Errorf("held = %+v, want %+v", os.Held, want)
 	}

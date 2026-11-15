@@ -19,12 +19,11 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 // core allows lead and sdk, lead allows core, sdk has no exception.
 func drySet() ListSet {
 	return ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", Closed, Closed, Shared, Closed),
+		Switches: switches("c", Closed, Closed, Shared, Closed),
 		Senders: []SenderLists{
-			{Sender: "foo.c.core", Allow: []string{"foo.c.lead", "foo.c.sdk"}},
-			{Sender: "foo.c.lead", Allow: []string{"foo.c.core"}},
-			{Sender: "foo.c.sdk"},
+			{Sender: "c.core", Allow: []string{"c.lead", "c.sdk"}},
+			{Sender: "c.lead", Allow: []string{"c.core"}},
+			{Sender: "c.sdk"},
 		},
 	}
 }
@@ -33,12 +32,11 @@ func drySet() ListSet {
 // reaches sdk), and closes one verb (status).
 func at008Next() ListSet {
 	return ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", Closed, Closed, Closed, Closed),
+		Switches: switches("c", Closed, Closed, Closed, Closed),
 		Senders: []SenderLists{
-			{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}},
-			{Sender: "foo.c.lead", Allow: []string{"foo.c.core", "foo.c.sdk"}},
-			{Sender: "foo.c.sdk"},
+			{Sender: "c.core", Allow: []string{"c.lead"}},
+			{Sender: "c.lead", Allow: []string{"c.core", "c.sdk"}},
+			{Sender: "c.sdk"},
 		},
 	}
 }
@@ -85,22 +83,22 @@ func wantReceivers(t *testing.T, p Plan, sender string, v Verb, added, removed [
 func TestDryRunAddOneReceiver(t *testing.T) {
 	base := drySet()
 	next := drySet()
-	next.Senders[2].Allow = []string{"foo.c.lead"}
+	next.Senders[2].Allow = []string{"c.lead"}
 	p := dry(t, &base, next, nil)
 	if len(p.Receivers) != 3 {
 		t.Fatalf("receivers = %+v, want mail, prompt and heartbeat of sdk", p.Receivers)
 	}
 	for _, v := range []Verb{Mail, Prompt, Heartbeat} {
-		wantReceivers(t, p, "foo.c.sdk", v, []string{"foo.c.lead"}, nil)
+		wantReceivers(t, p, "c.sdk", v, []string{"c.lead"}, nil)
 	}
 	// Status is shared: sdk already reached lead through the owner line.
-	if _, ok := receiver(p, "foo.c.sdk", Status); ok {
+	if _, ok := receiver(p, "c.sdk", Status); ok {
 		t.Error("status has no change: the owner line already reached lead")
 	}
 	if len(p.Templates) != 0 {
 		t.Errorf("templates = %+v, want none", p.Templates)
 	}
-	wantList(t, "new_credential", p.NewCredential, "foo.c.sdk")
+	wantList(t, "new_credential", p.NewCredential, "c.sdk")
 	wantList(t, "rotate_and_revoke", p.RotateAndRevoke)
 	wantList(t, "revoke", p.Revoke)
 	wantList(t, "first_credential", p.FirstCredential)
@@ -112,12 +110,12 @@ func TestDryRunAddOneReceiver(t *testing.T) {
 func TestDryRunRemoveOneReceiverRotates(t *testing.T) {
 	base := drySet()
 	next := drySet()
-	next.Senders[0].Allow = []string{"foo.c.lead"}
+	next.Senders[0].Allow = []string{"c.lead"}
 	p := dry(t, &base, next, nil)
 	for _, v := range []Verb{Mail, Prompt, Heartbeat} {
-		wantReceivers(t, p, "foo.c.core", v, nil, []string{"foo.c.sdk"})
+		wantReceivers(t, p, "c.core", v, nil, []string{"c.sdk"})
 	}
-	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "foo.c.core")
+	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "c.core")
 	wantList(t, "new_credential", p.NewCredential)
 	if len(p.Templates) != 0 {
 		t.Errorf("templates = %+v, want none", p.Templates)
@@ -131,21 +129,21 @@ func TestDryRunNarrowByDenyHasSentinelEffects(t *testing.T) {
 	p := dry(t, &base, next, nil)
 
 	for _, v := range []Verb{Mail, Prompt, Heartbeat} {
-		wantReceivers(t, p, "foo.c.core", v, nil, []string{"foo.c.sdk"})
+		wantReceivers(t, p, "c.core", v, nil, []string{"c.sdk"})
 	}
-	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "foo.c.core")
+	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "c.core")
 	// Every other sender of the key gains the sentinel: a new credential, no revoke.
-	wantList(t, "new_credential", p.NewCredential, "foo.c.lead", "foo.c.sdk")
-	if len(p.Templates) != 1 || p.Templates[0].Group != "foo.c" || p.Templates[0].Change != TemplateChanged {
-		t.Fatalf("templates = %+v, want foo.c changed", p.Templates)
+	wantList(t, "new_credential", p.NewCredential, "c.lead", "c.sdk")
+	if len(p.Templates) != 1 || p.Templates[0].Group != "c" || p.Templates[0].Change != TemplateChanged {
+		t.Fatalf("templates = %+v, want c changed", p.Templates)
 	}
-	wantList(t, "disconnected", p.Templates[0].DisconnectedSenders, "foo.c.core", "foo.c.lead", "foo.c.sdk")
+	wantList(t, "disconnected", p.Templates[0].DisconnectedSenders, "c.core", "c.lead", "c.sdk")
 	if !p.Templates[0].Disconnects {
 		t.Error("a changed template disconnects its group")
 	}
 	var lead TagChange
 	for _, tc := range p.Tags {
-		if tc.Sender == "foo.c.lead" {
+		if tc.Sender == "c.lead" {
 			lead = tc
 		}
 	}
@@ -156,12 +154,12 @@ func TestDryRunNarrowByDenyHasSentinelEffects(t *testing.T) {
 func TestDryRunWidenNeedsOnlyANewCredential(t *testing.T) {
 	base := at001()
 	next := at001()
-	next.Senders[0].Allow = []string{"foo.c.lead", "foo.c.sdk"}
+	next.Senders[0].Allow = []string{"c.lead", "c.sdk"}
 	p := dry(t, &base, next, nil)
-	wantList(t, "new_credential", p.NewCredential, "foo.c.core")
+	wantList(t, "new_credential", p.NewCredential, "c.core")
 	wantList(t, "rotate_and_revoke", p.RotateAndRevoke)
 	wantList(t, "revoke", p.Revoke)
-	wantReceivers(t, p, "foo.c.core", Mail, []string{"foo.c.sdk"}, nil)
+	wantReceivers(t, p, "c.core", Mail, []string{"c.sdk"}, nil)
 	if len(p.Templates) != 0 {
 		t.Errorf("templates = %+v", p.Templates)
 	}
@@ -170,17 +168,17 @@ func TestDryRunWidenNeedsOnlyANewCredential(t *testing.T) {
 func TestDryRunCloseAVerbIsADisconnectNotARotation(t *testing.T) {
 	base := at001() // status shared
 	next := at001()
-	next.Switches = switches("foo.c", Closed, Closed, Closed, Closed)
+	next.Switches = switches("c", Closed, Closed, Closed, Closed)
 	p := dry(t, &base, next, nil)
 	if len(p.Templates) != 1 || p.Templates[0].Change != TemplateChanged || !p.Templates[0].Disconnects {
 		t.Fatalf("templates = %+v", p.Templates)
 	}
-	wantList(t, "disconnected", p.Templates[0].DisconnectedSenders, "foo.c.core", "foo.c.lead", "foo.c.sdk")
-	all := []string{"foo.c.core", "foo.c.lead", "foo.c.sdk"}
+	wantList(t, "disconnected", p.Templates[0].DisconnectedSenders, "c.core", "c.lead", "c.sdk")
+	all := []string{"c.core", "c.lead", "c.sdk"}
 	// The allow tags still reach (core keeps lead); the owner line is what goes.
-	wantReceivers(t, p, "foo.c.core", Status, nil, []string{"foo.c.core", "foo.c.sdk"})
-	wantReceivers(t, p, "foo.c.lead", Status, nil, all)
-	wantReceivers(t, p, "foo.c.sdk", Status, nil, all)
+	wantReceivers(t, p, "c.core", Status, nil, []string{"c.core", "c.sdk"})
+	wantReceivers(t, p, "c.lead", Status, nil, all)
+	wantReceivers(t, p, "c.sdk", Status, nil, all)
 	if len(p.Tags) != 0 || len(p.RotateAndRevoke) != 0 || len(p.NewCredential) != 0 || len(p.Revoke) != 0 || len(p.FirstCredential) != 0 {
 		t.Errorf("a verb flip changes no tags and re-issues nobody: %+v", p)
 	}
@@ -189,10 +187,10 @@ func TestDryRunCloseAVerbIsADisconnectNotARotation(t *testing.T) {
 func TestDryRunSenderLeaves(t *testing.T) {
 	base := at003Deny()
 	next := at003Deny()
-	next.Senders = next.Senders[:3] // foo.d.solo leaves, and with it owner group foo.d
+	next.Senders = next.Senders[:3] // d.solo leaves, and with it owner group d
 	p := dry(t, &base, next, nil)
-	wantList(t, "revoke", p.Revoke, "foo.d.solo")
-	if len(p.Templates) != 1 || p.Templates[0].Group != "foo.d" || p.Templates[0].Change != TemplateRemoved || p.Templates[0].Disconnects {
+	wantList(t, "revoke", p.Revoke, "d.solo")
+	if len(p.Templates) != 1 || p.Templates[0].Group != "d" || p.Templates[0].Change != TemplateRemoved || p.Templates[0].Disconnects {
 		t.Errorf("templates = %+v", p.Templates)
 	}
 	if len(p.Receivers) != 0 {
@@ -203,14 +201,14 @@ func TestDryRunSenderLeaves(t *testing.T) {
 func TestDryRunNewSender(t *testing.T) {
 	base := at001()
 	next := at001()
-	next.Senders = append(next.Senders, SenderLists{Sender: "foo.c.new", Allow: []string{"foo.c.core"}})
+	next.Senders = append(next.Senders, SenderLists{Sender: "c.new", Allow: []string{"c.core"}})
 	p := dry(t, &base, next, nil)
-	wantList(t, "first_credential", p.FirstCredential, "foo.c.new")
+	wantList(t, "first_credential", p.FirstCredential, "c.new")
 	wantList(t, "revoke", p.Revoke)
-	wantReceivers(t, p, "foo.c.new", Mail, []string{"foo.c.core"}, nil)
-	wantReceivers(t, p, "foo.c.new", Status, []string{"foo.c.core", "foo.c.lead", "foo.c.new", "foo.c.sdk"}, nil)
+	wantReceivers(t, p, "c.new", Mail, []string{"c.core"}, nil)
+	wantReceivers(t, p, "c.new", Status, []string{"c.core", "c.lead", "c.new", "c.sdk"}, nil)
 	for _, r := range p.Receivers {
-		if r.Sender != "foo.c.new" {
+		if r.Sender != "c.new" {
 			t.Errorf("only the new sender changes, got %+v", r)
 		}
 	}
@@ -222,7 +220,7 @@ func TestDryRunNewSender(t *testing.T) {
 func TestDryRunRefusedCarriesEveryRefusalAndNoChanges(t *testing.T) {
 	base := drySet()
 	next := at008Next()
-	next.Senders[0].Allow = append(next.Senders[0].Allow, "foo.c.*")
+	next.Senders[0].Allow = append(next.Senders[0].Allow, "c.*")
 	next.Senders[1].Allow = append(next.Senders[1].Allow, "bar.c.lead")
 	next.Switches = next.Switches[:3]
 	p := DryRun(&base, next, nil)
@@ -244,22 +242,22 @@ func TestDryRunRefusedCarriesEveryRefusalAndNoChanges(t *testing.T) {
 
 func TestDryRunNothingInForce(t *testing.T) {
 	p := dry(t, nil, at001(), nil)
-	wantList(t, "first_credential", p.FirstCredential, "foo.c.core", "foo.c.lead", "foo.c.sdk")
+	wantList(t, "first_credential", p.FirstCredential, "c.core", "c.lead", "c.sdk")
 	wantList(t, "revoke", p.Revoke)
 	wantList(t, "rotate_and_revoke", p.RotateAndRevoke)
 	if len(p.Templates) != 1 || p.Templates[0].Change != TemplateAdded || p.Templates[0].Disconnects {
 		t.Errorf("templates = %+v", p.Templates)
 	}
-	wantReceivers(t, p, "foo.c.core", Mail, []string{"foo.c.lead"}, nil)
+	wantReceivers(t, p, "c.core", Mail, []string{"c.lead"}, nil)
 	// Every new sender has a tag entry, an empty one included.
-	if len(p.Tags) != 3 || p.Tags[0].Sender != "foo.c.core" || len(p.Tags[0].New) == 0 || len(p.Tags[1].New) != 0 || p.Tags[1].New == nil {
+	if len(p.Tags) != 3 || p.Tags[0].Sender != "c.core" || len(p.Tags[0].New) == 0 || len(p.Tags[1].New) != 0 || p.Tags[1].New == nil {
 		t.Errorf("tags = %+v", p.Tags)
 	}
 }
 
 func TestDryRunInForceThatDoesNotValidateIsRefused(t *testing.T) {
 	bad := at001()
-	bad.Senders[0].Allow = []string{"foo.c.*"}
+	bad.Senders[0].Allow = []string{"c.*"}
 	p := DryRun(&bad, at001(), nil)
 	if !p.Refused || len(p.Refusals) != 1 || p.Refusals[0].Stage != StageInForce {
 		t.Errorf("plan = %+v", p)
@@ -268,14 +266,14 @@ func TestDryRunInForceThatDoesNotValidateIsRefused(t *testing.T) {
 
 // longSender is a sender with n allow entries at long names.
 func longSet(n int) ListSet {
-	ls := ListSet{Range: "foo", Switches: switches("foo.ownerwithalongname", Closed, Closed, Closed, Closed)}
+	ls := ListSet{Switches: switches("ownerwithalongname", Closed, Closed, Closed, Closed)}
 	var allow []string
 	for i := 0; i < n; i++ {
-		allow = append(allow, fmt.Sprintf("foo.ownerwithalongname.receiver-with-a-long-name-%03d", i))
+		allow = append(allow, fmt.Sprintf("ownerwithalongname.receiver-with-a-long-name-%03d", i))
 	}
 	ls.Senders = []SenderLists{
-		{Sender: "foo.ownerwithalongname.big", Allow: allow},
-		{Sender: "foo.ownerwithalongname.small"},
+		{Sender: "ownerwithalongname.big", Allow: allow},
+		{Sender: "ownerwithalongname.small"},
 	}
 	return ls
 }
@@ -292,7 +290,7 @@ func TestSizeCheckNamesTheServerThatDoesNotFit(t *testing.T) {
 		t.Fatalf("problems = %v, want one", ps)
 	}
 	p := ps[0]
-	if !strings.Contains(p.Entry, "foo.ownerwithalongname.big") || !strings.Contains(p.Entry, `"beta"`) || strings.Contains(p.Entry, "alpha") {
+	if !strings.Contains(p.Entry, "ownerwithalongname.big") || !strings.Contains(p.Entry, `"beta"`) || strings.Contains(p.Entry, "alpha") {
 		t.Errorf("entry = %q", p.Entry)
 	}
 	if !strings.Contains(p.Reason, "over the 2000 byte limit") || !strings.Contains(p.Reason, "40 tags") {
@@ -323,7 +321,7 @@ func TestSizeCheckAccountJWT(t *testing.T) {
 		t.Fatal(err)
 	}
 	ps := SizeCheck(c, []ServerLimits{{Server: "tiny", MaxAccountJWT: 100}})
-	if len(ps) != 1 || !strings.HasPrefix(ps[0].Entry, `account "foo"`) || !strings.Contains(ps[0].Reason, "over the 100 byte limit") {
+	if len(ps) != 1 || !strings.HasPrefix(ps[0].Entry, `account, server`) || !strings.Contains(ps[0].Reason, "over the 100 byte limit") {
 		t.Errorf("problems = %v", ps)
 	}
 }
@@ -341,7 +339,7 @@ func TestDryRunDoesNotMutateItsInputs(t *testing.T) {
 
 // reorder returns ls with every slice reversed.
 func reorder(ls ListSet) ListSet {
-	out := ListSet{Range: ls.Range}
+	out := ListSet{}
 	out.Switches = slices.Clone(ls.Switches)
 	slices.Reverse(out.Switches)
 	for _, s := range ls.Senders {
@@ -375,7 +373,7 @@ func TestDryRunJSONIsDeterministic(t *testing.T) {
 
 	// A refused plan too: refusals are sorted, not in input order.
 	bad := at008Next()
-	bad.Senders[0].Allow = append(bad.Senders[0].Allow, "foo.c.*", "bar.c.x")
+	bad.Senders[0].Allow = append(bad.Senders[0].Allow, "c.*", "bar.c.x")
 	rbad := reorder(bad)
 	if !bytes.Equal(marshal(DryRun(&base, bad, nil)), marshal(DryRun(&rb, rbad, nil))) {
 		t.Error("input order changes the refusals")
@@ -411,12 +409,12 @@ func TestDryRunAT008Golden(t *testing.T) {
 func TestAT008Content(t *testing.T) {
 	base, next := drySet(), at008Next()
 	p := dry(t, &base, next, nil)
-	wantReceivers(t, p, "foo.c.lead", Mail, []string{"foo.c.sdk"}, nil)
-	wantReceivers(t, p, "foo.c.core", Mail, nil, []string{"foo.c.sdk"})
-	all := []string{"foo.c.core", "foo.c.lead", "foo.c.sdk"}
-	wantReceivers(t, p, "foo.c.sdk", Status, nil, all)
-	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "foo.c.core")
-	wantList(t, "new_credential", p.NewCredential, "foo.c.lead")
+	wantReceivers(t, p, "c.lead", Mail, []string{"c.sdk"}, nil)
+	wantReceivers(t, p, "c.core", Mail, nil, []string{"c.sdk"})
+	all := []string{"c.core", "c.lead", "c.sdk"}
+	wantReceivers(t, p, "c.sdk", Status, nil, all)
+	wantList(t, "rotate_and_revoke", p.RotateAndRevoke, "c.core")
+	wantList(t, "new_credential", p.NewCredential, "c.lead")
 	if len(p.Templates) != 1 || !p.Templates[0].Disconnects {
 		t.Fatalf("templates = %+v", p.Templates)
 	}
@@ -437,20 +435,20 @@ func TestReachOfAndSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := ReachOf(c, "foo.c.core", []string{"foo.c.sdk"})
+	r, err := ReachOf(c, "c.core", []string{"c.sdk"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"foo.c.sdk"}; !reflect.DeepEqual(r[Status], want) {
+	if want := []string{"c.sdk"}; !reflect.DeepEqual(r[Status], want) {
 		t.Errorf("status reach = %v, want %v", r[Status], want)
 	}
-	if _, err := ReachOf(c, "foo.c.nobody", nil); err == nil {
+	if _, err := ReachOf(c, "c.nobody", nil); err == nil {
 		t.Error("unknown sender accepted")
 	}
-	if got := Subject(Heartbeat, "foo.c.sdk"); got != "agents.hb.foo.c.sdk" {
+	if got := Subject(Heartbeat, "c.sdk"); got != "agents.hb.cc.c.sdk" {
 		t.Errorf("heartbeat subject = %q", got)
 	}
-	if got := Subject(Mail, "foo.c.sdk"); got != "agents.mail.foo.c.sdk" {
+	if got := Subject(Mail, "c.sdk"); got != "agents.mail.cc.c.sdk" {
 		t.Errorf("mail subject = %q", got)
 	}
 }

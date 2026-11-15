@@ -46,7 +46,7 @@ func fcDoc(t *testing.T, gen, base int, senders map[string][]string) []byte {
 		ss[s] = map[string]any{"allow": allow, "deny": []string{}}
 	}
 	b, err := json.Marshal(map[string]any{
-		"schema": policydoc.DocumentSchema, "account": "A", "range": "foo", "generation": gen, "base_generation": base,
+		"schema": policydoc.DocumentSchema, "account": "A", "generation": gen, "base_generation": base,
 		"issued_at": "2026-11-14T10:00:00Z",
 		"groups":    map[string]any{"c": map[string]any{"mail": "closed", "prompt": "closed", "status": "shared", "heartbeat": "closed"}},
 		"senders":   ss,
@@ -63,7 +63,7 @@ func diffWith(t *testing.T, inForce, next []byte, inboxes InboxChecker) policydo
 	fc := func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error) {
 		return FailClosed(ctx, prev, target, inboxes, true)
 	}
-	p, err := policydoc.Diff(context.Background(), diffReader{account: "A", inForce: inForce}, next, "foo", nil,
+	p, err := policydoc.Diff(context.Background(), diffReader{account: "A", inForce: inForce}, next, nil,
 		&policydoc.RotationContext{Adopted: true}, fc)
 	if err != nil {
 		t.Fatal(err)
@@ -97,41 +97,41 @@ func onlyRefusal(t *testing.T, p policydoc.DiffPlan, stage string) listset.Refus
 }
 
 func TestDiffRefusesANarrowingChangeAtStageNarrowing(t *testing.T) {
-	gen1 := fcDoc(t, 1, 0, map[string][]string{"foo.c.l1": {}, "foo.c.l2": {"foo.c.lead"}, "foo.c.lead": {}})
-	gen2 := fcDoc(t, 2, 1, map[string][]string{"foo.c.l1": {}, "foo.c.l2": {}, "foo.c.lead": {}})
-	p := diffWith(t, gen1, gen2, hasInbox("foo.c.l1", "foo.c.l2", "foo.c.lead"))
+	gen1 := fcDoc(t, 1, 0, map[string][]string{"c.l1": {}, "c.l2": {"c.lead"}, "c.lead": {}})
+	gen2 := fcDoc(t, 2, 1, map[string][]string{"c.l1": {}, "c.l2": {}, "c.lead": {}})
+	p := diffWith(t, gen1, gen2, hasInbox("c.l1", "c.l2", "c.lead"))
 	if r := onlyRefusal(t, p, policydoc.StageNarrowing); r.Reason != NarrowingDetail {
 		t.Fatalf("reason %q", r.Reason)
 	}
 }
 
 func TestDiffRefusesAnAddedAddressWithNoInboxAtStageInbox(t *testing.T) {
-	gen1 := fcDoc(t, 1, 0, map[string][]string{"foo.c.core": {}})
-	gen2 := fcDoc(t, 2, 1, map[string][]string{"foo.c.core": {}, "foo.c.new": {}})
-	p := diffWith(t, gen1, gen2, hasInbox("foo.c.core"))
-	if r := onlyRefusal(t, p, policydoc.StageInbox); r.Reason != NoInboxDetail([]string{"foo.c.new"}) {
+	gen1 := fcDoc(t, 1, 0, map[string][]string{"c.core": {}})
+	gen2 := fcDoc(t, 2, 1, map[string][]string{"c.core": {}, "c.new": {}})
+	p := diffWith(t, gen1, gen2, hasInbox("c.core"))
+	if r := onlyRefusal(t, p, policydoc.StageInbox); r.Reason != NoInboxDetail([]string{"c.new"}) {
 		t.Fatalf("reason %q", r.Reason)
 	}
 	// With its inbox the same change is accepted.
-	if p := diffWith(t, gen1, gen2, hasInbox("foo.c.core", "foo.c.new")); p.Refused {
+	if p := diffWith(t, gen1, gen2, hasInbox("c.core", "c.new")); p.Refused {
 		t.Fatalf("refused with the inbox present: %+v", p)
 	}
 }
 
 func TestDiffRefusesAnAddedAddressWithASuspendedInboxAtStageInbox(t *testing.T) {
-	gen1 := fcDoc(t, 1, 0, map[string][]string{"foo.c.core": {}})
-	gen2 := fcDoc(t, 2, 1, map[string][]string{"foo.c.core": {}, "foo.c.new": {}})
-	inb := hasInbox("foo.c.core")
-	inb.answers["foo.c.new"] = admin.InboxCheck{Stream: "inbox-new", Consumer: true, Suspended: true}
+	gen1 := fcDoc(t, 1, 0, map[string][]string{"c.core": {}})
+	gen2 := fcDoc(t, 2, 1, map[string][]string{"c.core": {}, "c.new": {}})
+	inb := hasInbox("c.core")
+	inb.answers["c.new"] = admin.InboxCheck{Stream: "inbox-new", Consumer: true, Suspended: true}
 	p := diffWith(t, gen1, gen2, inb)
-	if r := onlyRefusal(t, p, policydoc.StageInbox); r.Reason != SuspendedInboxDetail([]string{"foo.c.new"}) {
+	if r := onlyRefusal(t, p, policydoc.StageInbox); r.Reason != SuspendedInboxDetail([]string{"c.new"}) {
 		t.Fatalf("reason %q", r.Reason)
 	}
 }
 
 func TestDiffWithoutTheChecksSaysInboxNotChecked(t *testing.T) {
-	first := fcDoc(t, 1, 0, map[string][]string{"foo.c.core": {}})
-	p, err := policydoc.Diff(context.Background(), diffReader{account: "A"}, first, "foo", nil, &policydoc.RotationContext{Adopted: true}, nil)
+	first := fcDoc(t, 1, 0, map[string][]string{"c.core": {}})
+	p, err := policydoc.Diff(context.Background(), diffReader{account: "A"}, first, nil, &policydoc.RotationContext{Adopted: true}, nil)
 	if err != nil || p.Refused {
 		t.Fatalf("%+v, %v", p, err)
 	}

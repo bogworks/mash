@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,12 +129,11 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
 		Switches: []listset.SwitchEntry{
-			{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
-			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed},
+			{Group: "c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "c", Verb: listset.Prompt, Switch: listset.Closed},
+			{Group: "c", Verb: listset.Status, Switch: listset.Closed}, {Group: "c", Verb: listset.Heartbeat, Switch: listset.Closed},
 		},
-		Senders: []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}}, {Sender: "foo.c.lead"}},
+		Senders: []listset.SenderLists{{Sender: "c.core", Allow: []string{"c.lead"}}, {Sender: "c.lead"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -146,14 +147,14 @@ func newFixture(t *testing.T) *fixture {
 	fc := &fakeClaims{}
 	var tpl jwt.Permissions
 	for _, t := range c.Templates {
-		if t.Group == "foo.c" {
+		if t.Group == "c" {
 			tpl = t.Permissions
 		}
 	}
 	fc.publish(gpub, &tpl)
 	f := &fixture{claims: fc, tpl: tpl, gpub: gpub, rec: &fakeRecord{recs: map[string]store.Issued{}}, wrangler: w, wpub: wpub, now: time.Now(), logs: &bytes.Buffer{}}
 	f.is = &Issuer{
-		Registry: fakeRegistry{"h|foo.c": {wpub}}, ListSet: fakeSet{c}, Signer: fakeSigner{gk}, Record: f.rec, Claims: fc, AccountPub: apub,
+		Registry: fakeRegistry{"h|c": {wpub}}, ListSet: fakeSet{c}, Signer: fakeSigner{gk}, Record: f.rec, Claims: fc, AccountPub: apub,
 		Log: slog.New(slog.NewTextHandler(f.logs, nil)), Now: func() time.Time { return f.now },
 	}
 	return f
@@ -165,10 +166,10 @@ func (f *fixture) req(t *testing.T, address string, ttl time.Duration) Request {
 	pub, _ := u.PublicKey()
 	nb := make([]byte, MinNonceBytes)
 	_, _ = rand.Read(nb)
-	r := Request{Version: 1, Address: address, PublicKey: pub, Host: "h", Nonce: base64.RawURLEncoding.EncodeToString(nb),
+	r := Request{Version: 1, Address: address, Endpoint: "claude-code." + address, PublicKey: pub, Host: "h", Nonce: base64.RawURLEncoding.EncodeToString(nb),
 		Expires: f.now.Add(ttl).Unix(), Wrangler: f.wpub}
 	var err error
-	if r.Proof, err = SignProof(f.wrangler, r.Address, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+	if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -183,15 +184,15 @@ func code(err error) string {
 }
 
 func TestCanonicalBytesAreTheDocumentedForm(t *testing.T) {
-	got := string(CanonicalBytes("foo.c.core", "UKEY", "h", "NONCE", 1700000000))
-	if want := "mash-issue-v1\nfoo.c.core\nUKEY\nh\nNONCE\n1700000000"; got != want {
+	got := string(CanonicalBytes("c.core", "claude-code.c.core", "UKEY", "h", "NONCE", 1700000000))
+	if want := "mash-issue-v2\nc.core\nclaude-code.c.core\nUKEY\nh\nNONCE\n1700000000"; got != want {
 		t.Fatalf("%q", got)
 	}
 }
 
 func TestIssueSignsWithTheTableAndRecordsFirst(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", time.Minute)
+	r := f.req(t, "c.core", time.Minute)
 	out, err := f.is.Issue(context.Background(), r, store.PurposeRotation)
 	if err != nil {
 		t.Fatal(err)
@@ -201,10 +202,10 @@ func TestIssueSignsWithTheTableAndRecordsFirst(t *testing.T) {
 		t.Fatalf("%v %v", uc, err)
 	}
 	rec := f.rec.recs[r.PublicKey]
-	if rec.Purpose != store.PurposeRotation || rec.Generation != 7 || rec.Address != "foo.c.core" {
+	if rec.Purpose != store.PurposeRotation || rec.Generation != 7 || rec.Address != "c.core" {
 		t.Errorf("%+v", rec)
 	}
-	if _, err := f.is.Issue(context.Background(), f.req(t, "foo.c.lead", time.Minute), "bogus"); code(err) != CodeBadPurpose {
+	if _, err := f.is.Issue(context.Background(), f.req(t, "c.lead", time.Minute), "bogus"); code(err) != CodeBadPurpose {
 		t.Errorf("a bad purpose: %v", err)
 	}
 }
@@ -212,7 +213,7 @@ func TestIssueSignsWithTheTableAndRecordsFirst(t *testing.T) {
 func TestNothingIsReturnedWhenTheRecordFails(t *testing.T) {
 	f := newFixture(t)
 	f.rec.fail = true
-	out, err := f.is.Issue(context.Background(), f.req(t, "foo.c.core", time.Minute), store.PurposeIssue)
+	out, err := f.is.Issue(context.Background(), f.req(t, "c.core", time.Minute), store.PurposeIssue)
 	if out != nil || code(err) != CodeRecordFailed {
 		t.Fatalf("%v %v", out, err)
 	}
@@ -225,7 +226,7 @@ func TestNothingIsReturnedWhenTheRecordFails(t *testing.T) {
 // it has passed. The expiry, at most MaxWindow ahead, is the bound on a replay across a restart.
 func TestRestartForgetsNoncesAndExpiryBoundsTheReplay(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", time.Minute)
+	r := f.req(t, "c.core", time.Minute)
 	ctx := context.Background()
 	if _, err := f.is.Issue(ctx, r, store.PurposeIssue); err != nil {
 		t.Fatal(err)
@@ -251,7 +252,7 @@ func TestRestartForgetsNoncesAndExpiryBoundsTheReplay(t *testing.T) {
 func TestNoncesAreDroppedAtExpiryAndCapped(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	r := f.req(t, "foo.c.core", time.Minute)
+	r := f.req(t, "c.core", time.Minute)
 	if _, err := f.is.Issue(ctx, r, store.PurposeIssue); err != nil {
 		t.Fatal(err)
 	}
@@ -259,14 +260,14 @@ func TestNoncesAreDroppedAtExpiryAndCapped(t *testing.T) {
 		t.Fatalf("%d", f.is.nonces.len())
 	}
 	f.now = f.now.Add(2 * time.Minute)
-	if _, err := f.is.Issue(ctx, f.req(t, "foo.c.lead", time.Minute), store.PurposeIssue); err != nil || f.is.nonces.len() != 1 {
+	if _, err := f.is.Issue(ctx, f.req(t, "c.lead", time.Minute), store.PurposeIssue); err != nil || f.is.nonces.len() != 1 {
 		t.Fatalf("%v %d", err, f.is.nonces.len())
 	}
 	exp := f.now.Add(time.Minute)
 	for i := 0; f.is.nonces.len() < MaxNonces; i++ {
 		f.is.nonces.take("fill"+strconv.Itoa(i), exp, f.now)
 	}
-	if _, err := f.is.Issue(ctx, f.req(t, "foo.c.core", time.Minute), store.PurposeIssue); code(err) != CodeBusy {
+	if _, err := f.is.Issue(ctx, f.req(t, "c.core", time.Minute), store.PurposeIssue); code(err) != CodeBusy {
 		t.Fatalf("full set: %v", err)
 	}
 }
@@ -274,7 +275,7 @@ func TestNoncesAreDroppedAtExpiryAndCapped(t *testing.T) {
 // A forged request does not use up the nonce of a real one.
 func TestAForgedRequestDoesNotBurnTheNonce(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", time.Minute)
+	r := f.req(t, "c.core", time.Minute)
 	forged := r
 	forged.Proof = base64.RawURLEncoding.EncodeToString(make([]byte, 64))
 	if _, err := f.is.Issue(context.Background(), forged, store.PurposeIssue); code(err) != CodeBadProof {
@@ -287,11 +288,11 @@ func TestAForgedRequestDoesNotBurnTheNonce(t *testing.T) {
 
 func TestParseDropsUnknownFieldsAndCapsSize(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", time.Minute)
-	good := `{"version":1,"address":"` + r.Address + `","public_key":"` + r.PublicKey + `","host":"h","nonce":"` + r.Nonce +
+	r := f.req(t, "c.core", time.Minute)
+	good := `{"version":1,"address":"` + r.Address + `","endpoint":"` + r.Endpoint + `","public_key":"` + r.PublicKey + `","host":"h","nonce":"` + r.Nonce +
 		`","expires":` + "1" + `,"proof":"` + r.Proof + `","wrangler":"` + r.Wrangler + `","tags":["x"],"permissions":{"pub":{"allow":[">"]}}}`
 	got, rf := Parse([]byte(good))
-	if rf != nil || got.Address != "foo.c.core" {
+	if rf != nil || got.Address != "c.core" {
 		t.Fatalf("%+v %v", got, rf)
 	}
 	if _, rf := Parse(make([]byte, MaxRequestBytes+1)); rf == nil || rf.Code != CodeTooLarge {
@@ -306,12 +307,86 @@ func TestEveryFieldOfARefusalLogLineIsShapeChecked(t *testing.T) {
 	f := newFixture(t)
 	u, _ := nkeys.CreateUser()
 	seed, _ := u.Seed()
-	r := f.req(t, "foo.c.core", time.Minute)
+	r := f.req(t, "c.core", time.Minute)
 	r.PublicKey, r.Address, r.Host = string(seed), string(seed), string(seed)
 	if _, err := f.is.Issue(context.Background(), r, store.PurposeIssue); err == nil {
 		t.Fatal("accepted")
 	}
 	if strings.Contains(f.logs.String(), string(seed)) || !strings.Contains(f.logs.String(), "code=") {
 		t.Fatalf("%s", f.logs.String())
+	}
+}
+
+// Every credential the issuer signs under a scoped group key carries the endpoint tag, built from mash's own function
+// over the endpoint of the request, and the record keeps the tags that were signed.
+func TestIssuedCredentialCarriesTheEndpointTag(t *testing.T) {
+	f := newFixture(t)
+	r := f.req(t, "c.core", time.Minute)
+	out, err := f.is.Issue(context.Background(), r, store.PurposeIssue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, err := jwt.DecodeUserClaims(out.JWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"allow:c.lead", "ep:claude-code_c_core"}
+	if !slices.Equal([]string(uc.Tags), want) || !slices.Equal(out.Record.Tags, want) {
+		t.Fatalf("tags %v, record %v, want %v", uc.Tags, out.Record.Tags, want)
+	}
+}
+
+// A request never supplies tags, and an endpoint tag in a request is dropped unread like any other.
+func TestARequestCannotSupplyTheEndpointTag(t *testing.T) {
+	f := newFixture(t)
+	r := f.req(t, "c.core", time.Minute)
+	raw, _ := json.Marshal(map[string]any{
+		"version": r.Version, "address": r.Address, "endpoint": r.Endpoint, "public_key": r.PublicKey, "host": r.Host,
+		"nonce": r.Nonce, "expires": r.Expires, "proof": r.Proof, "wrangler": r.Wrangler, "tags": []string{"ep:cc_c_lead"},
+	})
+	got, rf := Parse(raw)
+	if rf != nil {
+		t.Fatal(rf)
+	}
+	out, err := f.is.Issue(context.Background(), got, store.PurposeIssue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, _ := jwt.DecodeUserClaims(out.JWT)
+	if slices.Contains([]string(uc.Tags), "ep:cc_c_lead") || !slices.Contains([]string(uc.Tags), "ep:claude-code_c_core") {
+		t.Fatalf("tags %v", uc.Tags)
+	}
+}
+
+// The issuer refuses to sign when the endpoint's owner and name are not the address's: a credential cannot point at
+// another address's inbox. Nothing is recorded and the nonce is not burned.
+func TestIssuerRefusesAnEndpointTagForAnotherAddress(t *testing.T) {
+	f := newFixture(t)
+	for _, ep := range []string{"claude-code.c.lead", "claude-code.d.core", "claude-code.c.other"} {
+		r := f.req(t, "c.core", time.Minute)
+		r.Endpoint = ep
+		var err error
+		if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+			t.Fatal(err)
+		}
+		out, err := f.is.Issue(context.Background(), r, store.PurposeIssue)
+		if out != nil || code(err) != CodeEndpoint {
+			t.Fatalf("endpoint %s: %v %v", ep, out, err)
+		}
+		if f.is.nonces.len() != 0 || len(f.rec.recs) != 0 {
+			t.Fatalf("endpoint %s: a nonce or a record was kept", ep)
+		}
+	}
+	// The endpoint is inside the proof: changing it after signing breaks the proof.
+	r := f.req(t, "c.core", time.Minute)
+	r.Endpoint = "other.c.core"
+	if _, err := f.is.Issue(context.Background(), r, store.PurposeIssue); code(err) != CodeBadProof {
+		t.Fatalf("%v", err)
+	}
+	// A legacy form is no endpoint of a policy address.
+	r = f.req(t, "c.core", time.Minute)
+	r.Endpoint = "core"
+	if _, err := f.is.Issue(context.Background(), r, store.PurposeIssue); code(err) != CodeMalformed {
+		t.Fatalf("%v", err)
 	}
 }

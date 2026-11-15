@@ -26,18 +26,18 @@ func (r fenceRevoker) Revoke(_ context.Context, pubs []string) (string, error) {
 	return tok, nil
 }
 
-// fenceWorld is the world of AT-014 with a Provisioner and an AfterPush that revokes the keys of foo.c.core through
+// fenceWorld is the world of AT-014 with a Provisioner and an AfterPush that revokes the keys of c.core through
 // the RotationsAfterPush Revoker, and a hook that records what it is asked and refuses the nth call of label refuse.
 func fenceWorld(t *testing.T, refuse string, nth int) (*world14, *events) {
 	t.Helper()
 	w := newWorld14(t)
 	rec := &MemIssueRecord{}
-	if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: userPub(t), Purpose: PurposeIssue, IssuedAt: fixedNow()}); err != nil {
+	if err := rec.Add(context.Background(), IssueEntry{Address: "c.core", PublicKey: userPub(t), Purpose: PurposeIssue, IssuedAt: fixedNow()}); err != nil {
 		t.Fatal(err)
 	}
-	plan := &RotationPlan{Leaving: []string{"foo.c.core"}, Record: rec, Revoker: fenceRevoker{w, t, w.ev}, Generation: 2, Now: fixedNow}
+	plan := &RotationPlan{Leaving: []string{"c.core"}, Record: rec, Revoker: fenceRevoker{w, t, w.ev}, Generation: 2, Now: fixedNow}
 	w.in.AfterPush = RotationsAfterPush(plan)
-	w.in.OldKeys = map[string][]OldKey{"foo.c.docs": {}}
+	w.in.OldKeys = map[string][]OldKey{"c.docs": {}}
 	seen := map[string]int{}
 	w.in.BeforeWrite = func(_ context.Context, what string) error {
 		w.ev.add("fence:" + what)
@@ -175,12 +175,12 @@ func TestBeforeWriteRefusals(t *testing.T) {
 func TestBeforeWriteRevokeRefusalStopsFurtherRevokes(t *testing.T) {
 	w, ev := fenceWorld(t, FenceRevoke, 1)
 	rec := &MemIssueRecord{}
-	for _, a := range []string{"foo.c.core", "foo.c.docs"} {
+	for _, a := range []string{"c.core", "c.docs"} {
 		if err := rec.Add(context.Background(), IssueEntry{Address: a, PublicKey: userPub(t), Purpose: PurposeIssue, IssuedAt: fixedNow()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	plan := &RotationPlan{Leaving: []string{"foo.c.core", "foo.c.docs"}, Record: rec, Revoker: fenceRevoker{w, t, ev}, Generation: 2, Now: fixedNow}
+	plan := &RotationPlan{Leaving: []string{"c.core", "c.docs"}, Record: rec, Revoker: fenceRevoker{w, t, ev}, Generation: 2, Now: fixedNow}
 	w.in.AfterPush = RotationsAfterPush(plan)
 	if _, err := RunOrdered(context.Background(), w.in, w.prov); !errors.Is(err, errFenced) {
 		t.Fatalf("err = %v", err)
@@ -195,7 +195,7 @@ func convergeFence(t *testing.T, refuse string, nth int) (*world14, *events, Sta
 	t.Helper()
 	w, ev := fenceWorld(t, refuse, nth)
 	w.in.AfterPush = nil
-	w.in.OldKeys = map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked}}, "foo.c.docs": {}}
+	w.in.OldKeys = map[string][]OldKey{"c.core": {{PublicKey: w.k.revoked}}, "c.docs": {}}
 	w.cl.failPush["s2"] = true
 	st, err := Run(context.Background(), w.in)
 	return w, ev, st, err

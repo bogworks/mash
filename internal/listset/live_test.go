@@ -32,7 +32,7 @@ func newLiveEnv(t *testing.T, c *Compiled) *liveEnv {
 	acc, _ := nkeys.CreateAccount()
 	accPub, _ := acc.PublicKey()
 	ac := jwt.NewAccountClaims(accPub)
-	ac.Name = c.Range
+	ac.Name = "test"
 	e := &liveEnv{t: t, acc: acc, accPub: accPub, scoped: map[string]nkeys.KeyPair{}}
 	for _, tpl := range c.Templates {
 		sk, _ := nkeys.CreateAccount()
@@ -167,6 +167,9 @@ func canSubscribe(t *testing.T, c *conn, obsConn *nats.Conn, subject string) boo
 	return false
 }
 
+// liveAgents are the agent tokens the live tests address subjects with: the template wildcards the position.
+var liveAgents = []string{"cc", "claude-code"}
+
 func liveCases() map[string]ListSet {
 	return map[string]ListSet{
 		"AT-001 shape":         at001(),
@@ -189,7 +192,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 			env := newLiveEnv(t, c)
 			m, _ := validate(ls)
 			universe := universeNamed(m)
-			universe = append(universe, ls.Range+".probe-owner.probe-name", ls.Range+"."+m.senders[0].addr.owner+".probe-name")
+			universe = append(universe, "probe-owner.probe-name", m.senders[0].addr.owner+".probe-name")
 
 			admin, err := env.connect(env.acc, "admin", nil, false)
 			if err != nil {
@@ -207,7 +210,8 @@ func TestLiveMatchesCheck(t *testing.T) {
 			for _, u := range c.Users {
 				a, _ := parseAddress(u.Sender)
 				// The user JWT carries only tags: the connection below is signed with no permissions of its own.
-				sc, err := env.connect(env.scoped[a.group()], u.Name, u.Tags, true)
+				// The issuer adds the endpoint tag of the sender's endpoint.
+				sc, err := env.connect(env.scoped[a.group()], u.Name, slices.Concat(u.Tags, []string{EndpointTagName + ":" + flat(u.Sender)}), true)
 				if err != nil {
 					t.Fatalf("%s cannot connect with tags %v: %v", u.Sender, u.Tags, err)
 				}
@@ -216,51 +220,58 @@ func TestLiveMatchesCheck(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, addr := range universe {
-					for _, v := range []Verb{Mail, Prompt, Status} {
-						got := canPublish(t, sc, obs, "agents."+v.subject()+"."+addr)
-						if w := slices.Contains(want[v], addr); got != w && slices.Contains(universeNamed(m), addr) {
-							t.Errorf("%s publish %s to %s: server %v, Check simulates %v", u.Sender, v, addr, got, w)
-						} else if !slices.Contains(universeNamed(m), addr) && got {
-							// a probe is outside every list: only a shared owner line may reach it
-							if !m.shared(a.group(), v) || !strings.HasPrefix(addr, a.group()+".") {
-								t.Errorf("%s publish %s reaches probe %s", u.Sender, v, addr)
+					// The agent token of the receiver is a wildcard in every line: any token gives the same answer.
+					for _, tk := range liveAgents {
+						for _, v := range []Verb{Mail, Prompt, Status} {
+							got := canPublish(t, sc, obs, subjT(tk, addr, v))
+							if w := slices.Contains(want[v], addr); got != w && slices.Contains(universeNamed(m), addr) {
+								t.Errorf("%s publish %s to %s (agent token %s): server %v, Check simulates %v", u.Sender, v, addr, tk, got, w)
+							} else if !slices.Contains(universeNamed(m), addr) && got {
+								// a probe is outside every list: only a shared owner line may reach it
+								if !m.shared(a.group(), v) || !strings.HasPrefix(addr, a.group()+".") {
+									t.Errorf("%s publish %s reaches probe %s", u.Sender, v, addr)
+								}
 							}
 						}
-					}
-					got := canSubscribe(t, sc, admin.nc, "agents.hb."+addr)
-					if w := slices.Contains(want[Heartbeat], addr); got != w && slices.Contains(universeNamed(m), addr) {
-						t.Errorf("%s watch heartbeat of %s: server %v, Check simulates %v", u.Sender, addr, got, w)
+						got := canSubscribe(t, sc, admin.nc, subjT(tk, addr, Heartbeat))
+						if w := slices.Contains(want[Heartbeat], addr); got != w && slices.Contains(universeNamed(m), addr) {
+							t.Errorf("%s watch heartbeat of %s (agent token %s): server %v, Check simulates %v", u.Sender, addr, tk, got, w)
+						}
 					}
 				}
 				// The fixed lines, which need {{name()}}: own heartbeat out, own prompt and status in; no other's.
 				self := u.Sender
-				if !canPublish(t, sc, obs, "agents.hb."+self) {
-					t.Errorf("%s cannot publish its own heartbeat", self)
+				for _, tk := range liveAgents {
+					if !canPublish(t, sc, obs, subjT(tk, self, Heartbeat)) {
+						t.Errorf("%s cannot publish its own heartbeat (agent token %s)", self, tk)
+					}
 				}
 				for _, addr := range universe {
-					if addr != self && canPublish(t, sc, obs, "agents.hb."+addr) {
-						t.Errorf("%s published the heartbeat of %s", self, addr)
-					}
-					for _, v := range []Verb{Prompt, Status} {
-						in := canSubscribe(t, sc, admin.nc, "agents."+v.subject()+"."+addr)
-						if in != (addr == self) {
-							t.Errorf("%s subscribe to %s of %s: %v", self, v, addr, in)
+					for _, tk := range liveAgents {
+						if addr != self && canPublish(t, sc, obs, subjT(tk, addr, Heartbeat)) {
+							t.Errorf("%s published the heartbeat of %s", self, addr)
 						}
-					}
-					if canSubscribe(t, sc, admin.nc, "agents.mail."+addr) {
-						t.Errorf("%s subscribed to mail of %s", self, addr)
+						for _, v := range []Verb{Prompt, Status} {
+							in := canSubscribe(t, sc, admin.nc, subjT(tk, addr, v))
+							if in != (addr == self) {
+								t.Errorf("%s subscribe to %s of %s: %v", self, v, addr, in)
+							}
+						}
+						if canSubscribe(t, sc, admin.nc, subjT(tk, addr, Mail)) {
+							t.Errorf("%s subscribed to mail of %s", self, addr)
+						}
 					}
 				}
 				// Its own inbox stream and consumer API subjects, and no other sender's.
-				flat := strings.ReplaceAll(self, ".", "_")
-				if !canPublish(t, sc, obs, "$JS.API.STREAM.INFO.inbox-"+flat) {
+				own := flat(self)
+				if !canPublish(t, sc, obs, "$JS.API.STREAM.INFO.inbox-"+own) {
 					t.Errorf("%s cannot reach its own inbox stream info", self)
 				}
 				for _, o := range m.senders {
 					if o.addr.String() == self {
 						continue
 					}
-					other := strings.ReplaceAll(o.addr.String(), ".", "_")
+					other := flat(o.addr.String())
 					if canPublish(t, sc, obs, "$JS.API.CONSUMER.MSG.NEXT.inbox-"+other+".deliver") {
 						t.Errorf("%s fetches from the inbox of %s", self, o.addr)
 					}
@@ -272,7 +283,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 }
 
 // The server's template expansion limit (maxPermTemplateSubjectExpansions) at its boundary: for AT-001's key the
-// publish allow list is 3N+1 subjects, so 1365 allow tags connect and 1366 are refused, as Check simulates.
+// publish allow list is 3N+17 subjects, so 1359 allow tags connect and 1360 are refused (a credential also carries the endpoint tag, whose lines count), as Check simulates.
 func TestLiveExpansionLimit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live nats-server cross-check")
@@ -285,23 +296,23 @@ func TestLiveExpansionLimit(t *testing.T) {
 	env := newLiveEnv(t, c)
 	var tpl jwt.Permissions
 	for _, x := range c.Templates {
-		if x.Group == "foo.c" {
+		if x.Group == "c" {
 			tpl = x.Permissions
 		}
 	}
-	for _, n := range []int{1365, 1366} {
-		_, simErr := expandPermissions(tpl, "core", allowTags(n))
-		sc, err := env.connect(env.scoped["foo.c"], "core", allowTags(n), true)
+	for _, n := range []int{1359, 1360} {
+		_, simErr := expandPermissions(tpl, "core", withEP(allowTags(n)))
+		sc, err := env.connect(env.scoped["c"], "core", withEP(allowTags(n)), true)
 		if sc != nil && sc.nc != nil {
 			defer sc.nc.Close()
 		}
 		if (simErr != nil) != (err != nil) {
 			t.Errorf("%d tags: server connect error %v, Check simulates %v", n, err, simErr)
 		}
-		if n == 1365 && err != nil {
+		if n == 1359 && err != nil {
 			t.Errorf("%d tags: server refused: %v", n, err)
 		}
-		if n == 1366 && err == nil {
+		if n == 1360 && err == nil {
 			t.Errorf("%d tags: server accepted", n)
 		}
 	}

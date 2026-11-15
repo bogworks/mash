@@ -28,12 +28,11 @@ func switches(group string, mail, prompt, status, hb listset.Switch) []listset.S
 // set1 is the first generation: mail is shared in the group and core also has docs on its allow list.
 func set1() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
+		Switches: switches("c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
-			{Sender: "foo.c.core", Allow: []string{"foo.c.docs"}},
-			{Sender: "foo.c.docs"},
-			{Sender: "foo.c.sdk"},
+			{Sender: "c.core", Allow: []string{"c.docs"}},
+			{Sender: "c.docs"},
+			{Sender: "c.sdk"},
 		},
 	}
 }
@@ -43,8 +42,8 @@ func set1() listset.ListSet {
 func set2() listset.ListSet {
 	ls := set1()
 	ls.Base = 1
-	ls.Switches = switches("foo.c", listset.Closed, listset.Closed, listset.Closed, listset.Closed)
-	ls.Senders = []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}, {Sender: "foo.c.sdk"}}
+	ls.Switches = switches("c", listset.Closed, listset.Closed, listset.Closed, listset.Closed)
+	ls.Senders = []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}, {Sender: "c.sdk"}}
 	return ls
 }
 
@@ -69,7 +68,7 @@ func newKeys(t *testing.T) keys {
 	up, _ := u.PublicKey()
 	k := keys{acct: kp, acctPub: pub, signers: map[string]string{}, revoked: up}
 	sk, _ := nkeys.CreateAccount()
-	k.signers["foo.c"], _ = sk.PublicKey()
+	k.signers["c"], _ = sk.PublicKey()
 	return k
 }
 
@@ -194,7 +193,7 @@ func (p fakeProber) Refused(_ context.Context, server string, probe ProbeCred, _
 	if !ok {
 		return false, errors.New("unknown generation")
 	}
-	c := &listset.Compiled{Range: p.byGen[g].Range, Templates: p.byGen[g].Templates}
+	c := &listset.Compiled{Templates: p.byGen[g].Templates}
 	for _, u := range p.byGen[g].Users {
 		if u.Sender == probe.Sender {
 			u.Name, u.Tags = probe.Name, probe.Tags

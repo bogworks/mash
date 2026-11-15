@@ -253,7 +253,7 @@ func TestRealPolicyListNamesTestsThatExist(t *testing.T) {
 	want := map[string][]string{
 		"AT-003": {"TestLiveMatchesCheck/deny_key_(AT-003)", "TestAT003OwnerLineDroppedAndDenyHolds"},
 		"AT-005": {"TestAT005DenyAllSenderIsRefused"},
-		"AT-020": {"TestLiveMatchesCheck", "TestAT020OpenReplyAndPlumbingSubjectsArePinned"},
+		"AT-020": {"TestLiveMatchesCheck", "TestAT020OpenReplyAndPlumbingSubjectsArePinned", "TestLiveAllowedAddressIsReachedUnderAnyAgentToken", "TestLiveCredentialWithoutEndpointTagHasNoInboxAccess"},
 		"AT-010": {"TestAT010Live"},
 	}
 	got := map[string][]string{}

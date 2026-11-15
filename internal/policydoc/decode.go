@@ -1,5 +1,5 @@
 // Package policydoc decodes the list-set document: the one value per account that homerange keeps and mash applies. It
-// decodes the document (raw canonical JSON, or a compact JWS signed by the range's submitter key) into a
+// decodes the document (raw canonical JSON, or a compact JWS signed by the account's submitter key) into a
 // listset.ListSet and checks the format's rules.
 //
 // DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed homerange-mash
@@ -27,7 +27,7 @@ import (
 
 // DocumentSchema is the schema value a document must carry. The seam has not fixed this value (D211 is pending): it is
 // kept here, in one place, and a document with any other value is refused.
-const DocumentSchema = "mash.listset/1"
+const DocumentSchema = "mash.listset/2"
 
 // Errors Decode returns, wrapped with detail.
 var (
@@ -41,7 +41,7 @@ var (
 
 // DecodeOptions configures Decode.
 type DecodeOptions struct {
-	// Submitter is the nkeys public key of the range's submitter. When set, the document must be a JWS whose signature
+	// Submitter is the nkeys public key of the account's submitter. When set, the document must be a JWS whose signature
 	// verifies under it. When empty, a JWS's signature is not checked and the result is not Verified.
 	Submitter string
 }
@@ -56,7 +56,6 @@ type DecodeOptions struct {
 type Document struct {
 	Schema         string
 	Account        string
-	Range          string
 	Generation     uint64
 	BaseGeneration uint64
 	IssuedAt       time.Time
@@ -83,7 +82,6 @@ type wireSender struct {
 type wireDoc struct {
 	Schema         *string                `json:"schema"`
 	Account        *string                `json:"account"`
-	Range          *string                `json:"range"`
 	Generation     *uint64                `json:"generation"`
 	BaseGeneration *uint64                `json:"base_generation"`
 	Groups         map[string]*wireGroup  `json:"groups"`
@@ -163,6 +161,9 @@ func decodePayload(p []byte) (Document, error) {
 	dec := json.NewDecoder(bytes.NewReader(p))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&w); err != nil {
+		if strings.Contains(err.Error(), `unknown field "range"`) {
+			return Document{}, bad(`unknown field "range": a policy is scoped to the account, and a document no longer carries a range`)
+		}
 		return Document{}, bad("%v", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
@@ -172,7 +173,7 @@ func decodePayload(p []byte) (Document, error) {
 		name    string
 		missing bool
 	}{
-		{"schema", w.Schema == nil}, {"account", w.Account == nil}, {"range", w.Range == nil},
+		{"schema", w.Schema == nil}, {"account", w.Account == nil},
 		{"generation", w.Generation == nil}, {"base_generation", w.BaseGeneration == nil},
 		{"groups", w.Groups == nil}, {"senders", w.Senders == nil}, {"issued_at", w.IssuedAt == nil},
 	} {
@@ -183,8 +184,8 @@ func decodePayload(p []byte) (Document, error) {
 	if *w.Schema != DocumentSchema {
 		return Document{}, bad("schema is %q, not %q", *w.Schema, DocumentSchema)
 	}
-	if *w.Account == "" || *w.Range == "" {
-		return Document{}, bad("account and range must not be empty")
+	if *w.Account == "" {
+		return Document{}, bad("account must not be empty")
 	}
 	if *w.BaseGeneration == math.MaxUint64 || *w.Generation != *w.BaseGeneration+1 {
 		return Document{}, bad("generation %d is not base_generation %d plus one", *w.Generation, *w.BaseGeneration)
@@ -200,9 +201,9 @@ func decodePayload(p []byte) (Document, error) {
 		}
 		next = *w.NextSubmitter
 	}
-	d := Document{Schema: *w.Schema, Account: *w.Account, Range: *w.Range, Generation: *w.Generation,
+	d := Document{Schema: *w.Schema, Account: *w.Account, Generation: *w.Generation,
 		BaseGeneration: *w.BaseGeneration, IssuedAt: at, NextSubmitter: next}
-	d.ListSet = listset.ListSet{Range: d.Range, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
+	d.ListSet = listset.ListSet{Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
 
 	owners := make([]string, 0, len(w.Groups))
 	for o := range w.Groups {
@@ -215,7 +216,7 @@ func decodePayload(p []byte) (Document, error) {
 			return Document{}, bad("group %q is null", o)
 		}
 		if strings.Contains(o, ".") {
-			return Document{}, bad("group %q: a group is keyed by its owner part only (no dots); the range is the document's, and a switch is set for an owner group, never for a single sender", o)
+			return Document{}, bad("group %q: a group is keyed by its owner only (no dots), and a switch is set for an owner group, never for a single sender", o)
 		}
 		for _, v := range []struct {
 			verb listset.Verb
@@ -227,7 +228,7 @@ func decodePayload(p []byte) (Document, error) {
 			if *v.val != string(listset.Shared) && *v.val != string(listset.Closed) {
 				return Document{}, bad("group %q: verb %q is %q, not shared or closed", o, v.verb, *v.val)
 			}
-			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: d.Range + "." + o, Verb: v.verb, Switch: listset.Switch(*v.val)})
+			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: o, Verb: v.verb, Switch: listset.Switch(*v.val)})
 		}
 	}
 	names := make([]string, 0, len(w.Senders))

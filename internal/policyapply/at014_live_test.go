@@ -3,9 +3,7 @@ package policyapply
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,9 +18,9 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// AT-014 (contract mash-messaging-policy, REQ-015): a list set adds foo.c.new, which foo.c.core must not reach, while
-// mail is shared in foo.c, and newly denies the existing foo.c.docs to foo.c.core. No inbox or credential exists for
-// foo.c.new until core's gate has passed on a live two-server cluster; afterwards core cannot mail foo.c.new, and the
+// AT-014 (contract mash-messaging-policy, REQ-015): a list set adds c.new, which c.core must not reach, while
+// mail is shared in c, and newly denies the existing c.docs to c.core. No inbox or credential exists for
+// c.new until core's gate has passed on a live two-server cluster; afterwards core cannot mail c.new, and the
 // denial of docs is reported applied only with core's gate passed.
 
 // liveEvCluster records the time of every push the run makes.
@@ -37,9 +35,9 @@ func (c liveEvCluster) Push(ctx context.Context, tok string, expect []string) ([
 }
 
 // liveProv is the test's Provisioner. CreateInbox checks, at the moment it is called, that every server holds the
-// target generation, that the generation is not yet committed and that foo.c.new has no inbox stream, then creates the
+// target generation, that the generation is not yet committed and that c.new has no inbox stream, then creates the
 // inbox stream and the durable consumer on the cluster the way mash does (store.InboxConfigIdentity,
-// store.ConsumerConfig). IssueCredential mints a real user of foo.c.new. Both are create-if-absent.
+// store.ConsumerConfig). IssueCredential mints a real user of c.new. Both are create-if-absent.
 type liveProv struct {
 	t      *testing.T
 	e      *at010Env
@@ -85,13 +83,9 @@ func (p *liveProv) inbox(ctx context.Context, name, address string) (stream, con
 	return true, true, nil
 }
 
-// identity is the endpoint identity of an address range.owner.name: the range is the agent token position.
+// identity is the endpoint identity of an address owner.name, with the agent token of testEndpoint.
 func (p *liveProv) identity(address string) (sap.EndpointIdentity, error) {
-	parts := strings.Split(address, ".")
-	if len(parts) != 3 {
-		return sap.EndpointIdentity{}, fmt.Errorf("address %q is not range.owner.name", address)
-	}
-	return sap.New(parts[0], parts[1], parts[2])
+	return sap.ParseCanonical(testEndpoint(address))
 }
 
 // waitJS waits until the cluster's JetStream answers for the account.
@@ -196,7 +190,7 @@ func TestAT014Live(t *testing.T) {
 	// The old key of core, as its host minted it: revoked by the change.
 	var core ProbeCred
 	for _, c := range credsOf(c1) {
-		if c.Sender == "foo.c.core" {
+		if c.Sender == "c.core" {
 			core = c
 		}
 	}
@@ -206,11 +200,11 @@ func TestAT014Live(t *testing.T) {
 		t.Fatal(err)
 	}
 	order := NewOrder(c1, c2, ex) // only to check the derivation; RunOrdered derives its own
-	if len(order.NewAddresses) != 1 || order.NewAddresses[0].Address != "foo.c.new" ||
-		!slices.Equal(order.NewAddresses[0].MustRefuse, []string{"foo.c.core"}) {
+	if len(order.NewAddresses) != 1 || order.NewAddresses[0].Address != "c.new" ||
+		!slices.Equal(order.NewAddresses[0].MustRefuse, []string{"c.core"}) {
 		t.Fatalf("order = %+v", order)
 	}
-	if len(order.NewlyDenied) != 1 || order.NewlyDenied[0] != (Denial{Sender: "foo.c.core", Receiver: "foo.c.docs"}) {
+	if len(order.NewlyDenied) != 1 || order.NewlyDenied[0] != (Denial{Sender: "c.core", Receiver: "c.docs"}) {
 		t.Fatalf("order = %+v", order)
 	}
 
@@ -229,7 +223,7 @@ func TestAT014Live(t *testing.T) {
 	ev := &events{}
 	var newUser ProbeCred
 	for _, c := range credsOf(c2) {
-		if c.Sender == "foo.c.new" {
+		if c.Sender == "c.new" {
 			newUser = c
 		}
 	}
@@ -242,22 +236,22 @@ func TestAT014Live(t *testing.T) {
 		},
 	}
 	prov.waitJS(ctx)
-	// No inbox stream or consumer exists for foo.c.new before the run.
+	// No inbox stream or consumer exists for c.new before the run.
 	for n := range e.urls {
-		if st, co, err := prov.inbox(ctx, n, "foo.c.new"); err != nil || st || co {
+		if st, co, err := prov.inbox(ctx, n, "c.new"); err != nil || st || co {
 			t.Fatalf("before the run, server %s: stream=%v consumer=%v err=%v", n, st, co, err)
 		}
 	}
 	in := RunInput{
 		Cluster: liveEvCluster{e.cluster, ev}, Prober: prober, Witnesses: wit, Ledger: WithProvisionMarkers(ledger, NewMemProvisionMarkers()),
-		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: oldPub}}},
+		Signers: e.signers(c2), PreviousSigners: e.signers(c1), OldKeys: map[string][]OldKey{"c.core": {{PublicKey: oldPub}}},
 		Account: e.acctPub, Inventory: 2, ListSet: at014Target(), Received: []byte("at014"),
 		Previous: c1, RevokedKeys: ex.RevokedKeys,
 		Signer: SignerFuncs{
 			SignPreviousFn: func(_ PreviousClaims, revoked []string) (string, error) { return e.account(c1, revoked...), nil },
 			SignFn: func(_ listset.Record, c *listset.Compiled) (string, error) {
-				// Nothing for foo.c.new exists when the JWT is signed, which is before the push.
-				if st, co, err := prov.inbox(ctx, "s1", "foo.c.new"); err != nil || st || co {
+				// Nothing for c.new exists when the JWT is signed, which is before the push.
+				if st, co, err := prov.inbox(ctx, "s1", "c.new"); err != nil || st || co {
 					t.Errorf("at signing: stream=%v consumer=%v err=%v", st, co, err)
 				}
 				e.waitNewSecond()
@@ -275,7 +269,7 @@ func TestAT014Live(t *testing.T) {
 	if st.State != StateApplied || !st.InForce || len(st.Failing) != 0 {
 		t.Fatalf("status: %+v", st)
 	}
-	// Nothing for foo.c.new before the push, and the steps in order after it.
+	// Nothing for c.new before the push, and the steps in order after it.
 	log := ev.get()
 	pushes := 0
 	for _, s := range log {
@@ -283,32 +277,32 @@ func TestAT014Live(t *testing.T) {
 			pushes++
 		}
 	}
-	if pushes == 0 || log[0] != "push" || log[len(log)-2] != "create:foo.c.new" || log[len(log)-1] != "issue:foo.c.new" {
+	if pushes == 0 || log[0] != "push" || log[len(log)-2] != "create:c.new" || log[len(log)-1] != "issue:c.new" {
 		t.Errorf("events = %v", log)
 	}
-	if !slices.Equal(os.Provisioned, []string{"foo.c.new"}) || len(os.Held) != 0 || len(os.Errors) != 0 {
+	if !slices.Equal(os.Provisioned, []string{"c.new"}) || len(os.Held) != 0 || len(os.Errors) != 0 {
 		t.Errorf("ordered status = %+v", os)
 	}
 	if rec, _ := ledger.InForce(); rec.Generation != 2 {
 		t.Errorf("generation in force = %d", rec.Generation)
 	}
-	// The inbox stream and the consumer of foo.c.new exist on the cluster.
+	// The inbox stream and the consumer of c.new exist on the cluster.
 	for n := range e.urls {
-		if st, co, err := prov.inbox(ctx, n, "foo.c.new"); err != nil || !st || !co {
+		if st, co, err := prov.inbox(ctx, n, "c.new"); err != nil || !st || !co {
 			t.Errorf("after the run, server %s: stream=%v consumer=%v err=%v", n, st, co, err)
 		}
 	}
 	// The denial of docs to core is reported applied, with core's gate passed.
-	if !Applied(st, order.NewlyDenied[0]) || !SenderPassed(st, "foo.c.core") {
-		t.Error("the denial of foo.c.docs to foo.c.core is not reported applied")
+	if !Applied(st, order.NewlyDenied[0]) || !SenderPassed(st, "c.core") {
+		t.Error("the denial of c.docs to c.core is not reported applied")
 	}
 
-	// After the gate core cannot mail foo.c.new on any server: the old credential (where it can be probed) and the
+	// After the gate core cannot mail c.new on any server: the old credential (where it can be probed) and the
 	// target credential are both refused.
 	probed := 0
 	for n := range e.urls {
 		for _, r := range slices.Concat(ex.Removed, ex.CredentialOnly) {
-			if r.Receiver != "foo.c.new" {
+			if r.Receiver != "c.new" {
 				continue
 			}
 			cred := r.Probe
@@ -325,17 +319,17 @@ func TestAT014Live(t *testing.T) {
 	if probed < 2 {
 		t.Errorf("probed %d (server, reach) pairs", probed)
 	}
-	// foo.c.new's credential exists and works on every server, and core's old key is refused.
+	// c.new's credential exists and works on every server, and core's old key is refused.
 	prov.mu.Lock()
 	creds, issued := prov.creds, prov.issued
 	prov.mu.Unlock()
 	if len(creds) == 0 || issued.IsZero() {
-		t.Fatal("no credential issued for foo.c.new")
+		t.Fatal("no credential issued for c.new")
 	}
 	for n, u := range e.urls {
 		nc, cerr := connectTo(ctx, n, u, creds, 5*time.Second)
 		if cerr != nil {
-			t.Errorf("server %s refused foo.c.new: %v", n, cerr)
+			t.Errorf("server %s refused c.new: %v", n, cerr)
 			continue
 		}
 		nc.Close()

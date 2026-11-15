@@ -1,6 +1,6 @@
 // Package policyview is the responder behind `mash policy show` and `mash policy explain` (REQ-010).
 //
-// A sender sees only its own reach. The responder answers a signed request on agents.policy.<range>, finds who the
+// A sender sees only its own reach. The responder answers a signed request on mash.policy, finds who the
 // caller is from the verified signature alone, and answers with that caller's own entry of the list set in force. It
 // never returns another sender's lists or reach; the full lists are the operator's view (mashctl).
 package policyview
@@ -45,8 +45,6 @@ type Store interface {
 
 // Options configures Mount.
 type Options struct {
-	// Range is the account's range. Required.
-	Range string
 	// Store is the ledger to read. Required.
 	Store Store
 	// Now gives the time requests are judged by; nil means time.Now.
@@ -58,8 +56,8 @@ type Options struct {
 	ResolveAddress func(ctx context.Context, userPub string) (address string, ok bool, err error)
 }
 
-// Subject is the subject of the responder of range rng.
-func Subject(rng string) string { return listset.PolicySubject(rng) }
+// Subject is the subject of the responder.
+func Subject() string { return listset.PolicySubject() }
 
 // Request is the body of a request.
 type Request struct {
@@ -118,12 +116,9 @@ type responder struct {
 	views    map[uint64]listset.View
 }
 
-// Mount serves the responder on nc: a micro service with one endpoint on Subject(opts.Range), in a queue group so
+// Mount serves the responder on nc: a micro service with one endpoint on Subject(), in a queue group so
 // several responders share the load. stop drains the service.
 func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
-	if opts.Range == "" {
-		return nil, errors.New("policyview: no range")
-	}
 	if opts.Store == nil {
 		return nil, errors.New("policyview: no store")
 	}
@@ -145,7 +140,7 @@ func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
 		return nil, fmt.Errorf("policyview: %w", err)
 	}
 	if err := svc.AddEndpoint("policy", micro.HandlerFunc(r.handle),
-		micro.WithEndpointSubject(Subject(opts.Range)), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
+		micro.WithEndpointSubject(Subject()), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
 		_ = svc.Stop()
 		return nil, fmt.Errorf("policyview: %w", err)
 	}
@@ -180,10 +175,14 @@ func (r *responder) handle(req micro.Request) {
 		refuse(req, "the signing key names no endpoint")
 		return
 	}
-	if parts := strings.Split(caller, "."); len(parts) != 3 || parts[0] != r.opts.Range {
-		refuse(req, fmt.Sprintf("the sender is not an endpoint of range %q", r.opts.Range))
+	// The resolved address is the three-part agent.owner.name of the endpoint; the list set names a sender by its
+	// owner.name.
+	parts := strings.Split(caller, ".")
+	if len(parts) != 3 {
+		refuse(req, fmt.Sprintf("the sender %q is not a three-part endpoint address", caller))
 		return
 	}
+	caller = parts[1] + "." + parts[2]
 	var q Request
 	if err := json.Unmarshal(req.Data(), &q); err != nil {
 		refuse(req, "the request is not JSON")

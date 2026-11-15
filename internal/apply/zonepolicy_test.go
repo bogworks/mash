@@ -81,7 +81,7 @@ func TestAppliedZonePolicyChecksEveryCopy(t *testing.T) {
 		t.Fatalf("servers error: %v %v", got, err)
 	}
 	// an owner group signer alone is not a zone policy
-	kp, err := ks.GroupKey("foo.c", true)
+	kp, err := ks.GroupKey("c", true)
 	if err != nil {
 		t.Fatal(err)
 	}

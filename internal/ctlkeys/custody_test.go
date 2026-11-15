@@ -187,26 +187,26 @@ func TestGroupKeyIsKeptBesideTheZoneKeysAndNeverOverwritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.GroupKey("foo.c", false); !errors.Is(err, ErrNoGroupKey) {
+	if _, err := a.GroupKey("c", false); !errors.Is(err, ErrNoGroupKey) {
 		t.Fatalf("missing: %v", err)
 	}
-	k1, err := a.GroupKey("foo.c", true)
+	k1, err := a.GroupKey("c", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p1, _ := k1.PublicKey()
-	k2, err := a.GroupKey("foo.c", true)
+	k2, err := a.GroupKey("c", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p2, _ := k2.PublicKey(); p1 != p2 {
 		t.Error("a second create replaced the key")
 	}
-	fi, err := os.Stat(filepath.Join(a.dir, "groups", "foo.c.nk"))
+	fi, err := os.Stat(filepath.Join(a.dir, "groups", "c.nk"))
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("%v %v", fi, err)
 	}
-	for _, bad := range []string{"", "foo", "foo.c.core", "../x.c", "foo.", ".c", "Foo.c", "foo/x.c"} {
+	for _, bad := range []string{"", "c.core", "foo.c", "../x", "c.", ".c", "C", "x/c", strings.Repeat("a", 33)} {
 		if _, err := a.GroupKey(bad, true); err == nil {
 			t.Errorf("accepted %q", bad)
 		}

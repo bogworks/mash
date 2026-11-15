@@ -23,16 +23,15 @@ import (
 // the deadline with the old keys revoked and the sender reported not connected. A sender that leaves the set has its keys
 // revoked.
 
-// at013Prev: status is shared in foo.c (a template change in the target, so the push closes every connection under the
-// key), mail is closed and foo.c.core may mail docs and sdk by allow tags.
+// at013Prev: status is shared in c (a template change in the target, so the push closes every connection under the
+// key), mail is closed and c.core may mail docs and sdk by allow tags.
 func at013Prev() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Closed, listset.Closed, listset.Shared, listset.Closed),
+		Switches: switches("c", listset.Closed, listset.Closed, listset.Shared, listset.Closed),
 		Senders: []listset.SenderLists{
-			{Sender: "foo.c.core", Allow: []string{"foo.c.docs", "foo.c.sdk"}},
-			{Sender: "foo.c.docs"},
-			{Sender: "foo.c.sdk"},
+			{Sender: "c.core", Allow: []string{"c.docs", "c.sdk"}},
+			{Sender: "c.docs"},
+			{Sender: "c.sdk"},
 		},
 	}
 }
@@ -41,30 +40,29 @@ func at013Prev() listset.ListSet {
 func at013Target() listset.ListSet {
 	return listset.ListSet{
 		Base:     1,
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Closed, listset.Closed, listset.Closed, listset.Closed),
+		Switches: switches("c", listset.Closed, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
-			{Sender: "foo.c.core", Allow: []string{"foo.c.sdk"}},
-			{Sender: "foo.c.docs"},
-			{Sender: "foo.c.sdk"},
+			{Sender: "c.core", Allow: []string{"c.sdk"}},
+			{Sender: "c.docs"},
+			{Sender: "c.sdk"},
 		},
 	}
 }
 
-// at013GonePrev has foo.c.gone, which the target drops.
+// at013GonePrev has c.gone, which the target drops.
 func at013GonePrev() listset.ListSet {
 	ls := at013Prev()
-	ls.Senders = []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.c.sdk"}}, {Sender: "foo.c.gone"}, {Sender: "foo.c.sdk"}}
+	ls.Senders = []listset.SenderLists{{Sender: "c.core", Allow: []string{"c.sdk"}}, {Sender: "c.gone"}, {Sender: "c.sdk"}}
 	return ls
 }
 
 func at013GoneTarget() listset.ListSet {
 	ls := at013Target()
-	ls.Senders = []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.c.sdk"}}, {Sender: "foo.c.sdk"}}
+	ls.Senders = []listset.SenderLists{{Sender: "c.core", Allow: []string{"c.sdk"}}, {Sender: "c.sdk"}}
 	return ls
 }
 
-const at013Receiver = "foo.c.sdk"
+const at013Receiver = "c.sdk"
 
 // at013Host is the sender's host: it makes its own key pair, tells mash only the public key, and connects with the
 // delivered JWT and its own seed.
@@ -236,7 +234,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 			creds, pub := e.realUser(pc)
 			s.oldPubs[addr] = append(s.oldPubs[addr], pub)
 			s.oldCred[addr] = append(s.oldCred[addr], creds)
-			if err := e.rec.Add(ctx, IssueEntry{Address: addr, PublicKey: pub, Purpose: PurposeIssue, Tags: pc.Tags, Generation: 1, IssuedAt: time.Now()}); err != nil {
+			if err := e.rec.Add(ctx, IssueEntry{Address: addr, PublicKey: pub, Purpose: PurposeIssue, Tags: at010Must(listset.WithEndpointTag(pc.Tags, pc.Endpoint, addr)), Generation: 1, IssuedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -281,7 +279,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		if err := mon.Flush(); err != nil {
 			t.Fatal(err)
 		}
-		oldNC, err = nats.Connect(e.urls["s1"]+","+e.urls["s2"], nats.UserCredentialBytes(s.oldCred["foo.c.core"][0]),
+		oldNC, err = nats.Connect(e.urls["s1"]+","+e.urls["s2"], nats.UserCredentialBytes(s.oldCred["c.core"][0]),
 			nats.ReconnectWait(100*time.Millisecond), nats.MaxReconnects(-1))
 		if err != nil {
 			t.Fatal(err)
@@ -300,8 +298,8 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 	}
 	if narrowed {
 		for _, u := range c2.Users {
-			if u.Sender == "foo.c.core" {
-				s.plan.Narrowed = append(s.plan.Narrowed, NarrowedSender{Address: u.Sender, Name: u.Name, Tags: u.Tags, NewPub: s.host.pub})
+			if u.Sender == "c.core" {
+				s.plan.Narrowed = append(s.plan.Narrowed, NarrowedSender{Address: u.Sender, Name: u.Name, Tags: u.Tags, Endpoint: testEndpoint(u.Sender), NewPub: s.host.pub})
 			}
 		}
 	}
@@ -418,7 +416,7 @@ func TestAT013Live(t *testing.T) {
 	}
 	t.Run("narrowing hands over to the new key", func(t *testing.T) {
 		t.Parallel()
-		s := at013Run(t, at013Prev(), at013Target(), "ok", 15*time.Second, true, []string{"foo.c.core"}, nil, true)
+		s := at013Run(t, at013Prev(), at013Target(), "ok", 15*time.Second, true, []string{"c.core"}, nil, true)
 		st := s.status
 		if st.State != StateApplied || !st.InForce || len(st.Failing) != 0 || len(st.NotConnected) != 0 {
 			t.Fatalf("status: %+v", st)
@@ -427,7 +425,7 @@ func TestAT013Live(t *testing.T) {
 		if len(r) != 1 || !r[0].Connected || r[0].DeliverError != "" || r[0].NewPub != s.host.pub {
 			t.Fatalf("results: %+v", r)
 		}
-		old := s.oldPubs["foo.c.core"]
+		old := s.oldPubs["c.core"]
 		if want := slices.Sorted(slices.Values(old)); !slices.Equal(r[0].Revoked, want) {
 			t.Errorf("revoked %v, want %v", r[0].Revoked, want)
 		}
@@ -440,7 +438,7 @@ func TestAT013Live(t *testing.T) {
 			t.Errorf("revocation began at %v, before the new key was seen at %v", first, seen)
 		}
 		s.requireRevoked(old, seen)
-		s.requireOldRefused("foo.c.core")
+		s.requireOldRefused("c.core")
 		// The new key is in the record as a rotation, not revoked, and works on every server.
 		for _, en := range s.e.entries() {
 			if en.PublicKey == s.host.pub && (en.Purpose != PurposeRotation || en.RevokedAt != nil || en.Generation != 2) {
@@ -462,11 +460,11 @@ func TestAT013Live(t *testing.T) {
 			t.Errorf("gap %v, want under one reconnect (3 s)", gap)
 		}
 		// A later issue request for a revoked key is refused, in the record and by Rotate.
-		if err := s.e.rec.Add(s.ctx, IssueEntry{Address: "foo.c.core", PublicKey: old[0], Purpose: PurposeIssue}); !errors.Is(err, ErrRevokedKey) {
+		if err := s.e.rec.Add(s.ctx, IssueEntry{Address: "c.core", PublicKey: old[0], Purpose: PurposeIssue}); !errors.Is(err, ErrRevokedKey) {
 			t.Errorf("Add of a revoked key: %v", err)
 		}
 		_, err := Rotate(s.ctx, RotateInput{
-			Address: "foo.c.core", Name: "core", Tags: []string{"allow:c.sdk"}, NewPub: old[1], Generation: 3,
+			Address: "c.core", Name: "core", Tags: []string{"allow:c.sdk"}, Endpoint: testEndpoint("c.core"), NewPub: old[1], Generation: 3,
 			Issuer: GroupUserIssuer{Signer: s.e, Account: s.e.acctPub}, Deliverer: s.host, Conns: s.conns,
 			Record: s.e.rec, Revoker: s.revoker, Deadline: time.Now().Add(time.Second),
 		})
@@ -482,15 +480,15 @@ func TestAT013Live(t *testing.T) {
 		name := map[string]string{"error": "failed delivery", "silent": "false report"}[mode]
 		t.Run(name+" ends at the deadline", func(t *testing.T) {
 			t.Parallel()
-			s := at013Run(t, at013Prev(), at013Target(), mode, 2*time.Second, true, []string{"foo.c.core"}, nil, false)
+			s := at013Run(t, at013Prev(), at013Target(), mode, 2*time.Second, true, []string{"c.core"}, nil, false)
 			st := s.status
-			if st.State != StatePartial || st.InForce || !slices.Equal(st.NotConnected, []string{"foo.c.core"}) {
+			if st.State != StatePartial || st.InForce || !slices.Equal(st.NotConnected, []string{"c.core"}) {
 				t.Fatalf("status: %+v", st)
 			}
-			if !slices.ContainsFunc(st.Failing, func(f Failure) bool { return f.Sender == "foo.c.core" && f.Check == CheckNotConnected }) {
+			if !slices.ContainsFunc(st.Failing, func(f Failure) bool { return f.Sender == "c.core" && f.Check == CheckNotConnected }) {
 				t.Errorf("failing: %+v", st.Failing)
 			}
-			if SenderPassed(st, "foo.c.core") {
+			if SenderPassed(st, "c.core") {
 				t.Error("a not-connected sender passed")
 			}
 			r := s.plan.Results
@@ -501,8 +499,8 @@ func TestAT013Live(t *testing.T) {
 				t.Error("the new key was seen")
 			}
 			// The old keys were revoked anyway, and nothing was committed.
-			s.requireRevoked(s.oldPubs["foo.c.core"], s.revoker.firstAt())
-			s.requireOldRefused("foo.c.core")
+			s.requireRevoked(s.oldPubs["c.core"], s.revoker.firstAt())
+			s.requireOldRefused("c.core")
 			if g, _ := s.ledger.InForce(); g.Generation != 1 {
 				t.Errorf("generation in force %d: something was committed", g.Generation)
 			}
@@ -511,14 +509,14 @@ func TestAT013Live(t *testing.T) {
 
 	t.Run("a removed sender is revoked and refused", func(t *testing.T) {
 		t.Parallel()
-		s := at013Run(t, at013GonePrev(), at013GoneTarget(), "ok", 5*time.Second, false, []string{"foo.c.gone"}, []string{"foo.c.gone"}, false)
+		s := at013Run(t, at013GonePrev(), at013GoneTarget(), "ok", 5*time.Second, false, []string{"c.gone"}, []string{"c.gone"}, false)
 		st := s.status
 		if st.State != StateApplied || !st.InForce || len(st.Failing) != 0 || len(st.NotConnected) != 0 {
 			t.Fatalf("status: %+v", st)
 		}
-		s.requireRevoked(s.oldPubs["foo.c.gone"], s.revoker.firstAt())
-		s.requireOldRefused("foo.c.gone")
-		if err := s.e.rec.Add(s.ctx, IssueEntry{Address: "foo.c.gone", PublicKey: s.oldPubs["foo.c.gone"][0], Purpose: PurposeIssue}); !errors.Is(err, ErrRevokedKey) {
+		s.requireRevoked(s.oldPubs["c.gone"], s.revoker.firstAt())
+		s.requireOldRefused("c.gone")
+		if err := s.e.rec.Add(s.ctx, IssueEntry{Address: "c.gone", PublicKey: s.oldPubs["c.gone"][0], Purpose: PurposeIssue}); !errors.Is(err, ErrRevokedKey) {
 			t.Errorf("Add of a revoked key: %v", err)
 		}
 	})

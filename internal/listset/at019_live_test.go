@@ -7,15 +7,15 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// TestAT019LivePromptGetsItsDirectAnswer runs the one-way cross-group list set (corpus case 3: foo.a.lead may prompt
-// foo.b.cve, nobody allows the reverse) on a live nats-server. TestLiveMatchesCheck covers who may send; this covers
-// the answer: a live prompt from foo.a.lead reaches foo.b.cve, whose answer comes straight back on the reply subject
-// in foo.a.lead's own inbox space, while foo.b.cve still cannot start a prompt of its own to foo.a.lead.
+// TestAT019LivePromptGetsItsDirectAnswer runs the one-way cross-group list set (corpus case 3: a.lead may prompt
+// b.cve, nobody allows the reverse) on a live nats-server. TestLiveMatchesCheck covers who may send; this covers
+// the answer: a live prompt from a.lead reaches b.cve, whose answer comes straight back on the reply subject
+// in a.lead's own inbox space, while b.cve still cannot start a prompt of its own to a.lead.
 func TestAT019LivePromptGetsItsDirectAnswer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live nats-server test")
 	}
-	const sender, recipient = "foo.a.lead", "foo.b.cve"
+	const sender, recipient = "a.lead", "b.cve"
 	ls := corpus()[3].ls
 	c, err := Compile(ls)
 	if err != nil {

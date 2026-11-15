@@ -38,7 +38,7 @@ func must[T any](v T, err error) T {
 
 func (e *pushEnv) accountJWT(c *Compiled) string {
 	ac := jwt.NewAccountClaims(e.accPub)
-	ac.Name = c.Range
+	ac.Name = "test"
 	for _, tpl := range c.Templates {
 		sk, ok := e.scoped[tpl.Group]
 		if !ok {
@@ -126,7 +126,8 @@ func (e *liveEnv) user(c *Compiled, sender string) (*conn, User, error) {
 	for _, u := range c.Users {
 		if u.Sender == sender {
 			a, _ := parseAddress(u.Sender)
-			sc, err := e.connect(e.scoped[a.group()], u.Name, u.Tags, true)
+			// The credential carries what the issuer adds: the endpoint tag of its endpoint.
+			sc, err := e.connect(e.scoped[a.group()], u.Name, slices.Concat(u.Tags, []string{EndpointTagName + ":" + flat(sender)}), true)
 			if err == nil {
 				e.t.Cleanup(sc.nc.Close)
 			}
@@ -164,7 +165,11 @@ func subscribeReaches(t *testing.T, c *conn, obs *nats.Conn, filter, subject str
 	return false
 }
 
-func flat(addr string) string { return strings.ReplaceAll(addr, ".", "_") }
+// testAgent is the agent token of the endpoints the live tests give credentials to.
+const testAgent = "foo"
+
+// flat is the flat key of the endpoint with the agent token testAgent at addr (owner.name).
+func flat(addr string) string { return testAgent + "_" + strings.ReplaceAll(addr, ".", "_") }
 
 // ownSubjects is what every sender keeps whatever its lists say: the fixed lines of the template for its own address.
 // Each is published (or subscribed) and observed.
@@ -204,7 +209,7 @@ func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []s
 	admin, obs := e.observer()
 
 	targets := append([]string{}, named...)
-	targets = append(targets, "foo.c.ghost", "foo.x.ghost", "bar.c.lead")
+	targets = append(targets, "c.ghost", "x.ghost")
 	var refused []string
 	for _, v := range []Verb{Mail, Prompt, Status} {
 		for _, a := range targets {
@@ -212,7 +217,7 @@ func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []s
 		}
 	}
 	for _, v := range []Verb{Mail, Prompt, Status} {
-		refused = append(refused, subj("foo.c.*", v), subj("foo.*.*", v), "agents."+v.subject()+".>", "agents."+v.subject()+".foo.>")
+		refused = append(refused, subj("c.*", v), subj("*.*", v), "agents."+v.subject()+".>", "agents."+v.subject()+".foo.>")
 	}
 	for _, a := range targets {
 		if a != self {
@@ -232,16 +237,15 @@ func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []s
 	assertOwnSubjectsReach(t, sc, admin, obs, self)
 }
 
-func denyAllSet(rng string, tagged bool) ListSet {
+func denyAllSet(tagged bool) ListSet {
 	ls := ListSet{
-		Range: rng,
 		Switches: concat(
-			switches("foo.c", Closed, Closed, Closed, Closed),
-			switches("foo.d", Closed, Closed, Closed, Closed)),
-		Senders: []SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.lead"}, {Sender: "foo.d.solo"}},
+			switches("c", Closed, Closed, Closed, Closed),
+			switches("d", Closed, Closed, Closed, Closed)),
+		Senders: []SenderLists{{Sender: "c.core"}, {Sender: "c.lead"}, {Sender: "d.solo"}},
 	}
 	if tagged {
-		ls.Senders[0].Allow = []string{"foo.c.lead"}
+		ls.Senders[0].Allow = []string{"c.lead"}
 	}
 	return ls
 }
@@ -253,11 +257,11 @@ func TestAT005DenyAllSenderIsRefused(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live nats-server test")
 	}
-	named := []string{"foo.c.core", "foo.c.lead", "foo.d.solo"}
+	named := []string{"c.core", "c.lead", "d.solo"}
 
 	t.Run("no allow entry anywhere", func(t *testing.T) {
 		t.Parallel()
-		ls := denyAllSet("foo", false)
+		ls := denyAllSet(false)
 		c, err := Compile(ls)
 		if err != nil {
 			t.Fatal(err)
@@ -275,7 +279,7 @@ func TestAT005DenyAllSenderIsRefused(t *testing.T) {
 
 	t.Run("tags removed by a new list set", func(t *testing.T) {
 		t.Parallel()
-		first := denyAllSet("foo", true)
+		first := denyAllSet(true)
 		c1, err := Compile(first)
 		if err != nil {
 			t.Fatal(err)
@@ -283,7 +287,7 @@ func TestAT005DenyAllSenderIsRefused(t *testing.T) {
 		env := newPushEnv(t, c1)
 
 		// Before: core holds an allow tag, and its mail to lead passes (so the later refusal is the tag's absence).
-		sc, u, err := env.user(c1, "foo.c.core")
+		sc, u, err := env.user(c1, "c.core")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -291,15 +295,15 @@ func TestAT005DenyAllSenderIsRefused(t *testing.T) {
 			t.Fatalf("first set: core tags %v", u.Tags)
 		}
 		_, obs := env.observer()
-		if !canPublish(t, sc, obs, subj("foo.c.lead", Mail)) {
+		if !canPublish(t, sc, obs, subj("c.lead", Mail)) {
 			t.Fatal("first set: core cannot mail lead")
 		}
-		if canPublish(t, sc, obs, subj("foo.d.solo", Mail)) {
+		if canPublish(t, sc, obs, subj("d.solo", Mail)) {
 			t.Fatal("first set: core mailed solo")
 		}
 
 		// After: no allow entry in the set; its tags are gone; the template is pushed and the sender connects afresh.
-		c2, err := Compile(denyAllSet("foo", false))
+		c2, err := Compile(denyAllSet(false))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +316,7 @@ func TestAT005DenyAllSenderIsRefused(t *testing.T) {
 
 // TestAT003OwnerLineDroppedAndDenyHolds is the second half of AT-003 (REQ-020; the existing 'deny key (AT-003)' case
 // of TestLiveMatchesCheck is the first): the owner line is dropped when mail is closed, and sharing restores it; then
-// with mail shared, foo.c.core denying foo.c.sdk and every user under the key carrying a deny tag, core's mail to lead
+// with mail shared, c.core denying c.sdk and every user under the key carrying a deny tag, core's mail to lead
 // passes and to sdk is refused.
 func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	if testing.Short() {
@@ -320,16 +324,15 @@ func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	}
 	set := func(mail Switch, coreDeny ...string) ListSet {
 		return ListSet{
-			Range:    "foo",
-			Switches: switches("foo.c", mail, Closed, Closed, Closed),
+			Switches: switches("c", mail, Closed, Closed, Closed),
 			Senders: []SenderLists{
-				{Sender: "foo.c.core", Deny: coreDeny},
-				{Sender: "foo.c.lead"},
-				{Sender: "foo.c.sdk"},
+				{Sender: "c.core", Deny: coreDeny},
+				{Sender: "c.lead"},
+				{Sender: "c.sdk"},
 			},
 		}
 	}
-	shared, closed, denied := set(Shared), set(Closed), set(Shared, "foo.c.sdk")
+	shared, closed, denied := set(Shared), set(Closed), set(Shared, "c.sdk")
 	cs := map[string]*Compiled{}
 	for name, ls := range map[string]ListSet{"shared": shared, "closed": closed, "denied": denied} {
 		c, err := Compile(ls)
@@ -341,7 +344,7 @@ func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	// The compile adds the sentinel deny tag to every user of the deny key that denies nobody.
 	for _, u := range cs["denied"].Users {
 		want := []string{"deny:c.sdk"}
-		if u.Sender != "foo.c.core" {
+		if u.Sender != "c.core" {
 			want = []string{NoDenyTag}
 		}
 		if !slices.Equal(u.Tags, want) {
@@ -353,34 +356,34 @@ func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	// reach reports, for each mail target, whether core's mail passes, with a connection opened after the last push.
 	reach := func(phase string, c *Compiled, want map[string]bool) {
 		t.Helper()
-		sc, _, err := env.user(c, "foo.c.core")
+		sc, _, err := env.user(c, "c.core")
 		if err != nil {
 			t.Fatalf("%s: core cannot connect: %v", phase, err)
 		}
 		_, obs := env.observer()
-		for _, target := range []string{"foo.c.lead", "foo.c.sdk"} {
+		for _, target := range []string{"c.lead", "c.sdk"} {
 			if got := canPublish(t, sc, obs, subj(target, Mail)); got != want[target] {
 				t.Errorf("%s: core mails %s: %v, want %v", phase, target, got, want[target])
 			}
 		}
 	}
-	reach("mail shared", cs["shared"], map[string]bool{"foo.c.lead": true, "foo.c.sdk": true})
+	reach("mail shared", cs["shared"], map[string]bool{"c.lead": true, "c.sdk": true})
 
 	env.push(cs["closed"])
-	reach("mail closed, no entry", cs["closed"], map[string]bool{"foo.c.lead": false, "foo.c.sdk": false})
+	reach("mail closed, no entry", cs["closed"], map[string]bool{"c.lead": false, "c.sdk": false})
 
 	env.push(cs["shared"])
-	reach("mail shared again", cs["shared"], map[string]bool{"foo.c.lead": true, "foo.c.sdk": true})
+	reach("mail shared again", cs["shared"], map[string]bool{"c.lead": true, "c.sdk": true})
 
 	env.push(cs["denied"])
-	reach("shared, core denies sdk", cs["denied"], map[string]bool{"foo.c.lead": true, "foo.c.sdk": false})
+	reach("shared, core denies sdk", cs["denied"], map[string]bool{"c.lead": true, "c.sdk": false})
 	// The deny is core's alone: lead still mails sdk.
-	lead, _, err := env.user(cs["denied"], "foo.c.lead")
+	lead, _, err := env.user(cs["denied"], "c.lead")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, obs := env.observer()
-	if !canPublish(t, lead, obs, subj("foo.c.sdk", Mail)) {
+	if !canPublish(t, lead, obs, subj("c.sdk", Mail)) {
 		t.Error("shared, core denies sdk: lead cannot mail sdk")
 	}
 }
@@ -390,28 +393,28 @@ type openRow struct {
 	subject string
 	// permitted: the server accepted the publish (the observer saw it); false: refused with a permissions violation.
 	permitted bool
-	// reach: the addresses, other than the sender, whose own connection received it. Peers are foo.c.lead and
-	// foo.d.solo, each subscribed to what its own template allows (its reply prefix, $SRV.>).
+	// reach: the addresses, other than the sender, whose own connection received it. Peers are c.lead and
+	// d.solo, each subscribed to what its own template allows (its reply prefix, $SRV.>).
 	reach []string
 	why   string
 }
 
-// pinnedOpenSubjects is the pinned result of AT-020's open-subject half, for the raw client of foo.c.core: every fixed line
+// pinnedOpenSubjects is the pinned result of AT-020's open-subject half, for the raw client of c.core: every fixed line
 // of the template that is not the sender's own policy, and the neighbouring subjects it must not reach. The table in
 // docs/security/threat-model.md section 5.3.1 is this table; change one and change the other. A widening or a
 // narrowing fails the test, and the maintainer who changes the table updates the document with it.
 func pinnedOpenSubjects() []openRow {
 	const doc = "ADR 0007, 0009"
 	return []openRow{
-		{"_INBOX.foo_c_lead.nuid1", true, []string{"foo.c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
-		{"_INBOX.foo_d_solo.nuid1", true, []string{"foo.d.solo"}, "the same in another owner group: the reply prefix is not part of an owner line"},
-		{"$SRV.INFO.agents", true, []string{"foo.c.lead", "foo.d.solo"}, "service discovery and live-prompt requests go to every endpoint (ADR 0007)"},
-		{"$SRV.PING", true, []string{"foo.c.lead", "foo.d.solo"}, "the same: every sender subscribes to $SRV.> to answer discovery"},
+		{"_INBOX.foo_c_lead.nuid1", true, []string{"c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
+		{"_INBOX.foo_d_solo.nuid1", true, []string{"d.solo"}, "the same in another owner group: the reply prefix is not part of an owner line"},
+		{"$SRV.INFO.agents", true, []string{"c.lead", "d.solo"}, "service discovery and live-prompt requests go to every endpoint (ADR 0007)"},
+		{"$SRV.PING", true, []string{"c.lead", "d.solo"}, "the same: every sender subscribes to $SRV.> to answer discovery"},
 		{"_INBOX.foo_c_core.nuid1", true, nil, "its own reply prefix: no other address receives it"},
-		{subj("foo.c.core", Heartbeat), true, nil, "its own heartbeat, a fixed line; nobody here subscribed to it"},
+		{subj("c.core", Heartbeat), true, nil, "its own heartbeat, a fixed line; nobody here subscribed to it"},
 		{"$JS.API.INFO", true, nil, "JetStream account info: a server API call, reaches no address"},
-		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the range by design (" + doc + ")"},
-		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the range, read only"},
+		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the account by design (" + doc + ")"},
+		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the account, read only"},
 		{"$JS.API.STREAM.INFO.KV_mash-leases", true, nil, "reads the lease bucket's state"},
 		{"$KV.mash-leases.foo_c_core", true, nil, "its own lease key"},
 		{"$JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_core.deliver", true, nil, "its own inbox consumer"},
@@ -430,11 +433,11 @@ func pinnedOpenSubjects() []openRow {
 		{"$JS.API.DIRECT.GET.inbox-foo_d_solo.x", false, nil, "direct read of an inbox in another owner group: refused"},
 		{"$JS.API.STREAM.DELETE.inbox-foo_c_lead", false, nil, "deleting another inbox: refused"},
 		{"$JS.API.STREAM.PURGE.inbox-foo_c_lead", false, nil, "purging another inbox: refused"},
-		{subj("foo.c.lead", Heartbeat), false, nil, "another address's heartbeat: refused"},
+		{subj("c.lead", Heartbeat), false, nil, "another address's heartbeat: refused"},
 	}
 }
 
-// TestAT020OpenReplyAndPlumbingSubjectsArePinned records what a raw client (the creds file of foo.c.core and a plain
+// TestAT020OpenReplyAndPlumbingSubjectsArePinned records what a raw client (the creds file of c.core and a plain
 // NATS client) reaches on the always-open reply and plumbing subjects, and pins it to pinnedOpenSubjects (documented in
 // docs/security/threat-model.md section 5.3.1). It also asserts the contract's positive half: another address's inbox,
 // prompt and status subjects cannot be subscribed, and its inbox stream cannot be consumed (the rows above).
@@ -442,14 +445,14 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live nats-server test")
 	}
-	ls := denyAllSet("foo", false)
+	ls := denyAllSet(false)
 	c, err := Compile(ls)
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := newLiveEnv(t, c)
 	admin, obs := env.observer()
-	core, _, err := env.user(c, "foo.c.core")
+	core, _, err := env.user(c, "c.core")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +460,7 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 	// Peers listen where their own templates allow them to: their reply prefix and $SRV.>.
 	var mu sync.Mutex
 	got := map[string][]string{} // subject -> peers that received it
-	for _, p := range []string{"foo.c.lead", "foo.d.solo"} {
+	for _, p := range []string{"c.lead", "d.solo"} {
 		pc, _, err := env.user(c, p)
 		if err != nil {
 			t.Fatal(err)
@@ -491,7 +494,7 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 	}
 
 	// Subscriptions: no other address's inbox, prompt, status or mail subject, nor a reply prefix but its own.
-	for _, peer := range []string{"foo.c.lead", "foo.d.solo"} {
+	for _, peer := range []string{"c.lead", "d.solo"} {
 		f := flat(peer)
 		for _, filter := range []string{
 			subj(peer, Mail), subj(peer, Prompt), subj(peer, Status),

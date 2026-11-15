@@ -37,8 +37,6 @@ const StageSize = "size"
 // probe and witness connections, and runs policyapply.Apply with everything it needs.
 type Applier struct {
 	Account string
-	// Range is the range this service applies list sets for (--range).
-	Range string
 	// Ledger is the account's ledger in the policy bucket; it keeps the record in force and writes the status.
 	Ledger Ledger
 	// Sys is a connection authenticated as a system account user.
@@ -89,8 +87,7 @@ type Applier struct {
 	markers     policyapply.ProvisionMarkers
 	markersErr  error
 
-	// applyFn, keptFn and readServers are seams for the tests; nil means policyapply.Apply, Issuer.Kept and ReadServers.
-	keptFn      func(context.Context) (map[string]string, error)
+	// applyFn and readServers are seams for the tests; nil means policyapply.Apply and ReadServers.
 	applyFn     func(context.Context, policyapply.ApplyRequest, policyapply.ApplyDeps) (policyapply.Status, error)
 	readServers func(ctx context.Context) ([]ServerInfo, error)
 }
@@ -183,9 +180,6 @@ func (a *Applier) logf(msg string, args ...any) {
 func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.Guard) (policyintake.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, ApplyTimeout)
 	defer cancel()
-	if a.Range == "" {
-		return policyintake.Result{}, errors.New("the applier has no range")
-	}
 	doc, err := policydoc.Decode(d.Raw, policydoc.DecodeOptions{}) // the intake verified the signature
 	if err != nil {
 		return policyintake.Result{}, err
@@ -218,7 +212,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		RotationStep: d.RotationStep}
 	issuer := &Issuer{
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
-		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
+		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
 		AdminUser: a.AdminUser, AdminIssuer: a.AdminIssuer, ExemptIssuers: a.ExemptIssuers,
 	}
 	markers, err := a.markersFor()
@@ -312,13 +306,6 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		signers[tpl.Group] = pub
 	}
 	deps.Signers = signers
-	kept := func(ctx context.Context) (map[string]string, error) { return issuer.Kept(ctx, doc.Generation) }
-	if a.keptFn != nil {
-		kept = a.keptFn
-	}
-	if deps.KeptSigners, err = kept(ctx); err != nil {
-		return policyintake.Result{}, err
-	}
 	deps.ServerLimits = Limits(servers)
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}

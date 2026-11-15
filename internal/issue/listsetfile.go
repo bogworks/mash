@@ -20,7 +20,7 @@ import (
 const maxListSetFile = 8 << 20
 
 // FileListSet is the ListSetInForce that reads a list set from a JSON file. DEC-004 leaves the list set's file format
-// open, so the file is a JSON object shaped like listset.ListSet: {"Range": "...", "Switches": [{"Group", "Verb",
+// open, so the file is a JSON object shaped like listset.ListSet: {"Switches": [{"Group", "Verb",
 // "Switch"}], "Senders": [{"Sender", "Allow", "Deny"}]} (field names match without regard to case; an unknown field is
 // refused). It is read and compiled again whenever its bytes change, and a file that cannot be read or does not compile
 // is no list set in force (fail closed). The generation is 0 until the policy gate lands.

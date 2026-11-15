@@ -11,6 +11,7 @@ import (
 	"github.com/bogworks/mash/internal/policyapply"
 	"github.com/bogworks/mash/internal/policydoc"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // ErrNotDecided is wrapped by the fail-closed steps: the behaviour they stand for is not decided, so nothing is done.
@@ -59,9 +60,12 @@ func SuspendedInboxDetail(addresses []string) string {
 		"submit it again once the inbox is resumed."
 }
 
-// InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one.
+// InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one. A list
+// set address is owner.name and names no agent token, so List finds the directory records of that owner and name and
+// CheckInbox checks the inbox of each.
 type InboxChecker interface {
 	CheckInbox(ctx context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error)
+	List(ctx context.Context) ([]store.Record, error)
 }
 
 var _ InboxChecker = (*admin.Admin)(nil)
@@ -95,13 +99,51 @@ const SuspendedReason = ": its inbox is suspended; resume it first"
 // Callers tell that answer apart with SuspendedReason. A
 // stream or consumer that exists but does not have the configuration mail depends on is an error, as is a failed read.
 func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
-	id, err := sap.ParseCanonical(address)
-	if err != nil {
-		return "", fmt.Errorf("address %.64q is not range.owner.name: %w", address, err)
+	owner, name, ok := strings.Cut(address, ".")
+	if !ok || owner == "" || name == "" || strings.Contains(name, ".") {
+		return "", fmt.Errorf("address %.64q is not owner.name", address)
 	}
 	if p.Inboxes == nil {
 		return address + " has no inbox stream", nil
 	}
+	recs, err := p.Inboxes.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	// The endpoints at the address: any agent token, so every directory record of the owner and name.
+	var ids []sap.EndpointIdentity
+	for _, r := range recs {
+		if r.Owner != owner || r.Name != name {
+			continue
+		}
+		id, err := r.Identity()
+		if err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return address + " has no inbox stream", nil
+	}
+	// The first problem is reported only when no endpoint at the address is fully served.
+	first := ""
+	for _, id := range ids {
+		m, err := p.missingFor(ctx, address, id)
+		if err != nil {
+			return "", err
+		}
+		if m == "" {
+			return "", nil
+		}
+		if first == "" {
+			first = m
+		}
+	}
+	return first, nil
+}
+
+// missingFor is MissingInbox for one endpoint at the address.
+func (p Provisioner) missingFor(ctx context.Context, address string, id sap.EndpointIdentity) (string, error) {
 	got, err := p.Inboxes.CheckInbox(ctx, id)
 	switch {
 	case err != nil:
@@ -143,7 +185,7 @@ func (p Provisioner) IssueCredential(_ context.Context, address string) error {
 		}
 		for _, u := range c.Users {
 			if u.Sender == address {
-				group, _, _ = cutLast(address)
+				group = groupOf(address)
 			}
 		}
 	}
@@ -158,15 +200,6 @@ func (p Provisioner) IssueCredential(_ context.Context, address string) error {
 		return fmt.Errorf("owner group %s has no scoped key, so no credential can be issued for its addresses", group)
 	}
 	return nil
-}
-
-// cutLast splits "range.owner.name" into "range.owner" and "name".
-func cutLast(address string) (group, name string, ok bool) {
-	i := strings.LastIndex(address, ".")
-	if i < 0 {
-		return "", address, false
-	}
-	return address[:i], address[i+1:], true
 }
 
 // FailClosedDeliverer is the Deliverer of the service: it places nothing. mash never holds a sender's seed, and how a

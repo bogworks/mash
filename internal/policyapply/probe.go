@@ -14,10 +14,12 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/listset"
 )
 
-// GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is "range.owner", the role
-// of the key). The user's permissions then come only from the key's template.
+// GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is the owner, the role of
+// the key). The user's permissions then come only from the key's template.
 type GroupSigner interface {
 	SignUser(group string, uc *jwt.UserClaims) (string, error)
 }
@@ -48,11 +50,18 @@ func (m *ProbeMinter) Mint(ctx context.Context, p ProbeCred) (creds []byte, pub 
 	if !nkeys.IsValidPublicAccountKey(m.Account) {
 		return nil, "", errors.New("probe minter: not an account public key")
 	}
-	i := strings.LastIndex(p.Sender, ".")
-	if i <= 0 || strings.Count(p.Sender, ".") < 2 {
-		return nil, "", fmt.Errorf("probe for %q: not a three-part address", p.Sender)
+	group, _, ok := strings.Cut(p.Sender, ".")
+	if !ok || group == "" || strings.Count(p.Sender, ".") != 1 {
+		return nil, "", fmt.Errorf("probe for %q: not an owner.name address", p.Sender)
 	}
-	group := p.Sender[:i]
+	endpoint := p.Endpoint
+	if endpoint == "" {
+		endpoint = "probe." + p.Sender
+	}
+	tags, err := listset.WithEndpointTag(p.Tags, endpoint, p.Sender)
+	if err != nil {
+		return nil, "", fmt.Errorf("probe for %s: %w", p.Sender, err)
+	}
 	if p.Name == "" {
 		return nil, "", fmt.Errorf("probe for %s: no name", p.Sender)
 	}
@@ -77,8 +86,8 @@ func (m *ProbeMinter) Mint(ctx context.Context, p ProbeCred) (creds []byte, pub 
 	uc := jwt.NewUserClaims(pub)
 	uc.SetScoped(true) // no permissions or limits of its own: the template supplies them
 	uc.Name = p.Name
-	uc.Tags.Add(p.Tags...)
-	if !slices.Equal([]string(uc.Tags), p.Tags) {
+	uc.Tags.Add(tags...)
+	if !slices.Equal([]string(uc.Tags), tags) {
 		return nil, "", fmt.Errorf("probe for %s: tags are not in the canonical lower-case form", p.Sender)
 	}
 	uc.IssuerAccount = m.Account

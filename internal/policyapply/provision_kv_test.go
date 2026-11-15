@@ -24,16 +24,16 @@ func newKVMarkers(t *testing.T, e *kvEnv) *KVProvisionMarkers {
 func TestKVProvisionMarkersSurviveNewInstance(t *testing.T) {
 	e := newKVEnv(t)
 	m1 := newKVMarkers(t, e)
-	for _, a := range []string{"foo.c.new", "foo.c.core"} {
+	for _, a := range []string{"c.new", "c.core"} {
 		if err := m1.MarkProvisioning(a, 2); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := m1.MarkProvisioning("foo.c.new", 2); err != nil { // idempotent
+	if err := m1.MarkProvisioning("c.new", 2); err != nil { // idempotent
 		t.Fatal(err)
 	}
 	got, err := newKVMarkers(t, e).Provisioning(2)
-	if err != nil || !slices.Equal(got, []string{"foo.c.core", "foo.c.new"}) {
+	if err != nil || !slices.Equal(got, []string{"c.core", "c.new"}) {
 		t.Fatalf("got %v, %v", got, err)
 	}
 }
@@ -44,19 +44,19 @@ func TestKVProvisionMarkersClearAndRemark(t *testing.T) {
 	if err := m.ClearProvisioning("nobody", 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.MarkProvisioning("foo.c.new", 2); err != nil {
+	if err := m.MarkProvisioning("c.new", 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ClearProvisioning("foo.c.new", 2); err != nil {
+	if err := m.ClearProvisioning("c.new", 2); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := newKVMarkers(t, e).Provisioning(2); err != nil || len(got) != 0 {
 		t.Fatalf("after clear: %v, %v", got, err)
 	}
-	if err := m.MarkProvisioning("foo.c.new", 2); err != nil {
+	if err := m.MarkProvisioning("c.new", 2); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := m.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+	if got, _ := m.Provisioning(2); !slices.Equal(got, []string{"c.new"}) {
 		t.Fatalf("after re-mark: %v", got)
 	}
 }
@@ -64,12 +64,12 @@ func TestKVProvisionMarkersClearAndRemark(t *testing.T) {
 func TestKVProvisionMarkersGenerationIsolation(t *testing.T) {
 	e := newKVEnv(t)
 	m := newKVMarkers(t, e)
-	_ = m.MarkProvisioning("foo.c.new", 2)
-	_ = m.MarkProvisioning("foo.c.docs", 12)
-	if got, _ := m.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+	_ = m.MarkProvisioning("c.new", 2)
+	_ = m.MarkProvisioning("c.docs", 12)
+	if got, _ := m.Provisioning(2); !slices.Equal(got, []string{"c.new"}) {
 		t.Errorf("gen 2: %v", got)
 	}
-	if got, _ := m.Provisioning(12); !slices.Equal(got, []string{"foo.c.docs"}) {
+	if got, _ := m.Provisioning(12); !slices.Equal(got, []string{"c.docs"}) {
 		t.Errorf("gen 12: %v", got)
 	}
 	if got, _ := m.Provisioning(1); len(got) != 0 {
@@ -101,14 +101,14 @@ func TestRunOrderedWithProvisionMarkersRefusesRollback(t *testing.T) {
 			w := newWorld14(t)
 			pm := mk(t)
 			w.in.Ledger = WithProvisionMarkers(evLedger{w.ledger, w.ev}, pm)
-			w.prov.fail("issue:foo.c.new", true)
+			w.prov.fail("issue:c.new", true)
 			if _, err := RunOrdered(context.Background(), w.in, w.prov); err != nil {
 				t.Fatal(err)
 			}
-			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"c.new"}) {
 				t.Fatalf("markers after first run: %v", got)
 			}
-			w.prov.fail("issue:foo.c.new", false)
+			w.prov.fail("issue:c.new", false)
 			w.cl.mu.Lock()
 			w.cl.jwts["s2"] = w.j1
 			w.cl.failPush["s2"] = true
@@ -131,10 +131,10 @@ func TestKVProvisionMarkersUnreadableMarkerIsAnError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := newKVEnv(t)
 			m := newKVMarkers(t, e)
-			if err := m.MarkProvisioning("foo.c.new", 2); err != nil {
+			if err := m.MarkProvisioning("c.new", 2); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.kv.Put(context.Background(), m.key("foo.c.other", 2), []byte(val)); err != nil {
+			if _, err := e.kv.Put(context.Background(), m.key("c.other", 2), []byte(val)); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := m.Provisioning(2); err == nil {
@@ -144,7 +144,7 @@ func TestKVProvisionMarkersUnreadableMarkerIsAnError(t *testing.T) {
 	}
 	e := newKVEnv(t)
 	m := newKVMarkers(t, e)
-	_, _ = e.kv.Put(context.Background(), m.key("foo.c.gone", 2), []byte(`{"cleared":true}`))
+	_, _ = e.kv.Put(context.Background(), m.key("c.gone", 2), []byte(`{"cleared":true}`))
 	if got, err := m.Provisioning(2); err != nil || len(got) != 0 {
 		t.Errorf("tombstone: %v, %v", got, err)
 	}
@@ -170,7 +170,7 @@ func (expiringKV) ListKeysFiltered(ctx context.Context, _ ...string) (jetstream.
 func TestKVProvisionMarkersExpiredListingIsAnError(t *testing.T) {
 	e := newKVEnv(t)
 	m := newKVMarkers(t, e)
-	if err := m.MarkProvisioning("foo.c.new", 2); err != nil {
+	if err := m.MarkProvisioning("c.new", 2); err != nil {
 		t.Fatal(err)
 	}
 	const expiry = 20 * time.Millisecond

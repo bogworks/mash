@@ -61,20 +61,20 @@ func TestStaticRefusalsAllWrapErrNoRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := key(t)
-	if err := f.Add("h", "foo.c", k); err != nil {
+	if err := f.Add("h", "c", k); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Save(path)
-	if got := s.Lookup("h", "foo.c"); len(got) != 1 || got[0] != k {
+	if got := s.Lookup("h", "c"); len(got) != 1 || got[0] != k {
 		t.Fatalf("%v", got)
 	}
-	if len(s.Lookup("h", "foo.d")) != 0 || len(s.Lookup("h2", "foo.c")) != 0 {
+	if len(s.Lookup("h", "d")) != 0 || len(s.Lookup("h2", "c")) != 0 {
 		t.Fatal("matched another host or group")
 	}
 	// A registry that stops being one registers no one.
 	f.TestAccount = false
 	_ = f.Save(path)
-	if len(s.Lookup("h", "foo.c")) != 0 {
+	if len(s.Lookup("h", "c")) != 0 {
 		t.Fatal("served after the flag was cleared")
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
@@ -102,7 +102,7 @@ func TestLoadRefusesASymlinkAndAWritableFile(t *testing.T) {
 
 func TestAddValidates(t *testing.T) {
 	f := &File{}
-	for _, c := range [][3]string{{"", "foo.c", key(t)}, {"h", "foo", key(t)}, {"h", "foo.c.core", key(t)}, {"h", "foo.c", "UBAD"}} {
+	for _, c := range [][3]string{{"", "c", key(t)}, {"h", "", key(t)}, {"h", "foo.c", key(t)}, {"h", "foo.c.core", key(t)}, {"h", "c", "UBAD"}} {
 		if err := f.Add(c[0], c[1], c[2]); err == nil {
 			t.Errorf("accepted %v", c)
 		}
@@ -190,7 +190,7 @@ func TestUpdateSecondReadWaitsForTheFirstToSave(t *testing.T) {
 		firstDone <- Update(path, func(f *File) error {
 			close(inside)
 			<-release
-			return f.Add("h1", "foo.c", key(t))
+			return f.Add("h1", "c", key(t))
 		})
 	}()
 	<-inside
@@ -200,7 +200,7 @@ func TestUpdateSecondReadWaitsForTheFirstToSave(t *testing.T) {
 			if !slices.ContainsFunc(f.Entries, func(e Entry) bool { return e.Host == "h1" }) {
 				t.Error("the second Update read the file before the first saved")
 			}
-			return f.Add("h2", "foo.c", key(t))
+			return f.Add("h2", "c", key(t))
 		})
 	}()
 	select {
@@ -223,7 +223,7 @@ func TestUpdateSecondReadWaitsForTheFirstToSave(t *testing.T) {
 // Concurrent adds of distinct keys and a remove: the file ends with every add except the removed one.
 func TestUpdateConcurrentAddsAndARemove(t *testing.T) {
 	path, _ := newReg(t)
-	if err := Update(path, func(f *File) error { return f.Add("victim", "foo.c", key(t)) }); err != nil {
+	if err := Update(path, func(f *File) error { return f.Add("victim", "c", key(t)) }); err != nil {
 		t.Fatal(err)
 	}
 	const n = 20
@@ -232,7 +232,7 @@ func TestUpdateConcurrentAddsAndARemove(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := Update(path, func(f *File) error { return f.Add(fmt.Sprintf("h%d", i), "foo.c", key(t)) }); err != nil {
+			if err := Update(path, func(f *File) error { return f.Add(fmt.Sprintf("h%d", i), "c", key(t)) }); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -241,7 +241,7 @@ func TestUpdateConcurrentAddsAndARemove(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		if err := Update(path, func(f *File) error {
-			if f.Remove("victim", "foo.c") == 0 {
+			if f.Remove("victim", "c") == 0 {
 				return errors.New("nothing removed")
 			}
 			return nil
@@ -263,7 +263,7 @@ func TestUpdateConcurrentAddsAndARemove(t *testing.T) {
 func TestUpdateRemovedKeyNeverReappears(t *testing.T) {
 	for i := range 50 {
 		path, _ := newReg(t)
-		if err := Update(path, func(f *File) error { return f.Add("x", "foo.c", key(t)) }); err != nil {
+		if err := Update(path, func(f *File) error { return f.Add("x", "c", key(t)) }); err != nil {
 			t.Fatal(err)
 		}
 		y := key(t)
@@ -271,13 +271,13 @@ func TestUpdateRemovedKeyNeverReappears(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			if err := Update(path, func(f *File) error { f.Remove("x", "foo.c"); return nil }); err != nil {
+			if err := Update(path, func(f *File) error { f.Remove("x", "c"); return nil }); err != nil {
 				t.Error(err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			if err := Update(path, func(f *File) error { return f.Add("y", "foo.c", y) }); err != nil {
+			if err := Update(path, func(f *File) error { return f.Add("y", "c", y) }); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -292,7 +292,7 @@ func TestUpdateErrorLeavesFileAndReleasesLock(t *testing.T) {
 	path, _ := newReg(t)
 	before, _ := os.ReadFile(path)
 	boom := errors.New("boom")
-	if err := Update(path, func(f *File) error { f.Entries = nil; _ = f.Add("h", "foo.c", key(t)); return boom }); !errors.Is(err, boom) {
+	if err := Update(path, func(f *File) error { f.Entries = nil; _ = f.Add("h", "c", key(t)); return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(path)
@@ -346,7 +346,7 @@ func TestLockFileCustody(t *testing.T) {
 func TestReadersDuringAnEditSeeACompleteFile(t *testing.T) {
 	path, a := newReg(t)
 	k0 := key(t)
-	if err := Update(path, func(f *File) error { return f.Add("h0", "foo.c", k0) }); err != nil {
+	if err := Update(path, func(f *File) error { return f.Add("h0", "c", k0) }); err != nil {
 		t.Fatal(err)
 	}
 	s, err := OpenStatic(path, a)
@@ -358,12 +358,12 @@ func TestReadersDuringAnEditSeeACompleteFile(t *testing.T) {
 		done <- Update(path, func(f *File) error {
 			close(inside)
 			<-release
-			return f.Add("h1", "foo.c", key(t))
+			return f.Add("h1", "c", key(t))
 		})
 	}()
 	<-inside
 	start := time.Now()
-	if got := s.Lookup("h0", "foo.c"); len(got) != 1 || got[0] != k0 {
+	if got := s.Lookup("h0", "c"); len(got) != 1 || got[0] != k0 {
 		t.Errorf("lookup during an edit: %v", got)
 	}
 	if f, err := Load(path); err != nil || len(f.Entries) != 1 {
@@ -397,7 +397,7 @@ func TestReadersDuringAnEditSeeACompleteFile(t *testing.T) {
 		}()
 	}
 	for i := range 30 {
-		if err := Update(path, func(f *File) error { return f.Add(fmt.Sprintf("w%d", i), "foo.c", key(t)) }); err != nil {
+		if err := Update(path, func(f *File) error { return f.Add(fmt.Sprintf("w%d", i), "c", key(t)) }); err != nil {
 			t.Error(err)
 		}
 	}

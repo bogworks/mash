@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -42,10 +41,7 @@ type Issuer struct {
 	// Resolver reads the account JWT from every server.
 	Resolver apply.Resolver
 	Account  string
-	// Range is the range this service applies list sets for. Only the signing keys of its owner groups ("range.owner")
-	// are replaced or dropped; the keys of other ranges' groups are kept as they are.
-	Range string
-	Trust apply.Trust
+	Trust    apply.Trust
 	// Servers is the declared server count (0 none given).
 	Servers int
 	// Now gives the time; nil means time.Now.
@@ -125,66 +121,35 @@ func errNonMashKey(k string) error {
 	return fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
 }
 
-// keptFrom splits the signing keys of base. kept is the other ranges' group keys of the key store (group -> public
-// key) that base also carries: the ones the next account JWT retains, and the ones the generation read must find. A
-// key store key of another range that base does not carry is in neither. mine are this range's keys in base, which are
+// splitKeys splits the signing keys of base. mine are the scoped owner group keys of the key store in base, which are
 // rebuilt from the list set. nonMash are the signing keys of base that are not a scoped owner group key of the key
 // store: Sign drops them after the issuer check, or refuses when it may not.
-func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash []string, err error) {
+func (s *Issuer) splitKeys(base *jwt.AccountClaims) (mine, nonMash []string, err error) {
 	ours, err := s.Keys.GroupPublics()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("owner group keys: %w", err)
+		return nil, nil, fmt.Errorf("owner group keys: %w", err)
 	}
-	if s.Range == "" {
-		return nil, nil, nil, errors.New("the issuer has no range: cannot tell which signing keys are this range's")
+	held := map[string]bool{} // public keys of the key store's owner groups
+	for _, pub := range ours {
+		held[pub] = true
 	}
-	groupOf := map[string]string{} // public key -> owner group
-	for g, pub := range ours {
-		groupOf[pub] = g
-	}
-	kept = map[string]string{}
 	for _, k := range base.SigningKeys.Keys() {
 		sc, _ := base.SigningKeys.GetScope(k)
-		g, held := groupOf[k]
-		if _, scoped := sc.(*jwt.UserScope); !scoped || !held {
+		if _, scoped := sc.(*jwt.UserScope); !scoped || !held[k] {
 			nonMash = append(nonMash, k)
 			continue
 		}
-		if strings.HasPrefix(g, s.Range+".") {
-			mine = append(mine, k)
-		} else {
-			kept[g] = k
-		}
+		mine = append(mine, k)
 	}
-	return kept, mine, nonMash, nil
-}
-
-// Kept is the scoped signing keys the next account JWT keeps beside this range's, as Sign retains them: the owner
-// group keys of other ranges that the account JWT the servers hold now carries. It maps group to public key and is
-// never nil. A non-mash signing key is an error unless the issuer may drop it (see AdminIssuer): only when generation,
-// the one about to be signed, is the first.
-func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string, error) {
-	base, err := s.current(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read the account JWT: %w", err)
-	}
-	kept, _, nonMash, err := s.keptFrom(base)
-	if err != nil {
-		return nil, err
-	}
-	if len(nonMash) > 0 && !s.canDrop(generation) {
-		return nil, errNonMashKey(nonMash[0])
-	}
-	return kept, nil
+	return mine, nonMash, nil
 }
 
 // Sign builds the account JWT of a generation: the account JWT the servers hold now, with the scoped signing keys
 // replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
-// The other ranges' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
-// the account's own settings) is kept. A signing key that is not an owner group key of the key store is not dropped
+// Everything else in it (limits, exports, revocations, the account's own settings) is kept. A signing key that is not an owner group key of the key store is not dropped
 // silently: without AdminIssuer and ExemptIssuers the apply is refused; with them it is dropped once admin.CheckIssuersKept
-// shows that the admin user and the connected exempt users stay signed by a kept key (the account key, an owner group
-// key of another range that the JWT carries, or a key of the list set), and refused with that check's error otherwise.
+// shows that the admin user and the connected exempt users stay signed by a kept key (the account key or a key of the
+// list set), and refused with that check's error otherwise.
 // Only the first generation's apply drops (ADR 0124): from the second on, a non-mash key is refused as without the
 // fields. It implements policyapply.Signer.
 func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
@@ -192,7 +157,7 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read the account JWT: %w", err)
 	}
-	kept, mine, nonMash, err := s.keptFrom(base)
+	mine, nonMash, err := s.splitKeys(base)
 	if err != nil {
 		return "", err
 	}
@@ -212,12 +177,9 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		}
 	}
 	if len(nonMash) > 0 {
-		// The keys that stay: the account's own key (CheckIssuersKept counts it), the other ranges' keys the JWT
-		// carries and the target's. This range's keys that the list set no longer names go, so a user under one is not kept.
+		// The keys that stay: the account's own key (CheckIssuersKept counts it) and the target's. The owner group
+		// keys that the list set no longer names go, so a user under one is not kept.
 		stay := map[string]bool{}
-		for _, k := range kept {
-			stay[k] = true
-		}
 		for _, p := range pubs {
 			stay[p] = true
 		}
@@ -233,7 +195,7 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		}
 	}
 	for _, k := range mine {
-		delete(base.SigningKeys, k) // this range's: rebuilt below from the list set
+		delete(base.SigningKeys, k) // an owner group key: rebuilt below from the list set
 	}
 	for i, tpl := range c.Templates {
 		pub := pubs[i]

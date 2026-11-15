@@ -20,7 +20,7 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1, ListSet: &set})
 	in := w.run(l, set2(), "bytes-2")
 	rec := &MemIssueRecord{}
-	if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: time.Unix(1000, 0)}); err != nil {
+	if err := rec.Add(context.Background(), IssueEntry{Address: "c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: time.Unix(1000, 0)}); err != nil {
 		t.Fatal(err)
 	}
 	return w, l, ApplyDeps{
@@ -28,7 +28,7 @@ func applyWorld(t *testing.T) (*world, *MemLedger, ApplyDeps) {
 		Ledger: l, Cluster: w.cluster, Prober: w.prober, Witnesses: w.wit, Signer: in.Signer,
 		Account: w.k.acctPub, Signers: w.k.signers, Now: fixedNow,
 		AfterPush: func(context.Context) (map[string][]string, []string, string, error) {
-			return map[string][]string{"foo.c.core": {w.k.revoked}}, nil, w.k.build(t, w.c2, w.k.revoked), nil
+			return map[string][]string{"c.core": {w.k.revoked}}, nil, w.k.build(t, w.c2, w.k.revoked), nil
 		},
 	}
 }
@@ -261,7 +261,7 @@ func TestApplyRefusesIncompleteInventory(t *testing.T) {
 		"record holds none for the sender":       func(_ *testing.T, _ *world, d *ApplyDeps) { d.IssueRecord = &MemIssueRecord{} },
 		"a credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
 			rec := &MemIssueRecord{}
-			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue}); err != nil {
+			if err := rec.Add(context.Background(), IssueEntry{Address: "c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue}); err != nil {
 				t.Fatal(err)
 			}
 			d.IssueRecord = rec
@@ -269,7 +269,7 @@ func TestApplyRefusesIncompleteInventory(t *testing.T) {
 		"a revoked credential without an issue time": func(t *testing.T, w *world, d *ApplyDeps) {
 			rec := &MemIssueRecord{}
 			at := time.Unix(1500, 0)
-			if err := rec.Add(context.Background(), IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, RevokedAt: &at}); err != nil {
+			if err := rec.Add(context.Background(), IssueEntry{Address: "c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, RevokedAt: &at}); err != nil {
 				t.Fatal(err)
 			}
 			d.IssueRecord = rec
@@ -305,9 +305,9 @@ func TestOldKeysFromRecord(t *testing.T) {
 	ctx := context.Background()
 	at := time.Unix(2000, 0)
 	for _, e := range []IssueEntry{
-		{Address: "foo.c.core", PublicKey: "UREV", Purpose: PurposeRotation, IssuedAt: at},
-		{Address: "foo.c.core", PublicKey: "UPROBE", Purpose: PurposeProbe},
-		{Address: "foo.c.docs", PublicKey: "UDOCS", Purpose: PurposeIssue, IssuedAt: at},
+		{Address: "c.core", PublicKey: "UREV", Purpose: PurposeRotation, IssuedAt: at},
+		{Address: "c.core", PublicKey: "UPROBE", Purpose: PurposeProbe},
+		{Address: "c.docs", PublicKey: "UDOCS", Purpose: PurposeIssue, IssuedAt: at},
 		{Address: "admin", PublicKey: "UADM", Purpose: PurposeIssue},
 	} {
 		if err := rec.Add(ctx, e); err != nil {
@@ -322,7 +322,7 @@ func TestOldKeysFromRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := got["foo.c.core"]
+	core := got["c.core"]
 	if len(core) != 2 {
 		t.Fatalf("core = %+v", core)
 	}
@@ -334,7 +334,7 @@ func TestOldKeysFromRecord(t *testing.T) {
 			t.Errorf("unexpected core key %+v", k)
 		}
 	}
-	if k := got["foo.c.docs"]; len(k) != 1 || k[0].PublicKey != "UDOCS" {
+	if k := got["c.docs"]; len(k) != 1 || k[0].PublicKey != "UDOCS" {
 		t.Errorf("docs = %+v", k)
 	}
 	if _, has := got["admin"]; has {
@@ -371,7 +371,7 @@ func TestApplyWithProvisionMarkersMarksBeforeCreateInbox(t *testing.T) {
 	m := NewMemProvisionMarkers()
 	deps.ProvisionMarkers = m
 	req := applyReq()
-	req.ListSet.Senders = append(req.ListSet.Senders, listset.SenderLists{Sender: "foo.c.new"})
+	req.ListSet.Senders = append(req.ListSet.Senders, listset.SenderLists{Sender: "c.new"})
 	var atCreate []string
 	deps.Provisioner = &markSpyProv{create: func(string) { atCreate, _ = m.Provisioning(2) }}
 	st, err := Apply(context.Background(), req, deps)
@@ -381,7 +381,7 @@ func TestApplyWithProvisionMarkersMarksBeforeCreateInbox(t *testing.T) {
 	if rec, _ := l.InForce(); rec.Generation != 2 {
 		t.Fatalf("in force = %d, status %+v", rec.Generation, st)
 	}
-	if !slices.Equal(atCreate, []string{"foo.c.new"}) {
+	if !slices.Equal(atCreate, []string{"c.new"}) {
 		t.Errorf("markers when CreateInbox ran = %v", atCreate)
 	}
 	if left, _ := m.Provisioning(2); len(left) != 0 {
@@ -402,7 +402,7 @@ func TestOldKeysFromAdminRecordUsesMaxIssued(t *testing.T) {
 	r := NewAdminIssueRecord(f)
 	future := time.Unix(4_000_000_000, 0)
 	for _, at := range []time.Time{future, time.Unix(1000, 0)} {
-		if err := r.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: at}); err != nil {
+		if err := r.Add(ctx, IssueEntry{Address: "c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: at}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -411,7 +411,7 @@ func TestOldKeysFromAdminRecordUsesMaxIssued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k := got["foo.c.core"]; len(k) != 1 || !k[0].IssuedAt.Equal(future) {
+	if k := got["c.core"]; len(k) != 1 || !k[0].IssuedAt.Equal(future) {
 		t.Errorf("core = %+v, want the future issue time", k)
 	}
 	f.histErr = map[string]error{w.k.revoked: &admin.IncompleteHistoryError{Key: w.k.revoked}}
@@ -438,7 +438,7 @@ func TestApplyWithoutProvisionerRefusesRollbackWhileMarkerStands(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w, l, deps := applyWorld(t)
 			pm := NewMemProvisionMarkers()
-			if err := pm.MarkProvisioning("foo.c.new", 2); err != nil {
+			if err := pm.MarkProvisioning("c.new", 2); err != nil {
 				t.Fatal(err)
 			}
 			setup(&deps, l, pm)
@@ -450,7 +450,7 @@ func TestApplyWithoutProvisionerRefusesRollbackWhileMarkerStands(t *testing.T) {
 			if pend, ok, _ := l.Pending(); !ok || pend.Generation != 2 {
 				t.Errorf("pending = %+v %v: the generation must stay pending", pend, ok)
 			}
-			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"foo.c.new"}) {
+			if got, _ := pm.Provisioning(2); !slices.Equal(got, []string{"c.new"}) {
 				t.Errorf("markers = %v, want the marker to stand", got)
 			}
 		})
@@ -479,7 +479,7 @@ func TestApplyRevokedFutureDatedOldKeyFailsTheGate(t *testing.T) {
 	const future = time.Hour
 	issued := time.Now().Add(future)
 	rec := &MemIssueRecord{}
-	if err := rec.Add(ctx, IssueEntry{Address: "foo.c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: issued}); err != nil {
+	if err := rec.Add(ctx, IssueEntry{Address: "c.core", PublicKey: w.k.revoked, Purpose: PurposeIssue, IssuedAt: issued}); err != nil {
 		t.Fatal(err)
 	}
 	if err := rec.MarkRevoked(ctx, w.k.revoked, time.Now()); err != nil {

@@ -29,9 +29,9 @@ var bg = context.Background()
 // reqFor builds a request for address and public key with the given nonce, proved by the fixture's wrangler.
 func (f *fixture) reqFor(t *testing.T, address, pub, nonce string) Request {
 	t.Helper()
-	r := Request{Version: 1, Address: address, PublicKey: pub, Host: "h", Nonce: nonce, Expires: f.now.Add(hardenTTL).Unix(), Wrangler: f.wpub}
+	r := Request{Version: 1, Address: address, Endpoint: "claude-code." + address, PublicKey: pub, Host: "h", Nonce: nonce, Expires: f.now.Add(hardenTTL).Unix(), Wrangler: f.wpub}
 	var err error
-	if r.Proof, err = SignProof(f.wrangler, r.Address, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
+	if r.Proof, err = SignProof(f.wrangler, r.Address, r.Endpoint, r.PublicKey, r.Host, r.Nonce, r.Expires); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -60,7 +60,7 @@ func TestSigningKeyMustBePublishedScopedWithTheTable(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t)
 			c.publish(f)
-			r := f.req(t, "foo.c.core", hardenTTL)
+			r := f.req(t, "c.core", hardenTTL)
 			out, err := f.is.Issue(bg, r, store.PurposeIssue)
 			if code(err) != c.want || (c.want != "" && (out != nil || len(f.rec.recs) != 0)) {
 				t.Fatalf("%v %v", out, err)
@@ -89,7 +89,7 @@ func otherAccountKey(t *testing.T) string {
 func TestScopeVerdictIsCachedForTheTTLOnly(t *testing.T) {
 	f := newFixture(t)
 	for i := 0; i < 5; i++ {
-		if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); err != nil {
+		if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -98,11 +98,11 @@ func TestScopeVerdictIsCachedForTheTTLOnly(t *testing.T) {
 	}
 	f.claims.publish(f.gpub, nil)
 	f.now = f.now.Add(ScopeTTL / 2)
-	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); err != nil {
+	if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); err != nil {
 		t.Fatalf("within the TTL the verdict stands: %v", err)
 	}
 	f.now = f.now.Add(ScopeTTL)
-	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoScope {
+	if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoScope {
 		t.Fatalf("after the TTL: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestScopeVerdictIsCachedForTheTTLOnly(t *testing.T) {
 // H2: a revocation that lands between the lookup and the write refuses the issue and returns nothing.
 func TestRevocationBetweenLookupAndWriteRefuses(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", hardenTTL)
+	r := f.req(t, "c.core", hardenTTL)
 	f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: r.Address}
 	f.rec.afterLookup = func() {
 		f.rec.mu.Lock()
@@ -128,11 +128,11 @@ func TestRevocationBetweenLookupAndWriteRefuses(t *testing.T) {
 // H2: another issuer binding the key to another address between lookup and write refuses this one.
 func TestBindingElsewhereBetweenLookupAndWriteRefuses(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", hardenTTL)
+	r := f.req(t, "c.core", hardenTTL)
 	f.rec.afterLookup = func() {
 		f.rec.mu.Lock()
 		defer f.rec.mu.Unlock()
-		f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: "foo.c.lead"}
+		f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: "c.lead"}
 	}
 	out, err := f.is.Issue(bg, r, store.PurposeIssue)
 	if out != nil || code(err) != CodeBound {
@@ -147,7 +147,7 @@ func TestTwoIssuersRacingForOneKeyExactlyOneSucceeds(t *testing.T) {
 		second := &Issuer{Registry: f.is.Registry, ListSet: f.is.ListSet, Signer: f.is.Signer, Record: f.is.Record, Claims: f.is.Claims,
 			AccountPub: f.is.AccountPub, Log: f.is.Log, Now: f.is.Now}
 		key := userPub(t)
-		reqs := []Request{f.reqFor(t, "foo.c.core", key, nonceN(round, 0)), f.reqFor(t, "foo.c.lead", key, nonceN(round, 1))}
+		reqs := []Request{f.reqFor(t, "c.core", key, nonceN(round, 0)), f.reqFor(t, "c.lead", key, nonceN(round, 1))}
 		issuers := []*Issuer{f.is, second}
 		var wg sync.WaitGroup
 		var ok, bound int
@@ -186,13 +186,13 @@ func TestRefusedRequestReleasesItsNonce(t *testing.T) {
 	f := newFixture(t)
 	key := userPub(t)
 	n := nonceN(1, 1)
-	if out, err := f.is.Issue(bg, f.reqFor(t, "foo.c.nobody", key, n), store.PurposeIssue); out != nil || code(err) != CodeUnlisted {
+	if out, err := f.is.Issue(bg, f.reqFor(t, "c.nobody", key, n), store.PurposeIssue); out != nil || code(err) != CodeUnlisted {
 		t.Fatalf("%v %v", out, err)
 	}
 	if f.is.nonces.len() != 0 {
 		t.Fatalf("%d nonces held after a refusal", f.is.nonces.len())
 	}
-	ok := f.reqFor(t, "foo.c.core", key, n)
+	ok := f.reqFor(t, "c.core", key, n)
 	if _, err := f.is.Issue(bg, ok, store.PurposeIssue); err != nil {
 		t.Fatalf("the corrected request: %v", err)
 	}
@@ -206,15 +206,15 @@ func TestRefusalsNeverHoldNonces(t *testing.T) {
 	f := newFixture(t)
 	ctx := bg
 	key := userPub(t)
-	f.rec.recs[key] = store.Issued{PublicKey: key, Address: "foo.c.lead"}
+	f.rec.recs[key] = store.Issued{PublicKey: key, Address: "c.lead"}
 	revoked := userPub(t)
-	f.rec.recs[revoked] = store.Issued{PublicKey: revoked, Address: "foo.c.core", RevokedAt: "2026-01-01T00:00:00Z"}
+	f.rec.recs[revoked] = store.Issued{PublicKey: revoked, Address: "c.core", RevokedAt: "2026-01-01T00:00:00Z"}
 	steps := []func(i int) (Request, string){
 		func(i int) (Request, string) {
-			return f.reqFor(t, "foo.c.nobody", userPub(t), nonceN(2, i)), CodeUnlisted
+			return f.reqFor(t, "c.nobody", userPub(t), nonceN(2, i)), CodeUnlisted
 		},
-		func(i int) (Request, string) { return f.reqFor(t, "foo.c.core", key, nonceN(3, i)), CodeBound },
-		func(i int) (Request, string) { return f.reqFor(t, "foo.c.core", revoked, nonceN(4, i)), CodeRevoked },
+		func(i int) (Request, string) { return f.reqFor(t, "c.core", key, nonceN(3, i)), CodeBound },
+		func(i int) (Request, string) { return f.reqFor(t, "c.core", revoked, nonceN(4, i)), CodeRevoked },
 	}
 	for i := 0; i < hardenManyReqs; i++ {
 		for _, step := range steps {
@@ -226,13 +226,13 @@ func TestRefusalsNeverHoldNonces(t *testing.T) {
 	}
 	f.claims.publish(f.gpub, nil)
 	f.now = f.now.Add(ScopeTTL + time.Second)
-	if _, err := f.is.Issue(ctx, f.reqFor(t, "foo.c.core", userPub(t), nonceN(5, 0)), store.PurposeIssue); code(err) != CodeNoScope {
+	if _, err := f.is.Issue(ctx, f.reqFor(t, "c.core", userPub(t), nonceN(5, 0)), store.PurposeIssue); code(err) != CodeNoScope {
 		t.Fatal(err)
 	}
 	f.claims.publish(f.gpub, &f.tpl)
 	f.now = f.now.Add(ScopeTTL + time.Second)
 	f.rec.fail = true
-	if _, err := f.is.Issue(ctx, f.reqFor(t, "foo.c.core", userPub(t), nonceN(6, 0)), store.PurposeIssue); code(err) != CodeRecordFailed {
+	if _, err := f.is.Issue(ctx, f.reqFor(t, "c.core", userPub(t), nonceN(6, 0)), store.PurposeIssue); code(err) != CodeRecordFailed {
 		t.Fatal(err)
 	}
 	if n := f.is.nonces.len(); n != 0 {
@@ -252,7 +252,7 @@ func TestFullNonceSetRefusesPromptly(t *testing.T) {
 	// The requests (key generation and signing) are built before the clock starts: only the refusals are timed.
 	reqs := make([]Request, hardenManyReqs)
 	for i := range reqs {
-		reqs[i] = f.reqFor(t, "foo.c.core", userPub(t), nonceN(7, i))
+		reqs[i] = f.reqFor(t, "c.core", userPub(t), nonceN(7, i))
 	}
 	start := time.Now()
 	for i := range reqs {
@@ -265,7 +265,7 @@ func TestFullNonceSetRefusesPromptly(t *testing.T) {
 	}
 	// Once the entries expire, requests are served again and the set drains by popping, not scanning.
 	f.now = f.now.Add(hardenTTL + time.Second)
-	if _, err := f.is.Issue(bg, f.reqFor(t, "foo.c.core", userPub(t), nonceN(8, 0)), store.PurposeIssue); err != nil {
+	if _, err := f.is.Issue(bg, f.reqFor(t, "c.core", userPub(t), nonceN(8, 0)), store.PurposeIssue); err != nil {
 		t.Fatal(err)
 	}
 	if f.is.nonces.len() != 1 {
@@ -323,7 +323,7 @@ func TestIncompleteAccountJWTReadRefusesAndIsNotCached(t *testing.T) {
 	f := newFixture(t)
 	f.claims.err = errors.New("only 1 of 2 servers answered the account JWT lookup")
 	for i := 0; i < 3; i++ {
-		_, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue)
+		_, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue)
 		var r *Refusal
 		if code(err) != CodeNoSigningKey || !errors.As(err, &r) || !strings.Contains(r.Error(), "every expected server") {
 			t.Fatalf("request %d: %v", i, err)
@@ -339,7 +339,7 @@ func TestIncompleteAccountJWTReadRefusesAndIsNotCached(t *testing.T) {
 		t.Fatalf("the reason is not logged: %s", f.logs.String())
 	}
 	f.claims.err = nil
-	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); err != nil {
+	if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); err != nil {
 		t.Fatalf("after the servers are back: %v", err)
 	}
 	if len(f.rec.recs) != 1 {
@@ -353,14 +353,14 @@ func TestIncompleteAccountJWTReadRefusesAndIsNotCached(t *testing.T) {
 func TestSilentServerWithANewerJWTThatRemovedTheSignerRefuses(t *testing.T) {
 	f := newFixture(t)
 	f.claims.err = errors.New("only 1 of 2 servers answered the account JWT lookup")
-	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoSigningKey {
+	if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoSigningKey {
 		t.Fatalf("silent: %v", err)
 	}
 	f.claims.err = nil
 	f.claims.mu.Lock()
 	f.claims.ac = jwt.NewAccountClaims("A") // the newer JWT: the signer is gone
 	f.claims.mu.Unlock()
-	if _, err := f.is.Issue(bg, f.req(t, "foo.c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoScope {
+	if _, err := f.is.Issue(bg, f.req(t, "c.core", hardenTTL), store.PurposeIssue); code(err) != CodeNoScope {
 		t.Fatalf("answering: %v", err)
 	}
 	if len(f.rec.recs) != 0 {
@@ -371,7 +371,7 @@ func TestSilentServerWithANewerJWTThatRemovedTheSignerRefuses(t *testing.T) {
 // A key revoked only in the account JWT (its record has no revoked_at) is refused, and nothing is signed or recorded.
 func TestKeyRevokedOnlyInAccountJWTIsRefused(t *testing.T) {
 	f := newFixture(t)
-	r := f.req(t, "foo.c.core", hardenTTL)
+	r := f.req(t, "c.core", hardenTTL)
 	f.claims.mu.Lock()
 	f.claims.ac.Revocations = jwt.RevocationList{}
 	f.claims.ac.Revocations.Revoke(r.PublicKey, f.now.Add(-time.Hour))

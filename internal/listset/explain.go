@@ -41,8 +41,6 @@ type View struct {
 	Describes string `json:"describes"`
 	// Generation is the generation of the list set in force, as the caller read it from the generation record.
 	Generation uint64 `json:"generation"`
-	// Range is the account's range.
-	Range string `json:"range"`
 	// Switches is every group and verb switch, sorted by group, then verb in Verbs order.
 	Switches []SwitchView `json:"switches"`
 	// Senders is one entry per sender, sorted by sender.
@@ -125,7 +123,6 @@ func Show(ls ListSet, c *Compiled, generation uint64) (View, error) {
 	v := View{
 		Describes:      DescribesListSet,
 		Generation:     generation,
-		Range:          m.rng,
 		Switches:       []SwitchView{},
 		Senders:        []SenderView{},
 		RawClientLimit: RawClientLimit,
@@ -174,7 +171,7 @@ func Show(ls ListSet, c *Compiled, generation uint64) (View, error) {
 // returns an error. Explain is pure.
 //
 // It returns an error for a ListSet that fails Validate, a sender the set does not list, and a receiver that is not
-// a valid three-part address in the set's range. The receiver need not be named in the set.
+// a valid two-part address. The receiver need not be named in the set.
 func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, error) {
 	m, err := validate(ls)
 	if err != nil {
@@ -200,9 +197,6 @@ func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, err
 	ra, reason := parseAddress(receiver)
 	if reason != "" {
 		return Explanation{}, fmt.Errorf("receiver %q: %s", receiver, reason)
-	}
-	if ra.rng != m.rng {
-		return Explanation{}, fmt.Errorf("receiver %q: range part %q is not the list set's range %q", receiver, ra.rng, m.rng)
 	}
 	who, to := sa.String(), ra.String()
 	reach, err := reachOver(c, who, []string{to})

@@ -69,14 +69,14 @@ flowchart LR
 
 | Piece | What it is | Source |
 |---|---|---|
-| Owner group | Every address that shares a range part and an owner part. One scoped signing key per owner group, named `range.owner`. | ADR 0102; `Compile` groups senders by `addr.group()` |
+| Owner group | Every address that shares an owner part: the group is the owner. One scoped signing key per owner group, named for the owner. The scope of a list set is the NATS account, so there is no part above the owner. | ADR 0102, amended by ADR 0132; `Compile` groups senders by `addr.group()` |
 | Template | The permission lines on the scoped signing key. `{{name()}}` and `{{tag(allow)}}` in a line are filled in by the server from the user JWT. | `template()` in `internal/listset/compile.go` |
-| Tag | `allow:<owner>.<name>` or `deny:<owner>.<name>`, lower case. The range is a literal in the template, so a tag cannot name another range. One tag covers mail, prompt, status and heartbeat. | `AllowTag`, `DenyTag` in `compile.go`; ADR 0102 |
-| Shared or closed | A switch per owner group and verb. Shared puts the owner line (`agents.<verb>.<range>.<owner>.*`) in the template. Closed leaves it out, so only allow tags reach anyone. | `template()`; `TestAT001TemplateNamesNoPeer` |
+| Tag | `allow:<owner>.<name>` or `deny:<owner>.<name>`, lower case. The third subject token (the agent token) is a wildcard in every line, so a tag never names it. One tag covers mail, prompt, status and heartbeat. | `AllowTag`, `DenyTag` in `compile.go`; ADR 0102 |
+| Shared or closed | A switch per owner group and verb. Shared puts the owner line (`agents.<verb>.*.<owner>.*`) in the template. Closed leaves it out, so only allow tags reach anyone. | `template()`; `TestAT001TemplateNamesNoPeer` |
 | Owner line | The one template line that reaches every address of the group. It is the only line that can name a group of addresses. | ADR 0102 |
-| Fixed lines | Lines that name only the sender or shared plumbing: its own heartbeat, its own inbox stream and consumer, its reply prefix, its own prompt and status subjects, the directory and its own lease key. They need no tag. | `fixedPub()` in `compile.go`; ADR 0102 |
+| Fixed lines | Lines that name only the sender or shared plumbing: its own heartbeat, its own prompt and status subjects, the policy subject `mash.policy`, and the directory. The lines for its own inbox stream and consumer, its reply prefix and its own lease key name the sender's flat key, so they use the endpoint tag `{{tag(ep)}}` the issuer adds (section 2.5). | `fixedPub()` in `compile.go`; ADR 0102 |
 | Deny lines | Present only in a key where some sender has a deny entry, and only for shared verbs. A deny beats an allow in NATS. | `template()`; ADR 0102 |
-| Deny sentinel | The tag `deny:_none`. Every user of a key that has deny lines carries a deny tag, a real one or the sentinel. It expands to a four-token subject, never the five tokens of an address, and `_none` is no part the naming grammar admits. It addresses nothing. | `NoDenyTag` in `compile.go`; `TestSentinelAddressesNothing` |
+| Deny sentinel | The tag `deny:_none`. Every user of a key that has deny lines carries a deny tag, a real one or the sentinel. It expands to `agents.<verb>.*._none`, a four-token subject, never the five tokens of an address, and `_none` is no part the naming grammar admits. It addresses nothing. | `NoDenyTag` in `compile.go`; `TestSentinelAddressesNothing` |
 
 Two facts about the NATS server shape the layout. Both were verified on nats-server 2.15.1 (ADR 0102, drivers):
 
@@ -90,113 +90,124 @@ direction (`internal/listset/check.go`; mutation cases in `TestMutationsAreRefus
 
 ### 2.2 A worked example, generated from the real compile
 
-The shape is the one in AT-001: account `foo`; senders `foo.c.core`, `foo.c.lead` and `foo.c.sdk`; mail, prompt and
-heartbeat closed, status shared; the only exception is that `foo.c.core` allows `foo.c.lead`. It is the `at001()`
+The shape is the one in AT-001: one owner group `c`; senders `c.core`, `c.lead` and `c.sdk`; mail, prompt and
+heartbeat closed, status shared; the only exception is that `c.core` allows `c.lead`. It is the `at001()`
 case of `internal/listset/corpus_test.go`. The text below is the output of a throwaway program that calls
 `listset.Compile` on that list set and prints the result. It is not in the repository.
 
 ```text
-template for scoped key foo.c
+template for scoped key c
   publish allow:
-    agents.mail.foo.{{tag(allow)}}
-    agents.prompt.foo.{{tag(allow)}}
-    agents.status.foo.c.*
-    agents.status.foo.{{tag(allow)}}
-    agents.hb.foo.c.{{name()}}
+    agents.mail.*.{{tag(allow)}}
+    agents.prompt.*.{{tag(allow)}}
+    agents.status.*.c.*
+    agents.status.*.{{tag(allow)}}
+    agents.hb.*.c.{{name()}}
+    mash.policy
     _INBOX.>
     $SRV.>
     $JS.API.INFO
-    $JS.API.STREAM.INFO.inbox-foo_c_{{name()}}
-    $JS.API.CONSUMER.INFO.inbox-foo_c_{{name()}}.deliver
-    $JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_{{name()}}.deliver
-    $JS.ACK.inbox-foo_c_{{name()}}.deliver.>
-    $JS.API.DIRECT.GET.inbox-foo_c_{{name()}}
-    $JS.API.DIRECT.GET.inbox-foo_c_{{name()}}.>
+    $JS.API.STREAM.INFO.inbox-{{tag(ep)}}
+    $JS.API.CONSUMER.INFO.inbox-{{tag(ep)}}.deliver
+    $JS.API.CONSUMER.MSG.NEXT.inbox-{{tag(ep)}}.deliver
+    $JS.ACK.inbox-{{tag(ep)}}.deliver.>
+    $JS.API.DIRECT.GET.inbox-{{tag(ep)}}
+    $JS.API.DIRECT.GET.inbox-{{tag(ep)}}.>
     $JS.API.STREAM.INFO.KV_mash-directory
     $JS.API.DIRECT.GET.KV_mash-directory.>
     $JS.API.STREAM.INFO.KV_mash-leases
-    $KV.mash-leases.foo_c_{{name()}}
-    $JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.foo_c_{{name()}}
+    $KV.mash-leases.{{tag(ep)}}
+    $JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.{{tag(ep)}}
   publish deny:
   subscribe allow:
-    agents.hb.foo.{{tag(allow)}}
-    _INBOX.foo_c_{{name()}}.>
-    agents.prompt.foo.c.{{name()}}
-    agents.status.foo.c.{{name()}}
+    agents.hb.*.{{tag(allow)}}
+    _INBOX.{{tag(ep)}}.>
+    agents.prompt.*.c.{{name()}}
+    agents.status.*.c.{{name()}}
     $SRV.>
   subscribe deny:
-user foo.c.core name=core tags=[allow:c.lead]
-user foo.c.lead name=lead tags=[]
-user foo.c.sdk name=sdk tags=[]
+user c.core name=core tags=[allow:c.lead]
+user c.lead name=lead tags=[]
+user c.sdk name=sdk tags=[]
 ```
 
 How to read it:
 
-- **The shared switch.** Status is shared, so the template has the owner line `agents.status.foo.c.*`. Every sender of
-  `foo.c` can probe every other. Mail, prompt and heartbeat are closed, so their owner lines (`agents.mail.foo.c.*`,
-  `agents.prompt.foo.c.*`, `agents.hb.foo.c.*`) are absent.
-- **The tag line.** `agents.mail.foo.{{tag(allow)}}` expands once per `allow` tag. `foo.c.core` carries
-  `allow:c.lead`, so the server builds `agents.mail.foo.c.lead`, `agents.prompt.foo.c.lead`,
-  `agents.status.foo.c.lead` and, on the subscribe side, `agents.hb.foo.c.lead`. That one tag is the whole exception.
-- **No tag, no reach.** `foo.c.lead` and `foo.c.sdk` carry no tags, so their tag lines drop out. They keep the owner
-  line for status and the fixed lines, and nothing else. `foo.c.core` has no line that reaches `foo.c.sdk` for mail,
+- **The agent token is a wildcard.** The third token of every address subject (`agents.mail.*.c.lead`) is the SAP agent
+  token of the endpoint's program, such as `claude-code`. A list set never names it, so every line has `*` there
+  (ADR 0132). The list set's addresses are `owner.name`, and the account is the scope.
+- **The shared switch.** Status is shared, so the template has the owner line `agents.status.*.c.*`. Every sender of
+  group `c` can probe every other. Mail, prompt and heartbeat are closed, so their owner lines (`agents.mail.*.c.*`,
+  `agents.prompt.*.c.*`, `agents.hb.*.c.*`) are absent.
+- **The tag line.** `agents.mail.*.{{tag(allow)}}` expands once per `allow` tag. `c.core` carries
+  `allow:c.lead`, so the server builds `agents.mail.*.c.lead`, `agents.prompt.*.c.lead`,
+  `agents.status.*.c.lead` and, on the subscribe side, `agents.hb.*.c.lead`. That one tag is the whole exception.
+- **The endpoint tag.** `{{tag(ep)}}` is not in the list set and is not in `Compiled.Users`. The issuer adds `ep:<flat
+  key>` to each user JWT it signs, for example `ep:claude-code_c_core`, where the flat key is `agent_owner_name`. The
+  inbox stream and consumer, the lease key and the reply prefix embed that flat key as one subject token, and NATS
+  cannot wildcard part of a token, so those lines need the exact key. A credential without an `ep` tag gets none of
+  them (the server drops a line whose tag is missing), so it cannot read its inbox, hold its lease or receive a reply.
+  Section 2.5 says how the tag is made.
+- **No tag, no reach.** `c.lead` and `c.sdk` carry no list-set tags, so their tag lines drop out. They keep the owner
+  line for status and the fixed lines, and nothing else. `c.core` has no line that reaches `c.sdk` for mail,
   prompt or heartbeat. `TestAT001TemplateNamesNoPeer` asserts that the template names no sender, and
   `TestLiveMatchesCheck/AT-001_shape` asserts the server's outcome for every sender and address.
 - **The user JWT carries tags and no permissions.** NATS refuses a permission list on a user signed by a scoped key
   (contract REQ-004). `Check` refuses any user with permission claims or with a tag other than `allow:` and `deny:`.
 
-The same compile on a key with a deny entry (mail, prompt and heartbeat shared, status closed, `foo.c.core` denies
-`foo.c.sdk`; the `at003Deny` shape) adds deny lines and the sentinel:
+The same compile on a key with a deny entry (mail, prompt and heartbeat shared, status closed, `c.core` denies
+`c.sdk`; the `at003Deny` shape) adds deny lines and the sentinel:
 
 <details>
 <summary>Real output: a key with a deny entry</summary>
 
 ```text
-template for scoped key foo.c
+template for scoped key c
   publish allow:
-    agents.mail.foo.c.*
-    agents.mail.foo.{{tag(allow)}}
-    agents.prompt.foo.c.*
-    agents.prompt.foo.{{tag(allow)}}
-    agents.status.foo.{{tag(allow)}}
-    agents.hb.foo.c.{{name()}}
+    agents.mail.*.c.*
+    agents.mail.*.{{tag(allow)}}
+    agents.prompt.*.c.*
+    agents.prompt.*.{{tag(allow)}}
+    agents.status.*.{{tag(allow)}}
+    agents.hb.*.c.{{name()}}
+    mash.policy
     _INBOX.>
     $SRV.>
     $JS.API.INFO
-    $JS.API.STREAM.INFO.inbox-foo_c_{{name()}}
-    $JS.API.CONSUMER.INFO.inbox-foo_c_{{name()}}.deliver
-    $JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_{{name()}}.deliver
-    $JS.ACK.inbox-foo_c_{{name()}}.deliver.>
-    $JS.API.DIRECT.GET.inbox-foo_c_{{name()}}
-    $JS.API.DIRECT.GET.inbox-foo_c_{{name()}}.>
+    $JS.API.STREAM.INFO.inbox-{{tag(ep)}}
+    $JS.API.CONSUMER.INFO.inbox-{{tag(ep)}}.deliver
+    $JS.API.CONSUMER.MSG.NEXT.inbox-{{tag(ep)}}.deliver
+    $JS.ACK.inbox-{{tag(ep)}}.deliver.>
+    $JS.API.DIRECT.GET.inbox-{{tag(ep)}}
+    $JS.API.DIRECT.GET.inbox-{{tag(ep)}}.>
     $JS.API.STREAM.INFO.KV_mash-directory
     $JS.API.DIRECT.GET.KV_mash-directory.>
     $JS.API.STREAM.INFO.KV_mash-leases
-    $KV.mash-leases.foo_c_{{name()}}
-    $JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.foo_c_{{name()}}
+    $KV.mash-leases.{{tag(ep)}}
+    $JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.{{tag(ep)}}
   publish deny:
-    agents.mail.foo.{{tag(deny)}}
-    agents.prompt.foo.{{tag(deny)}}
+    agents.mail.*.{{tag(deny)}}
+    agents.prompt.*.{{tag(deny)}}
   subscribe allow:
-    agents.hb.foo.c.*
-    agents.hb.foo.{{tag(allow)}}
-    _INBOX.foo_c_{{name()}}.>
-    agents.prompt.foo.c.{{name()}}
-    agents.status.foo.c.{{name()}}
+    agents.hb.*.c.*
+    agents.hb.*.{{tag(allow)}}
+    _INBOX.{{tag(ep)}}.>
+    agents.prompt.*.c.{{name()}}
+    agents.status.*.c.{{name()}}
     $SRV.>
   subscribe deny:
-    agents.hb.foo.{{tag(deny)}}
-user foo.c.core name=core tags=[deny:c.sdk]
-user foo.c.lead name=lead tags=[deny:_none]
-user foo.c.sdk name=sdk tags=[deny:_none]
+    agents.hb.*.{{tag(deny)}}
+user c.core name=core tags=[deny:c.sdk]
+user c.lead name=lead tags=[deny:_none]
+user c.sdk name=sdk tags=[deny:_none]
 ```
 
 </details>
 
-Here `foo.c.core` expands `deny:c.sdk` into `agents.mail.foo.c.sdk` on the publish deny list, so the owner line no
-longer reaches `sdk`. `lead` and `sdk` carry `deny:_none`, which expands to `agents.mail.foo._none`: a subject no
-address has. Without a deny tag the server would refuse the connection (section 2.1, fact 2). The live case is
-`TestLiveMatchesCheck/deny_key_(AT-003)`.
+Here `c.core` expands `deny:c.sdk` into `agents.mail.*.c.sdk` on the publish deny list, so the owner line no
+longer reaches `sdk`. `lead` and `sdk` carry `deny:_none`, which expands to `agents.mail.*._none`: a four-token
+subject, and no address has four tokens. Without a deny tag the server would refuse the connection (section 2.1, fact
+2). The live case is `TestLiveMatchesCheck/deny_key_(AT-003)`.
 
 ### 2.3 What `Check` proves before anything is signed
 
@@ -204,18 +215,51 @@ address has. Without a deny tag the server would refuse the connection (section 
 `check.go`, written after `processUserPermissionsTemplate` in the server's `auth.go`). It then compares, for each verb,
 what the expanded permissions reach with what the lists give: the owner line on shared verbs, plus the allow list,
 minus the deny list. It compares over every address the list set names, and over probe addresses in the same group,
-in another owner group and in another range. It refuses a mismatch in either direction (ADR 0102, decision outcome).
+and in another owner group. It refuses a mismatch in either direction (ADR 0102, decision outcome).
 A live test, `TestLiveMatchesCheck`, then requires the real server's publish and subscribe outcomes to equal the
 simulation. So the simulation is itself checked against a real server on every `go test` (it is skipped under `-short`).
 
+The endpoint tag is part of the model, as a tag the issuer supplies. `Check` expands each sender twice, with two
+different agent tokens in its flat key (`ep:alpha_c_core` and `ep:beta_c_core`), and requires the inbox, lease and reply
+lines of each expansion to match only that sender's own flat key and no other: the lines for `alpha_c_core` must not
+match a name built from `beta_c_core`. It also requires that a credential without the tag gets none of those lines.
+
 ### 2.4 What the compile refuses
 
-Wildcards (`*`, `>`), a part that fails the naming grammar, an address in another range, a switch set for one sender,
+Wildcards (`*`, `>`), a part that fails the naming grammar, a switch set for one sender,
 an owner group that leaves a verb unstated, a deny entry whose owner group has no shared verb or whose target is
 outside the sender's own owner group, and duplicates. The whole list set is refused and every bad entry is named
 (`TestAT002_BadEntriesRefuseTheWholeSet`, `TestAT002_AllNamedInOneError`, `TestDenyRule`).
 mash reads no label, role or group name in the compile: `internal/listset` has no reference to a label outside its
 tests, and the owner group comes from the sender's own address.
+
+### 2.5 The endpoint tag
+
+The third subject token of an address is the SAP agent token of the endpoint's program, and a list set never names it
+(ADR 0132). Every template line that carries it uses `*`. Three kinds of name cannot do that. The inbox stream and
+consumer (`inbox-<flat key>`), the lease key and the reply prefix (`_INBOX.<flat key>`) embed the endpoint's flat key,
+`agent_owner_name`, as **one** subject token, and NATS cannot wildcard part of a token. A line such as
+`inbox-*_c_core` does not exist. So those lines need the exact key, and the key must come from somewhere the sender
+cannot choose.
+
+It comes from a tag, `ep:<flat key>`, that the **issuer** adds to every user JWT it signs under an owner group's scoped
+key, and the template lines use `{{tag(ep)}}`. The rules:
+
+- A list set and `listset.Compiled.Users` never name the agent token or the `ep` tag. The tags a list set compiles to
+  are `allow:` and `deny:` tags only.
+- The tag comes from mash's own table of the endpoint's identity at issue time, through one shared function,
+  `listset.WithEndpointTag` (and `EndpointTag` under it). The issue service, rotation and the probe credentials all
+  call it.
+- The issuer **refuses to sign** when the endpoint's owner and name differ from the address's, and when the identity is
+  a legacy one. A request never supplies tags, so it cannot supply this one. A credential cannot point at another
+  address's inbox.
+- A credential **without** an `ep` tag gets no inbox, lease or reply access: the server drops a template line whose tag
+  is missing, and the other lines remain. That is fail closed.
+- The self-subject lines (a sender's own heartbeat, prompt and status subjects) wildcard the token, so a sender could
+  publish its own heartbeat under another agent token. That is accepted: it is still the sender's own owner and name.
+
+The tag costs bytes in the connect line. The size measure of section 6.2 includes it, measured with a 32-character
+agent token.
 
 ## 3. What the server checks at connect and on each send
 
@@ -243,16 +287,16 @@ or that a deny line matches, is not delivered, and the connection gets a permiss
 
 ```mermaid
 sequenceDiagram
-  participant S as foo.c.core with its creds file
+  participant S as c.core with its creds file
   participant N as nats-server
   S->>N: CONNECT with user JWT carrying tag allow:c.lead, signed challenge
   N->>N: check JWT chain, revocation and the private key proof
   N->>N: expand the scoped key template with name core and tag allow:c.lead
   N-->>S: connected, permissions fixed for this connection
-  S->>N: publish agents.mail.foo.c.lead
-  N->>N: matches agents.mail.foo.c.lead built from the tag
-  N-->>S: accepted, stored in the inbox stream of foo.c.lead, JetStream acknowledgement returned
-  S->>N: publish agents.mail.foo.c.sdk
+  S->>N: publish agents.mail.claude-code.c.lead
+  N->>N: matches agents.mail.*.c.lead built from the tag
+  N-->>S: accepted, stored in the inbox stream of c.lead, JetStream acknowledgement returned
+  S->>N: publish agents.mail.claude-code.c.sdk
   N->>N: no allow line matches
   N-->>S: permissions violation for publish, not delivered
 ```
@@ -429,7 +473,7 @@ once mash has revoked the key. It never holds a seed or a JWT.
 
 [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) lets a
 wrangler on a sender's host ask for a credential for a public key, without any private key leaving the host.
-`mashctl issue serve` answers on `agents.issue.<range>.<owner>`. The request names an address, a public key, a host, a
+`mashctl issue serve` answers on `mash.issue.<owner>`. The request names an address, a public key, a host, a
 nonce and an expiry, and carries the wrangler's signature over those fields. The service signs only if all of these
 hold:
 
@@ -437,7 +481,7 @@ hold:
 |---|---|
 | The request is well formed, within 4,096 bytes, and its subject names the address's owner group | malformed or oversize requests, a request on the wrong owner group's subject |
 | `expires` is in the future and no more than five minutes ahead | expired requests, an expiry set far ahead |
-| The wrangler key is registered for exactly this host and owner group, and the proof verifies over `mash-issue-v1`, address, public key, host, nonce and expiry | a forged or missing proof. A proof valid for `foo.c.core` fails for `foo.c.sdk`, because the address is in the signed bytes. |
+| The wrangler key is registered for exactly this host and owner group, and the proof verifies over `mash-issue-v1`, address, public key, host, nonce and expiry | a forged or missing proof. A proof valid for `c.core` fails for `c.sdk`, because the address is in the signed bytes. |
 | The nonce has not been seen | a replayed request |
 | The address is a sender in the list set in force | an unlisted address |
 | The public key is not revoked in the issue record and not bound there to another address | a revoked key, a key already bound elsewhere |
@@ -447,7 +491,7 @@ Tags, permissions, limits, a name or an expiry in a request are never read. The 
 compile of section 2). The record write comes before the reply and is the arbiter between concurrent requests: of two
 requests for one key and two addresses, exactly one succeeds. No private key is made, received, stored or logged on this
 path; `TestIssueServiceAT012NoPrivateKeyAnywhere` scans the NATS payloads and the log for seeds. No template mash
-compiles has a line that reaches `agents.issue.>` (`TestIssueSubjectIsNotReachableByATemplate`), so an endpoint cannot
+compiles has a line that reaches `mash.issue.>` (`TestIssueSubjectIsNotReachableByATemplate`), so an endpoint cannot
 publish to the service.
 
 What the countersignature proves, and what it trusts, from ADR 0104: it proves that the holder of the wrangler's
@@ -469,7 +513,7 @@ A raw client is a plain NATS client holding one sender's creds file (its signed 
 own). Under list-set enforcement ([ADR 0102](decisions/0102-list-set-permissions-are-one-template-per-owner-group-with-allow-and-deny-tags-and-a-deny-sentinel.md)) it publishes mail, prompt and status only to the
 addresses its lists give, and it cannot subscribe to another address's inbox, prompt or status subjects. A few lines of
 every template stay open to every sender, because replies, discovery and the directory need them. The table is what a
-raw client of `foo.c.core` reaches on them, measured against a real nats-server by
+raw client of `c.core` reaches on them, measured against a real nats-server by
 `TestAT020OpenReplyAndPlumbingSubjectsArePinned` (`internal/listset/at_live_test.go`). The test pins the table: a
 change that widens or narrows what is reachable fails it, and the maintainer who changes the test updates this table.
 
@@ -511,57 +555,58 @@ line, and each account JWT, against the limit of every server, and it refuses th
 on any server. It never drops, merges or widens an exception to make a credential fit.
 
 An exception is one address on a sender's allow or deny list, counted once across all verbs. The tag value is the
-address without the range, so a tag costs the length of the receiver's owner part and name. The deny sentinel
+two-part address, so a tag costs the length of the receiver's owner part and name. The deny sentinel
 `deny:_none` is a tag but not an exception. It costs one tag (13 bytes of JSON) on a sender whose group has a deny entry
 and who has none of its own.
 
 **The headline** (contract REQ-008, measured correction, 2026-11-14): about 100 exceptions per sender fit only at short
-names. At an owner part of 4 characters, 100 exceptions fit at names of 9 characters or less (102 at 9, 106 at 8, 97 at
-10). At 14-character names the figure is 83 at an owner part of 4, and it falls from there. The tables below are the
+names. At an owner part of 4 characters, 100 exceptions fit at names of 8 characters or less (104 at 8, 99 at 9, 95 at
+10). At 14-character names the figure is 81 at an owner part of 4, and it falls from there. The tables below are the
 measure: each cell is the largest number of exceptions for which the real `Compile` and `SizeCheck` report no problem at
-the default connect line of 4,096 bytes, with a range of 3 characters. An earlier figure in the contract's first drafts
+the default connect line of 4,096 bytes. The figures were measured again for ADR 0132: the user JWT now also
+carries the `ep` tag, measured with a 32-character agent token, which is why each figure is a little lower than before. An earlier figure in the contract's first drafts
 (151 tags at 7 characters, 105 at 14, 59 at 32) counted bare tag values and does not hold for real credentials.
 
 At the default connect line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile.
 The columns are the length of every name (the sender's and each receiver's); the rows are the length of the receiver's
-owner part; the range is 3 characters. A deny exception names a member of the sender's own owner group, so its owner
-part is the sender's. A range, an owner part and a name total at most 62 characters.
+owner part. A deny exception names a member of the sender's own owner group, so its owner
+part is the sender's. An owner part and a name total at most 62 characters.
 
 Allow exceptions on a closed verb (no sentinel):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 111 | 83 | 50 |
-| 8 | 93 | 73 | 46 |
-| 14 | 75 | 61 | 41 |
-| 24 | 57 | 48 | 35 |
+| 4 | 109 | 81 | 48 |
+| 8 | 91 | 71 | 44 |
+| 14 | 73 | 59 | 39 |
+| 24 | 55 | 47 | 33 |
 
 The same allow exceptions for a sender that also carries the sentinel (its group has a deny entry and the sender has none):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 111 | 83 | 50 |
-| 8 | 93 | 72 | 46 |
-| 14 | 75 | 61 | 41 |
-| 24 | 56 | 48 | 35 |
+| 4 | 108 | 81 | 48 |
+| 8 | 91 | 70 | 44 |
+| 14 | 73 | 59 | 39 |
+| 24 | 55 | 46 | 33 |
 
 Deny exceptions on a shared verb (the sender has its own denies, so no sentinel):
 
 | Owner part | 7-character names | 14-character names | 32-character names |
 | --- | --- | --- | --- |
-| 4 | 117 | 86 | 51 |
-| 8 | 97 | 75 | 47 |
-| 14 | 78 | 63 | 42 |
-| 24 | 58 | 49 | 35 |
+| 4 | 114 | 84 | 49 |
+| 8 | 95 | 73 | 45 |
+| 14 | 76 | 61 | 40 |
+| 24 | 56 | 48 | 34 |
 
-A worked example. A sender that may mail 61 receivers in an owner group of 14 characters, each with a 14-character
-name, fits (the limit is 61). At 62 it does not, and mash says so:
+A worked example. A sender that may mail 59 receivers in an owner group of 14 characters, each with a 14-character
+name, fits (the limit is 59). At 60 it does not, and mash says so:
 
 ```text
-sender abc.oooooooooooooo.saaaaaaaaaaaaa, server "default": its connect line would be 4116 bytes (user JWT 3770 bytes with 62 tags, plus 346 bytes of connect options), over the 4096 byte limit of server "default": fewer exceptions for that sender, or a shared verb instead of a long list
+sender aooooooooooooo.s0xxxxxxxxxxxx, server "default": its connect line would be 4106 bytes (user JWT 3760 bytes with 60 tags, plus 346 bytes of connect options), over the 4096 byte limit of server "default": fewer exceptions for that sender, or a shared verb instead of a long list
 ```
 
-The same sender with owner parts of 4 characters and names of 7 characters fits 111. The bytes are the rule, not the
+The same sender with owner parts of 4 characters and names of 7 characters fits 109. The bytes are the rule, not the
 count. A cluster is limited by its smallest server, and the message names the server that would not take the credential.
 An account JWT that does not fit a server is refused the same way, naming the account. It grows with the number of owner
 groups and the shared verbs they hold, never with the number of senders. The measure is conservative by at most 6 bytes:
@@ -681,8 +726,8 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 
 | Term | Meaning |
 |---|---|
-| Address | A three-part name: range part, owner part and name part, as in `agents.mail.foo.c.core` (range `foo`, owner `c`, name `core`). |
-| Owner group | Every address that shares one range part and one owner part. |
+| Address | A two-part name, owner part and name part: `c.core` (owner `c`, name `core`). The subject of a message to it is `agents.mail.<agent>.c.core`, where `<agent>` is the SAP agent token of the endpoint's program; a list set never names it. |
+| Owner group | Every address that shares one owner part. The scope of a list set is the NATS account. |
 | Verb | One kind of traffic: mail, prompt (a live request to a running session), status (a liveness probe) or heartbeat (the periodic "I am here" signal). |
 | Shared, closed | The switch for one owner group and one verb. Shared: the owner line is on. Closed: a sender reaches only the addresses on its allow list. |
 | List set | The switches and lists for one NATS account, handed over in one piece. |
@@ -693,7 +738,7 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | Scoped signing key | A signing key whose permissions are fixed in the account JWT. A user JWT it signs carries tags and no permissions. |
 | Template | The permission lines on a scoped signing key. `{{name()}}` and `{{tag(...)}}` are filled in by the server at connect. |
 | Tag | A `key:value` entry in a user JWT that the template turns into permission lines. |
-| Owner line | A template line that reaches every address of an owner group (`agents.mail.foo.c.*`). |
+| Owner line | A template line that reaches every address of an owner group (`agents.mail.*.c.*`). |
 | Fixed lines | Template lines that name only the sender or shared plumbing and need no tag. |
 | Deny sentinel | The tag `deny:_none`, carried by users of a key with deny lines, which addresses nothing. |
 | Push | Sending a new account JWT to the servers. |

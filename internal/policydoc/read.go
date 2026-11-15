@@ -181,9 +181,6 @@ func Explain(ctx context.Context, r Reader, sender, receiver string) (ExplainRes
 // force.
 const StageBase = "base"
 
-// StageRange is the stage of the refusal Diff reports for a document whose range is not the selected range.
-const StageRange = "range"
-
 // StagePending is the stage of the refusal Diff reports for a document whose content is not that of the pending
 // generation: until the pending generation is applied or rolled back, only the same list set can be submitted.
 const StagePending = "pending"
@@ -257,10 +254,6 @@ type RotationContext struct {
 	// stage signature.
 	MarkerErr error
 }
-
-// ErrRangeNeeded is what Diff returns when no list set is in force and the caller gave no range: a first document's
-// range cannot be checked without one.
-var ErrRangeNeeded = errors.New("--range is needed to check a first list set's range when nothing is in force")
 
 // StageSignature is the stage of the refusal Diff reports for a signer the adoption marker does not accept.
 const StageSignature = "signature"
@@ -392,15 +385,14 @@ func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
 }
 
 // Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
-// document for another account is an error. A document for a range other than rng (when rng is empty, the range of
-// the list set in force; with none in force it is an error, ErrRangeNeeded) is reported in the plan as a refusal with stage "range", and
-// one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
+// document for another account is an error. A document
+// whose base_generation is not the generation in force is reported as a refusal with stage "base", and one whose content is not
 // that of the pending generation as a refusal with stage "pending", and one whose next_submitter the intake would
 // refuse as a refusal with stage "document" or "adoption" (checked against rc; see RotationContext): a submission of
 // any would be refused. A document whose content is that in force is refused as the apply refuses it, with stage "unchanged", unless it starts or
 // completes a submitter rotation; one with no adoption marker (rc nil: not checked) or an account that is not adopted or
 // whose marker cannot be read is refused with stage "adoption".
-func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []listset.ServerLimits, rc *RotationContext, failClosed FailClosedFunc) (DiffPlan, error) {
+func Diff(ctx context.Context, r Reader, file []byte, servers []listset.ServerLimits, rc *RotationContext, failClosed FailClosedFunc) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
 		return DiffPlan{}, err
@@ -416,18 +408,9 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	var gen uint64
 	if cur.committed {
 		inForce, gen = &cur.ls, cur.gen
-		if rng == "" {
-			rng = cur.ls.Range
-		}
-	} else if rng == "" {
-		return DiffPlan{}, ErrRangeNeeded
 	}
 	p := listset.DryRun(inForce, next.ListSet, servers)
 	var pre []listset.Refusal
-	if rng != "" && next.Range != rng {
-		pre = append(pre, listset.Refusal{Stage: StageRange, Entry: "range",
-			Reason: fmt.Sprintf("the document is for range %s and the selected range is %s", next.Range, rng)})
-	}
 	if next.BaseGeneration != gen {
 		pre = append(pre, listset.Refusal{Stage: StageBase, Entry: "base_generation",
 			Reason: fmt.Sprintf("the document is based on generation %d and generation %d is in force: a submission would be refused as stale", next.BaseGeneration, gen)})

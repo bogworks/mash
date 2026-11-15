@@ -115,8 +115,8 @@ func (e Entry) validate() error {
 	if e.Host == "" || strings.ContainsAny(e.Host, " \t\r\n\x00\n") {
 		return errors.New("host is empty or has whitespace")
 	}
-	if r, o, ok := strings.Cut(e.Group, "."); !ok || r == "" || o == "" || strings.Contains(o, ".") {
-		return fmt.Errorf("group %q is not range.owner", e.Group)
+	if e.Group == "" || strings.ContainsAny(e.Group, ". \t\r\n\x00") {
+		return fmt.Errorf("group %q is not an owner (one part, no dot)", e.Group)
 	}
 	if !nkeys.IsValidPublicUserKey(e.WranglerKey) {
 		return fmt.Errorf("wrangler_key %q is not a NATS user public key", e.WranglerKey)

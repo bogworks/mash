@@ -88,7 +88,7 @@ func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	sc := jwt.NewAccountClaims(e.sysPub)
 	sc.Name = "SYS"
 	e.sysJWT = at010Must(sc.Encode(e.op))
-	e.scoped["foo.c"] = at010Must(nkeys.CreateAccount())
+	e.scoped["c"] = at010Must(nkeys.CreateAccount())
 	e.mint = &ProbeMinter{Signer: e, Account: e.acctPub, Record: e.rec}
 
 	gen1 := e.account(compile(t, prev))
@@ -331,17 +331,23 @@ func (e *at010Env) realUser(p ProbeCred) (creds []byte, pub string) {
 	uc := jwt.NewUserClaims(pub)
 	uc.SetScoped(true)
 	uc.Name = p.Name
-	uc.Tags.Add(p.Tags...)
+	uc.Tags.Add(at010Must(listset.WithEndpointTag(p.Tags, p.Endpoint, p.Sender))...) // the issuer's endpoint tag
 	uc.IssuerAccount = e.acctPub
-	tok := at010Must(e.SignUser(p.Sender[:strings.LastIndex(p.Sender, ".")], uc))
+	owner, _, _ := strings.Cut(p.Sender, ".")
+	tok := at010Must(e.SignUser(owner, uc))
 	seed := at010Must(kp.Seed())
 	return at010Must(jwt.FormatUserConfig(tok, seed)), pub
 }
 
+// testEndpoint is the canonical endpoint of an address in the live tests: the agent token "claude".
+func testEndpoint(address string) string { return "claude." + address }
+
+// credsOf are the credentials of the senders of c, each for its endpoint (testEndpoint): a probe or a real user made
+// from one carries that endpoint's tag.
 func credsOf(c *listset.Compiled) []ProbeCred {
 	var out []ProbeCred
 	for _, u := range c.Users {
-		out = append(out, ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
+		out = append(out, ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags), Endpoint: testEndpoint(u.Sender)})
 	}
 	return out
 }
@@ -362,7 +368,7 @@ func (e *at010Env) gateInput(r *at010Run, p *LiveProber, w *LiveWitnesses) GateI
 		Previous: &Candidate{Generation: 1, Compiled: r.c1, Signers: e.signers(r.c1)},
 		Signers:  e.signers(r.c2),
 		// core's credential-only reach is refused only by revoking the key of its old credential.
-		OldKeys: map[string][]OldKey{"foo.c.core": {{PublicKey: r.realPub}}},
+		OldKeys: map[string][]OldKey{"c.core": {{PublicKey: r.realPub}}},
 	}
 }
 
@@ -455,7 +461,7 @@ func newAT010Run(t *testing.T, e *at010Env) *at010Run {
 	// The old key of core, the sender whose tags narrow: a real user, minted as its host would.
 	var core ProbeCred
 	for _, c := range credsOf(r.c1) {
-		if c.Sender == "foo.c.core" {
+		if c.Sender == "c.core" {
 			core = c
 		}
 	}

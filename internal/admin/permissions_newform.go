@@ -12,7 +12,7 @@ import (
 )
 
 // ValidateGrant checks one subject grant against REQ-027: a grant that applies to the agents. subject space must not
-// carry '*' or '>' in the range (agent) token position, which is token index 2 of agents.<verb>.<agent>.<owner>.<name>,
+// carry '*' or '>' in the agent token position, which is token index 2 of agents.<verb>.<agent>.<owner>.<name>,
 // or at or before it. A grant is accepted only if every token is a literal or a lone '*', '>' appears only as the
 // last token, no token is empty or has whitespace, and no token mixes a wildcard character with other text.
 // A grant that starts with a wildcard applies to the agents. space too, so it is held to the same rule. An agents.

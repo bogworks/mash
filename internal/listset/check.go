@@ -19,10 +19,17 @@ import (
 // minus the deny list. It refuses on any address reachable that the lists do not give, and on any the lists give that
 // is not reachable.
 //
-// The addresses compared are every address the list set names plus probes: another name in each owner group, another
-// owner group in the range, another range. Check also refuses a template with no tag-free allow line in either
-// direction, a user that carries permission claims or a tag other than allow: and deny:, a deny-key user without a
-// deny tag, and any line outside the fixed set and the agents. subjects the lists give.
+// The ISSUER adds one tag to every credential it signs under an owner group's scoped key, ep:<flat key> (EndpointTag),
+// and the templates use it for the sender's inbox, lease and reply lines. Check models that: it expands each sender's
+// template with its list tags plus an ep tag for that sender, for each of two agent tokens (testAgents), and proves
+// that the lines naming a flat key name the sender's own and no other sender's, whatever the token, and that the
+// reach does not depend on the token. It also expands the template without an ep tag and proves the credential then
+// has none of the lines that name a flat key (fail closed).
+//
+// The addresses compared are every address the list set names plus probes: another name in each owner group and
+// another owner group. Check also refuses a template with no tag-free allow line in either direction, a line that
+// names an agent token, a user that carries permission claims or a tag other than allow: and deny:, a deny-key user
+// without a deny tag, and any line outside the fixed set and the agents. subjects the lists give.
 //
 // A list set that fails Validate is returned as its *ValidationError. Otherwise the error is a *CheckError.
 func Check(ls ListSet, c *Compiled) error {
@@ -35,10 +42,6 @@ func Check(ls ListSet, c *Compiled) error {
 	}
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
-
-	if c.Range != m.rng {
-		bad("compiled range "+quote(c.Range), "is not the list set's range %q", m.rng)
-	}
 
 	senderGroups := map[string]bool{}
 	for _, s := range m.senders {
@@ -61,6 +64,11 @@ func Check(ls ListSet, c *Compiled) error {
 		}
 		if !slices.ContainsFunc(t.Permissions.Sub.Allow, tagFree) {
 			bad(entry, "no subscribe allow line that needs no tag (REQ-006)")
+		}
+		for _, l := range slices.Concat(t.Permissions.Pub.Allow, t.Permissions.Pub.Deny, t.Permissions.Sub.Allow, t.Permissions.Sub.Deny) {
+			if toks := strings.Split(l, "."); len(toks) > 2 && toks[0] == "agents" && toks[2] != anyAgent {
+				bad(entry, "line %q names an agent token; the agent token position is a wildcard in every line", l)
+			}
 		}
 	}
 	for g := range senderGroups {
@@ -106,79 +114,28 @@ func Check(ls ListSet, c *Compiled) error {
 			bad(who, "user name %q is not the sender's name part %q, which the template's {{name()}} expands to", u.Name, s.addr.name)
 		}
 		for _, t := range u.Tags {
-			if !strings.HasPrefix(t, AllowTag+":") && !strings.HasPrefix(t, DenyTag+":") {
+			switch {
+			case IsEndpointTag(t):
+				bad(who, "tag %q is an endpoint tag; the issuer supplies it and a compiled user never names it", t)
+			case !strings.HasPrefix(t, AllowTag+":") && !strings.HasPrefix(t, DenyTag+":"):
 				bad(who, "tag %q is neither allow: nor deny:", t)
 			}
 		}
-		p, err := expandPermissions(tpl, u.Name, u.Tags)
-		if err != nil {
-			bad(who, "cannot connect: %v", err)
-			continue
-		}
-		for _, line := range p.pubAllow {
-			if r := m.lineRefusal(s, "pub", line); r != "" {
-				bad(who, "publish line %q: %s", line, r)
-			}
-		}
-		for _, line := range p.subAllow {
-			if r := m.lineRefusal(s, "sub", line); r != "" {
-				bad(who, "subscribe line %q: %s", line, r)
-			}
-		}
-		// Every fixed grant the sender needs must be present and survive the deny lines.
-		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), flat) {
-			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
-				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
-			}
-		}
-		for _, line := range []string{
-			"_INBOX." + flat + ".>",
-			subj(s.addr.String(), Prompt),
-			subj(s.addr.String(), Status),
-			"$SRV.>",
-		} {
-			if !slices.Contains(p.subAllow, line) || !p.canSub(concrete(line)) {
-				bad(who, "required subscribe grant %q is missing or denied: %s", line, fixedBreaks(line))
-			}
-		}
-		// The addresses its own expanded lines name join the universe, so a tag that names an address no list gives is
-		// compared too.
-		uni := slices.Clone(universe)
-		for _, line := range slices.Concat(p.pubAllow, p.subAllow) {
-			if toks := strings.Split(line, "."); len(toks) == 5 && toks[0] == "agents" {
-				uni = append(uni, strings.Join(toks[2:], "."))
-			}
-		}
-		slices.Sort(uni)
-		uni = slices.Compact(uni)
-		for _, v := range Verbs {
-			want := wantReach(m, s, v, uni)
-			got := p.reach(v, uni)
-			for _, a := range uni {
-				switch {
-				case got[a] && !want[a]:
-					bad(who+", verb "+string(v), "%s %s, which its lists do not give", reachWord(v), a)
-				case !got[a] && want[a]:
-					bad(who+", verb "+string(v), "cannot %s %s, which its lists give", reachVerb(v), a)
+		// A credential without the endpoint tag (an old one, or one with list tags only): nothing that names a flat
+		// key may be left in its lines.
+		if np, err := expandPermissions(tpl, u.Name, u.Tags); err != nil {
+			bad(who, "a credential without an endpoint tag cannot connect: %v", err)
+		} else {
+			for _, tk := range testAgents {
+				for _, line := range keyedLines(s.addr, tk) {
+					if slices.Contains(np.pubAllow, line) || slices.Contains(np.subAllow, line) {
+						bad(who, "without an endpoint tag the credential still has the line %q; a credential without the tag must get no inbox, lease or reply access", line)
+					}
 				}
 			}
 		}
-		// What no list gives: publishing another sender's heartbeat, and subscribing to prompts, status or mail of any
-		// address but its own.
-		self := s.addr.String()
-		for _, a := range uni {
-			if a != self && p.canPub(subj(a, Heartbeat)) {
-				bad(who+", verb heartbeat", "may publish the heartbeat of %s; a sender publishes only its own", a)
-			}
-			for _, v := range []Verb{Prompt, Status} {
-				if a != self && p.canSub(subj(a, v)) {
-					bad(who+", verb "+string(v), "may subscribe to the %s subject of %s; a sender serves only its own", v, a)
-				}
-			}
-			if p.canSub(subj(a, Mail)) {
-				bad(who+", verb mail", "may subscribe to the mail subject of %s; mail is read from the sender's own inbox stream only", a)
-			}
+		for _, tk := range testAgents {
+			checkEndpoint(m, s, u, tpl, tk, universe, bad)
 		}
 	}
 
@@ -186,6 +143,141 @@ func Check(ls ListSet, c *Compiled) error {
 		return &CheckError{Problems: ps}
 	}
 	return nil
+}
+
+// testAgents are the agent tokens Check expands every template with. No template line may depend on the agent token,
+// so two different tokens, one with a dash, must give the same reach and the same lines but for the flat key.
+var testAgents = []string{"cc", "claude-code"}
+
+// flatOf is the flat key of the endpoint with agent token tk at address a.
+func flatOf(tk string, a address) string { return tk + "_" + a.owner + "_" + a.name }
+
+// keyedLines are the lines that name the flat key of the endpoint with agent token tk at address a: its inbox, lease and
+// reply lines.
+func keyedLines(a address, tk string) []string {
+	flat := flatOf(tk, a)
+	var out []string
+	for _, l := range append(fixedPub("", PolicySubject(), flat), "_INBOX."+flat+".>") {
+		if strings.Contains(l, flat) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// checkEndpoint expands s's template with its list tags and the ep tag of its endpoint with agent token tk, and compares
+// the result with what the lists give.
+func checkEndpoint(m *model, s sender, u User, tpl jwt.Permissions, tk string, universe []string, bad func(string, string, ...any)) {
+	who := "sender " + s.addr.String()
+	own := flatOf(tk, s.addr)
+	tags := append(slices.Clone(u.Tags), EndpointTagName+":"+own)
+	p, err := expandPermissions(tpl, u.Name, tags)
+	if err != nil {
+		bad(who, "cannot connect: %v", err)
+		return
+	}
+	for _, line := range p.pubAllow {
+		if r := m.lineRefusal(s, tk, "pub", line); r != "" {
+			bad(who, "publish line %q: %s", line, r)
+		}
+	}
+	for _, line := range p.subAllow {
+		if r := m.lineRefusal(s, tk, "sub", line); r != "" {
+			bad(who, "subscribe line %q: %s", line, r)
+		}
+	}
+	// Every fixed grant the sender needs must be present and survive the deny lines.
+	for _, line := range fixedPub(subjT(anyAgent, s.addr.String(), Heartbeat), PolicySubject(), own) {
+		if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
+			bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
+		}
+	}
+	for _, line := range []string{
+		"_INBOX." + own + ".>",
+		subjT(anyAgent, s.addr.String(), Prompt),
+		subjT(anyAgent, s.addr.String(), Status),
+		"$SRV.>",
+	} {
+		if !slices.Contains(p.subAllow, line) || !p.canSub(concrete(line)) {
+			bad(who, "required subscribe grant %q is missing or denied: %s", line, fixedBreaks(line))
+		}
+	}
+	// No other endpoint's inbox, lease or reply prefix: the lines that name the flat key of any sender under either
+	// agent token, and of this sender's address under the other token, must not be reachable.
+	ownKeyed := keyedLines(s.addr, tk)
+	for _, o := range m.senders {
+		for _, ot := range testAgents {
+			if o.addr == s.addr && ot == tk {
+				continue
+			}
+			for _, line := range keyedLines(o.addr, ot) {
+				if slices.Contains(ownKeyed, line) {
+					continue
+				}
+				// Publishing to any _INBOX subject is the reply grant; what a sender must not have is another
+				// endpoint's reply prefix as a subscription.
+				if strings.HasPrefix(line, "_INBOX.") && p.canSub(concrete(line)) || !strings.HasPrefix(line, "_INBOX.") && p.canPub(concrete(line)) {
+					bad(who, "may reach %q, which belongs to the endpoint %s.%s", line, ot, o.addr)
+				}
+			}
+		}
+	}
+	// The addresses its own expanded lines name join the universe, so a tag that names an address no list gives is
+	// compared too.
+	uni := slices.Clone(universe)
+	for _, line := range slices.Concat(p.pubAllow, p.subAllow) {
+		if toks := strings.Split(line, "."); len(toks) == 5 && toks[0] == "agents" {
+			uni = append(uni, strings.Join(toks[3:], "."))
+		}
+	}
+	slices.Sort(uni)
+	uni = slices.Compact(uni)
+	for _, v := range Verbs {
+		want := wantReach(m, s, v, uni)
+		got := p.reachTok(tk, v, uni)
+		for _, a := range uni {
+			switch {
+			case got[a] && !want[a]:
+				bad(who+", verb "+string(v), "%s %s, which its lists do not give", reachWord(v), a)
+			case !got[a] && want[a]:
+				bad(who+", verb "+string(v), "cannot %s %s, which its lists give", reachVerb(v), a)
+			}
+		}
+	}
+	// What no list gives: publishing another sender's heartbeat, and subscribing to prompts, status or mail of any
+	// address but its own, under any agent token (the position is a wildcard: a sender may publish its own
+	// heartbeat under any agent token, ADR 0132).
+	self := s.addr.String()
+	for _, a := range uni {
+		for _, t := range testAgents {
+			if a != self && p.canPub(subjT(t, a, Heartbeat)) {
+				bad(who+", verb heartbeat", "may publish the heartbeat of %s; a sender publishes only its own", a)
+			}
+			for _, v := range []Verb{Prompt, Status} {
+				if a != self && p.canSub(subjT(t, a, v)) {
+					bad(who+", verb "+string(v), "may subscribe to the %s subject of %s; a sender serves only its own", v, a)
+				}
+			}
+			if p.canSub(subjT(t, a, Mail)) {
+				bad(who+", verb mail", "may subscribe to the mail subject of %s; mail is read from the sender's own inbox stream only", a)
+			}
+		}
+	}
+	// The reach must not depend on the agent token.
+	for _, v := range Verbs {
+		base := p.reachTok(tk, v, uni)
+		for _, t := range testAgents {
+			if t == tk {
+				continue
+			}
+			other := p.reachTok(t, v, uni)
+			for _, a := range uni {
+				if base[a] != other[a] {
+					bad(who+", verb "+string(v), "reach of %s depends on the agent token (%s against %s)", a, tk, t)
+				}
+			}
+		}
+	}
 }
 
 // concrete is a literal subject that line matches: a final '>' becomes one token.
@@ -230,13 +322,20 @@ func reachVerb(v Verb) string {
 	return "publish " + string(v) + " to"
 }
 
-// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range>: three tokens, no address.
-func isPolicySubject(line string) bool {
-	toks := strings.Split(line, ".")
-	return len(toks) == 3 && toks[0] == "agents" && toks[1] == "policy"
-}
+// isPolicySubject reports whether line is the policy responder subject, mash.policy: two tokens, no address.
+func isPolicySubject(line string) bool { return line == PolicySubject() }
 
-func subj(address string, v Verb) string { return "agents." + v.subject() + "." + address }
+// defaultAgent is the agent token of the subjects Subject, ReachOf and the explain answers use: the template wildcards
+// the position, so any valid token gives the same answer.
+const defaultAgent = "cc"
+
+// subj is the subject towards address (owner.name) under the default agent token.
+func subj(address string, v Verb) string { return subjT(defaultAgent, address, v) }
+
+// subjT is the subject towards address (owner.name) of the endpoint with agent token tk.
+func subjT(tk, address string, v Verb) string {
+	return "agents." + v.subject() + "." + tk + "." + address
+}
 
 // wantReach is the set the lists give a sender for verb v: the owner line on a shared verb, plus the allow list, minus
 // the deny list.
@@ -284,7 +383,7 @@ func (m *model) universeAll() []address {
 }
 
 // universeOf is every address the list set names plus probes: a name no list names in each owner group the set
-// mentions, another owner group of the range, and another range.
+// mentions, and another owner group.
 func universeOf(m *model) []string {
 	named := m.universeAll()
 	taken := map[string]bool{}
@@ -293,8 +392,8 @@ func universeOf(m *model) []string {
 		taken[a.String()] = true
 		owners[a.owner] = true
 	}
-	free := func(rng, owner, name string) address {
-		a := address{rng, owner, name}
+	free := func(owner, name string) address {
+		a := address{owner, name}
 		for i := 2; taken[a.String()]; i++ {
 			a.name = fmt.Sprintf("%s%d", name, i)
 		}
@@ -317,10 +416,9 @@ func universeOf(m *model) []string {
 	sort.Strings(keys)
 	for _, g := range keys {
 		a := groups[g]
-		out = append(out, free(a.rng, a.owner, "probe-name"))
-		out = append(out, free("probe-range", a.owner, "probe-name"))
+		out = append(out, free(a.owner, "probe-name"))
 	}
-	out = append(out, free(m.rng, freeOwner, "probe-name"))
+	out = append(out, free(freeOwner, "probe-name"))
 	res := make([]string, len(out))
 	for i, a := range out {
 		res[i] = a.String()
@@ -329,10 +427,11 @@ func universeOf(m *model) []string {
 	return slices.Compact(res)
 }
 
-// fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
-func fixedLines(s sender) (pub, sub []string) {
-	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", PolicySubject(s.addr.rng), flat) {
+// fixedLines are the non-agents lines a sender's expanded template may hold, for the sender's endpoint with agent token
+// tk: publish, then subscribe.
+func fixedLines(s sender, tk string) (pub, sub []string) {
+	flat := flatOf(tk, s.addr)
+	for _, l := range fixedPub("", PolicySubject(), flat) {
 		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
 			pub = append(pub, l)
 		}
@@ -340,11 +439,12 @@ func fixedLines(s sender) (pub, sub []string) {
 	return pub, []string{"_INBOX." + flat + ".>", "$SRV.>"}
 }
 
-// lineRefusal says why an expanded allow line is not one the lists could have asked for, or "".
-func (m *model) lineRefusal(s sender, dir, line string) string {
+// lineRefusal says why an expanded allow line is not one the lists could have asked for, or "". tk is the agent token
+// of the sender's endpoint in this expansion.
+func (m *model) lineRefusal(s sender, tk, dir, line string) string {
 	toks := strings.Split(line, ".")
 	if toks[0] != "agents" || isPolicySubject(line) {
-		pub, sub := fixedLines(s)
+		pub, sub := fixedLines(s, tk)
 		fixed := pub
 		if dir == "sub" {
 			fixed = sub
@@ -366,11 +466,11 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 	if v == "" {
 		return fmt.Sprintf("has verb %q, which is none of mail, prompt, status, hb", toks[1])
 	}
-	if toks[2] != m.rng {
-		return fmt.Sprintf("range part %q is not the account's range %q", toks[2], m.rng)
+	if toks[2] != anyAgent {
+		return fmt.Sprintf("names the agent token %q; the position is a wildcard", toks[2])
 	}
 	own := s.addr.String()
-	lit := toks[2] + "." + toks[3] + "." + toks[4]
+	lit := toks[3] + "." + toks[4]
 	switch {
 	case dir == "pub" && v == Heartbeat:
 		if lit != own {
@@ -394,10 +494,10 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 		}
 		return ""
 	}
-	if strings.ContainsAny(line[len("agents."):], "*>") {
+	if strings.ContainsAny(strings.Join(toks[3:], "."), "*>") {
 		return "holds a wildcard that is not the owner line"
 	}
-	if _, reason := parseAddress(toks[2] + "." + toks[3] + "." + toks[4]); reason != "" {
+	if _, reason := parseAddress(lit); reason != "" {
 		return "does not name a valid address: " + reason
 	}
 	return ""
@@ -591,9 +691,14 @@ func (e *expanded) canSub(subject string) bool {
 // reach is the set of addresses of universe the user reaches with verb v: a publish for mail, prompt and status, a
 // subscription for heartbeat.
 func (e *expanded) reach(v Verb, universe []string) map[string]bool {
+	return e.reachTok(defaultAgent, v, universe)
+}
+
+// reachTok is reach for the endpoint with agent token tk.
+func (e *expanded) reachTok(tk string, v Verb, universe []string) map[string]bool {
 	out := map[string]bool{}
 	for _, a := range universe {
-		if v == Heartbeat && e.canSub(subj(a, v)) || v != Heartbeat && e.canPub(subj(a, v)) {
+		if v == Heartbeat && e.canSub(subjT(tk, a, v)) || v != Heartbeat && e.canPub(subjT(tk, a, v)) {
 			out[a] = true
 		}
 	}
@@ -653,8 +758,15 @@ func expandSender(c *Compiled, sender string) (*expanded, error) {
 	if tpl == nil {
 		return nil, fmt.Errorf("no template %s", a.group())
 	}
-	return expandPermissions(tpl.Permissions, user.Name, user.Tags)
+	// The credential the issuer signs also carries the endpoint tag; displayAgent stands for the endpoint's own agent
+	// token, so the open subjects shown are those of a real credential.
+	tags := append(slices.Clone(user.Tags), EndpointTagName+":"+flatOf(displayAgent, a))
+	return expandPermissions(tpl.Permissions, user.Name, tags)
 }
+
+// displayAgent stands for the agent token of a sender's endpoint where an answer shows its expanded lines (Show,
+// Explain): the list set does not know the token and the template lines do not depend on it.
+const displayAgent = "agent"
 
 // universeNamed is the addresses the list set names, sorted.
 func universeNamed(m *model) []string {

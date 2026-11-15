@@ -1,14 +1,14 @@
 accepted: this would change
 size checked against the default server limits; the apply checks each server's own
-receivers foo.c.lead mail: added foo.c.core; removed (none)
-receivers foo.c.lead prompt: added foo.c.core; removed (none)
-receivers foo.c.lead status: added foo.c.core; removed (none)
-receivers foo.c.lead heartbeat: added foo.c.core; removed (none)
-template foo.c: changed; disconnects foo.c.core, foo.c.lead
-tags foo.c.core: allow:d.build, deny:_none -> allow:d.build
-tags foo.c.lead: deny:c.core -> allow:c.core
+receivers c.lead mail: added c.core; removed (none)
+receivers c.lead prompt: added c.core; removed (none)
+receivers c.lead status: added c.core; removed (none)
+receivers c.lead heartbeat: added c.core; removed (none)
+template c: changed; disconnects c.core, c.lead
+tags c.core: allow:d.build, deny:_none -> allow:d.build
+tags c.lead: deny:c.core -> allow:c.core
 rotate and revoke: (none)
-new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): foo.c.core, foo.c.lead
+new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): c.core, c.lead
 revoke: (none)
 first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
 inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse

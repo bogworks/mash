@@ -3,6 +3,7 @@ package policyapply
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -76,8 +77,8 @@ func TestProbeMinterMint(t *testing.T) {
 	sk, _ := nkeys.CreateAccount()
 	rec := &MemIssueRecord{}
 	now := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
-	m := &ProbeMinter{Signer: scopedSigner{"foo.c": sk}, Account: acctPub, Record: rec, Now: func() time.Time { return now }}
-	p := ProbeCred{Sender: "foo.c.core", Name: "core", Tags: []string{"allow:c.docs"}}
+	m := &ProbeMinter{Signer: scopedSigner{"c": sk}, Account: acctPub, Record: rec, Now: func() time.Time { return now }}
+	p := ProbeCred{Sender: "c.core", Name: "core", Tags: []string{"allow:c.docs"}}
 	creds, pub, err := m.Mint(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -94,8 +95,9 @@ func TestProbeMinterMint(t *testing.T) {
 	if uc.Subject != pub || uc.Name != "core" || uc.IssuerAccount != acctPub || uc.Issuer != skPub {
 		t.Errorf("claims = %+v", uc)
 	}
-	if len(uc.Tags) != 1 || uc.Tags[0] != "allow:c.docs" {
-		t.Errorf("tags = %v", uc.Tags)
+	// With no Endpoint the probe's endpoint tag is that of the probe endpoint "probe.c.core".
+	if want := []string{"allow:c.docs", "ep:probe_c_core"}; !slices.Equal([]string(uc.Tags), want) {
+		t.Errorf("tags = %v, want %v", uc.Tags, want)
 	}
 	if uc.Pub.Allow != nil || uc.Sub.Allow != nil || uc.Pub.Deny != nil || uc.Sub.Deny != nil || uc.Resp != nil {
 		t.Errorf("a probe carries permissions: %+v", uc.UserPermissionLimits)
@@ -104,13 +106,29 @@ func TestProbeMinterMint(t *testing.T) {
 		t.Errorf("expires = %d", uc.Expires)
 	}
 	es := rec.Entries()
-	if len(es) != 1 || es[0].Purpose != PurposeProbe || es[0].PublicKey != pub || es[0].Address != "foo.c.core" || es[0].RevokedAt != nil {
+	if len(es) != 1 || es[0].Purpose != PurposeProbe || es[0].PublicKey != pub || es[0].Address != "c.core" || es[0].RevokedAt != nil {
 		t.Errorf("record = %+v", es)
 	}
 	_, pub2, _ := m.Mint(context.Background(), p)
 	if pub2 == pub {
 		t.Error("probe keys repeat")
 	}
+	// An Endpoint gives its own tag; an endpoint at another address is refused.
+	p.Endpoint = "claude.c.core"
+	creds2, _, err := m.Mint(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok2, _ := jwt.ParseDecoratedJWT(creds2)
+	uc2, _ := jwt.DecodeUserClaims(tok2)
+	if want := []string{"allow:c.docs", "ep:claude_c_core"}; !slices.Equal([]string(uc2.Tags), want) {
+		t.Errorf("tags with an endpoint = %v, want %v", uc2.Tags, want)
+	}
+	p.Endpoint = "claude.c.docs"
+	if _, _, err := m.Mint(context.Background(), p); err == nil {
+		t.Error("a probe for an endpoint at another address was minted")
+	}
+	p.Endpoint = ""
 }
 
 func TestProbeMinterRefusals(t *testing.T) {
@@ -118,14 +136,14 @@ func TestProbeMinterRefusals(t *testing.T) {
 	acctPub, _ := acct.PublicKey()
 	sk, _ := nkeys.CreateAccount()
 	rec := &MemIssueRecord{}
-	m := &ProbeMinter{Signer: scopedSigner{"foo.c": sk}, Account: acctPub, Record: rec}
+	m := &ProbeMinter{Signer: scopedSigner{"c": sk}, Account: acctPub, Record: rec}
 	ctx := context.Background()
 	for name, p := range map[string]ProbeCred{
-		"no name":       {Sender: "foo.c.core"},
+		"no name":       {Sender: "c.core"},
 		"bad address":   {Sender: "core", Name: "core"},
-		"upper-case":    {Sender: "foo.c.core", Name: "core", Tags: []string{"Allow:c.docs"}},
-		"duplicate tag": {Sender: "foo.c.core", Name: "core", Tags: []string{"a:b", "a:b"}},
-		"unknown group": {Sender: "foo.z.core", Name: "core"},
+		"upper-case":    {Sender: "c.core", Name: "core", Tags: []string{"Allow:c.docs"}},
+		"duplicate tag": {Sender: "c.core", Name: "core", Tags: []string{"a:b", "a:b"}},
+		"unknown group": {Sender: "z.core", Name: "core"},
 	} {
 		if _, _, err := m.Mint(ctx, p); err == nil {
 			t.Errorf("%s: minted", name)
@@ -145,8 +163,8 @@ func TestProbeMinterRecordsBeforeReturning(t *testing.T) {
 	acct, _ := nkeys.CreateAccount()
 	acctPub, _ := acct.PublicKey()
 	sk, _ := nkeys.CreateAccount()
-	m := &ProbeMinter{Signer: scopedSigner{"foo.c": sk}, Account: acctPub, Record: &failingRecord{}}
-	creds, pub, err := m.Mint(context.Background(), ProbeCred{Sender: "foo.c.core", Name: "core"})
+	m := &ProbeMinter{Signer: scopedSigner{"c": sk}, Account: acctPub, Record: &failingRecord{}}
+	creds, pub, err := m.Mint(context.Background(), ProbeCred{Sender: "c.core", Name: "core"})
 	if err == nil || creds != nil || pub != "" {
 		t.Errorf("minted although the record failed: %v", err)
 	}
@@ -164,7 +182,7 @@ func TestProbeMinterErrorHasNoSeed(t *testing.T) {
 	kp, _ := nkeys.CreateUser()
 	seed, _ := kp.Seed()
 	m := &ProbeMinter{Signer: seedLeakSigner{string(seed)}, Account: acctPub, Record: &MemIssueRecord{}}
-	_, _, err := m.Mint(context.Background(), ProbeCred{Sender: "foo.c.core", Name: "core"})
+	_, _, err := m.Mint(context.Background(), ProbeCred{Sender: "c.core", Name: "core"})
 	if err == nil || strings.Contains(err.Error(), string(seed)) {
 		t.Errorf("err = %v", err)
 	}
@@ -239,8 +257,8 @@ func TestLiveTransportsPassTheirOptions(t *testing.T) {
 	acct, _ := nkeys.CreateAccount()
 	acctPub, _ := acct.PublicKey()
 	sk, _ := nkeys.CreateAccount()
-	m := &ProbeMinter{Signer: scopedSigner{"foo.c": sk}, Account: acctPub, Record: &MemIssueRecord{}}
-	p := ProbeCred{Sender: "foo.c.core", Name: "core", Tags: []string{"allow:c.docs"}}
+	m := &ProbeMinter{Signer: scopedSigner{"c": sk}, Account: acctPub, Record: &MemIssueRecord{}}
+	p := ProbeCred{Sender: "c.core", Name: "core", Tags: []string{"allow:c.docs"}}
 	opt := func(*nats.Options) error { return errOptionSeen }
 	urls := map[string]string{"s1": "nats://127.0.0.1:1"}
 

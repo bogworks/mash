@@ -15,7 +15,7 @@
 //
 // The checks run in a fixed order and the first that fails refuses the revision (never applying it): the account
 // must be adopted, the document must not already be the one in force, it must decode and verify against the key the
-// marker expects, name this account and this range, and a planned rotation's next key must be acceptable. The marker
+// marker expects, name this account, and a planned rotation's next key must be acceptable. The marker
 // is read for every revision, never cached.
 package policyintake
 
@@ -51,8 +51,6 @@ const (
 	StageDocument = "document"
 	// StageAccount: the document names another account than the key does.
 	StageAccount = "account"
-	// StageRange: the document names another range than this intake serves.
-	StageRange = "range"
 	// StageApply: the applier failed before it wrote a status of its own.
 	StageApply = "apply"
 )
@@ -86,7 +84,7 @@ var (
 
 // Doc is what the intake needs from a decoded document.
 type Doc struct {
-	Account, Range string
+	Account        string
 	Generation     uint64
 	BaseGeneration uint64
 	// Raw is the document's bytes as delivered; the intake sets it.
@@ -172,8 +170,6 @@ type Reporter interface {
 type Intake struct {
 	// Account is the account's public key; the key watched is KeyPrefix + Account.
 	Account string
-	// Range is the range name every document must carry.
-	Range string
 	// KV is the policy bucket.
 	KV     jetstream.KeyValue
 	Marker MarkerStore
@@ -296,8 +292,8 @@ func (in *Intake) retry(ctx context.Context, what string, superseded func() bool
 // error). A watch that closes later is created again with backoff. Revisions are handled one at a time, in order.
 func (in *Intake) Run(ctx context.Context) error {
 	switch {
-	case in.Account == "" || in.Range == "":
-		return errors.New("policyintake: Account and Range are required")
+	case in.Account == "":
+		return errors.New("policyintake: Account is required")
 	case in.KV == nil || in.Marker == nil || in.Lock == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil || in.HeldKeys == nil:
 		return errors.New("policyintake: KV, Marker, Lock, Decode, InForce, Apply, Report and HeldKeys are required")
 	}
@@ -497,9 +493,6 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 		return false
 	case doc.Account != strings.TrimPrefix(e.Key(), KeyPrefix):
 		in.refuse(ctx, doc.Generation, raw, StageAccount, "the document names another account than the key it was written to")
-		return false
-	case doc.Range != in.Range:
-		in.refuse(ctx, doc.Generation, raw, StageRange, "the document names another range than this one serves")
 		return false
 	}
 

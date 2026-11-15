@@ -26,7 +26,7 @@ type ListSetInForce interface {
 	InForce(ctx context.Context) (*listset.Compiled, int, error)
 }
 
-// Signer holds the owner groups' scoped signing keys. GroupKey returns the key of "range.owner"; the caller wipes it.
+// Signer holds the owner groups' scoped signing keys. GroupKey returns the key of the owner group (the owner); the caller wipes it.
 type Signer interface {
 	GroupKey(group string) (nkeys.KeyPair, error)
 }
@@ -90,7 +90,7 @@ func (is *Issuer) log() *slog.Logger {
 // what it should be, so a seed sent in the wrong field cannot reach the log. It never holds a JWT.
 func (is *Issuer) logRefusal(rf *Refusal, r Request, purpose string) {
 	addr, key, host := "(invalid)", "(invalid)", "(invalid)"
-	if _, err := r.AddressParts(); err == nil {
+	if _, _, err := r.AddressParts(); err == nil {
 		addr = r.Address
 	}
 	if nkeys.IsValidPublicUserKey(r.PublicKey) {
@@ -147,14 +147,22 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if exp.After(now.Add(MaxWindow)) {
 		return nil, refuse(CodeWindow, "the request expires more than %s ahead", MaxWindow)
 	}
-	id, _ := r.AddressParts()
-	group := id.Agent + "." + id.Owner
+	owner, _, _ := r.AddressParts()
+	group := owner
 
 	if is.Registry == nil || !keyIn(r.Wrangler, is.Registry.Lookup(r.Host, group)) {
 		return nil, refuse(CodeUnregistered, "that wrangler key is not registered for this host and owner group")
 	}
 	if !r.verifyProof() {
 		return nil, refuse(CodeBadProof, "the proof does not verify over the request")
+	}
+	// The endpoint tag comes from mash's own function over the endpoint the request names, never from a tag in the
+	// request, and is refused when the endpoint's owner and name are not the address's: a credential cannot point at
+	// another address's inbox. Nothing is signed or reserved before this.
+	epID, _ := r.EndpointIdentity()
+	epTag, err := listset.EndpointTag(epID, r.Address)
+	if err != nil {
+		return nil, refuse(CodeEndpoint, "the endpoint is not at the address of the request")
 	}
 	// The nonce is reserved only now, for a request that proved itself, so a forged request cannot use one up, and so a
 	// duplicate that arrives meanwhile is refused. It stays reserved only if a credential is returned: every refusal
@@ -240,13 +248,14 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	uc.IssuerAccount = is.AccountPub
 	uc.UserPermissionLimits = jwt.UserPermissionLimits{} // the scoped key's template applies only to a user with none
 	uc.Tags.Add(user.Tags...)
+	uc.Tags.Add(epTag)
 	token, err := uc.Encode(kp)
 	if err != nil {
 		return nil, refuse(CodeInternal, "signing failed")
 	}
 	rec := store.Issued{
-		PublicKey: r.PublicKey, Address: r.Address, Owner: id.Owner, Kind: store.IssuedEndpoint,
-		Tags: append([]string{}, user.Tags...), Generation: gen, Purpose: purpose,
+		PublicKey: r.PublicKey, Address: r.Address, Owner: owner, Kind: store.IssuedEndpoint,
+		Tags: append([]string{}, uc.Tags...), Generation: gen, Purpose: purpose,
 		IssuedAt: time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339),
 	}
 	// The token leaves this function only if the checked write succeeded; on any error it is dropped here.

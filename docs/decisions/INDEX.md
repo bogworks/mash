@@ -122,3 +122,4 @@
 | [0126](0126-a-resumed-apply-gives-no-witness-to-a-sender-the-earlier-push-already-settled.md) | A resumed apply gives no witness to a sender the earlier push already settled | proposed | 2026-11-15 |
 | [0129](0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md) | The policy commands are not part of v0.5.0 and the engine stays internal until it works standalone | proposed | 2026-11-15 |
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
+| [0132](0132-policy-scope-is-the-account-and-an-owner-is-the-group-range-is-removed.md) | Policy scope is the account and an owner is the group: range is removed | proposed | 2026-11-15 |

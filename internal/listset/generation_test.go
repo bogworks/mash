@@ -41,7 +41,7 @@ func TestAT016_StaleBaseRefused(t *testing.T) {
 // The base is judged before the list set is validated: a bad list set on a stale base is a stale base error.
 func TestAccept_StaleBaseBeforeValidation(t *testing.T) {
 	ls := at001()
-	ls.Range = ""
+	ls.Switches = nil // an invalid list set
 	ls.Base = 3
 	if _, _, err := Accept(Record{Generation: 1}, ls, recv(ls)); !errors.Is(err, ErrStaleBase) {
 		t.Fatalf("want ErrStaleBase, got %v", err)
@@ -82,7 +82,7 @@ func TestAccept_FirstAndChain(t *testing.T) {
 
 func TestAccept_ValidationFailureReturnsNoRecord(t *testing.T) {
 	ls := at001()
-	ls.Senders[0].Allow = append(ls.Senders[0].Allow, "foo.c.*")
+	ls.Senders[0].Allow = append(ls.Senders[0].Allow, "c.*")
 	ls.Base = 2
 	rec, c, err := Accept(Record{Generation: 2}, ls, recv(ls))
 	var ve *ValidationError
@@ -110,11 +110,11 @@ func TestDigest_String(t *testing.T) {
 
 func TestDigestListSet_OrderInsensitive(t *testing.T) {
 	a := at003Deny()
-	a.Senders[0].Allow = []string{"foo.c.lead", "foo.c.core"}
+	a.Senders[0].Allow = []string{"c.lead", "c.core"}
 	want := DigestListSet(a)
 
 	b := at003Deny()
-	b.Senders[0].Allow = []string{"foo.c.core", "foo.c.lead"}
+	b.Senders[0].Allow = []string{"c.core", "c.lead"}
 	b.Switches[0], b.Switches[len(b.Switches)-1] = b.Switches[len(b.Switches)-1], b.Switches[0]
 	b.Senders[0], b.Senders[3] = b.Senders[3], b.Senders[0]
 	if got := DigestListSet(b); got != want {
@@ -124,7 +124,7 @@ func TestDigestListSet_OrderInsensitive(t *testing.T) {
 		t.Fatal("digest not stable")
 	}
 	// Digesting must not reorder the caller's lists.
-	if a.Senders[0].Allow[0] != "foo.c.lead" {
+	if a.Senders[0].Allow[0] != "c.lead" {
 		t.Fatal("DigestListSet changed its input")
 	}
 }
@@ -133,17 +133,16 @@ func TestDigestListSet_ChangesWithAnyEntry(t *testing.T) {
 	base := DigestListSet(at003Deny())
 	cases := map[string]func(*ListSet){
 		"base":          func(l *ListSet) { l.Base = 1 },
-		"range":         func(l *ListSet) { l.Range = "bar" },
 		"switch value":  func(l *ListSet) { l.Switches[0].Switch = Closed },
 		"switch verb":   func(l *ListSet) { l.Switches[0].Verb = Status },
-		"switch group":  func(l *ListSet) { l.Switches[0].Group = "foo.e" },
-		"sender":        func(l *ListSet) { l.Senders[1].Sender = "foo.c.other" },
-		"extra sender":  func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.new"}) },
-		"allow entry":   func(l *ListSet) { l.Senders[1].Allow = []string{"foo.c.core"} },
-		"deny entry":    func(l *ListSet) { l.Senders[0].Deny = []string{"foo.c.lead"} },
+		"switch group":  func(l *ListSet) { l.Switches[0].Group = "e" },
+		"sender":        func(l *ListSet) { l.Senders[1].Sender = "c.other" },
+		"extra sender":  func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "c.new"}) },
+		"allow entry":   func(l *ListSet) { l.Senders[1].Allow = []string{"c.core"} },
+		"deny entry":    func(l *ListSet) { l.Senders[0].Deny = []string{"c.lead"} },
 		"deny to allow": func(l *ListSet) { l.Senders[0].Allow, l.Senders[0].Deny = l.Senders[0].Deny, nil },
 		"moved entry": func(l *ListSet) {
-			l.Senders[1].Allow = []string{"foo.c.sdk"}
+			l.Senders[1].Allow = []string{"c.sdk"}
 			l.Senders[2].Allow = nil
 		},
 	}
@@ -170,7 +169,7 @@ func TestDigestCompiled(t *testing.T) {
 
 	// Different tags differ.
 	ls := at001()
-	ls.Senders[1].Allow = []string{"foo.c.sdk"}
+	ls.Senders[1].Allow = []string{"c.sdk"}
 	c3, err := Compile(ls)
 	if err != nil {
 		t.Fatal(err)
@@ -198,8 +197,8 @@ func TestDigestCompiled_UserPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pinned: a Compiled with no user permissions digests as this. The pin moved when the policy responder grant joined the template.
-	if got, want := DigestCompiled(c).String(), "sha256:962836c55117c8d5645fff84ecb3973eb3bed08328b4b6f6113e315dccd00192"; got != want {
+	// Pinned: a Compiled with no user permissions digests as this. The pin moved when the policy responder grant joined the template, and again when range left the template and the endpoint tag joined it (digest encoding v2, ADR 0132).
+	if got, want := DigestCompiled(c).String(), "sha256:3586c0fd12484085134b77a702c872e8fa37694aca0026adb4a813c8be45c365"; got != want {
 		t.Fatalf("digest of a normal Compile output changed: %s", got)
 	}
 	d := DigestCompiled(c)
@@ -246,7 +245,7 @@ func TestAccept_NoReceivedBytesRefused(t *testing.T) {
 	}
 	// Bytes are checked before compiling: no bytes on an invalid list set reports the missing bytes.
 	bad := at001()
-	bad.Range = ""
+	bad.Switches = nil // an invalid list set
 	if _, _, err := Accept(Record{}, bad, nil); !errors.Is(err, ErrNoReceivedBytes) {
 		t.Fatalf("want ErrNoReceivedBytes, got %v", err)
 	}

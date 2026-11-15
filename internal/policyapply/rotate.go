@@ -12,6 +12,8 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/listset"
 )
 
 // UserIssuer issues a user JWT for a public key the sender's host made. It signs under the owner group's scoped key.
@@ -48,9 +50,9 @@ func (g GroupUserIssuer) Issue(_ context.Context, address, userPub, name string,
 	if !nkeys.IsValidPublicUserKey(userPub) {
 		return "", fmt.Errorf("issue for %s: not a user public key", address)
 	}
-	i := strings.LastIndex(address, ".")
-	if i <= 0 || strings.Count(address, ".") < 2 {
-		return "", fmt.Errorf("issue for %q: not a three-part address", address)
+	group, _, ok := strings.Cut(address, ".")
+	if !ok || group == "" || strings.Count(address, ".") != 1 {
+		return "", fmt.Errorf("issue for %q: not an owner.name address", address)
 	}
 	if name == "" {
 		return "", fmt.Errorf("issue for %s: no name", address)
@@ -63,7 +65,7 @@ func (g GroupUserIssuer) Issue(_ context.Context, address, userPub, name string,
 		return "", fmt.Errorf("issue for %s: tags are not in the canonical lower-case form", address)
 	}
 	uc.IssuerAccount = g.Account
-	tok, err := g.Signer.SignUser(address[:i], uc)
+	tok, err := g.Signer.SignUser(group, uc)
 	if err != nil {
 		return "", fmt.Errorf("sign credential for %s: %w", address, errNoSeed(err))
 	}
@@ -76,8 +78,11 @@ const defaultRotatePoll = 100 * time.Millisecond
 // RotateInput is the rotation of one narrowed sender.
 type RotateInput struct {
 	Address, Name string
-	// Tags are the target tags.
+	// Tags are the target tags (the list set's; no endpoint tag).
 	Tags []string
+	// Endpoint is the canonical agent.owner.name of the endpoint the credential is for. Required: Rotate adds its
+	// endpoint tag (listset.WithEndpointTag) to Tags, and refuses an endpoint that is not at Address.
+	Endpoint string
 	// NewPub is the public key the sender's host made; mash never sees its seed.
 	NewPub     string
 	Generation uint64
@@ -140,6 +145,13 @@ func Rotate(ctx context.Context, in RotateInput) (RotationResult, error) {
 	if poll <= 0 {
 		poll = defaultRotatePoll
 	}
+	if in.Endpoint == "" {
+		return res, fmt.Errorf("rotate %s: no endpoint: the credential needs its endpoint tag", in.Address)
+	}
+	signed, err := listset.WithEndpointTag(in.Tags, in.Endpoint, in.Address)
+	if err != nil {
+		return res, fmt.Errorf("rotate %s: %w", in.Address, err)
+	}
 	held, err := in.Record.ByAddress(ctx, in.Address)
 	if err != nil {
 		return res, fmt.Errorf("rotate %s: read issue record: %w", in.Address, err)
@@ -154,18 +166,18 @@ func Rotate(ctx context.Context, in RotateInput) (RotationResult, error) {
 		if e.RevokedAt != nil {
 			return res, fmt.Errorf("rotate %s: %w", in.Address, ErrRevokedKey)
 		}
-		if e.Purpose != PurposeRotation || e.Generation != in.Generation || !slices.Equal(e.Tags, in.Tags) {
+		if e.Purpose != PurposeRotation || e.Generation != in.Generation || !slices.Equal(e.Tags, signed) {
 			return res, fmt.Errorf("rotate %s: %w", in.Address, ErrDuplicateKey)
 		}
 	}
 
-	tok, err := in.Issuer.Issue(ctx, in.Address, in.NewPub, in.Name, slices.Clone(in.Tags))
+	tok, err := in.Issuer.Issue(ctx, in.Address, in.NewPub, in.Name, slices.Clone(signed))
 	if err != nil {
 		return res, fmt.Errorf("rotate %s: issue: %w", in.Address, errNoSeed(err))
 	}
 	entry := IssueEntry{
 		Address: in.Address, PublicKey: in.NewPub, Purpose: PurposeRotation,
-		Tags: slices.Clone(in.Tags), Generation: in.Generation, IssuedAt: now(),
+		Tags: slices.Clone(signed), Generation: in.Generation, IssuedAt: now(),
 	}
 	if uc, derr := jwt.DecodeUserClaims(tok); derr == nil && uc.Expires > 0 {
 		entry.Expires = time.Unix(uc.Expires, 0)
@@ -268,6 +280,8 @@ type NarrowedSender struct {
 	Address, Name string
 	// Tags are the target tags.
 	Tags []string
+	// Endpoint is the canonical agent.owner.name of the endpoint the credential is for (see RotateInput.Endpoint).
+	Endpoint string
 	// NewPub is the public key the sender's host made.
 	NewPub string
 }
@@ -341,7 +355,7 @@ func RotationsAfterPush(p *RotationPlan) func(ctx context.Context) (revoked map[
 			go func() {
 				defer wg.Done()
 				results[i], errs[i] = Rotate(ctx, RotateInput{
-					Address: n.Address, Name: n.Name, Tags: n.Tags, NewPub: n.NewPub, Generation: p.Generation,
+					Address: n.Address, Name: n.Name, Tags: n.Tags, Endpoint: n.Endpoint, NewPub: n.NewPub, Generation: p.Generation,
 					Issuer: p.Issuer, Deliverer: p.Deliverer, Conns: p.Conns, Record: p.Record, Revoker: rv,
 					Deadline: p.Deadline, Poll: p.Poll, Now: p.Now,
 				})

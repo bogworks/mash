@@ -3,96 +3,96 @@
   "refusals": [],
   "receivers": [
     {
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "verb": "mail",
       "added": [],
       "removed": [
-        "foo.c.sdk"
+        "c.sdk"
       ]
     },
     {
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "verb": "prompt",
       "added": [],
       "removed": [
-        "foo.c.sdk"
+        "c.sdk"
       ]
     },
     {
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "verb": "status",
       "added": [],
       "removed": [
-        "foo.c.core",
-        "foo.c.sdk"
+        "c.core",
+        "c.sdk"
       ]
     },
     {
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "verb": "heartbeat",
       "added": [],
       "removed": [
-        "foo.c.sdk"
+        "c.sdk"
       ]
     },
     {
-      "sender": "foo.c.lead",
+      "sender": "c.lead",
       "verb": "mail",
       "added": [
-        "foo.c.sdk"
+        "c.sdk"
       ],
       "removed": []
     },
     {
-      "sender": "foo.c.lead",
+      "sender": "c.lead",
       "verb": "prompt",
       "added": [
-        "foo.c.sdk"
+        "c.sdk"
       ],
       "removed": []
     },
     {
-      "sender": "foo.c.lead",
+      "sender": "c.lead",
       "verb": "status",
       "added": [],
       "removed": [
-        "foo.c.lead"
+        "c.lead"
       ]
     },
     {
-      "sender": "foo.c.lead",
+      "sender": "c.lead",
       "verb": "heartbeat",
       "added": [
-        "foo.c.sdk"
+        "c.sdk"
       ],
       "removed": []
     },
     {
-      "sender": "foo.c.sdk",
+      "sender": "c.sdk",
       "verb": "status",
       "added": [],
       "removed": [
-        "foo.c.core",
-        "foo.c.lead",
-        "foo.c.sdk"
+        "c.core",
+        "c.lead",
+        "c.sdk"
       ]
     }
   ],
   "templates": [
     {
-      "group": "foo.c",
+      "group": "c",
       "change": "changed",
       "disconnects": true,
       "disconnected_senders": [
-        "foo.c.core",
-        "foo.c.lead",
-        "foo.c.sdk"
+        "c.core",
+        "c.lead",
+        "c.sdk"
       ]
     }
   ],
   "tags": [
     {
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "old": [
         "allow:c.lead",
         "allow:c.sdk"
@@ -102,7 +102,7 @@
       ]
     },
     {
-      "sender": "foo.c.lead",
+      "sender": "c.lead",
       "old": [
         "allow:c.core"
       ],
@@ -113,10 +113,10 @@
     }
   ],
   "rotate_and_revoke": [
-    "foo.c.core"
+    "c.core"
   ],
   "new_credential": [
-    "foo.c.lead"
+    "c.lead"
   ],
   "revoke": [],
   "first_credential": []

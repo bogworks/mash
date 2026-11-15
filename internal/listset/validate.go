@@ -9,52 +9,57 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// address is a parsed three-part address, "range.owner.name".
-type address struct{ rng, owner, name string }
+// address is a parsed two-part address, "owner.name". The agent token of an endpoint is not part of it: the templates
+// wildcard that position (ADR 0132).
+type address struct{ owner, name string }
 
-func (a address) String() string { return a.rng + "." + a.owner + "." + a.name }
+func (a address) String() string { return a.owner + "." + a.name }
 
-// group is "range.owner".
-func (a address) group() string { return a.rng + "." + a.owner }
+// group is the owner group of the address: its owner part.
+func (a address) group() string { return a.owner }
 
-// tail is "owner.name", the tag value form of an address inside the account's range.
-func (a address) tail() string { return a.owner + "." + a.name }
+// tail is the tag value form of an address, "owner.name". It is the address itself.
+func (a address) tail() string { return a.String() }
 
-// parseAddress parses a three-part address with mash's naming grammar (sap.ParseCanonical, ADR 0074). The grammar
-// refuses every character a wildcard needs, but the reason names the wildcard so the caller sees REQ-003 at work.
+// parseAddress parses a two-part address with mash's naming grammar (the owner and name token rule of sap, ADR 0074).
+// The grammar refuses every character a wildcard needs, but the reason names the wildcard so the caller sees REQ-003
+// at work.
 func parseAddress(s string) (address, string) {
 	if strings.ContainsAny(s, "*>") {
 		return address{}, "wildcards are refused: an entry names one exact address"
 	}
-	id, err := sap.ParseCanonical(s)
-	if err != nil {
+	parts := strings.Split(s, ".")
+	if len(parts) != 2 {
+		return address{}, fmt.Sprintf("%q has %d dot-separated parts: want exactly two (owner.name)", s, len(parts))
+	}
+	// sap.New is the grammar; "a" is an agent token that always passes it.
+	if _, err := sap.New("a", parts[0], parts[1]); err != nil {
 		return address{}, strings.TrimPrefix(err.Error(), "sap: ")
 	}
-	return address{id.Agent, id.Owner, id.Name}, ""
+	return address{parts[0], parts[1]}, ""
 }
 
-// parseGroup parses "range.owner". A three-part value is a switch for a single sender.
-func parseGroup(s string) (rng, owner, reason string) {
+// parseGroup parses an owner group, which is an owner token. A two-part value is a switch for a single sender.
+func parseGroup(s string) (owner, reason string) {
 	if strings.ContainsAny(s, "*>") {
-		return "", "", "wildcards are refused: a switch names one exact owner group"
+		return "", "wildcards are refused: a switch names one exact owner group"
 	}
 	switch parts := strings.Split(s, "."); len(parts) {
-	case 2:
+	case 1:
 		// sap.New is the grammar; "a" is a name that always passes it.
-		if _, err := sap.New(parts[0], parts[1], "a"); err != nil {
-			return "", "", strings.TrimPrefix(err.Error(), "sap: ")
+		if _, err := sap.New("a", parts[0], "a"); err != nil {
+			return "", strings.TrimPrefix(err.Error(), "sap: ")
 		}
-		return parts[0], parts[1], ""
-	case 3:
-		return "", "", "a switch is set for an owner group, never for a single sender"
+		return parts[0], ""
+	case 2:
+		return "", "a switch is set for an owner group, never for a single sender"
 	default:
-		return "", "", "a group is range.owner, two parts"
+		return "", "a group is the owner, one part"
 	}
 }
 
 // model is a validated list set in a form the compiler and the checker share.
 type model struct {
-	rng      string
 	switches map[string]map[Verb]Switch // group -> verb -> switch
 	senders  []sender                   // sorted by address
 }
@@ -87,20 +92,14 @@ func validate(ls ListSet) (*model, error) {
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
-	if _, err := sap.New(ls.Range, "a", "a"); err != nil {
-		bad("range "+quote(ls.Range), "%s", strings.TrimPrefix(err.Error(), "sap: "))
-	}
-	m := &model{rng: ls.Range, switches: map[string]map[Verb]Switch{}}
+	m := &model{switches: map[string]map[Verb]Switch{}}
 
 	for _, e := range ls.Switches {
 		entry := fmt.Sprintf("switch %s %s", quote(e.Group), quote(string(e.Verb)))
-		rng, owner, reason := parseGroup(e.Group)
+		owner, reason := parseGroup(e.Group)
 		ok := reason == ""
 		if !ok {
 			bad(entry, "%s", reason)
-		} else if rng != ls.Range {
-			bad(entry, "range part %q is not the account's range %q", rng, ls.Range)
-			ok = false
 		}
 		if !e.Verb.valid() {
 			bad(entry, "unknown verb: use mail, prompt, status or heartbeat")
@@ -113,7 +112,7 @@ func validate(ls ListSet) (*model, error) {
 		if !ok {
 			continue
 		}
-		g := rng + "." + owner
+		g := owner
 		if _, dup := m.switches[g][e.Verb]; dup {
 			bad(entry, "stated twice; a group and verb take one value, even the same one")
 			continue
@@ -143,10 +142,6 @@ func validate(ls ListSet) (*model, error) {
 			}
 			continue
 		}
-		if addr.rng != ls.Range {
-			bad("sender "+quote(sl.Sender), "range part %q is not the account's range %q", addr.rng, ls.Range)
-			continue
-		}
 		if seen[addr.String()] {
 			bad("sender "+quote(sl.Sender), "listed twice")
 			continue
@@ -154,8 +149,8 @@ func validate(ls ListSet) (*model, error) {
 		seen[addr.String()] = true
 		groupsWithSender[addr.group()] = true
 		s := sender{addr: addr}
-		s.allow = parseList(sl.Allow, "allow", addr, ls.Range, bad)
-		s.deny = parseList(sl.Deny, "deny", addr, ls.Range, bad)
+		s.allow = parseList(sl.Allow, "allow", addr, bad)
+		s.deny = parseList(sl.Deny, "deny", addr, bad)
 		for _, d := range s.deny {
 			entry := "deny of " + quote(sl.Sender) + ": " + quote(d.String())
 			switch {
@@ -192,8 +187,8 @@ func validate(ls ListSet) (*model, error) {
 	return m, nil
 }
 
-// parseList parses one allow or deny list, refusing a bad address, another range and a repeat.
-func parseList(in []string, kind string, owner address, rng string, bad func(string, string, ...any)) []address {
+// parseList parses one allow or deny list, refusing a bad address and a repeat.
+func parseList(in []string, kind string, owner address, bad func(string, string, ...any)) []address {
 	var out []address
 	for _, s := range in {
 		entry := kind + " of " + quote(owner.String()) + ": " + quote(s)
@@ -201,8 +196,6 @@ func parseList(in []string, kind string, owner address, rng string, bad func(str
 		switch {
 		case reason != "":
 			bad(entry, "%s", reason)
-		case a.rng != rng:
-			bad(entry, "range part %q is not the account's range %q", a.rng, rng)
 		case slices.Contains(out, a):
 			bad(entry, "listed twice")
 		default:

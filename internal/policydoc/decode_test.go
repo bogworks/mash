@@ -16,14 +16,14 @@ const testAccount = "ACXTEST"
 
 func doc(gen, base int, mod func(m map[string]any)) []byte {
 	m := map[string]any{
-		"schema": DocumentSchema, "account": testAccount, "range": "foo", "generation": gen, "base_generation": base,
+		"schema": DocumentSchema, "account": testAccount, "generation": gen, "base_generation": base,
 		"issued_at": "2026-11-12T17:00:00Z",
 		"groups": map[string]any{
 			"c": map[string]any{"mail": "shared", "prompt": "closed", "status": "shared", "heartbeat": "shared"},
 		},
 		"senders": map[string]any{
-			"foo.c.core": map[string]any{"allow": []string{"foo.d.build"}, "deny": []string{}},
-			"foo.c.lead": map[string]any{"allow": []string{}, "deny": []string{"foo.c.core"}},
+			"c.core": map[string]any{"allow": []string{"d.build"}, "deny": []string{}},
+			"c.lead": map[string]any{"allow": []string{}, "deny": []string{"c.core"}},
 		},
 	}
 	if mod != nil {
@@ -63,13 +63,13 @@ func TestDecodeRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Verified || d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || d.ListSet.Range != "foo" || string(d.Raw) != string(raw) {
+	if d.Verified || d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || string(d.Raw) != string(raw) {
 		t.Fatalf("%+v", d)
 	}
-	if len(d.ListSet.Switches) != 4 || d.ListSet.Switches[0] != (listset.SwitchEntry{Group: "foo.c", Verb: listset.Mail, Switch: listset.Shared}) {
+	if len(d.ListSet.Switches) != 4 || d.ListSet.Switches[0] != (listset.SwitchEntry{Group: "c", Verb: listset.Mail, Switch: listset.Shared}) {
 		t.Fatalf("switches %+v", d.ListSet.Switches)
 	}
-	if len(d.ListSet.Senders) != 2 || d.ListSet.Senders[0].Sender != "foo.c.core" || d.ListSet.Senders[1].Deny[0] != "foo.c.core" {
+	if len(d.ListSet.Senders) != 2 || d.ListSet.Senders[0].Sender != "c.core" || d.ListSet.Senders[1].Deny[0] != "c.core" {
 		t.Fatalf("senders %+v", d.ListSet.Senders)
 	}
 	if _, err := Decode(raw, DecodeOptions{Submitter: "x"}); !errors.Is(err, ErrUnsigned) {
@@ -117,14 +117,14 @@ func TestDecodeRefusals(t *testing.T) {
 		"unknown group verb":  doc(7, 6, func(m map[string]any) { m["groups"].(map[string]any)["c"].(map[string]any)["fax"] = "shared" }),
 		"missing verb":        doc(7, 6, func(m map[string]any) { delete(m["groups"].(map[string]any)["c"].(map[string]any), "heartbeat") }),
 		"bad switch value":    doc(7, 6, func(m map[string]any) { m["groups"].(map[string]any)["c"].(map[string]any)["mail"] = "open" }),
-		"wrong schema":        doc(7, 6, func(m map[string]any) { m["schema"] = "mash.listset/2" }),
+		"wrong schema":        doc(7, 6, func(m map[string]any) { m["schema"] = "mash.listset/1" }),
 		"missing schema":      doc(7, 6, func(m map[string]any) { delete(m, "schema") }),
 		"missing senders":     doc(7, 6, func(m map[string]any) { delete(m, "senders") }),
-		"missing deny":        doc(7, 6, func(m map[string]any) { delete(m["senders"].(map[string]any)["foo.c.core"].(map[string]any), "deny") }),
+		"missing deny":        doc(7, 6, func(m map[string]any) { delete(m["senders"].(map[string]any)["c.core"].(map[string]any), "deny") }),
 		"generation skips":    doc(8, 6, nil),
 		"generation repeats":  doc(6, 6, nil),
 		"bad time":            doc(7, 6, func(m map[string]any) { m["issued_at"] = "yesterday" }),
-		"duplicate key":       []byte(strings.Replace(string(doc(7, 6, nil)), `"range":"foo"`, `"range":"foo","range":"bar"`, 1)),
+		"duplicate key":       []byte(strings.Replace(string(doc(7, 6, nil)), `"account":"ACXTEST"`, `"account":"ACXTEST","account":"ACXOTHER"`, 1)),
 		"duplicate nested":    []byte(strings.Replace(string(doc(7, 6, nil)), `"mail":"shared"`, `"mail":"shared","mail":"closed"`, 1)),
 		"trailing data":       append(doc(7, 6, nil), []byte(` {}`)...),
 		"not json":            []byte("hello"),
@@ -140,16 +140,14 @@ func TestDecodeRefusals(t *testing.T) {
 }
 
 func TestDecodeGroupKeyedByAddress(t *testing.T) {
-	for name, key := range map[string]string{"address": "lab.h1.l1", "range.owner": "lab.h1"} {
+	for name, key := range map[string]string{"address": "h1.l1", "dotted owner": "lab.h1"} {
 		b := doc(7, 6, func(m map[string]any) {
-			m["range"] = "lab"
 			g := m["groups"].(map[string]any)
 			g[key] = g["c"]
 			delete(g, "c")
 		})
 		_, err := Decode(b, DecodeOptions{})
-		if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), `group "`+key+`"`) ||
-			!strings.Contains(err.Error(), "owner part") || strings.Contains(err.Error(), "lab.lab") {
+		if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), `group "`+key+`"`) || !strings.Contains(err.Error(), "owner only") {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
@@ -189,5 +187,17 @@ func TestNextSubmitterSigned(t *testing.T) {
 	parts[1] = base64.RawURLEncoding.EncodeToString(doc(7, 6, func(m map[string]any) { m["next_submitter"] = other }))
 	if _, err := Decode([]byte(strings.Join(parts, ".")), DecodeOptions{Submitter: pub}); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("tampered next_submitter: %v", err)
+	}
+}
+
+// A document with a range member is refused as an unknown field, whatever the value: nothing carrying a range was
+// ever deployed, so there is no old form to read.
+func TestDecodeRefusesRange(t *testing.T) {
+	for _, v := range []any{"foo", "", nil} {
+		b := doc(7, 6, func(m map[string]any) { m["range"] = v })
+		_, err := Decode(b, DecodeOptions{})
+		if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), `unknown field "range"`) {
+			t.Errorf("range %v: got %v", v, err)
+		}
 	}
 }

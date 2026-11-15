@@ -11,17 +11,16 @@ import (
 	"testing"
 )
 
-// showSet is two owner groups in range r: o shares mail and heartbeat and keeps prompt and status closed, p is
+// showSet is two owner groups: o shares mail and heartbeat and keeps prompt and status closed, p is
 // closed throughout. a allows an address of p and denies c; x allows a.
 func showSet() ListSet {
 	return ListSet{
-		Range:    "r",
-		Switches: concat(switches("r.o", Shared, Closed, Closed, Shared), switches("r.p", Closed, Closed, Closed, Closed)),
+		Switches: concat(switches("o", Shared, Closed, Closed, Shared), switches("p", Closed, Closed, Closed, Closed)),
 		Senders: []SenderLists{
-			{Sender: "r.o.a", Allow: []string{"r.p.x"}, Deny: []string{"r.o.c"}},
-			{Sender: "r.o.b"},
-			{Sender: "r.o.c", Allow: []string{"r.o.a"}},
-			{Sender: "r.p.x", Allow: []string{"r.o.a", "r.o.b"}},
+			{Sender: "o.a", Allow: []string{"p.x"}, Deny: []string{"o.c"}},
+			{Sender: "o.b"},
+			{Sender: "o.c", Allow: []string{"o.a"}},
+			{Sender: "p.x", Allow: []string{"o.a", "o.b"}},
 		},
 	}
 }
@@ -49,16 +48,16 @@ func TestExplain(t *testing.T) {
 		// mail, prompt, status, heartbeat
 		w [4]want
 	}{
-		{"shared group, closed prompt and status", "r.o.b", "r.o.a", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
-		{"deny within a shared group beats the owner line", "r.o.a", "r.o.c", [4]want{{false, dn}, {false, no}, {false, no}, {false, dn}}},
-		{"deny is deny_tag on a shared verb and no_entry on a closed one", "r.o.a", "r.o.c", [4]want{{false, dn}, {false, no}, {false, no}, {false, dn}}},
-		{"allow across groups", "r.o.a", "r.p.x", [4]want{{true, al}, {true, al}, {true, al}, {true, al}}},
-		{"allow inside a group beats a closed verb", "r.o.c", "r.o.a", [4]want{{true, al}, {true, al}, {true, al}, {true, al}}},
-		{"receiver outside the group, on no list", "r.o.b", "r.p.x", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
-		{"closed group, receiver in it, no entry", "r.p.x", "r.p.y", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
-		{"receiver the set does not name", "r.o.b", "r.o.new", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
-		{"receiver in a group the set does not name", "r.o.a", "r.q.z", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
-		{"sender to itself", "r.o.b", "r.o.b", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
+		{"shared group, closed prompt and status", "o.b", "o.a", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
+		{"deny within a shared group beats the owner line", "o.a", "o.c", [4]want{{false, dn}, {false, no}, {false, no}, {false, dn}}},
+		{"deny is deny_tag on a shared verb and no_entry on a closed one", "o.a", "o.c", [4]want{{false, dn}, {false, no}, {false, no}, {false, dn}}},
+		{"allow across groups", "o.a", "p.x", [4]want{{true, al}, {true, al}, {true, al}, {true, al}}},
+		{"allow inside a group beats a closed verb", "o.c", "o.a", [4]want{{true, al}, {true, al}, {true, al}, {true, al}}},
+		{"receiver outside the group, on no list", "o.b", "p.x", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
+		{"closed group, receiver in it, no entry", "p.x", "p.y", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
+		{"receiver the set does not name", "o.b", "o.new", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
+		{"receiver in a group the set does not name", "o.a", "q.z", [4]want{{false, no}, {false, no}, {false, no}, {false, no}}},
+		{"sender to itself", "o.b", "o.b", [4]want{{true, own}, {false, no}, {false, no}, {true, own}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,13 +96,13 @@ func TestExplainDetail(t *testing.T) {
 		verb             int
 		want             string
 	}{
-		{"r.o.b", "r.o.a", 0, `owner group "r.o" shares mail`},
-		{"r.o.b", "r.o.a", 3, `owner group "r.o" shares heartbeat`},
-		{"r.o.a", "r.p.x", 0, `"r.p.x" is on the allow list`},
-		{"r.o.a", "r.o.c", 0, `"r.o.c" is on the deny list`},
-		{"r.o.b", "r.o.a", 1, `owner group "r.o" keeps prompt closed and "r.o.a" is on no list`},
-		{"r.o.a", "r.o.c", 1, `owner group "r.o" keeps prompt closed and "r.o.c" is on no list`},
-		{"r.o.b", "r.p.x", 0, `"r.p.x" is outside owner group "r.o" and on no list`},
+		{"o.b", "o.a", 0, `owner group "o" shares mail`},
+		{"o.b", "o.a", 3, `owner group "o" shares heartbeat`},
+		{"o.a", "p.x", 0, `"p.x" is on the allow list`},
+		{"o.a", "o.c", 0, `"o.c" is on the deny list`},
+		{"o.b", "o.a", 1, `owner group "o" keeps prompt closed and "o.a" is on no list`},
+		{"o.a", "o.c", 1, `owner group "o" keeps prompt closed and "o.c" is on no list`},
+		{"o.b", "p.x", 0, `"p.x" is outside owner group "o" and on no list`},
 	} {
 		if got := detail(tc.sender, tc.receiver, tc.verb); got != tc.want {
 			t.Errorf("detail = %q, want %q", got, tc.want)
@@ -114,18 +113,18 @@ func TestExplainDetail(t *testing.T) {
 func TestExplainOpenSubjects(t *testing.T) {
 	ls := showSet()
 	c := compiled(t, ls)
-	e, err := Explain(ls, c, "r.o.b", "r.o.a")
+	e, err := Explain(ls, c, "o.b", "o.a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"_INBOX.>", "$SRV.>", "$JS.API.INFO", "agents.policy.r"} {
+	for _, s := range []string{"_INBOX.>", "$SRV.>", "$JS.API.INFO", "mash.policy", "$KV.mash-leases.agent_o_b"} {
 		if !slices.Contains(e.OpenSubjects.Publish, s) {
 			t.Errorf("publish lacks %q: %v", s, e.OpenSubjects.Publish)
 		}
 	}
-	wantList(t, "subscribe", e.OpenSubjects.Subscribe, "$SRV.>", "_INBOX.r_o_b.>")
+	wantList(t, "subscribe", e.OpenSubjects.Subscribe, "$SRV.>", "_INBOX.agent_o_b.>")
 	for _, s := range slices.Concat(e.OpenSubjects.Publish, e.OpenSubjects.Subscribe) {
-		if strings.HasPrefix(s, "agents.") && s != PolicySubject("r") {
+		if strings.HasPrefix(s, "agents.") && s != PolicySubject() {
 			t.Errorf("open subject %q is an address subject", s)
 		}
 	}
@@ -141,24 +140,24 @@ func TestExplainErrors(t *testing.T) {
 	ls := showSet()
 	c := compiled(t, ls)
 	bad := showSet()
-	bad.Senders[0].Allow = []string{"r.p.*"}
+	bad.Senders[0].Allow = []string{"p.*"}
 	for _, tc := range []struct {
 		name             string
 		ls               ListSet
 		sender, receiver string
 	}{
-		{"unknown sender", ls, "r.o.nobody", "r.o.a"},
-		{"sender in another range", ls, "q.o.a", "r.o.a"},
-		{"receiver in another range", ls, "r.o.a", "q.o.a"},
-		{"receiver not an address", ls, "r.o.a", "r.o"},
-		{"receiver a wildcard", ls, "r.o.a", "r.o.*"},
-		{"invalid list set", bad, "r.o.a", "r.o.b"},
+		{"unknown sender", ls, "o.nobody", "o.a"},
+		{"sender a three-part address (the old form with a range)", ls, "q.o.a", "o.a"},
+		{"receiver a three-part address (the old form with a range)", ls, "o.a", "q.o.a"},
+		{"receiver not an address", ls, "o.a", "o"},
+		{"receiver a wildcard", ls, "o.a", "o.*"},
+		{"invalid list set", bad, "o.a", "o.b"},
 	} {
 		if _, err := Explain(tc.ls, c, tc.sender, tc.receiver); err == nil {
 			t.Errorf("%s: no error", tc.name)
 		}
 	}
-	if _, err := Explain(ls, nil, "r.o.a", "r.o.b"); err == nil {
+	if _, err := Explain(ls, nil, "o.a", "o.b"); err == nil {
 		t.Error("nil compiled: no error")
 	}
 	if _, err := Show(bad, c, 1); err == nil {
@@ -172,10 +171,10 @@ func TestExplainErrors(t *testing.T) {
 func TestExplainRefusesCompiledThatDisagrees(t *testing.T) {
 	ls := showSet()
 	other := showSet()
-	other.Senders[1].Allow = []string{"r.o.a", "r.p.x"} // r.o.b gains an allow the lists do not give
-	other.Senders[1].Deny = []string{"r.o.c"}
+	other.Senders[1].Allow = []string{"o.a", "p.x"} // o.b gains an allow the lists do not give
+	other.Senders[1].Deny = []string{"o.c"}
 	c := compiled(t, other)
-	if _, err := Explain(ls, c, "r.o.b", "r.p.x"); err == nil || !strings.Contains(err.Error(), "does not match the lists") {
+	if _, err := Explain(ls, c, "o.b", "p.x"); err == nil || !strings.Contains(err.Error(), "does not match the lists") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -223,22 +222,22 @@ func TestShowContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Describes != DescribesListSet || v.Generation != 7 || v.Range != "r" || v.RawClientLimit != RawClientLimit {
+	if v.Describes != DescribesListSet || v.Generation != 7 || v.RawClientLimit != RawClientLimit {
 		t.Errorf("header = %+v", v)
 	}
-	if len(v.Switches) != 8 || v.Switches[0] != (SwitchView{"r.o", Mail, Shared}) || v.Switches[7] != (SwitchView{"r.p", Heartbeat, Closed}) {
+	if len(v.Switches) != 8 || v.Switches[0] != (SwitchView{"o", Mail, Shared}) || v.Switches[7] != (SwitchView{"p", Heartbeat, Closed}) {
 		t.Errorf("switches = %+v", v.Switches)
 	}
 	var senders []string
 	for _, s := range v.Senders {
 		senders = append(senders, s.Sender)
 	}
-	wantList(t, "senders", senders, "r.o.a", "r.o.b", "r.o.c", "r.p.x")
+	wantList(t, "senders", senders, "o.a", "o.b", "o.c", "p.x")
 	a := v.Senders[0]
-	wantList(t, "a allow", a.Allow, "r.p.x")
-	wantList(t, "a deny", a.Deny, "r.o.c")
-	wantList(t, "a mail reach", a.Reach[0].Receivers, "r.o.a", "r.o.b", "r.p.x")
-	wantList(t, "a prompt reach", a.Reach[1].Receivers, "r.p.x")
+	wantList(t, "a allow", a.Allow, "p.x")
+	wantList(t, "a deny", a.Deny, "o.c")
+	wantList(t, "a mail reach", a.Reach[0].Receivers, "o.a", "o.b", "p.x")
+	wantList(t, "a prompt reach", a.Reach[1].Receivers, "p.x")
 	wantList(t, "b allow", v.Senders[1].Allow)
 }
 
@@ -265,7 +264,7 @@ func TestShowIsDeterministicAndNonNil(t *testing.T) {
 		t.Errorf("a slice marshals as null: %s", first)
 	}
 	ex := func(ls ListSet, c *Compiled) []byte {
-		e, err := Explain(ls, c, "r.o.a", "r.o.c")
+		e, err := Explain(ls, c, "o.a", "o.c")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +287,7 @@ func TestShowExplainGolden(t *testing.T) {
 		Show     View          `json:"show"`
 		Explains []Explanation `json:"explains"`
 	}{Show: v, Explains: []Explanation{}}
-	for _, p := range [][2]string{{"r.o.b", "r.o.a"}, {"r.o.a", "r.o.c"}, {"r.o.a", "r.p.x"}, {"r.o.b", "r.q.z"}} {
+	for _, p := range [][2]string{{"o.b", "o.a"}, {"o.a", "o.c"}, {"o.a", "p.x"}, {"o.b", "q.z"}} {
 		e, err := Explain(ls, c, p[0], p[1])
 		if err != nil {
 			t.Fatal(err)
@@ -321,12 +320,11 @@ func TestShowExplainGolden(t *testing.T) {
 
 func ExampleExplain() {
 	ls := ListSet{
-		Range:    "r",
-		Switches: switches("r.o", Shared, Closed, Closed, Shared),
+		Switches: switches("o", Shared, Closed, Closed, Shared),
 		Senders: []SenderLists{
-			{Sender: "r.o.a", Deny: []string{"r.o.c"}},
-			{Sender: "r.o.b"},
-			{Sender: "r.o.c"},
+			{Sender: "o.a", Deny: []string{"o.c"}},
+			{Sender: "o.b"},
+			{Sender: "o.c"},
 		},
 	}
 	c, err := Compile(ls)
@@ -334,8 +332,8 @@ func ExampleExplain() {
 		fmt.Println(err)
 		return
 	}
-	for _, receiver := range []string{"r.o.b", "r.o.c"} {
-		e, err := Explain(ls, c, "r.o.a", receiver)
+	for _, receiver := range []string{"o.b", "o.c"} {
+		e, err := Explain(ls, c, "o.a", receiver)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -345,12 +343,12 @@ func ExampleExplain() {
 		}
 	}
 	// Output:
-	// r.o.b mail: true owner_line
-	// r.o.b prompt: false no_entry
-	// r.o.b status: false no_entry
-	// r.o.b heartbeat: true owner_line
-	// r.o.c mail: false deny_tag
-	// r.o.c prompt: false no_entry
-	// r.o.c status: false no_entry
-	// r.o.c heartbeat: false deny_tag
+	// o.b mail: true owner_line
+	// o.b prompt: false no_entry
+	// o.b status: false no_entry
+	// o.b heartbeat: true owner_line
+	// o.c mail: false deny_tag
+	// o.c prompt: false no_entry
+	// o.c status: false no_entry
+	// o.c heartbeat: false deny_tag
 }

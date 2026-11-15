@@ -1,7 +1,7 @@
 {
   "generation": 2,
-  "content": "sha256:479139ca08986ea175f1629632254fa863cf20e16d6c6253b21ee50e3a4b778b",
-  "signed": "sha256:fda8327efb1cfa0212610a12d2ee471415574484a4d6b62bc1f9182dd6b9e2af",
+  "content": "sha256:d92ed1b23590789d4ea5279181d38945dd1066e865b3d2e7568bad01bbbe1b9d",
+  "signed": "sha256:3f3df53418f3fc0df1170feea2df9cdf7b9dd151e762e48a30d8a5f0aa1c193e",
   "state": "partial",
   "refusals": [],
   "servers": [
@@ -30,57 +30,57 @@
     },
     {
       "server": "s2",
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.core was not refused"
+      "detail": "pub agents.mail.cc.c.core was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.sdk was not refused"
+      "detail": "pub agents.mail.cc.c.sdk was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.core",
+      "sender": "c.core",
       "check": "refused_current",
-      "detail": "pub agents.mail.foo.c.docs (mail from foo.c.core to foo.c.docs) was not refused for the target credential"
+      "detail": "pub agents.mail.cc.c.docs (mail from c.core to c.docs) was not refused for the target credential"
     },
     {
       "server": "s2",
-      "sender": "foo.c.docs",
+      "sender": "c.docs",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.core was not refused"
+      "detail": "pub agents.mail.cc.c.core was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.docs",
+      "sender": "c.docs",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.docs was not refused"
+      "detail": "pub agents.mail.cc.c.docs was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.docs",
+      "sender": "c.docs",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.sdk was not refused"
+      "detail": "pub agents.mail.cc.c.sdk was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.sdk",
+      "sender": "c.sdk",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.core was not refused"
+      "detail": "pub agents.mail.cc.c.core was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.sdk",
+      "sender": "c.sdk",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.docs was not refused"
+      "detail": "pub agents.mail.cc.c.docs was not refused"
     },
     {
       "server": "s2",
-      "sender": "foo.c.sdk",
+      "sender": "c.sdk",
       "check": "refused",
-      "detail": "pub agents.mail.foo.c.sdk was not refused"
+      "detail": "pub agents.mail.cc.c.sdk was not refused"
     }
   ],
   "in_force": false,

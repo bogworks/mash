@@ -1,18 +1,18 @@
 accepted: this would change
 size checked against the default server limits; the apply checks each server's own
-receivers foo.c.core mail: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
-receivers foo.c.core prompt: added foo.d.build; removed (none)
-receivers foo.c.core status: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
-receivers foo.c.core heartbeat: added foo.c.core, foo.c.lead, foo.d.build; removed (none)
-receivers foo.c.lead mail: added foo.c.lead; removed (none)
-receivers foo.c.lead status: added foo.c.lead; removed (none)
-receivers foo.c.lead heartbeat: added foo.c.lead; removed (none)
-template foo.c: added
-tags foo.c.core: (none) -> allow:d.build, deny:_none
-tags foo.c.lead: (none) -> deny:c.core
+receivers c.core mail: added c.core, c.lead, d.build; removed (none)
+receivers c.core prompt: added d.build; removed (none)
+receivers c.core status: added c.core, c.lead, d.build; removed (none)
+receivers c.core heartbeat: added c.core, c.lead, d.build; removed (none)
+receivers c.lead mail: added c.lead; removed (none)
+receivers c.lead status: added c.lead; removed (none)
+receivers c.lead heartbeat: added c.lead; removed (none)
+template c: added
+tags c.core: (none) -> allow:d.build, deny:_none
+tags c.lead: (none) -> deny:c.core
 rotate and revoke: (none)
 new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
 revoke: (none)
-first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): foo.c.core, foo.c.lead
+first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): c.core, c.lead
 inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse
 signature not checked: give --submitter to check it against the adoption marker

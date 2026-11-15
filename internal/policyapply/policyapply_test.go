@@ -44,7 +44,7 @@ func newWorld(t *testing.T, onGen1 ...string) *world {
 	w.j1, w.j2 = w.k.build(t, w.c1), w.k.build(t, w.c2, w.k.revoked)
 	w.cluster = newCluster(w.j1, w.servers...)
 	w.prober = fakeProber{cluster: w.cluster, byGen: map[uint64]*listset.Compiled{1: w.c1, 2: w.c2}, allow: map[string]bool{}}
-	w.wit = witnessesFor(w.servers, "foo.c.core", "foo.c.docs", "foo.c.sdk")
+	w.wit = witnessesFor(w.servers, "c.core", "c.docs", "c.sdk")
 	var err error
 	if w.expect, err = NewExpect(w.c1, w.c2, []string{w.k.revoked}); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func (w *world) gate() GateInput {
 
 // oldKeys is the inventory of the old credentials: core's is the revoked key, the others have none.
 func (w *world) oldKeys() map[string][]OldKey {
-	return map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked, IssuedAt: time.Unix(1000, 0)}}, "foo.c.docs": {}, "foo.c.sdk": {}}
+	return map[string][]OldKey{"c.core": {{PublicKey: w.k.revoked, IssuedAt: time.Unix(1000, 0)}}, "c.docs": {}, "c.sdk": {}}
 }
 
 func (w *world) run(l Ledger, ls listset.ListSet, received string) RunInput {
@@ -113,18 +113,18 @@ func TestNewExpect(t *testing.T) {
 		t.Fatalf("removed = %+v", w.expect.Removed)
 	}
 	// core's mail to itself is removed too (the shared verb closes), and sorts before its mail to sdk.
-	if r0 := w.expect.Removed[0]; r0.Sender != "foo.c.core" || r0.Receiver != "foo.c.core" || r0.Verb != listset.Mail {
+	if r0 := w.expect.Removed[0]; r0.Sender != "c.core" || r0.Receiver != "c.core" || r0.Verb != listset.Mail {
 		t.Errorf("self-reach not listed first: %+v", r0)
 	}
 	r := w.expect.Removed[1]
-	if r.Sender != "foo.c.core" || r.Receiver != "foo.c.sdk" || r.Verb != listset.Mail || r.Probe.Name != "core" {
+	if r.Sender != "c.core" || r.Receiver != "c.sdk" || r.Verb != listset.Mail || r.Probe.Name != "core" {
 		t.Errorf("first removed = %+v", r)
 	}
 	if len(r.Probe.Tags) == 0 {
 		t.Error("probe has no old tags")
 	}
 	// core's allow of docs goes with the tag: the old tags still reach it under the new template.
-	if len(w.expect.CredentialOnly) != 4 || w.expect.CredentialOnly[0].Receiver != "foo.c.docs" {
+	if len(w.expect.CredentialOnly) != 4 || w.expect.CredentialOnly[0].Receiver != "c.docs" {
 		t.Errorf("credential only = %+v", w.expect.CredentialOnly)
 	}
 	for _, r := range append(slices.Clone(w.expect.Removed), w.expect.CredentialOnly...) {
@@ -160,8 +160,8 @@ func TestGenerationOf(t *testing.T) {
 	if _, ok := GenerationOf("not a jwt", cands); ok {
 		t.Error("garbage matched")
 	}
-	other := compile(t, listset.ListSet{Range: "foo", Switches: switches("foo.c", "shared", "shared", "shared", "shared"),
-		Senders: []listset.SenderLists{{Sender: "foo.c.core"}}})
+	other := compile(t, listset.ListSet{Switches: switches("c", "shared", "shared", "shared", "shared"),
+		Senders: []listset.SenderLists{{Sender: "c.core"}}})
 	if _, ok := GenerationOf(w.k.build(t, other), cands); ok {
 		t.Error("unknown templates matched")
 	}
@@ -197,7 +197,7 @@ func TestGateHeldBackServerIsPartial(t *testing.T) {
 	if !hasFailure(st, "s2", "", CheckGeneration) || hasFailure(st, "s1", "", CheckGeneration) {
 		t.Errorf("failing = %+v", st.Failing)
 	}
-	if !hasFailure(st, "s2", "foo.c.core", CheckRefused) {
+	if !hasFailure(st, "s2", "c.core", CheckRefused) {
 		t.Errorf("s2 should allow the removed reach: %+v", st.Failing)
 	}
 	if !hasFailure(st, "s2", "", CheckRevoked) {
@@ -228,9 +228,9 @@ func TestGateWitnessOpen(t *testing.T) {
 	w := newWorld(t)
 	w.cluster.set("s1", w.j2)
 	w.cluster.set("s2", w.j2)
-	w.wit.open[WitnessKey{"s2", "foo.c.core"}] = true
+	w.wit.open[WitnessKey{"s2", "c.core"}] = true
 	st, _ := Gate(context.Background(), w.gate())
-	if st.State != StatePartial || !hasFailure(st, "s2", "foo.c.core", CheckWitness) || len(st.Failing) != 1 {
+	if st.State != StatePartial || !hasFailure(st, "s2", "c.core", CheckWitness) || len(st.Failing) != 1 {
 		t.Fatalf("%+v", st)
 	}
 }
@@ -241,7 +241,7 @@ func TestGateRemovedReachAllowedOnOneServer(t *testing.T) {
 	w.cluster.set("s2", w.j2)
 	w.prober.allow["s2"] = true
 	st, _ := Gate(context.Background(), w.gate())
-	if st.State != StatePartial || !hasFailure(st, "s2", "foo.c.core", CheckRefused) || hasFailure(st, "s1", "foo.c.core", CheckRefused) {
+	if st.State != StatePartial || !hasFailure(st, "s2", "c.core", CheckRefused) || hasFailure(st, "s1", "c.core", CheckRefused) {
 		t.Fatalf("%+v", st.Failing)
 	}
 }
@@ -380,7 +380,7 @@ func TestRunNotCommittedWhenCheckFails(t *testing.T) {
 	w.prober.allow["s1"] = true
 	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	st, err := Run(context.Background(), w.run(l, set2(), "bytes-2"))
-	if err != nil || st.State != StatePartial || !hasFailure(st, "s1", "foo.c.core", CheckRefused) {
+	if err != nil || st.State != StatePartial || !hasFailure(st, "s1", "c.core", CheckRefused) {
 		t.Fatalf("%+v %v", st, err)
 	}
 	if rec, _ := l.InForce(); rec.Generation != 1 {
@@ -425,7 +425,7 @@ func TestRunMutatedCompiledRefusedBeforePush(t *testing.T) {
 	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1})
 	in := w.run(l, set2(), "bytes-2")
 	in.Signer = withSign(in.Signer, func(_ listset.Record, c *listset.Compiled) (string, error) {
-		c.Users[0].Tags = append(c.Users[0].Tags, "allow:foo.c.sdk")
+		c.Users[0].Tags = append(c.Users[0].Tags, "allow:c.sdk")
 		return w.k.build(t, c, w.k.revoked), nil
 	})
 	_, err := Run(context.Background(), in)
@@ -518,7 +518,7 @@ func TestGenerationOfSigners(t *testing.T) {
 	if _, ok := GenerationOf(w.k.buildWith(t, w.c2, w.k.signers, []string{extra}, w.k.revoked), cands); ok {
 		t.Error("a JWT with an extra signing key was read as the target")
 	}
-	if _, ok := GenerationOf(w.k.buildWith(t, w.c2, map[string]string{"foo.c": extra}, nil, w.k.revoked), cands); ok {
+	if _, ok := GenerationOf(w.k.buildWith(t, w.c2, map[string]string{"c": extra}, nil, w.k.revoked), cands); ok {
 		t.Error("a JWT with another signer was read as the target")
 	}
 }
@@ -549,7 +549,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 	in := w.gate()
 	in.Expect.RevokedKeys = nil
 	st, _ := Gate(context.Background(), in)
-	if st.State == StateApplied || !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+	if st.State == StateApplied || !hasFailure(st, "", "c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("empty RevokedKeys: %+v", st)
 	}
 	var named bool
@@ -562,7 +562,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 	// Missing inventory fails closed.
 	in = w.gate()
 	in.OldKeys = nil
-	if st, _ = Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+	if st, _ = Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "", "c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("no inventory: %+v", st)
 	}
 	// With the old key revoked the gate applies.
@@ -571,9 +571,9 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 	}
 	// A removed sender's keys must be revoked too.
 	in = w.gate()
-	in.Compiled = &listset.Compiled{Range: w.c2.Range, Templates: w.c2.Templates, Users: w.c2.Users[1:]}
-	in.OldKeys = map[string][]OldKey{"foo.c.core": {{PublicKey: "UOLD"}}, "foo.c.docs": {}, "foo.c.sdk": {}}
-	if st, _ = Gate(context.Background(), in); !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+	in.Compiled = &listset.Compiled{Templates: w.c2.Templates, Users: w.c2.Users[1:]}
+	in.OldKeys = map[string][]OldKey{"c.core": {{PublicKey: "UOLD"}}, "c.docs": {}, "c.sdk": {}}
+	if st, _ = Gate(context.Background(), in); !hasFailure(st, "", "c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("removed sender: %+v", st.Failing)
 	}
 }
@@ -593,7 +593,7 @@ func TestRunPendingGeneration(t *testing.T) {
 	pushes := len(w.cluster.pushes)
 
 	other := set2()
-	other.Senders[0].Allow = []string{"foo.c.docs"}
+	other.Senders[0].Allow = []string{"c.docs"}
 	in := w.run(l, other, "bytes-other")
 	in.Signer = withSign(in.Signer, func(listset.Record, *listset.Compiled) (string, error) {
 		t.Error("signed while a generation is pending")
@@ -673,19 +673,19 @@ func TestMemLedgerLockHonorsContext(t *testing.T) {
 // An allow list may name a receiver that is not a sender: removing it is still a removed reach, and it is probed.
 func TestNewExpectReceiverNotASender(t *testing.T) {
 	prev := set1()
-	prev.Senders = []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.d.ext"}}}
+	prev.Senders = []listset.SenderLists{{Sender: "c.core", Allow: []string{"d.ext"}}}
 	target := set1()
-	target.Senders = []listset.SenderLists{{Sender: "foo.c.core"}}
+	target.Senders = []listset.SenderLists{{Sender: "c.core"}}
 	e, err := NewExpect(compile(t, prev), compile(t, target), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var found bool
 	for _, r := range slices.Concat(e.Removed, e.CredentialOnly) {
-		found = found || (r.Sender == "foo.c.core" && r.Receiver == "foo.d.ext")
+		found = found || (r.Sender == "c.core" && r.Receiver == "d.ext")
 	}
 	if !found {
-		t.Fatalf("no removed reach to foo.d.ext: %+v", e)
+		t.Fatalf("no removed reach to d.ext: %+v", e)
 	}
 }
 
@@ -695,22 +695,22 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 	target := set1()
 	target.Senders = prev.Senders[:2]
 	e, err := NewExpect(compile(t, prev), compile(t, target), nil)
-	if err != nil || !slices.Equal(e.RemovedSenders, []string{"foo.c.sdk"}) {
+	if err != nil || !slices.Equal(e.RemovedSenders, []string{"c.sdk"}) {
 		t.Fatalf("%+v %v", e, err)
 	}
 	w := newWorld(t)
 	w.cluster.set("s1", w.j2)
 	w.cluster.set("s2", w.j2)
 	in := w.gate()
-	in.Expect.RemovedSenders = []string{"foo.c.gone"}
-	w.wit.all = append(w.wit.all, WitnessKey{"s1", "foo.c.gone"}, WitnessKey{"s2", "foo.c.gone"})
-	w.wit.open[WitnessKey{"s2", "foo.c.gone"}] = true
+	in.Expect.RemovedSenders = []string{"c.gone"}
+	w.wit.all = append(w.wit.all, WitnessKey{"s1", "c.gone"}, WitnessKey{"s2", "c.gone"})
+	w.wit.open[WitnessKey{"s2", "c.gone"}] = true
 	in.Witnesses = w.wit
 	st, _ := Gate(context.Background(), in)
-	if st.State == StateApplied || !hasFailure(st, "s2", "foo.c.gone", CheckWitness) || hasFailure(st, "s1", "foo.c.gone", CheckWitness) {
+	if st.State == StateApplied || !hasFailure(st, "s2", "c.gone", CheckWitness) || hasFailure(st, "s1", "c.gone", CheckWitness) {
 		t.Fatalf("open: %+v", st.Failing)
 	}
-	delete(w.wit.open, WitnessKey{"s2", "foo.c.gone"})
+	delete(w.wit.open, WitnessKey{"s2", "c.gone"})
 	in.Witnesses = w.wit
 	if st, _ = Gate(context.Background(), in); st.State != StateApplied {
 		t.Fatalf("closed: %+v", st.Failing)
@@ -718,7 +718,7 @@ func TestGateRemovedSenderWitness(t *testing.T) {
 	// With no witness reported at all for the removed sender, it is not proven closed.
 	w.wit.all = w.wit.all[:len(w.wit.all)-2]
 	in.Witnesses = w.wit
-	if st, _ = Gate(context.Background(), in); !hasFailure(st, "s1", "foo.c.gone", CheckWitness) {
+	if st, _ = Gate(context.Background(), in); !hasFailure(st, "s1", "c.gone", CheckWitness) {
 		t.Fatalf("missing: %+v", st.Failing)
 	}
 }
@@ -782,7 +782,7 @@ func TestGateRevocationOlderThanCredentialIssue(t *testing.T) {
 		return tok
 	}
 	issued := time.Unix(5000, 0)
-	keys := map[string][]OldKey{"foo.c.core": {{PublicKey: w.k.revoked, IssuedAt: issued}}, "foo.c.docs": {}, "foo.c.sdk": {}}
+	keys := map[string][]OldKey{"c.core": {{PublicKey: w.k.revoked, IssuedAt: issued}}, "c.docs": {}, "c.sdk": {}}
 	for _, tc := range []struct {
 		at      time.Time
 		applied bool
@@ -826,9 +826,8 @@ func TestRunRefusesOversizedListSet(t *testing.T) {
 func TestGateSelfReachOnlyRemoval(t *testing.T) {
 	solo := func(mail listset.Switch) listset.ListSet {
 		return listset.ListSet{
-			Range:    "foo",
-			Switches: switches("foo.c", mail, listset.Closed, listset.Closed, listset.Closed),
-			Senders:  []listset.SenderLists{{Sender: "foo.c.solo"}},
+			Switches: switches("c", mail, listset.Closed, listset.Closed, listset.Closed),
+			Senders:  []listset.SenderLists{{Sender: "c.solo"}},
 		}
 	}
 	c1, c2 := compile(t, solo(listset.Shared)), compile(t, solo(listset.Closed))
@@ -837,7 +836,7 @@ func TestGateSelfReachOnlyRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := slices.Concat(e.Removed, e.CredentialOnly)
-	if len(all) != 1 || all[0].Sender != "foo.c.solo" || all[0].Receiver != "foo.c.solo" || all[0].Verb != listset.Mail || all[0].Op != OpPub {
+	if len(all) != 1 || all[0].Sender != "c.solo" || all[0].Receiver != "c.solo" || all[0].Verb != listset.Mail || all[0].Op != OpPub {
 		t.Fatalf("expect = %+v", e)
 	}
 
@@ -846,10 +845,10 @@ func TestGateSelfReachOnlyRemoval(t *testing.T) {
 	j2 := w.k.build(t, c2)
 	w.cluster = newCluster(j2, servers...)
 	w.prober = fakeProber{cluster: w.cluster, byGen: map[uint64]*listset.Compiled{1: c1, 2: c2}, allow: map[string]bool{}}
-	w.wit = witnessesFor(servers, "foo.c.solo")
+	w.wit = witnessesFor(servers, "c.solo")
 	in := w.gate()
 	in.Compiled, in.Previous, in.Expect = c2, &Candidate{Generation: 1, Compiled: c1, Signers: w.k.signers}, e
-	in.TargetJWT, in.OldKeys = j2, map[string][]OldKey{"foo.c.solo": {}}
+	in.TargetJWT, in.OldKeys = j2, map[string][]OldKey{"c.solo": {}}
 	in.Prober, in.Witnesses = w.prober, w.wit
 
 	if st, _ := Gate(context.Background(), in); st.State != StateApplied {
@@ -857,13 +856,13 @@ func TestGateSelfReachOnlyRemoval(t *testing.T) {
 	}
 	w.prober.allow["s2"] = true
 	in.Prober = w.prober
-	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s2", "foo.c.solo", CheckRefused) {
+	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s2", "c.solo", CheckRefused) {
 		t.Fatalf("probe accepted: %+v", st.Failing)
 	}
 	w.prober.allow["s2"] = false
-	w.wit.open[WitnessKey{"s1", "foo.c.solo"}] = true
+	w.wit.open[WitnessKey{"s1", "c.solo"}] = true
 	in.Prober, in.Witnesses = w.prober, w.wit
-	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s1", "foo.c.solo", CheckWitness) {
+	if st, _ := Gate(context.Background(), in); st.State == StateApplied || !hasFailure(st, "s1", "c.solo", CheckWitness) {
 		t.Fatalf("witness open: %+v", st.Failing)
 	}
 }

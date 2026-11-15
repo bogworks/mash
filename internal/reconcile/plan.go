@@ -2,7 +2,7 @@
 // signer executes, the removal of what the account held before its first list set that the list set does not own.
 //
 // Half (a), signing keys: a signing key of the account JWT that is not a scoped key the key store holds for an owner
-// group (of this range or any other, see KeptSigners) is a non-mash key. The gate of the first applied list set
+// group is a non-mash key. The gate of the first applied list set
 // refuses extra signers, so the apply removes them; the plan reports each one still present in the JWT in force as a
 // finding, and with a list set from a file, before the first apply, each one the apply would remove. It never pushes for a signing key.
 //
@@ -79,9 +79,6 @@ type Input struct {
 	Claims *jwt.AccountClaims
 	// Signers maps each template group of the list set to its scoped signing key (see ExpectedSigners).
 	Signers map[string]string
-	// Held is the key store's GroupPublics: every owner group of every range to its public key. A scoped signing key
-	// held there is mash's, whatever its range, and is kept (see KeptSigners).
-	Held map[string]string
 	// Exempt is the adoption marker's exempt users: never in any action.
 	Exempt []string
 	// Servers is what every server's CONNZ said for the account; ScanIncomplete is non-empty when that is not the whole
@@ -216,55 +213,11 @@ func ExpectedSigners(groups []string, held map[string]string) (map[string]string
 	for _, g := range groups {
 		k := held[g]
 		if k == "" {
-			return nil, fmt.Errorf("the key store holds no signing key for group %s: run the reconcile where the range's owner group keys are (the account JWT is not used to guess which key is mash's)", g)
+			return nil, fmt.Errorf("the key store holds no signing key for group %s: run the reconcile where the owner group keys are (the account JWT is not used to guess which key is mash's)", g)
 		}
 		out[g] = k
 	}
 	return out, nil
-}
-
-// OtherRangesKept is the scoped signing keys of the account JWT that stay beside the target's: every scoped key
-// (*jwt.UserScope) the key store holds (held, from GroupPublics) for an owner group of ANOTHER range (a group that is not
-// rng's: "rng.<name>"), group to public key. It is how policyserve.Issuer keeps them. A key of this range's is
-// rebuilt from the list set, so one the list set no longer names is not in it. rng is the list set's range.
-func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng string) (map[string]string, error) {
-	if rng == "" {
-		return nil, errors.New("no range: cannot tell this range's signing keys from another range's (the list set names none)")
-	}
-	out := map[string]string{}
-	if claims == nil {
-		return out, nil
-	}
-	for g, pub := range held {
-		if strings.HasPrefix(g, rng+".") {
-			continue
-		}
-		if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil {
-			if us, ok := sc.(*jwt.UserScope); ok && us != nil {
-				out[g] = pub
-			}
-		}
-	}
-	return out, nil
-}
-
-// KeptSigners is the account JWT's signing keys that are mash's and stay once the list set is applied, as
-// policyserve.Issuer.Sign keeps them: the list set's expected signers (the target's group keys) and the scoped keys the
-// key store holds for another range's owner groups (OtherRangesKept). A key of this range's that the list set no longer
-// names goes, so it is not kept. Every other signing key, a scoped key the key store does not hold included, is non-mash.
-func KeptSigners(claims *jwt.AccountClaims, held, signers map[string]string, rng string) (map[string]bool, error) {
-	other, err := OtherRangesKept(claims, held, rng)
-	if err != nil {
-		return nil, err
-	}
-	kept := map[string]bool{}
-	for _, k := range signers {
-		kept[k] = true
-	}
-	for _, k := range other {
-		kept[k] = true
-	}
-	return kept, nil
 }
 
 // Groups is the owner groups of the list set's compiled templates, sorted.
@@ -316,10 +269,6 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	for _, k := range in.Signers {
 		scoped[k] = true
 	}
-	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Range)
-	if err != nil {
-		return Plan{}, err
-	}
 	adminUnrecorded := false
 	exempt := map[string]bool{}
 	for _, k := range in.Exempt {
@@ -362,7 +311,7 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			state = StateRemovedByApply
 		}
 		for _, k := range slices.Sorted(maps.Keys(in.Claims.SigningKeys)) {
-			if kept[k] {
+			if scoped[k] { // the target's group keys stay; any other signing key is non-mash
 				continue
 			}
 			sk := SigningKey{Key: k, State: state, Signed: []SignedUser{}}
@@ -436,6 +385,11 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			finding(r.PublicKey, "recorded as %q owner %q, the list set names %s but no directory record serves it: not revoked; remove the sender from the list set to revoke it", r.Address, r.Owner, strings.Join(by, ", "))
 			continue
 		}
+		// A new-form record (Address the flat key agent_owner_name) of an owner and name the list set names is that
+		// sender's endpoint's, whatever its agent token.
+		if o, n, ok := flatOwnerName(r.Address); ok && o == r.Owner && len(sm.named[recKey{n, o}]) > 0 {
+			continue
+		}
 		if why := sm.doubt(r); why != "" {
 			finding(r.PublicKey, "recorded as %q owner %q, which may be a sender of the list set, but %s: not revoked", r.Address, r.Owner, why)
 			continue
@@ -502,7 +456,7 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 		}
 	}
 	var nk *admin.IssuersNotKeptError
-	if e := admin.CheckIssuersKept(in.Account, in.AdminUser, in.AdminIssuer, exIssuers, kept); e != nil && errors.As(e, &nk) {
+	if e := admin.CheckIssuersKept(in.Account, in.AdminUser, in.AdminIssuer, exIssuers, scoped); e != nil && errors.As(e, &nk) {
 		p.IssuerProblems = nk.Problems
 	}
 
@@ -578,9 +532,13 @@ type senderMap struct {
 	// holds the senders whose resolution failed, by sender.
 	names map[string][]string
 	errs  map[string]error
-	// errOwner is the owner of each sender in errs that parsed as range.owner.name; a sender in errs with no entry has
+	// errOwner is the owner of each sender in errs that parsed as owner.name; a sender in errs with no entry has
 	// an unknown owner.
 	errOwner map[string]string
+	// named maps the (name, owner) of each sender to the sender: a record of that owner whose directory name is the
+	// sender's name or a flat key agent_owner_name of any agent token is the sender's endpoint's. The list set names no
+	// agent token, so the record's own agent token is not compared.
+	named map[recKey][]string
 	// absent maps the (directory name, owner) a sender would be recorded under, as its bare name or its flat key, to
 	// the senders for which no directory record was found.
 	absent map[recKey][]string
@@ -588,27 +546,29 @@ type senderMap struct {
 
 // resolveSenders resolves every sender of the list set to the record that serves it. A nil resolver resolves none.
 func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) senderMap {
-	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, errOwner: map[string]string{}, absent: map[recKey][]string{}}
-	if rs == nil {
-		return m
-	}
+	m := senderMap{match: map[recKey][]string{}, names: map[string][]string{}, errs: map[string]error{}, errOwner: map[string]string{}, named: map[recKey][]string{}, absent: map[recKey][]string{}}
 	for _, u := range users {
-		parts := strings.Split(u.Sender, ".")
-		var id sap.EndpointIdentity
-		var err error
-		if len(parts) == 3 {
-			id, err = sap.New(parts[0], parts[1], parts[2])
-		} else {
-			err = fmt.Errorf("sender %q is not range.owner.name", u.Sender)
-		}
-		if err != nil {
-			m.names[parts[len(parts)-1]] = append(m.names[parts[len(parts)-1]], u.Sender)
-			m.errs[u.Sender] = err
+		owner, name, ok := strings.Cut(u.Sender, ".")
+		if !ok || owner == "" || name == "" || strings.Contains(name, ".") {
+			if rs != nil {
+				m.errs[u.Sender] = fmt.Errorf("sender %q is not owner.name", u.Sender)
+				parts := strings.Split(u.Sender, ".")
+				m.names[parts[len(parts)-1]] = append(m.names[parts[len(parts)-1]], u.Sender)
+			}
 			continue
 		}
-		m.errOwner[u.Sender] = id.Owner
-		m.names[id.Name] = append(m.names[id.Name], u.Sender)
-		m.names[id.Flat()] = append(m.names[id.Flat()], u.Sender)
+		m.errOwner[u.Sender] = owner
+		m.named[recKey{name, owner}] = append(m.named[recKey{name, owner}], u.Sender)
+		if rs == nil {
+			continue
+		}
+		m.names[name] = append(m.names[name], u.Sender)
+		// The directory record that serves the address under its legacy name (`mashctl add`); an address with no
+		// legacy form has none. A new-form record is matched through named.
+		id, err := sap.Legacy(owner, name)
+		if err != nil {
+			continue
+		}
 		target, _, found, err := rs.ServingIdentity(ctx, id)
 		if err != nil {
 			m.errs[u.Sender] = err
@@ -618,13 +578,20 @@ func resolveSenders(ctx context.Context, rs Resolver, users []listset.User) send
 			k := recKey{target.Flat(), target.Owner}
 			m.match[k] = append(m.match[k], u.Sender)
 		} else {
-			for _, n := range []string{id.Name, id.Flat()} {
-				k := recKey{n, id.Owner}
-				m.absent[k] = append(m.absent[k], u.Sender)
-			}
+			k := recKey{name, owner}
+			m.absent[k] = append(m.absent[k], u.Sender)
 		}
 	}
 	return m
+}
+
+// flatOwnerName splits a flat key agent_owner_name into its owner and name.
+func flatOwnerName(flat string) (owner, name string, ok bool) {
+	p := strings.Split(flat, "_")
+	if len(p) != 3 || p[1] == "" || p[2] == "" {
+		return "", "", false
+	}
+	return p[1], p[2], true
 }
 
 // doubt is why a record that no sender is known to own may still be one's, or "" when it cannot be: its owner is

@@ -207,7 +207,7 @@ func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, pub string) {
 	t.Helper()
 	ks, fk = setup(t)
-	kp, err := ks.GroupKey("foo.c", true)
+	kp, err := ks.GroupKey("c", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, pub string
 	op, _, _ := ks.Operator()
 	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
 		sc := jwt.NewUserScope()
-		sc.Key, sc.Role = pub, "foo.c"
+		sc.Key, sc.Role = pub, "c"
 		sc.Template.Permissions.Pub.Allow.Add("foo.c.>")
 		cl.SigningKeys.AddScopedSigner(sc)
 	})
@@ -227,7 +227,7 @@ func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, pub string
 func TestGroupPublicsListsRegisteredGroupSigners(t *testing.T) {
 	ks, _, pub := groupSignerSetup(t)
 	got, err := ks.GroupPublics()
-	if err != nil || len(got) != 1 || got["foo.c"] != pub {
+	if err != nil || len(got) != 1 || got["c"] != pub {
 		t.Fatalf("%v %v", got, err)
 	}
 }
@@ -239,7 +239,7 @@ func TestGroupSignerRegistrationDoesNotExcuseOtherKeys(t *testing.T) {
 	op, _, _ := ks.Operator()
 	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
 		sc := jwt.NewUserScope()
-		sc.Key, sc.Role = pubOf(t, other), "foo.c"
+		sc.Key, sc.Role = pubOf(t, other), "c"
 		cl.SigningKeys.AddScopedSigner(sc)
 	})
 	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})

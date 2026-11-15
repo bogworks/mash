@@ -25,7 +25,7 @@ func Decode(raw []byte, submitter string) (policyintake.Doc, error) {
 		return policyintake.Doc{}, fmt.Errorf("%w: %v", policyintake.ErrDocument, err)
 	}
 	return policyintake.Doc{
-		Account: d.Account, Range: d.Range, Generation: d.Generation, BaseGeneration: d.BaseGeneration,
+		Account: d.Account, Generation: d.Generation, BaseGeneration: d.BaseGeneration,
 		Verified: d.Verified, NextSubmitter: d.NextSubmitter,
 	}, nil
 }

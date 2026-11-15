@@ -59,9 +59,6 @@ type ApplyDeps struct {
 	// generations unless the signer set does, also PreviousSigners. A caller whose signer set changed with this
 	// generation must call Run itself.
 	Signers map[string]string
-	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps
-	// beside Signers (RunInput.KeptSigners). Without them a multi-range account is never read as the target.
-	KeptSigners map[string]string
 	// ServerLimits are the servers' limits. Apply does not use them: the intake checks sizes with listset.SizeCheck
 	// before it calls Apply, and Run refuses a JWT over policy.AccountJWTLimit.
 	ServerLimits []listset.ServerLimits
@@ -151,7 +148,6 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		ListSet: req.ListSet, Received: req.Received, RotationStep: req.RotationStep,
 		Previous: prev, Signer: deps.Signer, OldKeys: oldKeys,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
-		KeptSigners: deps.KeptSigners,
 		OldKeysFn: func(ctx context.Context) (map[string][]OldKey, error) {
 			return oldKeysFromRecord(ctx, deps.IssueRecord, prev, req.ListSet)
 		},

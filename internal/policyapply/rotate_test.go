@@ -3,6 +3,7 @@ package policyapply
 import (
 	"context"
 	"errors"
+	"github.com/bogworks/mash/internal/listset"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -93,10 +94,10 @@ type rotEnv struct {
 	address string
 }
 
-// newRotEnv has two old credentials (issue) and one probe for foo.c.core, and one credential for foo.c.docs.
+// newRotEnv has two old credentials (issue) and one probe for c.core, and one credential for c.docs.
 func newRotEnv(t *testing.T, deadline time.Duration) *rotEnv {
 	t.Helper()
-	e := &rotEnv{t: t, ev: &events{}, rec: &MemIssueRecord{}, ok: &atomic.Bool{}, address: "foo.c.core"}
+	e := &rotEnv{t: t, ev: &events{}, rec: &MemIssueRecord{}, ok: &atomic.Bool{}, address: "c.core"}
 	ctx := context.Background()
 	e.old = []string{userPub(t), userPub(t)}
 	e.probe = userPub(t)
@@ -108,14 +109,24 @@ func newRotEnv(t *testing.T, deadline time.Duration) *rotEnv {
 	add(e.address, e.old[0], PurposeIssue)
 	add(e.address, e.old[1], PurposeRotation)
 	add(e.address, e.probe, PurposeProbe)
-	add("foo.c.docs", userPub(t), PurposeIssue)
+	add("c.docs", userPub(t), PurposeIssue)
 	e.in = RotateInput{
-		Address: e.address, Name: "core", Tags: []string{"allow:c.sdk"}, NewPub: userPub(t), Generation: 2,
+		Address: e.address, Name: "core", Tags: []string{"allow:c.sdk"}, Endpoint: "claude.c.core", NewPub: userPub(t), Generation: 2,
 		Issuer: rotIssuer{e.ev}, Deliverer: rotDeliverer{ev: e.ev}, Conns: rotConns{e.ev, e.ok},
 		Record: recEvents{e.rec, e.ev}, Revoker: rotRevoker{ev: e.ev},
 		Deadline: time.Now().Add(deadline), Poll: 5 * time.Millisecond,
 	}
 	return e
+}
+
+// signedTags are the tags Rotate signs and records: the target tags and the endpoint tag.
+func (e *rotEnv) signedTags() []string {
+	e.t.Helper()
+	tags, err := listset.WithEndpointTag(e.in.Tags, e.in.Endpoint, e.address)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return tags
 }
 
 func (e *rotEnv) revokedKeys() []string {
@@ -165,10 +176,10 @@ func TestRotateHappyPath(t *testing.T) {
 		switch {
 		case en.PublicKey == e.in.NewPub:
 			found = true
-			if en.Purpose != PurposeRotation || en.RevokedAt != nil || en.Generation != 2 || !slices.Equal(en.Tags, []string{"allow:c.sdk"}) {
+			if en.Purpose != PurposeRotation || en.RevokedAt != nil || en.Generation != 2 || !slices.Equal(en.Tags, []string{"allow:c.sdk", "ep:claude_c_core"}) {
 				t.Errorf("new entry = %+v", en)
 			}
-		case en.PublicKey == e.probe || en.Address == "foo.c.docs":
+		case en.PublicKey == e.probe || en.Address == "c.docs":
 			if en.RevokedAt != nil {
 				t.Errorf("entry %+v was revoked", en)
 			}
@@ -220,7 +231,7 @@ func TestRotateRefusesRevokedAndKnownKeys(t *testing.T) {
 	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.old[0], Purpose: PurposeIssue}); !errors.Is(err, ErrRevokedKey) {
 		t.Errorf("Add of a revoked key: %v", err)
 	}
-	if err := e.rec.Add(ctx, IssueEntry{Address: "foo.c.sdk", PublicKey: e.old[1], Purpose: PurposeIssue}); !errors.Is(err, ErrDuplicateKey) {
+	if err := e.rec.Add(ctx, IssueEntry{Address: "c.sdk", PublicKey: e.old[1], Purpose: PurposeIssue}); !errors.Is(err, ErrDuplicateKey) {
 		t.Errorf("Add of a duplicate key: %v", err)
 	}
 	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.old[1], Purpose: PurposeIssue, Generation: 9}); err != nil {
@@ -292,14 +303,14 @@ func TestGroupUserIssuer(t *testing.T) {
 	k := newKeys(t)
 	sk, _ := nkeys.CreateAccount()
 	signer := signerFunc(func(group string, uc *jwt.UserClaims) (string, error) {
-		if group != "foo.c" {
+		if group != "c" {
 			t.Errorf("group = %q", group)
 		}
 		return uc.Encode(sk)
 	})
 	pub := userPub(t)
 	tags := []string{"allow:c.sdk", "deny-none"}
-	tok, err := GroupUserIssuer{Signer: signer, Account: k.acctPub}.Issue(context.Background(), "foo.c.core", pub, "core", tags)
+	tok, err := GroupUserIssuer{Signer: signer, Account: k.acctPub}.Issue(context.Background(), "c.core", pub, "core", tags)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,10 +324,10 @@ func TestGroupUserIssuer(t *testing.T) {
 	if len(uc.Pub.Allow)+len(uc.Sub.Allow)+len(uc.Pub.Deny)+len(uc.Sub.Deny) != 0 {
 		t.Error("the credential carries permissions")
 	}
-	if _, err := (GroupUserIssuer{Signer: signer, Account: k.acctPub}).Issue(context.Background(), "foo.c.core", "SUAAAA", "core", tags); err == nil {
+	if _, err := (GroupUserIssuer{Signer: signer, Account: k.acctPub}).Issue(context.Background(), "c.core", "SUAAAA", "core", tags); err == nil {
 		t.Error("issued to a malformed key")
 	}
-	if _, err := (GroupUserIssuer{Signer: signer, Account: k.acctPub}).Issue(context.Background(), "foo.c.core", pub, "core", []string{"Allow:C.sdk"}); err == nil {
+	if _, err := (GroupUserIssuer{Signer: signer, Account: k.acctPub}).Issue(context.Background(), "c.core", pub, "core", []string{"Allow:C.sdk"}); err == nil {
 		t.Error("issued with non-canonical tags")
 	}
 }
@@ -325,7 +336,7 @@ type signerFunc func(group string, uc *jwt.UserClaims) (string, error)
 
 func (f signerFunc) SignUser(group string, uc *jwt.UserClaims) (string, error) { return f(group, uc) }
 
-// rotRun runs set1 -> set2 (core's tags narrow) with the rotation of foo.c.core as AfterPush on the fake world.
+// rotRun runs set1 -> set2 (core's tags narrow) with the rotation of c.core as AfterPush on the fake world.
 func rotRun(t *testing.T, connect bool, mod ...func(*RunInput)) (Status, *world, *Ledger0, *rotEnv) {
 	t.Helper()
 	w := newWorld(t)
@@ -340,7 +351,7 @@ func rotRun(t *testing.T, connect bool, mod ...func(*RunInput)) (Status, *world,
 		return tok, nil
 	}}
 	plan := &RotationPlan{
-		Narrowed:   []NarrowedSender{{Address: e.address, Name: "core", Tags: e.in.Tags, NewPub: e.in.NewPub}},
+		Narrowed:   []NarrowedSender{{Address: e.address, Name: "core", Tags: e.in.Tags, Endpoint: e.in.Endpoint, NewPub: e.in.NewPub}},
 		Generation: 2, Issuer: e.in.Issuer, Deliverer: e.in.Deliverer, Conns: e.in.Conns, Record: e.in.Record,
 		Revoker: e.in.Revoker, Deadline: e.in.Deadline, Poll: e.in.Poll,
 	}
@@ -348,7 +359,7 @@ func rotRun(t *testing.T, connect bool, mod ...func(*RunInput)) (Status, *world,
 	in := w.run(led, set2(), "x")
 	in.AfterPush = RotationsAfterPush(plan)
 	// The inventory comes from the issue record through AfterPush: the caller passes none for core.
-	in.OldKeys = map[string][]OldKey{"foo.c.docs": {}, "foo.c.sdk": {}}
+	in.OldKeys = map[string][]OldKey{"c.docs": {}, "c.sdk": {}}
 	for _, m := range mod {
 		m(&in)
 	}
@@ -372,7 +383,7 @@ func TestRunRotationConnectedIsApplied(t *testing.T) {
 	if led.gen() != 2 {
 		t.Errorf("generation in force = %d", led.gen())
 	}
-	if !SenderPassed(st, "foo.c.core") {
+	if !SenderPassed(st, "c.core") {
 		t.Error("core did not pass")
 	}
 	if !slices.Equal(e.revokedKeys(), slices.Sorted(slices.Values(e.old))) {
@@ -385,19 +396,19 @@ func TestRunRotationNotConnectedIsPartialAndNotCommitted(t *testing.T) {
 	if st.State != StatePartial || st.InForce {
 		t.Fatalf("state = %s in force = %v", st.State, st.InForce)
 	}
-	if !slices.Equal(st.NotConnected, []string{"foo.c.core"}) {
+	if !slices.Equal(st.NotConnected, []string{"c.core"}) {
 		t.Errorf("not connected = %v", st.NotConnected)
 	}
-	if !slices.ContainsFunc(st.Failing, func(f Failure) bool { return f.Sender == "foo.c.core" && f.Check == CheckNotConnected }) {
+	if !slices.ContainsFunc(st.Failing, func(f Failure) bool { return f.Sender == "c.core" && f.Check == CheckNotConnected }) {
 		t.Errorf("failing = %+v", st.Failing)
 	}
 	if led.gen() != 1 {
 		t.Errorf("generation in force = %d: something was committed", led.gen())
 	}
-	if SenderPassed(st, "foo.c.core") {
+	if SenderPassed(st, "c.core") {
 		t.Error("a not-connected sender passed")
 	}
-	if !SenderPassed(st, "foo.c.sdk") {
+	if !SenderPassed(st, "c.sdk") {
 		t.Error("an unrelated sender did not pass")
 	}
 	// The old keys were revoked anyway and the servers hold the revocations.
@@ -405,7 +416,7 @@ func TestRunRotationNotConnectedIsPartialAndNotCommitted(t *testing.T) {
 		t.Errorf("revoked %v", e.revokedKeys())
 	}
 	b, err := st.MarshalJSON()
-	if err != nil || !strings.Contains(string(b), `"not_connected":["foo.c.core"]`) {
+	if err != nil || !strings.Contains(string(b), `"not_connected":["c.core"]`) {
 		t.Errorf("json = %s %v", b, err)
 	}
 }
@@ -414,8 +425,8 @@ func TestRotationsAfterPushLeavingAndOrder(t *testing.T) {
 	e := newRotEnv(t, time.Second)
 	e.ok.Store(true)
 	plan := &RotationPlan{
-		Narrowed: []NarrowedSender{{Address: e.address, Name: "core", Tags: e.in.Tags, NewPub: e.in.NewPub}},
-		Leaving:  []string{"foo.c.docs"}, Generation: 2, Issuer: e.in.Issuer, Deliverer: e.in.Deliverer, Conns: e.in.Conns,
+		Narrowed: []NarrowedSender{{Address: e.address, Name: "core", Tags: e.in.Tags, Endpoint: e.in.Endpoint, NewPub: e.in.NewPub}},
+		Leaving:  []string{"c.docs"}, Generation: 2, Issuer: e.in.Issuer, Deliverer: e.in.Deliverer, Conns: e.in.Conns,
 		Record: e.in.Record, Revoker: e.in.Revoker, Deadline: e.in.Deadline, Poll: e.in.Poll,
 	}
 	revoked, nc, _, err := RotationsAfterPush(plan)(context.Background())
@@ -429,7 +440,7 @@ func TestRotationsAfterPushLeavingAndOrder(t *testing.T) {
 		}
 		n += len(keys)
 	}
-	if n != 3 || len(revoked[e.address]) == 0 || len(revoked["foo.c.docs"]) == 0 {
+	if n != 3 || len(revoked[e.address]) == 0 || len(revoked["c.docs"]) == 0 {
 		t.Errorf("revoked = %v", revoked)
 	}
 	if len(plan.Results) != 1 || !plan.Results[0].Connected {
@@ -445,9 +456,9 @@ func TestRunRotationDerivesOldKeys(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	st, _, _, _ = rotRun(t, true, func(in *RunInput) {
-		in.OldKeys = map[string][]OldKey{"foo.c.docs": {}, "foo.c.sdk": {}, "foo.c.core": {{PublicKey: freshUserPub(t)}}}
+		in.OldKeys = map[string][]OldKey{"c.docs": {}, "c.sdk": {}, "c.core": {{PublicKey: freshUserPub(t)}}}
 	})
-	if st.State != StatePartial || !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
+	if st.State != StatePartial || !hasFailure(st, "", "c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("a caller's old key that nothing revoked was accepted: %+v", st)
 	}
 }
@@ -479,7 +490,7 @@ func TestRotateResumesRecordedRotation(t *testing.T) {
 	e := newRotEnv(t, time.Second)
 	ctx := context.Background()
 	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.in.NewPub, Purpose: PurposeRotation,
-		Tags: slices.Clone(e.in.Tags), Generation: e.in.Generation, IssuedAt: fixedNow()}); err != nil {
+		Tags: e.signedTags(), Generation: e.in.Generation, IssuedAt: fixedNow()}); err != nil {
 		t.Fatal(err)
 	}
 	e.ok.Store(true)
@@ -497,7 +508,7 @@ func TestRotateResumesRecordedRotation(t *testing.T) {
 	// A different generation is not a resume.
 	e2 := newRotEnv(t, time.Second)
 	if err := e2.rec.Add(ctx, IssueEntry{Address: e2.address, PublicKey: e2.in.NewPub, Purpose: PurposeRotation,
-		Tags: slices.Clone(e2.in.Tags), Generation: e2.in.Generation + 1}); err != nil {
+		Tags: e2.signedTags(), Generation: e2.in.Generation + 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Rotate(ctx, e2.in); !errors.Is(err, ErrDuplicateKey) {
@@ -548,7 +559,7 @@ func TestRotateResumeRecordsNewRevision(t *testing.T) {
 	ctx := context.Background()
 	early := fixedNow().Add(-time.Hour)
 	if err := e.rec.Add(ctx, IssueEntry{Address: e.address, PublicKey: e.in.NewPub, Purpose: PurposeRotation,
-		Tags: slices.Clone(e.in.Tags), Generation: e.in.Generation, IssuedAt: early}); err != nil {
+		Tags: e.signedTags(), Generation: e.in.Generation, IssuedAt: early}); err != nil {
 		t.Fatal(err)
 	}
 	e.ok.Store(true)
@@ -561,5 +572,36 @@ func TestRotateResumeRecordsNewRevision(t *testing.T) {
 		if h.PublicKey == e.in.NewPub && !h.IssuedAt.Equal(fixedNow()) {
 			t.Errorf("issued at %v, want the resumed rotation's %v", h.IssuedAt, fixedNow())
 		}
+	}
+}
+
+// Rotate refuses a rotation with no endpoint, and an endpoint that is not at the address, before anything is issued.
+func TestRotateRefusesNoEndpointAndAnotherAddress(t *testing.T) {
+	for name, ep := range map[string]string{
+		"empty":                "",
+		"another name":         "claude.c.docs",
+		"another owner":        "claude.d.core",
+		"not canonical":        "c.core",
+		"legacy endpoint form": "core",
+	} {
+		e := newRotEnv(t, time.Second)
+		e.ok.Store(true)
+		e.in.Endpoint = ep
+		before := len(e.rec.Entries())
+		if _, err := Rotate(context.Background(), e.in); err == nil {
+			t.Errorf("%s: Rotate with endpoint %q succeeded", name, ep)
+		}
+		if got := e.ev.get(); len(got) != 0 {
+			t.Errorf("%s: events %v: nothing may be issued, delivered or revoked", name, got)
+		}
+		if len(e.rec.Entries()) != before || len(e.revokedKeys()) != 0 {
+			t.Errorf("%s: the issue record changed", name)
+		}
+	}
+	// Tags that already hold an endpoint tag are refused: the issuer supplies it.
+	e := newRotEnv(t, time.Second)
+	e.in.Tags = []string{"allow:c.sdk", "ep:claude_c_core"}
+	if _, err := Rotate(context.Background(), e.in); err == nil {
+		t.Error("Rotate with an ep tag in Tags succeeded")
 	}
 }

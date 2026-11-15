@@ -98,11 +98,14 @@ func OpOf(v listset.Verb) Op {
 }
 
 // ProbeCred is the old credential of a sender: its address, name claim and tags. The transport mints a user JWT with
-// them under the sender's owner-group scoped key.
+// them under the sender's owner-group scoped key. Endpoint is the canonical agent.owner.name of the endpoint the
+// credential was issued to; the minter adds its endpoint tag to Tags (a list set never names it). Empty means the
+// probe endpoint "probe.<Sender>".
 type ProbeCred struct {
-	Sender string   `json:"sender"`
-	Name   string   `json:"name"`
-	Tags   []string `json:"tags"`
+	Sender   string   `json:"sender"`
+	Name     string   `json:"name"`
+	Tags     []string `json:"tags"`
+	Endpoint string   `json:"endpoint,omitempty"`
 }
 
 // Prober sends one probe on one named server with a probe credential and reports whether the server refused it.

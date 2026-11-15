@@ -2,8 +2,8 @@
 // anything the NATS server would not enforce exactly as the lists say.
 //
 // The contract is mash-messaging-policy draft-2 (REQ-001 to REQ-006, AT-002, AT-004; ADR 0102). A list set is, for one
-// NATS account (one range), a shared or closed switch per owner group and verb, and per sending address an allow list
-// and a deny list of exact three-part addresses. This package has no file format (DEC-004 is open): ListSet is the
+// NATS account, a shared or closed switch per owner group and verb, and per sending address an allow list
+// and a deny list of exact two-part addresses, owner.name. This package has no file format (DEC-004 is open): ListSet is the
 // shape a decoded list set would have, so that bad shapes can be refused.
 //
 // Validate is pure. Compile validates, builds, and then runs Check on its own output; Check expands every sender's
@@ -31,7 +31,7 @@ const (
 // Verbs lists the four verbs in the order the package reports them.
 var Verbs = []Verb{Mail, Prompt, Status, Heartbeat}
 
-// subject is the subject word of v: agents.<subject>.<range>.<owner>.<name>. Heartbeat is "hb" (SAP).
+// subject is the subject word of v: agents.<subject>.<agent>.<owner>.<name>. Heartbeat is "hb" (SAP).
 func (v Verb) subject() string {
 	if v == Heartbeat {
 		return "hb"
@@ -60,8 +60,6 @@ const (
 
 // ListSet is the switches and lists for one account.
 type ListSet struct {
-	// Range is the account's range part. Every address and group must carry it.
-	Range string
 	// Base is the generation the submitter based this list set on: the one in force when it was written, 0 when
 	// nothing was in force. Accept refuses a list set whose Base is not the generation in force (REQ-017).
 	Base uint64
@@ -72,7 +70,7 @@ type ListSet struct {
 	Senders []SenderLists
 }
 
-// SwitchEntry sets one verb for one owner group. Group is "range.owner". A three-part address in Group is a switch
+// SwitchEntry sets one verb for one owner group. Group is the owner. A two-part address in Group is a switch
 // for a single sender, which is refused.
 type SwitchEntry struct {
 	Group  string
@@ -80,7 +78,7 @@ type SwitchEntry struct {
 	Switch Switch
 }
 
-// SenderLists are the exceptions of one sending address, all three-part addresses "range.owner.name".
+// SenderLists are the exceptions of one sending address, all two-part addresses "owner.name".
 //
 // Allow names the addresses reachable beyond the owner line. Deny names addresses of the sender's own owner group
 // taken away from a shared verb; it is refused when the group has no shared verb, when the target is outside the
@@ -93,7 +91,7 @@ type SenderLists struct {
 
 // Problem is one refused entry and the reason.
 type Problem struct {
-	// Entry names the entry, for example `allow of "foo.c.core": "foo.c.*"`.
+	// Entry names the entry, for example `allow of "c.core": "c.*"`.
 	Entry  string
 	Reason string
 }

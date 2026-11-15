@@ -27,12 +27,11 @@ func switches(group string, mail, prompt, status, hb listset.Switch) []listset.S
 	}
 }
 
-// testSet is a list set with one group, foo.c, and the senders foo.c.core and foo.c.docs.
+// testSet is a list set with one group, c, and the senders c.core and c.docs.
 func testSet() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
-		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
-		Senders:  []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}},
+		Switches: switches("c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
+		Senders:  []listset.SenderLists{{Sender: "c.core"}, {Sender: "c.docs"}},
 	}
 }
 
@@ -83,7 +82,7 @@ type world struct {
 	now     time.Time
 	acct    string
 	acctKP  nkeys.KeyPair
-	scoped  string // the mash scoped key of foo.c
+	scoped  string // the mash scoped key of c
 	plain   string // a non-mash signing key
 	admin   string
 	exempt  string
@@ -102,7 +101,7 @@ func newWorld(t *testing.T) *world {
 			hist: map[string]admin.IssuedTimes{}, histErr: map[string]error{}}}
 	w.claims = jwt.NewAccountClaims(acct)
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = scoped, "foo.c"
+	sc.Key, sc.Role = scoped, "c"
 	w.claims.SigningKeys.AddScopedSigner(sc)
 	return w
 }
@@ -127,7 +126,7 @@ func (w *world) build() Plan {
 	w.t.Helper()
 	p, err := Build(context.Background(), Input{
 		Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin, w.exempt},
 		Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct})
 	if err != nil {
 		w.t.Fatal(err)
@@ -156,12 +155,12 @@ func revocation(p Plan, key string) (Revocation, bool) {
 func TestRecordedSenderNotInTheListSetIsRevoked(t *testing.T) {
 	w := newWorld(t)
 	old, kept := userKey(t), userKey(t)
-	w.record(old, "foo.c.gone", w.now.Add(-time.Hour))
-	w.record(kept, "foo.c.core", w.now.Add(-time.Hour))
+	w.record(old, "c.gone", w.now.Add(-time.Hour))
+	w.record(kept, "c.core", w.now.Add(-time.Hour))
 	w.connect(w.conn(old, w.acct, "gone", w.now.Add(-time.Hour).Unix()))
 	p := w.build()
 	r, ok := revocation(p, old)
-	if !ok || r.Reason != ReasonRecorded || r.Address != "foo.c.gone" || r.At != w.now.Format(time.RFC3339) {
+	if !ok || r.Reason != ReasonRecorded || r.Address != "c.gone" || r.At != w.now.Format(time.RFC3339) {
 		t.Fatalf("revocation = %+v %v", r, ok)
 	}
 	if len(r.Connections) != 1 || r.Connections[0].Host != "10.0.0.7" || r.Connections[0].Server != "s1" || r.Connections[0].Name != "gone" {
@@ -209,7 +208,7 @@ func TestRecordedKeyWithAnUnprovenOrFutureHistoryIsAFindingAndUntouched(t *testi
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			k := userKey(t)
-			w.record(k, "foo.c.gone", w.now.Add(-time.Hour))
+			w.record(k, "c.gone", w.now.Add(-time.Hour))
 			w.connect(w.conn(k, w.acct, "gone", w.now.Add(-time.Hour).Unix()))
 			mutate(w, k)
 			p := w.build()
@@ -331,7 +330,7 @@ func TestSigningKeysStillPresentAndRemovedByTheFirstApply(t *testing.T) {
 
 	// before the first apply, against a file, the same key is one the apply removes, and is not a finding
 	in := Input{Account: w.acct, Now: w.now, Source: SourceListSetFile, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct}
+		Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct}
 	fp, err := Build(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +361,7 @@ func TestAdminUserUnderAKeyThatLeavesIsAnIssuerProblem(t *testing.T) {
 	w := newWorld(t)
 	w.claims.SigningKeys.Add(w.plain)
 	in := Input{Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.plain}
+		Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.plain}
 	p, err := Build(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -395,7 +394,7 @@ func TestStatusLines(t *testing.T) {
 func TestIncompleteScanIsAFinding(t *testing.T) {
 	w := newWorld(t)
 	p, err := Build(context.Background(), Input{Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(),
-		Claims: w.claims, Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued,
+		Claims: w.claims, Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin}, Issued: w.issued,
 		AdminUser: w.admin, AdminIssuer: w.acct, ScanIncomplete: "server s2 did not answer"})
 	if err != nil {
 		t.Fatal(err)
@@ -429,52 +428,24 @@ func TestPlanJSONIsStable(t *testing.T) {
 }
 
 func TestExpectedSigners(t *testing.T) {
-	got, err := ExpectedSigners([]string{"foo.c"}, map[string]string{"foo.c": "AHELD", "bar.c": "AOTHER"})
-	if err != nil || len(got) != 1 || got["foo.c"] != "AHELD" {
+	got, err := ExpectedSigners([]string{"c"}, map[string]string{"c": "AHELD", "bar.c": "AOTHER"})
+	if err != nil || len(got) != 1 || got["c"] != "AHELD" {
 		t.Errorf("held: %v %v", got, err)
 	}
-	if _, err = ExpectedSigners([]string{"foo.c"}, nil); err == nil || !strings.Contains(err.Error(), "key store holds no signing key for group foo.c") {
+	if _, err = ExpectedSigners([]string{"c"}, nil); err == nil || !strings.Contains(err.Error(), "key store holds no signing key for group c") {
 		t.Errorf("a group with no held key must be an error naming the key store: %v", err)
 	}
 }
 
-// Another range's owner-group key, held by the key store, is mash's and stays: it is not a signing-key line, not
-// counted, and a user it signed is neither a signing-key finding nor an issuer problem.
-func TestAnotherRangesHeldScopedKeyIsKept(t *testing.T) {
-	w := newWorld(t)
-	_, other := acctKey(t)
-	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = other, "bar.c"
-	w.claims.SigningKeys.AddScopedSigner(sc)
-	signed := w.exempt
-	w.connect(w.conn(signed, other, "svc", 1))
-	in := Input{Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped, "bar.c": other},
-		Exempt: []string{w.admin, signed}, Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct}
-	p, err := Build(context.Background(), in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(p.SigningKeys) != 0 || p.Unknown != 0 || p.Status != "reconciled: nothing to do" {
-		t.Errorf("signing keys %+v unknown %d status %q", p.SigningKeys, p.Unknown, p.Status)
-	}
-	if len(p.IssuerProblems) != 0 {
-		t.Errorf("a user signed by another range's kept key is flagged: %+v", p.IssuerProblems)
-	}
-	if strings.Contains(p.Text(), other) {
-		t.Errorf("text names the other range's key:\n%s", p.Text())
-	}
-}
-
-// A scoped key whose role names an owner group but that the key store does not hold is not mash's.
+// A scoped key that is not one of the list set's group keys is not mash's, whatever its role.
 func TestScopedKeyNotHeldIsNonMash(t *testing.T) {
 	w := newWorld(t)
 	_, stray := acctKey(t)
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = stray, "bar.c"
+	sc.Key, sc.Role = stray, "d"
 	w.claims.SigningKeys.AddScopedSigner(sc)
 	w.connect(w.conn(w.exempt, stray, "svc", 1))
-	p := w.build() // Held has foo.c only
+	p := w.build()
 	if len(p.SigningKeys) != 1 || p.SigningKeys[0].Key != stray || p.SigningKeys[0].State != StateStillPresent {
 		t.Fatalf("signing keys = %+v", p.SigningKeys)
 	}
@@ -491,7 +462,7 @@ func TestAdminKeyInUseNotInTheMarkerIsNeverRevoked(t *testing.T) {
 	w.connect(w.conn(rotated, w.acct, "admin", w.now.Add(-time.Hour).Unix()))
 	p, err := Build(context.Background(), Input{
 		Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin, w.exempt},
 		Servers: w.servers, Issued: w.issued, AdminUser: rotated, AdminIssuer: w.acct})
 	if err != nil {
 		t.Fatal(err)
@@ -530,7 +501,7 @@ func TestIncompleteScanWithholdsUntrackedRevocations(t *testing.T) {
 	legacy := userKey(t)
 	w.connect(w.conn(legacy, w.acct, "legacy", w.now.Add(-time.Hour).Unix()))
 	p, err := Build(context.Background(), Input{Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(),
-		Claims: w.claims, Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Claims: w.claims, Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin, w.exempt},
 		Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct, ScanIncomplete: "server s2 did not answer"})
 	if err != nil {
 		t.Fatal(err)
@@ -547,7 +518,7 @@ func TestIncompleteScanWithholdsUntrackedRevocations(t *testing.T) {
 func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) {
 	w := newWorld(t)
 	old := userKey(t)
-	w.record(old, "foo.c.gone", w.now.Add(-time.Hour))
+	w.record(old, "c.gone", w.now.Add(-time.Hour))
 	w.connect(w.conn(old, w.acct, "gone", w.now.Add(-time.Hour).Unix()))
 	p1 := w.build()
 	if !strings.HasPrefix(p1.PlanDigest, "sha256:") || len(p1.PlanDigest) != len("sha256:")+64 || p1.PlanDigest != p1.Digest() {
@@ -564,7 +535,7 @@ func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) 
 		t.Errorf("the digest moved with times or connections: %s %s", p1.PlanDigest, p2.PlanDigest)
 	}
 	other := userKey(t)
-	w.record(other, "foo.c.gone2", w.now.Add(-time.Hour))
+	w.record(other, "c.gone2", w.now.Add(-time.Hour))
 	w.connect(w.conn(other, w.acct, "gone2", w.now.Unix()))
 	if p3 := w.build(); p3.PlanDigest == p1.PlanDigest {
 		t.Error("a second revocation did not change the digest")
@@ -579,25 +550,21 @@ func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) 
 	}
 }
 
-// A same-range group the incoming list set drops: its held key is removed by the apply (Issuer.Sign rebuilds this
-// range's keys from the list set), so an exempt user it signed is an issuer problem, in a file preview and in force.
-// Another range's held key stays, so a user it signed is not.
-func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
+// A group the incoming list set drops: its key is removed by the apply (Issuer.Sign rebuilds the keys from the list
+// set), so an exempt user it signed is an issuer problem, in a file preview and in force.
+func TestGroupTheListSetDropsIsNotKept(t *testing.T) {
 	for _, src := range []Source{SourceListSetFile, SourceInForce} {
 		t.Run(string(src), func(t *testing.T) {
 			w := newWorld(t)
 			_, dropped := acctKey(t)
-			_, other := acctKey(t)
-			for k, role := range map[string]string{dropped: "foo.old", other: "bar.c"} {
-				sc := jwt.NewUserScope()
-				sc.Key, sc.Role = k, role
-				w.claims.SigningKeys.AddScopedSigner(sc)
-			}
-			svc, svc2 := userKey(t), userKey(t)
-			w.connect(w.conn(svc, dropped, "svc", 1), w.conn(svc2, other, "svc2", 1))
+			sc := jwt.NewUserScope()
+			sc.Key, sc.Role = dropped, "old"
+			w.claims.SigningKeys.AddScopedSigner(sc)
+			svc := userKey(t)
+			w.connect(w.conn(svc, dropped, "svc", 1))
 			p, err := Build(context.Background(), Input{Account: w.acct, Now: w.now, Source: src, Generation: 1, ListSet: testSet(), Claims: w.claims,
-				Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped, "foo.old": dropped, "bar.c": other},
-				Exempt: []string{w.admin, svc, svc2}, Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct})
+				Signers: map[string]string{"c": w.scoped},
+				Exempt:  []string{w.admin, svc}, Servers: w.servers, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -608,17 +575,18 @@ func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
 	}
 }
 
-// fakeResolver serves each sender from a table keyed by the sender's canonical address.
+// fakeResolver serves each sender from a table keyed by the sender's address owner.name. Build asks for the legacy
+// identity of the address (the list set names no agent token), so the key is the identity's owner and name.
 type fakeResolver struct {
 	byAddr map[string]sap.EndpointIdentity // the serving identity
 	errs   map[string]error
 }
 
 func (f fakeResolver) ServingIdentity(_ context.Context, id sap.EndpointIdentity) (sap.EndpointIdentity, bool, bool, error) {
-	if err := f.errs[id.String()]; err != nil {
+	if err := f.errs[id.Owner+"."+id.Name]; err != nil {
 		return sap.EndpointIdentity{}, false, false, err
 	}
-	t, ok := f.byAddr[id.String()]
+	t, ok := f.byAddr[id.Owner+"."+id.Name]
 	return t, t.IsLegacy(), ok, nil
 }
 
@@ -636,7 +604,7 @@ func (w *world) buildWith(rs Resolver) Plan {
 	w.t.Helper()
 	p, err := Build(context.Background(), Input{
 		Account: w.acct, Now: w.now, Source: SourceInForce, Generation: 1, ListSet: testSet(), Claims: w.claims,
-		Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Exempt: []string{w.admin, w.exempt},
+		Signers: map[string]string{"c": w.scoped}, Exempt: []string{w.admin, w.exempt},
 		Servers: w.servers, Issued: w.issued, Resolver: rs, AdminUser: w.admin, AdminIssuer: w.acct})
 	if err != nil {
 		w.t.Fatal(err)
@@ -652,12 +620,12 @@ func (w *world) recordOwned(key, address, owner string) {
 func TestLegacyRecordServingASenderIsNotRevoked(t *testing.T) {
 	w := newWorld(t)
 	mine, otherOwner := userKey(t), userKey(t)
-	w.recordOwned(mine, "core", "c")        // made by `mashctl add core`, owner c: serves foo.c.core
+	w.recordOwned(mine, "core", "c")        // made by `mashctl add core`, owner c: serves c.core
 	w.recordOwned(otherOwner, "core", "zz") // the same name under another owner, no sender
-	rs := fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": legacyID(t, "c", "core")}}
+	rs := fakeResolver{byAddr: map[string]sap.EndpointIdentity{"c.core": legacyID(t, "c", "core")}}
 	p := w.buildWith(rs)
 	if r, ok := revocation(p, mine); ok {
-		t.Errorf("the legacy record that serves foo.c.core was revoked: %+v", r)
+		t.Errorf("the legacy record that serves c.core was revoked: %+v", r)
 	}
 	if f, ok := finding(p, mine); ok {
 		t.Errorf("unexpected finding: %+v", f)
@@ -667,17 +635,25 @@ func TestLegacyRecordServingASenderIsNotRevoked(t *testing.T) {
 	}
 }
 
+// The list set names no agent token, so a new-form record (the directory name agent_owner_name) of a listed owner and
+// name is that sender's whatever its agent token; the same name under another owner, or another name, is not.
 func TestNewFormRecordServingASenderIsNotRevoked(t *testing.T) {
 	w := newWorld(t)
-	k := userKey(t)
-	w.recordOwned(k, "foo_c_core", "c") // the directory name of a new-form record is agent_owner_name
-	id, err := sap.New("foo", "c", "core")
-	if err != nil {
-		t.Fatal(err)
+	k1, k2, otherOwner, otherName := userKey(t), userKey(t), userKey(t), userKey(t)
+	w.recordOwned(k1, "foo_c_core", "c")
+	w.recordOwned(k2, "claude_c_core", "c")
+	w.recordOwned(otherOwner, "foo_zz_core", "zz")
+	w.recordOwned(otherName, "foo_c_other", "c")
+	p := w.buildWith(fakeResolver{})
+	for _, k := range []string{k1, k2} {
+		if r, ok := revocation(p, k); ok {
+			t.Errorf("the new-form record that serves c.core was revoked: %+v", r)
+		}
 	}
-	p := w.buildWith(fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": id}})
-	if r, ok := revocation(p, k); ok {
-		t.Errorf("the new-form record that serves foo.c.core was revoked: %+v", r)
+	for name, k := range map[string]string{"another owner": otherOwner, "another name": otherName} {
+		if r, ok := revocation(p, k); !ok || r.Reason != ReasonRecorded {
+			t.Errorf("%s: the record is revoked as before: %+v %v", name, r, ok)
+		}
 	}
 }
 
@@ -685,16 +661,16 @@ func TestRecordOfASenderWithNoDirectoryRecordIsAFindingNotARevoke(t *testing.T) 
 	w := newWorld(t)
 	legacy, newForm, otherOwner := userKey(t), userKey(t), userKey(t)
 	w.recordOwned(legacy, "core", "c")        // after `mashctl deprovision --no-revoke` the directory record is gone
-	w.recordOwned(newForm, "foo_c_core", "c") // the new-form directory name
+	w.recordOwned(newForm, "foo_c_core", "c") // a new-form record is matched by owner and name, never revoked
 	w.recordOwned(otherOwner, "core", "zz")   // the same name under another owner: no sender's
 	p := w.buildWith(fakeResolver{})          // found=false for every sender
+	f, ok := finding(p, legacy)
+	if !ok || !strings.Contains(f.Detail, "no directory record serves it") || !strings.Contains(f.Detail, "c.core") {
+		t.Errorf("legacy: finding = %+v %v", f, ok)
+	}
 	for name, k := range map[string]string{"legacy": legacy, "new-form": newForm} {
 		if r, ok := revocation(p, k); ok {
 			t.Errorf("%s: the record of a listed sender with no directory record was revoked: %+v", name, r)
-		}
-		f, ok := finding(p, k)
-		if !ok || !strings.Contains(f.Detail, "no directory record serves it") || !strings.Contains(f.Detail, "foo.c.core") {
-			t.Errorf("%s: finding = %+v %v", name, f, ok)
 		}
 	}
 	if r, ok := revocation(p, otherOwner); !ok || r.Reason != ReasonRecorded {
@@ -706,7 +682,7 @@ func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
 	w := newWorld(t)
 	k := userKey(t)
 	w.recordOwned(k, "core", "c")
-	p := w.buildWith(fakeResolver{errs: map[string]error{"foo.c.core": errors.New("directory unreadable")}})
+	p := w.buildWith(fakeResolver{errs: map[string]error{"c.core": errors.New("directory unreadable")}})
 	if _, ok := revocation(p, k); ok {
 		t.Fatal("a record whose sender could not be resolved was revoked")
 	}
@@ -719,9 +695,9 @@ func TestResolverErrorIsAFindingNotARevoke(t *testing.T) {
 func TestResolverErrorDoubtsOnlyTheSendersOwnRecords(t *testing.T) {
 	w := newWorld(t)
 	other, same := userKey(t), userKey(t)
-	w.recordOwned(other, "core", "zed") // foo.c.core is owned by c: the owners rule it out
+	w.recordOwned(other, "core", "zed") // c.core is owned by c: the owners rule it out
 	w.recordOwned(same, "core", "c")
-	p := w.buildWith(fakeResolver{errs: map[string]error{"foo.c.core": errors.New("directory unreadable")}})
+	p := w.buildWith(fakeResolver{errs: map[string]error{"c.core": errors.New("directory unreadable")}})
 	if r, ok := revocation(p, other); !ok || r.Reason != ReasonRecorded {
 		t.Errorf("a record under another owner is revoked despite the resolver error: %+v %v", r, ok)
 	}
@@ -751,7 +727,7 @@ func TestTwoSendersOnOneLegacyRecordIsInTheListSetWithAFinding(t *testing.T) {
 	k := userKey(t)
 	w.recordOwned(k, "core", "c")
 	both := legacyID(t, "c", "core")
-	p := w.buildWith(fakeResolver{byAddr: map[string]sap.EndpointIdentity{"foo.c.core": both, "foo.c.docs": both}})
+	p := w.buildWith(fakeResolver{byAddr: map[string]sap.EndpointIdentity{"c.core": both, "c.docs": both}})
 	if _, ok := revocation(p, k); ok {
 		t.Error("a record that serves two senders was revoked")
 	}

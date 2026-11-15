@@ -30,16 +30,15 @@ func sw(group string, mail, prompt, status, hb listset.Switch) []listset.SwitchE
 	}
 }
 
-// testSet: r.o.a reaches r.p.x by allow and is denied r.o.c; r.p.x reaches r.o.a and r.o.b.
+// testSet: o.a reaches p.x by allow and is denied o.c; p.x reaches o.a and o.b. The callers are endpoints of agent r.
 func testSet() listset.ListSet {
 	return listset.ListSet{
-		Range:    "r",
-		Switches: append(sw("r.o", listset.Shared, listset.Closed, listset.Closed, listset.Shared), sw("r.p", listset.Closed, listset.Closed, listset.Closed, listset.Closed)...),
+		Switches: append(sw("o", listset.Shared, listset.Closed, listset.Closed, listset.Shared), sw("p", listset.Closed, listset.Closed, listset.Closed, listset.Closed)...),
 		Senders: []listset.SenderLists{
-			{Sender: "r.o.a", Allow: []string{"r.p.x"}, Deny: []string{"r.o.c"}},
-			{Sender: "r.o.b"},
-			{Sender: "r.o.c", Allow: []string{"r.o.a"}},
-			{Sender: "r.p.x", Allow: []string{"r.o.a", "r.o.b"}},
+			{Sender: "o.a", Allow: []string{"p.x"}, Deny: []string{"o.c"}},
+			{Sender: "o.b"},
+			{Sender: "o.c", Allow: []string{"o.a"}},
+			{Sender: "p.x", Allow: []string{"o.a", "o.b"}},
 		},
 	}
 }
@@ -116,13 +115,13 @@ func newRig(t *testing.T) *rig {
 		callers: map[string]caller{},
 		now:     time.Now(),
 	}
-	for _, a := range []string{"r.o.a", "r.o.b", "r.o.c", "r.p.x", "q.o.z"} {
+	for _, a := range []string{"r.o.a", "r.o.b", "r.o.c", "r.p.x", "o.z"} {
 		c := newCaller(t, e.Account, a)
 		r.callers[a] = c
 		r.users[c.id.User] = a
 	}
 	stop, err := Mount(r.nc, Options{
-		Range: "r", Store: r.store, Now: func() time.Time { return r.now },
+		Store: r.store, Now: func() time.Time { return r.now },
 		ResolveAddress: func(_ context.Context, pub string) (string, bool, error) {
 			a, ok := r.users[pub]
 			return a, ok, nil
@@ -138,11 +137,11 @@ func newRig(t *testing.T) *rig {
 
 func (r *rig) signed(t *testing.T, c caller, payload []byte) *nats.Msg {
 	t.Helper()
-	h, err := c.id.Sign(Subject("r"), payload, "x", r.now, "")
+	h, err := c.id.Sign(Subject(), payload, "x", r.now, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := nats.NewMsg(Subject("r"))
+	m := nats.NewMsg(Subject())
 	m.Data = payload
 	m.Header.Set(sap.HeaderName, h.Encode())
 	return m
@@ -170,8 +169,8 @@ func errorOf(b []byte) string {
 }
 
 func TestSubject(t *testing.T) {
-	if Subject("r") != "agents.policy.r" {
-		t.Fatal(Subject("r"))
+	if Subject() != "mash.policy" {
+		t.Fatal(Subject())
 	}
 }
 
@@ -182,24 +181,24 @@ func TestShowAnswersOnlyTheCallersOwnReach(t *testing.T) {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatalf("%v: %s", err, raw)
 	}
-	if v.Describes != "list_set" || v.Sender != "r.o.a" || v.Generation != 3 || v.State != "applied" || !v.InForce || v.Notice != "" {
+	if v.Describes != "list_set" || v.Sender != "o.a" || v.Generation != 3 || v.State != "applied" || !v.InForce || v.Notice != "" {
 		t.Fatalf("header: %+v", v)
 	}
 	got := map[listset.Verb][]string{}
 	for _, vr := range v.Reach {
 		got[vr.Verb] = vr.Receivers
 	}
-	if strings.Join(got[listset.Mail], ",") != "r.o.a,r.o.b,r.p.x" {
+	if strings.Join(got[listset.Mail], ",") != "o.a,o.b,p.x" {
 		t.Fatalf("mail reach %v", got[listset.Mail])
 	}
 	if v.RawClientLimit != listset.RawClientLimit || len(v.OpenSubjects.Publish) == 0 {
 		t.Fatalf("limit/open: %+v", v)
 	}
-	if !contains(v.OpenSubjects.Publish, "agents.policy.r") {
+	if !contains(v.OpenSubjects.Publish, "mash.policy") {
 		t.Fatalf("open subjects lack the responder: %v", v.OpenSubjects.Publish)
 	}
-	// The answer never names another sender: r.o.c is denied to the caller, and nobody else's lists appear.
-	for _, other := range []string{"r.o.c"} {
+	// The answer never names another sender: o.c is denied to the caller, and nobody else's lists appear.
+	for _, other := range []string{"o.c"} {
 		if strings.Contains(string(raw), other) {
 			t.Errorf("answer to r.o.a names %s: %s", other, raw)
 		}
@@ -209,13 +208,13 @@ func TestShowAnswersOnlyTheCallersOwnReach(t *testing.T) {
 			t.Errorf("answer carries %s: %s", key, raw)
 		}
 	}
-	// r.p.x's answer holds its own reach (r.o.a, r.o.b) and not r.o.c, which only r.o.a's lists mention.
+	// p.x's answer holds its own reach (o.a, o.b) and not o.c, which only o.a's lists mention.
 	raw = r.ask(t, "r.p.x", Request{Op: OpShow})
-	if strings.Contains(string(raw), "r.o.c") || !strings.Contains(string(raw), `"r.p.x"`) {
-		t.Fatalf("r.p.x answer: %s", raw)
+	if strings.Contains(string(raw), "o.c") || !strings.Contains(string(raw), `"p.x"`) {
+		t.Fatalf("p.x answer: %s", raw)
 	}
-	if strings.Contains(string(raw), `"r.o.a"`) == false {
-		t.Fatalf("r.p.x reaches r.o.a by its own allow list: %s", raw)
+	if strings.Contains(string(raw), `"o.a"`) == false {
+		t.Fatalf("p.x reaches o.a by its own allow list: %s", raw)
 	}
 }
 
@@ -231,7 +230,7 @@ func contains(s []string, x string) bool {
 func TestShowStableJSONAndNonNilSlices(t *testing.T) {
 	r := newRig(t)
 	raw := r.ask(t, "r.o.b", Request{Op: OpShow})
-	for _, want := range []string{`"describes":"list_set"`, `"generation":3`, `"state":"applied"`, `"in_force":true`, `"sender":"r.o.b"`, `"reach":[`, `"open_subjects":{"publish":[`, `"raw_client_limit":`} {
+	for _, want := range []string{`"describes":"list_set"`, `"generation":3`, `"state":"applied"`, `"in_force":true`, `"sender":"o.b"`, `"reach":[`, `"open_subjects":{"publish":[`, `"raw_client_limit":`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("answer lacks %s: %s", want, raw)
 		}
@@ -265,7 +264,7 @@ func TestShowLabelsTheReachWithTheGenerationInForce(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	var e ExplainReply
-	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "r.o.c"}), &e); err != nil {
+	if err := json.Unmarshal(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "o.c"}), &e); err != nil {
 		t.Fatal(err)
 	}
 	if e.Generation != 2 || e.Latest == nil || *e.Latest != (Latest{3, "refused"}) {
@@ -282,22 +281,19 @@ func TestShowLabelsTheReachWithTheGenerationInForce(t *testing.T) {
 func TestExplainReceiver(t *testing.T) {
 	r := newRig(t)
 	var e ExplainReply
-	raw := r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "r.o.c"})
+	raw := r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "o.c"})
 	if err := json.Unmarshal(raw, &e); err != nil {
 		t.Fatal(err)
 	}
-	if e.Sender != "r.o.a" || e.Receiver != "r.o.c" || e.Generation != 3 || e.State != "applied" || len(e.Verbs) != 4 {
+	if e.Sender != "o.a" || e.Receiver != "o.c" || e.Generation != 3 || e.State != "applied" || len(e.Verbs) != 4 {
 		t.Fatalf("%+v", e)
 	}
 	if e.Verbs[0].Verb != listset.Mail || e.Verbs[0].Allowed || e.Verbs[0].Reason != listset.ReasonDenyTag {
 		t.Fatalf("mail verb: %+v", e.Verbs[0])
 	}
 	// The explanation is of the caller's own entry: asking about another sender is not possible, only a receiver.
-	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "r.o"})); msg == "" {
+	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "o"})); msg == "" {
 		t.Error("an invalid receiver was answered")
-	}
-	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "q.o.z"})); msg == "" {
-		t.Error("a receiver outside the range was answered")
 	}
 }
 
@@ -307,13 +303,13 @@ func TestUnsignedClaimedAndForgedAreRefused(t *testing.T) {
 	c := r.callers["r.o.a"]
 
 	// absent
-	m := nats.NewMsg(Subject("r"))
+	m := nats.NewMsg(Subject())
 	m.Data = body
 	if got := errorOf(r.do(t, m)); got != ErrSignatureRequired {
 		t.Errorf("unsigned: %q", got)
 	}
 	// claimed: a header with no signature
-	m = nats.NewMsg(Subject("r"))
+	m = nats.NewMsg(Subject())
 	m.Data = body
 	m.Header.Set(sap.HeaderName, sap.SenderHeader{V: 1, Account: c.id.Account, User: c.id.User}.Encode())
 	if got := errorOf(r.do(t, m)); got != ErrSignatureRequired {
@@ -327,22 +323,22 @@ func TestUnsignedClaimedAndForgedAreRefused(t *testing.T) {
 	}
 	// signed for another subject
 	h, _ := c.id.Sign("agents.policy.other", body, "x", r.now, "")
-	m = nats.NewMsg(Subject("r"))
+	m = nats.NewMsg(Subject())
 	m.Data = body
 	m.Header.Set(sap.HeaderName, h.Encode())
 	if got := errorOf(r.do(t, m)); got != ErrSignatureRequired {
 		t.Errorf("wrong subject: %q", got)
 	}
 	// stale
-	h, _ = c.id.Sign(Subject("r"), body, "x", r.now.Add(-time.Hour), "")
-	m = nats.NewMsg(Subject("r"))
+	h, _ = c.id.Sign(Subject(), body, "x", r.now.Add(-time.Hour), "")
+	m = nats.NewMsg(Subject())
 	m.Data = body
 	m.Header.Set(sap.HeaderName, h.Encode())
 	if got := errorOf(r.do(t, m)); got != ErrSignatureRequired {
 		t.Errorf("stale: %q", got)
 	}
 	// The refusals say nothing else.
-	m = nats.NewMsg(Subject("r"))
+	m = nats.NewMsg(Subject())
 	m.Data = body
 	if string(r.do(t, m)) != `{"error":"signature required"}` {
 		t.Error("the refusal carries more than the error")
@@ -367,14 +363,14 @@ func TestKeyWithNoAddressIsRefused(t *testing.T) {
 	if got := errorOf(r.do(t, r.signed(t, stranger, b))); !strings.Contains(got, "names no endpoint") {
 		t.Errorf("unknown key: %q", got)
 	}
-	// A key that maps to an address outside the range.
-	if got := errorOf(r.ask(t, "q.o.z", Request{Op: OpShow})); !strings.Contains(got, "not an endpoint of range") {
-		t.Errorf("outside the range: %q", got)
+	// A key that maps to an address that is not three-part.
+	if got := errorOf(r.ask(t, "o.z", Request{Op: OpShow})); !strings.Contains(got, "not a three-part endpoint address") {
+		t.Errorf("two-part address: %q", got)
 	}
 	// An address is never taken from the body.
-	b = []byte(`{"op":"show","sender":"r.o.a"}`)
+	b = []byte(`{"op":"show","sender":"o.a"}`)
 	var v ShowReply
-	if err := json.Unmarshal(r.do(t, r.signed(t, r.callers["r.o.b"], b)), &v); err != nil || v.Sender != "r.o.b" {
+	if err := json.Unmarshal(r.do(t, r.signed(t, r.callers["r.o.b"], b)), &v); err != nil || v.Sender != "o.b" {
 		t.Errorf("sender = %q (%v)", v.Sender, err)
 	}
 }
@@ -387,10 +383,10 @@ func TestNothingInForce(t *testing.T) {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatal(err)
 	}
-	if v.InForce || v.Notice != "no list set in force: owner line only" || v.Sender != "r.o.a" || v.Reach == nil {
+	if v.InForce || v.Notice != "no list set in force: owner line only" || v.Sender != "o.a" || v.Reach == nil {
 		t.Fatalf("%s", raw)
 	}
-	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "r.o.b"})); !strings.Contains(msg, "no list set in force") {
+	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "o.b"})); !strings.Contains(msg, "no list set in force") {
 		t.Errorf("explain with nothing in force: %q", msg)
 	}
 }
@@ -411,9 +407,8 @@ func TestMountRefusesIncompleteOptions(t *testing.T) {
 	nc := e.Conn(t, e.AdminCreds)
 	res := func(context.Context, string) (string, bool, error) { return "", false, nil }
 	for name, o := range map[string]Options{
-		"no range":    {Store: &fakeStore{}, ResolveAddress: res},
-		"no store":    {Range: "r", ResolveAddress: res},
-		"no resolver": {Range: "r", Store: &fakeStore{}},
+		"no store":    {ResolveAddress: res},
+		"no resolver": {Store: &fakeStore{}},
 	} {
 		if _, err := Mount(nc, o); err == nil {
 			t.Errorf("%s: mounted", name)

@@ -23,12 +23,11 @@ func listSetDir(t *testing.T) (string, string) {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(listset.ListSet{
-		Range: "foo",
 		Switches: []listset.SwitchEntry{
-			{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
-			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed},
+			{Group: "c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "c", Verb: listset.Prompt, Switch: listset.Closed},
+			{Group: "c", Verb: listset.Status, Switch: listset.Closed}, {Group: "c", Verb: listset.Heartbeat, Switch: listset.Closed},
 		},
-		Senders: []listset.SenderLists{{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}}, {Sender: "foo.c.lead"}},
+		Senders: []listset.SenderLists{{Sender: "c.core", Allow: []string{"c.lead"}}, {Sender: "c.lead"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +134,7 @@ func TestFileListSetIsCheckedAgainOnEveryRequest(t *testing.T) {
 	fx := newFixture(t)
 	fx.is.ListSet = &FileListSet{Path: p}
 	ctx := context.Background()
-	if _, err := fx.is.Issue(ctx, fx.req(t, "foo.c.core", time.Minute), store.PurposeIssue); err != nil {
+	if _, err := fx.is.Issue(ctx, fx.req(t, "c.core", time.Minute), store.PurposeIssue); err != nil {
 		t.Fatalf("a good file: %v", err)
 	}
 	signed := len(fx.rec.recs)
@@ -143,7 +142,7 @@ func TestFileListSetIsCheckedAgainOnEveryRequest(t *testing.T) {
 	refused := func(what string) {
 		t.Helper()
 		fx.logs.Reset()
-		_, err := fx.is.Issue(ctx, fx.req(t, "foo.c.core", time.Minute), store.PurposeIssue)
+		_, err := fx.is.Issue(ctx, fx.req(t, "c.core", time.Minute), store.PurposeIssue)
 		if code(err) != CodeNoListSet {
 			t.Fatalf("%s: %v", what, err)
 		}
@@ -162,7 +161,7 @@ func TestFileListSetIsCheckedAgainOnEveryRequest(t *testing.T) {
 	if err := os.Chmod(p, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.is.Issue(ctx, fx.req(t, "foo.c.core", time.Minute), store.PurposeIssue); err != nil {
+	if _, err := fx.is.Issue(ctx, fx.req(t, "c.core", time.Minute), store.PurposeIssue); err != nil {
 		t.Fatalf("restored: %v", err)
 	}
 	signed = len(fx.rec.recs)

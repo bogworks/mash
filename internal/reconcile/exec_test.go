@@ -97,7 +97,7 @@ func newFirst(t *testing.T) *first {
 	t.Helper()
 	kp, pub := acctKey(t)
 	_, scoped := acctKey(t)
-	f := &first{t: t, acct: kp, acctPub: pub, signers: map[string]string{"foo.c": scoped}, ls: testSet(), now: time.Now().UTC()}
+	f := &first{t: t, acct: kp, acctPub: pub, signers: map[string]string{"c": scoped}, ls: testSet(), now: time.Now().UTC()}
 	rec, c, err := listset.Accept(listset.Record{}, f.ls, []byte("first"))
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestExecuteRevokesPushesCommitsAndMarks(t *testing.T) {
 	if rec, _ := f.ledger.InForce(); rec != f.rec {
 		t.Errorf("the record in force changed: %+v", rec)
 	}
-	if ls, ok, _ := f.ledger.InForceListSet(); !ok || ls.Range != "foo" {
+	if ls, ok, _ := f.ledger.InForceListSet(); !ok || len(ls.Senders) == 0 {
 		t.Errorf("the list set in force changed: %v %v", ls, ok)
 	}
 	// only the recorded key has a record to mark
@@ -491,9 +491,9 @@ func TestExecuteRefusesAPlanSeenForAnotherGenerationAccountOrSource(t *testing.T
 	}
 }
 
-// TestExecuteKeepsAnotherRangesHeldKey: an account whose JWT also carries another range's held scoped key still passes
-// the generation checks and the gate, which count that key as kept; without it declared the exact signer count fails.
-func TestExecuteKeepsAnotherRangesHeldKey(t *testing.T) {
+// TestExecuteRefusesAnExtraSigningKey: an account whose JWT in force also carries a scoped key that is not one of the
+// list set's group keys is not read as the generation in force: the exact signer count fails and nothing is pushed.
+func TestExecuteRefusesAnExtraSigningKey(t *testing.T) {
 	f := newFirst(t)
 	_, other := acctKey(t)
 	claims, err := jwt.DecodeAccountClaims(f.jwt)
@@ -501,7 +501,7 @@ func TestExecuteKeepsAnotherRangesHeldKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = other, "bar.c"
+	sc.Key, sc.Role = other, "d"
 	claims.SigningKeys.AddScopedSigner(sc)
 	if f.jwt, err = claims.Encode(f.acct); err != nil {
 		t.Fatal(err)
@@ -513,21 +513,9 @@ func TestExecuteKeepsAnotherRangesHeldKey(t *testing.T) {
 	in := ExecInput{Build: func(context.Context) (Plan, error) { return p, nil }, Seen: &p, Ledger: f.ledger, Cluster: f.cluster, Account: f.acctPub, Inventory: 2,
 		Signers: f.signers, Signer: f.signer, Marker: f.marker, Now: func() time.Time { return f.now }}
 	if _, err := Execute(context.Background(), in); err == nil {
-		t.Fatal("another range's key not declared: the exact signer count should fail")
+		t.Fatal("an extra signing key: the exact signer count should fail")
 	}
-	in.Held = map[string]string{"foo.c": f.signers["foo.c"], "bar.c": other}
-	res, err := Execute(context.Background(), in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Revoked) != 1 || res.Revoked[0] != k {
-		t.Errorf("revoked %v", res.Revoked)
-	}
-	got, err := jwt.DecodeAccountClaims(f.inForceJWT())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got.SigningKeys.GetScope(other); !ok {
-		t.Error("the other range's key left the committed JWT")
+	if f.cluster.pushes != 0 {
+		t.Error("a push was made")
 	}
 }

@@ -18,27 +18,26 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 		entry  string // part of the Problem.Entry that must name it
 		reason string
 	}{
-		{"wildcard owner-part star", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "foo.c.*") }, `"foo.c.*"`, "wildcard"},
+		{"wildcard owner-part star", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "c.*") }, `"c.*"`, "wildcard"},
 		{"wildcard tail", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "foo.>") }, `"foo.>"`, "wildcard"},
 		{"wildcard in a deny", func(l *ListSet) { l.Senders[0].Deny = append(l.Senders[0].Deny, "foo.*.sdk") }, `"foo.*.sdk"`, "wildcard"},
-		{"wildcard sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.*"}) }, `sender "foo.c.*"`, "wildcard"},
+		{"wildcard sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "c.*"}) }, `sender "c.*"`, "wildcard"},
 		{"wildcard group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.*", Mail, Shared}) }, `switch "foo.*"`, "wildcard"},
-		{"other range", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "range part"},
-		{"other range sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "range part"},
-		{"other range group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "range part"},
-		{"grammar failing part", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.C.lead") }, `"foo.C.lead"`, "lower-case"},
-		{"grammar failing name", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c.-lead") }, `"foo.c.-lead"`, "letter"},
-		{"two parts", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c") }, `"foo.c"`, "three"},
-		{"switch for one sender", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.c.core", Mail, Shared}) }, `switch "foo.c.core"`, "single sender"},
-		{"duplicate group and verb, same value", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.c", Mail, Closed}) }, `switch "foo.c" "mail"`, "twice"},
-		{"duplicate group and verb, other value", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.c", Status, Closed}) }, `switch "foo.c" "status"`, "twice"},
-		{"missing verb", func(l *ListSet) { l.Switches = l.Switches[:3] }, `group "foo.c" "heartbeat"`, "no switch"},
+		{"three-part allow (the old form with a range)", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "exactly two"},
+		{"three-part sender (the old form with a range)", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "exactly two"},
+		{"two-part group (a single sender)", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "single sender"},
+		{"grammar failing part", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "C.lead") }, `"C.lead"`, "lower-case"},
+		{"grammar failing name", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "c.-lead") }, `"c.-lead"`, "letter"},
+		{"one part", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "c") }, `"c"`, "exactly two"},
+		{"switch for one sender", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"c.core", Mail, Shared}) }, `switch "c.core"`, "single sender"},
+		{"duplicate group and verb, same value", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"c", Mail, Closed}) }, `switch "c" "mail"`, "twice"},
+		{"duplicate group and verb, other value", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"c", Status, Closed}) }, `switch "c" "status"`, "twice"},
+		{"missing verb", func(l *ListSet) { l.Switches = l.Switches[:3] }, `group "c" "heartbeat"`, "no switch"},
 		{"unknown verb", func(l *ListSet) { l.Switches[0].Verb = "post" }, `"post"`, "unknown verb"},
 		{"unknown switch", func(l *ListSet) { l.Switches[0].Switch = "open" }, `"mail"`, "unknown switch"},
-		{"sender twice", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.lead"}) }, `sender "foo.c.lead"`, "twice"},
-		{"allow twice", func(l *ListSet) { l.Senders[0].Allow = []string{"foo.c.lead", "foo.c.lead"} }, `allow of "foo.c.core"`, "twice"},
-		{"allow and deny", func(l *ListSet) { l.Senders[0].Deny = []string{"foo.c.lead"} }, `deny of "foo.c.core"`, "allow list"},
-		{"bad range", func(l *ListSet) { l.Range = "" }, `range ""`, "empty"},
+		{"sender twice", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "c.lead"}) }, `sender "c.lead"`, "twice"},
+		{"allow twice", func(l *ListSet) { l.Senders[0].Allow = []string{"c.lead", "c.lead"} }, `allow of "c.core"`, "twice"},
+		{"allow and deny", func(l *ListSet) { l.Senders[0].Deny = []string{"c.lead"} }, `deny of "c.core"`, "allow list"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,10 +63,10 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 
 func TestAT002_AllNamedInOneError(t *testing.T) {
 	ls := at001()
-	ls.Senders[0].Allow = append(ls.Senders[0].Allow, "foo.c.*", "foo.>", "bar.c.lead", "foo.C.x")
+	ls.Senders[0].Allow = append(ls.Senders[0].Allow, "c.*", "foo.>", "bar.c.lead", "foo.C.x")
 	ls.Switches = append(ls.Switches,
-		SwitchEntry{"foo.c.core", Mail, Shared}, // one sender only
-		SwitchEntry{"foo.c", Mail, Closed},      // duplicate
+		SwitchEntry{"c.core", Mail, Shared}, // one sender only
+		SwitchEntry{"c", Mail, Closed},      // duplicate
 	)
 	ls.Switches = slices.DeleteFunc(ls.Switches, func(e SwitchEntry) bool { return e.Verb == Heartbeat }) // missing verb
 	c, err := Compile(ls)
@@ -82,7 +81,7 @@ func TestAT002_AllNamedInOneError(t *testing.T) {
 		t.Fatalf("want 7 problems, got %d: %v", len(ve.Problems), ve)
 	}
 	msg := err.Error()
-	for _, want := range []string{`"foo.c.*"`, `"foo.>"`, `"bar.c.lead"`, `"foo.C.x"`, `switch "foo.c.core"`, `switch "foo.c" "mail"`, `group "foo.c" "heartbeat"`} {
+	for _, want := range []string{`"c.*"`, `"foo.>"`, `"bar.c.lead"`, `"foo.C.x"`, `switch "c.core"`, `switch "c" "mail"`, `group "c" "heartbeat"`} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error does not name %s: %s", want, msg)
 		}
@@ -94,13 +93,13 @@ func TestDenyRule(t *testing.T) {
 	for name, mk := range map[string]func() ListSet{
 		"no shared verb": func() ListSet {
 			ls := at001()
-			ls.Switches = switches("foo.c", Closed, Closed, Closed, Closed)
-			ls.Senders[1].Deny = []string{"foo.c.sdk"}
+			ls.Switches = switches("c", Closed, Closed, Closed, Closed)
+			ls.Senders[1].Deny = []string{"c.sdk"}
 			return ls
 		},
 		"outside the owner group": func() ListSet {
 			ls := at003Deny()
-			ls.Senders[1].Deny = []string{"foo.d.solo"}
+			ls.Senders[1].Deny = []string{"d.solo"}
 			return ls
 		},
 	} {
@@ -125,7 +124,7 @@ func TestCompileDoesNotModifyInput(t *testing.T) {
 }
 
 func flatten(ls ListSet) []string {
-	out := []string{ls.Range}
+	var out []string
 	for _, s := range ls.Switches {
 		out = append(out, s.Group, string(s.Verb), string(s.Switch))
 	}
@@ -208,7 +207,7 @@ func TestAT004_ZeroTags(t *testing.T) {
 	for i := range c.Users {
 		c.Users[i].Tags = nil
 	}
-	got, err := effective(ls, c, "foo.c.core")
+	got, err := effective(ls, c, "c.core")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +216,7 @@ func TestAT004_ZeroTags(t *testing.T) {
 			t.Errorf("zero tags: %s reaches %v", v, got[v])
 		}
 	}
-	if want := []string{"foo.c.core", "foo.c.lead", "foo.c.sdk"}; !slices.Equal(got[Status], want) {
+	if want := []string{"c.core", "c.lead", "c.sdk"}; !slices.Equal(got[Status], want) {
 		t.Errorf("zero tags: status reaches %v, want %v", got[Status], want)
 	}
 
@@ -229,7 +228,7 @@ func TestAT004_ZeroTags(t *testing.T) {
 	for i := range c.Users {
 		c.Users[i].Tags = nil
 	}
-	if _, err := effective(ls, c, "foo.c.lead"); err == nil {
+	if _, err := effective(ls, c, "c.lead"); err == nil {
 		t.Error("a user of a deny key with no tags must not connect")
 	}
 }
@@ -242,7 +241,7 @@ func TestEmptyAllowIsNoTag(t *testing.T) {
 	}
 	for _, u := range c.Users {
 		switch u.Sender {
-		case "foo.c.core":
+		case "c.core":
 			if !slices.Equal(u.Tags, []string{"allow:c.lead"}) {
 				t.Errorf("core tags %v", u.Tags)
 			}
@@ -282,87 +281,87 @@ func TestMutationsAreRefused(t *testing.T) {
 	}
 	muts := []mut{
 		{"only tag-driven allow lines", at001, func(c *Compiled) {
-			p := &tpl(c, "foo.c").Permissions
+			p := &tpl(c, "c").Permissions
 			p.Pub.Allow = slices.DeleteFunc(p.Pub.Allow, tagFree)
 			p.Sub.Allow = slices.DeleteFunc(p.Sub.Allow, tagFree)
 		}, "no publish allow line that needs no tag"},
 		{"deny-key user without a deny tag", at003Deny, func(c *Compiled) {
-			u := user(c, "foo.c.lead")
+			u := user(c, "c.lead")
 			u.Tags = slices.DeleteFunc(u.Tags, func(s string) bool { return s == NoDenyTag })
 		}, "cannot connect"},
 		{"owner line kept on a closed verb", at001, func(c *Compiled) {
-			p := &tpl(c, "foo.c").Permissions
-			p.Pub.Allow.Add("agents.mail.foo.c.*")
-		}, "foo.c.core, verb mail"},
+			p := &tpl(c, "c").Permissions
+			p.Pub.Allow.Add("agents.mail.*.c.*")
+		}, "c.core, verb mail"},
 		{"owner line kept on a closed heartbeat", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Sub.Allow.Add("agents.hb.foo.c.*")
+			tpl(c, "c").Permissions.Sub.Allow.Add("agents.hb.*.c.*")
 		}, "verb heartbeat"},
 		{"a wildcard line", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.>")
+			tpl(c, "c").Permissions.Pub.Allow.Add("agents.>")
 		}, "agents.>"},
 		{"a wildcard in another owner group", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.mail.foo.*.*")
-		}, "agents.mail.foo.*.*"},
-		{"another range", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.mail.bar.c.lead")
+			tpl(c, "c").Permissions.Pub.Allow.Add("agents.mail.*.*.*")
+		}, "agents.mail.*.*.*"},
+		{"a line that names an agent token", at001, func(c *Compiled) {
+			tpl(c, "c").Permissions.Pub.Allow.Add("agents.mail.bar.c.lead")
 		}, "agents.mail.bar.c.lead"},
 		{"a foreign plumbing line", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("$JS.API.STREAM.INFO.inbox-foo_c_lead")
+			tpl(c, "c").Permissions.Pub.Allow.Add("$JS.API.STREAM.INFO.inbox-foo_c_lead")
 		}, "fixed lines"},
 		{"another inbox consumer", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("$JS.API.CONSUMER.MSG.NEXT.>")
+			tpl(c, "c").Permissions.Pub.Allow.Add("$JS.API.CONSUMER.MSG.NEXT.>")
 		}, "fixed lines"},
 		{"publish another heartbeat", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.hb.foo.c.lead")
+			tpl(c, "c").Permissions.Pub.Allow.Add("agents.hb.*.c.lead")
 		}, "heartbeat"},
 		{"subscribe to another prompt subject", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Sub.Allow.Add("agents.prompt.foo.c.lead")
+			tpl(c, "c").Permissions.Sub.Allow.Add("agents.prompt.*.c.lead")
 		}, "prompt"},
 		{"subscribe to mail", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions.Sub.Allow.Add("agents.mail.foo.c.core")
+			tpl(c, "c").Permissions.Sub.Allow.Add("agents.mail.*.c.core")
 		}, "mail"},
 		{"a user with permission claims", at001, func(c *Compiled) {
-			user(c, "foo.c.core").Permissions.Pub.Allow = jwt.StringList{"agents.>"}
+			user(c, "c.core").Permissions.Pub.Allow = jwt.StringList{"agents.>"}
 		}, "permission claims"},
 		{"a user with a non-tag claim", at001, func(c *Compiled) {
-			user(c, "foo.c.core").Permissions.BearerToken = true
+			user(c, "c.core").Permissions.BearerToken = true
 		}, "permission claims"},
 		{"a wildcard tag", at001, func(c *Compiled) {
-			user(c, "foo.c.sdk").Tags = []string{"allow:c.*"}
-		}, "foo.c.sdk, verb mail"},
+			user(c, "c.sdk").Tags = []string{"allow:c.*"}
+		}, "c.sdk, verb mail"},
 		{"a wildcard tag at the tail", at001, func(c *Compiled) {
-			user(c, "foo.c.sdk").Tags = []string{"allow:>"}
-		}, "foo.c.sdk, verb mail"},
-		{"a tag that names another range through the template's range", at001, func(c *Compiled) {
-			user(c, "foo.c.sdk").Tags = []string{"allow:c.zz-unlisted"}
+			user(c, "c.sdk").Tags = []string{"allow:>"}
+		}, "c.sdk, verb mail"},
+		{"a tag that names an address no list gives", at001, func(c *Compiled) {
+			user(c, "c.sdk").Tags = []string{"allow:c.zz-unlisted"}
 		}, "zz-unlisted"},
 		{"an extra allow tag", at001, func(c *Compiled) {
-			user(c, "foo.c.sdk").Tags = []string{"allow:c.core"}
-		}, "foo.c.sdk, verb mail"},
+			user(c, "c.sdk").Tags = []string{"allow:c.core"}
+		}, "c.sdk, verb mail"},
 		{"a missing allow tag", at001, func(c *Compiled) {
-			user(c, "foo.c.core").Tags = nil
-		}, "cannot publish mail to foo.c.lead"},
+			user(c, "c.core").Tags = nil
+		}, "cannot publish mail to c.lead"},
 		{"a deny tag dropped from the user that has a real one", at003Deny, func(c *Compiled) {
-			user(c, "foo.c.core").Tags = []string{NoDenyTag}
-		}, "foo.c.core, verb mail"},
+			user(c, "c.core").Tags = []string{NoDenyTag}
+		}, "c.core, verb mail"},
 		{"an unknown tag", at001, func(c *Compiled) {
-			u := user(c, "foo.c.sdk")
+			u := user(c, "c.sdk")
 			u.Tags = append(u.Tags, "label:x")
 		}, "neither allow: nor deny:"},
 		{"a missing user", at001, func(c *Compiled) {
 			c.Users = c.Users[:2]
 		}, "has no user"},
 		{"a user that is not a sender", at001, func(c *Compiled) {
-			c.Users = append(c.Users, User{Sender: "foo.c.ghost", Name: "ghost"})
+			c.Users = append(c.Users, User{Sender: "c.ghost", Name: "ghost"})
 		}, "not a sender"},
 		{"a wrong user name", at001, func(c *Compiled) {
-			user(c, "foo.c.sdk").Name = "lead"
+			user(c, "c.sdk").Name = "lead"
 		}, "user name"},
 		{"a missing template", at001, func(c *Compiled) {
 			c.Templates = nil
 		}, "missing for an owner group"},
 		{"a template with no allow line at all (the server would open everything)", at001, func(c *Compiled) {
-			tpl(c, "foo.c").Permissions = jwt.Permissions{}
+			tpl(c, "c").Permissions = jwt.Permissions{}
 		}, "no publish allow line"},
 	}
 	for _, tc := range muts {
@@ -392,7 +391,7 @@ func TestCheckRefusesInvalidListSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	ls := at001()
-	ls.Senders[0].Allow = []string{"foo.c.*"}
+	ls.Senders[0].Allow = []string{"c.*"}
 	var ve *ValidationError
 	if err := Check(ls, good); !errors.As(err, &ve) {
 		t.Fatalf("want *ValidationError, got %v", err)
@@ -407,18 +406,18 @@ func TestSubjectMatches(t *testing.T) {
 		filter, subject string
 		want            bool
 	}{
-		{"agents.mail.foo.c.*", "agents.mail.foo.c.core", true},
-		{"agents.mail.foo.c.*", "agents.mail.foo.d.core", false},
-		{"agents.mail.foo.c.*", "agents.mail.foo.c.core.x", false},
-		{"agents.mail.foo.c.*", "agents.mail.foo.c", false},
-		{"agents.mail.foo.*.*", "agents.mail.foo.c.core", true},
-		{"agents.>", "agents.mail.foo.c.core", true},
+		{"agents.mail.*.c.*", "agents.mail.*.c.core", true},
+		{"agents.mail.*.c.*", "agents.mail.*.d.core", false},
+		{"agents.mail.*.c.*", "agents.mail.*.c.core.x", false},
+		{"agents.mail.*.c.*", "agents.mail.*.c", false},
+		{"agents.mail.*.*.*", "agents.mail.*.c.core", true},
+		{"agents.>", "agents.mail.*.c.core", true},
 		{"agents.>", "agents", false},
-		{"agents.mail.>", "agents.prompt.foo.c.core", false},
+		{"agents.mail.>", "agents.prompt.*.c.core", false},
 		{">", "a", true},
-		{"agents.mail.foo.c.core", "agents.mail.foo.c.core", true},
-		{"agents.mail.foo.c.core", "agents.mail.foo.c.core2", false},
-		{"agents.mail.foo.c.core.>", "agents.mail.foo.c.core", false},
+		{"agents.mail.*.c.core", "agents.mail.*.c.core", true},
+		{"agents.mail.*.c.core", "agents.mail.*.c.core2", false},
+		{"agents.mail.*.c.core.>", "agents.mail.*.c.core", false},
 	} {
 		if got := subjectMatches(tc.filter, tc.subject); got != tc.want {
 			t.Errorf("subjectMatches(%q, %q) = %v, want %v", tc.filter, tc.subject, got, tc.want)
@@ -434,7 +433,7 @@ func TestSentinelAddressesNothing(t *testing.T) {
 			t.Errorf("%s has %d tokens", s, n)
 		}
 	}
-	if _, reason := parseAddress("foo.c." + NoDenyValue); reason == "" {
+	if _, reason := parseAddress("c." + NoDenyValue); reason == "" {
 		t.Error("the sentinel value is a valid name")
 	}
 	if _, reason := parseAddress("foo." + NoDenyValue + ".core"); reason == "" {
@@ -442,7 +441,7 @@ func TestSentinelAddressesNothing(t *testing.T) {
 	}
 }
 
-// The template for the AT-001 shape holds no line naming foo.c.sdk (AT-001) and drops the owner line on closed verbs.
+// The template for the AT-001 shape holds no line naming c.sdk (AT-001) and drops the owner line on closed verbs.
 func TestAT001TemplateNamesNoPeer(t *testing.T) {
 	c, err := Compile(at001())
 	if err != nil {
@@ -457,15 +456,15 @@ func TestAT001TemplateNamesNoPeer(t *testing.T) {
 			t.Errorf("template line names a sender: %s", l)
 		}
 	}
-	if !slices.Contains(p.Pub.Allow, "agents.status.foo.c.*") {
+	if !slices.Contains(p.Pub.Allow, "agents.status.*.c.*") {
 		t.Error("shared status has no owner line")
 	}
-	for _, l := range []string{"agents.mail.foo.c.*", "agents.prompt.foo.c.*"} {
+	for _, l := range []string{"agents.mail.*.c.*", "agents.prompt.*.c.*"} {
 		if slices.Contains(p.Pub.Allow, l) {
 			t.Errorf("closed verb keeps %s", l)
 		}
 	}
-	if slices.Contains(p.Sub.Allow, "agents.hb.foo.c.*") {
+	if slices.Contains(p.Sub.Allow, "agents.hb.*.c.*") {
 		t.Error("closed heartbeat keeps its owner line")
 	}
 	if len(p.Pub.Deny)+len(p.Sub.Deny) != 0 {
@@ -475,11 +474,11 @@ func TestAT001TemplateNamesNoPeer(t *testing.T) {
 
 // Every required fixed grant, removed from the template or denied, is refused by Check.
 func TestCheckRequiresFixedGrants(t *testing.T) {
-	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", PolicySubject("foo"), "foo_c_{{name()}}")
+	pubLines := fixedPub("agents.hb.*.c.{{name()}}", PolicySubject(), epT)
 	subLines := []string{
-		"_INBOX.foo_c_{{name()}}.>",
-		"agents.prompt.foo.c.{{name()}}",
-		"agents.status.foo.c.{{name()}}",
+		"_INBOX." + epT + ".>",
+		"agents.prompt.*.c.{{name()}}",
+		"agents.status.*.c.{{name()}}",
 		"$SRV.>",
 	}
 	type cas struct {
@@ -502,12 +501,12 @@ func TestCheckRequiresFixedGrants(t *testing.T) {
 				}
 				var p *jwt.Permissions
 				for i := range c.Templates {
-					if c.Templates[i].Group == "foo.c" {
+					if c.Templates[i].Group == "c" {
 						p = &c.Templates[i].Permissions
 					}
 				}
 				if p == nil {
-					t.Fatal("no template foo.c")
+					t.Fatal("no template c")
 				}
 				allow, deny := &p.Pub.Allow, &p.Pub.Deny
 				if tc.dir == "sub" {
@@ -534,31 +533,38 @@ func TestCheckRequiresFixedGrants(t *testing.T) {
 	}
 }
 
+// fixedPubCount is the number of fixed publish lines of every template.
+var fixedPubCount = len(fixedPub("", "", ""))
+
+// withEP adds the endpoint tag of the endpoint with agent token cc at c.core, which the issuer adds to a credential.
+func withEP(tags []string) []string { return append(slices.Clone(tags), EndpointTagName+":cc_c_core") }
+
 // allowTags returns n distinct allow tags and the no-deny tag a deny key requires of every user.
 func allowTags(n int) []string {
 	tags := make([]string, n, n+1)
 	for i := range tags {
-		tags[i] = fmt.Sprintf("%s:foo.c.p%d", AllowTag, i)
+		tags[i] = fmt.Sprintf("%s:c.p%d", AllowTag, i)
 	}
 	return append(tags, NoDenyTag)
 }
 
 // The server counts expansions per list and cumulatively over its lines (auth.go, maxPermTemplateSubjectExpansions):
 // the publish allow list holds the owner lines of the shared verbs and one allow-tag line per verb, so the third tag
-// line is refused when 3N + (shared publish verbs) exceeds 4096. The subscribe list holds N + one owner line.
+// line is refused when 3N + (shared publish verbs) + the sixteen fixed lines (the endpoint tag's lines are counted
+// too: a credential carries the ep tag, ADR 0132) exceeds 4096. The subscribe list holds N + one owner line.
 func TestExpansionLimitBoundary(t *testing.T) {
 	cases := []struct {
 		name   string
 		ls     ListSet
-		shared int // shared publish verbs of group foo.c
+		shared int // shared publish verbs of group c
 		max    int // the largest allow-tag count the server accepts
 	}{
-		{"status shared", at001(), 1, 1365},              // 3*1365+1 = 4096
-		{"mail and prompt shared", at003Deny(), 2, 1364}, // 3*1364+2 = 4094; 1365 gives 4097
+		{"status shared", at001(), 1, 1359},              // 3*1359+1+16 = 4094; 1360 gives 4097
+		{"mail and prompt shared", at003Deny(), 2, 1359}, // 3*1359+2+16 = 4095; 1360 gives 4098
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := 3*tc.max + tc.shared; got > maxTemplateExpansions || got+3 <= maxTemplateExpansions {
+			if got := 3*tc.max + tc.shared + fixedPubCount; got > maxTemplateExpansions || got+3 <= maxTemplateExpansions {
 				t.Fatalf("boundary %d is not the largest that fits (%d)", tc.max, got)
 			}
 			c, err := Compile(tc.ls)
@@ -567,19 +573,19 @@ func TestExpansionLimitBoundary(t *testing.T) {
 			}
 			var tpl jwt.Permissions
 			for _, x := range c.Templates {
-				if x.Group == "foo.c" {
+				if x.Group == "c" {
 					tpl = x.Permissions
 				}
 			}
-			if _, err := expandPermissions(tpl, "core", allowTags(tc.max)); err != nil {
+			if _, err := expandPermissions(tpl, "core", withEP(allowTags(tc.max))); err != nil {
 				t.Fatalf("%d tags: %v", tc.max, err)
 			}
-			_, err = expandPermissions(tpl, "core", allowTags(tc.max+1))
+			_, err = expandPermissions(tpl, "core", withEP(allowTags(tc.max+1)))
 			if !errors.Is(err, errTemplateExpansionLimit) {
 				t.Fatalf("%d tags: want the expansion limit, got %v", tc.max+1, err)
 			}
 			for i := range c.Users {
-				if c.Users[i].Sender == "foo.c.core" {
+				if c.Users[i].Sender == "c.core" {
 					c.Users[i].Tags = allowTags(tc.max + 1)
 				}
 			}
@@ -624,8 +630,8 @@ func TestTemplateHasPolicyGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := PolicySubject(c.Range)
-	if want != "agents.policy."+c.Range {
+	want := PolicySubject()
+	if want != "mash.policy" {
 		t.Fatalf("PolicySubject = %q", want)
 	}
 	for _, tpl := range c.Templates {

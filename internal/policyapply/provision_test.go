@@ -34,7 +34,7 @@ func (l markerLedger) Provisioning(g uint64) ([]string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []string
-	for _, a := range []string{"foo.c.new", "foo.c.core", "foo.c.docs"} {
+	for _, a := range []string{"c.new", "c.core", "c.docs"} {
 		if l.marks[markKey(a, g)] {
 			out = append(out, a)
 		}
@@ -77,14 +77,14 @@ func provisionedThenGateFails(t *testing.T, prov Provisioner, rp *recProv, w *wo
 	t.Helper()
 	ml := newMarkerLedger(evLedger{w.ledger, w.ev})
 	w.in.Ledger = ml
-	rp.fail("issue:foo.c.new", true)
+	rp.fail("issue:c.new", true)
 	if _, err := RunOrdered(context.Background(), w.in, prov); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := w.ledger.Pending(); !ok || ml.count() != 1 {
 		t.Fatalf("after the first run: pending %v, markers %d", ok, ml.count())
 	}
-	rp.fail("issue:foo.c.new", false)
+	rp.fail("issue:c.new", false)
 	// One server stays on the previous generation: it loses the target push and its re-push, so the cluster is split and
 	// the run rolls back. The rollback push reaches it, so the rollback is confirmed (every server holds the
 	// rollback JWT's revocations).
@@ -129,7 +129,7 @@ func TestRunOrderedRollbackAfterInboxRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(rp.removed, []string{"foo.c.new"}) || ml.count() != 0 {
+	if !slices.Equal(rp.removed, []string{"c.new"}) || ml.count() != 0 {
 		t.Errorf("removed %v, markers %d", rp.removed, ml.count())
 	}
 	if _, ok, _ := w.ledger.Pending(); ok {
@@ -176,14 +176,14 @@ func TestRunOrderedWritesNoMarkerForAVerifyOnlyProvisioner(t *testing.T) {
 	prov := verifyOnlyProv{w.prov}
 	ml := newMarkerLedger(evLedger{w.ledger, w.ev})
 	w.in.Ledger = ml
-	w.prov.fail("issue:foo.c.new", true)
+	w.prov.fail("issue:c.new", true)
 	if _, err := RunOrdered(context.Background(), w.in, prov); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := w.ledger.Pending(); !ok || ml.count() != 0 {
 		t.Fatalf("after the first run: pending %v, markers %d, want pending and no marker", ok, ml.count())
 	}
-	w.prov.fail("issue:foo.c.new", false)
+	w.prov.fail("issue:c.new", false)
 	w.cl.mu.Lock()
 	w.cl.jwts["s2"] = w.j1
 	w.cl.dropN["s2"] = dropTargetPushes

@@ -28,9 +28,13 @@ AT-005  ./internal/listset  TestAT005DenyAllSenderIsRefused  required
 AT-010  ./internal/policyapply  TestAT010Live  required
 # AT-011: does a template change reach open connections, per shipped NATS server version (checks the committed record).
 AT-011  ./internal/policyapply  TestAT011TemplateChangeReachesOpenConnections  required
-# AT-020: a raw client (tags-only credentials, a plain NATS client) gets no more than its lists. The whole live run:
+# AT-020: a raw client (credentials of tags only: the list tags and the issuer's ep tag, and a plain NATS client) gets no more than its lists. The whole live run:
 # its subtests all publish, subscribe and fetch as raw clients. The second test pins what it reaches on the open reply
 # and plumbing subjects (the table in docs/security/threat-model.md, section 5.3.1) and that another address's inbox,
 # prompt, status and inbox stream stay out of reach.
 AT-020  ./internal/listset  TestLiveMatchesCheck  required
 AT-020  ./internal/listset  TestAT020OpenReplyAndPlumbingSubjectsArePinned  required
+# AT-020 with the endpoint tag (ADR 0132): the agent token of a receiver is a wildcard in every line, and a credential
+# without the issuer's ep tag has no inbox, lease or reply access.
+AT-020  ./internal/listset  TestLiveAllowedAddressIsReachedUnderAnyAgentToken  required
+AT-020  ./internal/listset  TestLiveCredentialWithoutEndpointTagHasNoInboxAccess  required
