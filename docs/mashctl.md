@@ -106,7 +106,7 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 mashctl inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]
 ```
 
-Shows one endpoint's stored messages and where its `deliver` consumer stands, so a test lane can prove what the transport kept and delivered. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`, and also when `agent_token` is set.
+Shows one endpoint's stored messages and where its `deliver` consumer stands, so a test can prove what the transport kept and delivered. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`, and also when `agent_token` is set.
 
 - `address` is an endpoint name (a legacy endpoint), a flat key `agent_owner_name`, or `agent.owner.name` (`cc.OWNER.NAME` names a legacy endpoint). It is read from the directory record, one key; an address that names no record, or a dotted address whose owner is not the record's, is refused (exit 1).
 - The default is the last 20 messages, oldest first. `--limit N` caps the count. `--from SEQ` and `--to SEQ` are an inclusive stream-sequence range, clamped to the stream's first and last sequence; with `--from` the first N messages from it are shown.
