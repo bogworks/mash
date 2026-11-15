@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -324,7 +325,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}
 
-	// The probes and witnesses are opened before the push, for the senders of the generation in force.
+	// The probes and witnesses are opened before the push; a witness only for a sender the gate needs one for.
 	minter := &policyapply.ProbeMinter{Signer: GroupSigner{a.Keys}, Account: a.Account, Record: a.Record, Now: a.Now}
 	prober, wit := a.transports(servers, minter)
 	var loaders []*nats.Conn
@@ -349,11 +350,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 			loaders = append(loaders, c)
 		}
 	}
-	if prev != nil && len(prev.Users) > 0 {
-		var creds []policyapply.ProbeCred
-		for _, u := range prev.Users {
-			creds = append(creds, policyapply.ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
-		}
+	if creds := witnessSenders(prev, target, ex); len(creds) > 0 {
 		if err := wit.Open(ctx, URLs(servers), minter, creds); err != nil {
 			return policyintake.Result{}, fmt.Errorf("open the witness connections: %w; nothing was pushed", err)
 		}
@@ -452,4 +449,57 @@ func detailOf(st policyapply.Status) string {
 		parts = append(parts, r.Stage+": "+r.Reason)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// witnessSenders are the credentials of the senders of the generation in force that need a witness connection: those
+// with a removed reach (Removed, CredentialOnly) and those the change removes (RemovedSenders), the very senders the
+// gate requires a closed witness for. A push closes a connection only when the template of the group's scoped key
+// changes, so a witness for any other sender would stay open on a change that only widens, and the gate would take that
+// for a failure. A removal Expect does not represent (a group-level one) changes the group's template, which closes
+// every connection under that key: when any group's template differs between prev and target, or a group appears or
+// disappears, every sender of the generation in force gets a witness. It returns nil when no sender needs one.
+func witnessSenders(prev, target *listset.Compiled, ex policyapply.Expect) []policyapply.ProbeCred {
+	if prev == nil {
+		return nil
+	}
+	need := map[string]bool{}
+	all := templatesChange(prev, target)
+	for _, r := range ex.Removed {
+		need[r.Sender] = true
+	}
+	for _, r := range ex.CredentialOnly {
+		need[r.Sender] = true
+	}
+	for _, s := range ex.RemovedSenders {
+		need[s] = true
+	}
+	var creds []policyapply.ProbeCred
+	for _, u := range prev.Users {
+		if all || need[u.Sender] {
+			creds = append(creds, policyapply.ProbeCred{Sender: u.Sender, Name: u.Name, Tags: slices.Clone(u.Tags)})
+		}
+	}
+	return creds
+}
+
+// templatesChange reports whether the push changes the scoped template of any owner group: one differs between prev and
+// target, or a group appears or disappears.
+func templatesChange(prev, target *listset.Compiled) bool {
+	if target == nil {
+		return true
+	}
+	if len(prev.Templates) != len(target.Templates) {
+		return true
+	}
+	byGroup := map[string]listset.Template{}
+	for _, t := range prev.Templates {
+		byGroup[t.Group] = t
+	}
+	for _, t := range target.Templates {
+		p, ok := byGroup[t.Group]
+		if !ok || !reflect.DeepEqual(p.Permissions, t.Permissions) {
+			return true
+		}
+	}
+	return false
 }
