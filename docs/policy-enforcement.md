@@ -1,18 +1,17 @@
 # How mash enforces the messaging policy
 
 > **Drafting status.** This document is written so that an outside reader can check each claim against code, a test or
-> a decision record. Some of what it describes is in open pull requests that are not on `main`. Each such statement
-> carries a visible `Pending:` note. A maintainer finishes those notes, and removes the matching line here, when the
-> pull request lands.
+> a decision record. The pull requests it described have merged. Statements that are still thin carry a visible
+> `Not yet documented:` note, and the table below lists them. A maintainer removes a line here when its note is finished.
 >
-> | Item | Where in this file | Waits for | State of the text |
-> |---|---|---|---|
-> | The applied-policy gate: applied, partial and not applied; generations | section 5.1 | nothing: #487, #488, #499 and #489 are on `main` | Written from the contract only, before they merged. Names no code or test beyond section 7. |
-> | Narrowing rotates to a new key with a deadline; removal revokes | section 5.2 | nothing: #498 is on `main` | Written from the contract and ADR 0067 only. Names no code or test beyond section 7. |
-> | Probe-credential evidence for the gate | sections 5.1 and 6.3 | nothing: #488 is on `main` | Written from the contract and the `probe` purpose that ADR 0101 reserves. |
-> | #503 (a sender's lost reach to its own address is checked) | section 5.1 | nothing: #503 is on `main` | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
-> | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | the adoption marker is on `main` (ADR 0111, `mashctl policy adopt`); `show`, `explain` and the generation numbers: not checked here | Not yet documented beyond the contract text. |
-> | The list set file format (DEC-004) and wiring the compile into `mashctl policy apply` | sections 2 and 5 | a decision and a change not yet made | The compile is used by `internal/policyapply` and `internal/issue`; no `mashctl policy` subcommand takes a list set file yet (`docs/mashctl.md`). |
+> | Item | Where in this file | State of the text |
+> |---|---|---|
+> | The applied-policy gate: applied, partial and not applied; generations (#487, #488, #499, #489) | section 5.1 | Written from the contract only. Names no code or test beyond section 7. |
+> | Narrowing rotates to a new key with a deadline; removal revokes (#498) | section 5.2 | Written from the contract and ADR 0067 only. Names no code or test beyond section 7. |
+> | Probe-credential evidence for the gate (#488) | sections 5.1 and 6.3 | Written from the contract and the `probe` purpose that ADR 0101 reserves. |
+> | A sender's lost reach to its own address is checked (#503) | section 5.1 | Written from the maintainer's description of the change: it removed an exclusion in the gate that skipped a self-only removal. Names no test. Not yet mapped to an acceptance test: AT-010's contract text does not name the case (section 7). |
+> | `show`, `explain` (REQ-010), the adoption marker (REQ-016), generation numbers (REQ-017) | sections 5 and 6.6 | Not yet documented beyond the contract text. The adoption marker is `mashctl policy adopt` (ADR 0111). |
+> | The list set file format (DEC-004) | sections 2 and 5 | Not checked against the current `mashctl policy` subcommands (`docs/mashctl.md`). |
 
 ## 1. Purpose, and the claim
 
@@ -330,7 +329,7 @@ pull requests. It is written from the contract text (`mash-messaging-policy`, dr
 
 ### 5.1 The applied-policy gate
 
-> Pending: describes #487, #488, #499 and #489, which are on `main`. Not yet documented: the command names, output layout,
+> Describes #487, #488, #499 and #489. Not yet documented: the command names, output layout,
 > the generation counter's storage, the deadline values, and any test names. The text below restates the contract
 > (REQ-011, REQ-012, REQ-015, REQ-017, AT-010) and nothing else.
 
@@ -353,7 +352,7 @@ a sender is its own address (a self-only removal). A gate that skipped that case
 sender can still reach itself. #503 removed an exclusion in the gate that skipped it, so a sender's lost reach to its own
 address is checked like any other removed receiver.
 
-> Pending: describes #503, which is on `main`. Written from the maintainer's description of the change. Not yet documented:
+> Describes #503. Written from the maintainer's description of the change. Not yet documented:
 > the test names and the output. The contract text of REQ-011 and AT-010 does not name the self-only case.
 
 Because a template push closes every connection under the key (section 4), the gate expects a disconnect and then a
@@ -383,7 +382,7 @@ issue record's `generation` field is 0 because mash has no generation yet (ADR 0
 
 ### 5.2 Narrowing rotates, removal revokes
 
-> Pending: describes #498, which is on `main`. Not yet documented: the handover deadline's length, the retry behaviour and
+> Describes #498. Not yet documented: the handover deadline's length, the retry behaviour and
 > test names. The text below is REQ-014 and AT-013, plus ADR 0067 for what `mashctl reissue` does today.
 
 - When a sender's tags narrow, mash issues the new credential to a **new public key**, waits until the servers show a
@@ -568,7 +567,7 @@ that runs a larger `max_control_line` holds more: the limit is the server's own.
 
 ### 6.3 Probe-credential evidence
 
-> Pending: describes #488, which is on `main`. Not yet documented.
+> Describes #488. Not yet documented.
 
 The applied gate's evidence for a withdrawn permission is a probe credential, not a send as the old sender (section 5.1).
 So the evidence has three parts: the probe is refused on every server, every server's account JWT revokes each old key,
@@ -597,7 +596,7 @@ An account is run **either** with the marker that says an outside system owns it
 owner-line-only). One account run both ways is not supported (contract REQ-016, from the maintainer's ruling of
 2026-11-11: "Running mash with both [an outside owner of the policy] and without is not supported. Documented.").
 
-> Pending: the marker, its submitter key, the refusal of direct policy changes on a marked account, and the
+> Not yet documented: the marker, its submitter key, the refusal of direct policy changes on a marked account, and the
 > reconciliation at adoption are REQ-016. `mashctl policy adopt` and the guards on an adopted account are on `main` (ADR 0111;
 > `docs/mashctl.md`); the list-set intake that would take a list set from the submitter is not documented here. Not yet
 > documented beyond the contract text.
@@ -649,7 +648,7 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 | AT-004 | Compiled output fails closed: a tag-free allow line, tags only, effective permissions equal the lists | `TestAT004_Corpus`, `TestAT004_ZeroTags`, `TestMutationsAreRefused` | on `main`; required |
 | AT-005 | A deny-all sender is refused everywhere and still reaches its own inbox | `TestAT005DenyAllSenderIsRefused` | on `main`; required. The half that an issue request lacking a deny tag is refused before signing: not yet documented. |
 | AT-006 | An oversize credential or account JWT is refused before issue or push | `TestSizeCheckNamesTheServerThatDoesNotFit`, `TestSizeCheckAccountJWT` (`internal/listset`) | on `main`; not in the gate list. The check that the smallest server of a cluster refuses the whole set has no test on `main` that this document found. |
-| AT-007 | The documented exception limit matches the measured table | `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable` | not on `main`: the tables are in section 6.2 of this document and no test compares them with the measure yet; pending |
+| AT-007 | The documented exception limit matches the measured table | `TestDocumentedExceptionTable`, `TestSizeCheckBoundaryIsTheDocumentedTable` | not on `main`: the tables are in section 6.2 of this document and no test compares them with the measure yet |
 | AT-008 | The dry run lists exactly the changes and changes nothing | `TestDryRunAT008Golden`, `TestAT008Content`, `TestDryRunDoesNotMutateItsInputs` (`internal/listset/dryrun_test.go`) | on `main`; not in the gate list |
 | AT-009 | `explain` and `show` work without admin rights and name what they describe | not yet documented | no test found |
 | AT-010 | The applied gate, on a cluster of two or more servers | `TestAT010Live` (`internal/policyapply/at010_live_test.go`). The gate's check of a sender's lost reach to its own address (#503) is not yet mapped to AT-010: the contract's AT-010 text does not name a self-only removal. | on `main`; required in the gate list |
