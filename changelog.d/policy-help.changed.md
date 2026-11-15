@@ -1,0 +1,1 @@
+`mashctl policy --help`, `mashctl policy VERB --help` (and `-h`), `mash policy show --help` and `mash policy explain --help` now print the usage to stdout and exit 0, where the verbs printed an unknown-option error and exited 2. The `mashctl policy` usage now lists `reconcile --yes --plan DIGEST` and `adopt --sys-creds` and `--exempt`, as the verbs themselves do.
