@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -70,21 +71,21 @@ func TestRule2BothWaysThroughTracker(t *testing.T) {
 
 	// herdr does not recognise the dialog and says idle: stay blocked.
 	h.clk.Advance(time.Second)
-	h.setRuntime(true, StateIdle)
+	h.setRuntime(RuntimeReport{Available: true, State: StateIdle})
 	if a, _ := h.Current(); a.State != StateBlocked || a.Kind != KindPermission || a.Source != "hooks" {
 		t.Fatalf("idle without a sighting: %+v", a)
 	}
 
 	// herdr sees the dialog: both agree.
 	h.clk.Advance(time.Second)
-	h.setRuntime(true, StateBlocked)
+	h.setRuntime(RuntimeReport{Available: true, State: StateBlocked})
 	if a, _ := h.Current(); a.State != StateBlocked || a.Kind != KindPermission || a.Source != "both" {
 		t.Fatalf("both blocked: %+v", a)
 	}
 
 	// The person refused: no hook fires, herdr says idle, and herdr had seen the dialog: idle.
 	h.clk.Advance(time.Second)
-	h.setRuntime(true, StateIdle)
+	h.setRuntime(RuntimeReport{Available: true, State: StateIdle})
 	if a, _ := h.Current(); a.State != StateIdle || a.Source != "runtime" || a.Kind != "" {
 		t.Fatalf("idle after a sighting: %+v", a)
 	}
@@ -100,7 +101,7 @@ func TestRule2BothWaysThroughTracker(t *testing.T) {
 
 	// Runtime working beats hooks blocked.
 	h.clk.Advance(time.Second)
-	h.setRuntime(true, StateWorking)
+	h.setRuntime(RuntimeReport{Available: true, State: StateWorking})
 	if a, _ := h.Current(); a.State != StateWorking || a.Source != "runtime" {
 		t.Fatalf("working: %+v", a)
 	}
@@ -109,11 +110,11 @@ func TestRule2BothWaysThroughTracker(t *testing.T) {
 func TestRuntimeUnavailableFallsBackToHooks(t *testing.T) {
 	h := newHooksTracker(t, envLaunch)
 	h.write(t, h.rec("UserPromptSubmit"))
-	h.setRuntime(true, StateDone)
+	h.setRuntime(RuntimeReport{Available: true, State: StateDone})
 	if a, _ := h.Current(); a.State != StateDone || a.Source != "runtime" {
 		t.Fatalf("%+v", a)
 	}
-	h.setRuntime(false, "")
+	h.setRuntime(RuntimeReport{})
 	if a, _ := h.Current(); a.State != StateWorking || a.Source != "hooks" {
 		t.Fatalf("%+v", a)
 	}
@@ -169,13 +170,13 @@ func TestSinceNotResetBySourceChangeAlone(t *testing.T) {
 	start := h.clk.Now()
 	h.write(t, h.rec("PreToolUse"))
 	h.clk.Advance(time.Minute)
-	h.setRuntime(true, StateWorking) // hooks-only becomes both
+	h.setRuntime(RuntimeReport{Available: true, State: StateWorking}) // hooks-only becomes both
 	a, _ := h.Current()
 	if a.Source != "both" || !a.Since.Equal(start) {
 		t.Fatalf("%+v, want both since %v", a, start)
 	}
 	h.clk.Advance(time.Minute)
-	h.setRuntime(false, "") // and back to hooks-only
+	h.setRuntime(RuntimeReport{}) // and back to hooks-only
 	a, _ = h.Current()
 	if a.Source != "hooks" || !a.Since.Equal(start) {
 		t.Fatalf("%+v, want hooks since %v", a, start)
@@ -185,14 +186,14 @@ func TestSinceNotResetBySourceChangeAlone(t *testing.T) {
 func TestSinceAfterAbsenceIsNew(t *testing.T) {
 	clk := newClock()
 	tr := New(Options{Env: mapEnv(nil), Now: clk.Now})
-	tr.setRuntime(true, StateIdle)
+	tr.setRuntime(RuntimeReport{Available: true, State: StateIdle})
 	first, _ := tr.Current()
-	tr.setRuntime(false, "")
+	tr.setRuntime(RuntimeReport{})
 	if _, ok := tr.Current(); ok {
 		t.Fatal("want absent")
 	}
 	clk.Advance(time.Hour)
-	tr.setRuntime(true, StateIdle)
+	tr.setRuntime(RuntimeReport{Available: true, State: StateIdle})
 	again, _ := tr.Current()
 	if !again.Since.After(first.Since) {
 		t.Fatalf("since %v did not move past %v after an absence", again.Since, first.Since)
@@ -202,16 +203,85 @@ func TestSinceAfterAbsenceIsNew(t *testing.T) {
 func TestSinceFromRuntimeIsWhenSeen(t *testing.T) {
 	clk := newClock()
 	tr := New(Options{Env: mapEnv(nil), Now: clk.Now})
-	tr.setRuntime(true, StateWorking)
+	tr.setRuntime(RuntimeReport{Available: true, State: StateWorking})
 	if a, _ := tr.Current(); !a.Since.Equal(clk.Now()) || a.Since.Location() != time.UTC {
 		t.Fatalf("%+v", a)
 	}
 }
 
+// fakeRuntime is a RuntimeSource for the tests: Run counts its calls and blocks until ctx is done, reporting
+// whatever the test pushes.
+type fakeRuntime struct {
+	runs    atomic.Int32
+	in      chan RuntimeReport
+	stopped atomic.Bool
+}
+
+func newFakeRuntime() *fakeRuntime { return &fakeRuntime{in: make(chan RuntimeReport, 16)} }
+
+func (f *fakeRuntime) Run(ctx context.Context, report func(RuntimeReport)) {
+	f.runs.Add(1)
+	defer f.stopped.Store(true)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case r := <-f.in:
+			report(r)
+		}
+	}
+}
+
+func (f *fakeRuntime) Name() string { return "fakert" }
+
+func (f *fakeRuntime) Describe(r RuntimeReport) string {
+	if r.Version != "" {
+		return "fakert " + r.Version + " fine"
+	}
+	return "fakert fine"
+}
+
+func waitGroup(t *testing.T, tr *Tracker) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { tr.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tracker goroutines did not stop")
+	}
+}
+
+func waitState(t *testing.T, tr *Tracker, want State) Activity {
+	t.Helper()
+	var got Activity
+	waitFor(t, "state "+string(want), func() bool {
+		a, ok := tr.Current()
+		got = a
+		return ok && a.State == want
+	})
+	return got
+}
+
+// waitFor polls cond until it holds.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func mapEnv(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
 func TestOffRunsNothing(t *testing.T) {
-	f := newFakeHerdr(t)
-	env := herdrEnv(f)
-	tr := New(Options{Off: true, Env: mapEnv(env), Dir: t.TempDir()})
+	f := newFakeRuntime()
+	tr := New(Options{Off: true, Env: mapEnv(nil), Dir: t.TempDir(), Runtime: f})
 	tr.Start(context.Background())
 	if n := tr.spawned.Load(); n != 0 {
 		t.Fatalf("%d goroutines started", n)
@@ -222,8 +292,8 @@ func TestOffRunsNothing(t *testing.T) {
 	if d := tr.Describe(); d != "activity: off" {
 		t.Fatalf("describe = %q", d)
 	}
-	if m := f.seenMethods(); len(m) != 0 {
-		t.Fatalf("herdr was contacted: %v", m)
+	if n := f.runs.Load(); n != 0 {
+		t.Fatalf("the runtime source was run %d times", n)
 	}
 }
 
@@ -236,56 +306,71 @@ func TestNotConfiguredRunsNothing(t *testing.T) {
 	if _, ok := tr.Current(); ok {
 		t.Fatal("present")
 	}
-	if d := tr.Describe(); d != "activity: absent (no herdr, no hook record)" {
+	if d := tr.Describe(); d != "activity: absent (no runtime source, no hook record)" {
 		t.Fatalf("describe = %q", d)
 	}
 }
 
 func TestStartTwiceStartsOnce(t *testing.T) {
 	dir := t.TempDir()
-	tr := New(Options{Env: mapEnv(nil), Dir: dir, HooksPoll: time.Hour})
+	f := newFakeRuntime()
+	tr := New(Options{Env: mapEnv(nil), Dir: dir, HooksPoll: time.Hour, Runtime: f})
 	ctx, cancel := context.WithCancel(context.Background())
 	tr.Start(ctx)
 	tr.Start(ctx)
-	if n := tr.spawned.Load(); n != 1 {
-		t.Fatalf("%d goroutines", n)
+	if n := tr.spawned.Load(); n != 2 {
+		t.Fatalf("%d goroutines, want the source and the hooks poll", n)
 	}
+	waitFor(t, "source run", func() bool { return f.runs.Load() == 1 })
+	cancel()
+	waitGroup(t, tr)
+	if n := f.runs.Load(); n != 1 {
+		t.Fatalf("source run %d times", n)
+	}
+}
+
+func TestRuntimeReportsReachCurrent(t *testing.T) {
+	f := newFakeRuntime()
+	tr := New(Options{Env: mapEnv(nil), Runtime: f})
+	ctx, cancel := context.WithCancel(context.Background())
+	tr.Start(ctx)
+	f.in <- RuntimeReport{Available: true, State: StateWorking, Version: "1.2"}
+	if a := waitState(t, tr, StateWorking); a.Source != "runtime" {
+		t.Fatalf("%+v", a)
+	}
+	f.in <- RuntimeReport{Available: true, State: StateBlocked, Version: "1.2"}
+	waitState(t, tr, StateBlocked)
+	f.in <- RuntimeReport{Available: true}
+	waitFor(t, "not an agent", func() bool { _, ok := tr.Current(); return !ok })
+	f.in <- RuntimeReport{}
+	waitFor(t, "unavailable", func() bool { return strings.Contains(tr.Describe(), "fakert unavailable") })
 	cancel()
 	waitGroup(t, tr)
 }
 
 func TestCancelStopsEverything(t *testing.T) {
-	f := newFakeHerdr(t)
-	tr := New(Options{Env: mapEnv(herdrEnv(f)), Dir: t.TempDir(), HooksPoll: time.Millisecond, HerdrPoll: time.Millisecond,
-		Backoff: func(int) time.Duration { return time.Millisecond }})
+	f := newFakeRuntime()
+	tr := New(Options{Env: mapEnv(nil), Dir: t.TempDir(), HooksPoll: time.Millisecond, Runtime: f})
 	ctx, cancel := context.WithCancel(context.Background())
 	tr.Start(ctx)
+	f.in <- RuntimeReport{Available: true, State: StateIdle}
 	waitState(t, tr, StateIdle)
 	if tr.spawned.Load() < 2 {
 		t.Fatalf("spawned %d", tr.spawned.Load())
 	}
 	cancel()
 	waitGroup(t, tr)
+	if !f.stopped.Load() {
+		t.Fatal("the source did not stop")
+	}
 }
 
 func TestCancelledBeforeStartStopsEverything(t *testing.T) {
-	f := newFakeHerdr(t)
-	tr := New(Options{Env: mapEnv(herdrEnv(f)), Dir: t.TempDir(), HooksPoll: time.Millisecond,
-		Backoff: func(int) time.Duration { return time.Millisecond }})
+	f := newFakeRuntime()
+	tr := New(Options{Env: mapEnv(nil), Dir: t.TempDir(), HooksPoll: time.Millisecond, Runtime: f})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tr.Start(ctx)
-	waitGroup(t, tr)
-}
-
-func TestCancelDuringBackoffStops(t *testing.T) {
-	f := newFakeHerdr(t)
-	f.version = ""
-	tr := New(Options{Env: mapEnv(herdrEnv(f)), Backoff: func(int) time.Duration { return time.Hour }})
-	ctx, cancel := context.WithCancel(context.Background())
-	tr.Start(ctx)
-	waitFor(t, "first ping", func() bool { return f.seenMethods()["ping"] >= 1 })
-	cancel()
 	waitGroup(t, tr)
 }
 
@@ -304,18 +389,21 @@ func TestActivityHasOnlyFixedFields(t *testing.T) {
 }
 
 func TestDescribeForms(t *testing.T) {
-	f := newFakeHerdr(t)
-	f.set("working")
+	f := newFakeRuntime()
 	dir := t.TempDir()
-	env := herdrEnv(f)
-	env["MASH_LAUNCH_TOKEN"] = "tok-1"
-	tr := startHerdr(t, f, func(o *Options) { o.Dir = dir; o.HooksPoll = 2 * time.Millisecond; o.Env = mapEnv(env) })
+	env := map[string]string{"MASH_LAUNCH_TOKEN": "tok-1"}
+	tr := New(Options{Env: mapEnv(env), Dir: dir, HooksPoll: 2 * time.Millisecond, Runtime: f})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr.Start(ctx)
+	f.in <- RuntimeReport{Available: true, State: StateWorking, Version: "1.2"}
 	waitState(t, tr, StateWorking)
 	if err := WriteRecord(dir, Record{Event: "UserPromptSubmit", At: time.Now(), Launch: "tok-1"}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "source both", func() bool { a, _ := tr.Current(); return a.Source == "both" })
-	want := "activity: herdr 0.9.5 ok, hooks ok: working (source both)"
+	// The source's own text is used for an available report.
+	want := "activity: fakert 1.2 fine, hooks ok: working (source both)"
 	if d := tr.Describe(); d != want {
 		t.Fatalf("describe = %q, want %q", d, want)
 	}

@@ -1,4 +1,7 @@
-package activity
+// Package herdr is the runtime source for package activity that talks to herdr, a terminal workspace manager, over
+// its unix socket. Everything specific to herdr is here: the socket protocol, the HERDR_* environment variables and
+// the version text. Package activity knows none of it; the caller passes the source in as Options.Runtime.
+package herdr
 
 import (
 	"bufio"
@@ -6,13 +9,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/bogworks/mash/internal/activity"
 )
 
-// The runtime source reads the pane's agent state from herdr over its unix socket: JSON lines, one request per line.
+// Options configures the source. The zero value is the production setting.
+type Options struct {
+	Poll    time.Duration                       // backstop pane.get interval; 0 = 5s
+	Dial    func(path string) (net.Conn, error) // nil = unix socket dial; tests inject
+	Backoff func(attempt int) time.Duration     // reconnect delay; nil = 1s doubling to 30s
+	Log     io.Writer                           // diagnostics lines (connected, unavailable, version); nil = discard
+}
+
+// FromEnv returns the source for the pane the process runs in. ok is false when HERDR_SOCKET_PATH or HERDR_PANE_ID
+// is unset or empty: the process is not under herdr and there is nothing to read.
+func FromEnv(env func(string) string, o Options) (activity.RuntimeSource, bool) {
+	sock, pane := env("HERDR_SOCKET_PATH"), env("HERDR_PANE_ID")
+	if sock == "" || pane == "" {
+		return nil, false
+	}
+	return &source{o: o, sock: sock, pane: pane}, true
+}
+
+// The source reads the pane's agent state from herdr over its unix socket: JSON lines, one request per line.
 // It sends ping, pane.get and events.subscribe and nothing else; it never writes to the pane.
 
 // herdrTimeout bounds one request and its answer.
@@ -125,24 +149,58 @@ func (h *herdrConn) call(id, method string, params any) (herdrMsg, error) {
 }
 
 // herdrState maps herdr's agent_status to a state; "" means not an agent (unknown, or any word we do not know).
-func herdrState(s string) State {
-	switch State(s) {
-	case StateIdle, StateWorking, StateBlocked, StateDone:
-		return State(s)
+func herdrState(s string) activity.State {
+	switch st := activity.State(s); st {
+	case activity.StateIdle, activity.StateWorking, activity.StateBlocked, activity.StateDone:
+		return st
 	}
 	return ""
 }
 
-func (t *Tracker) dial(path string) (net.Conn, error) {
-	if t.o.Dial != nil {
-		return t.o.Dial(path)
+// source is the herdr runtime source for one pane.
+type source struct {
+	o    Options
+	sock string
+	pane string
+
+	wg     sync.WaitGroup // every goroutine Run starts; Run waits for it
+	report func(activity.RuntimeReport)
+}
+
+func (s *source) Name() string { return "herdr" }
+
+// Describe is the status text for an available report.
+func (s *source) Describe(r activity.RuntimeReport) string {
+	if r.Version != "" {
+		return "herdr " + r.Version + " ok"
+	}
+	return "herdr ok"
+}
+
+func (s *source) spawn(f func()) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		f()
+	}()
+}
+
+func (s *source) logf(format string, a ...any) {
+	if s.o.Log != nil {
+		fmt.Fprintf(s.o.Log, format+"\n", a...)
+	}
+}
+
+func (s *source) dial(path string) (net.Conn, error) {
+	if s.o.Dial != nil {
+		return s.o.Dial(path)
 	}
 	return net.DialTimeout("unix", path, herdrTimeout)
 }
 
-func (t *Tracker) backoff(attempt int) time.Duration {
-	if t.o.Backoff != nil {
-		return t.o.Backoff(attempt)
+func (s *source) backoff(attempt int) time.Duration {
+	if s.o.Backoff != nil {
+		return s.o.Backoff(attempt)
 	}
 	if attempt > 5 {
 		attempt = 5
@@ -150,21 +208,24 @@ func (t *Tracker) backoff(attempt int) time.Duration {
 	return min(time.Second<<attempt, 30*time.Second)
 }
 
-// herdrLoop keeps a session to herdr going: on any error the source is unavailable at once, then it retries after
-// a growing delay. The delay restarts from the beginning after a session that connected.
-func (t *Tracker) herdrLoop(ctx context.Context, sock, pane string) {
+// Run keeps a session to herdr going: on any error the source is unavailable at once, then it retries after
+// a growing delay. The delay restarts from the beginning after a session that connected. It returns when ctx is
+// done and every goroutine it started has stopped.
+func (s *source) Run(ctx context.Context, report func(activity.RuntimeReport)) {
+	s.report = report
+	defer s.wg.Wait()
 	attempt := 0
 	for ctx.Err() == nil {
-		connected, err := t.herdrSession(ctx, sock, pane)
-		t.setRuntime(false, "")
+		connected, err := s.session(ctx)
+		report(activity.RuntimeReport{})
 		if ctx.Err() != nil {
 			return
 		}
-		t.logf("herdr unavailable: %v", err)
+		s.logf("herdr unavailable: %v", err)
 		if connected {
 			attempt = 0
 		}
-		d := t.backoff(attempt)
+		d := s.backoff(attempt)
 		attempt++
 		timer := time.NewTimer(d)
 		select {
@@ -182,12 +243,13 @@ type subMsg struct {
 	err error
 }
 
-// herdrSession runs one connection's life and returns why it ended. connected is true once the source went live.
-func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connected bool, err error) {
+// session runs one connection's life and returns why it ended. connected is true once the source went live.
+func (s *source) session(ctx context.Context) (connected bool, err error) {
+	sock, pane := s.sock, s.pane
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var cs connSet
-	t.spawn(func() {
+	s.spawn(func() {
 		<-sctx.Done()
 		cs.closeAll()
 	})
@@ -195,7 +257,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 	nextID := 0
 	id := func() string { nextID++; return "a" + strconv.Itoa(nextID) }
 
-	c, err := t.dial(sock)
+	c, err := s.dial(sock)
 	if err != nil {
 		return false, err
 	}
@@ -215,7 +277,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 		return false, errors.New("herdr ping answer has no version or protocol")
 	}
 
-	getPane := func() (term string, st State, err error) {
+	getPane := func() (term string, st activity.State, err error) {
 		m, err := ctrl.call(id(), "pane.get", map[string]any{"pane_id": pane})
 		if err != nil {
 			return "", "", err
@@ -247,7 +309,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 			sub.Close()
 		}
 		gen++
-		sc, err := t.dial(sock)
+		sc, err := s.dial(sock)
 		if err != nil {
 			return err
 		}
@@ -275,7 +337,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 			return errors.New("herdr did not start the subscription")
 		}
 		g := gen
-		t.spawn(func() {
+		s.spawn(func() {
 			for {
 				m, err := h.readMsg(0)
 				select {
@@ -291,6 +353,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 		return nil
 	}
 	// refresh reads the pane and fails the session if the pane id now belongs to another terminal.
+	var version string
 	refresh := func() error {
 		tid, st, err := getPane()
 		if err != nil {
@@ -299,10 +362,11 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 		if tid != term {
 			return errors.New("herdr pane id now names a different terminal")
 		}
-		t.setRuntime(true, st)
+		s.report(activity.RuntimeReport{Available: true, State: st, Version: version})
 		return nil
 	}
 
+	version = pong.Version
 	if err := subscribe(); err != nil {
 		return false, err
 	}
@@ -311,12 +375,9 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 		return false, err
 	}
 	connected = true
-	t.mu.Lock()
-	t.version = pong.Version
-	t.mu.Unlock()
-	t.logf("herdr %s ok", pong.Version)
+	s.logf("herdr %s ok", pong.Version)
 
-	poll := t.o.HerdrPoll
+	poll := s.o.Poll
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
@@ -360,7 +421,7 @@ func (t *Tracker) herdrSession(ctx context.Context, sock, pane string) (connecte
 			if json.Unmarshal(sm.msg.Data, &d) != nil || d.PaneID != pane {
 				continue
 			}
-			t.setRuntime(true, herdrState(d.AgentStatus))
+			s.report(activity.RuntimeReport{Available: true, State: herdrState(d.AgentStatus), Version: version})
 		}
 	}
 }

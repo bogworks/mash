@@ -24,6 +24,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/activity"
+	"github.com/bogworks/mash/internal/activity/herdr"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -167,6 +168,7 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
+	stderr = &syncWriter{w: stderr} // serve, its goroutines and the activity tracker's log all write to it
 	applyRetryTiming(cfg)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -197,15 +199,22 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	if cfg.Inert() {
 		return degraded(endpoint.InertInstructions, false)
 	}
-	// The activity tracker reads herdr and the hook command's record, and stops with serve's context. It starts a
-	// goroutine only for a source that is configured. A spool directory that cannot be determined leaves the hooks
-	// source out.
+	// The activity tracker reads a runtime source and the hook command's record, and stops with serve's context. It
+	// starts a goroutine only for a source that is configured. The runtime source is herdr when this process runs
+	// under it, and none otherwise. A spool directory that cannot be determined leaves the hooks source out.
 	adir, derr := endpoint.SpoolDir(cfg)
 	if derr != nil {
 		adir = ""
 	}
-	src.tracker = activity.New(activity.Options{Env: os.Getenv, Dir: adir, Off: cfg.Activity == "off", Log: stderr})
+	aopts := activity.Options{Env: os.Getenv, Dir: adir, Off: cfg.Activity == "off"}
+	if rt, ok := herdr.FromEnv(os.Getenv, herdr.Options{Log: stderr}); ok {
+		aopts.Runtime = rt
+	}
+	src.tracker = activity.New(aopts)
 	src.tracker.Start(ctx)
+	// The tracker's goroutines write to stderr (the herdr adapter's log): stop them before serve returns, so a caller
+	// that reads stderr after serve returns never races with them.
+	defer func() { cancel(); src.tracker.Wait() }()
 	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
 	var policy []byte
@@ -1131,4 +1140,18 @@ func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spo
 		}
 		ep.NoteSpoolFault(err)
 	}
+}
+
+// syncWriter serialises writes to one writer. serve writes diagnostics from several goroutines (the lease-rollup
+// warning, the activity tracker's adapter log, the main loop); a bytes.Buffer in a test is not safe for that, and one
+// line from one goroutine should not interleave with another's.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }

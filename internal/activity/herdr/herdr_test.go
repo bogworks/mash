@@ -1,4 +1,4 @@
-package activity
+package herdr
 
 import (
 	"bytes"
@@ -8,53 +8,83 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/bogworks/mash/internal/activity"
 )
 
-// startHerdr starts a tracker on the fake with tiny delays and stops it with the test.
-func startHerdr(t *testing.T, f *fakeHerdr, mod func(*Options)) *Tracker {
+// recorder keeps the last report the source made.
+type recorder struct {
+	mu   sync.Mutex
+	last activity.RuntimeReport
+}
+
+func (r *recorder) report(x activity.RuntimeReport) {
+	r.mu.Lock()
+	r.last = x
+	r.mu.Unlock()
+}
+
+func (r *recorder) get() activity.RuntimeReport {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last
+}
+
+// running is a source started on the fake, with a way to stop it and wait for Run to return.
+type running struct {
+	*recorder
+	src  activity.RuntimeSource
+	done chan struct{}
+}
+
+// startHerdr starts a source on the fake with tiny delays and stops it with the test.
+func startHerdr(t *testing.T, f *fakeHerdr, mod func(*Options)) *running {
 	t.Helper()
-	o := Options{Env: mapEnv(herdrEnv(f)), HerdrPoll: time.Hour,
-		Backoff: func(int) time.Duration { return time.Millisecond }}
+	o := Options{Poll: time.Hour, Backoff: func(int) time.Duration { return time.Millisecond }}
 	if mod != nil {
 		mod(&o)
 	}
-	tr := New(o)
+	src, ok := FromEnv(mapEnv(herdrEnv(f)), o)
+	if !ok {
+		t.Fatal("not configured")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	tr.Start(ctx)
+	r := &running{recorder: &recorder{}, src: src, done: make(chan struct{})}
+	go func() { src.Run(ctx, r.report); close(r.done) }()
 	t.Cleanup(func() {
 		cancel()
-		waitGroup(t, tr)
+		waitDone(t, r)
 	})
-	return tr
+	return r
 }
 
-// waitGroup waits for every goroutine the tracker started.
-func waitGroup(t *testing.T, tr *Tracker) {
+// waitDone waits for Run to return, which it does only after every goroutine it started has stopped.
+func waitDone(t *testing.T, r *running) {
 	t.Helper()
-	done := make(chan struct{})
-	go func() { tr.wg.Wait(); close(done) }()
 	select {
-	case <-done:
+	case <-r.done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("tracker goroutines did not stop")
+		t.Fatal("source goroutines did not stop")
 	}
 }
 
-func waitState(t *testing.T, tr *Tracker, want State) Activity {
+func waitState(t *testing.T, r *running, want activity.State) activity.RuntimeReport {
 	t.Helper()
-	var got Activity
+	var got activity.RuntimeReport
 	waitFor(t, "state "+string(want), func() bool {
-		a, ok := tr.Current()
-		got = a
-		return ok && a.State == want
+		got = r.get()
+		return got.Available && got.State == want
 	})
 	return got
 }
 
-func waitAbsent(t *testing.T, tr *Tracker) {
+// waitAbsent waits for a report that gives no state: unavailable, or not an agent pane.
+func waitAbsent(t *testing.T, r *running) {
 	t.Helper()
-	waitFor(t, "absent", func() bool { _, ok := tr.Current(); return !ok })
+	waitFor(t, "absent", func() bool { x := r.get(); return !x.Available || x.State == "" })
 }
+
+func absent(r *running) bool { x := r.get(); return !x.Available || x.State == "" }
 
 func TestHerdrInitialState(t *testing.T) {
 	f := newFakeHerdr(t)
@@ -62,17 +92,23 @@ func TestHerdrInitialState(t *testing.T) {
 	var log bytes.Buffer
 	var mu sync.Mutex
 	tr := startHerdr(t, f, func(o *Options) { o.Log = lockedWriter{&mu, &log} })
-	a := waitState(t, tr, StateWorking)
-	if a.Source != "runtime" || a.Kind != "" || a.Since.IsZero() {
-		t.Fatalf("activity = %+v", a)
+	a := waitState(t, tr, activity.StateWorking)
+	if !a.Available || a.Version != "0.9.5" {
+		t.Fatalf("report = %+v", a)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if !strings.Contains(log.String(), "herdr 0.9.5 ok") {
 		t.Fatalf("log = %q", log.String())
 	}
-	if d := tr.Describe(); !strings.Contains(d, "herdr 0.9.5 ok") || !strings.Contains(d, "working") {
+	if d := tr.src.Describe(a); d != "herdr 0.9.5 ok" {
 		t.Fatalf("describe = %q", d)
+	}
+	if d := tr.src.Describe(activity.RuntimeReport{Available: true}); d != "herdr ok" {
+		t.Fatalf("describe without a version = %q", d)
+	}
+	if n := tr.src.Name(); n != "herdr" {
+		t.Fatalf("name = %q", n)
 	}
 }
 
@@ -90,37 +126,37 @@ func (w lockedWriter) Write(p []byte) (int, error) {
 func TestHerdrEventUpdates(t *testing.T) {
 	f := newFakeHerdr(t)
 	tr := startHerdr(t, f, nil)
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	f.push("w1:p1", "working")
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 	f.push("w1:p1", "blocked")
-	waitState(t, tr, StateBlocked)
+	waitState(t, tr, activity.StateBlocked)
 	f.push("w1:p1", "done")
-	waitState(t, tr, StateDone)
+	waitState(t, tr, activity.StateDone)
 }
 
 func TestHerdrEventForOtherPaneIgnored(t *testing.T) {
 	f := newFakeHerdr(t)
 	tr := startHerdr(t, f, nil)
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	f.push("w9:p9", "working")
 	f.push("w1:p1", "done") // after the first; once this lands the first was handled
-	waitState(t, tr, StateDone)
+	waitState(t, tr, activity.StateDone)
 }
 
 func TestHerdrEventsLostResubscribesAndReconciles(t *testing.T) {
 	f := newFakeHerdr(t)
 	tr := startHerdr(t, f, nil)
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	before := f.count(func(f *fakeHerdr) int { return f.subscribe })
 	// The change happens while events are lost: no event carries it, only the pane.get after resubscribing.
 	f.set("blocked")
 	f.eventsLost()
-	waitState(t, tr, StateBlocked)
+	waitState(t, tr, activity.StateBlocked)
 	waitFor(t, "resubscribe", func() bool { return f.count(func(f *fakeHerdr) int { return f.subscribe }) > before })
 	// And the new subscription delivers.
 	f.push("w1:p1", "working")
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 }
 
 func TestHerdrDroppedConnectionIsUnavailableAtOnceThenReconnects(t *testing.T) {
@@ -137,12 +173,12 @@ func TestHerdrDroppedConnectionIsUnavailableAtOnceThenReconnects(t *testing.T) {
 			return time.Millisecond
 		}
 	})
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	f.set("working")
 	f.dropAll()
 	waitAbsent(t, tr) // unavailable at once, before any retry
 	close(release)
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(attempts) == 0 || attempts[0] != 0 {
@@ -162,14 +198,14 @@ func TestHerdrBackoffAttemptResetsAfterConnect(t *testing.T) {
 			return time.Millisecond
 		}
 	})
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	for i := 0; i < 2; i++ {
 		mu.Lock()
 		n := len(attempts)
 		mu.Unlock()
 		f.dropAll()
 		waitFor(t, "backoff", func() bool { mu.Lock(); defer mu.Unlock(); return len(attempts) > n })
-		waitState(t, tr, StateIdle)
+		waitState(t, tr, activity.StateIdle)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -199,8 +235,8 @@ func TestHerdrRetriesWhileServerDown(t *testing.T) {
 		t.Fatalf("attempts = %v, want 0 1 2 while never connected", attempts)
 	}
 	mu.Unlock()
-	if _, ok := tr.Current(); ok {
-		t.Fatal("activity present while herdr is unavailable")
+	if !absent(tr) {
+		t.Fatal("state reported while herdr is unavailable")
 	}
 }
 
@@ -210,7 +246,7 @@ func TestHerdrTerminalIDChangeIsUnavailable(t *testing.T) {
 	hold := true
 	release := make(chan struct{})
 	tr := startHerdr(t, f, func(o *Options) {
-		o.HerdrPoll = 5 * time.Millisecond
+		o.Poll = 5 * time.Millisecond
 		o.Backoff = func(int) time.Duration {
 			mu.Lock()
 			h := hold
@@ -221,7 +257,7 @@ func TestHerdrTerminalIDChangeIsUnavailable(t *testing.T) {
 			return time.Millisecond
 		}
 	})
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	f.set("working")
 	f.setTerm("term_2") // the pane id was reused by another terminal
 	waitAbsent(t, tr)   // and the working of the new terminal is not reported as ours
@@ -230,36 +266,29 @@ func TestHerdrTerminalIDChangeIsUnavailable(t *testing.T) {
 	mu.Unlock()
 	close(release)
 	// After reconnecting the source reads the new terminal id as its own.
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 }
 
 func TestHerdrUnknownStatusHasNoState(t *testing.T) {
 	f := newFakeHerdr(t)
 	f.set("unknown")
 	tr := startHerdr(t, f, nil)
-	waitFor(t, "connected", func() bool {
-		tr.mu.Lock()
-		defer tr.mu.Unlock()
-		return tr.rt.Available
-	})
-	if _, ok := tr.Current(); ok {
+	waitFor(t, "connected", func() bool { return tr.get().Available })
+	if !absent(tr) {
 		t.Fatal("unknown status produced a state")
 	}
-	if d := tr.Describe(); !strings.Contains(d, "not an agent") {
-		t.Fatalf("describe = %q", d)
-	}
 	f.push("w1:p1", "working")
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 	f.push("w1:p1", "something-new") // a word we do not know is treated like unknown
 	waitAbsent(t, tr)
 }
 
 func TestHerdrBackstopPollPicksUpChange(t *testing.T) {
 	f := newFakeHerdr(t)
-	tr := startHerdr(t, f, func(o *Options) { o.HerdrPoll = 5 * time.Millisecond })
-	waitState(t, tr, StateIdle)
+	tr := startHerdr(t, f, func(o *Options) { o.Poll = 5 * time.Millisecond })
+	waitState(t, tr, activity.StateIdle)
 	f.set("working") // no event
-	waitState(t, tr, StateWorking)
+	waitState(t, tr, activity.StateWorking)
 }
 
 func TestHerdrPongWithoutVersionIsUnavailable(t *testing.T) {
@@ -272,8 +301,8 @@ func TestHerdrPongWithoutVersionIsUnavailable(t *testing.T) {
 			mod(f)
 			tr := startHerdr(t, f, nil)
 			waitFor(t, "a ping", func() bool { return f.seenMethods()["ping"] >= 2 })
-			if _, ok := tr.Current(); ok {
-				t.Fatal("activity present")
+			if !absent(tr) {
+				t.Fatal("state reported")
 			}
 			if m := f.seenMethods(); m["pane.get"] != 0 {
 				t.Fatalf("pane.get sent after a bad pong: %v", m)
@@ -287,17 +316,17 @@ func TestHerdrPaneGetErrorIsUnavailable(t *testing.T) {
 	f.setPaneErr(true)
 	tr := startHerdr(t, f, nil)
 	waitFor(t, "two pane.get", func() bool { return f.count(func(f *fakeHerdr) int { return f.paneGets }) >= 2 })
-	if _, ok := tr.Current(); ok {
-		t.Fatal("activity present")
+	if !absent(tr) {
+		t.Fatal("state reported")
 	}
 	f.setPaneErr(false)
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 }
 
 func TestHerdrSendsOnlyReadMethods(t *testing.T) {
 	f := newFakeHerdr(t)
-	tr := startHerdr(t, f, func(o *Options) { o.HerdrPoll = 2 * time.Millisecond })
-	waitState(t, tr, StateIdle)
+	tr := startHerdr(t, f, func(o *Options) { o.Poll = 2 * time.Millisecond })
+	waitState(t, tr, activity.StateIdle)
 	f.push("w1:p1", "working")
 	f.eventsLost()
 	f.dropAll()
@@ -314,15 +343,46 @@ func TestHerdrSendsOnlyReadMethods(t *testing.T) {
 
 func TestHerdrNotConfiguredWithoutBothVariables(t *testing.T) {
 	for _, env := range []map[string]string{
+		{},
 		{"HERDR_SOCKET_PATH": "/nonexistent"},
 		{"HERDR_PANE_ID": "w1:p1"},
+		{"HERDR_SOCKET_PATH": "", "HERDR_PANE_ID": "w1:p1"},
 	} {
-		tr := New(Options{Env: mapEnv(env)})
-		tr.Start(context.Background())
-		if n := tr.spawned.Load(); n != 0 {
-			t.Fatalf("env %v started %d goroutines", env, n)
+		if src, ok := FromEnv(mapEnv(env), Options{}); ok || src != nil {
+			t.Fatalf("env %v gave a source", env)
 		}
 	}
+}
+
+// TestHerdrThroughTracker runs the source under a real tracker: the combination, the status text and the stop.
+func TestHerdrThroughTracker(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.set("working")
+	var log bytes.Buffer
+	var mu sync.Mutex
+	src, _ := FromEnv(mapEnv(herdrEnv(f)), Options{Poll: time.Hour, Log: lockedWriter{&mu, &log},
+		Backoff: func(int) time.Duration { return time.Millisecond }})
+	tr := activity.New(activity.Options{Env: mapEnv(nil), Runtime: src})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr.Start(ctx)
+	waitFor(t, "working", func() bool { a, ok := tr.Current(); return ok && a.State == activity.StateWorking })
+	if a, _ := tr.Current(); a.Source != "runtime" || a.Kind != "" || a.Since.IsZero() {
+		t.Fatalf("activity = %+v", a)
+	}
+	want := "activity: herdr 0.9.5 ok: working (source runtime)"
+	if d := tr.Describe(); d != want {
+		t.Fatalf("describe = %q, want %q", d, want)
+	}
+	f.set("unknown")
+	f.push("w1:p1", "unknown")
+	waitFor(t, "absent", func() bool { _, ok := tr.Current(); return !ok })
+	if d := tr.Describe(); d != "activity: absent (herdr: not an agent pane, no hook record)" {
+		t.Fatalf("describe = %q", d)
+	}
+	f.dropAll()
+	f.set("working")
+	waitFor(t, "back", func() bool { a, ok := tr.Current(); return ok && a.State == activity.StateWorking })
 }
 
 func TestHerdrInjectedDial(t *testing.T) {
@@ -337,10 +397,28 @@ func TestHerdrInjectedDial(t *testing.T) {
 			return net.Dial("unix", p)
 		}
 	})
-	waitState(t, tr, StateIdle)
+	waitState(t, tr, activity.StateIdle)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(paths) < 2 || paths[0] != f.path {
 		t.Fatalf("dialled %v", paths)
 	}
+}
+
+func TestHerdrCancelDuringBackoffStops(t *testing.T) {
+	f := newFakeHerdr(t)
+	f.version = ""
+	r := startHerdr(t, f, func(o *Options) { o.Backoff = func(int) time.Duration { return time.Hour } })
+	waitFor(t, "first ping", func() bool { return f.seenMethods()["ping"] >= 1 })
+	_ = r // cleanup cancels and waits for Run
+}
+
+func TestHerdrCancelledBeforeRunStops(t *testing.T) {
+	f := newFakeHerdr(t)
+	src, _ := FromEnv(mapEnv(herdrEnv(f)), Options{Backoff: func(int) time.Duration { return time.Millisecond }})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := &running{recorder: &recorder{}, src: src, done: make(chan struct{})}
+	go func() { src.Run(ctx, r.report); close(r.done) }()
+	waitDone(t, r)
 }

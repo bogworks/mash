@@ -192,6 +192,11 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	}
 }
 
+// herdrAdapter is the one allowed import of a foreign tool's name: the replaceable runtime source for package
+// activity. It is optional at run time (it does nothing without the HERDR_* variables), and nothing else in the tree
+// may import herdr code.
+const herdrAdapter = "github.com/bogworks/mash/internal/activity/herdr"
+
 // TestNoForeignToolInSource is a simple, honest check: no non-test Go file under cmd/ or internal/ runs, looks up or
 // imports a foreign tool or claude.
 func TestNoForeignToolInSource(t *testing.T) {
@@ -210,7 +215,7 @@ func TestNoForeignToolInSource(t *testing.T) {
 			checked++
 			for _, imp := range f.Imports {
 				path, _ := strconv.Unquote(imp.Path.Value)
-				if hasForeign(path) {
+				if hasForeign(path) && path != herdrAdapter {
 					t.Errorf("%s imports %s", p, path)
 				}
 			}

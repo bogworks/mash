@@ -3,8 +3,6 @@ package activity
 import (
 	"context"
 	"fmt"
-	"io"
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -14,15 +12,12 @@ import (
 
 // Options configures a Tracker.
 type Options struct {
-	Env       func(string) string                 // process environment reader; nil = os.Getenv
-	Dir       string                              // directory holding RecordFile ("" = no hooks source)
-	Off       bool                                // MASH_ACTIVITY=off: nothing runs, Current is always absent
-	Now       func() time.Time                    // nil = time.Now
-	HooksPoll time.Duration                       // how often RecordFile is re-read; 0 = 1s
-	HerdrPoll time.Duration                       // backstop pane.get interval; 0 = 5s
-	Dial      func(path string) (net.Conn, error) // nil = unix socket dial; tests inject
-	Backoff   func(attempt int) time.Duration     // reconnect delay; nil = 1s doubling to 30s
-	Log       io.Writer                           // diagnostics lines (herdr connected/unavailable, version); nil = discard
+	Env       func(string) string // process environment reader; nil = os.Getenv
+	Dir       string              // directory holding RecordFile ("" = no hooks source)
+	Off       bool                // MASH_ACTIVITY=off: nothing runs, Current is always absent
+	Now       func() time.Time    // nil = time.Now
+	HooksPoll time.Duration       // how often RecordFile is re-read; 0 = 1s
+	Runtime   RuntimeSource       // nil = no runtime source; the caller builds it (the herdr adapter is one)
 }
 
 // Tracker combines the runtime and hooks sources into one Activity.
@@ -40,11 +35,10 @@ type Tracker struct {
 	hkSeen bool
 	hkInfo os.FileInfo
 
-	mu      sync.Mutex
-	rt      runtimeView
-	version string // herdr's version, for Describe
-	hkRec   Record
-	hkOK    bool // hkRec is from this process's harness
+	mu    sync.Mutex
+	rt    runtimeView
+	hkRec Record
+	hkOK  bool // hkRec is from this process's harness
 	// last is the combined answer the last evaluation produced; Since in it is the time it first appeared.
 	last   Activity
 	lastOK bool
@@ -62,11 +56,6 @@ func New(o Options) *Tracker {
 	return t
 }
 
-func (t *Tracker) herdrConfigured() (sock, pane string, ok bool) {
-	sock, pane = t.env("HERDR_SOCKET_PATH"), t.env("HERDR_PANE_ID")
-	return sock, pane, sock != "" && pane != ""
-}
-
 func (t *Tracker) spawn(f func()) {
 	t.wg.Add(1)
 	t.spawned.Add(1)
@@ -76,20 +65,14 @@ func (t *Tracker) spawn(f func()) {
 	}()
 }
 
-func (t *Tracker) logf(format string, a ...any) {
-	if t.o.Log != nil {
-		fmt.Fprintf(t.o.Log, format+"\n", a...)
-	}
-}
-
 // Start begins reading the configured sources and returns at once. It starts no goroutine when Off, when neither
 // source is configured, or when called a second time. Every goroutine stops when ctx is done.
 func (t *Tracker) Start(ctx context.Context) {
 	if t.o.Off || !t.started.CompareAndSwap(false, true) {
 		return
 	}
-	if sock, pane, ok := t.herdrConfigured(); ok {
-		t.spawn(func() { t.herdrLoop(ctx, sock, pane) })
+	if t.o.Runtime != nil {
+		t.spawn(func() { t.o.Runtime.Run(ctx, t.setRuntime) })
 	}
 	if t.o.Dir != "" {
 		poll := t.o.HooksPoll
@@ -110,6 +93,10 @@ func (t *Tracker) Start(ctx context.Context) {
 		})
 	}
 }
+
+// Wait returns when every goroutine Start began has stopped. Cancel the context given to Start first. It returns at
+// once when nothing was started.
+func (t *Tracker) Wait() { t.wg.Wait() }
 
 // Current returns the combined activity; ok is false when it is absent. Absent is not idle.
 func (t *Tracker) Current() (Activity, bool) {
@@ -146,12 +133,15 @@ func (t *Tracker) evalLocked() {
 	t.last, t.lastOK = a, true
 }
 
-// setRuntime records what the runtime source says: avail false for unavailable, state empty for "not an agent".
-func (t *Tracker) setRuntime(avail bool, st State) {
+// setRuntime records what the runtime source says: Available false for unavailable, State empty for "not an agent".
+func (t *Tracker) setRuntime(r RuntimeReport) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.rt.Available, t.rt.State = avail, st
-	if avail && st == StateBlocked {
+	if !r.Available {
+		r.State, r.Version = "", ""
+	}
+	t.rt.Available, t.rt.State, t.rt.Version = r.Available, r.State, r.Version
+	if r.Available && r.State == StateBlocked {
 		t.rt.BlockedSeen = t.now().UTC()
 	}
 	t.evalLocked()
@@ -164,21 +154,21 @@ func (t *Tracker) Describe() string {
 	}
 	a, ok := t.Current()
 	t.mu.Lock()
-	rt, version, hk := t.rt, t.version, t.hkOK
+	rt, hk := t.rt, t.hkOK
 	hkView := t.hooksViewAt(t.now().UTC())
 	t.mu.Unlock()
-	_, _, hasHerdr := t.herdrConfigured()
+	src := t.o.Runtime
 	hasHooks := t.o.Dir != ""
 
 	if !ok {
 		var why []string
 		switch {
-		case !hasHerdr:
-			why = append(why, "no herdr")
+		case src == nil:
+			why = append(why, "no runtime source")
 		case !rt.Available:
-			why = append(why, "herdr unavailable")
+			why = append(why, src.Name()+" unavailable")
 		default:
-			why = append(why, "herdr: not an agent pane")
+			why = append(why, src.Name()+": not an agent pane")
 		}
 		switch {
 		case !hasHooks, !hk:
@@ -189,14 +179,11 @@ func (t *Tracker) Describe() string {
 		return "activity: absent (" + strings.Join(why, ", ") + ")"
 	}
 	var parts []string
-	if hasHerdr {
-		switch {
-		case !rt.Available:
-			parts = append(parts, "herdr unavailable")
-		case version != "":
-			parts = append(parts, "herdr "+version+" ok")
-		default:
-			parts = append(parts, "herdr ok")
+	if src != nil {
+		if rt.Available {
+			parts = append(parts, src.Describe(RuntimeReport{Available: true, State: rt.State, Version: rt.Version}))
+		} else {
+			parts = append(parts, src.Name()+" unavailable")
 		}
 	}
 	if hasHooks {
