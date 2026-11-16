@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -31,15 +32,17 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if cfgErr != nil || cfg.Inert() {
 		return 0
 	}
+	// The whole input is read, uncapped: a PostToolUse input carries the tool's full response and may pass 1 MiB. It is
+	// read before the TLS check below because the activity record needs no TLS.
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return 0
+	}
+	recordActivity(cfg, raw, env, time.Now().UTC(), stderr)
 	// The hook connects to nothing, but a configuration serve and the CLI refuse must not look healthy here: the refusal
 	// is said on stderr (hook.log) and the hook still exits 0 (the spool has no mail from a serve that never started).
 	if _, err := endpoint.EndpointTLS(cfg); err != nil {
 		fmt.Fprintf(stderr, "mash hook: %v\n", err)
-		return 0
-	}
-	// The whole input is read, uncapped: a PostToolUse input carries the tool's full response and may pass 1 MiB.
-	raw, err := io.ReadAll(stdin)
-	if err != nil {
 		return 0
 	}
 	trig, ok := adapter.Trigger(raw, env)
@@ -173,6 +176,33 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 	}
 	return 0
+}
+
+// recordActivity writes the latest main-session hook event to activity.json in the endpoint's spool directory, where
+// serve's activity tracker reads it (peer activity). It lives in `mash hook` and not in a command of its own because
+// the plugin of one release runs against the binary of the one before, and an older binary answers an unknown
+// subcommand with an error but ignores, silently, a hook event it does not know. It runs on every tool call, so it
+// connects to nothing, takes no spool lock and scans no directory; an event that is not tracked costs one JSON parse.
+// It writes only into a spool directory that already exists (serve makes it), so a session with no serve leaves no
+// files behind. A failed write is one stderr line; it never changes the hook's exit code or output.
+func recordActivity(cfg config.Config, raw []byte, env func(string) string, now time.Time, stderr io.Writer) {
+	if cfg.Activity == "off" {
+		return
+	}
+	rec, ok := activity.RecordFromHook(raw, env, now)
+	if !ok {
+		return
+	}
+	dir, err := endpoint.SpoolDir(cfg)
+	if err != nil {
+		return
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return
+	}
+	if err := activity.WriteRecord(dir, rec); err != nil {
+		fmt.Fprintf(stderr, "mash hook: recording the activity: %v\n", err)
+	}
 }
 
 // waitNoticeEvery is how often the hook repeats the lease-wait notice while the wait persists.

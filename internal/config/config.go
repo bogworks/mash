@@ -69,6 +69,7 @@ type Config struct {
 	Host           string       // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
 	SpoolRequired  bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
+	Activity       string       // MASH_ACTIVITY / "activity": "auto" (default) reads the activity sources, "off" reads none
 	Dir            string       // the config directory (ConfigDir); "" when none can be found
 	Legacy         string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits         store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
@@ -122,6 +123,8 @@ type file struct {
 
 	SpoolFromStart *bool `json:"spool_from_start"`
 	SpoolRequired  *bool `json:"spool_required"`
+
+	Activity string `json:"activity"`
 
 	InsecureLoopback *bool `json:"insecure_loopback"`
 	RequireTLS       *bool `json:"require_tls"`
@@ -531,6 +534,23 @@ func Load(lookup Lookup, home string) (Config, error) {
 			return c, fmt.Errorf("mash: %s %w", from, err)
 		}
 		*p.dst = d
+	}
+
+	// Chosen as the timeouts are: the environment, else the file, validated once, so an invalid file value under a
+	// valid environment override loads and an invalid effective one names its source.
+	{
+		raw, from := env("MASH_ACTIVITY"), "MASH_ACTIVITY"
+		if raw == "" {
+			raw, from = f.Activity, `config.json "activity"`
+		}
+		switch raw {
+		case "", "auto":
+			c.Activity = "auto"
+		case "off":
+			c.Activity = "off"
+		default:
+			return c, fmt.Errorf("mash: %s=%q is not auto or off", from, raw)
+		}
 	}
 
 	if (c.TLSCert == "") != (c.TLSKey == "") {

@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/claudesettings"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -44,6 +45,8 @@ type statusSource struct {
 	// cli is `mash status` from a shell: nothing is connected, so the live-only lines (connection, delivery) say
 	// that a running session reports them instead of printing a state they cannot know.
 	cli bool
+	// tracker is serve's activity tracker; nil when serve has not made one (no endpoint) and in the CLI.
+	tracker *activity.Tracker
 }
 
 // settings reads Claude Code's managed sources and the home they were read from. home is "" when it is unknown.
@@ -125,6 +128,9 @@ func statusText(src *statusSource) string {
 		lines = append(lines, l)
 	}
 	lines = append(lines, deliveryLines(src)...)
+	if l := activityLine(src); l != "" {
+		lines = append(lines, l)
+	}
 	if l := spoolFaultLine(src); l != "" {
 		lines = append(lines, l)
 	}
@@ -558,6 +564,18 @@ func readRelayCounters(cfg config.Config) (endpoint.RelayCounters, bool) {
 		return endpoint.RelayCounters{}, false
 	}
 	return endpoint.ReadRelayCounters(cfg.StateDir, o, n)
+}
+
+// activityLine is what the activity tracker says (inside serve), or that a running session reports it (from the
+// shell). Without a tracker (no endpoint) there is nothing to say.
+func activityLine(src *statusSource) string {
+	switch {
+	case src.cli:
+		return "activity: reported by a running session"
+	case src.tracker != nil:
+		return src.tracker.Describe()
+	}
+	return ""
 }
 
 // relayLine shows the relay-trace counters (ADR 0064). Inside serve they are the running endpoint's; from the shell

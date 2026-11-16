@@ -369,6 +369,46 @@ func TestLoadSpoolRequired(t *testing.T) {
 	}
 }
 
+func TestLoadActivity(t *testing.T) {
+	load := func(t *testing.T, file string, env map[string]string) (Config, error) {
+		t.Helper()
+		home := t.TempDir()
+		writeFile(t, home, file)
+		env["MASH_NAME"] = "a"
+		return load(envOf(env), home)
+	}
+	base := `"url":"tls://x:4222","owner":"o"`
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       string
+	}{
+		{"default auto", `{` + base + `}`, map[string]string{}, "auto"},
+		{"empty env is unset", `{` + base + `}`, map[string]string{"MASH_ACTIVITY": ""}, "auto"},
+		{"env off", `{` + base + `}`, map[string]string{"MASH_ACTIVITY": "off"}, "off"},
+		{"env auto", `{` + base + `}`, map[string]string{"MASH_ACTIVITY": "auto"}, "auto"},
+		{"file off", `{` + base + `,"activity":"off"}`, map[string]string{}, "off"},
+		{"file auto", `{` + base + `,"activity":"auto"}`, map[string]string{}, "auto"},
+		{"env beats the file", `{` + base + `,"activity":"off"}`, map[string]string{"MASH_ACTIVITY": "auto"}, "auto"},
+		{"valid env beats an invalid file", `{` + base + `,"activity":"maybe"}`, map[string]string{"MASH_ACTIVITY": "off"}, "off"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, tc.file, tc.env)
+			if err != nil || c.Activity != tc.want {
+				t.Fatalf("Activity = %q, %v; want %q", c.Activity, err, tc.want)
+			}
+		})
+	}
+	for _, v := range []string{"on", "OFF", "1", "true", " off"} {
+		if _, err := load(t, `{`+base+`}`, map[string]string{"MASH_ACTIVITY": v}); err == nil || !strings.Contains(err.Error(), "MASH_ACTIVITY") {
+			t.Fatalf("%q: err %v, want a MASH_ACTIVITY error", v, err)
+		}
+	}
+	if _, err := load(t, `{`+base+`,"activity":"maybe"}`, map[string]string{}); err == nil || !strings.Contains(err.Error(), `"activity"`) {
+		t.Fatalf("file value: err %v, want an activity error", err)
+	}
+}
+
 func TestLimitsConfig(t *testing.T) {
 	home := t.TempDir()
 	c, err := load(envOf(nil), home)
