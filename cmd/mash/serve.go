@@ -176,7 +176,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Det
 	adapter := det.Adapter
 	applyRetryTiming(cfg)
 	endpoint.SetSessionEnv(adapter.SessionSources().Env)
-	endpoint.SetNoSessionIdentity(host.IsHeadless(adapter)) // a headless serve is never the same session as another
+	// No same-session takeover where ancestry does not identify the session (headless, Codex). While the host is only
+	// assumed, the first lease is opened before the MCP client has named it, so it is opened without identity and
+	// hostSettle sets the settled host's answer (Claude Code and Pi get identity back).
+	endpoint.SetNoSessionIdentity(det.Pending() || host.NoSameSessionTakeover(adapter))
 	endpoint.SetServicePrefix(adapter.Words().ServicePrefix)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -323,7 +326,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Det
 		waited := ep == nil
 		if waited {
 			var ok bool
-			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify, noteHeld); !ok {
+			if ep, ok = acquire(ctx, cfg, srv, &state, held, startErr, stderr, notify, noteHeld, pendingSettle(det, hs, srv)); !ok {
 				return
 			}
 			clearWaiter() // this serve now holds the lease
@@ -525,8 +528,16 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Det
 // or a permanent error stops it. It starts from the first Open's failure: a held lease, or else startErr, a
 // transient error. It sends the waiting notice once Claude Code is ready, and the terminal notice on a permanent
 // failure. It returns the endpoint it now owns; on false the caller has nothing to close.
+// pendingSettle is what acquire calls when the client initializes while the host is still assumed, else nil.
+func pendingSettle(det host.Detection, hs *hostSettle, srv *mcp.Server) func() {
+	if !det.Pending() {
+		return nil
+	}
+	return func() { hs.settle(srv) }
+}
+
 func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *atomic.Pointer[sessionState],
-	held *endpoint.LeaseHeldError, startErr error, stderr io.Writer, notify func(string), noteHeld func(*endpoint.LeaseHeldError)) (*endpoint.Endpoint, bool) {
+	held *endpoint.LeaseHeldError, startErr error, stderr io.Writer, notify func(string), noteHeld func(*endpoint.LeaseHeldError), settle func()) (*endpoint.Endpoint, bool) {
 	type result struct {
 		ep  *endpoint.Endpoint
 		err error
@@ -617,6 +628,13 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 		select {
 		case <-ready:
 			ready = nil
+			// The client has initialized: a still-assumed host is settled now, so a takeover is judged for the settled
+			// host. The first attempt ran without identity (see serve); a held lease of an earlier serve of this same
+			// session is tried again soon rather than after the long retry.
+			if settle != nil && held != nil && !inflight && failed == nil {
+				settle()
+				timer.Reset(sameSessionRetry)
+			}
 			// An attempt that finished before readiness is settled first, so a success is never announced as
 			// "held" and a terminal failure is told at once.
 			select {

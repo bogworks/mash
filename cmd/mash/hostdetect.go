@@ -65,6 +65,7 @@ func (h *hostSettle) settle(srv *mcp.Server) host.Adapter {
 		d := h.final
 		h.src.late.Store(&d)
 		endpoint.SetServicePrefix(d.Adapter.Words().ServicePrefix)
+		endpoint.SetNoSessionIdentity(host.NoSameSessionTakeover(d.Adapter))
 		if h.det.Pending() {
 			if d.Assumed() {
 				fmt.Fprintln(h.stderr, d.AssumedMessage())

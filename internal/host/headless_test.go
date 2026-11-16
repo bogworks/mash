@@ -88,3 +88,14 @@ func TestHeadlessOwnerRecordIsNotClaimable(t *testing.T) {
 		t.Errorf("OwnerPID = %d", OwnerPID(got))
 	}
 }
+
+func TestNoSameSessionTakeover(t *testing.T) {
+	for _, c := range []struct {
+		a    Adapter
+		want bool
+	}{{Claude{}, false}, {Pi{}, false}, {Headless{}, true}, {Codex{}, true}} {
+		if got := NoSameSessionTakeover(c.a); got != c.want {
+			t.Errorf("%s: NoSameSessionTakeover = %v, want %v", c.a.Name(), got, c.want)
+		}
+	}
+}

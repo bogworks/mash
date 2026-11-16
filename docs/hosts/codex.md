@@ -114,5 +114,7 @@ sooner if a tool finishes first. A failed `codex queue` is written to stderr onc
 - A live `mash prompt` to a Codex endpoint does not work yet: the request id the model replies with is carried only
   on the channel.
 - With no launch token, mail waits for the first mash tool call (see section 2).
-- Two threads of one shared app-server that use the same `MASH_NAME` can take the endpoint's lease from each other,
-  because they share a parent process; give each thread its own name.
+- Same-session lease takeover is off for Codex: process ancestry does not identify a thread, so two threads of one
+  shared app-server with the same `MASH_NAME` never take a live lease from each other. A restarted serve of the same
+  thread waits for the old lease to be released or to expire (as under headless), until the thread id can identify the
+  lease holder. Give each thread its own name.

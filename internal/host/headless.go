@@ -10,6 +10,14 @@ import (
 // IsHeadless reports whether a is the headless adapter: serve then has no MCP client to talk to.
 func IsHeadless(a Adapter) bool { _, ok := a.(Headless); return ok }
 
+// NoSameSessionTakeover is true when a serve of host a must not take a live lease from another serve under the same
+// parent process: headless has no session, and a host whose process ancestry does not identify its session (Codex,
+// where threads of one app-server share a parent) cannot tell its own earlier serve from another thread's. Takeover of
+// a dead or expired holder is unchanged.
+func NoSameSessionTakeover(a Adapter) bool {
+	return IsHeadless(a) || !a.SessionSources().AncestryUnique
+}
+
 // Headless is the adapter for an endpoint that runs with no agent host at all (MASH_HOST=headless, ADR 0139): serve
 // keeps the endpoint online and its mail is read with the CLI. There is no session, no hook and no wake, so every
 // method that serves a hook or a wake is inert and safe to call.

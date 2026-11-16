@@ -88,8 +88,11 @@ Not decided here, and later work:
 * The plugin's MCP entry under Codex (`${CLAUDE_PLUGIN_ROOT}` is not expanded by Codex).
 * An intake of Codex's activity into mash.
 * Live prompts (`mash prompt`) to a Codex endpoint.
-* Two threads of one shared app-server with the same endpoint name, whose serves share a parent process
-  ([ADR 0092](0092-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md) treats the same parent as the same session).
+* Same-session takeover of the endpoint lease ([ADR 0092](0092-a-new-serve-of-the-same-session-takes-over-the-endpoint-lease.md))
+  is off for Codex, as under headless: threads of one shared app-server share a parent process, so ancestry cannot tell
+  one thread's serve from another's. A restarted serve of the same thread waits for the old lease to be released or to
+  expire, until the thread id can identify the lease holder. A serve whose host is still only assumed opens its first
+  lease without identity and gets it back when the client's name settles the host to one whose ancestry is unique.
 
 This amends [ADR 0032](0032-host-adapter-seam.md) (a third host and an optional wake interface),
 [ADR 0040](0040-hook-ownership-session-id-launch-token-then-process-chain.md) (rule 3 applies only where ancestry is
