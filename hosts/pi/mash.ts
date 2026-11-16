@@ -30,6 +30,10 @@ function run(args: string[], input: string): Promise<string> {
   });
 }
 
+// REOFFER_MS must exceed mash's re-offer hold (reofferAfter = 60 * time.Second in `mash hook`), or a retry finds the
+// dropped batch still withheld and offers nothing.
+const REOFFER_MS = 61_000;
+
 type Offer = { text: string; ack: string };
 
 // hook asks `mash hook` for the mail waiting for this session. event is the name the Go adapter (internal/host/pi.go)
@@ -66,6 +70,8 @@ export default function (pi: any) {
   let gen = 0;
   let watcher: FSWatcher | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  // retry looks for mail again once the hook's hold on a dropped offer has expired (see agent_settled).
+  let retry: ReturnType<typeof setTimeout> | undefined;
 
   // wake starts a turn that carries the waiting mail, unless the model is busy or there is none.
   const wake = async () => {
@@ -142,6 +148,8 @@ export default function (pi: any) {
     watcher = undefined;
     if (timer) clearInterval(timer);
     timer = undefined;
+    if (retry) clearTimeout(retry);
+    retry = undefined;
     armed = false;
     busy = false;
     held = false;
@@ -154,11 +162,24 @@ export default function (pi: any) {
   pi.on("agent_settled", () => {
     busy = false;
     held = false;
+    const dropped = pending.length > 0;
     pending = []; // offers no message_end confirmed (blocked, aborted) are dropped unacked
     // Mail beyond one batch, or held while busy, waits with no new file to wake on: look again. wake() sends nothing
     // when the hook offers nothing, and the hook holds an offered batch back from this session for 60 s, so this
     // cannot loop hot: a turn starts only when the hook offers new text, and then settles once.
     void wake();
+    // A dropped offer stays held back from this session for the hook's 60 s, and nothing else may check again when
+    // the hold ends (an idle session gets no new file): look once more then. One timer, replaced not stacked; a retry
+    // whose own offer is dropped schedules the next, so delivery is at least once, at most one look per REOFFER_MS.
+    if (dropped) {
+      const g = gen;
+      if (retry) clearTimeout(retry);
+      retry = setTimeout(() => {
+        retry = undefined;
+        if (g === gen) void wake();
+      }, REOFFER_MS);
+      retry.unref();
+    }
   });
 
   // After a tool result: add the mail to that result, so the model sees it on its next step.
