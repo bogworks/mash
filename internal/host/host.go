@@ -57,7 +57,7 @@ type SessionSources struct {
 
 // SessionID is the session id a's host sets in the environment env reads; "" when none, or env is nil.
 func SessionID(a Adapter, env func(string) string) string {
-	if env == nil {
+	if env == nil || a.SessionSources().Env == "" { // a host with no session variable has no session id
 		return ""
 	}
 	return env(a.SessionSources().Env)
@@ -112,9 +112,11 @@ func Select(name string) (Adapter, error) {
 	switch name {
 	case "", "claude":
 		return Claude{}, nil
+	case "headless": // no host at all (ADR 0139); never detected, only named
+		return Headless{}, nil
 	}
 	return nil, fmt.Errorf("mash: unknown host %q (MASH_HOST); known hosts: %s", name, strings.Join(Known(), ", "))
 }
 
 // Known lists the host names Select accepts.
-func Known() []string { return []string{"claude"} }
+func Known() []string { return []string{"claude", "headless"} }

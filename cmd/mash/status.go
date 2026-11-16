@@ -378,11 +378,13 @@ func clockLine(skew time.Duration, ok bool) string {
 // reportSettings prints once, at serve start, the allowlist line when it is not OK and the environment line when it
 // applies, so a log read later shows why the channel or the environment is missing.
 func reportSettings(src *statusSource, stderr io.Writer) {
-	if l := allowlistLine(src); !strings.HasPrefix(l, allowlistPrefix+"OK") {
-		fmt.Fprintln(stderr, "mash: "+l)
-	}
-	if l := environmentLine(src); l != "" {
-		fmt.Fprintln(stderr, "mash: "+l)
+	if src.host().ClaudeSettingsChecks() {
+		if l := allowlistLine(src); !strings.HasPrefix(l, allowlistPrefix+"OK") {
+			fmt.Fprintln(stderr, "mash: "+l)
+		}
+		if l := environmentLine(src); l != "" {
+			fmt.Fprintln(stderr, "mash: "+l)
+		}
 	}
 	if l := tlsLine(src.cfg); strings.HasPrefix(l, "tls: WARN") {
 		fmt.Fprintln(stderr, "mash: "+l)
@@ -638,7 +640,12 @@ func hooklessFix(sp spool.Spool, own time.Time, w host.Words) string {
 // is launched. It connects to nothing and takes no lease. It is a report, so a missing name or config is output, not
 // a failure.
 func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout io.Writer) int {
-	src := &statusSource{cfg: cfg, cfgErr: cfgErr, cli: true, home: env("HOME"), getenv: env}
+	return statusCmdFor(cfg, cfgErr, nil, env, stdout)
+}
+
+// statusCmdFor is statusCmd for the host adapter; nil reads as Claude Code.
+func statusCmdFor(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string) string, stdout io.Writer) int {
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: adapter, cli: true, home: env("HOME"), getenv: env}
 	fmt.Fprintln(stdout, statusText(src))
 	return 0
 }

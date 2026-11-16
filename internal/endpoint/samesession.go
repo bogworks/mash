@@ -30,11 +30,9 @@ func sessionEnvName() string {
 }
 
 // SetSessionEnv names the environment variable OurSession reads the session id from. Call it before OurSession is first
-// used; "" leaves the default.
+// used. "" means the host has no session variable (headless, ADR 0139): none is read, not even the default.
 func SetSessionEnv(name string) {
-	if name != "" {
-		sessionEnv.Store(&name)
-	}
+	sessionEnv.Store(&name)
 }
 
 // OurSession is this process's SessionIdent; a variable so tests can stand in for another session or none.

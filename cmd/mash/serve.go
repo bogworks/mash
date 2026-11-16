@@ -175,8 +175,15 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// Without a usable identity, still answer MCP (the plugin may be enabled in every session) with only the
 	// tools that need no endpoint, version and status, and say why.
 	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: adapter, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
+	headless := host.IsHeadless(adapter)
 	reportSettings(src, stderr)
 	degraded := func(instr string, notify bool) int {
+		if headless {
+			// With no MCP client there is nobody to tell and nothing to serve the info tools to: the reason is on
+			// stderr and serve ends, rather than idling with no endpoint.
+			fmt.Fprintln(stderr, instr)
+			return 1
+		}
 		srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, infoTools(src))
 		src.srv.Store(srv)
 		if notify {
@@ -254,7 +261,21 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		instr += retryingLine
 	}
 	src.state = &state
+	// Headless (ADR 0139) has no MCP client. The least invasive way to run is to keep the one code path and give the
+	// MCP server nothing to read until the context ends and nowhere to write: stdin and stdout are not touched, so a
+	// closed or /dev/null stdin does not end serve (the server's Run returns on input EOF, which is what ends a
+	// hosted serve), and the only exit is the context (signal) or a lost lease. Everything that waits on an MCP
+	// handshake is released by hand below: the channel-ready gate, and the client ping that would never be answered.
+	if headless {
+		pr, pw := io.Pipe()
+		go func() { <-ctx.Done(); _ = pw.Close() }()
+		stdin, stdout = pr, io.Discard
+		fmt.Fprintf(stderr, "mash: endpoint %s runs headless (no agent host, no MCP client); read its mail with `mash inbox` and `mash read`; stop with SIGINT or SIGTERM\n", cfg.DisplayName())
+	}
 	srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, tools(&state, src))
+	if headless {
+		srv.MarkChannelReady()
+	}
 	src.srv.Store(srv)
 	// Each ended tool call is evidence for the hookless detector (endpoint/hookless.go): a hook runs after every
 	// successful tool call, so two calls well apart with no hook between them mean the hooks do not run.
@@ -272,6 +293,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	go func() {
 		defer close(done)
 		notify := func(text string) {
+			if headless { // no client to notify: the operator's stderr is the channel
+				fmt.Fprintln(stderr, text)
+				return
+			}
 			_ = srv.Notify(text, nil)
 		}
 		waited := ep == nil
@@ -289,10 +314,12 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		case <-ctx.Done():
 			return
 		}
-		if waited {
+		if waited || headless { // headless: the endpoint is up whether or not it waited for the lease; say so on stderr
 			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
-		go pingClient(ctx, srv, ep)
+		if !headless { // no client exists to answer a ping, and mcp_seen stays unset
+			go pingClient(ctx, srv, ep)
+		}
 		go warnLeaseRollup(ctx, ep, stderr)
 		// Hook delivery: once the plugin's hook has run in this session, mail goes through the spool (endpoint/hook.go).
 		// Without a spool, mail stays on the channel.
@@ -341,7 +368,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			ep.SpoolFromStart()
 		}
 		startSvc := func() {
+			// The SAP service is what makes `who` show an endpoint online, so headless registers it too. It has no
+			// session to show a live prompt to: it says so at once, rather than let the sender wait out a timeout.
 			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
+				if headless {
+					_ = ep.Reply(p.RequestID, "mash: this endpoint runs headless (no agent host) and cannot answer a live prompt; send it mail instead", true)
+					return
+				}
 				text, ok := promptNotice(p)
 				if !ok { // unreachable under endpoint.MaxPromptBytes; answer the caller rather than show a cut notice
 					_ = ep.Reply(p.RequestID, "mash: the prompt was too large to show and was not delivered", true)
@@ -436,10 +469,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			cancel()
 		}
 	}()
+	if headless { // the worker ending on its own (a permanent failure, a lost lease) ends serve: there is no client to close it
+		go func() { <-done; cancel() }()
+	}
 	_ = srv.Run(ctx)
 	cancel()
 	<-done
-	if lost.Load() {
+	if lost.Load() || (headless && parent.Err() == nil) {
 		return 1
 	}
 	return 0

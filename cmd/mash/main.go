@@ -207,7 +207,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
 	if args[0] == "status" { // a report: a config error is a line of it
-		return statusCmd(cfg, err, env, stdout)
+		// status reads the host from MASH_HOST so a headless endpoint skips Claude Code's settings checks. A report never
+		// fails on it: an unknown host reads as the default here, and `mash serve` refuses it.
+		a, _ := host.Select(cfg.Host)
+		return statusCmdFor(cfg, err, a, env, stdout)
 	}
 	if err != nil && args[0] != "serve" {
 		fmt.Fprintln(stderr, err)

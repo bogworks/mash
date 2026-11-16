@@ -447,6 +447,51 @@ Inside a session (the MCP `status` tool) the line is the running endpoint's. Fro
 
 The limits. A candidate is time adjacency: the endpoint sent to someone soon after someone else's mail arrived. It does not show that the text relates, and a busy endpoint is a candidate on most sends. A relay that waits longer than the window, is retyped or paraphrased, or is sent through another endpoint, is not seen. `Mash-Via` is an honesty mechanism: a sender that does not declare is not caught by it. Use the lines to see how often it happens, then decide with the data whether any rule is worth making; none is made here.
 
+## Run an endpoint with no agent
+
+mash needs no agent host. `MASH_HOST=headless mash serve` keeps an endpoint online, with its lease held and mail arriving, until you stop it; you read the mail with the CLI ([ADR 0139](decisions/0139-an-endpoint-can-run-with-no-agent-host-mash-host-headless.md)). It is for tests, scripts and services that only need a mailbox. It is chosen by name and never detected, so a Claude Code session is unaffected.
+
+This runs end to end on one machine with `nats-server` on your `PATH` (see [Local setup](#local-setup-with-mashctl-init---local)). Run `mashctl` and `mash` from a shell that has no `MASH_*` variables left over from an agent session:
+
+```sh
+mashctl init --local --owner alice --start     # a local server, config.json and admin creds
+mashctl add a                                  # two endpoints: a will run headless, b sends to it
+mashctl add b
+
+MASH_HOST=headless MASH_NAME=a mash serve </dev/null &
+# mash: endpoint a runs headless (no agent host, no MCP client); read its mail with `mash inbox` and `mash read`; stop with SIGINT or SIGTERM
+# mash: endpoint a is online; mail is on for this session.
+
+MASH_NAME=a mash who
+# a	online	seen 0s ago
+# b	offline
+
+MASH_NAME=b mash send a hello
+# sent #1 from b to a
+
+MASH_NAME=a mash inbox
+# #1	from b [verified]	2026-11-16T09:38:16Z	5 B	hello	kind task	instance wJVkOvd47jayJCvdWJHW4R
+
+MASH_NAME=a mash read 1
+# --- #1 from b [verified] at 2026-11-16T09:38:16Z
+# instance: wJVkOvd47jayJCvdWJHW4R
+# kind: task
+# > hello
+
+kill -INT %1          # or Ctrl-C when serve runs in the foreground; SIGTERM and SIGHUP do the same
+MASH_NAME=b mash who
+# a	offline
+# b	offline
+```
+
+What to expect:
+
+- serve does not read or write standard input and output, so `</dev/null` or a closed stdin does not end it. It ends on SIGINT, SIGTERM or SIGHUP, releases the lease and exits 0. It exits 1, with the reason on stderr, if the lease is lost or it cannot start (no `MASH_NAME`, no server).
+- Mail waits in the inbox and the spool, unacked, until you read it with `mash inbox` and `mash read`. Nothing re-sends it and nothing wakes anyone. The CLI never takes the lease, so `inbox` and `read` work while serve runs.
+- The endpoint cannot answer a live prompt: `mash prompt a ...` is answered at once with a line that says so. Send it mail.
+- `MASH_HOST=headless mash status` skips the checks of Claude Code's settings.
+- Stop the local server with `kill $(cat ~/.config/mash/server/server.pid)` (the path is `<config dir>/server/server.pid`).
+
 ## Headless and SDK sessions
 
 mash's live receipts use persistent `claude -p` stream-json sessions. Other headless shapes behave differently.

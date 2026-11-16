@@ -45,6 +45,7 @@ type Server struct {
 	listOnce  sync.Once
 	listed    chan struct{}
 	chanReady chan struct{}
+	chanOnce  sync.Once // closes chanReady: the handshake's goroutine, or MarkChannelReady, whichever is first
 
 	pmu     sync.Mutex
 	pings   map[string]chan struct{} // outstanding pings to the client, by request id
@@ -112,7 +113,7 @@ func New(in io.Reader, out io.Writer, name, version, instructions string, tools 
 		case <-time.After(fallback):
 		}
 		time.Sleep(grace)
-		close(s.chanReady)
+		s.chanOnce.Do(func() { close(s.chanReady) })
 	}()
 	for _, t := range tools {
 		s.tools[t.Name] = t
@@ -123,6 +124,10 @@ func New(in io.Reader, out io.Writer, name, version, instructions string, tools 
 
 // Initialized is closed once the client has sent notifications/initialized.
 func (s *Server) Initialized() <-chan struct{} { return s.ready }
+
+// MarkChannelReady closes ChannelReady now, with no handshake. It is for a serve that has no MCP client at all
+// (headless, ADR 0139): nothing will ever initialize, and what waits on ChannelReady must not wait for it.
+func (s *Server) MarkChannelReady() { s.chanOnce.Do(func() { close(s.chanReady) }) }
 
 // ChannelReady is closed when channel events are expected to be delivered:
 // after initialized and the client's first tools/list (plus a short grace),

@@ -1,0 +1,1 @@
+`MASH_HOST=headless mash serve` keeps an endpoint online with no agent host and no MCP client until it is stopped; its mail is read with `mash inbox` and `mash read` ([ADR 0139](docs/decisions/0139-an-endpoint-can-run-with-no-agent-host-mash-host-headless.md)).

@@ -370,7 +370,9 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 // waiting out the idle wake would delay its first mail. That ring does not start the backoff, so the idle wake still
 // follows if it starts no turn (Claude Code may drop a channel event before its first prompt). Result and fyi mail still waits. Once a hook has run, the rules above apply unchanged.
 func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
-	if len(h.msgs) == 0 {
+	// A host with no wake (headless, ADR 0139) passes no Deliverer: there is nothing to ring, and no wake is counted, so
+	// the session is never judged hookless.
+	if deliver == nil || len(h.msgs) == 0 {
 		return
 	}
 	var ring []spool.Ref
