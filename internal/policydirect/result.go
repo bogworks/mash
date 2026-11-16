@@ -84,6 +84,58 @@ type Result struct {
 	Status *policyapply.Status `json:"status,omitempty"`
 	// Plan is the dry run's plan, when there was one.
 	Plan *listset.Plan `json:"plan,omitempty"`
+	// NextSteps is what each sender the policy touches needs done next, from the plan: a dry run's, and a real run's
+	// that applied or partly pushed. It is plain data; the steps are not taken here.
+	NextSteps []NextStep `json:"next_steps"`
+}
+
+// The steps of NextStep, named as the plan names the lists they come from.
+const (
+	StepFirstCredential = "first_credential"
+	StepNewCredential   = "new_credential"
+	StepRotateAndRevoke = "rotate_and_revoke"
+	StepRevoke          = "revoke"
+)
+
+// The actions of NextStep.
+const (
+	ActionIssue              = "issue"
+	ActionIssueThenRevokeOld = "issue_then_revoke_old"
+	ActionRevoke             = "revoke"
+)
+
+// NextStep is one thing a sender needs once the policy is in force. Purpose is "issue" or "rotation", as a credential
+// request for it would carry (empty for a revoke); Address is the sender's address, owner.name.
+type NextStep struct {
+	Sender  string `json:"sender"`
+	Step    string `json:"step"`
+	Action  string `json:"action"`
+	Address string `json:"address"`
+	Purpose string `json:"purpose,omitempty"`
+	Detail  string `json:"detail"`
+}
+
+// nextSteps is the steps the plan's four lists make, in the order first credential, new credential, rotate and revoke,
+// revoke; each list is sorted already.
+func nextSteps(p *listset.Plan) []NextStep {
+	out := []NextStep{}
+	for _, s := range p.FirstCredential {
+		out = append(out, NextStep{Sender: s, Step: StepFirstCredential, Action: ActionIssue, Address: s, Purpose: "issue",
+			Detail: "issue a credential for a public key the endpoint made; mashctl never needs its private key"})
+	}
+	for _, s := range p.NewCredential {
+		out = append(out, NextStep{Sender: s, Step: StepNewCredential, Action: ActionIssue, Address: s, Purpose: "issue",
+			Detail: "issue a new credential for this sender's public key, so its changed tags take effect; nothing is revoked"})
+	}
+	for _, s := range p.RotateAndRevoke {
+		out = append(out, NextStep{Sender: s, Step: StepRotateAndRevoke, Action: ActionIssueThenRevokeOld, Address: s, Purpose: "rotation",
+			Detail: "issue a credential for a new public key the endpoint made, then revoke the old key, whose credential keeps reach the policy removed"})
+	}
+	for _, s := range p.Revoke {
+		out = append(out, NextStep{Sender: s, Step: StepRevoke, Action: ActionRevoke, Address: s,
+			Detail: "revoke every key issued for this sender, which the policy no longer lists"})
+	}
+	return out
 }
 
 // ExitCode is the exit-code group of the outcome: 0 applied, planned and unchanged; 1 invalid, unsupported, stale and

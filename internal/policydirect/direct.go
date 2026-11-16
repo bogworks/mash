@@ -234,7 +234,7 @@ func (c Config) env() env {
 }
 
 func newResult(opts Options) Result {
-	return Result{DryRun: opts.DryRun, Checks: []Check{
+	return Result{DryRun: opts.DryRun, NextSteps: []NextStep{}, Checks: []Check{
 		{Name: CheckDocument, Result: ResultNotRun},
 		{Name: CheckBaseGeneration, Result: ResultNotRun},
 		{Name: CheckSize, Result: ResultNotRun},
@@ -359,7 +359,7 @@ func run(ctx context.Context, e env, doc []byte, opts Options) Result {
 
 	d, bad := decode(doc, e.account)
 	if bad != nil {
-		bad.DryRun, bad.Checks = res.DryRun, res.Checks
+		bad.DryRun, bad.Checks, bad.NextSteps = res.DryRun, res.Checks, res.NextSteps
 		bad.check(CheckDocument, ResultFail, bad.Message)
 		bad.finish()
 		return *bad
@@ -434,7 +434,7 @@ func run(ctx context.Context, e env, doc []byte, opts Options) Result {
 		res.finish()
 		return res
 	}
-	realRun(ctx, e, d, doc, held, l, prev, &res)
+	realRun(ctx, e, d, doc, held, l, prev, prevLS, &res)
 	res.finish()
 	return res
 }
@@ -480,6 +480,7 @@ func dryRun(ctx context.Context, e env, d policydoc.Document, raw []byte, cur li
 		return
 	}
 	res.Outcome = OutcomePlanned
+	res.NextSteps = nextSteps(&plan)
 	res.Message = fmt.Sprintf("a dry run: generation %d would be applied; nothing was changed", d.Generation)
 }
 
@@ -504,7 +505,7 @@ func refuse(res *Result, rs []listset.Refusal) {
 
 // realRun applies the document through the engine and maps what came back.
 func realRun(ctx context.Context, e env, d policydoc.Document, raw []byte, held func(context.Context) error, l ledger,
-	prev *listset.Compiled, res *Result) {
+	prev *listset.Compiled, prevLS *listset.ListSet, res *Result) {
 	// The checks of the engine that report no status of their own are made first, so that each gets its own outcome: the
 	// inbox of an added address and the narrowing of an existing sender. The engine makes them again before it pushes.
 	if target, cerr := listset.Compile(d.ListSet); cerr == nil {
@@ -528,6 +529,13 @@ func realRun(ctx context.Context, e env, d policydoc.Document, raw []byte, held 
 		Account: d.Account, Generation: d.Generation, BaseGeneration: d.BaseGeneration, Raw: raw,
 	}, g)
 	mapRun(ctx, l, d, ar, err, res)
+	// The policy is in force or partly pushed: say what each sender needs next, from the same comparison a dry run makes.
+	if res.Outcome == OutcomeApplied || res.Outcome == OutcomePartial {
+		plan := listset.DryRun(prevLS, d.ListSet, nil)
+		if !plan.Refused {
+			res.NextSteps = nextSteps(&plan)
+		}
+	}
 }
 
 // mapRun turns what the engine returned into the result. The error text alone says little, so the sentinels are read

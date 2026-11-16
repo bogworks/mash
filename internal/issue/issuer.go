@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/listset"
@@ -147,6 +146,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if exp.After(now.Add(MaxWindow)) {
 		return nil, refuse(CodeWindow, "the request expires more than %s ahead", MaxWindow)
 	}
+
 	owner, _, _ := r.AddressParts()
 	group := owner
 
@@ -158,10 +158,9 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	}
 	// The endpoint tag comes from mash's own function over the endpoint the request names, never from a tag in the
 	// request, and is refused when the endpoint's owner and name are not the address's: a credential cannot point at
-	// another address's inbox. Nothing is signed or reserved before this.
-	epID, _ := r.EndpointIdentity()
-	epTag, err := listset.EndpointTag(epID, r.Address)
-	if err != nil {
+	// another address's inbox. Nothing is signed or reserved before this. Sign makes the same check again; it is made
+	// here too so that this refusal still comes before the nonce is taken.
+	if _, err := endpointTag(r.Endpoint, r.Address); err != nil {
 		return nil, refuse(CodeEndpoint, "the endpoint is not at the address of the request")
 	}
 	// The nonce is reserved only now, for a request that proved itself, so a forged request cannot use one up, and so a
@@ -177,99 +176,19 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		}
 	}()
 
-	compiled, gen, err := is.ListSet.InForce(ctx)
-	if err != nil || compiled == nil {
-		if err != nil {
-			is.log().Warn("no list set in force", "reason", err.Error())
-		}
-		return nil, refuse(CodeNoListSet, "no list set is in force")
-	}
-	var user *listset.User
-	for i := range compiled.Users {
-		if compiled.Users[i].Sender == r.Address {
-			user = &compiled.Users[i]
-			break
-		}
-	}
-	if user == nil {
-		return nil, refuse(CodeUnlisted, "that address is not a sender in the list set in force")
-	}
-	var tpl *listset.Template
-	for i := range compiled.Templates {
-		if compiled.Templates[i].Group == group {
-			tpl = &compiled.Templates[i]
-			break
-		}
-	}
-	if tpl == nil {
-		return nil, refuse(CodeTemplate, "the list set has no template for this owner group")
-	}
-
-	// An early refusal, so a revoked or bound key costs no signing. The record write below decides.
-	cur, err := is.Record.Lookup(ctx, r.PublicKey)
-	if err != nil {
-		return nil, refuse(CodeRecordFailed, "the issue record could not be read")
-	}
-	if rf := bindingRefusal(cur, r.Address); rf != nil {
+	out, rf := is.authority().Sign(ctx, r.Address, r.Endpoint, r.PublicKey, purpose)
+	if rf != nil {
 		return nil, rf
 	}
-
-	kp, err := is.Signer.GroupKey(group)
-	if err != nil {
-		return nil, refuse(CodeNoSigningKey, "the signing key of this owner group is not available")
-	}
-	defer kp.Wipe()
-	pub, err := kp.PublicKey()
-	if err != nil || !nkeys.IsValidPublicAccountKey(pub) || pub == is.AccountPub {
-		// A user signed by the account identity key would carry no restrictions: never.
-		return nil, refuse(CodeNoSigningKey, "the signing key of this owner group is not a scoped signing key")
-	}
-	// The key must be published in the account JWT as a scoped signer with this group's template: an unscoped key, or
-	// one with another template, would let the user carry more than the list set allows.
-	scopeCode, revoked := is.checkScope(ctx, group, pub, tpl.Permissions)
-	switch scopeCode {
-	case "":
-	case CodeNoScope:
-		return nil, refuse(CodeNoScope, "the signing key of this owner group is not published in the account JWT as a scoped signing key")
-	case CodeTemplate:
-		return nil, refuse(CodeTemplate, "the scoped signing key of this owner group has a template other than the list set's")
-	default:
-		return nil, refuse(CodeNoSigningKey, "the account JWT could not be read from every expected server, so the signing key could not be verified")
-	}
-
-	// A key the account JWT revokes is refused whatever its issue record says (it may have been revoked outside
-	// mashctl, so the record has no revoked_at). Any entry refuses: a newer JWT must not restore the key's access.
-	if _, ok := revoked[r.PublicKey]; ok {
-		return nil, refuse(CodeRevoked, "that public key has been revoked")
-	}
-
-	uc := jwt.NewUserClaims(r.PublicKey)
-	uc.Name = user.Name
-	uc.IssuerAccount = is.AccountPub
-	uc.UserPermissionLimits = jwt.UserPermissionLimits{} // the scoped key's template applies only to a user with none
-	uc.Tags.Add(user.Tags...)
-	uc.Tags.Add(epTag)
-	token, err := uc.Encode(kp)
-	if err != nil {
-		return nil, refuse(CodeInternal, "signing failed")
-	}
-	rec := store.Issued{
-		PublicKey: r.PublicKey, Address: r.Address, Owner: owner, Kind: store.IssuedEndpoint,
-		Tags: append([]string{}, uc.Tags...), Generation: gen, Purpose: purpose,
-		IssuedAt: time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339),
-	}
-	// The token leaves this function only if the checked write succeeded; on any error it is dropped here.
-	if err := is.Record.RecordChecked(ctx, rec); err != nil {
-		switch {
-		case errors.Is(err, store.ErrKeyRevoked):
-			return nil, refuse(CodeRevoked, "that public key has been revoked")
-		case errors.Is(err, store.ErrKeyBoundElsewhere):
-			return nil, refuse(CodeBound, "that public key is already bound to another address")
-		}
-		return nil, refuse(CodeRecordFailed, "the issue could not be recorded, so nothing is issued")
-	}
 	issued = true
-	return &Issued{JWT: token, Tags: rec.Tags, Record: rec}, nil
+	return out, nil
+}
+
+// authority is the signing core of this issuer over its own parts and its own scope cache. It is made per call so a
+// part a caller sets later is the one used.
+func (is *Issuer) authority() *Authority {
+	return &Authority{ListSet: is.ListSet, Signer: is.Signer, Record: is.Record, Claims: is.Claims, AccountPub: is.AccountPub,
+		Log: is.Log, Now: is.Now, shared: &is.scopes}
 }
 
 // bindingRefusal is the refusal for a key whose record cur is revoked or bound to another address than address.
