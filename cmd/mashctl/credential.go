@@ -590,7 +590,11 @@ func credRevoke(args []string, env func(string) string, lookup config.Lookup, st
 	defer b.Close()
 	// One reading of the clock, as retire takes it: the check of the issue record and the revocation carry one time.
 	at := ctl.RevokeNow()
-	if _, found, err := b.Admin.IssuedByKey(b.Ctx, target); err == nil && !found {
+	_, found, err := b.Admin.IssuedByKey(b.Ctx, target)
+	if err != nil {
+		return finish(errRes, fmt.Errorf("read the issue record: %w", err))
+	}
+	if !found {
 		// No issue record: a key no server's account JWT revokes either is not one this deployment knows.
 		revoked, err := keyRevoked(b.Ctx, cfg, env, servers, target)
 		if err != nil {
