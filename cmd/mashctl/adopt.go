@@ -283,7 +283,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl retire` (or a rotating `reissue`) is the first to use it\n", shape, len(set.Names))
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N to `mashctl retire` and `reissue` so they can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl add`, `retire`, `reissue`, `unzone` and `deprovision` so they can confirm every server took the update")
 	}
 
 	// (5) can the operator key sign for this account?

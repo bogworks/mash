@@ -166,3 +166,12 @@ func TestRevokeDoesNotResurrectFromAStaleServer(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestShortRefusalSaysHowToFixTheCount(t *testing.T) {
+	s := shortRefusal("only 2 of 3 servers answered the account lookup")
+	for _, w := range []string{"only 2 of 3", "pass --servers N or set MASH_SERVERS"} {
+		if !strings.Contains(s, w) {
+			t.Errorf("%q lacks %q", s, w)
+		}
+	}
+}

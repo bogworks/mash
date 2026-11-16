@@ -26,6 +26,14 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2
 	}
+	if serverFlagVerbs[args[0]] {
+		rest, env2, err := extractServerFlags(args[1:], env)
+		if err != nil {
+			fmt.Fprintf(stderr, "mashctl: %s: %v\n", args[0], err)
+			return 2
+		}
+		args, env = append([]string{args[0]}, rest...), env2
+	}
 	switch args[0] {
 	case "version":
 		if helpRequested(args[1:]) {
@@ -77,6 +85,13 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 			return err
 		}
 		return revokeUsers(ctx, cfg, env, n, users, stdout, now)
+	}
+	ctl.CheckRevokeServers = func(ctx context.Context, cfg config.Config) error {
+		n, err := parseServers(env)
+		if err != nil {
+			return err
+		}
+		return checkServerSet(ctx, cfg, env, n)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)

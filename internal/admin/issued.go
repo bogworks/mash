@@ -29,6 +29,9 @@ func (a *Admin) issuedKV(ctx context.Context) (jetstream.KeyValue, error) {
 		}
 	}
 	if err != nil {
+		if down := bucketDown(store.IssuedBucket, err); down != nil {
+			return nil, down
+		}
 		return nil, fmt.Errorf("mash: issue record bucket (run `mash admin init`): %w", err)
 	}
 	if err := store.VerifyIssuedBucket(ctx, a.js); err != nil {

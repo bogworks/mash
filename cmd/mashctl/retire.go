@@ -17,7 +17,8 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 )
 
-const retireUsage = `usage: mashctl retire NAME [--delete-creds] [--force] [--no-revoke]
+const retireUsage = `usage: mashctl retire NAME [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
 `
 
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
@@ -107,6 +108,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		user = r.User
 	}
 	var revokeOut bytes.Buffer
+	revokedOK := false // the revocation completed on every server
 	switch {
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
@@ -146,12 +148,29 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}
+				revokedOK = true
 				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 				return nil
 			})
 		}
 		if afterRetireRead != nil {
 			afterRetireRead()
+		}
+		// The server set is checked before the directory record, the lease or the inbox is touched: a short set
+		// changes nothing.
+		if !noRevoke {
+			if err := checkServerSet(ctx, cfg, env, servers); err != nil {
+				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n%s\n", name, err, ctl.NotRevoked)
+				return 1
+			}
+		}
+		// partialNote says what a revocation that completed left behind, when the removal then did not finish.
+		partialNote := func() {
+			if !revokedOK {
+				return
+			}
+			io.WriteString(stdout, revokeOut.String())
+			fmt.Fprintf(stderr, "mashctl: retire %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running it again finishes it\n", name, ctl.ShortKey(user))
 		}
 		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
 			if admin.IsRefusal(err) {
@@ -167,8 +186,14 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				return fail("%v: nothing was changed", err)
 			}
 			if admin.IsPartial(err) {
+				partialNote()
 				return fail("%v; run mashctl retire %s again", err, name)
 			}
+			if !noRevoke && !revokedOK {
+				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n%s; run the command again once the cause is fixed\n", name, err, ctl.NotRevoked)
+				return 1
+			}
+			partialNote()
 			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left)", err, name)
 		}
 	case force:

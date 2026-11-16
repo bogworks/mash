@@ -310,6 +310,9 @@ func (a *Admin) openRetired(ctx context.Context) (jetstream.KeyValue, *jetstream
 		}
 	}
 	if err != nil {
+		if down := bucketDown(store.RetiredBucket, err); down != nil {
+			return nil, nil, down
+		}
 		return nil, nil, fmt.Errorf("mash: retired-name bucket (run `mash admin init`): %w", err)
 	}
 	st, err := kv.Status(ctx)

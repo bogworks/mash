@@ -126,7 +126,7 @@ func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, e
 // shortRefusal is the refusal of a write whose lookup was not answered by every known server: the silent one may hold a
 // newer copy than the one a write would build from.
 func shortRefusal(short string) string {
-	return short + "; mashctl will not write from a copy that may be older than the newest one a silent server holds. Bring the silent server back (or fix --servers) and run it again"
+	return short + "; mashctl will not write from a copy that may be older than the newest one a silent server holds. Bring the silent server back and run it again. The lookup does not say which server was silent. If the count is wrong, pass --servers N or set MASH_SERVERS"
 }
 
 // notCompleteRefusal is the refusal of a write whose server set could not be confirmed complete before anything is

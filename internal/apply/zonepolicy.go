@@ -35,7 +35,7 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 		return false, fmt.Errorf("look up the account JWT: %w", err)
 	}
 	if expect := serverExpect(set, servers); expect > 0 && len(toks) < expect {
-		return false, fmt.Errorf("not every server was checked: only %d of %d servers answered the account lookup", len(toks), expect)
+		return false, fmt.Errorf("not every server was checked: only %d of %d servers answered the account lookup (the lookup does not say which server was silent; if the count is wrong, pass --servers N or set MASH_SERVERS)", len(toks), expect)
 	}
 	groups, err := ks.GroupPublics()
 	if err != nil {

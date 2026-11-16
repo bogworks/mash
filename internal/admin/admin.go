@@ -246,6 +246,9 @@ const clearLeaseTries = 3
 func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
 	if err != nil {
+		if down := bucketDown(store.DirectoryBucket, err); down != nil {
+			return nil, down
+		}
 		return nil, fmt.Errorf("mash: directory bucket (run `mash admin init`): %w", err)
 	}
 	return kv, nil
@@ -1101,6 +1104,9 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	defer adm.release(ctx)
 	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if err != nil {
+		if down := bucketDown(store.LeaseBucket, err); down != nil {
+			return down
+		}
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
 	if err := lk.check(ctx); err != nil {
@@ -1711,4 +1717,20 @@ func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// jsErrStreamOffline is the JetStream API error code for a stream whose server is down or not yet recovered.
+const jsErrStreamOffline = 10118
+
+// bucketDown words a NATS "stream is offline" error (err_code 10118) on a bucket: the server that holds the bucket's
+// stream is down, so the bucket exists and `mash admin init` would not help. It returns nil for any other error.
+func bucketDown(bucket string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var api *jetstream.APIError
+	if (errors.As(err, &api) && api.ErrorCode == jsErrStreamOffline) || strings.Contains(err.Error(), "stream is offline") {
+		return fmt.Errorf("mash: the server holding bucket %s is down: bring it back and run the command again: %w", bucket, err)
+	}
+	return nil
 }

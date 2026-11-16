@@ -1,0 +1,1 @@
+`mashctl add`, `reissue`, `retire`, `unzone` and `deprovision` take `--servers N` and `--sys-creds FILE`, and a command that stops on a server that is down says so: `retire` and `deprovision` print "nothing was revoked; the key is still valid" when the server set is short, and a stream that is offline is reported as a down server, not as a missing bucket.

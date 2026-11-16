@@ -17,7 +17,8 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
+const addUsage = `usage: mashctl add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE]
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
 `
 
 type addOpts struct {
