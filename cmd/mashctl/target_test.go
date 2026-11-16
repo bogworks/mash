@@ -194,6 +194,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	showTarget(t)
+	h.env["MASH_NAME"] = "sessionagent" // the warning is given inside an endpoint session only
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"url":"tls://scratch.example:4222","owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +207,7 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 		t.Errorf("stderr:\n%s\nwant %q", errb, want)
 	}
 	// With the file and the environment agreeing there is no warning.
+	delete(h.env, "MASH_NAME")
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"url":"`+h.e.URL+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

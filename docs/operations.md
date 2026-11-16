@@ -353,7 +353,7 @@ cluster: {
 ```
 
    Listen on addresses the central host and the other nodes can reach, and use TLS for anything beyond a test (the template has none).
-3. Start the nodes. Check that the cluster formed with `mashctl issued check --servers 3` after step 4: its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did. `adopt` also prints `3 server(s) replied`.
+3. Start the nodes. Check that the cluster formed with `mashctl issued check --servers 3` once step 5 is done (it needs the admin creds and the issue record): its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did. `adopt` also prints `3 server(s) replied`.
 4. On the central host, copy the operator signing seed, the account identity seed and `sys.creds` from node 1, and run `adopt`. It creates the central host's config.json, imports the operator and account keys into its key store, copies `sys.creds` to `<config dir>/server/` and, with `--mint-admin`, writes `mashadmin.creds` there. A fresh central host has no configured owner, so pass `--owner`:
 
 ```sh
