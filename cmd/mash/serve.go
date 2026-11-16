@@ -61,6 +61,11 @@ func sendArgsError(raw json.RawMessage) error {
 	return fmt.Errorf("send needs `text` (the message body); got: %s", got)
 }
 
+// startService registers the endpoint's SAP service; a variable so a test can make it fail.
+var startService = func(ep *endpoint.Endpoint, ctx context.Context, onPrompt func(endpoint.PromptEvent)) error {
+	return ep.StartService(ctx, onPrompt)
+}
+
 // Retry timing for a session that starts while its endpoint's lease is held. Variables so tests can shorten
 // them; the hooks are test barriers and nil in production.
 var (
@@ -168,6 +173,7 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
 	applyRetryTiming(cfg)
 	endpoint.SetSessionEnv(adapter.SessionSources().Env)
+	endpoint.SetNoSessionIdentity(host.IsHeadless(adapter)) // a headless serve is never the same session as another
 	endpoint.SetServicePrefix(adapter.Words().ServicePrefix)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -370,7 +376,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		startSvc := func() {
 			// The SAP service is what makes `who` show an endpoint online, so headless registers it too. It has no
 			// session to show a live prompt to: it says so at once, rather than let the sender wait out a timeout.
-			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
+			if err := startService(ep, ctx, func(p endpoint.PromptEvent) {
 				if headless {
 					_ = ep.Reply(p.RequestID, "mash: this endpoint runs headless (no agent host) and cannot answer a live prompt; send it mail instead", true)
 					return
@@ -383,6 +389,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
 			}); err != nil {
 				fmt.Fprintln(stderr, err)
+				if headless { // without its service the endpoint shows offline and answers nothing: end serve, exit 1
+					fmt.Fprintln(stderr, "mash: headless serve cannot register its service; exiting")
+					cancel()
+					return
+				}
 				_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
 			}
 		}

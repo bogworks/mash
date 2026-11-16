@@ -77,6 +77,9 @@ type ownerRecord struct {
 	PID     int    `json:"pid,omitempty"`
 	Session string `json:"session,omitempty"`
 	Launch  string `json:"launch,omitempty"`
+	// Host names a non-Claude host whose serve wrote the record (headless, ADR 0139). Claude's own record has none, and
+	// Claude's Match refuses any record that does.
+	Host string `json:"host,omitempty"`
 }
 
 // OwnerToken is the JSON owner record of the serve that holds the lease: its parent pid, its session id (SessionSources.Env)
@@ -113,6 +116,9 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	case strings.HasPrefix(owner, "{"):
 		if json.Unmarshal([]byte(owner), &r) != nil {
 			return false, "owner record unreadable (is serve a different mash version than the hook?)"
+		}
+		if r.Host != "" { // another host's serve (headless): no Claude Code hook may drain its spool
+			return false, "owner is a " + r.Host + " serve; no hook drains it"
 		}
 	case strings.HasPrefix(owner, "pid:"):
 		n, err := strconv.Atoi(strings.TrimPrefix(owner, "pid:"))

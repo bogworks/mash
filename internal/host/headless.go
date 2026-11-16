@@ -1,6 +1,9 @@
 package host
 
 import (
+	"encoding/json"
+	"os"
+
 	"github.com/bogworks/mash/internal/spool"
 )
 
@@ -35,9 +38,13 @@ func (Headless) ClaudeSettingsChecks() bool { return false }
 // Trigger: no host runs a hook for this adapter, so nothing is ever a delivery point.
 func (Headless) Trigger([]byte, func(string) string) (Trigger, bool) { return Trigger{}, false }
 
-// OwnerToken is the owner record Claude writes (serve's parent pid; no session, since none is declared), so a spool
-// is readable by anything that expects one.
-func (Headless) OwnerToken(env func(string) string) string { return Claude{}.OwnerToken(env) }
+// OwnerToken marks the spool as a headless serve's: its own pid, and neither a session id nor a launch token, so no
+// Claude Code hook that shares an environment, session or ancestry with the shell that started serve can claim it
+// (Claude's Match refuses any record with a host field).
+func (Headless) OwnerToken(func(string) string) string {
+	b, _ := json.Marshal(ownerRecord{Host: "headless", PID: os.Getpid()})
+	return string(b)
+}
 
 // Owns and Match follow the Claude rules. They are unused, since no hook exists to ask.
 func (Headless) Owns(owner string, h HookIdentity) bool { return Claude{}.Owns(owner, h) }

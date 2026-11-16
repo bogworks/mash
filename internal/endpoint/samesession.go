@@ -35,6 +35,14 @@ func SetSessionEnv(name string) {
 	sessionEnv.Store(&name)
 }
 
+// noIdentity is set by a serve that is never one session of anything (headless, ADR 0139): its lease records no session
+// identity and it never counts as the same session as another serve.
+var noIdentity atomic.Bool
+
+// SetNoSessionIdentity makes this process's lease carry no session identity and sameSession always false, so two serves
+// under one parent never take each other's live lease. Takeover of a dead or expired holder is unchanged.
+func SetNoSessionIdentity(on bool) { noIdentity.Store(on) }
+
 // OurSession is this process's SessionIdent; a variable so tests can stand in for another session or none.
 var OurSession = func() SessionIdent { return ourSessionOnce() }
 
@@ -53,7 +61,7 @@ var ourSessionOnce = sync.OnceValue(func() SessionIdent {
 // of a running session, ADR 0043) is not the same session.
 func (e *Endpoint) sameSession(lv leaseValue) bool {
 	machine := ourMachine()
-	if machine == "" || lv.Machine != machine {
+	if noIdentity.Load() || machine == "" || lv.Machine != machine {
 		return false
 	}
 	me := OurSession()

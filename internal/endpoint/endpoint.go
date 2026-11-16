@@ -209,6 +209,9 @@ func (e *Endpoint) lease() []byte {
 	host, _ := os.Hostname()
 	start, _ := procStart(os.Getpid())
 	id := OurSession()
+	if noIdentity.Load() {
+		id = SessionIdent{}
+	}
 	lv := leaseValue{Instance: e.instance, Host: host, PID: fmt.Sprint(os.Getpid()), Start: start, Machine: ourMachine(),
 		PPID: id.PPID, PStart: id.PStart, Session: id.Session,
 		Since: time.Now().UTC().Format(time.RFC3339), LaunchToken: e.cfg.LaunchToken,

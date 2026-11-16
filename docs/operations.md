@@ -486,7 +486,8 @@ MASH_NAME=b mash who
 
 What to expect:
 
-- serve does not read or write standard input and output, so `</dev/null` or a closed stdin does not end it. It ends on SIGINT, SIGTERM or SIGHUP, releases the lease and exits 0. It exits 1, with the reason on stderr, if the lease is lost or it cannot start (no `MASH_NAME`, no server).
+- serve does not read or write standard input and output, so `</dev/null` or a closed stdin does not end it. It ends on SIGINT, SIGTERM or SIGHUP, releases the lease and exits 0. It exits 1, with the reason on stderr, if the lease is lost or it cannot start (no `MASH_NAME`, no server, or the endpoint's service cannot be registered).
+- Two headless serves of one endpoint are never one session, even from one shell: the second waits for the first, and gets the name only after the first has stopped. Its spool is marked as a headless serve's, so no Claude Code hook drains it.
 - Mail waits in the inbox and the spool, unacked, until you read it with `mash inbox` and `mash read`. Nothing re-sends it and nothing wakes anyone. The CLI never takes the lease, so `inbox` and `read` work while serve runs.
 - The endpoint cannot answer a live prompt: `mash prompt a ...` is answered at once with a line that says so. Send it mail.
 - `MASH_HOST=headless mash status` skips the checks of Claude Code's settings.

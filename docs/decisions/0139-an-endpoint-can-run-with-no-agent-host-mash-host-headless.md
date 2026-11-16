@@ -45,14 +45,17 @@ What it does:
    discarded. Standard input and output are not read or written for MCP, so a closed or empty stdin does not end it. The
    one thing in serve that waits on the client, the gate that holds notices until the client's `tools/list`, is opened
    at once, and the client ping is not run. A lost lease, or a failure that would otherwise leave an inactive server
-   running, ends serve with exit code 1 and its reason on stderr, because there is no client to be told.
+   running, ends serve with exit code 1 and its reason on stderr, because there is no client to be told. That includes a failure to register the endpoint's service.
 3. **Spools and waits.** Its wake is none, so `SpoolsFromStart` is true: mail is spooled from the first message and held
    unacked in the inbox, and nothing drains it. There is no wake to send, so none is counted and the session is never
    judged to have no hooks. `mash inbox` and `mash read` show the mail; they never take the lease, so they run alongside
    serve.
 4. **Names itself.** Its words are `mash serve (headless)`, `serve process` and the service prefix `mash (headless): `.
    It declares no session id source, so a session variable in the environment it was started from is not read as its
-   session. `mash status` run with `MASH_HOST=headless` does not run Claude Code's settings checks, and neither does
+   session. Its lease records no session identity (no parent pid either), so a headless serve is never the same session
+   as another serve and never takes a live lease; only a dead or expired holder is taken over. Its spool owner record is
+   `{"host":"headless","pid":N}` (serve's own pid, no session, no launch token), and Claude Code's hook refuses any
+   owner record with a host field, so no hook drains it. `mash status` run with `MASH_HOST=headless` does not run Claude Code's settings checks, and neither does
    serve's start-up report.
 
 What it does not do:
