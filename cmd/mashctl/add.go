@@ -30,13 +30,6 @@ type addOpts struct {
 
 func parseAddArgs(args []string) (addOpts, error) {
 	o := addOpts{labels: map[string]string{}}
-	val := func(i *int, flag string) (string, error) {
-		if *i+1 >= len(args) || args[*i+1] == "" {
-			return "", fmt.Errorf("%s needs a value", flag)
-		}
-		*i++
-		return args[*i], nil
-	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		flag, inline, hasInline := strings.Cut(a, "=")
@@ -44,13 +37,7 @@ func parseAddArgs(args []string) (addOpts, error) {
 			flag, hasInline = a, false
 		}
 		get := func() (string, error) {
-			if hasInline {
-				if inline == "" {
-					return "", fmt.Errorf("%s needs a value", flag)
-				}
-				return inline, nil
-			}
-			return val(&i, flag)
+			return flagValue(args, &i, flag, inline, hasInline)
 		}
 		var v string
 		var err error

@@ -57,15 +57,9 @@ func parseInboxInspectArgs(args []string) (inboxInspectOpts, error) {
 				o.legacy = true
 			}
 		case "--from", "--to", "--limit":
-			var v string
-			switch {
-			case hasInline && inline != "":
-				v = inline
-			case !hasInline && i+1 < len(args) && args[i+1] != "":
-				i++
-				v = args[i]
-			default:
-				return o, fmt.Errorf("%s needs a value", name)
+			v, err := flagValue(args, &i, name, inline, hasInline)
+			if err != nil {
+				return o, err
 			}
 			if name == "--limit" {
 				n, err := strconv.Atoi(v)

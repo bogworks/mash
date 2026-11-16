@@ -23,11 +23,14 @@ func runUnzone(args []string, env func(string) string, lookup config.Lookup, std
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "--sys-creds" && i+1 < len(args):
-			i++
-			sysCreds = args[i]
-		case strings.HasPrefix(a, "--sys-creds=") && len(a) > len("--sys-creds="):
-			sysCreds = strings.TrimPrefix(a, "--sys-creds=")
+		case a == "--sys-creds" || strings.HasPrefix(a, "--sys-creds="):
+			inline, hasInline := strings.CutPrefix(a, "--sys-creds=")
+			v, err := flagValue(args, &i, "--sys-creds", inline, hasInline)
+			if err != nil {
+				fmt.Fprintf(stderr, "mashctl: unzone: %v\n%s", err, unzoneUsage)
+				return 2
+			}
+			sysCreds = v
 		case strings.HasPrefix(a, "-") || name != "":
 			fmt.Fprintf(stderr, "mashctl: unzone: unknown %s\n%s", config.RejectedArg(a), unzoneUsage)
 			return 2

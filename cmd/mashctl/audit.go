@@ -608,15 +608,9 @@ func parseAuditArgs(args []string) (auditOpts, error) {
 				o.strict = true
 			}
 		case "--creds-dir", "--compare":
-			var v string
-			switch {
-			case hasInline && inline != "":
-				v = inline
-			case !hasInline && i+1 < len(args) && args[i+1] != "":
-				i++
-				v = args[i]
-			default:
-				return o, fmt.Errorf("%s needs a value", name)
+			v, err := flagValue(args, &i, name, inline, hasInline)
+			if err != nil {
+				return o, err
 			}
 			if name == "--creds-dir" {
 				o.credsDir = v

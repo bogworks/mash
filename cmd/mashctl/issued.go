@@ -64,15 +64,9 @@ func parseIssuedArgs(verb string, args []string) (issuedOpts, error) {
 			}
 			o.json = true
 		case verb == "check" && (name == "--sys-creds" || name == "--servers"):
-			var v string
-			switch {
-			case hasInline && inline != "":
-				v = inline
-			case !hasInline && i+1 < len(args) && args[i+1] != "":
-				i++
-				v = args[i]
-			default:
-				return o, fmt.Errorf("%s needs a value", name)
+			v, err := flagValue(args, &i, name, inline, hasInline)
+			if err != nil {
+				return o, err
 			}
 			if name == "--sys-creds" {
 				o.sysCreds = v
