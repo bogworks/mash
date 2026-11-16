@@ -124,3 +124,4 @@
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
 | [0132](0132-policy-scope-is-the-account-and-an-owner-is-the-group-range-is-removed.md) | Policy scope is the account and an owner is the group: range is removed | proposed | 2026-11-15 |
 | [0133](0133-the-issue-services-countersigner-is-a-requester-and-mash-carries-no-name-of-a-layer-above.md) | The issue service's countersigner is a requester and mash carries no name of a layer above | proposed | 2026-11-15 |
+| [0136](0136-mashctl-signs-a-credential-for-a-public-key-the-endpoint-made-and-never-sees-a-private-key.md) | `mashctl` signs a credential for a public key the endpoint made, and never sees a private key | proposed | 2026-11-16 |
