@@ -49,6 +49,9 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	defer cancel()
 	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Now: now}, users)
 	if err != nil {
+		if res.Acked > 0 {
+			return &ackedError{err: err, acked: res.Acked}
+		}
 		return err
 	}
 	if res.Warning != "" {
@@ -62,6 +65,15 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	}
 	return nil
 }
+
+// ackedError is a revoke error that follows an acknowledgement by some servers; the message is the cause's.
+type ackedError struct {
+	err   error
+	acked int
+}
+
+func (e *ackedError) Error() string { return e.err.Error() }
+func (e *ackedError) Unwrap() error { return e.err }
 
 // keyRevoked reports whether the account JWT revokes the user key pub (at any time); a test replaces it.
 var keyRevoked = revokedInAccount

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,15 +27,15 @@ import (
 
 const credentialUsage = `usage: mashctl credential key --out FILE
        mashctl credential install --seed FILE --jwt FILE --out CREDS [--force]
-       mashctl credential issue (--address owner.name --key PUBKEY [--endpoint agent.owner.name] [--purpose issue|rotation] | --request FILE|-) [--out FILE] [--json] [--servers N] [--sys-creds FILE]
+       mashctl credential issue (--address owner.name --key PUBKEY [--endpoint agent.owner.name] [--purpose issue|rotation] | --request FILE|-) [--out FILE [--force]] [--json] [--servers N] [--sys-creds FILE]
        mashctl credential show PUBKEY|owner.name [--json] [--servers N] [--sys-creds FILE]
-       mashctl credential revoke PUBKEY [--servers N] [--sys-creds FILE]
+       mashctl credential revoke PUBKEY [--json] [--servers N] [--sys-creds FILE]
 `
 
 const (
-	credIssueUsage  = "usage: mashctl credential issue (--address owner.name --key PUBKEY [--endpoint agent.owner.name] [--purpose issue|rotation] | --request FILE|-) [--out FILE] [--json] [--servers N] [--sys-creds FILE]"
+	credIssueUsage  = "usage: mashctl credential issue (--address owner.name --key PUBKEY [--endpoint agent.owner.name] [--purpose issue|rotation] | --request FILE|-) [--out FILE [--force]] [--json] [--servers N] [--sys-creds FILE]"
 	credShowUsage   = "usage: mashctl credential show PUBKEY|owner.name [--json] [--servers N] [--sys-creds FILE]"
-	credRevokeUsage = "usage: mashctl credential revoke PUBKEY [--servers N] [--sys-creds FILE]"
+	credRevokeUsage = "usage: mashctl credential revoke PUBKEY [--json] [--servers N] [--sys-creds FILE]"
 )
 
 // The exit codes of the credential verbs, as credential.Result.ExitCode and ADR 0134 give them.
@@ -152,6 +155,7 @@ type issueOpts struct {
 	req      credential.Request
 	request  string // --request FILE or -, "" when not given
 	out      string
+	force    bool
 	json     bool
 	servers  string
 	sysCreds string
@@ -161,13 +165,13 @@ type issueOpts struct {
 
 // parseIssueArgs reads the flags of issue. The error is a usage error; it never carries a flag's value.
 func parseIssueArgs(args []string) (o issueOpts, help bool, err error) {
-	vals, set, help, err := credential.ParseFlags(args, []string{"--address", "--key", "--endpoint", "--purpose", "--request", "--out", "--servers", "--sys-creds"}, []string{"--json"})
+	vals, set, help, err := credential.ParseFlags(args, []string{"--address", "--key", "--endpoint", "--purpose", "--request", "--out", "--servers", "--sys-creds"}, []string{"--json", "--force"})
 	if help || err != nil {
 		return o, help, err
 	}
 	o = issueOpts{
 		req:     credential.Request{Address: vals["--address"], Endpoint: vals["--endpoint"], PublicKey: vals["--key"], Purpose: vals["--purpose"]},
-		request: vals["--request"], out: vals["--out"], json: set["--json"], servers: vals["--servers"], sysCreds: vals["--sys-creds"],
+		request: vals["--request"], out: vals["--out"], json: set["--json"], force: set["--force"], servers: vals["--servers"], sysCreds: vals["--sys-creds"],
 		endpointGiven: vals["--endpoint"] != "",
 	}
 	if o.request != "" {
@@ -214,6 +218,12 @@ func credIssue(args []string, env func(string) string, lookup config.Lookup, std
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl credential issue: %v\n%s\n", err, credIssueUsage)
 		return credUsage
+	}
+	if o.out != "" && !o.force {
+		if _, err := os.Lstat(o.out); err == nil {
+			fmt.Fprintf(stderr, "mashctl credential issue: %s exists; pass --force to overwrite\n", o.out)
+			return credUsage
+		}
 	}
 	// A seed in any input is refused before anything connects, and is never echoed.
 	refuse := func(rf *credential.Refusal) int {
@@ -323,7 +333,7 @@ func emitIssue(res credential.Result, o issueOpts, stdout, stderr io.Writer) int
 	code := res.ExitCode()
 	wrote := false
 	if res.Outcome == credential.OutcomeIssued && o.out != "" {
-		if err := credential.WriteFile0600(o.out, []byte(res.JWT+"\n"), true); err != nil {
+		if err := credential.WriteFile0600(o.out, []byte(res.JWT+"\n"), o.force); err != nil {
 			fmt.Fprintf(stderr, "mashctl credential issue: issued %s for %s, but the JWT was not written: %v\n", res.Address, res.PublicKey, err)
 			return credError
 		}
@@ -532,8 +542,12 @@ func writeReport(w io.Writer, rep credential.Report) {
 	}
 }
 
+// revokeAckRE is the count revokeUsers prints for a key it revoked.
+var revokeAckRE = regexp.MustCompile(`(\d+) server\(s\) acknowledged`)
+
+// credRevoke is `mashctl credential revoke`: exit 0 revoked or unchanged, 1 refused, 2 usage, 5 partial, 6 error.
 func credRevoke(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	target, vals, _, rc, done := credTarget("revoke", credRevokeUsage, args, nil, stdout, stderr)
+	target, vals, set, rc, done := credTarget("revoke", credRevokeUsage, args, []string{"--json"}, stdout, stderr)
 	if done {
 		return rc
 	}
@@ -546,29 +560,72 @@ func credRevoke(args []string, env func(string) string, lookup config.Lookup, st
 		fmt.Fprintf(stderr, "mashctl credential revoke: %v\n", err)
 		return credUsage
 	}
+	asJSON := set["--json"]
+	// finish reports the result: one JSON object on stdout, or (text) the refusal line on stderr.
+	finish := func(res credential.RevokeResult, cause error) int {
+		res.PublicKey = target
+		if cause != nil {
+			fmt.Fprintf(stderr, "mashctl credential revoke: %v\n", cause)
+		}
+		if asJSON {
+			printJSON(stdout, res)
+		} else if res.Refusal != nil {
+			fmt.Fprintf(stderr, "refused: %s: %s\n", res.Refusal.Code, res.Refusal.Detail)
+		}
+		return res.ExitCode()
+	}
+	errRes := credential.RevokeResult{Outcome: credential.OutcomeError}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return credError
+		return finish(errRes, err)
 	}
-	announceTarget(cfg, env, stderr, &sysTarget{vals["--sys-creds"]})
+	if !asJSON {
+		announceTarget(cfg, env, stderr, &sysTarget{vals["--sys-creds"]})
+	}
 	env = credEnv(env, vals["--sys-creds"])
 	b, err := openCredBackend(cfg, env, servers)
 	if err != nil {
-		fmt.Fprintf(stderr, "mashctl credential revoke: %v\n", err)
-		return credError
+		return finish(errRes, err)
 	}
 	defer b.Close()
 	// One reading of the clock, as retire takes it: the check of the issue record and the revocation carry one time.
 	at := ctl.RevokeNow()
-	if err := ctl.CheckNotFutureIssued(b.Ctx, b.Admin, []ctl.RevokeTarget{{Key: target}}, at, stderr); err != nil {
-		fmt.Fprintf(stderr, "mashctl credential revoke: %v\n", err)
-		return credError
+	if _, found, err := b.Admin.IssuedByKey(b.Ctx, target); err == nil && !found {
+		// No issue record: a key no server's account JWT revokes either is not one this deployment knows.
+		revoked, err := keyRevoked(b.Ctx, cfg, env, servers, target)
+		if err != nil {
+			return finish(errRes, err)
+		}
+		if !revoked {
+			return finish(credential.RevokeResult{Outcome: credential.OutcomeRefused, Refusal: &credential.Refusal{Code: credential.RefusalNotFound, Detail: "no issue record for " + target + " and no account JWT revokes it"}}, nil)
+		}
 	}
-	if err := revokeUsers(b.Ctx, cfg, env, servers, []string{target}, stdout, func() time.Time { return at }); err != nil {
-		fmt.Fprintf(stderr, "mashctl credential revoke: user key %s...: %v\n", ctl.ShortKey(target), err)
-		return credError
+	if err := ctl.CheckNotFutureIssued(b.Ctx, b.Admin, []ctl.RevokeTarget{{Key: target}}, at, stderr); err != nil {
+		return finish(errRes, err)
+	}
+	var out bytes.Buffer
+	err = revokeUsers(b.Ctx, cfg, env, servers, []string{target}, &out, func() time.Time { return at })
+	if asJSON {
+		stderr.Write(out.Bytes()) // warnings; stdout holds the one JSON object
+	} else {
+		stdout.Write(out.Bytes())
+	}
+	if err != nil {
+		cause := fmt.Errorf("user key %s...: %w", ctl.ShortKey(target), err)
+		var ae *ackedError
+		if errors.As(err, &ae) {
+			return finish(credential.RevokeResult{Outcome: credential.OutcomePartial, ServersAcknowledged: ae.acked}, cause)
+		}
+		return finish(errRes, cause)
 	}
 	ctl.MarkRevoked(b.Ctx, b.Admin, target, at, stderr)
-	return credOK
+	res := credential.RevokeResult{Outcome: credential.OutcomeUnchanged}
+	if m := revokeAckRE.FindStringSubmatch(out.String()); m != nil {
+		res.Outcome = credential.OutcomeRevoked
+		res.ServersAcknowledged, _ = strconv.Atoi(m[1])
+		if servers > 0 && res.ServersAcknowledged < servers {
+			res.Outcome = credential.OutcomePartial
+		}
+	}
+	return finish(res, nil)
 }

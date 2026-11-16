@@ -170,3 +170,76 @@ func TestInstallCmdRefusesAReadableSeedFile(t *testing.T) {
 		t.Fatal("seed in error")
 	}
 }
+
+func TestWriteFile0600Overwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f")
+	if err := os.WriteFile(path, []byte("OLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile0600(path, []byte("NEW"), true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "NEW" {
+		t.Fatalf("%q", b)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %o", fi.Mode().Perm())
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("temp file left: %v", ents)
+	}
+	if err := WriteFile0600(path, []byte("X"), false); err == nil {
+		t.Fatal("overwrite=false replaced a file")
+	}
+	if b, _ := os.ReadFile(path); string(b) != "NEW" {
+		t.Fatalf("%q", b)
+	}
+}
+
+func TestWriteFile0600FailureLeavesTheOriginal(t *testing.T) {
+	// A target that is a directory: the rename fails, the temp file is removed.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "d")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "keep"), []byte("K"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile0600(target, []byte("NEW"), true); err == nil {
+		t.Fatal("wrote over a directory")
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("temp file left: %v", ents)
+	}
+	// A read-only directory: no temp file can be made, the old file is intact.
+	if os.Getuid() == 0 {
+		return
+	}
+	ro := t.TempDir()
+	path := filepath.Join(ro, "f")
+	if err := os.WriteFile(path, []byte("OLD"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(ro, 0o700)
+	if err := WriteFile0600(path, []byte("NEW"), true); err == nil {
+		t.Fatal("wrote into a read-only directory")
+	}
+	if b, _ := os.ReadFile(path); string(b) != "OLD" {
+		t.Fatalf("original changed: %q", b)
+	}
+}
+
+func TestRevokeResultExitCodes(t *testing.T) {
+	for outcome, want := range map[string]int{
+		OutcomeRevoked: 0, OutcomeUnchanged: 0, OutcomeRefused: 1, OutcomePartial: 5, OutcomeError: 6, "bogus": 6,
+	} {
+		if got := (RevokeResult{Outcome: outcome}).ExitCode(); got != want {
+			t.Errorf("%s: %d, want %d", outcome, got, want)
+		}
+	}
+}

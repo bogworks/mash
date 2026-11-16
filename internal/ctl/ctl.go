@@ -144,9 +144,9 @@ func issuedLines(line func(left, right string)) {
 func credentialLines(line func(left, right string)) {
 	line("credential key --out FILE", "make a user key for an endpoint; the seed goes to FILE (mode 0600, never over an existing file) and only the public key is printed (`mash credential key` does the same with no server)")
 	line("credential install --seed FILE --jwt FILE --out CREDS [--force]", "make the creds file from the endpoint's seed and the JWT signed for its public key; refuses a JWT for another key")
-	line("credential issue --address owner.name --key PUBKEY [--endpoint E] [--purpose issue|rotation] [--out FILE] [--json] [--servers N] [--sys-creds FILE]", "sign a credential for a public key the endpoint made, with the owner group's key, and record it; prints the JWT (no private key is ever taken); --request FILE|- takes the request as JSON; exit 0 issued, 1 refused, 6 error")
+	line("credential issue --address owner.name --key PUBKEY [--endpoint E] [--purpose issue|rotation] [--out FILE [--force]] [--json] [--servers N] [--sys-creds FILE]", "sign a credential for a public key the endpoint made, with the owner group's key, and record it; prints the JWT (no private key is ever taken); --request FILE|- takes the request as JSON; exit 0 issued, 1 refused, 6 error")
 	line("credential show PUBKEY|owner.name [--json] [--servers N] [--sys-creds FILE]", "the issue record and history of a key, or of every key at an address, whether the account JWT revokes it and whether it is connected; exit 1 not_found when there is no record")
-	line("credential revoke PUBKEY [--servers N] [--sys-creds FILE]", "revoke a user key in the account JWT by its public key and mark it in the issue record")
+	line("credential revoke PUBKEY [--json] [--servers N] [--sys-creds FILE]", "revoke a user key in the account JWT by its public key and mark it in the issue record; --json prints one object {outcome, public_key, servers_acknowledged, refusal}; exit 0 revoked or unchanged (already revoked), 1 refused (not_found: no issue record and no account JWT revokes it), 5 partial (fewer servers than --servers acknowledged), 6 error")
 }
 
 func retireLines(line func(left, right string)) {

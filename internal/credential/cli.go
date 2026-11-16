@@ -1,10 +1,13 @@
 package credential
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -54,31 +57,66 @@ func ParseFlags(args []string, valued []string, bools []string) (vals map[string
 	return vals, set, false, nil
 }
 
-// WriteFile0600 writes data to path with mode 0600. Without overwrite the file must not exist (O_EXCL); with it an
-// existing file is truncated and its mode set to 0600.
+// WriteFile0600 writes data to path with mode 0600. Without overwrite the file must not exist (O_EXCL). With overwrite
+// the data goes to a new file of mode 0600 in the same directory and is renamed over path once it is synced, so the
+// existing file is untouched when anything fails.
 func WriteFile0600(path string, data []byte, overwrite bool) error {
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	if overwrite {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	}
-	f, err := os.OpenFile(path, flags, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%s exists; it is not overwritten", path)
+	if !overwrite {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("%s exists; it is not overwritten", path)
+			}
+			return fmt.Errorf("cannot write %s", path)
 		}
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			return fmt.Errorf("cannot write %s", path)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("cannot write %s", path)
+		}
+		return nil
+	}
+	dir, base := filepath.Split(path)
+	var f *os.File
+	var tmp string
+	for range 10 {
+		var rnd [6]byte
+		if _, err := rand.Read(rnd[:]); err != nil {
+			return fmt.Errorf("cannot write %s", path)
+		}
+		tmp = filepath.Join(dir, "."+base+"."+hex.EncodeToString(rnd[:])+".tmp")
+		var err error
+		f, err = os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			break
+		}
+		f = nil
+		if !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("cannot write %s", path)
+		}
+	}
+	if f == nil {
 		return fmt.Errorf("cannot write %s", path)
 	}
-	if overwrite {
-		if err := f.Chmod(0o600); err != nil {
-			f.Close()
-			return fmt.Errorf("cannot set the mode of %s", path)
-		}
+	fail := func() error {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("cannot write %s", path)
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return fmt.Errorf("cannot write %s", path)
+		return fail()
+	}
+	if err := f.Sync(); err != nil {
+		return fail()
 	}
 	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("cannot write %s", path)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("cannot write %s", path)
 	}
 	return nil

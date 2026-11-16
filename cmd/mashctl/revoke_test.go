@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/credential"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -322,5 +324,83 @@ func TestRetireWithAShortUserValueDoesNotPanic(t *testing.T) {
 	out, errb, code := h.run("retire", "b")
 	if code != 0 || !strings.Contains(out, "user key abc... revoked") {
 		t.Fatalf("%d %q %q", code, out, errb)
+	}
+}
+
+// credRevokeRun runs `credential revoke` against the test server with revokeUsers and keyRevoked stubbed.
+func credRevokeRun(t *testing.T, pub string, revoke func(io.Writer) error, keyIsRevoked bool, args ...string) (int, string, string) {
+	t.Helper()
+	h := newFleetEnv(t)
+	oldR, oldK := revokeUsers, keyRevoked
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, out io.Writer, _ func() time.Time) error {
+		return revoke(out)
+	}
+	keyRevoked = func(context.Context, config.Config, func(string) string, int, string) (bool, error) {
+		return keyIsRevoked, nil
+	}
+	t.Cleanup(func() { revokeUsers, keyRevoked = oldR, oldK })
+	var out, errb bytes.Buffer
+	env := func(k string) string { return h.env[k] }
+	rc := run(append([]string{"credential", "revoke", pub}, args...), env, config.LookupFromFunc(env), &out, &errb)
+	return rc, out.String(), errb.String()
+}
+
+func TestCredentialRevokeOutcomesAndExitCodes(t *testing.T) {
+	_, pub, _ := credential.NewKey()
+	acked := func(n int) func(io.Writer) error {
+		return func(w io.Writer) error {
+			fmt.Fprintf(w, "revoked user key %s...: %d server(s) acknowledged\n", ctl.ShortKey(pub), n)
+			return nil
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		revoke  func(io.Writer) error
+		known   bool
+		args    []string
+		rc      int
+		outcome string
+		acked   int
+		refusal string
+	}{
+		{"revoked", acked(2), true, []string{"--servers", "2"}, 0, "revoked", 2, ""},
+		{"unchanged", func(w io.Writer) error {
+			fmt.Fprintf(w, "user key %s...: already revoked\n", ctl.ShortKey(pub))
+			return nil
+		}, true, nil, 0, "unchanged", 0, ""},
+		{"fewer acknowledged", acked(1), true, []string{"--servers", "3"}, 5, "partial", 1, ""},
+		{"not confirmed", func(io.Writer) error { return &ackedError{err: errors.New("not confirmed"), acked: 2} }, true, []string{"--servers", "3"}, 5, "partial", 2, ""},
+		{"error", func(io.Writer) error { return errors.New("no system account credentials") }, true, nil, 6, "error", 0, ""},
+		{"not found", acked(1), false, nil, 1, "refused", 0, "not_found"},
+	} {
+		for _, asJSON := range []bool{false, true} {
+			args := tc.args
+			if asJSON {
+				args = append(append([]string{}, args...), "--json")
+			}
+			rc, so, se := credRevokeRun(t, pub, tc.revoke, tc.known, args...)
+			if rc != tc.rc {
+				t.Fatalf("%s json=%v: rc %d, want %d: %q %q", tc.name, asJSON, rc, tc.rc, so, se)
+			}
+			if !asJSON {
+				if tc.outcome == "revoked" && !strings.Contains(so, "server(s) acknowledged") {
+					t.Errorf("%s: text lost: %q", tc.name, so)
+				}
+				continue
+			}
+			if strings.Count(so, "\n") != 1 {
+				t.Fatalf("%s: stdout is not one line: %q", tc.name, so)
+			}
+			var got credential.RevokeResult
+			if err := json.Unmarshal([]byte(so), &got); err != nil {
+				t.Fatalf("%s: %v %q", tc.name, err, so)
+			}
+			if got.Outcome != tc.outcome || got.PublicKey != pub || got.ServersAcknowledged != tc.acked {
+				t.Errorf("%s: %+v", tc.name, got)
+			}
+			if (tc.refusal == "") != (got.Refusal == nil) || got.Refusal != nil && got.Refusal.Code != tc.refusal {
+				t.Errorf("%s: refusal %+v", tc.name, got.Refusal)
+			}
+		}
 	}
 }

@@ -184,7 +184,7 @@ func TestCredentialIssueExitCodesFollowTheResult(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "x.jwt")
 	for range 2 {
 		var so, se bytes.Buffer
-		if rc := emitIssue(res, issueOpts{out: out}, &so, &se); rc != 0 {
+		if rc := emitIssue(res, issueOpts{out: out, force: true}, &so, &se); rc != 0 {
 			t.Fatalf("rc %d %s", rc, se.String())
 		}
 		if strings.Contains(so.String(), "JWTTEXT") || !strings.Contains(so.String(), "issued: acme.x, key "+pub+", generation 4\ntags: a b\njwt written to "+out) {
@@ -197,7 +197,19 @@ func TestCredentialIssueExitCodesFollowTheResult(t *testing.T) {
 			t.Fatalf("mode %o", fi.Mode().Perm())
 		}
 	}
+	// Without force an existing --out is not replaced, even if the early check was raced.
+	if err := os.WriteFile(out, []byte("KEEP\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var so, se bytes.Buffer
+	if rc := emitIssue(res, issueOpts{out: out}, &so, &se); rc != 6 {
+		t.Fatalf("no force: rc %d", rc)
+	}
+	if b, _ := os.ReadFile(out); string(b) != "KEEP\n" {
+		t.Fatalf("file replaced: %q", b)
+	}
+	so.Reset()
+	se.Reset()
 	if rc := emitIssue(res, issueOpts{}, &so, &se); rc != 0 || !strings.HasSuffix(so.String(), "\nJWTTEXT\n") || se.Len() != 0 {
 		t.Fatalf("stdout form: rc %d %q %q", rc, so.String(), se.String())
 	}
@@ -213,5 +225,23 @@ func TestCredentialIssueExitCodesFollowTheResult(t *testing.T) {
 	ref := credential.Result{Outcome: credential.OutcomeRefused, Refusal: &credential.Refusal{Code: "no_list_set", Detail: "none"}}
 	if rc := emitIssue(ref, issueOpts{}, &so, &se); rc != 1 || so.Len() != 0 || !strings.Contains(se.String(), "refused: no_list_set: none") {
 		t.Fatalf("refused: rc %d %q %q", rc, so.String(), se.String())
+	}
+}
+
+func TestCredentialIssueOutExistingNeedsForce(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "x.jwt")
+	if err := os.WriteFile(out, []byte("KEEP\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, _, se := credRun(t, "", "issue", "--address", "acme.x", "--key", "UAAAA", "--out", out)
+	if rc != 2 || !strings.Contains(se, out+" exists; pass --force to overwrite") {
+		t.Fatalf("rc %d %q", rc, se)
+	}
+	if b, _ := os.ReadFile(out); string(b) != "KEEP\n" {
+		t.Fatalf("file changed: %q", b)
+	}
+	// --force parses and gets past the early check.
+	if o, _, err := parseIssueArgs([]string{"--address", "acme.x", "--key", "UAAAA", "--out", out, "--force"}); err != nil || !o.force {
+		t.Fatalf("%+v %v", o, err)
 	}
 }

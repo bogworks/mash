@@ -35,3 +35,38 @@ func (r Result) ExitCode() int {
 	}
 	return 6
 }
+
+// The outcomes of a revoke, besides OutcomeRefused and OutcomeError.
+const (
+	// OutcomeRevoked: the key is revoked in the account JWT and every server asked acknowledged it (exit 0).
+	OutcomeRevoked = "revoked"
+	// OutcomeUnchanged: the account JWT already revoked the key (exit 0).
+	OutcomeUnchanged = "unchanged"
+	// OutcomePartial: the revocation reached fewer servers than were asked for; running it again is safe (exit 5).
+	OutcomePartial = "partial"
+)
+
+// RefusalNotFound is the refusal code of a revoke of a key with no issue record that no server's account JWT revokes.
+const RefusalNotFound = "not_found"
+
+// RevokeResult is what `mashctl credential revoke` reports. PublicKey is echoed only when it is a user public key.
+type RevokeResult struct {
+	Outcome             string   `json:"outcome"`
+	PublicKey           string   `json:"public_key,omitempty"`
+	ServersAcknowledged int      `json:"servers_acknowledged"`
+	Refusal             *Refusal `json:"refusal,omitempty"`
+}
+
+// ExitCode is the exit-code group of the outcome: 0 revoked or unchanged, 1 refused, 5 partial, 6 error and anything
+// unknown.
+func (r RevokeResult) ExitCode() int {
+	switch r.Outcome {
+	case OutcomeRevoked, OutcomeUnchanged:
+		return 0
+	case OutcomeRefused:
+		return 1
+	case OutcomePartial:
+		return 5
+	}
+	return 6
+}
