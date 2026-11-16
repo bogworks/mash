@@ -1767,5 +1767,8 @@ func bucketDown(bucket string, err error) error {
 	if isUnavailable(err) {
 		return wordUnavailable(err)
 	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
+		return fmt.Errorf("mash: bucket %s did not answer in time: check that every server is up, then run the command again: %w", bucket, err)
+	}
 	return nil
 }

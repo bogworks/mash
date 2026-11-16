@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -59,5 +60,12 @@ func TestRewordUnavailable(t *testing.T) {
 	}
 	if RewordUnavailable(got) != got || RewordUnavailable("other") != "other" {
 		t.Errorf("not idempotent or touched an unrelated text")
+	}
+}
+
+func TestBucketDownDeadlineIsNotAnInitHint(t *testing.T) {
+	err := bucketDown("mash-leases", fmt.Errorf("open: %w", context.DeadlineExceeded))
+	if err == nil || strings.Contains(err.Error(), "admin init") || !strings.Contains(err.Error(), "mash-leases") {
+		t.Fatalf("got %v", err)
 	}
 }
