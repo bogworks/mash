@@ -1,1 +1,0 @@
-The README now starts with a one-machine quick start that needs no account, ahead of the Synadia Cloud path. `docs/install.md` says the channel allowlist is optional for one person on one machine, and that the development flag is enough for a solo developer. `nats-server` is named as a prerequisite in the README, `docs/install.md` and `docs/operations.md`.

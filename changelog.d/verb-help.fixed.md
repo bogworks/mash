@@ -1,1 +1,0 @@
-`mash VERB --help` and `mashctl VERB --help` print the verb's usage and change nothing; before, `mashctl init --help` ran init, `mash plugin export --help` wrote a plugin tree into ./--help, and `mash serve --help` started the channel server. `mashctl issued check --help`, `unlabel --help` and `version --help` print their own usage.
