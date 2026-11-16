@@ -53,8 +53,18 @@ func unread(t *testing.T, ep *Endpoint) uint64 {
 
 func until(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(20 * time.Millisecond) {
+	untilWithin(t, 5*time.Second, what, cond, nil)
+}
+
+// untilWithin is until with its own bound, for waits that sit behind a server round trip and can be slow on a loaded
+// host. onTimeout, when set, adds state to the failure message.
+func untilWithin(t *testing.T, d time.Duration, what string, cond func() bool, onTimeout func() string) {
+	t.Helper()
+	for deadline := time.Now().Add(d); !cond(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
+			if onTimeout != nil {
+				t.Fatalf("timed out after %s: %s: %s", d, what, onTimeout())
+			}
 			t.Fatalf("timed out: %s", what)
 		}
 	}

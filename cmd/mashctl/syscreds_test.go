@@ -58,7 +58,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 		t.Fatal(err)
 	}
 	e.ks = ks
-	pl, err := bootstrap.Build(bootstrap.Params{Dir: filepath.Join(root, "server"), Owner: "alice", Port: 4222}, ks)
+	pl, err := bootstrap.Build(bootstrap.Params{Dir: filepath.Join(root, "server"), Owner: "alice", Port: 4222, JetStreamDisk: 256 << 20}, ks)
 	if err != nil {
 		t.Fatal(err)
 	}

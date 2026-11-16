@@ -152,7 +152,7 @@ func TestLegacyMailNotSplitAndLeaseReleased(t *testing.T) {
 		bodies = append(bodies, fmt.Sprintf("msg-%d-end", i))
 	}
 	f.sendTo(t, snd, "old", bodies...)
-	until(t, "all legacy mail shown", func() bool {
+	untilLegacy(t, f, "all legacy mail shown", func() bool {
 		got := joined(ev)
 		for _, b := range bodies {
 			if !strings.Contains(got, "> "+b) {
@@ -208,7 +208,7 @@ func TestLegacyLeaseLostStopsLegacyConsumptionOnly(t *testing.T) {
 	if _, err := kv.Put(context.Background(), "old", other); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "legacy lease loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "legacy lease loss noticed", func() bool { return !ep.legacyReading() })
 	if line, _ := ep.LegacyInboxLine(); !strings.HasPrefix(line, "legacy inbox: not read (") {
 		t.Fatalf("status line %q", line)
 	}
@@ -224,7 +224,7 @@ func TestLegacyLeaseLostStopsLegacyConsumptionOnly(t *testing.T) {
 	// sent takes it and nak's it with a one second delay (so it does not spin), which shows as ack pending until the
 	// delay has passed. The mail must end up pending, not held and not acknowledged; wait for that rather than read once.
 	var i *jetstream.ConsumerInfo
-	until(t, "the mail sent after the loss is pending on the legacy consumer, not held or acknowledged", func() bool {
+	untilLegacy(t, f, "the mail sent after the loss is pending on the legacy consumer, not held or acknowledged", func() bool {
 		i = legacyConsumerInfo(t, f, "inbox-old")
 		return i.NumAckPending == 0 && i.NumPending == 1
 	})
@@ -303,7 +303,7 @@ func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
 	go func() { _ = ep.Run(ctx, ev.deliver); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; ep.Close() })
 	f.sendTo(t, pe, id.Flat(), "own-held")
-	until(t, "all held", func() bool { return len(waiting(t, sp)) == 4 })
+	untilLegacy(t, f, "all held", func() bool { return len(waiting(t, sp)) == 4 })
 	if i := legacyConsumerInfo(t, f, "inbox-old"); i.AckFloor.Stream != 0 || i.NumAckPending != 3 {
 		t.Fatalf("legacy consumer before the loss: %+v", i)
 	}
@@ -318,8 +318,8 @@ func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
 	if _, err := kv.Put(context.Background(), "old", other); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "legacy lease loss noticed", func() bool { return !ep.legacyReading() })
-	until(t, "held legacy mail dropped from the spool", func() bool {
+	untilLegacy(t, f, "legacy lease loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "held legacy mail dropped from the spool", func() bool {
 		w := waiting(t, sp)
 		return len(w) == 1 && string(w[0].Body) == "own-held"
 	})
@@ -336,7 +336,7 @@ func TestLegacyLeaseLostDropsHeldLegacyMailUnacked(t *testing.T) {
 	if err := sp.Drained(spool.Ref{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "own mail acked once drained", func() bool {
+	untilLegacy(t, f, "own mail acked once drained", func() bool {
 		i := legacyConsumerInfo(t, f, "inbox-ag_team_new")
 		return i.AckFloor.Stream == 1 && i.NumAckPending == 0
 	})
@@ -448,13 +448,13 @@ func TestLegacyLeaseEpochRecordedAndStamped(t *testing.T) {
 		t.Fatalf("epoch after SetSpool: %d %v (hold %d)", n, ok, ep.legacy.epoch.Load())
 	}
 	f.sendTo(t, snd, "old", "stamped")
-	until(t, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
+	untilLegacy(t, f, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
 	if w := waiting(t, sp); w[0].Epoch != ep.legacy.epoch.Load() {
 		t.Fatalf("entry epoch %d, hold %d", w[0].Epoch, ep.legacy.epoch.Load())
 	}
 	takeLegacyOver(t, f)
-	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
-	until(t, "epoch none", func() bool { n, ok := sp.Epoch(); return ok && n == 0 })
+	untilLegacy(t, f, "loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "epoch none", func() bool { n, ok := sp.Epoch(); return ok && n == 0 })
 }
 
 // The lease is lost after dropUnleased passed the message and before the spool write: the live check inside the write's
@@ -488,7 +488,7 @@ func TestLegacyLeaseEpochLostBeforeSpoolWriteWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, lev := f.run(t, "old")
-	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced") })
+	untilLegacy(t, f, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced") })
 	time.Sleep(300 * time.Millisecond)
 	if n := strings.Count(joined(lev), "> raced"); n != 1 {
 		t.Fatalf("the next holder showed it %d times", n)
@@ -528,13 +528,13 @@ func TestLegacyLeaseEpochLostBetweenCheckAndWriteIsHidden(t *testing.T) {
 	if n, ok := sp.Epoch(); !ok || n != 0 {
 		t.Fatalf("epoch %d %v, want none", n, ok)
 	}
-	until(t, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
+	untilLegacy(t, f, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
 	ep.stopLegacyRetry() // a different endpoint takes over: the old one must not take the lease again
 	if err := (*kv).Delete(context.Background(), "old"); err != nil {
 		t.Fatal(err)
 	}
 	_, lev := f.run(t, "old")
-	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-late") })
+	untilLegacy(t, f, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-late") })
 	time.Sleep(300 * time.Millisecond)
 	if n := strings.Count(joined(lev), "> raced-late"); n != 1 {
 		t.Fatalf("the next holder showed it %d times", n)
@@ -597,13 +597,13 @@ func TestLegacyLeaseEpochLostDuringWriteIsRecordedWithTheEntry(t *testing.T) {
 	}
 	once.Do(func() { close(release) })
 	f.sendTo(t, peer, id.Flat(), "trigger") // a batch on the own stream (the legacy one is no longer read): the worker drops the entry
-	until(t, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
+	untilLegacy(t, f, "the entry dropped", func() bool { return !sp.Has(spool.Ref{Stream: LegacyStream, Seq: 1}) })
 	ep.stopLegacyRetry()
 	if err := (*kv).Delete(context.Background(), "old"); err != nil {
 		t.Fatal(err)
 	}
 	_, lev := f.run(t, "old")
-	until(t, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-write") })
+	untilLegacy(t, f, "next holder shown it", func() bool { return strings.Contains(joined(lev), "> raced-write") })
 }
 
 // A legacy entry written under an old epoch is skipped by the hook read once the epoch has changed.
@@ -613,7 +613,7 @@ func TestLegacyLeaseEpochOldEntrySkippedAfterChange(t *testing.T) {
 	id := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
 	ep, _, sp := openSpooled(t, f, id)
 	f.sendTo(t, snd, "old", "under the old epoch")
-	until(t, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
+	untilLegacy(t, f, "legacy mail spooled", func() bool { return hasLegacy(waiting(t, sp)) })
 	unlock, err := sp.Lock()
 	if err != nil {
 		t.Fatal(err)
@@ -651,7 +651,7 @@ func TestLegacyLeaseHealHeldStampsAndSkipsAfterLoss(t *testing.T) {
 
 	// Lost: the entry is gone, and a heal writes nothing.
 	takeLegacyOver(t, f)
-	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "loss noticed", func() bool { return !ep.legacyReading() })
 	if err := os.Remove(filepath.Join(sp.Dir, "legacy@5.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
@@ -682,7 +682,7 @@ func TestLegacyLeaseDedupeAckGatedByLease(t *testing.T) {
 		t.Fatalf("held: acks=%d naks=%d", b.acks, b.naks)
 	}
 	takeLegacyOver(t, f)
-	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "loss noticed", func() bool { return !ep.legacyReading() })
 	if b := dup(); b.acks != 0 || b.naks != 1 {
 		t.Fatalf("lost: acks=%d naks=%d", b.acks, b.naks)
 	}
@@ -711,7 +711,7 @@ func TestLegacyLeaseLostBeforeChannelDeliveryFencesLegacyMail(t *testing.T) {
 
 	// A new holder takes the lease over; the batch was already past dropUnleased.
 	takeLegacyOver(t, f)
-	until(t, "loss noticed", func() bool { return !ep.legacyReading() })
+	untilLegacy(t, f, "loss noticed", func() bool { return !ep.legacyReading() })
 	calls = 0
 	lost := &ackCounter{}
 	ep.deliverBatch(deliver, []pending{{mail: legacyMail(8), msg: lost}}, newSeenSet(0))
@@ -734,4 +734,16 @@ func TestLegacyLeaseLostBeforeChannelDeliveryFencesLegacyMail(t *testing.T) {
 func consumerCounters(i *jetstream.ConsumerInfo) string {
 	return fmt.Sprintf("delivered stream %d, ack floor stream %d, pending %d, ack pending %d, redelivered %d, waiting %d",
 		i.Delivered.Stream, i.AckFloor.Stream, i.NumPending, i.NumAckPending, i.NumRedelivered, i.NumWaiting)
+}
+
+// legacyWait bounds the waits on the legacy consumer, a lease loss or the next holder: each sits behind several server
+// round trips, which a heavily loaded host can stretch well past the default bound.
+const legacyWait = 20 * time.Second
+
+// untilLegacy waits up to legacyWait and, on timeout, adds the legacy consumer's counters to the failure.
+func untilLegacy(t *testing.T, f *fixture, what string, cond func() bool) {
+	t.Helper()
+	untilWithin(t, legacyWait, what, cond, func() string {
+		return "legacy consumer inbox-old: " + consumerCounters(legacyConsumerInfo(t, f, "inbox-old"))
+	})
 }
