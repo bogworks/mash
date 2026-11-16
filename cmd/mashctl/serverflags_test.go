@@ -175,3 +175,21 @@ func TestRetireFailureBeforeAnyRevokeSaysKeyStillValid(t *testing.T) {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
+
+func TestDeprovisionDrainedShortServerSetChangesNothing(t *testing.T) {
+	h := newFleetEnv(t)
+	h.provisionDeclared("a")
+	s := stubRevoke(t)
+	old := checkServerSet
+	checkServerSet = func(context.Context, config.Config, func(string) string, int) error {
+		return errors.New("only 2 of 3 servers answered the account lookup")
+	}
+	t.Cleanup(func() { checkServerSet = old })
+	_, errb, code := h.run("deprovision", "a", "--drained-to", "0", "--suspension", "s1")
+	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	if len(s.calls) != 0 || len(h.records()) != 1 {
+		t.Errorf("changed something: calls %v records %v", s.calls, h.records())
+	}
+}

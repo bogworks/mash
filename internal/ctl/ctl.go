@@ -486,6 +486,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				warnUser = recordUser()
 				noRevokeWarn(warnUser)
 			}
+			if !precheck() {
+				return 1
+			}
 			if err := adm.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
 				return failRemoval(err)
 			}
