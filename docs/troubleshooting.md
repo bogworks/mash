@@ -164,6 +164,14 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 Each endpoint takes one stream, and the two shared buckets take two. On Synadia's free tier (5 streams) that is 3 endpoints. Remove an endpoint with `mash admin deprovision <name>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
 
+## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
+
+Symptom: `mashctl init`, `mashctl adopt` or any JetStream call fails with `nats: API error: code=503 err_code=10076 description=jetstream not enabled` (or `no responders available for request`), and mash adds "the server could not enable JetStream for the account: it could not reserve the account's disk limit (2 GiB). nats-server gives JetStream 75% of the free disk by default, so the free disk under the server's store directory is probably under about 2.7 GiB".
+
+Cause: nats-server gives JetStream a store budget of 75% of the free disk when it starts. The account JWT asks for a disk limit (2 GiB in the account `init --local` makes). When the limit is more than what is left of that budget, the server silently leaves JetStream off for the account, and every JetStream call fails. The account JWT looks fine, because the limit is only a request: `mashctl adopt` step 6 asks the server and is the check that catches it.
+
+Fix, either one: free disk under the server's store directory (or move the store to a larger disk), then restart the server; or lower the account's limit, for example `nsc edit account NAME --js-disk-storage 1G`, then push the account.
+
 ## `environment: STRIPPED`
 
 Claude Code passes MCP servers only a baseline environment, so `MASH_NAME` cannot reach `mash serve`. mash is unsupported in that mode until the organisation drops the setting. Put `url` and `owner` in config.json; the name cannot be.

@@ -153,6 +153,10 @@ func (a *Admin) Conn() *nats.Conn { return a.nc }
 // bucket does not allow rollup: Init creates it hardened and hardens an existing one (see store.HardenLeaseBucket),
 // and fails if it cannot.
 func (a *Admin) Init(ctx context.Context) error {
+	return JetStreamNotEnabledHint(a.initBuckets(ctx), 0)
+}
+
+func (a *Admin) initBuckets(ctx context.Context) error {
 	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
 		if cfg.Bucket == store.LeaseBucket {
 			if err := a.initLease(ctx, cfg); err != nil {

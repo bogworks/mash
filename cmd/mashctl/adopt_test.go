@@ -578,3 +578,41 @@ func TestAdoptMintAdminConnectsOnNonStrictServer(t *testing.T) {
 		t.Errorf("success came before the connect test:\n%s", out)
 	}
 }
+
+func TestAdoptAsksTheServerWhetherJetStreamIsEnabled(t *testing.T) {
+	e := newApplyEnv(t)
+	a := newAdopter(t, e)
+	out, errb, code := a.adopt("--mint-admin", "--dry-run")
+	if code != 0 || errb != "" {
+		t.Fatalf("%d\n%s\n%s", code, out, errb)
+	}
+	if !strings.Contains(out, "6. jetstream      ok: the server answered for the account:") {
+		t.Errorf("no server-asked line:\n%s", out)
+	}
+	if strings.Contains(out, "enabled for the account") {
+		t.Errorf("a bare 'enabled' claim:\n%s", out)
+	}
+	out, _, code = a.adopt("--dry-run")
+	if code != 0 || !strings.Contains(out, "6. jetstream      not checked") {
+		t.Errorf("without an account user the output must say the server was not asked:\n%s", out)
+	}
+}
+
+func TestAdoptFailsWhenTheServerCouldNotEnableJetStream(t *testing.T) {
+	e := newApplyEnvOpts(t, nil, func(o *server.Options) { o.JetStreamMaxStore = 1 << 30 })
+	a := newAdopter(t, e)
+	before := tree(t, a.root)
+	out, errb, code := a.adopt("--mint-admin")
+	if code == 0 {
+		t.Fatalf("adopt succeeded:\n%s", out)
+	}
+	if strings.Contains(out, "enabled for the account") {
+		t.Errorf("adopt claimed JetStream is enabled before failing:\n%s", out)
+	}
+	for _, want := range []string{"could not enable JetStream", "75% of the free disk", "(2 GiB)", "about 2.7 GiB"} {
+		if !strings.Contains(errb, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errb)
+		}
+	}
+	sameTree(t, before, tree(t, a.root))
+}
