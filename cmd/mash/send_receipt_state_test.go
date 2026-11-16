@@ -31,7 +31,7 @@ func (w *world) statusPeer(t *testing.T, name string, body []byte) {
 // never for fyi or result; a status request nobody answers costs the receipt about a second, not a failure.
 func TestServeSendReceiptRecipientState(t *testing.T) {
 	w := newWorld(t, "a", "b", "c", "d")
-	w.statusPeer(t, "b", statusJSON(`,"state":"blocked","kind":"question"`))
+	w.statusPeer(t, "b", statusJSON(`,"program_status":{"state":"blocked","kind":"question"}`))
 	w.statusPeer(t, "c", statusJSON(""))
 	w.statusPeer(t, "d", nil)
 	s := startServe(t, w.env["a"])
@@ -66,7 +66,7 @@ func TestServeSendReceiptRecipientState(t *testing.T) {
 		t.Fatalf("silent peer: %q %v after %v", out, bad, took)
 	}
 	// A failed send reports the failure and no state line.
-	w.statusPeer(t, "ghost", statusJSON(`,"state":"working"`))
+	w.statusPeer(t, "ghost", statusJSON(`,"program_status":{"state":"working"}`))
 	if out, bad, _ = call(`{"to":"ghost","text":"hi"}`); !bad || strings.Contains(out, "recipient:") {
 		t.Fatalf("failed send: %q %v", out, bad)
 	}
@@ -75,7 +75,7 @@ func TestServeSendReceiptRecipientState(t *testing.T) {
 // The CLI send output is a compatibility contract (ADR 0034): no state line.
 func TestCLISendOutputHasNoRecipientState(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	w.statusPeer(t, "a", statusJSON(`,"state":"working"`))
+	w.statusPeer(t, "a", statusJSON(`,"program_status":{"state":"working"}`))
 	if out, code := w.cli(t, "b", "send", "a", "hi"); code != 0 || out != "sent #1 from b to a\n" {
 		t.Fatalf("%d %q", code, out)
 	}
