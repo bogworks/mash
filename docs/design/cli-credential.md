@@ -1,6 +1,6 @@
 # The credential commands for mashctl (design, 0.5.5)
 
-Lane ctl, 2026-11-16. For lead. Status: a design for questions, no code. It is the command line over core's `internal/credential` (#698, ADR 0136, held, stacked on #688). Standalone first (ADR 0131): everything here works with one NATS account, the keys `mashctl` already holds, and no other service.
+2026-11-16. Status: design; the code is #703. It is the command line over core's `internal/credential` (#698, ADR 0136, held, stacked on #688). Standalone first (ADR 0131): everything here works with one NATS account, the keys `mashctl` already holds, and no other service.
 
 ## 1. What the commands do
 
@@ -60,18 +60,13 @@ next steps (4):
 
 The text is built from `NextStep{Sender, Step, Action, Address, Purpose, Detail}` by one pure function, `RenderNextSteps`, tested with golden files. In JSON the steps stay data (core's shape); a wrapper builds its own commands. The text names no host; "the endpoint's host" is the host that runs that sender.
 
-## 4. Order for a new three-part agent
+## 4. Order of use
 
-1. Host with the keys: `mashctl add` is not used. Apply the policy (0.5.5 `policy apply`), which prints the next steps.
-2. Endpoint's host: `credential key`.
-3. Keys' host: `credential issue`; copy the JWT over (any channel; it is not secret).
-4. Endpoint's host: `credential install`.
-
-`add` and `reissue` stay as they are (core's note: they stay until ctl and Randy decide). The seed travels with `add`; it does not with this path.
+Section 8 gives the order for new endpoints and for rotation, step by step. The seed never travels on this path; with `mashctl add` it does, and under a list set in force `add` and `reissue` refuse (#702).
 
 ## 5. What it does not do
 
-Expire a credential, take a signed request, or change `add`. It does not create the policy bucket or choose a first policy: with no list set in force `issue` refuses `no_list_set`.
+Write the endpoint host's `config.json`, expire a credential, take a signed request, or change `add`. It does not create the policy bucket or choose a first policy: with no list set in force `issue` refuses `no_list_set`.
 
 ## 6. Tests
 
@@ -79,22 +74,35 @@ Expire a credential, take a signed request, or change `add`. It does not create 
 - A table test (the one from #697) covers `--help` on the four verbs.
 - Live, two servers: key on host B, issue on host A, install on B, connect; `show` finds the key; rotation issues a second key; a key bound to another address is refused. Seeds appear in no output (grep the captured output).
 
-## 7. Decisions (lead, 2026-11-16)
+## 7. Decisions
 
 - **Where the endpoint verbs live.** `mashctl` is not on the endpoint's host (ADR 0131). `key` and `install` are `mash credential key|install`: no NATS, no operator keys. `mashctl credential key|install` also exist for a single host, one shared implementation (`internal/credential`).
-- **Revoke.** `mashctl credential revoke PUB` revokes a key by public key (it uses `revokeUsers`). A rotation needs it: `issue --purpose rotation`, then `revoke OLD`.
-- **`--endpoint`.** Defaults to the endpoint of the address, found in the directory (a legacy `<name>` record under the legacy-in-place ADR). If the directory has none or more than one, refuse and name the flag.
-- **Output.** `issue` prints the JWT on stdout by default (no seed in it); `--out FILE` writes it with mode 0600. Nothing that holds a seed goes to stdout: `key` writes the seed to its file and prints only the public key, and `install` writes the creds file itself.
+- **Revoke.** `mashctl credential revoke PUB [--servers N] [--sys-creds FILE] [--json]` revokes a key by public key. Outcome words and exit codes follow ADR 0134 (revoked and unchanged 0, refused 1, partial 5, error 6, usage 2). A key with no issue record is refused `not_found` unless a server already revokes it.
+- **`--endpoint`.** Defaults to the endpoint of the address, found in the directory (a legacy `<name>` record is governed in place, #702). If the directory has none or more than one, refuse and name the flag.
+- **Output.** `issue` prints the JWT on stdout by default (no seed in it); `--out FILE` writes it with mode 0600 and refuses an existing file without `--force`. Nothing that holds a seed goes to stdout: `key` writes the seed to its file and prints only the public key, and `install` writes the creds file itself.
 - **`show`.** Takes an address (every key at it) or a public key.
 
-## 8. The story, end to end (from spike 8)
+## 8. The story, end to end
 
-Two endpoints, `acme.x` and `acme.y`, and a third, `acme.z`, with the policy "x may mail y".
+This builds on #702: a legacy endpoint is governed in place, and `add` and `reissue` refuse while a list set is in force. Three endpoints, `x`, `y` and `z`, and the policy "x may mail y".
 
-1. On the keys' host: apply the policy (0.5.5 `policy apply`). It prints the next steps: a first credential for x, y and z.
-2. On each endpoint's host: `mash credential key --out ep.seed` prints the public key.
-3. On the keys' host, once per endpoint: `mashctl credential issue --address acme.x --key UX... --out x.jwt` (and y, z); copy each JWT to its host.
-4. On each endpoint's host: `mash credential install --seed ep.seed --jwt x.jwt --out acme.x.creds`; start the session with it.
-5. x mails y: delivered. z mails y: refused, because no list entry allows it.
-6. `mashctl credential show acme.x` lists x's key, generation and whether it is connected.
-7. Rotation of x: new key on x's host, `issue --purpose rotation`, install, then `mashctl credential revoke UX_OLD`; the old connection closes.
+| Step | Where | Command | Blocked on |
+|---|---|---|---|
+| 1 | keys' host | `mashctl add x`, `add y`, `add z`: the directory record and inbox (and a first creds file, which step 5 retires) | nothing |
+| 2 | keys' host | apply the policy (`policy apply`) | **the first policy: the policy commands wait on the answers to #681; until they land this step and everything after it cannot run** |
+| 3 | each endpoint's host | `mash credential key --out ep.seed` prints the public key | nothing (works today) |
+| 4 | keys' host, once per endpoint | `mashctl credential issue --address owner.x --key UX... --out x.jwt`; copy the JWT over | step 2 (with no list set in force, issue refuses `no_list_set`) |
+| 5 | each endpoint's host | `mash credential install --seed ep.seed --jwt x.jwt --out CREDS`; restart the session | step 4 |
+| 6 | keys' host | `mashctl credential revoke UX_OLD` for the key `add` made; the policy's next steps name this step | step 5 (revoke after the restart, never before) |
+| 7 | | x mails y: delivered. z mails y: refused, no list entry allows it | steps 2 to 6 |
+
+Rotation of an endpoint: new key on its host, `issue --purpose rotation`, `install`, restart the session, then `revoke OLD`. The order is restart, then revoke, so the endpoint is never without a valid credential.
+
+One allow entry grants mail, prompt, status and heartbeat together. Whether an allow can grant status alone is an open question with Randy; this design assumes it cannot.
+
+## 9. Where things go on the endpoint's host
+
+- **Creds file.** `install --out` takes any path. The path `mash` reads by default is `<config dir>/<name>.creds` for an endpoint with `MASH_NAME=x` (a legacy endpoint), and `<config dir>/<agent_owner_name>.creds` (the flat identity) for a three-token one; `MASH_CREDS` (or `creds` in `config.json`) names another path. `install` requires `--out`; pass the default path above, or any path and set `MASH_CREDS` to it.
+- **The rest of the endpoint's config.** Nothing in this change writes `config.json`. The endpoint's host needs `url` (the NATS servers), `owner`, and `tls_ca` when the server uses a private CA; the operator sets them by hand or with the environment (`MASH_URL`, `MASH_OWNER`, `MASH_TLS_CA`). A command that writes it is out of scope here (section 5).
+- **The seed.** `ep.seed` stays on the endpoint's host with mode 0600. It is read only by `install`. After `install` the seed also sits inside the creds file; the seed file can be deleted.
+
