@@ -112,6 +112,11 @@ func TestNameRuleSend(t *testing.T) {
 	// The refused identity has no record at all: still the rule, not "no endpoint named".
 	_, err = a.Send(ctx, "gone", "hi", 0)
 	wantRefusal(t, err, "no-gone", "send: the recipient")
+	// CheckSend is the check Send starts with; callers run it before contacting the recipient.
+	wantRefusal(t, a.CheckSend("bad"), "no-bad", "send: the recipient")
+	if err := a.CheckSend("b"); err != nil {
+		t.Fatalf("CheckSend refused an allowed recipient: %v", err)
+	}
 	if _, err := a.Send(ctx, "b", "hi", 0); err != nil {
 		t.Fatalf("an allowed recipient was refused: %v", err)
 	}
@@ -125,6 +130,7 @@ func TestNameRuleSend(t *testing.T) {
 	a.cfg.NameRule = ruleOf(t, "name:a")
 	_, err = a.Send(ctx, "b", "hi", 0)
 	wantRefusal(t, err, "no-a", "send: the sender")
+	wantRefusal(t, a.CheckSend("b"), "no-a", "send: the sender")
 }
 
 // (b) a record named in the open's first wave (clientNeeds) is not read when its identity is refused.

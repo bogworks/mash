@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,3 +84,46 @@ func TestCLISendOutputHasNoRecipientState(t *testing.T) {
 
 // firstLine is the receipt text proper, without the advisory recipient-state line that may follow it.
 func firstLine(s string) string { return strings.SplitN(s, "\n", 2)[0] }
+
+// A send the name rule refuses, or to a name that is no endpoint name, is refused before anything reaches the
+// recipient: the status request that rides alongside a send is never made.
+func TestServeSendRefusedMakesNoStatusRequest(t *testing.T) {
+	w := newWorld(t, "a", "blocked")
+	rule := configARuleFile(t, t.TempDir(), "name-rule.json",
+		`{"version":1,"rules":[{"id":"no-blocked","match":{"name":{"is":"blocked"}},"message":"blocked is retired"}]}`)
+	env := map[string]string{"MASH_NAME_RULE_FILE": rule}
+	for k, v := range w.env["a"] {
+		env[k] = v
+	}
+	var asked atomic.Int32
+	nc := w.e.Conn(t, w.e.AdminCreds)
+	for _, name := range []string{"blocked", "UPPER"} {
+		if _, err := nc.Subscribe(sap.For(w.e.Owner, name).Status, func(m *nats.Msg) {
+			asked.Add(1)
+			_ = m.Respond(statusJSON(""))
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, env)
+	s.initialize(t)
+	for i, c := range []struct{ args, want string }{
+		{`{"to":"blocked","text":"hi"}`, "blocked is retired"},
+		{`{"to":"UPPER","text":"hi"}`, ""},
+	} {
+		id := 100 + i
+		s.send(t, `{"jsonrpc":"2.0","id":`+strconv.Itoa(id)+`,"method":"tools/call","params":{"name":"send","arguments":`+c.args+`}}`)
+		r := s.await(t, 5*time.Second, idIs(float64(id)))["result"].(map[string]any)
+		out := r["content"].([]any)[0].(map[string]any)["text"].(string)
+		if r["isError"] != true || strings.Contains(out, "\nrecipient:") || !strings.Contains(out, c.want) {
+			t.Fatalf("%s: %q", c.args, out)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := asked.Load(); n != 0 {
+		t.Fatalf("a refused send made %d status requests", n)
+	}
+}

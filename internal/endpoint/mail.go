@@ -905,16 +905,23 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 	return r.Seq, err
 }
 
+// CheckSend applies the name rule to the sender and the recipient, the first thing SendDetailed does. A caller that
+// contacts the recipient alongside the send (a status request) runs it first, so a refused send reaches no one.
+func (e *Endpoint) CheckSend(to string) error {
+	to = sap.KeyOf(to)
+	if err := e.checkSelf(pointSendSender); err != nil {
+		return err
+	}
+	return e.checkKey(pointSendRecipient, to)
+}
+
 // SendDetailed is SendWith that also reports a duplicate. Every send carries an idempotency key, the caller's (o.ID)
 // or a random one; the message's nonce and Nats-Msg-Id derive from it, so a retry with the key is dropped by the
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
 	to = sap.KeyOf(to) // the canonical agent.owner.name names the same recipient as its flat key (ADR 0081)
 	// The name rule comes first: before the inbox or the directory is read, and nothing is dropped silently.
-	if err := e.checkSelf(pointSendSender); err != nil {
-		return SendResult{}, err
-	}
-	if err := e.checkKey(pointSendRecipient, to); err != nil {
+	if err := e.CheckSend(to); err != nil {
 		return SendResult{}, err
 	}
 	inReplyTo := o.InReplyTo

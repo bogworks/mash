@@ -703,6 +703,10 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				k, tagged := kind.Tag(k, inReplyTo, a.Text)
 				// For mail that wakes, ask the recipient its state alongside the publish; the receipt never waits for it
 				// longer than PeerActivityTimeout after the send started and never fails because of it.
+				// The name rule is checked first, so a send it refuses contacts no one.
+				if err := ep.CheckSend(a.To); err != nil {
+					return "", err
+				}
 				var peer <-chan endpoint.PeerState
 				started := time.Now()
 				if k.Wakes() || a.Urgent {
