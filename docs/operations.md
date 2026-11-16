@@ -490,7 +490,7 @@ What to expect:
 - Mail waits in the inbox and the spool, unacked, until you read it with `mash inbox` and `mash read`. Nothing re-sends it and nothing wakes anyone. The CLI never takes the lease, so `inbox` and `read` work while serve runs.
 - The endpoint cannot answer a live prompt: `mash prompt a ...` is answered at once with a line that says so. Send it mail.
 - `MASH_HOST=headless mash status` skips the checks of Claude Code's settings.
-- Stop the local server with `kill "$(cat "${MASH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mash}/server/server.pid")"`. That is `<config dir>/server/server.pid`; if you ran `mashctl init --dir D`, it is `D/server/server.pid`.
+- Stop the local server with `kill "$(cat "${MASH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mash}/server/server.pid")"`. That is `<config dir>/server/server.pid`; if you ran `mashctl init --local --dir D`, it is `D/server.pid` (see [Local setup](#local-setup-with-mashctl-init---local)).
 
 ## Headless and SDK sessions
 
