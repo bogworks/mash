@@ -98,7 +98,7 @@ func Usage(prog string) string {
 		}
 		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
 	}
-	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
+	line("init [--replicas auto|1|3]", "create the directory and lease buckets (or raise their caps to the configured limits); mash-owned objects are made with the replica count the replicas setting gives (auto: 3 when 3 or more servers are declared)")
 	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, no TLS), keys and credentials, for one developer; --start also starts it and creates the buckets")
 	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
@@ -183,6 +183,12 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		return nil, nil, nil, err
 	}
 	a = a.WithNameRule(cfg.NameRule)
+	n, err := cfg.EffectiveReplicas()
+	if err != nil {
+		nc.Close()
+		return nil, nil, nil, err
+	}
+	cfg.Limits.Replicas = n
 	if err := a.SetLimits(cfg.Limits); err != nil {
 		nc.Close()
 		return nil, nil, nil, err
@@ -207,7 +213,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		cfg.Limits = store.DefaultLimits()
 	}
 	if args[0] == "init" && len(args) > 1 {
-		return usage(errors.New(initUsage(prog)))
+		r, ok := replicasFlag(args[1:])
+		if !ok {
+			return usage(errors.New(initUsage(prog)))
+		}
+		cfg.Replicas = r
 	}
 	if args[0] == "list" && len(args) > 1 {
 		return usage(errors.New("usage: " + prog + " list"))
@@ -235,6 +245,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "inbox_max_bytes %s\ninbox_max_age %s\ndirectory_max_bytes %s\nlease_max_bytes %s\ninbox_max_consumers %d\n",
 			config.FormatSize(l.InboxMaxBytes), config.FormatAge(l.InboxMaxAge), config.FormatSize(l.DirectoryMaxBytes),
 			config.FormatSize(l.LeaseMaxBytes), l.InboxMaxConsumers)
+		n, err := cfg.EffectiveReplicas()
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "replicas %d (setting %s, servers %d)\n", n, orAuto(cfg.Replicas), cfg.Servers)
 		return 0
 	}
 	a, ctx, closeAdmin, err := OpenAdmin(prog, cfg)
@@ -640,7 +655,19 @@ func provisionKeyArgs(prog, user, account string) error {
 }
 
 func initUsage(prog string) string {
-	return "usage: " + prog + " init   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
+	return "usage: " + prog + " init [--replicas auto|1|3]   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start] [--replicas auto|1]"
+}
+
+// replicasFlag reads args that are exactly "--replicas N" or "--replicas=N". The value is checked where objects are
+// made (store.Replicas), so a refused value is refused with the allowed values named.
+func replicasFlag(args []string) (string, bool) {
+	switch {
+	case len(args) == 2 && args[0] == "--replicas" && args[1] != "":
+		return args[1], true
+	case len(args) == 1 && strings.HasPrefix(args[0], "--replicas=") && len(args[0]) > len("--replicas="):
+		return strings.TrimPrefix(args[0], "--replicas="), true
+	}
+	return "", false
 }
 
 // permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
@@ -852,4 +879,11 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		}
 	}
 	return nil
+}
+
+func orAuto(s string) string {
+	if s == "" {
+		return "auto"
+	}
+	return s
 }

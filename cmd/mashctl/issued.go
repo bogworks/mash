@@ -143,7 +143,11 @@ func runIssued(args []string, env func(string) string, lookup config.Lookup, std
 	if verb == "list" {
 		return printIssuedList(recs, present, o.json, stdout)
 	}
-	return runIssuedCheck(ctx, cfg, env, o, servers, recs, present, stdout, stderr)
+	want, short, err := adm.ReplicaShortfall(ctx, store.IssuedStreamName)
+	if err != nil {
+		return fail("%v", err)
+	}
+	return runIssuedCheck(ctx, cfg, env, o, servers, recs, present, store.ReplicaShortfallText(want, short), stdout, stderr)
 }
 
 // issuedFailed prints an issued failure, with the lost-quorum hint when JetStream is unavailable, and returns 2.
@@ -234,7 +238,10 @@ type issuedCheck struct {
 	Unrecorded    []issuedFindingOut   `json:"unrecorded"`
 	RevokedConn   []issuedRevokedConn  `json:"revoked_connected"`
 	NotConnected  []issuedNotConnected `json:"recorded_not_connected"`
-	Summary       issuedSummary        `json:"summary"`
+	// Replicas is the one finding of a configuration that asks for 3 replicas while the issue record has fewer; it is
+	// left out when there is none.
+	Replicas string        `json:"replicas,omitempty"`
+	Summary  issuedSummary `json:"summary"`
 }
 
 // connScan is what every server's CONNZ said about the account's connections, and how much of the picture it is.
@@ -293,7 +300,7 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 	return sc, nil
 }
 
-func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, stdout, stderr io.Writer) int {
+func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, replicaFinding string, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "mashctl: issued check: %s\n", admin.RewordUnavailable(fmt.Sprintf(format, a...)))
 		return issuedNoAnswer
@@ -372,11 +379,12 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	rep.Summary.Recorded = len(recs)
 	rep.Summary.Unrecorded = len(rep.Unrecorded)
 	rep.Summary.NotConnected = len(rep.NotConnected)
-	rep.Clean = len(rep.Unrecorded) == 0 && len(rep.RevokedConn) == 0 && rep.Complete
+	rep.Replicas = replicaFinding
+	rep.Clean = len(rep.Unrecorded) == 0 && len(rep.RevokedConn) == 0 && rep.Complete && rep.Replicas == ""
 
 	code := issuedClean
 	switch {
-	case len(rep.Unrecorded) > 0 || len(rep.RevokedConn) > 0:
+	case len(rep.Unrecorded) > 0 || len(rep.RevokedConn) > 0 || rep.Replicas != "":
 		code = issuedFinding
 	case !rep.Complete:
 		code = issuedNoAnswer
@@ -417,6 +425,9 @@ func printIssuedCheck(rep issuedCheck, w io.Writer) {
 		for _, n := range rep.NotConnected {
 			fmt.Fprintf(w, "  %s\t%s\t%s\n", n.PublicKey, config.Clean(n.Kind), config.Clean(n.Address))
 		}
+	}
+	if rep.Replicas != "" {
+		fmt.Fprintf(w, "REPLICAS: the issue record: %s\n", config.Clean(rep.Replicas))
 	}
 	if !rep.Complete {
 		fmt.Fprintf(w, "INCOMPLETE: %s; keys connected to a server that did not answer, or whose list was not read whole, were not checked\n", rep.Incomplete)

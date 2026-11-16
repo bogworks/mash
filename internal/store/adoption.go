@@ -60,9 +60,12 @@ func (m Marker) ExemptRecorded() bool { return len(m.Exempt) > 0 }
 
 // AdoptionConfig is the adoption bucket: one key, written only over the admin connection, no TTL, a history of
 // AdoptionHistory.
-func AdoptionConfig() jetstream.KeyValueConfig {
+func AdoptionConfig() jetstream.KeyValueConfig { return AdoptionConfigFor(1) }
+
+// AdoptionConfigFor is AdoptionConfig with the given replica count (1 or 3; below 1 is 1).
+func AdoptionConfigFor(replicas int) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: AdoptionBucket, Description: "mash adoption marker: the account's list sets come from an outside system",
-		History: AdoptionHistory, Storage: jetstream.FileStorage, MaxBytes: AdoptionMaxBytes}
+		History: AdoptionHistory, Storage: jetstream.FileStorage, MaxBytes: AdoptionMaxBytes, Replicas: max(replicas, 1)}
 }
 
 // ErrAdoptionBucket is returned when the adoption bucket's stream is not configured as mash makes it.
@@ -72,8 +75,8 @@ var ErrAdoptionBucket = errors.New("adoption bucket is not hardened")
 // moment, as CreateIssuedBucket does for the issue record. If the stream already exists the existing bucket is
 // verified, never altered. It is verified after creation and an error is returned unless it is as mash makes it
 // (fail closed).
-func CreateAdoptionBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, error) {
-	cfg := AdoptionConfig()
+func CreateAdoptionBucket(ctx context.Context, js jetstream.JetStream, replicas int) (jetstream.KeyValue, error) {
+	cfg := AdoptionConfigFor(replicas)
 	if _, err := js.AccountInfo(ctx); err != nil {
 		return nil, err
 	}
@@ -85,7 +88,7 @@ func CreateAdoptionBucket(ctx context.Context, js jetstream.JetStream) (jetstrea
 		MaxBytes:          cfg.MaxBytes,
 		MaxMsgSize:        -1,
 		Storage:           jetstream.FileStorage,
-		Replicas:          1,
+		Replicas:          cfg.Replicas,
 		AllowRollup:       false,
 		DenyDelete:        true,
 		DenyPurge:         true,
@@ -112,6 +115,12 @@ func CreateAdoptionBucket(ctx context.Context, js jetstream.JetStream) (jetstrea
 // refuses rollup, delete and purge, keeps no TTL, is on file storage, discards new messages when full and keeps
 // AdoptionHistory revisions of a key. It never changes the bucket.
 func VerifyAdoptionBucket(ctx context.Context, js jetstream.JetStream) error {
+	return VerifyAdoptionBucketAt(ctx, js, 1)
+}
+
+// VerifyAdoptionBucketAt is VerifyAdoptionBucket that also refuses a stream with fewer than wantReplicas replicas. A
+// larger count is accepted: it was raised on purpose (RaiseReplicas).
+func VerifyAdoptionBucketAt(ctx context.Context, js jetstream.JetStream, wantReplicas int) error {
 	s, err := js.Stream(ctx, AdoptionStreamName)
 	if err != nil {
 		return fmt.Errorf("mash: adoption stream: %w", err)
@@ -137,6 +146,8 @@ func VerifyAdoptionBucket(ctx context.Context, js jetstream.JetStream) error {
 		bad = "discards old records when full"
 	case c.MaxMsgsPerSubject < AdoptionHistory:
 		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", AdoptionHistory)
+	case replicaCount(c) < wantReplicas:
+		bad = fmt.Sprintf("has %d replica(s) where %d are wanted (raise the replica count of mash-owned state)", replicaCount(c), wantReplicas)
 	}
 	if bad != "" {
 		return fmt.Errorf("mash: %s %s: %w; recreate it as `mash admin init` makes it, copying its revisions", AdoptionBucket, bad, ErrAdoptionBucket)

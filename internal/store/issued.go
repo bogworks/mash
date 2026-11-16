@@ -132,9 +132,12 @@ func (i Issued) EffectivePurpose() string {
 
 // IssuedConfig is the issue record's bucket: user public key -> Issued, written only by the minting authority (the
 // admin connection of mashctl). It has no TTL and a history of IssuedHistory.
-func IssuedConfig() jetstream.KeyValueConfig {
+func IssuedConfig() jetstream.KeyValueConfig { return IssuedConfigFor(1) }
+
+// IssuedConfigFor is IssuedConfig with the given replica count (1 or 3; below 1 is 1).
+func IssuedConfigFor(replicas int) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: IssuedBucket, Description: "mash issue record: every user JWT mash issued",
-		History: IssuedHistory, Storage: jetstream.FileStorage, MaxBytes: IssuedMaxBytes}
+		History: IssuedHistory, Storage: jetstream.FileStorage, MaxBytes: IssuedMaxBytes, Replicas: max(replicas, 1)}
 }
 
 // ErrIssuedBucket is returned when the issue record's stream is not configured as mash makes it.
@@ -143,9 +146,10 @@ var ErrIssuedBucket = errors.New("issue record bucket is not hardened")
 // CreateIssuedBucket creates the issue record's bucket with its stream refusing rollup, delete and purge from the first
 // moment, the way CreateLeaseBucket does for the lease bucket (the KV default allows rollup, and KeyValueConfig cannot
 // say otherwise). If the stream already exists the existing bucket is verified, never altered. It is verified after
-// creation and an error is returned unless it is as mash makes it (fail closed).
-func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, error) {
-	cfg := IssuedConfig()
+// creation and an error is returned unless it is as mash makes it (fail closed). replicas is the replica count of a
+// new stream (1 or 3); an existing stream keeps its own.
+func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream, replicas int) (jetstream.KeyValue, error) {
+	cfg := IssuedConfigFor(replicas)
 	if _, err := js.AccountInfo(ctx); err != nil {
 		return nil, err
 	}
@@ -157,7 +161,7 @@ func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream) (jetstream.
 		MaxBytes:          cfg.MaxBytes,
 		MaxMsgSize:        -1,
 		Storage:           jetstream.FileStorage,
-		Replicas:          1,
+		Replicas:          cfg.Replicas,
 		AllowRollup:       false,
 		DenyDelete:        true,
 		DenyPurge:         true,
@@ -185,6 +189,12 @@ func CreateIssuedBucket(ctx context.Context, js jetstream.JetStream) (jetstream.
 // rollup, delete and purge, keeps no TTL, discards new messages when full and keeps at least IssuedMinHistory
 // revisions of a key. It never changes the bucket.
 func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
+	return VerifyIssuedBucketAt(ctx, js, 1)
+}
+
+// VerifyIssuedBucketAt is VerifyIssuedBucket that also refuses a stream with fewer than wantReplicas replicas. A
+// larger count is accepted: it was raised on purpose (RaiseReplicas).
+func VerifyIssuedBucketAt(ctx context.Context, js jetstream.JetStream, wantReplicas int) error {
 	s, err := js.Stream(ctx, IssuedStreamName)
 	if err != nil {
 		return fmt.Errorf("mash: issue record stream: %w", err)
@@ -210,6 +220,8 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 		bad = "discards old records when full"
 	case c.MaxMsgsPerSubject < IssuedMinHistory:
 		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", IssuedMinHistory)
+	case replicaCount(c) < wantReplicas:
+		bad = fmt.Sprintf("has %d replica(s) where %d are wanted (raise the replica count of mash-owned state)", replicaCount(c), wantReplicas)
 	}
 	if bad != "" {
 		return fmt.Errorf("mash: %s %s: %w; recreate it as `mash admin init` makes it, copying its records", IssuedBucket, bad, ErrIssuedBucket)

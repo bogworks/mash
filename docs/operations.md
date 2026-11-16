@@ -296,7 +296,7 @@ mashctl deprovision design --suspension 9f3c... --drained-to 41
 
 ## Topologies
 
-mash supports one NATS server, or a cluster, in the default JetStream domain, with the default API prefix. Inboxes are single-replica ([Durability](#durability-and-sync_interval)), so on a cluster an inbox is unavailable while its node is down.
+mash supports one NATS server, or a cluster, in the default JetStream domain, with the default API prefix. Mash-owned streams and buckets have as many replicas as the `replicas` setting gives ([Replicas](#replicas)): three on a cluster that declares three or more servers, one otherwise. With one replica an inbox is unavailable while its node is down.
 
 JetStream domains, leaf-node inboxes and subject mappings are not supported. The endpoint permissions that `mash admin permissions` generates (`$JS.API.*`, `$JS.ACK.<stream>.<consumer>.>`) and the client (`jetstream.New` with no domain or API prefix) assume the default domain. On a leaf node with its own domain, or behind subject mappings, the API and ACK subjects differ: acks can be denied (endless redelivery), the inbox may be unreachable, and signatures over mapped subjects may not verify. A `js_domain` setting is not implemented.
 
@@ -369,6 +369,14 @@ mashctl adopt --server tls://node1:4222 --owner O --account MASH \
 
 `--account` must be the account name `init --local` chose, `MASH` by default; the default for `--account` is the owner, which fails when the owner is another name. `adopt` takes one `--server` URL and writes it to config.json. For a test cluster without TLS, run `adopt` as `MASH_INSECURE_LOOPBACK=1 mashctl adopt --server nats://127.0.0.1:4222 ...`; the variable is accepted for a loopback URL only and is needed for that command alone: `adopt` writes `insecure_loopback` into config.json, so the later commands do not need the variable. The seed files must be mode 0600. Delete the copies you made when `adopt` has stored the keys.
 
+## Replicas
+
+Every stream and bucket mash owns (the directory, the leases, the retired names, the issue record, the adoption marker and each endpoint's inbox) is made with one setting, `replicas`: `auto` (the default), `1` or `3`. It is `config.json`'s `"replicas"`, the `MASH_REPLICAS` variable, or `--replicas N` on `init` and `adopt`. `auto` means 3 when `servers` (`MASH_SERVERS`) is 3 or more and 1 otherwise, so a single server stays at one replica. `3` needs three declared servers and is refused with fewer. Any other value, 5 included, is refused, naming `auto`, `1` and `3`: NATS allows 5, mash has not tested it. `mashctl init --local` is one server and stays at one replica. `mashctl limits --show` prints the effective count.
+
+An object that exists keeps its replica count: `init` neither raises nor lowers it. The count of an existing deployment is raised in place, while it serves, by one engine call (`store.RaiseReplicas`): for each object, in the order directory, lease, issue record, adoption, retired names and then every inbox, it raises only the replica count and waits, with the lag shown, until every replica is current. It never changes another field, writes no key, keeps rollup off on the lease bucket, is safe to run again and to resume after a stop, never lowers, refuses a target above the declared server count, and changes nothing when the cluster cannot place the replicas (a node is down). R1 and R3 objects can sit side by side during a partial run. The command name is decided separately; until it exists the call is made from code. Raising needs every node up and with room: storage is three times what one replica used, so size the account's disk for it.
+
+`audit` and `mashctl issued check` report one finding when the setting resolves to 3 and an object has fewer replicas (`raise the replica count of mash-owned state to 3`); nothing is reported when `auto` resolves to 1. An existing inbox with more replicas than wanted is accepted; one with fewer is refused. See [ADR 0141](decisions/0141-mash-owned-state-is-replicated-to-the-size-of-the-cluster-set-by-one-key-and-raised-in-place.md).
+
 ## Inbox limits
 
 By default each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest (both are configurable: see [Limits](#limits)). Single messages are limited to 1 MiB including headers, or to the server's `max_payload` when that is smaller: mash reads it from the server at connect time and refuses an oversize send locally with a clear error before anything is published. Synadia Cloud's free tier caps a payload at 512 KiB, so there the limit is 512 KiB. Message deletion and purging are denied on the stream itself, so even the account admin cannot quietly rewrite history; deleting the whole stream (deprovisioning) is the only way to remove it.
@@ -432,7 +440,7 @@ The examples above default to `JS_DISK=2G`, `JS_STREAMS=64` and `JS_CONSUMERS=12
 
 ## Durability and sync_interval
 
-Every mash inbox is a JetStream stream with one replica (R1). nats-server's default `sync_interval` is 2 minutes: the server acknowledges a write before it has fsynced it. So a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as `sent #N`. Restarting or killing mash, or the nats-server process, is fine: the data is in the operating system's page cache and survives. See [Jepsen's analysis of NATS 2.12.1](https://jepsen.io/analyses/nats-2.12.1) and [Synadia's response](https://synadia.com/blog/jepsen-nats-2-12-1), which recommends `sync_interval: always` for a single server.
+Every mash inbox is a JetStream stream, with one replica (R1) unless the [`replicas` setting](#replicas) gives three. nats-server's default `sync_interval` is 2 minutes: the server acknowledges a write before it has fsynced it. So a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as `sent #N`. Restarting or killing mash, or the nats-server process, is fine: the data is in the operating system's page cache and survives. See [Jepsen's analysis of NATS 2.12.1](https://jepsen.io/analyses/nats-2.12.1) and [Synadia's response](https://synadia.com/blog/jepsen-nats-2-12-1), which recommends `sync_interval: always` for a single server.
 
 - **Self-hosted server:** set it in `nats-server.conf`, then restart the server:
 
@@ -440,7 +448,7 @@ Every mash inbox is a JetStream stream with one replica (R1). nats-server's defa
   jetstream { sync_interval: always }
   ```
 
-  I could not confirm the block from the NATS configuration pages, so check the documentation for your server version. Replicated streams (R3) can survive the loss of one server when the replicas sit on independent hosts, but replication alone does not guarantee that acknowledged writes survive a crash (see the NATS JetStream documentation); mash does not provision replicated streams today and Synadia's free tier does not offer them.
+  I could not confirm the block from the NATS configuration pages, so check the documentation for your server version. Replicated streams (R3) can survive the loss of one server when the replicas sit on independent hosts, but replication alone does not guarantee that acknowledged writes survive a crash (see the NATS JetStream documentation); mash makes them when the `replicas` setting gives three ([Replicas](#replicas)); Synadia's free tier does not offer them.
 - **Cost:** `always` fsyncs on every write, so write latency and throughput suffer. A mail mesh sends little, so this is usually acceptable.
 - **Synadia Cloud:** its policy for this is not documented and unknown to us (we have asked). Treat a host crash there as able to lose recent mail.
 - **Visibility:** mash cannot read the server's setting today, so `mash status` does not warn about it.

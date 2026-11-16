@@ -12,6 +12,7 @@ import (
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // Seams for tests.
@@ -27,7 +28,7 @@ func init() {
 }
 
 func initLocalUsage(prog string) string {
-	return "usage: " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]\n  --start starts the new loopback-only server (127.0.0.1) and creates the buckets over a plain connection to it; init --local without --start connects to nothing"
+	return "usage: " + prog + " init --local [--dir D] [--owner O] [--port P] [--start] [--replicas auto|1]\n  --start starts the new loopback-only server (127.0.0.1) and creates the buckets over a plain connection to it; init --local without --start connects to nothing"
 }
 
 // runInitLocal is `init --local`: it writes a local operator-mode NATS server's configuration (args are the
@@ -40,8 +41,10 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	var (
 		local, start bool
 		dir, owner   string
+		replicas     = "auto"
 		port         = bootstrap.DefaultPort
 	)
+	fs.StringVar(&replicas, "replicas", "auto", "")
 	fs.BoolVar(&local, "local", false, "")
 	fs.BoolVar(&start, "start", false, "")
 	fs.StringVar(&dir, "dir", "", "")
@@ -69,6 +72,10 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	}
 	if !config.ValidName(owner) {
 		return fail(fmt.Errorf("%s: owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", pfx, owner))
+	}
+	// A local server is one server: a replica count above 1 could not be placed.
+	if _, err := store.Replicas(replicas, 1); err != nil {
+		return fail(err)
 	}
 	if port < 1 || port > 65535 {
 		return fail(fmt.Errorf("%s: port %d is out of range", pfx, port))
@@ -135,6 +142,7 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	c := cfg
 	c.URL, c.Owner, c.AdminCreds = pl.URL, owner, pl.Creds
 	c.TLSCA, c.TLSCert, c.TLSKey = "", "", "" // the local server has no TLS
+	c.Servers, c.Replicas = 1, replicas       // one server, whatever the loaded configuration declares
 	c.InsecureLoopback = true                 // the server was generated and started by this run on 127.0.0.1: plain by construction
 	if code := initLocalBuckets(prog, c, stdout, stderr); code != 0 {
 		fmt.Fprintf(stderr, "%s: the server is running (pid %d) but its buckets were not created; run: %s init\n", pfx, pid, prog)

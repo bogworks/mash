@@ -56,7 +56,7 @@ func validateSubmitterKey(account, submitter string) error {
 func (a *Admin) adoptionKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.AdoptionBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		if kv, err = store.CreateAdoptionBucket(ctx, a.js); err != nil {
+		if kv, err = store.CreateAdoptionBucket(ctx, a.js, a.limits.ReplicaCount()); err != nil {
 			// Lost a race with another admin creating it: read it again.
 			if kv2, err2 := a.js.KeyValue(ctx, store.AdoptionBucket); err2 == nil {
 				kv, err = kv2, nil
@@ -233,7 +233,7 @@ func (a *Admin) initAdoption(ctx context.Context) error {
 	_, err := a.js.KeyValue(ctx, store.AdoptionBucket)
 	switch {
 	case errors.Is(err, jetstream.ErrBucketNotFound):
-		if _, err := store.CreateAdoptionBucket(ctx, a.js); err != nil {
+		if _, err := store.CreateAdoptionBucket(ctx, a.js, a.limits.ReplicaCount()); err != nil {
 			return fmt.Errorf("mash: bucket %s: %w", store.AdoptionBucket, err)
 		}
 		return nil

@@ -304,7 +304,7 @@ func (a *Admin) retiredKV(ctx context.Context) (jetstream.KeyValue, error) {
 func (a *Admin) openRetired(ctx context.Context) (jetstream.KeyValue, *jetstream.KeyValueBucketStatus, error) {
 	kv, err := a.js.KeyValue(ctx, store.RetiredBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		if kv, err = a.js.CreateKeyValue(ctx, store.RetiredConfig()); err != nil {
+		if kv, err = a.js.CreateKeyValue(ctx, store.RetiredConfigFor(a.limits.ReplicaCount())); err != nil {
 			// Lost a race with another admin creating it, or no right to create: read it again.
 			kv, err = a.js.KeyValue(ctx, store.RetiredBucket)
 		}

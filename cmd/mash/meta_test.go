@@ -128,13 +128,13 @@ func TestAdminLimitsCLI(t *testing.T) {
 		return out.String() + strings.TrimPrefix(errb.String(), adminDeprecation+"\n"), code
 	}
 	// --show needs no server and prints the defaults for a Config with no limits.
-	const defaults = "inbox_max_bytes 16MiB\ninbox_max_age 30d\ndirectory_max_bytes 16MiB\nlease_max_bytes 4MiB\ninbox_max_consumers -1\n"
+	const defaults = "inbox_max_bytes 16MiB\ninbox_max_age 30d\ndirectory_max_bytes 16MiB\nlease_max_bytes 4MiB\ninbox_max_consumers -1\nreplicas 1 (setting auto, servers 0)\n"
 	if out, code := run(store.Limits{}, "limits", "--show"); code != 0 || out != defaults {
 		t.Fatalf("show: %d %q", code, out)
 	}
 	custom := store.Limits{InboxMaxBytes: 64 << 20, InboxMaxAge: 36 * time.Hour, DirectoryMaxBytes: 2 << 20, LeaseMaxBytes: 5 << 19, InboxMaxConsumers: 3}
 	if out, code := run(custom, "limits", "--show"); code != 0 ||
-		out != "inbox_max_bytes 64MiB\ninbox_max_age 36h0m0s\ndirectory_max_bytes 2MiB\nlease_max_bytes 2560KiB\ninbox_max_consumers 3\n" {
+		out != "inbox_max_bytes 64MiB\ninbox_max_age 36h0m0s\ndirectory_max_bytes 2MiB\nlease_max_bytes 2560KiB\ninbox_max_consumers 3\nreplicas 1 (setting auto, servers 0)\n" {
 		t.Fatalf("show custom: %d %q", code, out)
 	}
 	// limits [name...] raises an existing inbox.

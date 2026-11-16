@@ -163,7 +163,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 		}
 	}
 	cj, _ := os.ReadFile(filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"))
-	for _, want := range []string{e.srv.ClientURL(), `"owner": "alice"`, filepath.Join(srvDir, "mashadmin.creds")} {
+	for _, want := range []string{e.srv.ClientURL(), `"owner": "alice"`, filepath.Join(srvDir, "mashadmin.creds"), `"servers": 1`, `"replicas": "auto"`} {
 		if !strings.Contains(string(cj), want) {
 			t.Errorf("config.json lacks %q:\n%s", want, cj)
 		}
@@ -576,5 +576,25 @@ func TestAdoptMintAdminConnectsOnNonStrictServer(t *testing.T) {
 	}
 	if strings.Index(out, "connected (minted)") > strings.Index(out, "All checks passed") {
 		t.Errorf("success came before the connect test:\n%s", out)
+	}
+}
+
+// adopt reads the server count from the system ping and decides the replica count from it and --replicas: three on a
+// single server is refused before anything is written, an unsupported value likewise, and the written config says what
+// was decided.
+func TestAdoptReplicas(t *testing.T) {
+	e := newApplyEnv(t)
+	a := newAdopter(t, e)
+	a.refuses(1, []string{"--replicas", "replicas 3 needs at least 3 servers and 1 are declared", "nothing was changed"}, "--mint-admin", "--replicas", "3")
+	a.refuses(1, []string{"--replicas", "auto, 1 and 3"}, "--mint-admin", "--replicas", "5")
+	a.refuses(2, []string{"--replicas needs a value"}, "--mint-admin", "--replicas")
+	if out, errb, code := a.adopt("--mint-admin", "--replicas", "1"); code != 0 {
+		t.Fatalf("adopt --replicas 1: %d\n%s\n%s", code, out, errb)
+	}
+	cj := string(mustRead(t, filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")))
+	for _, want := range []string{`"servers": 1`, `"replicas": "1"`} {
+		if !strings.Contains(cj, want) {
+			t.Errorf("config.json lacks %q:\n%s", want, cj)
+		}
 	}
 }

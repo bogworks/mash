@@ -72,6 +72,12 @@ type Config struct {
 	Dir            string       // the config directory (ConfigDir); "" when none can be found
 	Legacy         string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits         store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	// Replicas is the replicas setting: "auto" (the default), "1" or "3" (config.json "replicas", MASH_REPLICAS). It is
+	// kept as written and decided with Servers by store.Replicas (EffectiveReplicas), where admin creates objects.
+	Replicas string
+	// Servers is the declared server count of the deployment (config.json "servers", MASH_SERVERS); 0 is none declared.
+	// An unusable MASH_SERVERS reads as none here: the commands that act on the count refuse it in their own words.
+	Servers int
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
@@ -127,6 +133,9 @@ type file struct {
 	RequireTLS       *bool `json:"require_tls"`
 
 	Limits json.RawMessage `json:"limits"`
+
+	Replicas json.RawMessage `json:"replicas"` // kept raw: the string "auto", "1" or "3", or the number 1 or 3
+	Servers  *int            `json:"servers"`
 
 	NameRuleFile     json.RawMessage `json:"name_rule_file"`     // kept raw: null, "" and non-strings are present but invalid
 	NameRuleRequired json.RawMessage `json:"name_rule_required"` // kept raw: only true and false are valid
@@ -346,7 +355,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if home != "" && env("MASH_CONFIG_DIR") == "" {
 		legacy = filepath.Join(home, ".config", "mash")
 	}
-	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits(), Replicas: "auto"}
 
 	var f file
 	var raw []byte
@@ -412,6 +421,16 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if c.Limits, err = ParseLimits(f.Limits); err != nil {
 		return c, err
 	}
+	if len(f.Replicas) > 0 {
+		r, err := replicasValue(f.Replicas)
+		if err != nil {
+			return c, fmt.Errorf("mash: config.json \"replicas\": %w", err)
+		}
+		c.Replicas = r
+	}
+	if f.Servers != nil {
+		c.Servers = *f.Servers
+	}
 
 	fileAgentSet := false
 	str := func(dst *string, key string) {
@@ -438,6 +457,10 @@ func Load(lookup Lookup, home string) (Config, error) {
 	str(&c.TLSCA, "MASH_TLS_CA")
 	str(&c.TLSCert, "MASH_TLS_CERT")
 	str(&c.TLSKey, "MASH_TLS_KEY")
+	str(&c.Replicas, "MASH_REPLICAS")
+	if n, err := strconv.Atoi(strings.TrimSpace(env("MASH_SERVERS"))); err == nil && n > 0 {
+		c.Servers = n
+	}
 	for _, p := range []struct {
 		dst *int
 		key string
@@ -585,6 +608,23 @@ func Load(lookup Lookup, home string) (Config, error) {
 	}
 	return c, nil
 }
+
+// replicasValue reads config.json "replicas": a string or a whole number.
+func replicasValue(raw json.RawMessage) (string, error) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return "", errors.New("want \"auto\", 1 or 3")
+	}
+	return strconv.Itoa(n), nil
+}
+
+// EffectiveReplicas is the replica count of mash-owned objects this configuration asks for (store.Replicas of the
+// replicas setting and the declared server count), or the refusal for a setting that cannot be used.
+func (c Config) EffectiveReplicas() (int, error) { return store.Replicas(c.Replicas, c.Servers) }
 
 // Identity is the endpoint's identity: the legacy one of Owner and Name when AgentToken is empty, else the three-token
 // identity of AgentToken, Owner and Name. The error of sap is returned as is; it names the rule that failed.

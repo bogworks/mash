@@ -39,11 +39,12 @@ const (
 )
 
 func adoptUsage() string {
-	return "usage: mashctl adopt --server URL [--account NAME] --operator-key FILE --account-key FILE --sys-creds FILE [--admin-creds FILE | --mint-admin] [--owner O] [--dry-run]\n"
+	return "usage: mashctl adopt --server URL [--account NAME] --operator-key FILE --account-key FILE --sys-creds FILE [--admin-creds FILE | --mint-admin] [--owner O] [--replicas auto|1|3] [--dry-run]\n"
 }
 
 type adoptOpts struct {
 	server, account, owner            string
+	replicas                          string
 	operatorKey, accountKey, sysCreds string
 	adminCreds                        string
 	mintAdmin, dryRun                 bool
@@ -53,7 +54,7 @@ func parseAdoptArgs(args []string) (adoptOpts, error) {
 	var o adoptOpts
 	str := map[string]*string{
 		"--server": &o.server, "--account": &o.account, "--owner": &o.owner, "--operator-key": &o.operatorKey,
-		"--account-key": &o.accountKey, "--sys-creds": &o.sysCreds, "--admin-creds": &o.adminCreds,
+		"--account-key": &o.accountKey, "--sys-creds": &o.sysCreds, "--admin-creds": &o.adminCreds, "--replicas": &o.replicas,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -239,6 +240,20 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		return fail("the system account ping (%s) was answered by no server: this does not look like an operator-mode server with a full resolver, or --sys-creds are not system account user creds (nothing was changed)", "$SYS.REQ.SERVER.PING")
 	}
 	fmt.Fprintf(stdout, "  2. server         ok: refused a connection without credentials (operator mode); the system creds connect\n")
+	// The server count is what the system ping found; the replica count follows from it and the setting (--replicas,
+	// else the configuration's), and is refused here, before anything is written.
+	servers := len(set.Names)
+	replicaSetting := o.replicas
+	if replicaSetting == "" {
+		replicaSetting = cfg.Replicas
+	}
+	if replicaSetting == "" {
+		replicaSetting = "auto"
+	}
+	replicaCount, err := store.Replicas(replicaSetting, servers)
+	if err != nil {
+		return fail("--replicas: %v (%d server(s) answered the system ping; nothing was changed)", err, servers)
+	}
 
 	lctx, lcancel := context.WithTimeout(ctx, lookupWait)
 	tok, err := res.Lookup(lctx, st.acctPub)
@@ -370,7 +385,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		adminPath = st.adminDst
 		step("%skeep the existing %s (it connected; not minted again)", verb, st.adminDst)
 		if !o.dryRun {
-			if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw); err != nil {
+			if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw, replicaCount); err != nil {
 				return fail("the admin user in %s could not be recorded in the issue record (%v). It is not recorded, so `mashctl issued check` will report it as unrecorded until it is: run `mashctl init` (or adopt again) once the cause is fixed", st.adminDst, err)
 			}
 			step("recorded the admin user in the issue record (bucket %s)", store.IssuedBucket)
@@ -382,7 +397,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 			break
 		}
 		// Record first, then write: a creds file that exists is always a recorded credential.
-		if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw); err != nil {
+		if err := recordAdoptedAdmin(cfg, o.server, owner, st.adminRaw, replicaCount); err != nil {
 			return fail("the minted mashadmin user could not be recorded in the issue record (%v): the admin credentials were NOT recorded and were NOT written to %s, so no credential was handed out. Fix the cause and run adopt again, or use --admin-creds FILE and run `mashctl init`", err, st.adminDst)
 		}
 		step("recorded the admin user in the issue record (bucket %s)", store.IssuedBucket)
@@ -396,7 +411,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("minted the mashadmin user and wrote %s (0600)", st.adminDst)
 	}
 
-	settings := map[string]string{"url": o.server, "owner": owner}
+	settings := map[string]string{"url": o.server, "owner": owner, "servers": strconv.Itoa(servers), "replicas": replicaSetting}
 	if adminPath != "" {
 		settings["admin_creds"] = adminPath
 	}
@@ -461,7 +476,7 @@ func already(have bool) string {
 
 func settingsText(m map[string]string) string {
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "servers", "replicas", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("%q: %s", k, jsonValue(k, v)))
 		}
@@ -473,7 +488,7 @@ func configJSON(m map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "servers", "replicas", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, jsonValue(k, v)))
 		}
@@ -607,7 +622,7 @@ func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
 // recordAdoptedAdmin writes the admin user in raw to the issue record, over its own connection (the user is the
 // account's admin, so it may write the bucket), creating the bucket on demand. It runs before the creds file is
 // written, so a credential adopt hands out is never unrecorded.
-func recordAdoptedAdmin(cfg config.Config, url, owner string, raw []byte) error {
+func recordAdoptedAdmin(cfg config.Config, url, owner string, raw []byte, replicas int) error {
 	c, err := dialAdmin(cfg, url, raw)
 	if err != nil {
 		return err
@@ -615,6 +630,14 @@ func recordAdoptedAdmin(cfg config.Config, url, owner string, raw []byte) error 
 	defer c.Close()
 	a, err := madmin.New(c, owner)
 	if err != nil {
+		return err
+	}
+	l := cfg.Limits
+	if l == (store.Limits{}) {
+		l = store.DefaultLimits()
+	}
+	l.Replicas = replicas
+	if err := a.SetLimits(l); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -664,9 +687,9 @@ func ensureDir(d string) error {
 	return nil
 }
 
-// jsonValue is v as a config.json value: insecure_loopback is a boolean, everything else a string.
+// jsonValue is v as a config.json value: insecure_loopback is a boolean, servers a number, everything else a string.
 func jsonValue(key, v string) string {
-	if key == "insecure_loopback" {
+	if key == "insecure_loopback" || key == "servers" {
 		return v
 	}
 	return strconv.Quote(v)

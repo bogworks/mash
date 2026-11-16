@@ -28,7 +28,7 @@ Either run your own NATS server in operator mode, or use Synadia Cloud. [`script
 
 ## How durable is the mail?
 
-Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a single-replica (R1) JetStream stream that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. Synadia Cloud's policy is not documented. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
+Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a JetStream stream, single-replica (R1) unless the `replicas` setting gives three ([Replicas](operations.md#replicas)), that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. Synadia Cloud's policy is not documented. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
 
 ## Can mail be lost to a flood?
 

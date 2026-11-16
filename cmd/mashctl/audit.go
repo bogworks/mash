@@ -530,6 +530,9 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			s.Undrained++
 		}
 	}
+	if snap.ReplicaFinding != "" {
+		rep.Problems = append(rep.Problems, auditProblem{What: "replicas", Item: "mash-owned state", Error: snap.ReplicaFinding})
+	}
 	s.RetiredFinal, s.RetiredPending = retired.Final, retired.Pending
 	s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Problems = len(rep.Orphans.Streams), len(rep.Orphans.Leases), len(rep.Orphans.Creds), len(rep.Problems)
 	return rep

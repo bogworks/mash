@@ -153,7 +153,7 @@ func (a *Admin) Conn() *nats.Conn { return a.nc }
 // bucket does not allow rollup: Init creates it hardened and hardens an existing one (see store.HardenLeaseBucket),
 // and fails if it cannot.
 func (a *Admin) Init(ctx context.Context) error {
-	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
+	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfigFor(a.limits.ReplicaCount())} {
 		if cfg.Bucket == store.LeaseBucket {
 			if err := a.initLease(ctx, cfg); err != nil {
 				return err
@@ -171,8 +171,13 @@ func (a *Admin) Init(ctx context.Context) error {
 				}
 				continue // an existing retired bucket is never altered (ADR 0088)
 			}
-			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok && bs.StreamInfo().Config.MaxBytes > cfg.MaxBytes {
-				cfg.MaxBytes = bs.StreamInfo().Config.MaxBytes
+			if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok {
+				if bs.StreamInfo().Config.MaxBytes > cfg.MaxBytes {
+					cfg.MaxBytes = bs.StreamInfo().Config.MaxBytes
+				}
+				// An existing bucket keeps its replica count: Init neither raises nor lowers it (raising is an
+				// explicit act, store.RaiseReplicas).
+				cfg.Replicas = max(bs.StreamInfo().Config.Replicas, 1)
 			}
 		}
 		if _, err := a.js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
@@ -204,7 +209,7 @@ func (a *Admin) initLease(ctx context.Context, cfg jetstream.KeyValueConfig) err
 		if sc.MaxBytes > cfg.MaxBytes {
 			cfg.MaxBytes = sc.MaxBytes
 		}
-		sc.MaxBytes = cfg.MaxBytes
+		sc.MaxBytes = cfg.MaxBytes // sc.Replicas stays as it is: Init does not change a replica count
 		sc.AllowRollup = false
 		if _, err := a.js.UpdateStream(ctx, sc); err != nil {
 			return fmt.Errorf("mash: bucket %s: %w", cfg.Bucket, err)
@@ -572,11 +577,18 @@ func firstInboxDiff(what, name string, fields []inboxField) error {
 // checkInboxStream compares an existing inbox stream with want, field by field. want carries the one mail filter.
 func checkInboxStream(name string, got, want jetstream.StreamConfig) error {
 	wantSubjects := sortedCopy(want.Subjects)
+	// The replica count may be larger than wanted: it was raised on purpose (store.RaiseReplicas, ADR 0141). A smaller
+	// one is refused with the way out, which is to raise it and not to deprovision.
+	if got.Replicas < 1 {
+		got.Replicas = 1
+	}
+	if got.Replicas < want.Replicas {
+		return fmt.Errorf("mash: inbox stream of %s has %d replica(s) where mash needs %d; raise the replica count of mash-owned state to %d (the command name is decided separately); mash does not recreate an existing inbox, because that could discard stored mail", name, got.Replicas, want.Replicas, want.Replicas)
+	}
 	return firstInboxDiff("stream", name, []inboxField{
 		{"subjects", sortedCopy(got.Subjects), wantSubjects},
 		{"storage", got.Storage, want.Storage},
 		{"retention", got.Retention, want.Retention},
-		{"replicas", got.Replicas, want.Replicas},
 		{"max_age", got.MaxAge, want.MaxAge},
 		{"max_bytes", got.MaxBytes, want.MaxBytes},
 		{"max_msgs", got.MaxMsgs, want.MaxMsgs},

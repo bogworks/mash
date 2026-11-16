@@ -122,3 +122,4 @@
 | [0126](0126-a-resumed-apply-gives-no-witness-to-a-sender-the-earlier-push-already-settled.md) | A resumed apply gives no witness to a sender the earlier push already settled | proposed | 2026-11-15 |
 | [0129](0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md) | The policy commands are not part of v0.5.0 and the engine stays internal until it works standalone | proposed | 2026-11-15 |
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
+| [0141](0141-mash-owned-state-is-replicated-to-the-size-of-the-cluster-set-by-one-key-and-raised-in-place.md) | Mash-owned state is replicated to the size of the cluster, set by one key, and raised in place | proposed | 2026-11-16 |

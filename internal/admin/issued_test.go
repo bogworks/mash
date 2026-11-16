@@ -439,7 +439,7 @@ func TestInitRaisesAnOldIssuedBucketHistory(t *testing.T) {
 	e := testenv.Start(t)
 	a, js := initOn(t, e)
 	ctx := context.Background()
-	if _, err := store.CreateIssuedBucket(ctx, js); err != nil {
+	if _, err := store.CreateIssuedBucket(ctx, js, 1); err != nil {
 		t.Fatal(err)
 	}
 	s, err := js.Stream(ctx, store.IssuedStreamName)

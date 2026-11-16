@@ -21,7 +21,7 @@ import (
 func (a *Admin) issuedKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.IssuedBucket)
 	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		if kv, err = store.CreateIssuedBucket(ctx, a.js); err != nil {
+		if kv, err = store.CreateIssuedBucket(ctx, a.js, a.limits.ReplicaCount()); err != nil {
 			// Lost a race with another admin creating it: read it again.
 			if kv2, err2 := a.js.KeyValue(ctx, store.IssuedBucket); err2 == nil {
 				kv, err = kv2, nil
@@ -419,7 +419,7 @@ func (a *Admin) initIssued(ctx context.Context) error {
 	_, err := a.js.KeyValue(ctx, store.IssuedBucket)
 	switch {
 	case errors.Is(err, jetstream.ErrBucketNotFound):
-		if _, err := store.CreateIssuedBucket(ctx, a.js); err != nil {
+		if _, err := store.CreateIssuedBucket(ctx, a.js, a.limits.ReplicaCount()); err != nil {
 			return fmt.Errorf("mash: bucket %s: %w", store.IssuedBucket, err)
 		}
 		return nil

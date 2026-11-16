@@ -73,6 +73,10 @@ type AuditSnapshot struct {
 
 	LeaseRollup bool   // the lease bucket exists and its stream still allows rollup writes (it has not been hardened)
 	LeaseError  string // the lease bucket exists and its stream configuration could not be read; empty otherwise
+
+	// ReplicaFinding is the one finding of a configuration that asks for 3 replicas while a mash-owned object has
+	// fewer (store.ReplicaShortfallText); empty when the setting resolves to 1 or every object has enough.
+	ReplicaFinding string
 }
 
 // AuditRetiredMarker is one key of the retired-name bucket: the marker, or why its value could not be read.
@@ -221,6 +225,11 @@ func (a *Admin) Audit(ctx context.Context) (AuditSnapshot, error) {
 		_ = json.Unmarshal(e.Value(), &lv)
 		snap.Leases = append(snap.Leases, AuditLease{Key: k, Tombstone: lv.Deprovisioned})
 	}
+	want, short, err := a.ReplicaShortfall(ctx)
+	if err != nil {
+		return snap, err
+	}
+	snap.ReplicaFinding = store.ReplicaShortfallText(want, short)
 	return snap, nil
 }
 
@@ -286,4 +295,23 @@ func (a *Admin) auditRetired(ctx context.Context) (AuditRetired, error) {
 		out.Markers = append(out.Markers, AuditRetiredMarker{Key: k, Marker: m})
 	}
 	return out, nil
+}
+
+// ReplicaShortfall is the replica count the configuration asks for (a.limits) and the mash-owned objects, among only
+// (stream names; none means every object), that have fewer. It reads and changes nothing.
+func (a *Admin) ReplicaShortfall(ctx context.Context, only ...string) (want int, short []string, err error) {
+	want = a.limits.ReplicaCount()
+	if want < 2 {
+		return want, nil, nil
+	}
+	state, err := store.ReplicaState(ctx, a.js)
+	if err != nil {
+		return want, nil, err
+	}
+	for _, o := range state {
+		if o.Replicas < want && (len(only) == 0 || slices.Contains(only, o.Object)) {
+			short = append(short, o.Object)
+		}
+	}
+	return want, short, nil
 }

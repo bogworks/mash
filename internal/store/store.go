@@ -73,6 +73,18 @@ type Limits struct {
 	DirectoryMaxBytes int64
 	LeaseMaxBytes     int64
 	InboxMaxConsumers int // -1 is unlimited
+	// Replicas is the replica count every mash-owned stream and bucket is created with (store.Replicas decides it from
+	// the replicas setting and the declared server count): 0 and 1 are one replica, 3 is three. It is never part of
+	// the size limits: an existing object keeps its count (raising one is RaiseReplicas).
+	Replicas int
+}
+
+// ReplicaCount is l.Replicas as a replica count: 0 (unset) is 1.
+func (l Limits) ReplicaCount() int {
+	if l.Replicas < 1 {
+		return 1
+	}
+	return l.Replicas
 }
 
 // DefaultLimits returns the built-in limits.
@@ -94,6 +106,8 @@ func (l Limits) Validate() error {
 		return fmt.Errorf("mash: limits lease_max_bytes %d is below the minimum 1MiB", l.LeaseMaxBytes)
 	case l.InboxMaxConsumers != -1 && l.InboxMaxConsumers < 1:
 		return fmt.Errorf("mash: limits inbox_max_consumers %d must be -1 (unlimited) or at least 1", l.InboxMaxConsumers)
+	case l.Replicas != 0 && l.Replicas != 1 && l.Replicas != 3:
+		return fmt.Errorf("mash: replicas %d is not supported: the values are auto, 1 and 3", l.Replicas)
 	}
 	return nil
 }
@@ -131,7 +145,7 @@ func inboxStreamConfig(name string, subjects []string, l Limits) jetstream.Strea
 		DenyDelete:        true,
 		DenyPurge:         true,
 		AllowDirect:       true,
-		Replicas:          1,
+		Replicas:          l.ReplicaCount(),
 	}
 }
 
@@ -153,7 +167,7 @@ func DirectoryConfig() jetstream.KeyValueConfig { return DirectoryConfigFor(Defa
 // DirectoryConfigFor is DirectoryConfig under limits l.
 func DirectoryConfigFor(l Limits) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: DirectoryBucket, Description: "mash endpoint directory",
-		History: 1, Storage: jetstream.FileStorage, MaxBytes: l.DirectoryMaxBytes}
+		History: 1, Storage: jetstream.FileStorage, MaxBytes: l.DirectoryMaxBytes, Replicas: l.ReplicaCount()}
 }
 
 // LeaseConfig is the lease bucket: name -> holder, expiring unless refreshed.
@@ -162,7 +176,7 @@ func LeaseConfig() jetstream.KeyValueConfig { return LeaseConfigFor(DefaultLimit
 // LeaseConfigFor is LeaseConfig under limits l.
 func LeaseConfigFor(l Limits) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: LeaseBucket, Description: "mash endpoint leases",
-		History: 1, TTL: LeaseTTL, Storage: jetstream.FileStorage, MaxBytes: l.LeaseMaxBytes}
+		History: 1, TTL: LeaseTTL, Storage: jetstream.FileStorage, MaxBytes: l.LeaseMaxBytes, Replicas: l.ReplicaCount()}
 }
 
 // RetiredConfig is the retired-name bucket: flat identity -> Retired, written when a new-form identity is
@@ -170,9 +184,12 @@ func LeaseConfigFor(l Limits) jetstream.KeyValueConfig {
 // deletes from it: INV-002, a retired name is never reassigned, needs the marker to outlive the lease. The KV
 // stream jetstream makes for it discards new messages when full (never an old marker); VerifyRetiredStatus refuses
 // a bucket whose stream does otherwise.
-func RetiredConfig() jetstream.KeyValueConfig {
+func RetiredConfig() jetstream.KeyValueConfig { return RetiredConfigFor(1) }
+
+// RetiredConfigFor is RetiredConfig with the given replica count (1 or 3; below 1 is 1).
+func RetiredConfigFor(replicas int) jetstream.KeyValueConfig {
 	return jetstream.KeyValueConfig{Bucket: RetiredBucket, Description: "mash retired new-form identities",
-		History: 1, Storage: jetstream.FileStorage, MaxBytes: RetiredMaxBytes}
+		History: 1, Storage: jetstream.FileStorage, MaxBytes: RetiredMaxBytes, Replicas: max(replicas, 1)}
 }
 
 // Retired is the value of one retired-name marker. It names the identity's three tokens and the user public key that
@@ -201,7 +218,11 @@ func (r Retired) IsPending() bool { return r.State == RetiredPending }
 // a history other than RetiredConfig's is not a bucket mash made, and memory storage would lose every marker on a
 // server restart. It never changes the bucket; the error tells the
 // admin to fix or recreate it.
-func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
+func VerifyRetiredStatus(st jetstream.KeyValueStatus) error { return VerifyRetiredStatusAt(st, 1) }
+
+// VerifyRetiredStatusAt is VerifyRetiredStatus that also refuses a bucket with fewer than wantReplicas replicas. A
+// larger count is accepted: it was raised on purpose (RaiseReplicas, ADR 0141).
+func VerifyRetiredStatusAt(st jetstream.KeyValueStatus, wantReplicas int) error {
 	want := RetiredConfig()
 	switch {
 	case st.TTL() != 0:
@@ -222,6 +243,8 @@ func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
 			return fmt.Errorf("mash: bucket %s expires messages after %s: that could drop a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.MaxAge)
 		case c.MaxMsgs > 0:
 			return fmt.Errorf("mash: bucket %s is capped at %d messages: that could evict a retired marker and let a retired name be reassigned (INV-002); fix or recreate the bucket (mash does not change it)", RetiredBucket, c.MaxMsgs)
+		case replicaCount(c) < wantReplicas:
+			return fmt.Errorf("mash: bucket %s has %d replica(s) where %d are wanted: raise the replica count of mash-owned state (the bucket holds its markers as they are)", RetiredBucket, replicaCount(c), wantReplicas)
 		}
 	}
 	return nil
