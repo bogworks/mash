@@ -38,12 +38,12 @@ Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not suppo
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.0
 curl -fsSLO $BASE/mash-linux-amd64
 curl -fsSLO $BASE/SHA256SUMS
-grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c -      # macOS: shasum -a 256 -c -
+grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
 gh attestation verify mash-linux-amd64 -R bogworks/mash \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.0
-chmod +x mash-linux-amd64
-BIN=~/.local/bin                                            # any directory; it must be on your PATH
+  --source-ref refs/tags/v0.5.0 &&
+chmod +x mash-linux-amd64 &&
+BIN=~/.local/bin &&                                         # any directory; it must be on your PATH
 mkdir -p "$BIN" && mv mash-linux-amd64 "$BIN/mash"
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "add $BIN to your PATH" ;; esac
 mash version

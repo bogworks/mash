@@ -89,9 +89,10 @@ Download the binary and `SHA256SUMS` from the release page, then check the check
 installed and logged in; `<commit>` is the commit the tag points to):
 
 ```sh
-grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c -        # macOS: shasum -a 256 -c -
-gh attestation verify mash-linux-amd64 -R bogworks/mash \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml \
+REPO=bogworks/mash                                            # the repository the release came from
+grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c -         # macOS: shasum -a 256 -c -
+gh attestation verify mash-linux-amd64 -R "$REPO" \
+  --signer-workflow "$REPO/.github/workflows/release.yml" \
   --source-ref refs/tags/v<version> --source-digest <commit>
 ```
 
