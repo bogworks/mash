@@ -60,9 +60,10 @@ export default function (pi: any) {
   let busy = false; // the model is mid-answer: hold a wake
   let held = false; // a wake arrived while busy
   let armed = false;
+  let warned = false; // the no-identity notice was given for this session lifetime (session_start can fire twice)
   // pending are offers handed to Pi (a tool result, an injected message, a wake) and not yet confirmed by message_end.
   // Each is acked at its confirming message_end, and dropped unacked at agent_settled or session_shutdown: the mail
-  // stays spooled and the hook offers it again (to a new session at once, to this one after 60 s).
+  // stays spooled and is offered again (to this session after 60 s; a new session gets it once its serve takes the mail over, which can take up to about 30 s).
   type Pending = { g: number; s: string; event: "tool_result" | "before_agent_start"; offer: Offer };
   let pending: Pending[] = [];
   // gen counts session lifetimes. session_shutdown bumps it, so a wake or hook that began for an old
@@ -117,7 +118,21 @@ export default function (pi: any) {
     session = ctx.sessionManager.getSessionId();
     if (armed) return;
     const dir = await run(["spool-dir"], "");
-    if (!dir || g !== gen) return; // no mash identity: nothing to watch
+    if (g !== gen) return;
+    if (!dir) {
+      // No mash identity in Pi's own environment (serve may still work, from mcp.json's env): nothing to watch, and
+      // mail would sit unseen. Say so once per session, in the UI and on stderr, never silently.
+      if (!warned) {
+        warned = true;
+        const msg =
+          "mash: Pi's environment has no mash identity (MASH_NAME/MASH_OWNER/MASH_URL or config); mail will not be delivered to this session";
+        console.error(msg);
+        try {
+          ctx.ui?.notify?.(msg, "warning");
+        } catch {}
+      }
+      return;
+    }
     // serve creates the spool once its MCP server is up, which can be after session_start: poll for it, then watch.
     const arm = () => {
       if (g !== gen || armed || !existsSync(join(dir, ".owner"))) return;
@@ -151,6 +166,7 @@ export default function (pi: any) {
     if (retry) clearTimeout(retry);
     retry = undefined;
     armed = false;
+    warned = false;
     busy = false;
     held = false;
     pending = []; // unconfirmed offers are dropped unacked: the mail stays spooled

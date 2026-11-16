@@ -9,6 +9,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/host"
 )
 
 // A three-token endpoint is shown as agent.owner.name on every human surface of the client and the serve (ADR 0081);
@@ -82,7 +83,7 @@ func TestToolErrorsAndVersionShowCanonical(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `mash endpoint "`+nfDot+`" could not start`) {
 		t.Fatalf("%v", err)
 	}
-	if got := versionText(nfCfg.DisplayName(), "x", ""); !strings.Contains(got, "endpoint "+nfDot+" (owner x)") {
+	if got := versionText(nfCfg.DisplayName(), "x", "", host.Claude{}); !strings.Contains(got, "endpoint "+nfDot+" (owner x)") {
 		t.Fatalf("version %q", got)
 	}
 }

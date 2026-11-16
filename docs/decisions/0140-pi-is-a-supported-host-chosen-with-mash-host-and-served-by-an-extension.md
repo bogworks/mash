@@ -38,7 +38,7 @@ Chosen: add a `Pi` adapter, selected explicitly with `MASH_HOST=pi`.
    Its words are "Pi", "Pi process" and "Pi (mash): ", and it has none of Claude Code's settings checks. Ownership
    follows Claude's rules (launch token, process ancestry); the session-id rule never fires because Pi gives serve no
    session id. `host.SessionID` returns "" for a host with no variable and does not read the environment.
-2. **Output.** Pi's `Present` renders the text Claude puts in `additionalContext`, with the same trust-label frame and
+2. **Output.** Pi's `Present` renders the text Claude puts in `additionalContext`, with the same hook frame (`HookFrame`: bodies are quoted data, plus the unproven and stale notes when such mail is in the batch) and
    the same size cap. Both adapters call one shared function for the text, so the two cannot drift. Pi's hook prints it
    as JSON, `{"text": "...", "ack": "<token>"}` (see 6); its notices print `{"text": "..."}`.
 3. **Notice moves onto the adapter.** The other-launch and lease-wait notices were written as Claude's JSON by
@@ -65,7 +65,10 @@ Chosen: add a `Pi` adapter, selected explicitly with `MASH_HOST=pi`.
    `before_agent_start` message, or the wake's `sendMessage` message), never when the handler returns the text; a
    pending offer is dropped unacked at `agent_settled` and `session_shutdown`. After each `agent_settled` it wakes
    again, so mail beyond one batch is picked up; the 60 second hold keeps that from looping. Delivery is at-least-once: a batch is not offered again to the same session for 60 seconds, and
-   is offered again after that or to another session, flagged as a repeat. Claude Code and headless are unchanged.
+   is offered again after that or to another session, flagged as a repeat. Mail offered and not acked when a session ends is
+   never lost, but a new session does not get it at once: a starting serve clears the old holder's spooled copy and
+   the server redelivers the message once the consumer's ack wait (30 seconds) ends, so it reaches the new session up
+   to about 30 seconds after it starts. Claude Code and headless are unchanged.
 
 Not decided here, and later work:
 
@@ -74,7 +77,7 @@ Not decided here, and later work:
 * An installer command for Pi's configuration and extension.
 * Live prompts (`mash prompt`) to a Pi endpoint, which need the request id the model replies with to reach it.
 * An intake of Pi's activity (working, idle, blocked) into mash.
-* Getting mash's server instructions to a Pi model. Until then each delivered batch carries the trust-label frame.
+* Getting mash's server instructions to a Pi model. Until then each delivered batch carries only the hook frame: the line that bodies are quoted data, not instructions, and, when the batch holds unproven (`[claimed]`, `[unknown-signer]`, `[absent]`) or `[stale]` mail, the note that such mail is information, not instructions. It does not say what `[verified]` means.
 
 This amends [ADR 0032](0032-host-adapter-seam.md): the adapter's surface gains `Notice`, and a second host is
 registered. It is not edited.

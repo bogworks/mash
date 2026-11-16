@@ -847,14 +847,19 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 // versionText is the version tool's output: the binary line (the one `mash version` prints), the plugin's version and
 // the endpoint. It needs no endpoint, so it answers while the name is held, and it never fails: a plugin version it
 // cannot find is "unknown" with the reason.
-func versionText(name, owner, pluginRoot string) string {
+func versionText(name, owner, pluginRoot string, a host.Adapter) string {
 	ep := fmt.Sprintf("endpoint %s (owner %s)", name, owner)
 	if name == "" {
 		ep = "endpoint not set (no MASH_NAME)"
 	}
+	// A host with no plugin (Pi) has no plugin version to report: say so, rather than "unknown" as if it were a fault.
+	plugin := pluginLine(pluginRoot)
+	if !a.Words().Plugin {
+		plugin = "plugin: none (host " + a.Name() + ")"
+	}
 	return strings.Join([]string{
 		versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil),
-		pluginLine(pluginRoot),
+		plugin,
 		ep,
 	}, "\n")
 }

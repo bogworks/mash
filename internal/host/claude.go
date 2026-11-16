@@ -45,7 +45,7 @@ func (Claude) Wake() WakeKind { return WakeChannel }
 
 // Words names Claude Code in notices and status lines.
 func (Claude) Words() Words {
-	return Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): "}
+	return Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): ", Launch: "claude", Plugin: true}
 }
 
 // ClaudeSettingsChecks: Claude Code is the host whose settings files status reads.

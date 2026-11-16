@@ -32,7 +32,7 @@ func (Pi) Wake() WakeKind { return WakeNone }
 
 // Words names Pi in notices and status lines.
 func (Pi) Words() Words {
-	return Words{Product: "Pi", Process: "Pi process", ServicePrefix: "Pi (mash): "}
+	return Words{Product: "Pi", Process: "Pi process", ServicePrefix: "Pi (mash): ", Launch: "pi"}
 }
 
 // ClaudeSettingsChecks: Claude Code's settings files say nothing about Pi.

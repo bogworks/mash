@@ -328,7 +328,7 @@ func TestClaudeSessionSourcesWakeAndWords(t *testing.T) {
 	if c.Wake() != WakeChannel || c.SpoolsFromStart() {
 		t.Fatalf("wake %v spoolsFromStart %v", c.Wake(), c.SpoolsFromStart())
 	}
-	if w := c.Words(); w != (Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): "}) {
+	if w := c.Words(); w != (Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): ", Launch: "claude", Plugin: true}) {
 		t.Fatalf("words %+v", w)
 	}
 	if !c.ClaudeSettingsChecks() {

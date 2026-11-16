@@ -50,7 +50,7 @@ func TestPiDeclarations(t *testing.T) {
 	if p.Wake() != WakeNone || !p.SpoolsFromStart() || p.ClaudeSettingsChecks() {
 		t.Errorf("wake %v spools %v checks %v", p.Wake(), p.SpoolsFromStart(), p.ClaudeSettingsChecks())
 	}
-	if got, want := p.Words(), (Words{Product: "Pi", Process: "Pi process", ServicePrefix: "Pi (mash): "}); got != want {
+	if got, want := p.Words(), (Words{Product: "Pi", Process: "Pi process", ServicePrefix: "Pi (mash): ", Launch: "pi"}); got != want {
 		t.Errorf("words %+v", got)
 	}
 	called := false

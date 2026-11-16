@@ -105,6 +105,12 @@ type Words struct {
 	Process string
 	// ServicePrefix starts the micro service description; the endpoint name follows it ("Claude Code (mash): ").
 	ServicePrefix string
+	// Launch is the command that starts the host, as the REFUSED status line tells the user to launch it ("claude");
+	// "" for a host with no hook.
+	Launch string
+	// Plugin is true when the host carries mash as a plugin with its own version (Claude Code); the version tool
+	// reports a plugin line only for such a host.
+	Plugin bool
 }
 
 // Trigger is a recognised host hook invocation. Subagent is set when it ran for a subagent's tool call, not the main

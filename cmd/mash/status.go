@@ -96,7 +96,7 @@ func versionTool(src *statusSource) mcp.Tool {
 	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's name and owner.",
 		Schema: schema(map[string]any{}),
 		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
-			out := versionText(src.cfg.DisplayName(), src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
+			out := versionText(src.cfg.DisplayName(), src.cfg.Owner, src.pluginRoot, src.host()) + "\n" + clientLine(src.clientInfo())
 			if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
 				out += "\n" + l
 			}
@@ -444,10 +444,30 @@ func environmentLine(src *statusSource) string {
 	return ""
 }
 
+// launchWord is the command the REFUSED line tells the user to start the host with.
+func launchWord(w host.Words) string {
+	if w.Launch == "" {
+		return w.Product
+	}
+	return w.Launch
+}
+
+// wakeClause says the last wake started a turn, and only when a wake was sent: with none, there is nothing to say.
+func wakeClause(wakes int64) string {
+	if wakes > 0 {
+		return "; the last wake started a turn"
+	}
+	return ""
+}
+
 func deliveryLines(src *statusSource) []string {
 	cfg := src.cfg
 	if src.cli {
 		return []string{"delivery: " + cliLiveNote + ": hook state and channel notification counts exist only inside a running session"}
+	}
+	n, last := int64(0), time.Time{}
+	if srv := src.srv.Load(); srv != nil {
+		n, last = srv.Notified()
 	}
 	var out []string
 	switch {
@@ -464,13 +484,13 @@ func deliveryLines(src *statusSource) []string {
 		if own == nil {
 			out = append(out, "delivery: hooks n/a - this session does not hold the lease yet")
 		} else if at, ok := sp.LastHook(); ok && !at.Before(*own) {
-			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s); the last wake started a turn; mail also arrives with tool results", at.Format(time.RFC3339)))
+			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s)%s; mail also arrives with tool results", at.Format(time.RFC3339), wakeClause(n)))
 		} else if st, wakes := hooklessOf(src); st == endpoint.HooklessProven {
 			out = append(out, fmt.Sprintf("delivery: DEGRADED - no mash hook has run since %s although this session has made tool calls. Likely cause: %s. Mail now: read each message with the read tool. Next: %s",
 				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own, src.host().Words())))
 		} else if rat, why, ok := sp.Refused(); ok && rat.After(*own) {
-			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start %s with MASH_LAUNCH_TOKEN=$(uuidgen) claude ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
-				redactText(why), rat.Format(time.RFC3339), src.host().Words().Product))
+			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start %s with MASH_LAUNCH_TOKEN=$(uuidgen) %s ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
+				redactText(why), rat.Format(time.RFC3339), src.host().Words().Product, launchWord(src.host().Words())))
 		} else if st == endpoint.HooklessSuspected {
 			out = append(out, fmt.Sprintf("delivery: SUSPECTED - the last %d wakes started no turn (no hook since %s); channel writes are not counted as delivery; re-waking stopped", wakes, own.Format(time.RFC3339)))
 		} else if wakes > 0 {
@@ -479,9 +499,9 @@ func deliveryLines(src *statusSource) []string {
 			out = append(out, "delivery: hooks have not run yet in this session (they run with the first prompt or tool call)")
 		}
 	}
-	n, last := int64(0), time.Time{}
-	if srv := src.srv.Load(); srv != nil {
-		n, last = srv.Notified()
+	// Channel notifications are how only a channel host (Claude Code) is woken: the others take no channel delivery.
+	if src.host().Wake() != host.WakeChannel {
+		return out
 	}
 	line := fmt.Sprintf("delivery: channel notifications sent: %d %s", n, channelNote)
 	if n > 0 {
