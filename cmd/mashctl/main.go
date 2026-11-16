@@ -59,6 +59,8 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
+	case "credential": // key and install need no server; issue, show and revoke read their own configuration
+		return runCredential(args[1:], env, lookup, stdout, stderr)
 	case "add":
 		return runAdd(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the labels on the directory record

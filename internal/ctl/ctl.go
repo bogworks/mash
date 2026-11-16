@@ -121,6 +121,7 @@ func Usage(prog string) string {
 		mintLines(line)
 		issuedLines(line)
 		retireLines(line)
+		credentialLines(line)
 		line("unzone NAME [--sys-creds FILE] [--servers N]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
 	}
 	return b.String()
@@ -138,6 +139,14 @@ func mintLines(line func(left, right string)) {
 func issuedLines(line func(left, right string)) {
 	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
+}
+
+func credentialLines(line func(left, right string)) {
+	line("credential key --out FILE", "make a user key for an endpoint; the seed goes to FILE (mode 0600, never over an existing file) and only the public key is printed (`mash credential key` does the same with no server)")
+	line("credential install --seed FILE --jwt FILE --out CREDS [--force]", "make the creds file from the endpoint's seed and the JWT signed for its public key; refuses a JWT for another key")
+	line("credential issue --address owner.name --key PUBKEY [--endpoint E] [--purpose issue|rotation] [--out FILE] [--json] [--servers N] [--sys-creds FILE]", "sign a credential for a public key the endpoint made, with the owner group's key, and record it; prints the JWT (no private key is ever taken); --request FILE|- takes the request as JSON; exit 0 issued, 1 refused, 6 error")
+	line("credential show PUBKEY|owner.name [--json] [--servers N] [--sys-creds FILE]", "the issue record and history of a key, or of every key at an address, whether the account JWT revokes it and whether it is connected; exit 1 not_found when there is no record")
+	line("credential revoke PUBKEY [--servers N] [--sys-creds FILE]", "revoke a user key in the account JWT by its public key and mark it in the issue record")
 }
 
 func retireLines(line func(left, right string)) {
