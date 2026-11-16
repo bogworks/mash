@@ -89,15 +89,38 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 	}
 }
 
-func TestHelpRequestedReadsOnlyFlagTokensBeforeDoubleDash(t *testing.T) {
-	if helpRequested([]string{"add", "n", "--", "--help"}) {
-		t.Error("--help after -- was taken as help")
+// Help is only the first argument after the verb (after the sub-verb for issued and inbox): a value, a note or a
+// label that contains the words is never help.
+func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
+	yes := []struct {
+		verb string
+		args []string
+	}{
+		{"add", []string{"-h"}}, {"add", []string{"--help"}}, {"label", []string{"--help"}}, {"set-meta", []string{"-h"}},
+		{"reissue", []string{"--help"}}, {"retire", []string{"-h"}}, {"suspend", []string{"-h"}},
+		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
+		{"inbox", []string{"inspect", "-h"}}, {"version", []string{"--help"}},
 	}
-	if !helpRequested([]string{"add", "n", "--note", "--help"}) {
-		t.Error("--help not found")
+	for _, c := range yes {
+		if !helpRequested(c.verb, c.args) {
+			t.Errorf("%s %v: not help, want help", c.verb, c.args)
+		}
 	}
-	if helpRequested([]string{"label", "n", "--label", "help"}) {
-		t.Error("the value help was taken as a flag")
+	no := []struct {
+		verb string
+		args []string
+	}{
+		{"add", []string{"n", "--", "--help"}}, {"add", []string{"n", "--note", "--help"}}, {"add", []string{"n", "--describe", "-h"}},
+		{"add", []string{"n", "--note", "see -h"}}, {"label", []string{"n", "--label", "help"}},
+		{"label", []string{"n", "role=-h"}}, {"label", []string{"n", "k=--help"}}, {"label", []string{"n", "k", "--help"}},
+		{"set-meta", []string{"n", "note", "--help"}}, {"set-meta", []string{"n", "--help"}},
+		{"reissue", []string{"n", "--help"}}, {"retire", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
+		{"unlabel", []string{"n", "-h"}}, {"issued", []string{"check", "n", "--help"}}, {"inbox", []string{"inspect", "n", "-h"}},
+	}
+	for _, c := range no {
+		if helpRequested(c.verb, c.args) {
+			t.Errorf("%s %v: taken as help", c.verb, c.args)
+		}
 	}
 }
 

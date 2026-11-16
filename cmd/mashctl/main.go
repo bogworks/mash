@@ -28,7 +28,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 	}
 	switch args[0] {
 	case "version":
-		if helpRequested(args[1:]) {
+		if helpRequested("version", args[1:]) {
 			fmt.Fprintln(stdout, "usage: mashctl version")
 			return 0
 		}
@@ -38,7 +38,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
 	}
-	if isVerb(args[0]) && helpRequested(args[1:]) { // before any dispatch or config load: help changes nothing
+	if isVerb(args[0]) && helpRequested(args[0], args[1:]) { // before any dispatch or config load: help changes nothing
 		fmt.Fprint(stdout, verbUsage(args))
 		return 0
 	}
@@ -84,16 +84,16 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 	return ctl.Run("mashctl", cfg, args, stdout, stderr)
 }
 
-// helpRequested reports whether -h or --help is among a verb's arguments before a literal "--". Only exact tokens
-// count: a value such as `--label help` is not a flag.
-func helpRequested(args []string) bool {
-	for _, a := range args {
-		switch a {
-		case "--":
-			return false
-		case "-h", "--help":
-			return true
-		}
+// helpRequested reports whether -h or --help is the first argument after the verb, or, for a verb with sub-verbs
+// (`issued check`, `inbox inspect`), the first argument after the sub-verb. Text further along is never read for help:
+// a value, a note or a message may contain the words.
+func helpRequested(verb string, args []string) bool {
+	isHelp := func(a string) bool { return a == "-h" || a == "--help" }
+	if len(args) > 0 && isHelp(args[0]) {
+		return true
+	}
+	if (verb == "issued" || verb == "inbox") && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
+		return true
 	}
 	return false
 }
