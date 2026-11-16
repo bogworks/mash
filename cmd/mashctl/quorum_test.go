@@ -64,7 +64,7 @@ func TestRetireBelowTheQuorumRefusesAndRemovesNothing(t *testing.T) {
 	s := stubRevoke(t)
 	s.err = errors.New("revoke: refusing: 1 of 3 servers answered and the write quorum is 2: a server may be down: bring it back, or set write_quorum (nothing was revoked)")
 	out, errb, code := h.run("retire", "a")
-	if code != 1 || strings.Contains(out, "retired") || !strings.Contains(errb, "1 of 3 servers answered and the write quorum is 2") || !strings.Contains(errb, "nothing was changed") {
+	if code != 1 || strings.Contains(out, "retired") || !strings.Contains(errb, "1 of 3 servers answered and the write quorum is 2") || !strings.Contains(errb, "the directory record was not changed") {
 		t.Fatalf("exit %d: %q %q", code, out, errb)
 	}
 	if len(h.records()) != 1 {
