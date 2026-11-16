@@ -9,6 +9,8 @@ This walks through one machine running Claude Code sessions with mash. Provision
 - `nats-server`, a current 2.x release with JetStream, on your `PATH`, for the one-machine path in section 4 (`mashctl init --local --start`). Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15. You do not need it if you use a server that already runs, such as Synadia Cloud.
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones, `status` warns). The plugin and the `mash` binary should be the same release (major and minor); `status` warns when they are not.
 
+Using Pi instead of Claude Code? [hosts/pi.md](hosts/pi.md) is the Pi-specific install; the rest of this page applies to it too.
+
 ## 1. The binary
 
 Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.

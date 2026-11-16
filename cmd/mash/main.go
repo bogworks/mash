@@ -24,6 +24,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
 
   mash serve                                   the Claude Code channel server (started by the plugin)
   mash hook                                    the plugin's hook: shows the session its spooled mail
+  mash spool-dir                               print this endpoint's spool directory (for a host extension that watches it)
   mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (as MASH_NAME); --urgent
                                                wakes it at once; K is blocker|question|task (wake an idle recipient)
                                                or result|fyi (opt-in; wait for its next turn); default task;
@@ -128,13 +129,14 @@ const sendUsage = "usage: mash send <to> [--urgent] [--kind blocker|question|tas
 
 // verbUsage is the usage line of each endpoint verb, printed for `mash VERB --help`.
 var verbUsage = map[string]string{
-	"status":  "usage: mash status",
-	"version": "usage: mash version",
-	"send":    sendUsage,
-	"read":    "usage: mash read <seq>",
-	"inbox":   "usage: mash inbox [--limit N] [--after SEQ]",
-	"who":     whoUsage,
-	"prompt":  "usage: mash prompt <to> <text...>",
+	"status":    "usage: mash status",
+	"version":   "usage: mash version",
+	"send":      sendUsage,
+	"read":      "usage: mash read <seq>",
+	"inbox":     "usage: mash inbox [--limit N] [--after SEQ]",
+	"who":       whoUsage,
+	"prompt":    "usage: mash prompt <to> <text...>",
+	"spool-dir": "usage: mash spool-dir",
 }
 
 // runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads, so that a
@@ -219,6 +221,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	switch args[0] {
 	case "serve":
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
+	case "spool-dir":
+		return spoolDirCmd(cfg, stdout, stderr)
 	case "send", "read", "inbox", "who", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	case "admin":

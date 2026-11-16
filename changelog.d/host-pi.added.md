@@ -1,0 +1,1 @@
+Pi is now a supported host: set `MASH_HOST=pi` and copy `hosts/pi/mash.ts` into Pi's extensions, and mail reaches the model with its trust labels and wakes an idle session; `mash spool-dir` prints the endpoint's spool directory ([ADR 0140](docs/decisions/0140-pi-is-a-supported-host-chosen-with-mash-host-and-served-by-an-extension.md), [docs/hosts/pi.md](docs/hosts/pi.md)).

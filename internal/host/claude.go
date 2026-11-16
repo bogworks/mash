@@ -84,10 +84,13 @@ type ownerRecord struct {
 
 // OwnerToken is the JSON owner record of the serve that holds the lease: its parent pid, its session id (SessionSources.Env)
 // and its MASH_LAUNCH_TOKEN.
-func (c Claude) OwnerToken(env func(string) string) string {
+func (c Claude) OwnerToken(env func(string) string) string { return ownerToken(c, env) }
+
+// ownerToken is OwnerToken for the host a, whose SessionSources say which variable holds the session id.
+func ownerToken(a Adapter, env func(string) string) string {
 	r := ownerRecord{PID: os.Getppid()}
 	if env != nil {
-		r.Session, r.Launch = SessionID(c, env), env("MASH_LAUNCH_TOKEN")
+		r.Session, r.Launch = SessionID(a, env), env("MASH_LAUNCH_TOKEN")
 	}
 	b, _ := json.Marshal(r)
 	return string(b)
@@ -219,8 +222,19 @@ func (Claude) Waker(notify func(text string, meta map[string]string) error) func
 	return notify
 }
 
+// Notice renders text as a hook output for event: Notice's JSON.
+func (Claude) Notice(event, text string) []byte { return Notice(event, text) }
+
 // Present renders waiting as the hook's additionalContext.
 func (Claude) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.Entry) {
+	text, shown := presentText(p, waiting)
+	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": p.Event, "additionalContext": text}})
+	return append(out, '\n'), shown
+}
+
+// presentText is the text a hook shows the model for waiting, and the entries it actually shows (only they are
+// drained). Claude puts it in additionalContext; Pi prints it as it is.
+func presentText(p Presentation, waiting []spool.Entry) (string, []spool.Entry) {
 	// One drain shows at most BatchMsgs messages, in full or, past BatchBytes, as a digest (the bodies stay readable
 	// by #seq). The rest wait for the next run: never dropped.
 	// BatchMsgs 0 is allowed and means "digest" to render, so it must not also empty the drain (codex M2 on #21).
@@ -278,8 +292,7 @@ func (Claude) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.En
 	for i := range waiting {
 		waiting[i].Listed = digest // also clears a mark Waiting set: shown in full now, so drained
 	}
-	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": p.Event, "additionalContext": text}})
-	return append(out, '\n'), waiting
+	return text, waiting
 }
 
 // Utf16Len exposes utf16Len to tests of other packages that assert the Claude Code cap.

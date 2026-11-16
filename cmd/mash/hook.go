@@ -67,7 +67,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	}
 	// Told at most once per waitNoticeEvery while this session's serve waits for the lease, in a run that would print
 	// nothing else: two documents on stdout are not one hook output.
-	noteWait := func() { waitNotice(sp, cfg, trig.Event, id, stdout, stderr) }
+	noteWait := func() { waitNotice(sp, cfg, adapter, trig.Event, id, stdout, stderr) }
 	ok, why := adapter.Match(sp.Owner(), id)
 	if getenv(env, "MASH_HOOK_TRACE") == "1" {
 		fmt.Fprintf(stderr, "mash hook: trace pid=%d ancestors=%v hook-session=%q match=%v (%s)\n",
@@ -91,7 +91,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			key := hex.EncodeToString(sum[:])[:16]
 			if !sp.Told(key) {
 				text := otherLaunchNotice(adapter.Words(), host.OwnerPID(sp.Owner()), cfg.DisplayName())
-				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
+				if _, err := stdout.Write(adapter.Notice(trig.Event, text)); err == nil {
 					told = true
 					if err := sp.NoteTold(key); err != nil {
 						fmt.Fprintf(stderr, "mash hook: recording the notice: %v\n", err)
@@ -182,7 +182,7 @@ const waitNoticeEvery = 10 * time.Minute
 // for the session of the waiting serve only: the hook's session id is the serve's, or the serve's parent is among the
 // hook's ancestors; the hook of the session that holds the lease is told nothing. A missing state, or one whose serve is
 // gone, prints nothing (and a stale one is removed). Call it under the spool lock.
-func waitNotice(sp spool.Spool, cfg config.Config, event string, id host.HookIdentity, stdout, stderr io.Writer) {
+func waitNotice(sp spool.Spool, cfg config.Config, adapter host.Adapter, event string, id host.HookIdentity, stdout, stderr io.Writer) {
 	ws, ok := sp.LiveWaitState()
 	if !ok {
 		if err := sp.ClearStaleWaitState(); err != nil {
@@ -205,7 +205,7 @@ func waitNotice(sp spool.Spool, cfg config.Config, event string, id host.HookIde
 	}
 	text := fmt.Sprintf("mash: this session does not hold endpoint %s (held by pid %s on %s); mail is off until it recovers",
 		cfg.Name, ws.HolderPID, ws.HolderHost)
-	if _, err := stdout.Write(host.Notice(event, text)); err != nil {
+	if _, err := stdout.Write(adapter.Notice(event, text)); err != nil {
 		return
 	}
 	if err := sp.NoteWaitNotice(now); err != nil {

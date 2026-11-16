@@ -37,6 +37,9 @@ type Adapter interface {
 	Match(owner string, hook HookIdentity) (ok bool, why string)
 	// Present renders entries for the host; shown are the entries actually rendered (only they are drained).
 	Present(p Presentation, entries []spool.Entry) (out []byte, shown []spool.Entry)
+	// Notice renders a one-off message of mash's own (the other-launch and lease-wait notices) the way the host takes
+	// hook output, for the hook event it ran for.
+	Notice(event, text string) []byte
 	// SpoolsFromStart is true whenever Wake is not WakeChannel: the host takes no channel delivery (Pi never sees the
 	// channel notification), so serve then spools mail from its first message and acks only what a hook drained, never on a channel write.
 	SpoolsFromStart() bool
@@ -60,7 +63,11 @@ func SessionID(a Adapter, env func(string) string) string {
 	if env == nil || a.SessionSources().Env == "" { // a host with no session variable has no session id
 		return ""
 	}
-	return env(a.SessionSources().Env)
+	name := a.SessionSources().Env
+	if name == "" { // a host with no session id in the environment
+		return ""
+	}
+	return env(name)
 }
 
 // WakeKind is how a host is woken when mail arrives for an idle session.
@@ -107,16 +114,19 @@ type Presentation struct {
 	BatchMsgs, BatchBytes int
 }
 
-// Select returns the adapter for a host name: "" or "claude" is Claude Code.
+// Select returns the adapter for a host name: "" or "claude" is Claude Code, "pi" is Pi. The host is chosen by name
+// only (MASH_HOST); nothing is detected from the environment.
 func Select(name string) (Adapter, error) {
 	switch name {
 	case "", "claude":
 		return Claude{}, nil
 	case "headless": // no host at all (ADR 0139); never detected, only named
 		return Headless{}, nil
+	case "pi":
+		return Pi{}, nil
 	}
 	return nil, fmt.Errorf("mash: unknown host %q (MASH_HOST); known hosts: %s", name, strings.Join(Known(), ", "))
 }
 
 // Known lists the host names Select accepts.
-func Known() []string { return []string{"claude", "headless"} }
+func Known() []string { return []string{"claude", "headless", "pi"} }

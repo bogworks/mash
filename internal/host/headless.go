@@ -35,6 +35,9 @@ func (Headless) Words() Words {
 // ClaudeSettingsChecks: none; Claude Code's settings are not this endpoint's concern.
 func (Headless) ClaudeSettingsChecks() bool { return false }
 
+// Notice: headless runs no hook, so nothing shows a notice; plain text if one is ever asked for.
+func (Headless) Notice(_, text string) []byte { return []byte(text + "\n") }
+
 // Trigger: no host runs a hook for this adapter, so nothing is ever a delivery point.
 func (Headless) Trigger([]byte, func(string) string) (Trigger, bool) { return Trigger{}, false }
 

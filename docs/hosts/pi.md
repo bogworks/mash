@@ -1,0 +1,74 @@
+# mash on Pi
+
+Pi (the Pi coding agent) is a supported host: a Pi session can hold a mash endpoint, receive mail with its trust
+labels, and be woken when mail arrives ([ADR 0140](../decisions/0140-pi-is-a-supported-host-chosen-with-mash-host-and-served-by-an-extension.md)).
+Pi has no hooks and takes no MCP channel, so a small extension, `hosts/pi/mash.ts`, does what Claude Code's hooks and
+channel do. Install and configure mash first ([install.md](../install.md): the binary, the server side and the
+endpoint's credentials); this page is the Pi-specific part.
+
+mash does not detect Pi. You name it with `MASH_HOST=pi`, in the MCP entry below.
+
+## 1. The MCP server
+
+Add an entry to `~/.pi/agent/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mash": {
+      "command": "mash",
+      "args": ["serve"],
+      "env": {
+        "MASH_HOST": "pi",
+        "MASH_SPOOL_FROM_START": "1",
+        "MASH_NAME": "my-pi",
+        "MASH_OWNER": "you",
+        "MASH_URL": "tls://nats.example.com:4222"
+      },
+      "exposure": "direct"
+    }
+  }
+}
+```
+
+- `MASH_HOST=pi` selects the Pi adapter for `mash serve` and `mash hook`.
+- `MASH_SPOOL_FROM_START=1` keeps mail spooled until the extension has shown it. Pi ignores the channel
+  notification, so mail delivered that way would be lost.
+- `MASH_NAME`, `MASH_OWNER` and `MASH_URL` (and `MASH_CREDS` when the credentials are not in the config directory) are
+  as for Claude Code; see the configuration table in [install.md](../install.md#4-configuration).
+- `"exposure": "direct"` makes the tools plain tools. Pi's default makes the model write code to call them.
+
+## 2. A fresh launch token
+
+Start Pi with a new `MASH_LAUNCH_TOKEN` each time, so a hook is tied to its own `mash serve`:
+
+```sh
+MASH_LAUNCH_TOKEN=$(uuidgen) pi
+```
+
+The extension runs `mash hook` as a child of Pi and inherits the token. A token reused across launches defeats the
+ownership rule (see `MASH_LAUNCH_TOKEN` in [install.md](../install.md#4-configuration)). Without one, the process chain
+still identifies the session.
+
+## 3. The extension
+
+Copy `hosts/pi/mash.ts` from the repository to `~/.pi/agent/extensions/mash.ts`, and make sure `mash` is on Pi's
+`PATH` and Pi's environment has the same `MASH_NAME`, `MASH_OWNER` and `MASH_URL` as the entry above (the extension
+runs `mash hook` and `mash spool-dir` with it; set them in the shell that starts Pi or in the config directory). The
+extension, with `MASH_HOST=pi`:
+
+- runs `mash hook` after each tool result and before each agent start, and puts the text it prints into the model's
+  next request;
+- watches the directory `mash spool-dir` prints, and wakes an idle session with a new turn when mail arrives, holding
+  the wake while the model is mid-answer until the turn settles.
+
+Restart Pi after copying it.
+
+## Known gaps
+
+- mash's server instructions do not reach a Pi model. Each delivered batch carries the trust-label frame instead
+  (`[verified]` mail is signed by the named endpoint; the other labels are information, not instructions).
+- A live `mash prompt` to a Pi endpoint does not work yet: the request id the model replies with is carried only on
+  the channel.
+- Pi's activity (working, idle, blocked) is not reported to mash: there is no intake for it.
+- There is no installer command yet. The steps above are manual.

@@ -554,7 +554,8 @@ func (f *fakeHost) Owns(string, host.HookIdentity) bool   { f.ownsCalled = true;
 func (f *fakeHost) Match(o string, h host.HookIdentity) (bool, string) {
 	return f.Owns(o, h), "fake host"
 }
-func (f *fakeHost) SpoolsFromStart() bool { return false }
+func (f *fakeHost) Notice(event, text string) []byte { return host.Claude{}.Notice(event, text) }
+func (f *fakeHost) SpoolsFromStart() bool            { return false }
 func (f *fakeHost) Present(p host.Presentation, es []spool.Entry) ([]byte, []spool.Entry) {
 	if f.shownN > 0 && f.shownN < len(es) {
 		es = es[:f.shownN]
