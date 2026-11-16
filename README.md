@@ -43,7 +43,9 @@ gh attestation verify mash-linux-amd64 -R bogworks/mash \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
   --source-ref refs/tags/v0.5.0
 chmod +x mash-linux-amd64
-mv mash-linux-amd64 ~/.local/bin/mash                      # any directory on your PATH
+BIN=~/.local/bin                                            # any directory; it must be on your PATH
+mkdir -p "$BIN" && mv mash-linux-amd64 "$BIN/mash"
+case ":$PATH:" in *":$BIN:"*) ;; *) echo "add $BIN to your PATH" ;; esac
 mash version
 ```
 
