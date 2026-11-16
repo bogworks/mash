@@ -12,15 +12,34 @@ A sender's mash knows whether a peer's mash answers (`who`, presence, [ADR 0066]
 It does not know whether the peer can take a turn. A session that holds a dialog open (a permission prompt, or a
 question to its user) answers presence probes, but it cannot read mail. Every sender then knows only "I sent a message".
 
-SAP 0.3 gives every agent a `status` endpoint, which answers a request with a heartbeat-shaped reply (SAP §8.7). A
-draft change to SAP, 0.3.1, reserves the keys of OSC 7501 (the terminal program-status protocol, revision 0.4) in that
-reply: a top-level `state` (`idle`, `working`, `done`, `blocked`, `error`), and `kind` with `blocked` (`permission`,
-`question`, `auth`), with OSC 7501's meanings. Randy ruled that mash does this now, and conforms to the text if it is
-added. The serving side, a state source and the reply, is a separate change. This record is the asking side.
+SAP 0.3 gives every agent a `status` endpoint, which answers a request with a heartbeat-shaped reply (SAP §8.7).
+SAP 0.3.1, as merged (synadia-agent-sdk-docs PR #25), lets an agent add fields of its own to its heartbeat and its
+status reply:
+
+> An agent MAY add fields of its own to the payload. An added field MUST NOT reuse the name of a field in the table
+> above. ... An agent that adds fields to its heartbeat SHOULD add the same ones to its status reply (§8.7).
+> (§8.3)
+
+> Callers MUST tolerate additional unknown fields. (§8.3)
+
+The status reply is specified so that those fields are in it:
+
+> Reply body: A §8.3 heartbeat-shaped JSON payload, freshly built per request, with the agent's added fields (§8.3).
+> (§8.7)
+
+> Agents SHOULD source the reply payload from the same builder used to construct periodic heartbeats so the two emit
+> identical values for fields they share, the agent's added fields (§8.3) included. (§8.7.1)
+
+mash uses that room for one field of its own, `program_status`: an object with a `state` (`idle`, `working`, `done`,
+`blocked`, `error`) and, with `blocked`, a `kind` (`permission`, `question`, `auth`), with the meanings of OSC 7501 (the
+terminal program-status protocol). Its reservation of top-level `state` and `kind` keys (PR #24) is not relied on: the
+maintainer declined it as written. Randy ruled that mash reports peer state over SAP status now. The serving side, a
+state source and the reply, is a separate change. This record is the asking side.
 
 ## Decision Drivers
 
-* No change to SAP beyond the draft, and no divergence from the SAP Go SDK. Asking is an ordinary SAP status request.
+* No change to SAP, and no divergence from the SAP Go SDK (D229). Asking is an ordinary SAP status request, and
+  `program_status` is an added field SAP §8.3 already allows.
 * A reported state is the peer's unsigned claim (SAP §13.11: a reply is never signed), so mash never grants anything on it.
 * Silence is never "free". An absent state is not `idle`.
 * `who`'s default line is a compatibility contract that launchers parse
@@ -50,10 +69,11 @@ resolved as a send resolves a recipient, legacy form included.
   * refused (a permissions violation on the status subject).
 
 **Reading the reply.**
-* Only `state`, `kind` and `instance_id` are read.
-* An unrecognised `state` means not reported, and an unrecognised `kind` is dropped (OSC 7501's rules). `kind` counts
-  only with `blocked`.
-* `msg`, `title` and every other key are never read or shown.
+* Only `program_status.state`, `program_status.kind` and `instance_id` are read. Top-level `state` and `kind` are not
+  read: they were never released.
+* A `program_status` that is not an object, or a `state` outside the five values, means not reported. A `kind`
+  outside the three values, or without `blocked`, is dropped. Unknown members and keys are ignored.
+* `program_detail` and every other key are never read or shown. Liveness never depends on `program_status`.
 
 **Showing it.** `who` adds a `state` column for online endpoints only.
 * The column appears in the MCP `who` tool, `who --long` and `who --json`.
@@ -79,7 +99,8 @@ resolved as a send resolves a recipient, legacy form included.
 
 * `internal/endpoint/peeractivity_test.go` covers:
   * a reported state, a reply with no state, an unrecognised state and an unrecognised kind;
-  * that `msg` and `title` are never exposed;
+  * a `program_status` that is not an object, a kind without `blocked`, and top-level `state` and `kind` ignored;
+  * that `program_detail` is never exposed;
   * no responder, and a responder that never answers;
   * a refusal, the concurrency limit of 8, and the cache;
   * that the request carries an `Agent-Sender` that verifies.
@@ -100,8 +121,9 @@ resolved as a send resolves a recipient, legacy form included.
 ### Listen for state in heartbeats
 
 * Good, because there is no request at all.
-* Bad, because every heartbeat subscriber would receive every endpoint's state, and the SAP draft keeps the
-  program-status keys in the status reply. mash also stopped listening to heartbeats (ADR 0066).
+* Bad, because mash stopped listening to heartbeats (ADR 0066), and a reader would hold a subscription to every
+  endpoint's beats for a value it needs only when someone looks. mash's readers ask by status request. The heartbeat
+  may carry `program_status` for other watchers; that is the serving side's change.
 
 ### Add the state to `who`'s default line
 
@@ -112,4 +134,7 @@ resolved as a send resolves a recipient, legacy form included.
 
 * The serving side, the state source and the status reply, is the internal/activity change and the status payload
   that follows it.
-* The draft SAP text is §8.7.2, "Reserved program-status keys" (0.3.1). It is not filed upstream.
+* The SAP text is §8.3 (added fields), §8.7 and §8.7.1 of 0.3.1 as merged. No SAP change is needed, and none is made
+  (D229).
+* Later: mash's policy will keep the heartbeat public and answer status only to authorized callers, so everything
+  beyond the five states and three kinds stays reply-only.

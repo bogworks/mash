@@ -39,11 +39,11 @@ func TestWhoStateColumnAndJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	reply("blk", statusJSON(`,"state":"blocked","kind":"question","msg":"HIDDEN"`), 0)
-	reply("wrk", statusJSON(`,"state":"working"`), 0)
+	reply("blk", statusJSON(`,"program_status":{"state":"blocked","kind":"question"},"program_detail":{"msg":"HIDDEN"}`), 0)
+	reply("wrk", statusJSON(`,"program_status":{"state":"working"}`), 0)
 	reply("plain", statusJSON(``), 0)
-	reply("slow", statusJSON(`,"state":"working"`), 10*time.Second) // never back inside the budget
-	reply("gone", statusJSON(`,"state":"working"`), 0)              // answers, but is listed offline
+	reply("slow", statusJSON(`,"program_status":{"state":"working"}`), 10*time.Second) // never back inside the budget
+	reply("gone", statusJSON(`,"program_status":{"state":"working"}`), 0)              // answers, but is listed offline
 	if err := nc.Flush(); err != nil {
 		t.Fatal(err)
 	}

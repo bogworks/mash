@@ -13,9 +13,9 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// What a peer reports about itself over the SAP status endpoint (SAP 0.3.1 draft, OSC 7501 revision 0.4 reserved
-// keys): the status reply is the heartbeat-shaped JSON plus, when the peer reports, the top-level keys state and
-// kind. The report is the peer's own and unsigned: it is information, never a grant.
+// What a peer reports about itself over the SAP status endpoint (SAP 0.3.1, section 8.3: an agent adds fields of its
+// own): the status reply is the heartbeat-shaped JSON plus, when the peer reports, the object program_status with
+// state and kind. The report is the peer's own and unsigned: it is information, never a grant.
 const (
 	// PeerActivityTimeout is how long one status request waits for an answer (and how long it waits for a free slot).
 	PeerActivityTimeout = time.Second
@@ -69,31 +69,35 @@ var (
 	peerKinds  = map[string]bool{"permission": true, "question": true, "auth": true}
 )
 
-// parsePeerStatus reads a status reply body by the OSC 7501 rules: an unrecognised state means the program-status
-// part is ignored entirely (not reported); an unrecognised kind is absent, and kind counts only with blocked;
-// unknown keys are ignored.
+// parsePeerStatus reads a status reply body: program_status.state and program_status.kind. A non-object
+// program_status, or a state outside the five values, means not reported; a kind outside the three values, or without
+// blocked, is dropped; unknown members and keys (top-level state and kind included) are ignored.
 func parsePeerStatus(body []byte) PeerState {
 	out := PeerState{Outcome: PeerNotReported}
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(body, &raw) != nil {
 		return out
 	}
-	str := func(k string) string {
+	str := func(m map[string]json.RawMessage, k string) string {
 		var s string
-		if v, ok := raw[k]; ok && json.Unmarshal(v, &s) == nil {
+		if v, ok := m[k]; ok && json.Unmarshal(v, &s) == nil {
 			return s
 		}
 		return ""
 	}
-	if id := str("instance_id"); len(id) <= 128 {
+	if id := str(raw, "instance_id"); len(id) <= 128 {
 		out.InstanceID = config.Clean(id)
 	}
-	state := str("state")
+	var ps map[string]json.RawMessage
+	if v, ok := raw["program_status"]; !ok || json.Unmarshal(v, &ps) != nil || ps == nil {
+		return out
+	}
+	state := str(ps, "state")
 	if !peerStates[state] {
 		return out
 	}
 	out.Outcome, out.State = PeerReported, state
-	if k := str("kind"); state == "blocked" && peerKinds[k] {
+	if k := str(ps, "kind"); state == "blocked" && peerKinds[k] {
 		out.Kind = k
 	}
 	return out

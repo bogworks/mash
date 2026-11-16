@@ -41,13 +41,20 @@ func TestPeerActivityOutcomes(t *testing.T) {
 		peer, extra string
 		want        PeerState
 	}{
-		{"p1", `"state":"blocked","kind":"question"`, PeerState{PeerReported, "blocked", "question", "INST1"}},
+		{"p1", `"program_status":{"state":"blocked","kind":"question"}`, PeerState{PeerReported, "blocked", "question", "INST1"}},
 		{"p2", ``, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
-		{"p3", `"state":"sleeping"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
-		{"p4", `"state":"blocked","kind":"lunch"`, PeerState{PeerReported, "blocked", "", "INST1"}},
-		{"p5", `"state":"working","msg":"SECRET-MSG","title":"SECRET-TITLE","progress":0.5,"app":"x","id":"y"`, PeerState{PeerReported, "working", "", "INST1"}},
-		{"p6", `"state":"working","kind":"question"`, PeerState{PeerReported, "working", "", "INST1"}}, // kind means something only with blocked
-		{"p7", `"state":7`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p3", `"program_status":{"state":"sleeping"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p4", `"program_status":{"state":"blocked","kind":"lunch"}`, PeerState{PeerReported, "blocked", "", "INST1"}},
+		{"p5", `"program_status":{"state":"working","msg":"SECRET-MSG","extra":1},"program_detail":{"title":"SECRET-TITLE","msg":"SECRET-MSG"},"progress":0.5,"app":"x","id":"y"`, PeerState{PeerReported, "working", "", "INST1"}},
+		{"p6", `"program_status":{"state":"working","kind":"question"}`, PeerState{PeerReported, "working", "", "INST1"}}, // kind means something only with blocked
+		{"p7", `"program_status":{"state":7}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p9", `"program_status":"working"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p10", `"program_status":null`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p11", `"program_status":["working"]`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p12", `"state":"working","kind":"question"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}}, // top-level keys are ignored
+		{"p13", `"state":"blocked","kind":"question","program_status":{"state":"idle"}`, PeerState{PeerReported, "idle", "", "INST1"}},
+		{"p14", `"program_status":{"kind":"question"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"p15", `"program_status":{"state":"blocked","kind":"auth"}`, PeerState{PeerReported, "blocked", "auth", "INST1"}},
 	} {
 		f.fakePeer(t, c.peer, peerStatusBody(c.extra))
 		got := a.PeerActivity(context.Background(), c.peer)
@@ -127,7 +134,7 @@ func TestPeerActivityRefusedByPermissions(t *testing.T) {
 	}
 	f.creds["s"], f.users["s"] = c, u
 	s := f.client(t, "s")
-	f.fakePeer(t, "b", peerStatusBody(`"state":"working"`))
+	f.fakePeer(t, "b", peerStatusBody(`"program_status":{"state":"working"}`))
 	if got := s.PeerActivity(context.Background(), "b"); got.Outcome != PeerRefused {
 		t.Fatalf("b is not addressable by this sender: %+v", got)
 	}
@@ -164,7 +171,7 @@ func TestPeerActivityCachesForFiveSeconds(t *testing.T) {
 	var n atomic.Int64
 	if _, err := nc.Subscribe(sap.For(f.e.Owner, "cached").Status, func(m *nats.Msg) {
 		n.Add(1)
-		_ = m.Respond(peerStatusBody(`"state":"idle"`))
+		_ = m.Respond(peerStatusBody(`"program_status":{"state":"idle"}`))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +216,7 @@ func TestPeerActivityConcurrencyLimit(t *testing.T) {
 			}
 			time.Sleep(60 * time.Millisecond)
 			inFlight.Add(-1)
-			_ = m.Respond(peerStatusBody(`"state":"working"`))
+			_ = m.Respond(peerStatusBody(`"program_status":{"state":"working"}`))
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -240,7 +247,7 @@ func TestPeerActivityRequestCarriesSignedSender(t *testing.T) {
 		h, tr := sap.VerifyLive(m.Header.Get(sap.HeaderName), m.Subject, m.Data, time.Now(), sap.NewNonceSet(time.Minute))
 		got <- tr
 		user <- h.User
-		_ = m.Respond(peerStatusBody(`"state":"idle"`))
+		_ = m.Respond(peerStatusBody(`"program_status":{"state":"idle"}`))
 	}); err != nil {
 		t.Fatal(err)
 	}
