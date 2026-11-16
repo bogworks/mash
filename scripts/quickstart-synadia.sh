@@ -8,14 +8,15 @@
 #
 # What it does:
 #   1. finds your team, system and account, and checks the free-tier stream limit
-#      (2 shared streams + 1 per endpoint must fit); after `mash admin init` it also counts the
+#      (2 shared streams + 1 per endpoint must fit); after the init step (`mashctl init`) it also counts the
 #      endpoints the mash directory already holds and stops if the account cannot take the plan;
 #   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (url, owner) and
-#      runs `mash admin init` with the admin creds, then (if the plan fits) creates, for each
-#      endpoint, a NATS user with the permissions `mash admin permissions <name>` prints (creds go
-#      to <config dir>/<name>.creds, 0600) and runs `mash admin provision`;
-#   4. sends a test message between the first two endpoints (if there are two);
-#   5. deletes the temporary admin user when it ends, however it ends (EXIT trap).
+#      does the init step with the admin creds (the script runs the `mash admin init` form of `mashctl init`), then (if the plan fits)
+#      creates, for each endpoint, a NATS user with the permissions that `mashctl permissions <name>` prints
+#      (the script runs the `mash admin permissions` form; creds go to <config dir>/<name>.creds, 0600)
+#      and does the provision step (`mashctl provision`; the script runs the `mash admin provision` form);
+#   3. sends a test message between the first two endpoints (if there are two);
+#   4. deletes the temporary admin user when it ends, however it ends (EXIT trap).
 #
 # The API token comes from SYNADIA_API_TOKEN, one line on stdin (--token-stdin), or a prompt
 # on a terminal. It is never taken from argv, never stored and never printed; curl gets it

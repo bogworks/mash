@@ -27,7 +27,7 @@ Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not suppo
 
 ## Install mash
 
-**Download a release (recommended).** A release binary is the build that the project's release workflow made from a tag, and you can check that. Download the binary for your platform and `SHA256SUMS` from the [v0.5.0 release](https://github.com/bogworks/mash/releases/tag/v0.5.0). The four binaries are:
+**Download a release (recommended).** A release binary is the build that the project's release workflow made from a tag, and you can check that. Download the binary for your platform and `SHA256SUMS` from the [v0.5.0 release](https://github.com/bogworks/mash/releases/tag/v0.5.0). The release has 11 files; the four binaries are:
 
 - `mash-linux-amd64`
 - `mash-linux-arm64`
@@ -51,9 +51,9 @@ mash version
 
 The checksum shows the file arrived whole. The attestation, a record signed by GitHub, shows that this binary was built from the `v0.5.0` tag by the release workflow ([more](docs/release.md)). `gh` is the [GitHub CLI](https://cli.github.com/).
 
-**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@latest` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `commit unknown`.
+**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@latest` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `commit unknown`. With the default `GOTOOLCHAIN=auto`, an older Go fetches 1.27.4 by itself (Go 1.27.3 prints "switching to go1.27.4"); `GOTOOLCHAIN=local` would refuse.
 
-**`mashctl`** (the tool that sets up servers and creates agents) is not among the release assets: v0.5.0 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@latest`; `mashctl version` prints `0.0.0-dev` from a go install.
+**`mashctl`** (the tool that sets up servers and creates agents) is not among the release assets: v0.5.0 has 11 files (the four `mash-<os>-<arch>` binaries, four `.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`) and no `mashctl` binary among them. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@latest`; `mashctl version` prints `0.0.0-dev` from a go install.
 
 ## Quick start: one machine, no account
 
@@ -73,15 +73,19 @@ claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
 MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
 MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
-MASH_NAME=design mash send review "hello"                 # from a shell
-MASH_NAME=review mash inbox
+MASH_NAME=design mash send review "hello"                 # terminal 3: a plain shell
+MASH_NAME=review mash inbox                               # terminal 3
 ```
+
+If `MASH_*` variables are set in your shell for another setup (`MASH_URL`, `MASH_OWNER`, `MASH_ADMIN_CREDS`), unset them first: they win over the `config.json` that `init --local` wrote (see [docs/mashctl.md](docs/mashctl.md)).
+
+The first launch of Claude Code with a fresh config shows a welcome screen, security notes and a folder-trust question, then the channels warning; expect them and accept to continue.
 
 `mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another.
 
 `--channels` and `--dangerously-load-development-channels` are Claude Code research-preview flags. They are not shown in `claude --help`, but they work.
 
-The config and the credentials land in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`; `init --local` prints it. The development flag lets the plugin wake an idle session without the channel allowlist (a list of channel plugins that Claude Code lets run without asking), and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local) covers the local server, including how to stop it and start it again.
+The config and the credentials land in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`; `init --local` prints it. The development flag lets the plugin wake an idle session without the channel allowlist (a list of channel plugins that Claude Code lets run without asking), and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local) covers the local server, including how to stop it and start it again. To stop it: `kill $(cat <config dir>/server.pid)` ([docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local)).
 
 ## Quickstart on Synadia Cloud (free tier)
 
