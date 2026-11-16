@@ -57,9 +57,12 @@ Chosen: add a `Pi` adapter, selected explicitly with `MASH_HOST=pi`.
    spooled, recording who it was offered to and when. `mash hook --ack <token>` (stdin as for the hook) marks exactly
    the offered entries delivered, under the spool lock after the same owner check; entries already delivered or gone
    are skipped, and a refused owner marks nothing. The token is base64url of a JSON list of the shown refs and whether
-   each was a full message or a digest line. The extension acks only after Pi accepted the message (right before the
-   tool result or `before_agent_start` message is returned; after `sendMessage` returns for a wake), and never when the
-   session changed. Delivery is at-least-once: a batch is not offered again to the same session for 60 seconds, and
+   each was a full message or a digest line. The ack applies only to entries whose offered mark names the acking
+   session, and is refused with no session id, because the token is forgeable base64. The extension acks only when
+   Pi's `message_end` shows the message carrying the text was committed (the tool result it was added to, the
+   `before_agent_start` message, or the wake's `sendMessage` message), never when the handler returns the text; a
+   pending offer is dropped unacked at `agent_settled` and `session_shutdown`. After each `agent_settled` it wakes
+   again, so mail beyond one batch is picked up; the 60 second hold keeps that from looping. Delivery is at-least-once: a batch is not offered again to the same session for 60 seconds, and
    is offered again after that or to another session, flagged as a repeat. Claude Code and headless are unchanged.
 
 Not decided here, and later work:
@@ -86,7 +89,8 @@ registered. It is not edited.
 Every existing test passes with no expected string changed, except Pi's own: the hook output is now JSON, and Pi's
 `Notice` is `{"text": ...}`. New tests cover two-phase delivery (the hook offers and does not drain, the ack drains
 exactly the offered entries, a second ack is a no-op, an ack after an owner change is refused, a recent batch is not
-re-offered to the same session and is to a new one, Claude has no ack phase), Pi's `Trigger` (both events, foreign input
+re-offered to the same session and is to a new one, Claude has no ack phase, a forged or another session's token drains
+nothing, an ack with no session is refused), Pi's `Trigger` (both events, foreign input
 refused), `Present` equal to Claude's `additionalContext`, `Notice` for both hosts, `Select` and `Known`, `SessionID`
 with no variable, the words, wake and `SpoolsFromStart`, the hook path with `MASH_HOST=pi`, and `mash spool-dir`.
 

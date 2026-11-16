@@ -1,7 +1,8 @@
 // mash for Pi (ADR 0140). Pi has no hooks and takes no MCP channel, so this extension is both:
 //   - after each tool result and before each agent start it runs `mash hook` (MASH_HOST=pi), which offers the waiting
 //     mail as JSON {"text","ack"} without draining it; the extension puts the text into the model's next request and
-//     only then runs `mash hook --ack <token>`, so mail is never lost to a session change in between;
+//     runs `mash hook --ack <token>` only when Pi's message_end shows the message that carries the text was added to
+//     the conversation, so mail is never lost to a shutdown or abort in between;
 //   - it watches the spool directory `mash spool-dir` prints, and wakes an idle session with sendMessage
 //     ({triggerTurn:true}) when mail arrives. While the model is mid-answer the wake is held until agent_settled.
 // Copy this file to the extensions/ directory of Pi's agent directory (~/.pi/agent, or $PI_CODING_AGENT_DIR).
@@ -55,6 +56,11 @@ export default function (pi: any) {
   let busy = false; // the model is mid-answer: hold a wake
   let held = false; // a wake arrived while busy
   let armed = false;
+  // pending are offers handed to Pi (a tool result, an injected message, a wake) and not yet confirmed by message_end.
+  // Each is acked at its confirming message_end, and dropped unacked at agent_settled or session_shutdown: the mail
+  // stays spooled and the hook offers it again (to a new session at once, to this one after 60 s).
+  type Pending = { g: number; s: string; event: "tool_result" | "before_agent_start"; offer: Offer };
+  let pending: Pending[] = [];
   // gen counts session lifetimes. session_shutdown bumps it, so a wake or hook that began for an old
   // session (a stale watcher event, a pending spool-dir or hook run) sees gen has moved and does nothing.
   let gen = 0;
@@ -63,6 +69,7 @@ export default function (pi: any) {
 
   // wake starts a turn that carries the waiting mail, unless the model is busy or there is none.
   const wake = async () => {
+    if (!armed) return; // no session to wake yet, or it has shut down
     if (busy) {
       held = true;
       return;
@@ -71,9 +78,33 @@ export default function (pi: any) {
     const s = session;
     const offer = await hook("before_agent_start", s);
     if (!offer || g !== gen) return; // the session changed: not acked, the mail stays spooled for the next one
-    pi.sendMessage({ customType: "mash-mail", content: offer.text, display: true }, { triggerTurn: true });
-    if (g === gen) await ack("before_agent_start", s, offer); // sendMessage did not throw
+    // Pi has no event for "sendMessage took it" other than the custom message's message_end, so the ack waits for that.
+    const p: Pending = { g, s, event: "before_agent_start", offer };
+    pending.push(p);
+    try {
+      pi.sendMessage({ customType: "mash-mail", content: offer.text, display: true }, { triggerTurn: true });
+    } catch {
+      pending = pending.filter((x) => x !== p); // not sent: not acked, the mail stays spooled
+    }
   };
+
+  // textOf is the text of a message's content, a string or a list of parts.
+  const textOf = (c: any): string =>
+    typeof c === "string" ? c : Array.isArray(c) ? c.map((x: any) => (typeof x?.text === "string" ? x.text : "")).join("") : "";
+
+  // A message was finalized into the conversation (message_end fires for user, assistant, tool-result and custom
+  // messages). If it carries a pending offer's text (the offer's own custom message, or the tool result it was added
+  // to), the mail has reached the conversation: ack it.
+  pi.on("message_end", (event: any) => {
+    const m = event?.message;
+    if (!m || (m.role !== "custom" && m.role !== "toolResult") || pending.length === 0) return;
+    if (m.role === "custom" && m.customType !== "mash-mail") return;
+    const body = textOf(m.content);
+    const done = pending.filter((p) => p.g === gen && body.includes(p.offer.text));
+    if (done.length === 0) return;
+    pending = pending.filter((p) => !done.includes(p));
+    for (const p of done) void ack(p.event, p.s, p.offer);
+  });
 
   pi.on("session_start", async (_e: any, ctx: any) => {
     const g = gen;
@@ -114,6 +145,7 @@ export default function (pi: any) {
     armed = false;
     busy = false;
     held = false;
+    pending = []; // unconfirmed offers are dropped unacked: the mail stays spooled
   });
 
   pi.on("agent_start", () => {
@@ -121,10 +153,12 @@ export default function (pi: any) {
   });
   pi.on("agent_settled", () => {
     busy = false;
-    if (held) {
-      held = false;
-      void wake();
-    }
+    held = false;
+    pending = []; // offers no message_end confirmed (blocked, aborted) are dropped unacked
+    // Mail beyond one batch, or held while busy, waits with no new file to wake on: look again. wake() sends nothing
+    // when the hook offers nothing, and the hook holds an offered batch back from this session for 60 s, so this
+    // cannot loop hot: a turn starts only when the hook offers new text, and then settles once.
+    void wake();
   });
 
   // After a tool result: add the mail to that result, so the model sees it on its next step.
@@ -133,7 +167,7 @@ export default function (pi: any) {
     const s = session;
     const offer = await hook("tool_result", s);
     if (!offer || g !== gen) return;
-    await ack("tool_result", s, offer); // right before handing the augmented content back
+    pending.push({ g, s, event: "tool_result", offer }); // acked at the tool result's message_end
     return { content: [...event.content, { type: "text", text: "\n\n" + offer.text }] };
   });
 
@@ -144,7 +178,7 @@ export default function (pi: any) {
     const s = session;
     const offer = await hook("before_agent_start", s);
     if (!offer || g !== gen) return;
-    await ack("before_agent_start", s, offer); // right before handing the message back
+    pending.push({ g, s, event: "before_agent_start", offer }); // acked at the message's message_end
     return { message: { customType: "mash-mail", content: offer.text, display: true } };
   });
 }

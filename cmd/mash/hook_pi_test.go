@@ -202,3 +202,44 @@ func TestSpoolDirIsInTheUsage(t *testing.T) {
 		t.Fatalf("exit %d: %q", code, out.String())
 	}
 }
+
+// A token is only base64 JSON: an ack drains only entries offered to the acking session. A forged token naming a
+// spooled entry that was never offered drains nothing; neither does the ack of another session's offer.
+func TestPiAckOnlyDrainsWhatWasOfferedToThisSession(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env, 1, 2)
+	forged := ackToken([]spool.Entry{{Seq: 1}, {Seq: 2}})
+	if _, e := piHook(t, env, piIn, "--ack", forged); !strings.Contains(e, "not offered to this session") {
+		t.Fatalf("stderr %q", e)
+	}
+	if w, _ := sp.Waiting(); len(w) != 2 || sp.IsDrained(spool.Ref{Seq: 1}) {
+		t.Fatalf("a forged token drained: %+v", w)
+	}
+	o, _ := piHook(t, env, piIn)
+	if o.Ack == "" {
+		t.Fatal("no offer")
+	}
+	if _, e := piHook(t, env, `{"event":"tool_result","session":"s2"}`, "--ack", o.Ack); !strings.Contains(e, "not offered to this session") {
+		t.Fatalf("stderr %q", e)
+	}
+	if w, _ := sp.Waiting(); len(w) != 2 {
+		t.Fatalf("another session's ack drained: %+v", w)
+	}
+	piHook(t, env, piIn, "--ack", o.Ack)
+	if w, _ := sp.Waiting(); len(w) != 0 {
+		t.Fatalf("the offered session's ack did not drain: %+v", w)
+	}
+}
+
+// An ack with no session id is refused, even for an entry offered with an empty session.
+func TestPiAckWithoutASessionIsRefused(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env, 1)
+	if err := sp.MarkOffered("", spool.Ref{Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, e := piHook(t, env, `{"event":"tool_result","session":""}`, "--ack", ackToken([]spool.Entry{{Seq: 1}}))
+	if sp.IsDrained(spool.Ref{Seq: 1}) {
+		t.Fatalf("drained with no session (stderr %q)", e)
+	}
+}

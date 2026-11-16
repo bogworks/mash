@@ -72,8 +72,15 @@ func ackToken(shown []spool.Entry) string {
 }
 
 // applyAck marks the entries token names as the one-step hook would have: drained, or listed for a digest line. An entry
-// already drained, or not spooled any more, is skipped. Call it under the spool lock, after the owner check.
-func applyAck(sp spool.Spool, token string, stderr io.Writer) {
+// already drained, or not spooled any more, is skipped, and so is one not offered to session: the token is only
+// base64 JSON, so it proves nothing, and the spool's offered mark (spool.MarkOffered) is what says this session was
+// shown the entry. An empty session is refused outright, since it would match an offer made with an empty session.
+// Call it under the spool lock, after the owner check.
+func applyAck(sp spool.Spool, session, token string, stderr io.Writer) {
+	if session == "" {
+		fmt.Fprintf(stderr, "mash hook: --ack: no session id; nothing acked\n")
+		return
+	}
 	b, err := base64.RawURLEncoding.DecodeString(token)
 	var items []ackItem
 	if err == nil {
@@ -83,9 +90,17 @@ func applyAck(sp spool.Spool, token string, stderr io.Writer) {
 		fmt.Fprintf(stderr, "mash hook: --ack: unreadable token\n")
 		return
 	}
+	skipped := false
 	for _, it := range items {
 		ref := spool.Ref{Stream: it.Stream, Seq: it.Seq}
 		if sp.IsDrained(ref) || !sp.Has(ref) {
+			continue
+		}
+		if sess, _, ok := sp.Offered(ref); !ok || sess != session {
+			if !skipped { // once, not per entry
+				fmt.Fprintf(stderr, "mash hook: --ack: #%s was not offered to this session; skipped (and any others like it)\n", endpoint.FormatMsgRef(ref))
+				skipped = true
+			}
 			continue
 		}
 		if it.Listed {
@@ -195,7 +210,7 @@ func hookAck(cfg config.Config, cfgErr error, adapter host.Adapter, env func(str
 		return 0
 	}
 	if ack != "" {
-		applyAck(sp, ack, stderr)
+		applyAck(sp, id.SessionID, ack, stderr)
 		return 0
 	}
 	// Every run marks the session hooked, so serve spools from now on; before the first run it delivered by channel.

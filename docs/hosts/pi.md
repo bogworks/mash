@@ -79,13 +79,21 @@ one step):
    waits. Otherwise it prints one JSON line, `{"text": "...", "ack": "<token>"}`, and leaves the mail spooled. The
    token is opaque (it names the entries shown). The lease-wait and other-launch notices are `{"text": "..."}` with no
    `ack`.
-2. After Pi has accepted the message, the extension runs `mash hook --ack <token>` with the same stdin. Under the spool
-   lock and after the same owner check, it marks exactly those entries delivered. An entry already delivered or gone
-   is skipped; a refused owner marks nothing.
+2. Once Pi has committed the message, the extension runs `mash hook --ack <token>` with the same stdin. Under the
+   spool lock and after the same owner check, it marks delivered exactly those entries of the token that were offered
+   to the acking session (the token is only base64 JSON and proves nothing). An entry already delivered or gone is
+   skipped; an entry never offered to this session, or offered to another, is skipped with a line on stderr; a refused
+   owner, or an ack with no session id, marks nothing.
 
-The extension acks right before it returns the augmented tool result or the `before_agent_start` message, and after
-`sendMessage` returns for a wake. If Pi changed session while the hook ran, it does not ack, and the mail stays
-spooled for the new session.
+The extension does not ack when it returns the text. It records the offer as pending and acks at Pi's `message_end` for
+the message that carries it: the tool result the text was added to, the message `before_agent_start` injected, or the
+wake's own `mash-mail` message. A pending offer is dropped without an ack at `agent_settled` (the message never
+reached the conversation: a blocked or aborted call) and at `session_shutdown`; the mail stays spooled for the new
+session, or for this one after 60 seconds.
+
+After each turn settles (`agent_settled`) the extension looks again, so mail beyond one batch, or a wake held while the
+model was busy, is not left waiting for a new file to arrive. This cannot loop: a turn starts only when the hook offers
+text, and a batch just offered to this session is held back for 60 seconds.
 
 Delivery is at-least-once. A batch that was offered and not acked (a crash, a session change) is offered again, and
 shown as a repeat. The same session is not offered a batch again for 60 seconds after the last offer, so an ack still
