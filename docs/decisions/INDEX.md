@@ -124,4 +124,4 @@
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
 | [0132](0132-policy-scope-is-the-account-and-an-owner-is-the-group-range-is-removed.md) | Policy scope is the account and an owner is the group: range is removed | proposed | 2026-11-15 |
 | [0133](0133-the-issue-services-countersigner-is-a-requester-and-mash-carries-no-name-of-a-layer-above.md) | The issue service's countersigner is a requester and mash carries no name of a layer above | proposed | 2026-11-15 |
-| [0134](0134-applying-a-policy-reports-one-outcome-word-and-one-exit-code-group.md) | Applying a policy reports one outcome word and one exit-code group | proposed | 2026-11-16 |
+| [0144](0144-applying-a-policy-reports-one-outcome-word-and-one-exit-code-group.md) | Applying a policy reports one outcome word and one exit-code group | proposed | 2026-11-16 |

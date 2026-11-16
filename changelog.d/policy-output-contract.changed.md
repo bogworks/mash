@@ -1,1 +1,1 @@
-The policy text output starts with a scope line and says the credential is not checked. An unchanged policy is reported as "No changes needed" and not as a refusal. Applying a policy has one set of outcome words and exit codes (ADR 0134).
+The policy text output starts with a scope line and says the credential is not checked. An unchanged policy is reported as "No changes needed" and not as a refusal. Applying a policy has one set of outcome words and exit codes (ADR 0144).
