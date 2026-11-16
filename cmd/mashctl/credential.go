@@ -38,7 +38,7 @@ const (
 	credRevokeUsage = "usage: mashctl credential revoke PUBKEY [--json] [--servers N] [--sys-creds FILE]"
 )
 
-// The exit codes of the credential verbs, as credential.Result.ExitCode and ADR 0134 give them.
+// The exit codes of the credential verbs, as credential.Result.ExitCode and ADR 0144 give them.
 const (
 	credOK      = 0
 	credRefused = 1
