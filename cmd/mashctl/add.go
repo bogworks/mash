@@ -192,7 +192,7 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		return 2
 	}
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: add %s: %s\n", o.name, fmt.Sprintf(format, a...))
+		fmt.Fprintf(stderr, "mashctl: add %s: %s\n", o.name, admin.RewordUnavailable(fmt.Sprintf(format, a...)))
 		return 1
 	}
 	if !config.ValidName(o.name) {

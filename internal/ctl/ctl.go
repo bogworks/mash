@@ -515,6 +515,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		// Deprovision is idempotent, so rollbacks can call it freely; this verb refuses a name that was never there.
 		if ok, err := a.Exists(ctx, args[1]); err != nil {
+			if RevokeUsers != nil && !noRevoke {
+				return fail(fmt.Errorf("%w\n%s", err, NotRevoked))
+			}
 			return fail(err)
 		} else if !ok {
 			fmt.Fprintf(stderr, "no endpoint named %s\n", shown)

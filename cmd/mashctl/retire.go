@@ -74,7 +74,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		return 2
 	}
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: retire %s: %s\n", name, fmt.Sprintf(format, a...))
+		fmt.Fprintf(stderr, "mashctl: retire %s: %s\n", name, admin.RewordUnavailable(fmt.Sprintf(format, a...)))
 		return 1
 	}
 	if !config.ValidName(name) {
@@ -101,6 +101,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	defer closeAdmin()
 	recs, err := adm.List(ctx)
 	if err != nil {
+		if !noRevoke {
+			return fail("%v\n%s", err, ctl.NotRevoked)
+		}
 		return fail("%v", err)
 	}
 	user := ""
