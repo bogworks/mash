@@ -459,7 +459,15 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Det
 			close(svcDone)
 			startSvc()
 		}
-		wake := host.WakerFor(adapter, host.WakeContext{Ctx: ctx, ThreadID: srv.ThreadID, Env: os.Getenv, Stderr: stderr}, srv.Notify)
+		wctx := host.WakeContext{Ctx: ctx, ThreadID: srv.ThreadID, Env: os.Getenv, Stderr: stderr}
+		if adapter.Wake() == host.WakeCommand {
+			wctx.Status = &host.WakeStatus{}
+			src.wake = wctx.Status
+			if d, err := endpoint.SpoolDir(cfg); err == nil {
+				wctx.CodexHome = spool.Spool{Dir: d}.CodexHome
+			}
+		}
+		wake := host.WakerFor(adapter, wctx, srv.Notify)
 		if err := ep.Run(ctx, wake); err != nil && ctx.Err() == nil {
 			var lostTo *endpoint.LeaseLostError
 			if errors.As(err, &lostTo) && lostTo.SameSession {

@@ -614,6 +614,9 @@ func (s Spool) OwnRecord(legacy, record string) error {
 	if err := os.Remove(filepath.Join(s.Dir, toldFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(filepath.Join(s.Dir, codexHomeFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	// The new holder's own waiting record (a serve that waited, then bound) is done; so is any other for its pid.
 	var rec struct {
 		PID int `json:"pid"`
@@ -706,6 +709,45 @@ func (s Spool) Owner() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// OwnerUpdatedAfter reports whether the .owner record was last written after t. A host that learns its session id
+// after the bind (Codex) rewrites it then, which is the moment an earlier refusal stops being true.
+func (s Spool) OwnerUpdatedAfter(t time.Time) bool {
+	fi, err := os.Stat(filepath.Join(s.Dir, ownerFile))
+	return err == nil && fi.ModTime().After(t)
+}
+
+const codexHomeFile = ".codexhome"
+
+// NoteCodexHome records the CODEX_HOME a Codex hook runs with, only when it is an absolute path to an existing
+// directory (nothing else is kept). Call it under Lock.
+func (s Spool) NoteCodexHome(h string) error {
+	if !validHome(h) {
+		return nil
+	}
+	p := filepath.Join(s.Dir, codexHomeFile)
+	if b, err := os.ReadFile(p); err == nil && string(b) == h {
+		return nil
+	}
+	return os.WriteFile(p, []byte(h), 0o600)
+}
+
+// CodexHome is the CODEX_HOME a hook recorded, "" when none or when it no longer names an existing absolute directory.
+func (s Spool) CodexHome() string {
+	b, err := os.ReadFile(filepath.Join(s.Dir, codexHomeFile))
+	if err != nil || !validHome(string(b)) {
+		return ""
+	}
+	return string(b)
+}
+
+func validHome(h string) bool {
+	if h == "" || !filepath.IsAbs(h) || strings.ContainsAny(h, "\x00\n") {
+		return false
+	}
+	fi, err := os.Stat(h)
+	return err == nil && fi.IsDir()
 }
 
 // Refusal is what a hook that matched none of the ownership rules leaves in .refused.

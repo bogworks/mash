@@ -76,8 +76,12 @@ Codex.
 7. **The wake.** `codex queue --thread <thread id> --message <text>`, run as an argument list with no shell and a
    bounded timeout. The thread id is the last `_meta.threadId` the MCP server saw, checked against a conservative
    pattern before use; with none yet, nothing is run and the endpoint retries. The text is built by mash from the
-   count of waiting messages and a fixed sentence, never from the endpoint's wake line, which names senders. A failure
-   is written to stderr once and is not fatal. `MASH_CODEX_BIN` and `MASH_CODEX_REMOTE` name the binary and the
+   count of waiting messages and a fixed sentence, never from the endpoint's wake line, which names senders. The command
+   needs Codex's home: Codex gives an MCP server only a short environment, so the configuration lists
+   `env_vars = ["MASH_LAUNCH_TOKEN", "CODEX_HOME"]`, and when serve has no `CODEX_HOME` the hook, which runs in Codex's
+   environment, records its value (an absolute existing directory, nothing else) in the spool for the wake to use. A
+   failure (the command does not start, or exits non-zero) is written to stderr once per distinct failure, is shown
+   by `mash status` as `delivery: wake FAILED at <time>: <reason>` until a wake succeeds, and is not fatal. `MASH_CODEX_BIN` and `MASH_CODEX_REMOTE` name the binary and the
    app-server address.
 8. **The seam.** `WakerFor(adapter, WakeContext, notify)` gives an adapter that implements `ContextWaker` the thread
    id, the environment and stderr; every other adapter gets its `Waker(notify)` as before.

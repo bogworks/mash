@@ -24,7 +24,7 @@ func TestCodexDeclarations(t *testing.T) {
 	if c.Wake() != WakeCommand || !c.SpoolsFromStart() || c.ClaudeSettingsChecks() {
 		t.Errorf("wake %v spools %v checks %v", c.Wake(), c.SpoolsFromStart(), c.ClaudeSettingsChecks())
 	}
-	if got, want := c.Words(), (Words{Product: "Codex", Process: "Codex process", ServicePrefix: "Codex (mash): "}); got != want {
+	if got, want := c.Words(), (Words{Product: "Codex", Process: "Codex process", ServicePrefix: "Codex (mash): ", Launch: "codex", Plugin: false}); got != want {
 		t.Errorf("words %+v", got)
 	}
 	if a, err := Select("codex"); err != nil || a.Name() != "codex" {
@@ -366,5 +366,72 @@ func TestOwnerRecordHostMustBeTheHooksOwn(t *testing.T) {
 	// Claude's own record has no host, so its bytes are unchanged.
 	if rec := (Claude{}).OwnerToken(none); strings.Contains(rec, "host") {
 		t.Errorf("Claude record names a host: %s", rec)
+	}
+}
+
+// A failed wake is recorded for status; one stderr line per distinct failure, and a success clears it.
+func TestCodexWakerRecordsFailureForStatus(t *testing.T) {
+	bin, _ := fakeCodex(t, "echo boom >&2\nexit 3\n")
+	var errb bytes.Buffer
+	ctx := wakeCtx(bin, "t1", &errb)
+	ctx.Status = &WakeStatus{}
+	w := WakerFor(Codex{}, ctx, nil)
+	for i := 0; i < 3; i++ {
+		_ = w("x", map[string]string{"count": "1"})
+	}
+	at, why, ok := ctx.Status.Failure()
+	if !ok || at.IsZero() || !strings.Contains(why, "boom") || len(why) > 200 {
+		t.Errorf("failure %v %q %v", at, why, ok)
+	}
+	if n := strings.Count(errb.String(), "mash: codex wake:"); n != 1 {
+		t.Errorf("stderr %d times", n)
+	}
+	// A different failure is told again.
+	ctx.Env = func(k string) string {
+		return map[string]string{"MASH_CODEX_BIN": filepath.Join(t.TempDir(), "absent")}[k]
+	}
+	_ = WakerFor(Codex{}, ctx, nil)("x", nil)
+	if n := strings.Count(errb.String(), "mash: codex wake:"); n != 2 {
+		t.Errorf("distinct failure: stderr %d times", n)
+	}
+	// A success clears the failure and counts.
+	good, _ := fakeCodex(t, "exit 0\n")
+	ctx.Env = func(k string) string { return map[string]string{"MASH_CODEX_BIN": good}[k] }
+	if err := WakerFor(Codex{}, ctx, nil)("x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := ctx.Status.Failure(); ok || ctx.Status.Sent() != 1 {
+		t.Errorf("after success: failed %v sent %d", ok, ctx.Status.Sent())
+	}
+}
+
+// With no CODEX_HOME in serve's environment the home a hook recorded is given to the command; serve's own wins.
+func TestCodexWakerUsesRecordedCodexHome(t *testing.T) {
+	home := t.TempDir()
+	bin, _ := fakeCodex(t, "exit 0\n")
+	envFile := filepath.Join(t.TempDir(), "env")
+	script := "#!/bin/sh\nprintf '%s' \"$CODEX_HOME\" > '" + envFile + "'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", "")
+	var errb bytes.Buffer
+	ctx := wakeCtx(bin, "t1", &errb)
+	ctx.CodexHome = func() string { return home }
+	if err := WakerFor(Codex{}, ctx, nil)("x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(envFile); string(b) != home {
+		t.Errorf("CODEX_HOME = %q, want %q", b, home)
+	}
+	ctx.Env = func(k string) string {
+		return map[string]string{"MASH_CODEX_BIN": bin, "CODEX_HOME": "/serve/home"}[k]
+	}
+	t.Setenv("CODEX_HOME", "/serve/home")
+	if err := WakerFor(Codex{}, ctx, nil)("x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(envFile); string(b) != "/serve/home" {
+		t.Errorf("serve's CODEX_HOME lost: %q", b)
 	}
 }

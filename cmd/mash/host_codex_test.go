@@ -311,3 +311,43 @@ func TestServeCodexRetryBindRecordsThreadID(t *testing.T) {
 		return strings.Contains(o, `"session":"019bbbbb-thread"`) && strings.Contains(o, `"host":"codex"`)
 	})
 }
+
+// A Codex hook of the owner records CODEX_HOME (an absolute existing directory) for the wake; anything else is kept out.
+func TestCodexHookRecordsCodexHome(t *testing.T) {
+	env := hookEnv(t, nil)
+	sp := spoolOf(env)
+	if err := sp.Init(); err != nil {
+		t.Fatal(err)
+	}
+	owner := `{"pid":` + itoa(os.Getppid()) + `,"session":"thread-1","host":"codex"}`
+	if err := os.WriteFile(filepath.Join(sp.Dir, ".owner"), []byte(owner), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run1 := func(home string) {
+		e := envFrom(env)
+		var out, errb bytes.Buffer
+		run([]string{"hook"}, func(k string) string {
+			if k == "CODEX_HOME" {
+				return home
+			}
+			return e(k)
+		}, strings.NewReader(`{"hook_event_name":"PostToolUse","session_id":"thread-1"}`), &out, &errb)
+	}
+	run1("relative/dir")
+	run1(filepath.Join(t.TempDir(), "absent"))
+	if got := sp.CodexHome(); got != "" {
+		t.Fatalf("recorded %q", got)
+	}
+	home := t.TempDir()
+	run1(home)
+	if got := sp.CodexHome(); got != home {
+		t.Fatalf("CodexHome %q, want %q", got, home)
+	}
+	// A new lease holder starts clean.
+	if err := sp.OwnRecord("pid:1", owner); err != nil {
+		t.Fatal(err)
+	}
+	if got := sp.CodexHome(); got != "" {
+		t.Errorf("kept across a new owner: %q", got)
+	}
+}

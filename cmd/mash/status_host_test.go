@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -100,10 +103,64 @@ func TestVersionTextPluginLinePerHost(t *testing.T) {
 
 // The help line names no one host.
 func TestUsageServeLineIsHostNeutral(t *testing.T) {
-	if !strings.Contains(usage, "  mash serve                                   the MCP server an agent host runs (Claude Code, Pi)\n") {
+	if !strings.Contains(usage, "  mash serve                                   the MCP server an agent host runs (Claude Code, Pi, Codex)\n") {
 		t.Error("usage serve line")
 	}
 	if strings.Contains(usage, "the Claude Code channel server") {
 		t.Error("usage still says Claude Code channel server")
+	}
+}
+
+// Codex: its own launch word, no channel line, no wake clause without a counted wake, a failed wake is shown.
+func TestDeliveryLinesCodex(t *testing.T) {
+	cx := deliveryText(deliverySource(t, host.Codex{}, 0, false, true))
+	if !strings.Contains(cx, "Next: start Codex with MASH_LAUNCH_TOKEN=$(uuidgen) codex ... (a fresh value") ||
+		strings.Contains(cx, "claude") || strings.Contains(cx, "channel notifications") {
+		t.Errorf("codex REFUSED line:\n%s", cx)
+	}
+	src := deliverySource(t, host.Codex{}, 0, true, false)
+	if got := deliveryText(src); strings.Contains(got, "last wake started a turn") || strings.Contains(got, "wake FAILED") {
+		t.Errorf("no wake yet:\n%s", got)
+	}
+	src.wake = &host.WakeStatus{}
+	bin := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho bad home >&2\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wc := host.WakeContext{Ctx: context.Background(), ThreadID: func() string { return "t1" }, Status: src.wake,
+		Env: func(k string) string { return map[string]string{"MASH_CODEX_BIN": bin}[k] }}
+	_ = host.WakerFor(host.Codex{}, wc, nil)("x", map[string]string{"count": "1"})
+	got := deliveryText(src)
+	if !strings.Contains(got, "delivery: wake FAILED at ") || !strings.Contains(got, "bad home") || strings.Contains(got, "last wake started a turn") {
+		t.Errorf("failed wake:\n%s", got)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = host.WakerFor(host.Codex{}, wc, nil)("x", map[string]string{"count": "1"})
+	got = deliveryText(src)
+	if strings.Contains(got, "wake FAILED") || !strings.Contains(got, "; the last wake started a turn") {
+		t.Errorf("after a good wake:\n%s", got)
+	}
+}
+
+// A refusal older than the owner record's last rewrite (the thread id learned from the first tool call) is not shown.
+func TestDeliveryRefusalOlderThanOwnerUpdateIsDropped(t *testing.T) {
+	src := deliverySource(t, host.Codex{}, 0, false, true)
+	dir, _ := endpoint.SpoolDir(src.cfg)
+	sp := spool.Spool{Dir: dir}
+	if !strings.Contains(deliveryText(src), "delivery: REFUSED") {
+		t.Fatal("setup: no refusal shown")
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".owner"), []byte(`{"pid":1,"session":"t1","host":"codex"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(dir, ".owner"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	_ = sp
+	if got := deliveryText(src); strings.Contains(got, "REFUSED") {
+		t.Errorf("stale refusal shown:\n%s", got)
 	}
 }

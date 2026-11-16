@@ -43,6 +43,8 @@ type statusSource struct {
 	// owned is when this session's SetSpool bound the spool (zero until then): a hook run before it belongs to
 	// another session, the previous lease holder's.
 	owned atomic.Pointer[time.Time]
+	// wake is what a command wake (Codex) last did; nil for a host woken by channel.
+	wake *host.WakeStatus
 	// home, managedDir and getenv are where the Claude Code settings are read from; empty or nil means the user's
 	// home, the OS default managed directory and the process environment. Tests set them.
 	home, managedDir string
@@ -479,6 +481,9 @@ func deliveryLines(src *statusSource) []string {
 	if srv := src.srv.Load(); srv != nil {
 		n, last = srv.Notified()
 	}
+	if src.wake != nil { // a command wake counts the wakes it sent, not channel notifications
+		n = src.wake.Sent()
+	}
 	var out []string
 	switch {
 	case cfg.Name == "" || cfg.Owner == "":
@@ -498,7 +503,7 @@ func deliveryLines(src *statusSource) []string {
 		} else if st, wakes := hooklessOf(src); st == endpoint.HooklessProven {
 			out = append(out, fmt.Sprintf("delivery: DEGRADED - no mash hook has run since %s although this session has made tool calls. Likely cause: %s. Mail now: read each message with the read tool. Next: %s",
 				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own, src.host().Words())))
-		} else if rat, why, ok := sp.Refused(); ok && rat.After(*own) {
+		} else if rat, why, ok := sp.Refused(); ok && rat.After(*own) && !sp.OwnerUpdatedAfter(rat) {
 			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start %s with MASH_LAUNCH_TOKEN=$(uuidgen) %s ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
 				redactText(why), rat.Format(time.RFC3339), src.host().Words().Product, launchWord(src.host().Words())))
 		} else if st == endpoint.HooklessSuspected {
@@ -507,6 +512,11 @@ func deliveryLines(src *statusSource) []string {
 			out = append(out, fmt.Sprintf("delivery: hooks have not run yet in this session; the last %d wake(s) started no turn", wakes))
 		} else {
 			out = append(out, "delivery: hooks have not run yet in this session (they run with the first prompt or tool call)")
+		}
+	}
+	if src.wake != nil {
+		if at, why, failed := src.wake.Failure(); failed {
+			out = append(out, fmt.Sprintf("delivery: wake FAILED at %s: %s. Mail stays spooled and arrives with the next prompt or tool call; Next: check that codex is on serve's PATH (or MASH_CODEX_BIN) and that CODEX_HOME is in the mash server's env_vars (docs/hosts/codex.md)", at.Format(time.RFC3339), redactText(why)))
 		}
 	}
 	// Channel notifications are how only a channel host (Claude Code) is woken: the others take no channel delivery.

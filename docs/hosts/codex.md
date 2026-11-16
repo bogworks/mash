@@ -31,7 +31,7 @@ Add this to `~/.codex/config.toml`:
 [mcp_servers.mash]
 command = "mash"
 args = ["serve"]
-env_vars = ["MASH_LAUNCH_TOKEN"]
+env_vars = ["MASH_LAUNCH_TOKEN", "CODEX_HOME"]
 default_tools_approval_mode = "approve"
 
 [mcp_servers.mash.env]
@@ -44,6 +44,10 @@ MASH_URL = "tls://nats.example.com:4222"
 
 - `env_vars = ["MASH_LAUNCH_TOKEN"]` passes the launch token from the shell that starts Codex (section 2). Codex gives
   an MCP server only a short list of variables, plus `env` and the names in `env_vars`.
+- `CODEX_HOME` in `env_vars` matters when you use a non-default Codex home: the wake (section 4) runs `codex queue`
+  against the same Codex home, and without it the command would act on the default `~/.codex` and wake nothing. If
+  it is missing, the hook (which runs in Codex's own environment) records Codex's `CODEX_HOME` and the wake uses that
+  when serve has none; listing it here is still the plain way to be sure.
 - `default_tools_approval_mode = "approve"` lets the model call mash's tools. mash declares no tool annotations, so
   without it Codex asks for approval on every call and a non-interactive run fails each one.
 - `MASH_HOST = "codex"` is optional (see above). `MASH_SPOOL_FROM_START = "1"` keeps mail spooled until a hook has
@@ -99,10 +103,26 @@ a sender's text. The hook then delivers the mail itself with its trust labels, a
 - the thread id, which comes with the first mash tool call of the session. Until then nothing is run and the mail
   stays spooled.
 
-How fast the wake lands depends on how Codex runs. With a shared app-server it takes a fraction of a second; set
-`MASH_CODEX_REMOTE` to the app-server's address (the `--remote` value) so `codex queue` reaches it. A plain TUI polls
-its queue about every ten seconds. Mail that arrives during a turn waits for the turn, and `PostToolUse` delivers it
-sooner if a tool finishes first. A failed `codex queue` is written to stderr once and is not fatal.
+How fast the wake lands depends on the kind of message and on how Codex runs. Mail that wakes at all waits first:
+a normal `task` message is woken only after the endpoint has been idle for the idle wait (45 s, `idle_wake`), and
+`fyi` and `result` never wake; an `--urgent` message wakes at once (see [operations.md](../operations.md)). Then
+`codex queue` has to reach the session. With a shared app-server, set `MASH_CODEX_REMOTE` to the app-server's address
+(the `--remote` value): an urgent message wakes in a fraction of a second, a `task` message after the 45 s. A plain
+TUI polls its queue, so an urgent message takes about 5 to 7 seconds and a `task` message about 45 s plus that.
+Mail that arrives during a turn waits for the turn, and `PostToolUse` delivers it sooner if a tool finishes first.
+
+A `codex queue` that fails to start or exits non-zero is not fatal: the mail stays spooled and arrives with the next
+prompt or tool call. The failure is written to stderr once per distinct failure and shown by `mash status` as
+`delivery: wake FAILED at <time>: <reason>` until a later wake succeeds.
+
+### Shared app-server: when the endpoint is online
+
+Under a shared app-server, `mash serve` is started by the app-server for a thread, not by the TUI. The endpoint is
+online only while a thread's `mash serve` runs: before the first prompt of a thread there is none, and mail waits.
+serve's lifetime follows the app-server, not the TUI: after the TUI quits, the thread stays loaded and the endpoint
+stays online until the app-server stops. serve exits when its stdin closes, so the quick exit that holds for a plain
+TUI (serve gone within seconds of the session closing) applies under a shared app-server only when the app-server
+closes that stdin, that is when it unloads the thread or stops.
 
 ## Known gaps
 
@@ -113,7 +133,9 @@ sooner if a tool finishes first. A failed `codex queue` is written to stderr onc
 - Codex's activity (working, idle, blocked) is not reported to mash: there is no intake for it.
 - A live `mash prompt` to a Codex endpoint does not work yet: the request id the model replies with is carried only
   on the channel.
-- With no launch token, mail waits for the first mash tool call (see section 2).
+- With no launch token, mail waits for the first mash tool call (see section 2). Until then `mash status` may report
+  `delivery: REFUSED` for the hook that ran before it; the first tool call makes the session recognised and the next
+  hook delivers, and status drops that refusal once the thread id is recorded.
 - Same-session lease takeover is off for Codex: process ancestry does not identify a thread, so two threads of one
   shared app-server with the same `MASH_NAME` never take a live lease from each other. A restarted serve of the same
   thread waits for the old lease to be released or to expire (as under headless), until the thread id can identify the

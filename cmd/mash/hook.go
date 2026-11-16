@@ -216,6 +216,11 @@ func hookAck(cfg config.Config, cfgErr error, adapter host.Adapter, env func(str
 		applyAck(sp, id.SessionID, ack, stderr)
 		return 0
 	}
+	if adapter.Name() == "codex" { // Codex's own home, for the wake's `codex queue`; a path, validated by the spool
+		if err := sp.NoteCodexHome(getenv(env, "CODEX_HOME")); err != nil {
+			fmt.Fprintf(stderr, "mash hook: recording CODEX_HOME: %v\n", err)
+		}
+	}
 	// Every run marks the session hooked, so serve spools from now on; before the first run it delivered by channel.
 	if err := sp.Touch(); err != nil {
 		return 0 // no spool: serve is not spooling for this endpoint

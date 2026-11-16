@@ -22,7 +22,7 @@ import (
 
 const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
 
-  mash serve                                   the MCP server an agent host runs (Claude Code, Pi)
+  mash serve                                   the MCP server an agent host runs (Claude Code, Pi, Codex)
   mash hook [--ack TOKEN]                      the plugin's hook: shows the session its spooled mail (with MASH_HOST=pi, TOKEN
                                                marks the batch a previous run offered as delivered)
   mash spool-dir                               print this endpoint's spool directory (for a host extension that watches it)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -42,7 +43,7 @@ func (Codex) Wake() WakeKind { return WakeCommand }
 
 // Words names Codex in notices and status lines.
 func (Codex) Words() Words {
-	return Words{Product: "Codex", Process: "Codex process", ServicePrefix: "Codex (mash): "}
+	return Words{Product: "Codex", Process: "Codex process", ServicePrefix: "Codex (mash): ", Launch: "codex", Plugin: false}
 }
 
 // ClaudeSettingsChecks: Claude Code's settings files say nothing about Codex.
@@ -87,8 +88,51 @@ type WakeContext struct {
 	ThreadID func() string
 	// Env reads serve's environment (MASH_CODEX_BIN, MASH_CODEX_REMOTE).
 	Env func(string) string
-	// Stderr gets a command failure, once.
+	// Stderr gets a command failure, once per distinct failure.
 	Stderr io.Writer
+	// Status, when set, records each wake's outcome for `mash status`.
+	Status *WakeStatus
+	// CodexHome is the CODEX_HOME a Codex hook recorded, "" when none. It is used only when serve's own environment
+	// has no CODEX_HOME.
+	CodexHome func() string
+}
+
+// WakeStatus is what a command wake last did: how many wakes were sent, and the last failure while the latest wake
+// failed. Safe for concurrent use.
+type WakeStatus struct {
+	mu     sync.Mutex
+	sent   int64
+	failed bool
+	at     time.Time
+	reason string
+}
+
+// Sent is the number of wakes that ran `codex queue` successfully.
+func (w *WakeStatus) Sent() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sent
+}
+
+// Failure is the latest wake's failure (when and a short reason); ok is false when the latest wake succeeded or none ran.
+func (w *WakeStatus) Failure() (at time.Time, reason string, ok bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.at, w.reason, w.failed
+}
+
+// done records an outcome and reports whether it is a failure whose reason is new (not the previous failure's).
+func (w *WakeStatus) done(err error, reason string) (newReason bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err == nil {
+		w.sent++
+		w.failed, w.reason = false, ""
+		return false
+	}
+	newReason = !w.failed || w.reason != reason
+	w.failed, w.at, w.reason = true, time.Now(), reason
+	return newReason
 }
 
 // ContextWaker is an adapter whose wake needs more than the channel notification.
@@ -118,7 +162,10 @@ var threadIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 // yet it fails (the endpoint retries at its next check) and nothing is run: the mail stays spooled. A command failure
 // is written to Stderr once and is not fatal.
 func (Codex) WakerWith(c WakeContext, _ func(string, map[string]string) error) func(string, map[string]string) error {
-	var once sync.Once
+	st := c.Status
+	if st == nil {
+		st = &WakeStatus{}
+	}
 	return func(text string, meta map[string]string) error {
 		var thread string
 		if c.ThreadID != nil {
@@ -149,18 +196,36 @@ func (Codex) WakerWith(c WakeContext, _ func(string, map[string]string) error) f
 		ctx, cancel := context.WithTimeout(parent, CodexWakeTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, bin, args...)
+		// Codex gives an MCP server CODEX_HOME only through env_vars. Without it the command would act on the default
+		// home, so a home the hook recorded stands in for it (an absolute existing directory, nothing else).
+		if c.Env == nil || c.Env("CODEX_HOME") == "" {
+			if c.CodexHome != nil {
+				if h := c.CodexHome(); h != "" {
+					cmd.Env = append(os.Environ(), "CODEX_HOME="+h)
+				}
+			}
+		}
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
 		cmd.WaitDelay = time.Second // a child that keeps the pipes open after the kill does not hold the wake
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				err = fmt.Errorf("timed out after %s", CodexWakeTimeout)
+		err := cmd.Run()
+		if err != nil && ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("timed out after %s", CodexWakeTimeout)
+		}
+		reason := ""
+		if err != nil {
+			reason = err.Error()
+			if l := firstLine(out.String()); l != "" {
+				reason += ": " + l
 			}
-			once.Do(func() {
-				if c.Stderr != nil {
-					fmt.Fprintf(c.Stderr, "mash: codex wake: %s queue failed: %v: %s (mail stays spooled; later wakes are tried quietly)\n", bin, err, firstLine(out.String()))
-				}
-			})
+			if len(reason) > 200 {
+				reason = reason[:200]
+			}
+		}
+		if st.done(err, reason) && c.Stderr != nil {
+			fmt.Fprintf(c.Stderr, "mash: codex wake: %s queue failed: %s (mail stays spooled; later wakes are tried quietly)\n", bin, reason)
+		}
+		if err != nil {
 			return fmt.Errorf("codex queue: %w", err)
 		}
 		return nil
