@@ -599,7 +599,7 @@ func TestAdoptAsksTheServerWhetherJetStreamIsEnabled(t *testing.T) {
 }
 
 func TestAdoptFailsWhenTheServerCouldNotEnableJetStream(t *testing.T) {
-	e := newApplyEnvOpts(t, nil, func(o *server.Options) { o.JetStreamMaxStore = 1 << 30 })
+	e := newApplyEnvOpts(t, nil, func(o *server.Options) { o.JetStreamMaxStore = 128 << 20 })
 	a := newAdopter(t, e)
 	before := tree(t, a.root)
 	out, errb, code := a.adopt("--mint-admin")
@@ -609,7 +609,7 @@ func TestAdoptFailsWhenTheServerCouldNotEnableJetStream(t *testing.T) {
 	if strings.Contains(out, "enabled for the account") {
 		t.Errorf("adopt claimed JetStream is enabled before failing:\n%s", out)
 	}
-	for _, want := range []string{"could not enable JetStream", "75% of the free disk", "(2 GiB)", "about 2.7 GiB"} {
+	for _, want := range []string{"could not enable JetStream", "75% of the free disk", "(0.2 GiB)", "about 0.3 GiB"} {
 		if !strings.Contains(errb, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errb)
 		}
