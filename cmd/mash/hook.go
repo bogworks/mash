@@ -53,25 +53,27 @@ func ackArg(args []string) string {
 	return ""
 }
 
-// ackItem is one entry an ack token names: its ref, and whether the batch showed it as a digest line (listed) rather
-// than in full (drained).
+// ackItem is one entry an ack token names: its ref only. Whether the entry was shown as a digest line or in full is
+// not in the token (an older token's "l" flag is ignored): it is base64 JSON anyone can edit, so the spool's offered
+// mark, written at offer time, is the only record of that.
 type ackItem struct {
 	Stream string `json:"s,omitempty"`
 	Seq    uint64 `json:"q"`
-	Listed bool   `json:"l,omitempty"`
 }
 
 // ackToken names the entries shown, opaque to the extension: base64url of a JSON list.
 func ackToken(shown []spool.Entry) string {
 	items := make([]ackItem, len(shown))
 	for i, e := range shown {
-		items[i] = ackItem{Stream: e.Stream, Seq: e.Seq, Listed: e.Listed}
+		items[i] = ackItem{Stream: e.Stream, Seq: e.Seq}
 	}
 	b, _ := json.Marshal(items)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// applyAck marks the entries token names as the one-step hook would have: drained, or listed for a digest line. An entry
+// applyAck marks the entries token names as the one-step hook would have: drained if the offer showed it in full, listed
+// if the offer showed a digest line (a digest lists, it does not ack: ADR 0046). Which one is read from the spool's
+// offered mark, never from the token. An entry
 // already drained, or not spooled any more, is skipped, and so is one not offered to session: the token is only
 // base64 JSON, so it proves nothing, and the spool's offered mark (spool.MarkOffered) is what says this session was
 // shown the entry. An empty session is refused outright, since it would match an offer made with an empty session.
@@ -96,14 +98,15 @@ func applyAck(sp spool.Spool, session, token string, stderr io.Writer) {
 		if sp.IsDrained(ref) || !sp.Has(ref) {
 			continue
 		}
-		if sess, _, ok := sp.Offered(ref); !ok || sess != session {
+		sess, wasListed, _, ok := sp.Offered(ref)
+		if !ok || sess != session {
 			if !skipped { // once, not per entry
 				fmt.Fprintf(stderr, "mash hook: --ack: #%s was not offered to this session; skipped (and any others like it)\n", endpoint.FormatMsgRef(ref))
 				skipped = true
 			}
 			continue
 		}
-		if it.Listed {
+		if wasListed {
 			if !sp.IsListed(ref) {
 				err = sp.Listed(ref)
 			}
@@ -226,7 +229,7 @@ func hookAck(cfg config.Config, cfgErr error, adapter host.Adapter, env func(str
 		// A batch this session was offered a moment ago and has not acked is not offered again yet.
 		now := time.Now()
 		waiting = slices.DeleteFunc(waiting, func(e spool.Entry) bool {
-			sess, at, ok := sp.Offered(e.Ref())
+			sess, _, at, ok := sp.Offered(e.Ref())
 			return ok && sess == id.SessionID && now.Sub(at) < reofferAfter
 		})
 		if len(waiting) == 0 {
@@ -264,7 +267,7 @@ func hookAck(cfg config.Config, cfgErr error, adapter host.Adapter, env func(str
 		seqs[i] = e.Ref()
 	}
 	if twoPhase { // offered, not drained: the ack drains it once the host has accepted it
-		if err := sp.MarkOffered(id.SessionID, seqs...); err != nil {
+		if err := sp.MarkOffered(id.SessionID, shown...); err != nil {
 			fmt.Fprintf(stderr, "mash hook: recording what is being offered: %v; offering it anyway\n", err)
 		}
 		failpoint(env, stderr, "before-print")

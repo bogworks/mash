@@ -81,7 +81,8 @@ one step):
    `ack`.
 2. Once Pi has committed the message, the extension runs `mash hook --ack <token>` with the same stdin. Under the
    spool lock and after the same owner check, it marks delivered exactly those entries of the token that were offered
-   to the acking session (the token is only base64 JSON and proves nothing). An entry already delivered or gone is
+   to the acking session (the token is only base64 JSON and proves nothing: it names refs, and whether an entry was
+   shown in full or as a digest line is read from the spool, so a digest-listed entry is listed, never delivered). An entry already delivered or gone is
    skipped; an entry never offered to this session, or offered to another, is skipped with a line on stderr; a refused
    owner, or an ack with no session id, marks nothing.
 

@@ -401,36 +401,45 @@ func (s Spool) MarkShown(refs ...Ref) error {
 }
 
 // MarkOffered is MarkShown for a two-phase host: the shown mark also records which session the batch was offered to
-// (its content) and when (its mtime), so a later hook can hold back a batch it offered a moment ago to the same
-// session and show it again to a new one.
-func (s Spool) MarkOffered(session string, refs ...Ref) error {
-	for _, r := range refs {
-		if err := checkStream(r.Stream); err != nil {
+// and whether each entry was offered in full or as a digest line (its content: the session id, a NUL, then "l" for
+// listed or "f" for full), and when (its mtime), so a later hook can hold back a batch it offered a moment ago to the
+// same session and show it again to a new one, and an ack can act on what was offered, not on what a token claims.
+// An entry's Listed field is what it was rendered as.
+func (s Spool) MarkOffered(session string, entries ...Entry) error {
+	for _, e := range entries {
+		if err := checkStream(e.Stream); err != nil {
 			return err
 		}
 	}
 	if err := os.MkdirAll(s.shown(), 0o700); err != nil {
 		return err
 	}
-	for _, r := range refs {
-		if err := os.WriteFile(s.shownFile(r), []byte(session), 0o600); err != nil {
+	for _, e := range entries {
+		flag := "f"
+		if e.Listed {
+			flag = "l"
+		}
+		if err := os.WriteFile(s.shownFile(e.Ref()), []byte(session+"\x00"+flag), 0o600); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Offered reports the session and the time of r's last MarkOffered; ok is false when r has no shown mark.
-func (s Spool) Offered(r Ref) (session string, at time.Time, ok bool) {
+// Offered reports the session, whether the entry was offered as a digest line, and the time of r's last MarkOffered;
+// ok is false when r has no shown mark. A mark without a flag (written before the flag existed, or by MarkShown with no
+// content) reads as listed: the safe reading, since a listed entry is never drained by an ack.
+func (s Spool) Offered(r Ref) (session string, listed bool, at time.Time, ok bool) {
 	if checkStream(r.Stream) != nil {
-		return "", time.Time{}, false
+		return "", false, time.Time{}, false
 	}
 	fi, err := os.Stat(s.shownFile(r))
 	if err != nil {
-		return "", time.Time{}, false
+		return "", false, time.Time{}, false
 	}
 	b, _ := os.ReadFile(s.shownFile(r))
-	return string(b), fi.ModTime(), true
+	session, flag, found := strings.Cut(string(b), "\x00")
+	return session, !found || flag != "f", fi.ModTime(), true
 }
 
 // Listed marks seq as listed in a digest and not seen: its listed mark is written (atomically: a temporary file,

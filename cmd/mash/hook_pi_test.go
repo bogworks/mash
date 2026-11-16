@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -235,7 +236,7 @@ func TestPiAckOnlyDrainsWhatWasOfferedToThisSession(t *testing.T) {
 func TestPiAckWithoutASessionIsRefused(t *testing.T) {
 	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
 	sp := piSpool(t, env, 1)
-	if err := sp.MarkOffered("", spool.Ref{Seq: 1}); err != nil {
+	if err := sp.MarkOffered("", spool.Entry{Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
 	_, e := piHook(t, env, `{"event":"tool_result","session":""}`, "--ack", ackToken([]spool.Entry{{Seq: 1}}))
@@ -243,3 +244,46 @@ func TestPiAckWithoutASessionIsRefused(t *testing.T) {
 		t.Fatalf("drained with no session (stderr %q)", e)
 	}
 }
+
+// A digest lists, it does not ack (ADR 0046): the ack reads whether an entry was offered in full or as a digest line from
+// the spool, so a token edited to say a digest entry was shown in full (the old "l" flag false) does not drain it.
+func TestPiAckUsesTheStoredListedStateNotTheToken(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi", "MASH_BATCH_BYTES": "100"})
+	sp := piSpool(t, env)
+	for q := uint64(1); q <= 4; q++ {
+		if err := sp.Put(spool.Entry{Seq: q, From: "b", Trust: "claimed", At: time.Now(), Body: []byte(strings.Repeat("x", 300))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o, _ := piHook(t, env, piIn)
+	if o.Ack == "" {
+		t.Fatal("nothing offered")
+	}
+	var listed, full []spool.Ref
+	for _, q := range []uint64{1, 2, 3, 4} {
+		r := spool.Ref{Seq: q}
+		if _, l, _, ok := sp.Offered(r); ok && l {
+			listed = append(listed, r)
+		} else if ok {
+			full = append(full, r)
+		}
+	}
+	if len(listed) == 0 {
+		t.Fatalf("no entry was offered as a digest line: %q", o.Text)
+	}
+	// A forged token claims every entry was shown in full (l false), as an edited token would.
+	items := make([]map[string]any, 0, 4)
+	for _, r := range append(slicesClone(listed), full...) {
+		items = append(items, map[string]any{"q": r.Seq, "l": false})
+	}
+	b, _ := json.Marshal(items)
+	piHook(t, env, piIn, "--ack", base64.RawURLEncoding.EncodeToString(b))
+	for _, r := range listed {
+		if sp.IsDrained(r) || !sp.IsListed(r) {
+			t.Fatalf("digest-only #%d: drained=%v listed=%v after a token claiming it was shown in full", r.Seq, sp.IsDrained(r), sp.IsListed(r))
+		}
+	}
+	// the full case (a batch that fits) drains: TestPiAckDrainsExactlyTheOfferedEntries
+}
+
+func slicesClone(r []spool.Ref) []spool.Ref { return append([]spool.Ref(nil), r...) }

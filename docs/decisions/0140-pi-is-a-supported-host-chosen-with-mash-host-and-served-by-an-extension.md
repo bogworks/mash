@@ -56,9 +56,11 @@ Chosen: add a `Pi` adapter, selected explicitly with `MASH_HOST=pi`.
    `TwoPhase` (an optional interface, `host.TwoPhaser`; true for Pi only). Its hook offers the batch and leaves it
    spooled, recording who it was offered to and when. `mash hook --ack <token>` (stdin as for the hook) marks exactly
    the offered entries delivered, under the spool lock after the same owner check; entries already delivered or gone
-   are skipped, and a refused owner marks nothing. The token is base64url of a JSON list of the shown refs and whether
-   each was a full message or a digest line. The ack applies only to entries whose offered mark names the acking
-   session, and is refused with no session id, because the token is forgeable base64. The extension acks only when
+   are skipped, and a refused owner marks nothing. The token is base64url of a JSON list of the shown refs only. Whether
+   each was offered as a full message (acked: drained) or a digest line (listed, never drained: ADR 0046) is recorded
+   in the spool's offered mark at offer time, and the ack reads it there, never from the token. The ack applies only
+   to entries whose offered mark names the acking session, and is refused with no session id, because the token is
+   forgeable base64. The extension acks only when
    Pi's `message_end` shows the message carrying the text was committed (the tool result it was added to, the
    `before_agent_start` message, or the wake's `sendMessage` message), never when the handler returns the text; a
    pending offer is dropped unacked at `agent_settled` and `session_shutdown`. After each `agent_settled` it wakes
