@@ -8,9 +8,15 @@ endpoint's credentials); this page is the Pi-specific part.
 
 mash does not detect Pi. You name it with `MASH_HOST=pi`, in the MCP entry below.
 
+## Pi's agent directory
+
+Pi keeps its configuration in its agent directory: `~/.pi/agent` by default, or the directory `PI_CODING_AGENT_DIR`
+names when it is set. Below, `<agent-dir>` is that directory; print it with
+`echo "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"` in the shell that starts Pi.
+
 ## 1. The MCP server
 
-Add an entry to `~/.pi/agent/mcp.json`:
+Add an entry to `<agent-dir>/mcp.json`:
 
 ```json
 {
@@ -52,7 +58,7 @@ still identifies the session.
 
 ## 3. The extension
 
-Copy `hosts/pi/mash.ts` from the repository to `~/.pi/agent/extensions/mash.ts`, and make sure `mash` is on Pi's
+Copy `hosts/pi/mash.ts` from the repository to `<agent-dir>/extensions/mash.ts`, and make sure `mash` is on Pi's
 `PATH` and Pi's environment has the same `MASH_NAME`, `MASH_OWNER` and `MASH_URL` as the entry above (the extension
 runs `mash hook` and `mash spool-dir` with it; set them in the shell that starts Pi or in the config directory). The
 extension, with `MASH_HOST=pi`:

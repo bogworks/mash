@@ -3,7 +3,8 @@
 //     it prints into the model's next request;
 //   - it watches the spool directory `mash spool-dir` prints, and wakes an idle session with sendMessage
 //     ({triggerTurn:true}) when mail arrives. While the model is mid-answer the wake is held until agent_settled.
-// Copy this file to ~/.pi/agent/extensions/. Pi must be started with MASH_NAME (and MASH_OWNER, MASH_URL, MASH_CREDS
+// Copy this file to the extensions/ directory of Pi's agent directory (~/.pi/agent, or $PI_CODING_AGENT_DIR).
+// Pi must be started with MASH_NAME (and MASH_OWNER, MASH_URL, MASH_CREDS
 // as for any mash endpoint) in its environment, and MASH_HOST=pi, which the mcp.json entry sets for serve; see
 // docs/hosts/pi.md.
 import { spawn } from "node:child_process";
@@ -59,8 +60,9 @@ export default function (pi: any) {
       if (armed || !existsSync(join(dir, ".owner"))) return;
       armed = true;
       watch(dir, (_kind, name) => {
-        // a new message file, not serve's or the hook's bookkeeping (dotfiles)
-        if (name && name.endsWith(".json") && !name.startsWith(".")) void wake();
+        // a new message file, not serve's or the hook's bookkeeping (dotfiles). Node does not always give the file
+        // name: then wake anyway, since wake() shows nothing when no mail waits.
+        if (!name || (name.endsWith(".json") && !name.startsWith("."))) void wake();
       });
       void wake(); // mail that arrived before the watch
     };
