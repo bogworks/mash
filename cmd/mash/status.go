@@ -428,6 +428,10 @@ func deliveryLines(src *statusSource) []string {
 	if src.cli {
 		return []string{"delivery: " + cliLiveNote + ": hook state and channel notification counts exist only inside a running session"}
 	}
+	n, last := int64(0), time.Time{}
+	if srv := src.srv.Load(); srv != nil {
+		n, last = srv.Notified()
+	}
 	var out []string
 	switch {
 	case cfg.Name == "" || cfg.Owner == "":
@@ -443,7 +447,11 @@ func deliveryLines(src *statusSource) []string {
 		if own == nil {
 			out = append(out, "delivery: hooks n/a - this session does not hold the lease yet")
 		} else if at, ok := sp.LastHook(); ok && !at.Before(*own) {
-			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s); the last wake started a turn; mail also arrives with tool results", at.Format(time.RFC3339)))
+			wake := ""
+			if n > 0 {
+				wake = "; the last wake started a turn"
+			}
+			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s)%s; mail also arrives with tool results", at.Format(time.RFC3339), wake))
 		} else if st, wakes := hooklessOf(src); st == endpoint.HooklessProven {
 			out = append(out, fmt.Sprintf("delivery: DEGRADED - no mash hook has run since %s although this session has made tool calls. Likely cause: %s. Mail now: read each message with the read tool. Next: %s",
 				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own)))
@@ -457,10 +465,6 @@ func deliveryLines(src *statusSource) []string {
 		} else {
 			out = append(out, "delivery: hooks have not run yet in this session (they run with the first prompt or tool call)")
 		}
-	}
-	n, last := int64(0), time.Time{}
-	if srv := src.srv.Load(); srv != nil {
-		n, last = srv.Notified()
 	}
 	line := fmt.Sprintf("delivery: channel notifications sent: %d %s", n, channelNote)
 	if n > 0 {
