@@ -714,9 +714,12 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					if src.asks == nil {
 						return "", errors.New("mash: answer=now needs a running mash serve")
 					}
-					if err := src.asks.Check(); err != nil {
+					// A slot is reserved before the publish, so concurrent sends cannot all pass the limit.
+					release, err := src.asks.Reserve()
+					if err != nil {
 						return "", err
 					}
+					defer release()
 				}
 				inReplyTo, err := declaredSeq(ep, "in_reply_to", a.InReplyTo)
 				if err != nil {

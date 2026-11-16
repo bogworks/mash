@@ -71,6 +71,8 @@ type AskTable struct {
 	now  func() time.Time
 	asks []OpenAsk
 	seq  uint64
+	// pending counts slots reserved by sends in flight (Reserve), so concurrent sends cannot all pass the limit.
+	pending int
 }
 
 type askFile struct {
@@ -122,12 +124,39 @@ func (t *AskTable) Asks() []OpenAsk {
 	return out
 }
 
-// Check refuses a new ask when the table is full. Run it before the send.
+// Check refuses a new ask when the open asks and the reserved slots fill the table.
 func (t *AskTable) Check() error {
-	if t.Len() >= MaxOpenAsks {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.prune()
+	return t.fullLocked()
+}
+
+func (t *AskTable) fullLocked() error {
+	if len(t.asks)+t.pending >= MaxOpenAsks {
 		return fmt.Errorf("mash: %d answer=now asks are already open (the limit); wait for a reply or for one to expire (24 hours), or send without answer=now", MaxOpenAsks)
 	}
 	return nil
+}
+
+// Reserve takes one slot atomically before a send, refusing when open asks plus reserved slots fill the table. The
+// caller runs release once the send has failed, or after Add (release is idempotent).
+func (t *AskTable) Reserve() (release func(), err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.prune()
+	if err := t.fullLocked(); err != nil {
+		return nil, err
+	}
+	t.pending++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			t.mu.Lock()
+			t.pending--
+			t.mu.Unlock()
+		})
+	}, nil
 }
 
 // ParseAnswerWithin reads the send tool's answer and answer_within: ok is false when the send is not an answer=now one.

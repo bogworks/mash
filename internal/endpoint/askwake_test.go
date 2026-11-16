@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,5 +176,38 @@ func TestAnswerNowReplyWakesWhateverTheKind(t *testing.T) {
 	}
 	if tb.Len() != 0 {
 		t.Fatal("the ask reopened")
+	}
+}
+
+func TestAskTableReserveIsAtomicAndReleases(t *testing.T) {
+	tb := OpenAskTable(filepath.Join(t.TempDir(), "asks.json"))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var rels []func()
+	for i := 0; i < MaxOpenAsks+5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rel, err := tb.Reserve(); err == nil {
+				mu.Lock()
+				rels = append(rels, rel)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(rels) != MaxOpenAsks {
+		t.Fatalf("granted %d reservations, want %d", len(rels), MaxOpenAsks)
+	}
+	if _, err := tb.Reserve(); err == nil {
+		t.Fatal("a full table granted a reservation")
+	}
+	rels[0]()
+	rels[0]() // idempotent
+	if _, err := tb.Reserve(); err != nil {
+		t.Fatalf("a released slot was not reusable: %v", err)
+	}
+	if _, err := tb.Reserve(); err == nil {
+		t.Fatal("double release freed two slots")
 	}
 }
