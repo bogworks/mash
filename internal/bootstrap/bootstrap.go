@@ -54,6 +54,9 @@ type Params struct {
 	Owner      string
 	Port       int
 	ConfigPath string // where config.json goes if none exists; "" skips it
+	// JetStreamDisk is the account's JetStream disk limit in bytes; zero means the 2 GiB default. Callers other than
+	// tests leave it zero.
+	JetStreamDisk int64
 }
 
 // File is one file to create.
@@ -75,6 +78,13 @@ type Plan struct {
 	System   string
 	// OperatorJWT is the operator JWT written to the server directory; init --local also stores a copy in the key directory.
 	OperatorJWT string
+}
+
+func (p Params) jetStreamDisk() int64 {
+	if p.JetStreamDisk > 0 {
+		return p.JetStreamDisk
+	}
+	return jsDisk
 }
 
 func (p Params) path(n string) string { return filepath.Join(p.Dir, n) }
@@ -176,7 +186,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 	}
 	ac := jwt.NewAccountClaims(acctPub)
 	ac.Name = "MASH"
-	ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: jsDisk, Streams: jsStreams, Consumer: jsConsumers}
+	ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: p.jetStreamDisk(), Streams: jsStreams, Consumer: jsConsumers}
 	acctJWT, err := ac.Encode(opKP)
 	if err != nil {
 		return nil, fmt.Errorf("mashctl: account jwt: %w", err)

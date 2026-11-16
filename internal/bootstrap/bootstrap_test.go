@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -44,8 +45,11 @@ func newSetup(t *testing.T) *setup {
 	return s
 }
 
+// testDisk keeps the generated account's JetStream limit small, so a test does not depend on the host's free disk.
+const testDisk = 256 << 20
+
 func (s *setup) params() Params {
-	return Params{Dir: s.serverDir, Owner: "alice", Port: 4222, ConfigPath: s.cfgPath}
+	return Params{Dir: s.serverDir, Owner: "alice", Port: 4222, ConfigPath: s.cfgPath, JetStreamDisk: testDisk}
 }
 
 func (s *setup) generate(t *testing.T) {
@@ -411,7 +415,7 @@ func TestStartRefusesWhatThisRunDidNotGenerateOrANonLoopbackURLBeforeStartingAny
 }
 
 // TestInitReportsJetStreamThatCouldNotBeEnabled: a server whose JetStream store budget is under the account's 2 GiB
-// disk limit leaves the account without JetStream; Init says why.
+// disk limit (testDisk here) leaves the account without JetStream; Init says why.
 func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
 	s := newSetup(t)
 	s.generate(t)
@@ -421,7 +425,7 @@ func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
 	}
 	opts.Port = -1
 	opts.NoLog, opts.NoSigs = true, true
-	opts.JetStreamMaxStore = 1 << 30
+	opts.JetStreamMaxStore = testDisk / 2 // under the account's own limit
 	srv, err := server.NewServer(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -453,5 +457,47 @@ func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
 	}
 	if !admin.IsJetStreamNotEnabled(err) {
 		t.Errorf("the original error is not reachable: %v", err)
+	}
+}
+
+// accountDisk is the JetStream disk limit in the account JWT that a plan preloads into server.conf.
+func accountDisk(t *testing.T, pl *Plan) int64 {
+	t.Helper()
+	var conf string
+	for _, f := range pl.Files {
+		if f.Path == pl.ConfPath() {
+			conf = string(f.Data)
+		}
+	}
+	i := strings.Index(conf, pl.Account+": ")
+	if i < 0 {
+		t.Fatal("no account in server.conf")
+	}
+	tok := strings.Trim(strings.Fields(conf[i+len(pl.Account)+2:])[0], `"'`)
+	c, err := jwt.DecodeAccountClaims(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.Limits.JetStreamLimits.DiskStorage
+}
+
+func TestJetStreamDiskLimit(t *testing.T) {
+	s := newSetup(t)
+	p := s.params()
+	pl, err := Build(p, s.ks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := accountDisk(t, pl); got != testDisk {
+		t.Fatalf("account disk limit %d, want %d", got, int64(testDisk))
+	}
+	p.JetStreamDisk = 0
+	p.Dir = filepath.Join(s.root, "default")
+	pl, err = Build(p, s.ks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := accountDisk(t, pl); got != 2<<30 {
+		t.Fatalf("default account disk limit %d, want 2 GiB", got)
 	}
 }
