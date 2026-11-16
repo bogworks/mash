@@ -278,3 +278,36 @@ func mustDetect(t *testing.T, name string, env map[string]string) host.Detection
 	}
 	return d
 }
+
+// Codex learns its thread id late. When the first spool bind fails under MASH_SPOOL_REQUIRED and the background retry
+// binds it later, thread tracking starts then too: a thread id that arrived before the bind reaches the owner record.
+func TestServeCodexRetryBindRecordsThreadID(t *testing.T) {
+	old := spoolRetryEvery
+	spoolRetryEvery = 100 * time.Millisecond
+	t.Cleanup(func() { spoolRetryEvery = old }) // runs after startServe's cleanup has stopped serve
+	w := newWorld(t, "a")
+	w.env["a"]["MASH_SPOOL_REQUIRED"] = "1"
+	state := filepath.Join(t.TempDir(), "state")
+	w.env["a"]["MASH_STATE_DIR"] = state
+	if err := os.WriteFile(state, nil, 0o600); err != nil { // no spool directory can be made
+		t.Fatal(err)
+	}
+	t.Setenv("MASH_LAUNCH_TOKEN", "")
+	s := startServe(t, w.env["a"])
+	s.initializeAs(t, "codex-mcp-client")
+	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"version","arguments":{},"_meta":{"threadId":"019bbbbb-thread"}}}`)
+	s.await(t, 5*time.Second, idIs(3))
+	// The first bind has failed before the spool directory is fixed, or this would test the initial bind.
+	eventually(t, 10*time.Second, "the failed bind is reported", func() bool { return strings.Contains(s.stderr(), "the spool is failing") })
+	if err := os.Rename(state, state+".was"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sp := spool.Spool{Dir: spool.Dir(state, w.env["a"]["MASH_OWNER"], w.env["a"]["MASH_NAME"])}
+	eventually(t, 15*time.Second, "thread id in the owner record after the retry bind", func() bool {
+		o := sp.Owner()
+		return strings.Contains(o, `"session":"019bbbbb-thread"`) && strings.Contains(o, `"host":"codex"`)
+	})
+}

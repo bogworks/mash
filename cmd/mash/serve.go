@@ -373,7 +373,13 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Det
 				go retrySpool(ctx, ep, func() (spool.Spool, error) {
 					d, err := endpoint.SpoolDir(cfg)
 					return spool.Spool{Dir: d}, err
-				}, ownerTok, &src.owned)
+				}, ownerTok, &src.owned, func(bound spool.Spool) {
+					// A host that learns its session id late needs the thread id recorded after a retry bind too: the
+					// owner record is otherwise never rewritten and hooks refuse the waiting mail.
+					if so, ok := adapter.(host.SessionOwner); ok {
+						trackThread(ctx, srv, so, bound, ownerTok, stderr)
+					}
+				})
 			} else if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
@@ -1171,11 +1177,11 @@ func warnLeaseRollup(ctx context.Context, ep *endpoint.Endpoint, stderr io.Write
 }
 
 // spoolRetryEvery is how often a spool that failed at start is tried again under MASH_SPOOL_REQUIRED.
-const spoolRetryEvery = 5 * time.Second
+var spoolRetryEvery = 5 * time.Second
 
 // retrySpool binds the spool in the background once it works, until ctx ends. The held mail was never acked, so the
-// inbox redelivers it and it is spooled from the first message.
-func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spool, error), owner string, owned *atomic.Pointer[time.Time]) {
+// inbox redelivers it and it is spooled from the first message. onBound, when not nil, runs once with the bound spool.
+func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spool, error), owner string, owned *atomic.Pointer[time.Time], onBound func(spool.Spool)) {
 	t := time.NewTicker(spoolRetryEvery)
 	defer t.Stop()
 	for {
@@ -1191,6 +1197,9 @@ func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spo
 		}
 		if err == nil {
 			owned.Store(&boundAt)
+			if onBound != nil {
+				onBound(s)
+			}
 			return
 		}
 		if ctx.Err() != nil {
