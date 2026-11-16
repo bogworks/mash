@@ -34,6 +34,23 @@ type Claude struct{}
 
 func (Claude) Name() string { return "claude" }
 
+// SessionSources: Claude Code sets CLAUDE_CODE_SESSION_ID, puts session_id in the hook JSON, and its process is the
+// session.
+func (Claude) SessionSources() SessionSources {
+	return SessionSources{Env: "CLAUDE_CODE_SESSION_ID", HookField: "session_id", AncestryUnique: true}
+}
+
+// Wake: Claude Code takes the MCP channel notification.
+func (Claude) Wake() WakeKind { return WakeChannel }
+
+// Words names Claude Code in notices and status lines.
+func (Claude) Words() Words {
+	return Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): "}
+}
+
+// ClaudeSettingsChecks: Claude Code is the host whose settings files status reads.
+func (Claude) ClaudeSettingsChecks() bool { return true }
+
 // Trigger reads Claude Code's hook JSON.
 func (Claude) Trigger(stdin []byte, env func(string) string) (Trigger, bool) {
 	var in struct {
@@ -62,12 +79,12 @@ type ownerRecord struct {
 	Launch  string `json:"launch,omitempty"`
 }
 
-// OwnerToken is the JSON owner record of the serve that holds the lease: its parent pid, its CLAUDE_CODE_SESSION_ID
+// OwnerToken is the JSON owner record of the serve that holds the lease: its parent pid, its session id (SessionSources.Env)
 // and its MASH_LAUNCH_TOKEN.
-func (Claude) OwnerToken(env func(string) string) string {
+func (c Claude) OwnerToken(env func(string) string) string {
 	r := ownerRecord{PID: os.Getppid()}
 	if env != nil {
-		r.Session, r.Launch = env("CLAUDE_CODE_SESSION_ID"), env("MASH_LAUNCH_TOKEN")
+		r.Session, r.Launch = SessionID(c, env), env("MASH_LAUNCH_TOKEN")
 	}
 	b, _ := json.Marshal(r)
 	return string(b)
@@ -189,7 +206,7 @@ func differs(hook, owner string) string {
 }
 
 // SpoolsFromStart: Claude Code takes channel events, so mail is the channel's until a hook first runs.
-func (Claude) SpoolsFromStart() bool { return false }
+func (c Claude) SpoolsFromStart() bool { return c.Wake() != WakeChannel }
 
 // Waker: Claude Code takes the wake as the MCP channel notification itself.
 func (Claude) Waker(notify func(text string, meta map[string]string) error) func(text string, meta map[string]string) error {

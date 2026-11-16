@@ -307,3 +307,42 @@ func TestPresentMarksDigestEntriesListed(t *testing.T) {
 		t.Fatal("a mark Waiting set survived a full showing")
 	}
 }
+
+func TestClaudeSessionSourcesWakeAndWords(t *testing.T) {
+	c := Claude{}
+	src := c.SessionSources()
+	if src != (SessionSources{Env: "CLAUDE_CODE_SESSION_ID", HookField: "session_id", AncestryUnique: true}) {
+		t.Fatalf("sources %+v", src)
+	}
+	// Trigger's struct tag must agree with the declared hook field.
+	in, _ := json.Marshal(map[string]string{"hook_event_name": "PostToolUse", src.HookField: "S9"})
+	if tr, ok := c.Trigger(in, nil); !ok || tr.SessionID != "S9" {
+		t.Fatalf("Trigger does not read HookField %q: %+v %v", src.HookField, tr, ok)
+	}
+	if got := SessionID(c, func(k string) string { return map[string]string{"CLAUDE_CODE_SESSION_ID": "S1"}[k] }); got != "S1" {
+		t.Fatalf("SessionID %q", got)
+	}
+	if SessionID(c, nil) != "" {
+		t.Fatal("SessionID with no env")
+	}
+	if c.Wake() != WakeChannel || c.SpoolsFromStart() {
+		t.Fatalf("wake %v spoolsFromStart %v", c.Wake(), c.SpoolsFromStart())
+	}
+	if w := c.Words(); w != (Words{Product: "Claude Code", Process: "Claude process", ServicePrefix: "Claude Code (mash): "}) {
+		t.Fatalf("words %+v", w)
+	}
+	if !c.ClaudeSettingsChecks() {
+		t.Fatal("Claude runs the settings checks")
+	}
+}
+
+// The owner record is written byte for byte as before the session id came from SessionSources.
+func TestOwnerTokenGolden(t *testing.T) {
+	env := func(k string) string {
+		return map[string]string{"CLAUDE_CODE_SESSION_ID": "S1", "MASH_LAUNCH_TOKEN": "tok"}[k]
+	}
+	want := `{"pid":` + strconv.Itoa(os.Getppid()) + `,"session":"S1","launch":"tok"}`
+	if got := (Claude{}).OwnerToken(env); got != want {
+		t.Fatalf("owner record %s, want %s", got, want)
+	}
+}

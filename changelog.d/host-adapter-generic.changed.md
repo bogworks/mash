@@ -1,0 +1,1 @@
+Internal refactor: where a host keeps its session id, how it is woken and what its notices call it now come from the host adapter instead of being written into the callers; Claude Code is still the only host, and no output changes.

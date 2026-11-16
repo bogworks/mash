@@ -167,12 +167,14 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 // serve runs the endpoint manager for one Claude session until stdin closes.
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
 	applyRetryTiming(cfg)
+	endpoint.SetSessionEnv(adapter.SessionSources().Env)
+	endpoint.SetServicePrefix(adapter.Words().ServicePrefix)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	// Without a usable identity, still answer MCP (the plugin may be enabled in every session) with only the
 	// tools that need no endpoint, version and status, and say why.
-	src := &statusSource{cfg: cfg, cfgErr: cfgErr, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: adapter, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
 	reportSettings(src, stderr)
 	degraded := func(instr string, notify bool) int {
 		srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, infoTools(src))
@@ -194,7 +196,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), cfgErr), true)
 	}
 	if cfg.Inert() {
-		return degraded(endpoint.InertInstructions, false)
+		return degraded(endpoint.InertInstructions(adapter.Words().Product), false)
 	}
 	// A policy.md whose path is absent is an empty policy (a dangling symlink is present, so not absent); one that exists but cannot be read is a configuration failure, never
 	// a silent drop of the operator's restrictions.
@@ -214,7 +216,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
 	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
 	// Removed on every exit, and at once when the first attempt binds (the bind also removes it, spool.OwnRecord).
-	clearWaiter, noteHeld := noteWaiting(cfg)
+	clearWaiter, noteHeld := noteWaiting(cfg, adapter)
 	defer clearWaiter()
 	startPPID := getppid()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
@@ -1047,14 +1049,14 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // removes the record, and the function that records who holds the lease (the spool's lease-wait state, which a hook of
 // this session turns into a notice, ADR 0092); the removal removes that state too. A spool that cannot be written costs
 // only these.
-func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
+func noteWaiting(cfg config.Config, adapter host.Adapter) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
 	dir, err := endpoint.SpoolDir(cfg)
 	if err != nil {
 		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}
 	s := spool.Spool{Dir: dir}
 	ppid := os.Getppid()
-	session := os.Getenv("CLAUDE_CODE_SESSION_ID")
+	session := host.SessionID(adapter, os.Getenv)
 	if s.Init() != nil {
 		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}

@@ -54,6 +54,9 @@ func TestRegistrationMetadata(t *testing.T) {
 		md["mail_subject"] != "agents.mail.cc.o.a" {
 		t.Fatalf("service info %+v", info)
 	}
+	if info.Description != "Claude Code (mash): a" {
+		t.Fatalf("service description %q", info.Description)
+	}
 	if info.ID != a.Instance() {
 		t.Fatalf("instance id %q vs %q", info.ID, a.Instance())
 	}

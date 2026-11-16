@@ -540,6 +540,12 @@ type fakeHost struct {
 }
 
 func (f *fakeHost) Name() string { return "fake" }
+func (f *fakeHost) SessionSources() host.SessionSources {
+	return host.Claude{}.SessionSources()
+}
+func (f *fakeHost) Wake() host.WakeKind        { return host.WakeChannel }
+func (f *fakeHost) Words() host.Words          { return host.Claude{}.Words() }
+func (f *fakeHost) ClaudeSettingsChecks() bool { return false }
 func (f *fakeHost) Trigger([]byte, func(string) string) (host.Trigger, bool) {
 	return host.Trigger{Event: "E"}, f.trigger
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 // SessionIdent is who this serve process is, as far as a later serve of the same Claude Code session can tell: its
@@ -16,11 +17,31 @@ type SessionIdent struct {
 	PPID, PStart, Session string
 }
 
+// sessionEnv is the environment variable that holds the host's session id; serve sets it from the host adapter
+// (internal/host imports this package, so it cannot be asked here).
+var sessionEnv atomic.Pointer[string]
+
+// sessionEnvName is the variable set by SetSessionEnv, else CLAUDE_CODE_SESSION_ID.
+func sessionEnvName() string {
+	if p := sessionEnv.Load(); p != nil {
+		return *p
+	}
+	return "CLAUDE_CODE_SESSION_ID"
+}
+
+// SetSessionEnv names the environment variable OurSession reads the session id from. Call it before OurSession is first
+// used; "" leaves the default.
+func SetSessionEnv(name string) {
+	if name != "" {
+		sessionEnv.Store(&name)
+	}
+}
+
 // OurSession is this process's SessionIdent; a variable so tests can stand in for another session or none.
 var OurSession = func() SessionIdent { return ourSessionOnce() }
 
 var ourSessionOnce = sync.OnceValue(func() SessionIdent {
-	id := SessionIdent{Session: os.Getenv("CLAUDE_CODE_SESSION_ID")}
+	id := SessionIdent{Session: os.Getenv(sessionEnvName())}
 	if pp := os.Getppid(); pp > 1 { // a parent of 1 or less is no parent: never an identity
 		id.PPID = strconv.Itoa(pp)
 		id.PStart, _ = procStart(pp)

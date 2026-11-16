@@ -60,7 +60,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	defer unlock()
 	id := host.HookIdentity{SessionID: trig.SessionID, LaunchToken: getenv(env, "MASH_LAUNCH_TOKEN")}
 	if id.SessionID == "" { // the stdin session_id wins; the environment only fills in when stdin has none
-		id.SessionID = getenv(env, "CLAUDE_CODE_SESSION_ID")
+		id.SessionID = host.SessionID(adapter, env)
 	}
 	for _, w := range sp.Waiters() {
 		id.Waiters = append(id.Waiters, w.PID)
@@ -90,8 +90,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			sum := sha256.Sum256([]byte(id.SessionID + "\x00" + who))
 			key := hex.EncodeToString(sum[:])[:16]
 			if !sp.Told(key) {
-				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
-					host.OwnerPID(sp.Owner()), cfg.DisplayName())
+				text := otherLaunchNotice(adapter.Words(), host.OwnerPID(sp.Owner()), cfg.DisplayName())
 				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
 					told = true
 					if err := sp.NoteTold(key); err != nil {
@@ -244,4 +243,11 @@ func failpoint(env func(string) string, stderr io.Writer, name string) {
 		fmt.Fprintf(stderr, "mash hook: failpoint %s\n", name)
 		time.Sleep(time.Hour)
 	}
+}
+
+// otherLaunchNotice is the in-session notice a hook of another launch of the session is shown (ADR 0043); pid is the
+// owning process's, name the endpoint's display name.
+func otherLaunchNotice(w host.Words, pid int, name string) string {
+	return fmt.Sprintf("mash: this copy of the session is not receiving mail. Another %s of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
+		w.Process, pid, name)
 }

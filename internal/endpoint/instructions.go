@@ -63,8 +63,10 @@ func HookFrame(name string, trusts []sap.Trust) string {
 	return b.String()
 }
 
-// InertInstructions is shown when this session has no mash identity.
-const InertInstructions = "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off. Start Claude Code with MASH_NAME=<endpoint> to give this session a mailbox. Call the status tool to see what is missing."
+// InertInstructions is shown when this session has no mash identity; product is the host's name (Words.Product).
+func InertInstructions(product string) string {
+	return "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off. Start " + product + " with MASH_NAME=<endpoint> to give this session a mailbox. Call the status tool to see what is missing."
+}
 
 // ErrorInstructions is shown when the endpoint could not start.
 func ErrorInstructions(name string, err error) string {

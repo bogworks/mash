@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -219,6 +220,23 @@ func (e *Endpoint) publishHeartbeat() {
 	}
 }
 
+// servicePrefix starts the micro service description (the endpoint name follows); serve sets it from the host's Words.
+var servicePrefix atomic.Pointer[string]
+
+// SetServicePrefix sets the description prefix; "" leaves the default "Claude Code (mash): ".
+func SetServicePrefix(p string) {
+	if p != "" {
+		servicePrefix.Store(&p)
+	}
+}
+
+func serviceDescription(name string) string {
+	if p := servicePrefix.Load(); p != nil {
+		return *p + name
+	}
+	return "Claude Code (mash): " + name
+}
+
 // StartService registers this endpoint as a SAP 0.3 agent (spec 7.4) and
 // starts the signed heartbeat. Prompts that pass verification go to onPrompt.
 func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent)) error {
@@ -230,7 +248,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     CurrentVersion(),
-		Description: "Claude Code (mash): " + e.cfg.Name,
+		Description: serviceDescription(e.cfg.Name),
 		Metadata: map[string]string{
 			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.key,
 			"protocol_version": sap.ProtocolVersion, "user_nkey": e.id.User, "account": e.id.Account,

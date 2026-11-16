@@ -17,6 +17,16 @@ import (
 // Adapter is how mash talks to the agent host a session runs in (Claude Code today).
 type Adapter interface {
 	Name() string
+	// SessionSources says where this host puts its session id: serve and the hook read it from here, never from a
+	// host-specific name spelled out in the callers.
+	SessionSources() SessionSources
+	// Wake says how serve wakes an idle session of this host.
+	Wake() WakeKind
+	// Words is the host's name for itself and its processes, as the notices and status lines say it.
+	Words() Words
+	// ClaudeSettingsChecks is true when `mash status` should run the checks that read Claude Code's settings files
+	// (channel allowlist, managed settings, MCP environment) and warn on the client version. Only Claude has them.
+	ClaudeSettingsChecks() bool
 	// Trigger reads a host hook invocation; ok=false means it is not a delivery point for us (do nothing).
 	Trigger(stdin []byte, env func(string) string) (t Trigger, ok bool)
 	// OwnerToken is what the lease-holding serve records as the spool's owner. env reads serve's environment.
@@ -27,11 +37,52 @@ type Adapter interface {
 	Match(owner string, hook HookIdentity) (ok bool, why string)
 	// Present renders entries for the host; shown are the entries actually rendered (only they are drained).
 	Present(p Presentation, entries []spool.Entry) (out []byte, shown []spool.Entry)
-	// SpoolsFromStart is true when the host takes no channel delivery (Pi never sees the channel notification): serve
-	// then spools mail from its first message and acks only what a hook drained, never on a channel write.
+	// SpoolsFromStart is true whenever Wake is not WakeChannel: the host takes no channel delivery (Pi never sees the
+	// channel notification), so serve then spools mail from its first message and acks only what a hook drained, never on a channel write.
 	SpoolsFromStart() bool
 	// Waker returns the delivery serve uses to wake the session, given the MCP channel notification.
 	Waker(notify func(text string, meta map[string]string) error) func(text string, meta map[string]string) error
+}
+
+// SessionSources is where a host carries its session id.
+type SessionSources struct {
+	// Env is the environment variable that holds the session id, in serve's and the hook's environment.
+	Env string
+	// HookField is the key of the session id in the hook's stdin JSON.
+	HookField string
+	// AncestryUnique is true when the host's process ancestry identifies the session (serve's parent pid is the
+	// host process, ADR 0040 rule 3).
+	AncestryUnique bool
+}
+
+// SessionID is the session id a's host sets in the environment env reads; "" when none, or env is nil.
+func SessionID(a Adapter, env func(string) string) string {
+	if env == nil {
+		return ""
+	}
+	return env(a.SessionSources().Env)
+}
+
+// WakeKind is how a host is woken when mail arrives for an idle session.
+type WakeKind int
+
+const (
+	// WakeChannel is the MCP channel notification serve already sends (Claude Code).
+	WakeChannel WakeKind = iota
+	// WakeCommand is a command the host runs to be woken.
+	WakeCommand
+	// WakeNone is a host with no wake: mail waits for a hook or a poll.
+	WakeNone
+)
+
+// Words is how notices and status lines name the host.
+type Words struct {
+	// Product is the host product ("Claude Code").
+	Product string
+	// Process is what its process is called in a notice ("Claude process").
+	Process string
+	// ServicePrefix starts the micro service description; the endpoint name follows it ("Claude Code (mash): ").
+	ServicePrefix string
 }
 
 // Trigger is a recognised host hook invocation. Subagent is set when it ran for a subagent's tool call, not the main

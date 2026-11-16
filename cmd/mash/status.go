@@ -29,7 +29,9 @@ import (
 // statusSource is what the status tool reads, live, in every serve mode. state is nil when no endpoint start was
 // attempted (no name, or a config error); srv is set once the MCP server exists.
 type statusSource struct {
-	cfg        config.Config
+	cfg config.Config
+	// adapter is the host the session runs in; nil reads as Claude Code, the only host there is.
+	adapter    host.Adapter
 	cfgErr     error
 	pluginRoot string
 	state      *atomic.Pointer[sessionState]
@@ -44,6 +46,14 @@ type statusSource struct {
 	// cli is `mash status` from a shell: nothing is connected, so the live-only lines (connection, delivery) say
 	// that a running session reports them instead of printing a state they cannot know.
 	cli bool
+}
+
+// host is the adapter status words and checks come from.
+func (s *statusSource) host() host.Adapter {
+	if s.adapter == nil {
+		return host.Claude{}
+	}
+	return s.adapter
 }
 
 // settings reads Claude Code's managed sources and the home they were read from. home is "" when it is unknown.
@@ -106,7 +116,7 @@ func statusTool(src *statusSource) mcp.Tool {
 // It never prints the contents of the creds file, and strips a password from the url.
 func statusText(src *statusSource) string {
 	cfg := src.cfg
-	lines := []string{nameLine(cfg)}
+	lines := []string{nameLineFor(cfg, src.host().Words())}
 	if l := identityLine(cfg); l != "" {
 		lines = append(lines, l)
 	}
@@ -120,9 +130,11 @@ func statusText(src *statusSource) string {
 		lines = slices.Insert(lines, len(lines)-1, l)
 	}
 	lines = append(lines, clockLine(clockSkewOf(src)))
-	lines = append(lines, allowlistLine(src))
-	if l := environmentLine(src); l != "" {
-		lines = append(lines, l)
+	if src.host().ClaudeSettingsChecks() {
+		lines = append(lines, allowlistLine(src))
+		if l := environmentLine(src); l != "" {
+			lines = append(lines, l)
+		}
 	}
 	lines = append(lines, deliveryLines(src)...)
 	if l := spoolFaultLine(src); l != "" {
@@ -143,7 +155,11 @@ func statusText(src *statusSource) string {
 	lines = append(lines, relayLine(src))
 	lines = append(lines, "version: "+versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil))
 	if !src.cli {
-		lines = append(lines, clientStatusLine(src.clientInfo()))
+		if src.host().ClaudeSettingsChecks() {
+			lines = append(lines, clientStatusLine(src.clientInfo()))
+		} else {
+			lines = append(lines, clientLine(src.clientInfo()))
+		}
 	}
 	if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
 		lines = append(lines, l)
@@ -151,16 +167,19 @@ func statusText(src *statusSource) string {
 	return strings.Join(lines, "\n")
 }
 
-func nameLine(cfg config.Config) string {
+func nameLine(cfg config.Config) string { return nameLineFor(cfg, host.Claude{}.Words()) }
+
+// nameLineFor is nameLine with the host's words.
+func nameLineFor(cfg config.Config, w host.Words) string {
 	switch {
 	case cfg.Name == "":
-		return "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>"
+		return "name: MISSING - not set. Next: start " + w.Product + " with MASH_NAME=<endpoint>"
 	case cfg.AgentToken != "":
 		if _, err := cfg.Identity(); err != nil {
 			return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_AGENT_TOKEN, owner or MASH_NAME", err)
 		}
 	case !config.ValidName(cfg.Name):
-		return fmt.Sprintf("name: FAILED - %q is not a valid endpoint name. Next: start Claude Code with MASH_NAME=<endpoint>, using 1-48 lower-case letters, digits and single hyphens, starting with a letter", cfg.Name)
+		return fmt.Sprintf("name: FAILED - %q is not a valid endpoint name. Next: start %s with MASH_NAME=<endpoint>, using 1-48 lower-case letters, digits and single hyphens, starting with a letter", cfg.Name, w.Product)
 	}
 	return "name: OK - " + cfg.DisplayName()
 }
@@ -317,7 +336,7 @@ func connectionLine(src *statusSource) string {
 	case st.ep != nil:
 		return fmt.Sprintf("connection: OK - endpoint %s is running", cfg.DisplayName())
 	case st.failed != nil:
-		return fmt.Sprintf("connection: FAILED - %s. Next: fix the cause (see the creds and config lines) and restart Claude Code", redactText(st.failed.Error()))
+		return fmt.Sprintf("connection: FAILED - %s. Next: fix the cause (see the creds and config lines) and restart %s", redactText(st.failed.Error()), src.host().Words().Product)
 	case st.retrying != nil:
 		return fmt.Sprintf("connection: RETRYING - could not reach the server, last error: %s. mash retries on its own", redactText(st.retrying.Error()))
 	case st.superseded != nil:
@@ -446,10 +465,10 @@ func deliveryLines(src *statusSource) []string {
 			out = append(out, fmt.Sprintf("delivery: hooks have run in this session (last at %s); the last wake started a turn; mail also arrives with tool results", at.Format(time.RFC3339)))
 		} else if st, wakes := hooklessOf(src); st == endpoint.HooklessProven {
 			out = append(out, fmt.Sprintf("delivery: DEGRADED - no mash hook has run since %s although this session has made tool calls. Likely cause: %s. Mail now: read each message with the read tool. Next: %s",
-				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own)))
+				own.Format(time.RFC3339), hooklessCause(sp, *own), hooklessFix(sp, *own, src.host().Words())))
 		} else if rat, why, ok := sp.Refused(); ok && rat.After(*own) {
-			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start Claude Code with MASH_LAUNCH_TOKEN=$(uuidgen) claude ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
-				redactText(why), rat.Format(time.RFC3339)))
+			out = append(out, fmt.Sprintf("delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (%s, last at %s). Next: start %s with MASH_LAUNCH_TOKEN=$(uuidgen) claude ... (a fresh value per launch; one reused across launches defeats the check), and report your setup (see docs/operations.md)",
+				redactText(why), rat.Format(time.RFC3339), src.host().Words().Product))
 		} else if st == endpoint.HooklessSuspected {
 			out = append(out, fmt.Sprintf("delivery: SUSPECTED - the last %d wakes started no turn (no hook since %s); channel writes are not counted as delivery; re-waking stopped", wakes, own.Format(time.RFC3339)))
 		} else if wakes > 0 {
@@ -608,9 +627,9 @@ func hooklessCause(sp spool.Spool, own time.Time) string {
 	return "hooks are disabled (disableAllHooks, or allowManagedHooksOnly without mash force-enabled), or not loaded, or `mash` is not on the hook's PATH (see hook.log)"
 }
 
-func hooklessFix(sp spool.Spool, own time.Time) string {
+func hooklessFix(sp spool.Spool, own time.Time, w host.Words) string {
 	if rat, _, ok := sp.Refused(); ok && rat.After(own) {
-		return "start Claude Code with MASH_LAUNCH_TOKEN=<any unique value>, and report your setup (see docs/operations.md)"
+		return "start " + w.Product + " with MASH_LAUNCH_TOKEN=<any unique value>, and report your setup (see docs/operations.md)"
 	}
 	return "remove disableAllHooks from the settings; under allowManagedHooksOnly an administrator force-enables mash@mash in managed enabledPlugins; check hook.log (see docs/operations.md)"
 }
