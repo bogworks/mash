@@ -1,0 +1,1 @@
+`mash serve` exiting on stdin EOF is now a documented guarantee, pinned by tests: it releases the endpoint lease and exits within 5 s, an EOF during the first open is acted on once that open returns, and a superseded serve never renews its lease.
