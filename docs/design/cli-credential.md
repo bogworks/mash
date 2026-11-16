@@ -42,7 +42,7 @@ mashctl credential show UABC...XYZ
 - **Output.** Text by default. `--json` prints core's `Result` as one JSON object on stdout (outcome, address, public_key, jwt, tags, generation, issued_at, refusal) and nothing else on stdout; text goes to stderr only when `--json` is not set. `--out FILE` writes the JWT (mode 0600) and the text result omits the `jwt` field.
 - **A seed is never accepted.** A seed in `--key`, `--request` or stdin is refused with core's `seed_in_request` and is not echoed; the text says the key should be treated as exposed.
 - **Server flags.** `issue` and `show` take `--servers N` and `--sys-creds FILE` like `add` (#695), and read the same environment.
-- **Exit codes** follow ADR 0134 and `policydirect`: issued/shown 0, refused 1 (the result's `refusal.code` says why), error 6, usage 2. `show` of a key with no record is 1 (`not_found`).
+- **Exit codes** follow ADR 0144 and `policydirect`: issued/shown 0, refused 1 (the result's `refusal.code` says why), error 6, usage 2. `show` of a key with no record is 1 (`not_found`).
 - **`--help`** on every verb prints the usage and changes nothing (#697).
 
 ## 3. next_steps, as exact commands
@@ -77,7 +77,7 @@ Write the endpoint host's `config.json`, expire a credential, take a signed requ
 ## 7. Decisions
 
 - **Where the endpoint verbs live.** `mashctl` is not on the endpoint's host (ADR 0131). `key` and `install` are `mash credential key|install`: no NATS, no operator keys. `mashctl credential key|install` also exist for a single host, one shared implementation (`internal/credential`).
-- **Revoke.** `mashctl credential revoke PUB [--servers N] [--sys-creds FILE] [--json]` revokes a key by public key. Outcome words and exit codes follow ADR 0134 (revoked and unchanged 0, refused 1, partial 5, error 6, usage 2). A key with no issue record is refused `not_found` unless a server already revokes it.
+- **Revoke.** `mashctl credential revoke PUB [--servers N] [--sys-creds FILE] [--json]` revokes a key by public key. Outcome words and exit codes follow ADR 0144 (revoked and unchanged 0, refused 1, partial 5, error 6, usage 2). A key with no issue record is refused `not_found` unless a server already revokes it.
 - **`--endpoint`.** Defaults to the endpoint of the address, found in the directory (a legacy `<name>` record is governed in place, #702). If the directory has none or more than one, refuse and name the flag.
 - **Output.** `issue` prints the JWT on stdout by default (no seed in it); `--out FILE` writes it with mode 0600 and refuses an existing file without `--force`. Nothing that holds a seed goes to stdout: `key` writes the seed to its file and prints only the public key, and `install` writes the creds file itself.
 - **`show`.** Takes an address (every key at it) or a public key.
