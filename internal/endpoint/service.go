@@ -17,7 +17,6 @@ import (
 	"github.com/nats-io/nats.go/micro"
 	"github.com/nats-io/nuid"
 
-	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -177,8 +176,96 @@ func (e *Endpoint) promptMetadata() map[string]string {
 	return map[string]string{"max_payload": "1MB", "attachments_ok": "false", "min_sender_trust": "signed"}
 }
 
-// heartbeat builds the SAP §8.3 payload (also the status reply).
-func (e *Endpoint) heartbeat() []byte {
+// sapFields are the §8.3 field names an added field must not reuse.
+var sapFields = map[string]bool{"agent": true, "owner": true, "session": true, "instance_id": true, "ts": true,
+	"interval_s": true, "protocol_version": true, "endpoints": true}
+
+// SetHeartbeatExtras gives the endpoint the provider of its own heartbeat fields (SAP 0.3.1 §8.3), with the contract
+// of the SAP Go SDK's host.WithHeartbeatExtras: it is read once per build, and its fields go after the §8.3 fields on
+// every heartbeat and every status reply. A provider that panics, returns a §8.3 field name or returns a value that
+// does not marshal costs that build all its extras, never the beat; the failure is logged without its text. nil
+// removes the provider.
+func (e *Endpoint) SetHeartbeatExtras(f func() map[string]any) {
+	if f == nil {
+		e.hbExtras.Store(nil)
+		return
+	}
+	e.hbExtras.Store(&f)
+}
+
+// SetStatusExtras gives the endpoint the provider of the fields only the status reply carries, under the same
+// failure rules. Its fields may not reuse a §8.3 name or a key the heartbeat carries. nil removes the provider.
+func (e *Endpoint) SetStatusExtras(f func() map[string]any) {
+	if f == nil {
+		e.stExtras.Store(nil)
+		return
+	}
+	e.stExtras.Store(&f)
+}
+
+// readExtras reads one provider and returns its fields as raw JSON, or nil when there is none or its answer cannot go
+// on the wire. banned names fields the answer may not reuse. A failure is logged (when logging) with the field name
+// only, never the panic value or the error text.
+func (e *Endpoint) readExtras(p *func() map[string]any, what string, banned func(string) bool, logging bool) map[string]json.RawMessage {
+	if p == nil {
+		return nil
+	}
+	fail := func(msg string, args ...any) {
+		if logging {
+			e.log.Printf(msg, args...)
+		}
+	}
+	var m map[string]any
+	ok := func() (ok bool) {
+		defer func() {
+			if recover() != nil {
+				fail("%s extras provider panicked; building without extras", what)
+				ok = false
+			}
+		}()
+		m = (*p)()
+		return true
+	}()
+	if !ok || len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		if sapFields[k] || (banned != nil && banned(k)) {
+			fail("%s extras reuse a field name already in the payload; building without extras (field %q)", what, k)
+			return nil
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			fail("%s extras do not serialize; building without extras (field %q)", what, k)
+			return nil
+		}
+		out[k] = b
+	}
+	return out
+}
+
+// merge adds extra to the JSON object payload. With nothing to add it returns payload itself.
+func merge(payload []byte, extra map[string]json.RawMessage) []byte {
+	if len(extra) == 0 {
+		return payload
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(payload, &m) != nil {
+		return payload
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return payload
+	}
+	return b
+}
+
+// base is the §8.3 payload without any added field.
+func (e *Endpoint) base() []byte {
 	type ep struct {
 		Subject  string            `json:"subject"`
 		Metadata map[string]string `json:"metadata"`
@@ -200,46 +287,45 @@ func (e *Endpoint) heartbeat() []byte {
 	return b
 }
 
-// SetActivity gives the endpoint the reader of what the harness is doing; nil, or a reader that reports absent,
-// means the status reply is the plain heartbeat.
-func (e *Endpoint) SetActivity(f func() (activity.Activity, bool)) {
-	if f == nil {
-		e.activity.Store(nil)
-		return
-	}
-	e.activity.Store(&f)
-}
-
-// statusPayload is the status reply: the heartbeat's fields plus, when the activity reader reports one, `state`
-// and, for a blocked state with a kind, `kind` (SAP 0.3.1 §8.7.2). Nothing else of the activity (since, source)
-// goes on the wire. The published heartbeat never carries them.
-func (e *Endpoint) statusPayload() []byte {
-	hb := e.heartbeat()
-	fp := e.activity.Load()
-	if fp == nil {
-		return hb
-	}
-	a, ok := (*fp)()
-	if !ok || a.State == "" {
-		return hb
-	}
-	var m map[string]json.RawMessage
-	if json.Unmarshal(hb, &m) != nil {
-		return hb
-	}
-	m["state"], _ = json.Marshal(string(a.State))
-	if a.State == activity.StateBlocked && a.Kind != "" {
-		m["kind"], _ = json.Marshal(string(a.Kind))
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return hb
-	}
+// heartbeat builds the SAP §8.3 payload plus the heartbeat extras: the one builder of the published beat and of
+// the status reply (§8.7.1).
+func (e *Endpoint) heartbeat() []byte {
+	b, _ := e.build(true)
 	return b
 }
 
-func (e *Endpoint) publishHeartbeat() {
-	payload := e.heartbeat()
+// build is heartbeat() that also returns the extras it carried, marshalled, for noticing a change. A provider is
+// read once per build.
+func (e *Endpoint) build(logging bool) ([]byte, string) {
+	x := e.readExtras(e.hbExtras.Load(), "heartbeat", nil, logging)
+	sig, _ := json.Marshal(x) // a map marshals in sorted key order
+	return merge(e.base(), x), string(sig)
+}
+
+// extrasSig is the heartbeat extras as they would be built now, marshalled, for noticing a change. It calls only the
+// provider (with the same safety rules as build) and logs nothing.
+func (e *Endpoint) extrasSig() string {
+	if e.hbExtras.Load() == nil {
+		return "null"
+	}
+	sig, _ := json.Marshal(e.readExtras(e.hbExtras.Load(), "heartbeat", nil, false)) // the provider only, not the beat
+	return string(sig)
+}
+
+// statusPayload is the status reply: heartbeat() (the same call, so the same added fields) plus the status extras.
+func (e *Endpoint) statusPayload() []byte {
+	hb := e.heartbeat()
+	var have map[string]json.RawMessage
+	if json.Unmarshal(hb, &have) != nil {
+		return hb
+	}
+	x := e.readExtras(e.stExtras.Load(), "status", func(k string) bool { _, dup := have[k]; return dup }, true)
+	return merge(hb, x)
+}
+
+// publishHeartbeat publishes one signed heartbeat and returns the extras signature it carried.
+func (e *Endpoint) publishHeartbeat() string {
+	payload, sig := e.build(true)
 	var hb struct {
 		TS string `json:"ts"`
 	}
@@ -248,13 +334,75 @@ func (e *Endpoint) publishHeartbeat() {
 	h, err := e.id.Sign(e.subj.HB, payload, e.key, ts, "")
 	if err != nil {
 		e.log.Printf("heartbeat: %v", err)
-		return
+		return sig
 	}
 	m := nats.NewMsg(e.subj.HB)
 	m.Data = payload
 	m.Header.Set(sap.HeaderName, h.Encode())
 	if err := e.nc.PublishMsg(m); err != nil {
 		e.log.Printf("heartbeat: %v", err)
+	}
+	return sig
+}
+
+// Off-cycle beats (SAP §8.2 lets each instance choose its interval, and asks for none below 1 s): when the heartbeat
+// extras change, one extra beat goes at once, at most one per offCycleWindow, and the latest value wins. extrasPoll
+// is how often the provider is read for a change. The Endpoint fields beatWindow and beatPoll override them (tests).
+const (
+	offCycleWindow = 2 * time.Second
+	extrasPoll     = 250 * time.Millisecond
+)
+
+// beatLoop publishes the periodic heartbeat and the off-cycle beats until ctx or quit ends it.
+func (e *Endpoint) beatLoop(ctx context.Context, quit <-chan struct{}, sig string) {
+	window, every := offCycleWindow, extrasPoll
+	if e.beatWindow > 0 {
+		window = e.beatWindow
+	}
+	if e.beatPoll > 0 {
+		every = e.beatPoll
+	}
+	t := time.NewTicker(HeartbeatInterval)
+	defer t.Stop()
+	poll := time.NewTicker(every)
+	defer poll.Stop()
+	var lastOff time.Time
+	var trail *time.Timer
+	var trailC <-chan time.Time
+	defer func() {
+		if trail != nil {
+			trail.Stop()
+		}
+	}()
+	off := func() {
+		if e.extrasSig() == sig {
+			return
+		}
+		sig = e.publishHeartbeat()
+		lastOff = time.Now()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-quit:
+			return
+		case <-t.C:
+			sig = e.publishHeartbeat()
+		case <-poll.C:
+			if e.hbExtras.Load() == nil || trailC != nil || e.extrasSig() == sig {
+				continue
+			}
+			if wait := window - time.Since(lastOff); !lastOff.IsZero() && wait > 0 {
+				trail = time.NewTimer(wait)
+				trailC = trail.C
+				continue
+			}
+			off()
+		case <-trailC:
+			trail, trailC = nil, nil
+			off()
+		}
 	}
 }
 
@@ -311,21 +459,8 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		return fmt.Errorf("mash: service registration: %w", err)
 	}
 	started = true
-	e.publishHeartbeat()
-	go func() {
-		t := time.NewTicker(HeartbeatInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.quit:
-				return
-			case <-t.C:
-				e.publishHeartbeat()
-			}
-		}
-	}()
+	sig := e.publishHeartbeat()
+	go e.beatLoop(ctx, s.quit, sig)
 	return nil
 }
 

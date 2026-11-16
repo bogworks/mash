@@ -1,0 +1,2 @@
+`mash serve` reports what its Claude Code session is doing as a `program_status` field (`idle`, `working`, `blocked`, `done`, `error`) in its signed heartbeat and its SAP status reply, and publishes an extra heartbeat within 2 s of a change; the status reply also carries a short `program_detail` title and message. Without a terminal runtime (herdr) it reports `working` or `idle` from Claude Code hooks and never `blocked`
+([ADR 0134](docs/decisions/0134-mash-asks-a-peers-reported-state-over-sap-status-and-shows-it-only-where-who-already-adds-fields.md)).

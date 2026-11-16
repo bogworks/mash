@@ -299,7 +299,8 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			}
 			clearWaiter() // this serve now holds the lease
 		}
-		ep.SetActivity(src.tracker.Current)
+		ep.SetHeartbeatExtras(programStatus(src.tracker.Current))
+		ep.SetStatusExtras(programDetail(cfg.DisplayName(), src.tracker.Current))
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
 		select {

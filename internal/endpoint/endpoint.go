@@ -20,7 +20,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
 
-	"github.com/bogworks/mash/internal/activity"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
@@ -59,8 +58,13 @@ type Endpoint struct {
 	headAt time.Time
 	headOK bool
 
-	// activity reads what the harness is doing, for the status reply (SetActivity); nil for none.
-	activity atomic.Pointer[func() (activity.Activity, bool)]
+	// hbExtras and stExtras are the providers of the heartbeat's own fields and of the status reply's extra fields
+	// (SetHeartbeatExtras, SetStatusExtras); nil for none.
+	hbExtras atomic.Pointer[func() map[string]any]
+	stExtras atomic.Pointer[func() map[string]any]
+	// beatWindow and beatPoll override the off-cycle window and the extras poll (zero: the defaults); tests set them
+	// before StartService.
+	beatWindow, beatPoll time.Duration
 
 	cfg config.Config
 	// ident is the endpoint's identity (cfg.Identity()) and key its directory/stream/lease key, ident.Flat(): the bare
