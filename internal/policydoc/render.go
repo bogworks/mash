@@ -5,9 +5,46 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/policyapply"
 )
 
 const describesLine = "This describes the list set in force, not any installed credential."
+
+// scopeLine and credentialLine open a show or explain: what the output covers, and what it does not check.
+const (
+	scopeLine      = "scope: the list set in force for this account"
+	credentialLine = "credential: not checked (this shows the policy, not any installed credential)"
+	noChangesLine  = "No changes needed"
+)
+
+// renderOpening writes the scope line, the describes line and the credential line.
+func renderOpening(b *strings.Builder) {
+	b.WriteString(scopeLine + "\n" + describesLine + "\n" + credentialLine + "\n")
+}
+
+// checkLines are the per-check lines of a plan: the document, the base generation and the server limits.
+func (p DiffPlan) checkLines() string {
+	base, doc := "base generation: current\n", "document: valid\n"
+	for _, r := range p.Refusals {
+		if r.Stage == listset.StageValidate || r.Stage == listset.StageCheck {
+			doc = "document: invalid\n"
+		}
+		if r.Stage == StageBase || r.Stage == StagePending {
+			base = "base generation: stale\n"
+		}
+	}
+	return doc + base + SizeLimitsLine + "\n"
+}
+
+// onlyUnchanged reports whether every refusal of the plan is the unchanged-content refusal.
+func (p DiffPlan) onlyUnchanged() bool {
+	for _, r := range p.Refusals {
+		if r.Stage != policyapply.StageUnchanged {
+			return false
+		}
+	}
+	return len(p.Refusals) > 0
+}
 
 func list(items []string) string {
 	if len(items) == 0 {
@@ -43,7 +80,7 @@ func renderHeader(b *strings.Builder, h StateHeader) {
 // RenderShow is the plain, line-oriented text of a ShowResult.
 func RenderShow(r ShowResult) string {
 	var b strings.Builder
-	b.WriteString(describesLine + "\n")
+	renderOpening(&b)
 	renderHeader(&b, r.Header)
 	if r.View == nil {
 		b.WriteString("no list set is in force\n")
@@ -70,7 +107,7 @@ func RenderShow(r ShowResult) string {
 // RenderExplain is the plain, line-oriented text of an ExplainResult.
 func RenderExplain(r ExplainResult) string {
 	var b strings.Builder
-	b.WriteString(describesLine + "\n")
+	renderOpening(&b)
 	renderHeader(&b, r.Header)
 	if r.Explanation == nil {
 		b.WriteString("no list set is in force\n")
@@ -95,7 +132,14 @@ func RenderExplain(r ExplainResult) string {
 func RenderPlan(p DiffPlan) string {
 	var b strings.Builder
 	if p.Refused {
-		fmt.Fprintf(&b, "refused: nothing would change\n")
+		if p.onlyUnchanged() {
+			b.WriteString(noChangesLine + "\n" + p.checkLines())
+			for _, r := range p.Refusals {
+				fmt.Fprintf(&b, "  %s\n", r.Reason)
+			}
+			return b.String()
+		}
+		b.WriteString("refused: nothing would change\n" + p.checkLines())
 		for _, r := range p.Refusals {
 			fmt.Fprintf(&b, "  [%s] %s: %s\n", r.Stage, r.Entry, r.Reason)
 		}
@@ -103,9 +147,9 @@ func RenderPlan(p DiffPlan) string {
 	}
 	if p.rotation == "" && !p.completes() && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
-		return "accepted: nothing would change\n" + SizeLimitsLine + "\n" + p.signatureNote()
+		return noChangesLine + "\n" + p.checkLines() + p.signatureNote()
 	}
-	b.WriteString("accepted: this would change\n" + SizeLimitsLine + "\n")
+	b.WriteString("accepted: this would change\n" + p.checkLines())
 	if p.rotation != "" {
 		b.WriteString("rotation: " + p.rotation + "\n")
 	}

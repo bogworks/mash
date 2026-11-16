@@ -1,2 +1,5 @@
-refused: nothing would change
-  [unchanged] list_set: same content as generation 7 in force; nothing to apply
+No changes needed
+document: valid
+base generation: current
+size checked against the default server limits; the apply checks each server's own
+  same content as generation 7 in force; nothing to apply

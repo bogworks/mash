@@ -1,2 +1,5 @@
 refused: nothing would change
+document: valid
+base generation: stale
+size checked against the default server limits; the apply checks each server's own
   [base] base_generation: the document is based on generation 6 and generation 7 is in force: a submission would be refused as stale

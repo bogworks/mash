@@ -1,4 +1,6 @@
+scope: the list set in force for this account
 This describes the list set in force, not any installed credential.
+credential: not checked (this shows the policy, not any installed credential)
 in force: generation 7
 server nats-a: generation 7
 server nats-b: generation 7

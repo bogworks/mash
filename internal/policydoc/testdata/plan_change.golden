@@ -1,4 +1,6 @@
 accepted: this would change
+document: valid
+base generation: current
 size checked against the default server limits; the apply checks each server's own
 receivers c.lead mail: added c.core; removed (none)
 receivers c.lead prompt: added c.core; removed (none)

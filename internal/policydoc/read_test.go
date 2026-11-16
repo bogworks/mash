@@ -244,6 +244,9 @@ func TestDiff(t *testing.T) {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_stale", RenderPlan(p))
+	if !strings.Contains(RenderPlan(p), "\nbase generation: stale\n") || !strings.HasPrefix(RenderPlan(p), "refused: ") {
+		t.Errorf("a stale plan does not say so:\n%s", RenderPlan(p))
+	}
 
 	// Another account is an error.
 	if _, err := Diff(ctx, r, doc(8, 7, func(m map[string]any) { m["account"] = "ACXOTHER" }), nil, nil, nil); err == nil {
@@ -297,7 +300,7 @@ func TestDiffNothingChanges(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 	text := RenderPlan(p)
-	if text != "refused: nothing would change\n  [unchanged] list_set: same content as generation 7 in force; nothing to apply\n" {
+	if !strings.HasPrefix(text, "No changes needed\ndocument: valid\n") || !strings.HasSuffix(text, "\n  same content as generation 7 in force; nothing to apply\n") || strings.Contains(text, "refused") {
 		t.Fatalf("%q", text)
 	}
 	golden(t, "plan_unchanged", text)
@@ -313,7 +316,7 @@ func TestDiffUnchangedRotationStep(t *testing.T) {
 	withNext := doc(8, 7, func(m map[string]any) { m["next_submitter"] = next })
 
 	p, err := Diff(ctx, r, withNext, nil, &RotationContext{Adopted: true, Marker: store.Marker{Account: testAccount, Submitter: cur}, Held: []string{userKey(t)}}, nil)
-	if err != nil || p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: next submitter "+next+" would be recorded\n") {
+	if err != nil || p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\ndocument: valid\nbase generation: current\n"+SizeLimitsLine+"\nrotation: next submitter "+next+" would be recorded\n") {
 		t.Fatalf("starts a rotation: %+v, %v", p, err)
 	}
 	// The caller read no marker: the rotation is shown, not validated, and is a step.
@@ -322,7 +325,7 @@ func TestDiffUnchangedRotationStep(t *testing.T) {
 	}
 	pend := &RotationContext{Adopted: true, Marker: store.Marker{Account: testAccount, Submitter: cur, NextSubmitter: pendKey}, Signer: pendKey}
 	p, err = Diff(ctx, r, same, nil, pend, nil)
-	if err != nil || p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pendKey+"\n") {
+	if err != nil || p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\ndocument: valid\nbase generation: current\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pendKey+"\n") {
 		t.Fatalf("completes a rotation: %+v, %v", p, err)
 	}
 	// Pending, but the signer is not the pending key and no next_submitter: not a step. With no signer named and none
@@ -445,7 +448,7 @@ func TestDiffRotation(t *testing.T) {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	text := RenderPlan(p)
-	want := "accepted: this would change\n" + SizeLimitsLine + "\nrotation: next submitter " + next + " would be recorded\n"
+	want := "accepted: this would change\ndocument: valid\nbase generation: current\n" + SizeLimitsLine + "\nrotation: next submitter " + next + " would be recorded\n"
 	if !strings.HasPrefix(text, want) || strings.Contains(text, "nothing would change") {
 		t.Fatalf("%q", text)
 	}
@@ -488,7 +491,7 @@ func TestDiffRotation(t *testing.T) {
 	rc := adopted(pend)
 	rc.Signer = pend.NextSubmitter
 	p, _ = Diff(ctx, r, doc(8, 7, nil), nil, rc, nil)
-	if p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pend.NextSubmitter+"\n") {
+	if p.Refused || !strings.HasPrefix(RenderPlan(p), "accepted: this would change\ndocument: valid\nbase generation: current\n"+SizeLimitsLine+"\nrotation: generation would complete the pending rotation to "+pend.NextSubmitter+"\n") {
 		t.Fatalf("%q", RenderPlan(p))
 	}
 }
@@ -636,5 +639,18 @@ func TestDiffMarkerOfAnotherAccount(t *testing.T) {
 	rc.Marker.Account = testAccount
 	if p := mustDiff(t, r, changedDoc(nil), rc); p.Refused {
 		t.Fatalf("%+v", p)
+	}
+}
+
+// Show and explain open with the scope line, the describes line and the credential line.
+func TestRenderOpening(t *testing.T) {
+	want := scopeLine + "\n" + describesLine + "\n" + credentialLine + "\n"
+	if scopeLine != "scope: the list set in force for this account" {
+		t.Fatal(scopeLine)
+	}
+	for name, text := range map[string]string{"show": RenderShow(ShowResult{}), "explain": RenderExplain(ExplainResult{})} {
+		if !strings.HasPrefix(text, want) {
+			t.Errorf("%s does not open with the scope lines:\n%s", name, text)
+		}
 	}
 }
