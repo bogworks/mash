@@ -194,6 +194,11 @@ func (r Request) AddressParts() (owner, name string, err error) {
 // EndpointIdentity is the identity the request's endpoint names. It is the identity the endpoint tag is built from;
 // whether its owner and name are the address's is decided where the tag is built (listset.EndpointTag).
 func (r Request) EndpointIdentity() (sap.EndpointIdentity, error) {
+	if parts := strings.Split(r.Endpoint, "."); len(parts) == 3 && parts[0] == sap.AgentToken {
+		// cc.<owner>.<name> is the canonical form of a legacy identity (ADR 0138): the agent token "cc" is its own, and
+		// sap.New refuses it for a new-form one.
+		return sap.Legacy(parts[1], parts[2])
+	}
 	id, err := sap.ParseCanonical(r.Endpoint)
 	if err != nil {
 		return id, err

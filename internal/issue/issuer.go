@@ -55,7 +55,9 @@ type Issuer struct {
 	// Claims reads the account JWT the signing key is verified against (see ScopeTTL).
 	Claims     AccountClaims
 	AccountPub string
-	Log        *slog.Logger
+	// Directory is the seam Authority reads for a legacy endpoint (see Authority.Directory); nil refuses one.
+	Directory Directory
+	Log       *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 
@@ -188,7 +190,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 // part a caller sets later is the one used.
 func (is *Issuer) authority() *Authority {
 	return &Authority{ListSet: is.ListSet, Signer: is.Signer, Record: is.Record, Claims: is.Claims, AccountPub: is.AccountPub,
-		Log: is.Log, Now: is.Now, shared: &is.scopes}
+		Directory: is.Directory, Log: is.Log, Now: is.Now, shared: &is.scopes}
 }
 
 // bindingRefusal is the refusal for a key whose record cur is revoked or bound to another address than address.

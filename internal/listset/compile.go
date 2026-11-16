@@ -178,17 +178,16 @@ func template(m *model, owner string, withDeny bool) jwt.Permissions {
 // and does not begin with agents, so it is no address subject and no reach.
 func PolicySubject() string { return "mash.policy" }
 
-// EndpointTag is the endpoint tag of the endpoint id at address: "ep:<flat key>", the flat key being agent_owner_name,
-// lower case. It is the one function every issuer of a user JWT under an owner group's scoped key calls to build the
+// EndpointTag is the endpoint tag of the endpoint id at address: "ep:<flat key>", the flat key being agent_owner_name
+// for a new-form identity and the bare name for a legacy one (id.Flat(), lower case). It is the one function every issuer of a user JWT under an owner group's scoped key calls to build the
 // tag, so the tag comes from mash's own table of the endpoint's identity and never from a request. It refuses an
-// identity whose owner and name are not the address's (a credential must not point at another address's inbox) and a
-// legacy identity (its flat key has no owner, so no template line could be exact for it).
+// identity whose owner and name are not the address's (a credential must not point at another address's inbox). A
+// legacy flat key has no owner and a legacy name belongs to one owner only through the directory, so this function
+// cannot tell whether the name is the address's owner's: the issuer checks that against the directory before it signs
+// a legacy tag (ADR 0138). A legacy flat key cannot equal a new-form one (a new-form flat key has underscores).
 func EndpointTag(id sap.EndpointIdentity, address string) (string, error) {
 	if err := id.Validate(); err != nil {
 		return "", fmt.Errorf("endpoint tag: %w", err)
-	}
-	if id.IsLegacy() {
-		return "", fmt.Errorf("endpoint tag: %s is a legacy identity; policy covers new-form endpoints only", id)
 	}
 	a, reason := parseAddress(address)
 	if reason != "" {
@@ -204,7 +203,13 @@ func EndpointTag(id sap.EndpointIdentity, address string) (string, error) {
 // agent.owner.name of the endpoint, added for address. Any ep tag already in tags is an error: a credential carries
 // one, and it is the issuer's.
 func WithEndpointTag(tags []string, endpoint, address string) ([]string, error) {
-	id, err := sap.ParseCanonical(endpoint)
+	var id sap.EndpointIdentity
+	var err error
+	if parts := strings.Split(endpoint, "."); len(parts) == 3 && parts[0] == sap.AgentToken {
+		id, err = sap.Legacy(parts[1], parts[2]) // cc.<owner>.<name> is a legacy identity (ADR 0138)
+	} else {
+		id, err = sap.ParseCanonical(endpoint)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("endpoint tag: endpoint %q: %s", endpoint, strings.TrimPrefix(err.Error(), "sap: "))
 	}

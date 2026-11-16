@@ -40,6 +40,8 @@ type Config struct {
 	Record issue.Record
 	// Claims reads the account JWT, verified, from every server.
 	Claims issue.AccountClaims
+	// Directory is read only for a legacy endpoint (cc.<owner>.<name>); nil refuses one (fail closed).
+	Directory issue.Directory
 
 	// Records, Revoked and Scan are what Show reads: the record and its history, whether the account JWT revokes a key
 	// on any server, and the connections of the account on every server.
@@ -96,13 +98,14 @@ func FromDirect(d policydirect.Config) (Config, error) {
 	}
 	cl := &clusterClaims{res: apply.NATS{Conn: d.Sys, Inventory: d.Servers}, account: d.Account, servers: d.Servers, trust: d.Trust}
 	return Config{
-		Account: d.Account,
-		ListSet: listSetInForce{d},
-		Signer:  groupSigner{d.Keys},
-		Record:  adminRecord{d.Admin},
-		Claims:  cl,
-		Records: d.Admin,
-		Revoked: cl.revokes,
+		Account:   d.Account,
+		ListSet:   listSetInForce{d},
+		Signer:    groupSigner{d.Keys},
+		Record:    adminRecord{d.Admin},
+		Claims:    cl,
+		Directory: d.Admin,
+		Records:   d.Admin,
+		Revoked:   cl.revokes,
 		Scan: func(ctx context.Context) (policyserve.ConnScan, error) {
 			return policyserve.ScanConnections(ctx, d.Sys, d.Account, d.Servers)
 		},
@@ -254,7 +257,7 @@ func Issue(ctx context.Context, cfg Config, req Request) (Result, error) {
 	if rf := req.Validate(); rf != nil {
 		return refused(rf)
 	}
-	a := &issue.Authority{ListSet: cfg.ListSet, Signer: cfg.Signer, Record: cfg.Record, Claims: cfg.Claims, AccountPub: cfg.Account, Log: cfg.Log, Now: cfg.Now}
+	a := &issue.Authority{ListSet: cfg.ListSet, Signer: cfg.Signer, Record: cfg.Record, Claims: cfg.Claims, AccountPub: cfg.Account, Directory: cfg.Directory, Log: cfg.Log, Now: cfg.Now}
 	out, rf := a.Sign(ctx, req.Address, req.Endpoint, req.PublicKey, req.EffectivePurpose())
 	if rf != nil {
 		return refused(&Refusal{Code: rf.Code, Detail: rf.Msg})

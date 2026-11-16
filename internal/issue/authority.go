@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/listset"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -28,7 +29,11 @@ type Authority struct {
 	// Claims reads the account JWT the signing key is verified against (see ScopeTTL).
 	Claims     AccountClaims
 	AccountPub string
-	Log        *slog.Logger
+	// Directory is read only when the endpoint is a legacy identity (ADR 0138): a legacy flat key is its bare name and
+	// carries no owner, so the endpoint tag of a legacy endpoint is issued only for a legacy record of that name under
+	// the address's owner. Nil with a legacy endpoint refuses (fail closed); a new-form endpoint never reads it.
+	Directory Directory
+	Log       *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 
@@ -36,6 +41,27 @@ type Authority struct {
 	// call keeps one cache across calls.
 	shared *scopeCache
 	scopes scopeCache
+}
+
+// Directory is the endpoint directory as the issue path reads it, for a legacy endpoint only.
+type Directory interface {
+	// LegacyOwner reads the directory record named name. found is false when there is none; legacy is true when the
+	// record is a legacy (one-token) record, false for a new-form record; owner is the record's owner. An error means
+	// the record could not be read.
+	LegacyOwner(ctx context.Context, name string) (owner string, legacy, found bool, err error)
+}
+
+// legacyEndpointOK reports whether the directory holds a legacy record of id's name under owner. It fails closed.
+func (a *Authority) legacyEndpointOK(ctx context.Context, id sap.EndpointIdentity) bool {
+	if a.Directory == nil {
+		return false
+	}
+	owner, legacy, found, err := a.Directory.LegacyOwner(ctx, id.Name)
+	if err != nil {
+		a.log().Warn("the directory could not be read for a legacy endpoint", "reason", err.Error())
+		return false
+	}
+	return found && legacy && owner == id.Owner
 }
 
 // ErrAuthorityNotConfigured is returned by Check for an Authority with a part missing.
@@ -73,12 +99,20 @@ func (a *Authority) cache() *scopeCache {
 // endpointTag is the endpoint tag of endpoint, refused when the endpoint is not in canonical form or its owner and name
 // are not the address's.
 func endpointTag(endpoint, address string) (string, error) {
+	tag, _, err := endpointTagOf(endpoint, address)
+	return tag, err
+}
+
+// endpointTagOf is endpointTag that also returns the identity the endpoint names. It reads nothing: for a legacy
+// identity the directory check is Authority.Sign's.
+func endpointTagOf(endpoint, address string) (string, sap.EndpointIdentity, error) {
 	r := Request{Address: address, Endpoint: endpoint}
 	id, err := r.EndpointIdentity()
 	if err != nil {
-		return "", err
+		return "", id, err
 	}
-	return listset.EndpointTag(id, address)
+	tag, err := listset.EndpointTag(id, address)
+	return tag, id, err
 }
 
 // Sign signs a user JWT for publicKey at address and records it, or returns a *Refusal and signs and records nothing.
@@ -100,9 +134,14 @@ func (a *Authority) Sign(ctx context.Context, address, endpoint, publicKey, purp
 
 	// The endpoint tag comes from mash's own function over the endpoint, never from a tag in the request, and is refused
 	// when the endpoint's owner and name are not the address's: a credential cannot point at another address's inbox.
-	epTag, err := endpointTag(endpoint, address)
+	epTag, epID, err := endpointTagOf(endpoint, address)
 	if err != nil {
 		return nil, refuse(CodeEndpoint, "the endpoint is not at the address of the request")
+	}
+	// A legacy tag is its bare name, which says nothing of its owner: the directory must hold a legacy record of that
+	// name under the address's owner (ADR 0138), or a credential could point at another owner's inbox.
+	if epID.IsLegacy() && !a.legacyEndpointOK(ctx, epID) {
+		return nil, refuse(CodeEndpoint, "the endpoint is not a legacy endpoint of that owner in the directory")
 	}
 
 	compiled, gen, err := a.ListSet.InForce(ctx)

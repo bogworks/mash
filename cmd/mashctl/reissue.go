@@ -540,6 +540,11 @@ func reissueLocked(ctx context.Context, adm *admin.Admin, lock admin.NameLock, k
 		return false, fmt.Errorf("%s's creds file was issued for another account (%s...); mashctl can only revoke in this account, so it cannot cut that JWT off: revoke it where it was issued, then retire and add %s again", name, ctl.ShortKey(d.AccountPub), name)
 	}
 
+	// An applied list set is refused before anything is minted, staged or revoked (ADR 0138): the owner-wide untagged
+	// credential of a mint is not governed by it. The check only reads the policy ledger.
+	if err := listSetGuard(ctx, adm, accountPub, "reissue"); err != nil {
+		return false, err
+	}
 	// An applied zone policy is refused before anything is minted, staged or revoked: the owner-wide permissions of a
 	// mint would bypass its mail restrictions. The check only reads.
 	if err := zguard(); err != nil {

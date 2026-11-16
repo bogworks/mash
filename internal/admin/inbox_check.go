@@ -131,3 +131,30 @@ func (a *Admin) recordServes(ctx context.Context, kv jetstream.KeyValue, key str
 	}
 	return rid == id, nil
 }
+
+// LegacyOwner reads the directory record keyed name and reports its owner, and whether it is a legacy record (a record
+// that names the legacy identity of its owner and name, not a new-form one). found is false when there is no such
+// record. A record that cannot be read or parsed is an error. It is the directory read behind a legacy endpoint tag
+// (ADR 0138): the issuer issues the tag of a legacy name only for the owner this returns.
+func (a *Admin) LegacyOwner(ctx context.Context, name string) (owner string, legacy, found bool, err error) {
+	kv, err := a.dir(ctx)
+	if err != nil {
+		return "", false, false, err
+	}
+	e, err := kv.Get(ctx, name)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return "", false, false, nil
+	}
+	if err != nil {
+		return "", false, false, fmt.Errorf("mash: directory %s: %w", config.Clean(name), err)
+	}
+	rec, err := store.ParseRecord(name, e.Value())
+	if err != nil {
+		return "", false, false, fmt.Errorf("mash: directory record %s is not readable: %v", config.Clean(name), err)
+	}
+	id, err := rec.Identity()
+	if err != nil {
+		return "", false, false, fmt.Errorf("mash: directory record %s: %v", config.Clean(name), err)
+	}
+	return rec.Owner, id.IsLegacy(), true, nil
+}

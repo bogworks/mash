@@ -250,8 +250,11 @@ key, and the template lines use `{{tag(ep)}}`. The rules:
 - The tag comes from mash's own table of the endpoint's identity at issue time, through one shared function,
   `listset.WithEndpointTag` (and `EndpointTag` under it). The issue service, rotation and the probe credentials all
   call it.
-- The issuer **refuses to sign** when the endpoint's owner and name differ from the address's, and when the identity is
-  a legacy one. A request never supplies tags, so it cannot supply this one. A credential cannot point at another
+- The issuer **refuses to sign** when the endpoint's owner and name differ from the address's. A legacy identity
+  (`cc.<owner>.<name>`) gets the tag `ep:<name>`, its flat key, and the issuer signs it only when the directory holds a
+  legacy record of that name under the address's owner; a missing record, another owner's, a new-form record or a failed
+  read refuses (ADR 0138). `mashctl add` and `reissue` mint untagged owner-wide credentials, so they refuse while a list
+  set is in force. A request never supplies tags, so it cannot supply this one. A credential cannot point at another
   address's inbox.
 - A credential **without** an `ep` tag gets no inbox, lease or reply access: the server drops a template line whose tag
   is missing, and the other lines remain. That is fail closed.

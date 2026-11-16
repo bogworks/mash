@@ -251,6 +251,16 @@ func runAdd(args []string, env func(string) string, lookup config.Lookup, stdout
 		return fail("creds file %s exists; %s", credsPath, orphanText(o.name))
 	}
 
+	// An applied list set is refused first (ADR 0138): the owner-wide untagged credential minted below is not governed by
+	// it. Only the policy ledger is read.
+	_, accountPub, err := keys.Account()
+	if err != nil {
+		return fail("%v", err)
+	}
+	if err := listSetGuard(ctx, adm, accountPub, "add"); err != nil {
+		return fail("%v", err)
+	}
+
 	// An applied zone policy is refused before any key, record or file is made (ADR 0091): the owner-wide permissions
 	// minted below would bypass its mail restrictions. The check only reads.
 	if err := zoneGuard(cfg, "", env); err != nil {
