@@ -66,7 +66,7 @@ func TestAnnounceNamesTargetAndSources(t *testing.T) {
 
 func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 	cfg, env := loadCfg(t, `{"url":"tls://file:4222","owner":"fo","admin_creds":"/f/a.creds","tls_ca":"/f/ca.pem"}`,
-		map[string]string{"MASH_URL": "tls://env:4222", "MASH_OWNER": "eo", "MASH_ADMIN_CREDS": "/e/a.creds", "MASH_TLS_CA": "/e/ca.pem"})
+		map[string]string{"MASH_URL": "tls://env:4222", "MASH_OWNER": "eo", "MASH_ADMIN_CREDS": "/e/a.creds", "MASH_TLS_CA": "/e/ca.pem", "MASH_NAME": "x"})
 	got := announced(cfg, env, nil)
 	for _, w := range []string{
 		"warning: MASH_URL (tls://env:4222) overrides config.json's url (tls://file:4222); mashctl is acting on tls://env:4222.",
@@ -79,8 +79,19 @@ func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", w, got)
 		}
 	}
-	if strings.Contains(got, "inside a mash session") {
-		t.Errorf("no session variable is set, but:\n%s", got)
+}
+
+// A central host sets no endpoint name: its MASH_URL over config.json is meant, and the warning about the endpoint
+// session does not apply.
+func TestAnnounceEnvOverFileNoWarningWithoutAnEndpointName(t *testing.T) {
+	cfg, env := loadCfg(t, `{"url":"tls://file:4222","owner":"fo"}`,
+		map[string]string{"MASH_URL": "tls://a:4222,tls://b:4222", "MASH_OWNER": "eo"})
+	got := announced(cfg, env, nil)
+	if strings.Contains(got, "warning") || strings.Contains(got, "endpoint session") {
+		t.Errorf("warned on a central host:\n%s", got)
+	}
+	if !strings.Contains(got, "target server tls://a:4222,tls://b:4222 (from MASH_URL)") {
+		t.Errorf("the target line lacks the url:\n%s", got)
 	}
 }
 

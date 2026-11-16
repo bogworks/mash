@@ -2,12 +2,20 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/ctlkeys"
 )
+
+// ShortAnswerError is the refusal when fewer servers answered the account lookup than the deployment has.
+type ShortAnswerError struct{ Answered, Expected int }
+
+func (e *ShortAnswerError) Error() string {
+	return fmt.Sprintf("only %d of %d servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)", e.Answered, e.Expected)
+}
 
 // AppliedZonePolicy reports whether the account JWT the servers hold carries a zone policy (ADR 0091): any scoped
 // signing key (jwt.UserScope), which is what `policy apply` publishes for each compiled zone, with its permission
@@ -35,7 +43,7 @@ func AppliedZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, s
 		return false, fmt.Errorf("look up the account JWT: %w", err)
 	}
 	if expect := serverExpect(set, servers); expect > 0 && len(toks) < expect {
-		return false, fmt.Errorf("not every server was checked: only %d of %d servers answered the account lookup (the lookup does not say which server was silent; if the count is wrong, pass --servers N or set MASH_SERVERS)", len(toks), expect)
+		return false, &ShortAnswerError{Answered: len(toks), Expected: expect}
 	}
 	groups, err := ks.GroupPublics()
 	if err != nil {
@@ -88,6 +96,10 @@ func HasZoneScope(claims *jwt.AccountClaims, groupKeys map[string]bool) bool {
 func RefuseZonePolicy(ctx context.Context, r Resolver, ks *ctlkeys.Authority, servers int, refusal error) error {
 	applied, err := AppliedZonePolicy(ctx, r, ks, servers)
 	if err != nil {
+		var short *ShortAnswerError
+		if errors.As(err, &short) {
+			return err
+		}
 		return fmt.Errorf("cannot tell whether a zone policy is applied: %w", err)
 	}
 	if applied {

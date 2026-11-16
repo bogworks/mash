@@ -238,3 +238,19 @@ func TestAdvertisedServersAreNotUsed(t *testing.T) {
 		}
 	}
 }
+
+func TestNoServersHint(t *testing.T) {
+	for _, err := range []error{nats.ErrNoServers, fmt.Errorf("wrapped: %w", nats.ErrNoServers), errors.New("nats: no servers available for connection")} {
+		got := natsauth.NoServersHint(err).Error()
+		if !strings.Contains(got, "no servers available for connection") || !strings.HasSuffix(got, "(check MASH_URL and that at least one listed server is up)") {
+			t.Errorf("hint = %q", got)
+		}
+		if again := natsauth.NoServersHint(natsauth.NoServersHint(err)).Error(); again != got {
+			t.Errorf("not idempotent: %q", again)
+		}
+	}
+	plain := errors.New("connection refused")
+	if natsauth.NoServersHint(plain) != plain || natsauth.NoServersHint(nil) != nil {
+		t.Error("another error must pass through unchanged")
+	}
+}

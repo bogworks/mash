@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 )
@@ -184,7 +185,10 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 					return fail("%v", checkErr)
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
-					return fail("%v: nothing was changed (--no-revoke retires without revoking)", err)
+					if errors.Is(revokeErr, apply.ErrNotConfirmed) {
+						return fail("%v: the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)", err)
+					}
+					return fail("%v: %s; the directory record was not changed (--no-revoke retires without revoking)", err, ctl.NotRevoked)
 				}
 				return fail("%v: nothing was changed", err)
 			}

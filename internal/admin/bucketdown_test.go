@@ -69,3 +69,28 @@ func TestBucketDownDeadlineIsNotAnInitHint(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRewordUnavailableStreamOffline(t *testing.T) {
+	raw := "mash: stream inbox-a: nats: API error: code=500 err_code=10118 description=stream is offline"
+	got := RewordUnavailable(raw)
+	want := "mash: the server holding stream inbox-a is down: bring it back and run the command again: " + raw
+	if got != want {
+		t.Errorf("named: got %q", got)
+	}
+	nameless := "issue record bucket: nats: API error: code=500 err_code=10118 description=stream is offline"
+	got = RewordUnavailable(nameless)
+	if got != "mash: the server holding a stream or bucket is down: bring it back and run the command again: "+nameless {
+		t.Errorf("nameless: got %q", got)
+	}
+	if RewordUnavailable(got) != got {
+		t.Errorf("not idempotent")
+	}
+	// the text bucketDown already wrote is left as it is
+	added := "mashctl: add c: mash: the server holding bucket mash-issued is down: bring it back and run the command again: nats: API error: code=500 err_code=10118 description=stream is offline; nothing was issued"
+	if RewordUnavailable(added) != added {
+		t.Errorf("reworded twice: %q", RewordUnavailable(added))
+	}
+	if got := RewordUnavailable("x: err_code=10118 y"); !strings.Contains(got, "is down: bring it back") {
+		t.Errorf("code only: %q", got)
+	}
+}

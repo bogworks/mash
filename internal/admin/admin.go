@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1741,13 +1742,27 @@ func wordUnavailable(err error) error {
 	return err
 }
 
-// RewordUnavailable puts the lost-quorum hint in front of the raw NATS text in an already formatted message. It
-// leaves a message that has the hint, or does not carry the text, as it is.
+// streamNameInError finds the stream name in a NATS error text such as "stream inbox-a: nats: ...".
+var streamNameInError = regexp.MustCompile(`\bstream ([A-Za-z0-9_.-]+):`)
+
+const serverDownText = "is down: bring it back and run the command again"
+
+// RewordUnavailable puts a hint in front of the raw NATS text in an already formatted message: the lost-quorum hint
+// for "JetStream system temporarily unavailable", and, for "stream is offline" (err_code 10118), a line saying the
+// server that holds the stream or bucket is down. It leaves a message that has a hint, or carries neither text, as it
+// is.
 func RewordUnavailable(msg string) string {
-	if !strings.Contains(msg, unavailableText) || strings.Contains(msg, unavailableHint) {
-		return msg
+	if strings.Contains(msg, unavailableText) && !strings.Contains(msg, unavailableHint) {
+		return unavailableHint + ": " + msg
 	}
-	return unavailableHint + ": " + msg
+	if (strings.Contains(msg, "stream is offline") || strings.Contains(msg, "err_code="+strconv.Itoa(jsErrStreamOffline))) && !strings.Contains(msg, serverDownText) {
+		what := "a stream or bucket"
+		if m := streamNameInError.FindStringSubmatch(msg); m != nil {
+			what = "stream " + m[1]
+		}
+		return "mash: the server holding " + what + " " + serverDownText + ": " + msg
+	}
+	return msg
 }
 
 // jsErrStreamOffline is the JetStream API error code for a stream whose server is down or not yet recovered.

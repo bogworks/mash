@@ -67,7 +67,13 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 	}
 	fmt.Fprintln(stderr, line)
 
+	// The override warning names the endpoint session the shell may be inside, so it is given only when an endpoint
+	// name, agent token or launch token is set. A central host sets none, and its MASH_URL list is meant.
+	inSession := cfg.Name != "" || cfg.AgentToken != "" || env("MASH_NAME") != "" || env("MASH_LAUNCH_TOKEN") != "" || env("MASH_AGENT_TOKEN") != ""
 	for _, key := range []string{"url", "owner", "admin_creds", "tls_ca"} {
+		if !inSession {
+			break
+		}
 		src, fileVal := cfg.Source[key], cfg.FileValues[key]
 		if src != config.SourceKeys[key] || fileVal == "" {
 			continue
