@@ -1,6 +1,7 @@
 package releasenotes
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -115,5 +116,30 @@ func TestSectionBody(t *testing.T) {
 	}
 	if _, ok := SectionBody(cl, "0.4"); ok {
 		t.Fatal("a prefix matched")
+	}
+}
+
+func TestOpeningBoldLeadUpgrading(t *testing.T) {
+	if err := Opening(notes(words(MinSummaryWords), "**If you used X**, the order matters:\n\n1. Do this.")); err != nil {
+		t.Fatalf("a bold lead line in Upgrading was refused: %v", err)
+	}
+	if err := Opening(notes(words(MinSummaryWords), "word")); err == nil {
+		t.Fatal("a one-word Upgrading was accepted")
+	}
+}
+
+// TestChangelogOpensWithTheApprovedStyle runs the opening check over the 0.5.0 section of CHANGELOG.md, the text
+// published on the release.
+func TestChangelogOpensWithTheApprovedStyle(t *testing.T) {
+	b, err := os.ReadFile("../../CHANGELOG.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, ok := SectionBody(string(b), "0.5.0")
+	if !ok {
+		t.Fatal("CHANGELOG.md has no 0.5.0 section")
+	}
+	if err := Opening(body); err != nil {
+		t.Fatalf("the 0.5.0 section fails the opening check: %v", err)
 	}
 }

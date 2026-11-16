@@ -122,7 +122,8 @@ func Opening(text string) error {
 		return fmt.Errorf("there is no %q heading after the Summary: say what an operator must do after upgrading, or write \"Nothing to do.\"", UpgradingHeading)
 	}
 	p := prose(ls, up)
-	if len(strings.Fields(p)) < 2 || !strings.ContainsAny(p, ".!?") {
+	// A bold lead line ("**If you used X**, the order matters:") counts as the sentence.
+	if len(strings.Fields(p)) < 2 || !(strings.ContainsAny(p, ".!?") || strings.HasPrefix(p, "**")) {
 		return fmt.Errorf("the Upgrading section has no sentence of paragraph text before its first list or heading: say what an operator must do, or write \"Nothing to do.\"")
 	}
 	return nil
