@@ -409,3 +409,49 @@ func TestStartRefusesWhatThisRunDidNotGenerateOrANonLoopbackURLBeforeStartingAny
 		}
 	}
 }
+
+// TestInitReportsJetStreamThatCouldNotBeEnabled: a server whose JetStream store budget is under the account's 2 GiB
+// disk limit leaves the account without JetStream; Init says why.
+func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
+	s := newSetup(t)
+	s.generate(t)
+	opts, err := server.ProcessConfigFile(s.pl.ConfPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Port = -1
+	opts.NoLog, opts.NoSigs = true, true
+	opts.JetStreamMaxStore = 1 << 30
+	srv, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Start()
+	if !srv.ReadyForConnections(10 * time.Second) {
+		t.Fatal("server did not start")
+	}
+	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
+	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	a, err := admin.New(nc, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = a.Init(ctx)
+	if err == nil {
+		t.Fatal("Init succeeded without JetStream")
+	}
+	for _, want := range []string{"could not enable JetStream", "75% of the free disk", "nsc edit account NAME --js-disk-storage 1G"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if !admin.IsJetStreamNotEnabled(err) {
+		t.Errorf("the original error is not reachable: %v", err)
+	}
+}

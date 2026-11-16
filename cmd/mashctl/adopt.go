@@ -15,6 +15,7 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
 	madmin "github.com/bogworks/mash/internal/admin"
@@ -265,7 +266,8 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if err != nil {
 		return fail("%v (nothing was changed)", err)
 	}
-	fmt.Fprintf(stdout, "  3. jetstream      ok: enabled for the account%s: disk %s, streams %s, consumers %s\n", tier, limitText(lim.DiskStorage, true), limitText(lim.Streams, false), limitText(lim.Consumer, false))
+	fmt.Fprintf(stdout, "  3. jetstream      ok: the account JWT gives it%s: disk %s, streams %s, consumers %s\n", tier, limitText(lim.DiskStorage, true), limitText(lim.Streams, false), limitText(lim.Consumer, false))
+	fmt.Fprintf(stdout, "  3. jetstream      (the JWT is what the account asks for; step 6 asks the server whether it enabled JetStream)\n")
 	if lim.Streams > 0 && lim.Streams < needStreams {
 		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (its inbox plus the two KV buckets), one more per endpoint", lim.Streams, needStreams))
 	}
@@ -321,6 +323,13 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if st.adminKind != "" {
 		fmt.Fprintf(stdout, "  6. admin creds    ok: connected (%s)\n", st.adminKind)
+		info, err := askJetStream(cfg, o.server, st.adminRaw, lim.DiskStorage)
+		if err != nil {
+			return fail("%v (nothing was changed)", err)
+		}
+		fmt.Fprintf(stdout, "  6. jetstream      ok: the server answered for the account: %s\n", info)
+	} else {
+		fmt.Fprintf(stdout, "  6. jetstream      not checked: without --admin-creds or --mint-admin there is no account user to ask the server whether JetStream is enabled for the account\n")
 	}
 	for _, w := range warns {
 		fmt.Fprintf(stdout, "  warning: %s\n", w)
@@ -589,6 +598,35 @@ func connectAdmin(cfg config.Config, url string, raw []byte) error {
 	}
 	c.Close()
 	return nil
+}
+
+// askJetStream asks the server, as an account user, for the account's JetStream info: the one proof that JetStream is
+// enabled for the account. It fails with the likely cause when the server says it is not enabled.
+func askJetStream(cfg config.Config, url string, raw []byte, limit int64) (string, error) {
+	c, err := dialAdmin(cfg, url, raw)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	js, err := jetstream.New(c)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ai, err := js.AccountInfo(ctx)
+	if err != nil {
+		if errors.Is(err, nats.ErrNoResponders) {
+			// Asked by this very check: no JetStream service answers for the account, which is how an account whose
+			// JetStream the server could not enable looks too.
+			return "", madmin.JetStreamNotEnabledHint(fmt.Errorf("%w (%v)", jetstream.ErrJetStreamNotEnabled, err), limit)
+		}
+		if madmin.IsJetStreamNotEnabled(err) {
+			return "", madmin.JetStreamNotEnabledHint(err, limit)
+		}
+		return "", fmt.Errorf("ask the server for the account's JetStream info: %w", err)
+	}
+	return fmt.Sprintf("%d stream(s), %d consumer(s), %s of disk in use", ai.Streams, ai.Consumers, config.FormatSize(int64(ai.Store))), nil
 }
 
 func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
