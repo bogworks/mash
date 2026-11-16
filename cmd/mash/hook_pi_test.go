@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,35 +12,158 @@ import (
 	"github.com/bogworks/mash/internal/spool"
 )
 
-// With MASH_HOST=pi the hook reads the extension's JSON and prints the batch as plain text, and drains it.
-func TestHookWithPiPrintsPlainText(t *testing.T) {
-	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+// piOffer is the JSON a Pi hook prints for a batch.
+type piOffer struct {
+	Text string `json:"text"`
+	Ack  string `json:"ack"`
+}
+
+func piHook(t *testing.T, env map[string]string, in string, args ...string) (piOffer, string) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	if code := run(append([]string{"hook"}, args...), envFrom(env), strings.NewReader(in), &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	var o piOffer
+	if out.Len() > 0 {
+		if err := json.Unmarshal(out.Bytes(), &o); err != nil {
+			t.Fatalf("not JSON: %q: %v", out.String(), err)
+		}
+	}
+	return o, errb.String()
+}
+
+func piSpool(t *testing.T, env map[string]string, seqs ...uint64) spool.Spool {
+	t.Helper()
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.Put(spool.Entry{Seq: 1, From: "b", Trust: "claimed", At: time.Now(), Body: []byte("hello pi")}); err != nil {
+	for _, q := range seqs {
+		if err := sp.Put(spool.Entry{Seq: q, From: "b", Trust: "claimed", At: time.Now(), Body: []byte(fmt.Sprintf("hello pi %d", q))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sp
+}
+
+const piIn = `{"event":"tool_result","session":"s1"}`
+
+// Under MASH_HOST=pi the hook offers the batch as JSON {text, ack} and does not drain it; nothing waiting prints nothing.
+func TestPiHookOffersWithoutDraining(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env)
+	if o, _ := piHook(t, env, piIn); o.Text != "" || o.Ack != "" {
+		t.Fatalf("empty spool printed %+v", o)
+	}
+	for _, q := range []uint64{1, 2} {
+		if err := sp.Put(spool.Entry{Seq: q, From: "b", Trust: "claimed", At: time.Now(), Body: []byte(fmt.Sprintf("hello pi %d", q))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o, _ := piHook(t, env, piIn)
+	if o.Ack == "" || !strings.Contains(o.Text, "> hello pi 1") || !strings.Contains(o.Text, "2 messages from b") {
+		t.Fatalf("offer %+v", o)
+	}
+	if w, _ := sp.Waiting(); len(w) != 2 {
+		t.Fatalf("the hook drained: %+v", w)
+	}
+	// the same session is not offered the same batch again at once
+	if o2, _ := piHook(t, env, piIn); o2.Text != "" {
+		t.Fatalf("re-offered inside the window: %+v", o2)
+	}
+	// a new session is offered it again, flagged as a repeat
+	o3, _ := piHook(t, env, `{"event":"tool_result","session":"s2"}`)
+	if o3.Ack == "" || !strings.Contains(o3.Text, "hello pi 1") {
+		t.Fatalf("not re-offered to a new session: %+v", o3)
+	}
+}
+
+// The ack drains exactly the entries the token names; a second ack is a no-op; an entry that arrived after the offer stays.
+func TestPiAckDrainsExactlyTheOfferedEntries(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env, 1, 2)
+	o, _ := piHook(t, env, piIn)
+	if err := sp.Put(spool.Entry{Seq: 3, From: "b", Trust: "claimed", At: time.Now(), Body: []byte("late")}); err != nil {
 		t.Fatal(err)
 	}
+	if out, _ := piHook(t, env, piIn, "--ack", o.Ack); out.Text != "" {
+		t.Fatalf("an ack printed %+v", out)
+	}
+	w, _ := sp.Waiting()
+	if len(w) != 1 || w[0].Seq != 3 || !sp.IsDrained(spool.Ref{Seq: 1}) || !sp.IsDrained(spool.Ref{Seq: 2}) || sp.IsDrained(spool.Ref{Seq: 3}) {
+		t.Fatalf("after the ack: waiting %+v", w)
+	}
+	// double ack: nothing changes, no error
+	if _, e := piHook(t, env, piIn, "--ack="+o.Ack); e != "" {
+		t.Fatalf("second ack said %q", e)
+	}
+	if w, _ := sp.Waiting(); len(w) != 1 || w[0].Seq != 3 {
+		t.Fatalf("after the second ack: %+v", w)
+	}
+	// an ack of an entry serve already acked (tombstone and file gone) does not write a tombstone
+	if err := sp.Acked(spool.Ref{Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	piHook(t, env, piIn, "--ack", o.Ack)
+	if sp.IsDrained(spool.Ref{Seq: 1}) {
+		t.Fatal("an ack of an unknown entry wrote a tombstone")
+	}
+	// a junk token is a no-op
+	if _, e := piHook(t, env, piIn, "--ack", "!!"); !strings.Contains(e, "unreadable token") {
+		t.Fatalf("stderr %q", e)
+	}
+}
+
+// An ack from a session that does not own the spool is refused: nothing is drained.
+func TestPiAckAfterOwnerChangeIsRefused(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env, 1)
+	o, _ := piHook(t, env, piIn)
+	if o.Ack == "" {
+		t.Fatal("no offer")
+	}
+	// the spool now belongs to another launch
+	if err := sp.OwnRecord("pid:1", `{"pid":1,"launch":"someone-else"}`); err != nil {
+		t.Fatal(err)
+	}
+	env2 := map[string]string{}
+	for k, v := range env {
+		env2[k] = v
+	}
+	env2["MASH_LAUNCH_TOKEN"] = "mine"
+	if out, e := piHook(t, env2, piIn, "--ack", o.Ack); out.Text != "" || !strings.Contains(e, "not this session's spool") {
+		t.Fatalf("out %+v stderr %q", out, e)
+	}
+	if w, _ := sp.Waiting(); len(w) != 1 || sp.IsDrained(spool.Ref{Seq: 1}) {
+		t.Fatalf("a refused ack drained: %+v", w)
+	}
+}
+
+// A Claude hook has no ack phase: `--ack` is a no-op there (nothing printed, nothing drained), and without it the hook
+// drains in one step as before.
+func TestClaudeHookHasNoAckPhase(t *testing.T) {
+	env := hookEnv(t, nil)
+	sp := piSpool(t, env, 1)
 	var out, errb bytes.Buffer
-	if code := run([]string{"hook"}, envFrom(env), strings.NewReader(`{"event":"tool_result","session":"s1"}`), &out, &errb); code != 0 {
-		t.Fatalf("exit %d: %s", code, errb.String())
-	}
-	got := out.String()
-	if strings.HasPrefix(got, "{") || !strings.Contains(got, "> hello pi") || !strings.Contains(got, "1 message from b") {
-		t.Fatalf("not plain text:\n%s", got)
-	}
-	if w, _ := sp.Waiting(); len(w) != 0 {
-		t.Fatalf("left %+v", w)
-	}
-	// Claude's input is not Pi's: nothing is printed, nothing drained.
-	if err := sp.Put(spool.Entry{Seq: 2, From: "b", Trust: "claimed", At: time.Now(), Body: []byte("again")}); err != nil {
-		t.Fatal(err)
-	}
-	out.Reset()
-	run([]string{"hook"}, envFrom(env), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
+	run([]string{"hook", "--ack", "x"}, envFrom(env), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
 	if w, _ := sp.Waiting(); out.Len() != 0 || len(w) != 1 {
-		t.Fatalf("out %q waiting %d", out.String(), len(w))
+		t.Fatalf("out %q waiting %+v", out.String(), w)
+	}
+	run([]string{"hook"}, envFrom(env), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
+	if w, _ := sp.Waiting(); !strings.Contains(out.String(), "additionalContext") || len(w) != 0 {
+		t.Fatalf("out %q waiting %+v", out.String(), w)
+	}
+}
+
+// Claude's input is not Pi's: with MASH_HOST=pi nothing is printed and nothing is drained or offered.
+func TestPiInputOfAnotherHostIsStillIgnored(t *testing.T) {
+	env := hookEnv(t, map[string]string{"MASH_HOST": "pi"})
+	sp := piSpool(t, env, 1)
+	var out, errb bytes.Buffer
+	run([]string{"hook"}, envFrom(env), strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
+	if w, _ := sp.Waiting(); out.Len() != 0 || len(w) != 1 || w[0].Redelivered {
+		t.Fatalf("out %q waiting %+v", out.String(), w)
 	}
 }
 

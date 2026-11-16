@@ -47,6 +47,21 @@ type Adapter interface {
 	Waker(notify func(text string, meta map[string]string) error) func(text string, meta map[string]string) error
 }
 
+// TwoPhaser is implemented by an adapter whose hook offers a batch without draining it (Pi, ADR 0140): the host
+// acknowledges what it accepted with a second invocation, `mash hook --ack <token>`. An adapter without it (Claude
+// Code, headless) drains in the one step, as it always has.
+type TwoPhaser interface {
+	TwoPhase() bool
+	// Offer renders out, what Present printed, together with the ack token naming the entries it shows.
+	Offer(out []byte, token string) []byte
+}
+
+// IsTwoPhase reports whether a delivers in two phases.
+func IsTwoPhase(a Adapter) bool {
+	t, ok := a.(TwoPhaser)
+	return ok && t.TwoPhase()
+}
+
 // SessionSources is where a host carries its session id.
 type SessionSources struct {
 	// Env is the environment variable that holds the session id, in serve's and the hook's environment.

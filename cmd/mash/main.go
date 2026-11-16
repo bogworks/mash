@@ -23,7 +23,8 @@ import (
 const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
 
   mash serve                                   the Claude Code channel server (started by the plugin)
-  mash hook                                    the plugin's hook: shows the session its spooled mail
+  mash hook [--ack TOKEN]                      the plugin's hook: shows the session its spooled mail (with MASH_HOST=pi, TOKEN
+                                               marks the batch a previous run offered as delivered)
   mash spool-dir                               print this endpoint's spool directory (for a host extension that watches it)
   mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (as MASH_NAME); --urgent
                                                wakes it at once; K is blocker|question|task (wake an idle recipient)
@@ -206,7 +207,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		}
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
-		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
+		return hookAck(cfg, err, adapter, env, ackArg(args[1:]), stdin, stdout, stderr)
 	}
 	if args[0] == "status" { // a report: a config error is a line of it
 		// status reads the host from MASH_HOST so a headless endpoint skips Claude Code's settings checks. A report never

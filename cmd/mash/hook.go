@@ -2,13 +2,16 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
@@ -28,6 +31,82 @@ import (
 // entry still marked on a later run is presented as re-delivered, so the model does not act on it twice. A mark that
 // cannot be written does not stop the print: at-least-once wins, and stderr says so.
 func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return hookAck(cfg, cfgErr, adapter, env, "", stdin, stdout, stderr)
+}
+
+// reofferAfter is how long a two-phase host's hook holds back a batch it offered to the same session and that was not
+// acked: the extension acks within moments of the hook returning, so a repeat inside this window is a hook that is
+// still in flight or an ack on its way, not a lost message. After it, or for a different session, the batch is offered
+// again (at-least-once: a repeat is accepted, a loss is not).
+const reofferAfter = 60 * time.Second
+
+// ackArg is the token of `--ack TOKEN` or `--ack=TOKEN` in a hook's arguments, "" when there is none.
+func ackArg(args []string) string {
+	for i, a := range args {
+		if a == "--ack" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if t, ok := strings.CutPrefix(a, "--ack="); ok {
+			return t
+		}
+	}
+	return ""
+}
+
+// ackItem is one entry an ack token names: its ref, and whether the batch showed it as a digest line (listed) rather
+// than in full (drained).
+type ackItem struct {
+	Stream string `json:"s,omitempty"`
+	Seq    uint64 `json:"q"`
+	Listed bool   `json:"l,omitempty"`
+}
+
+// ackToken names the entries shown, opaque to the extension: base64url of a JSON list.
+func ackToken(shown []spool.Entry) string {
+	items := make([]ackItem, len(shown))
+	for i, e := range shown {
+		items[i] = ackItem{Stream: e.Stream, Seq: e.Seq, Listed: e.Listed}
+	}
+	b, _ := json.Marshal(items)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// applyAck marks the entries token names as the one-step hook would have: drained, or listed for a digest line. An entry
+// already drained, or not spooled any more, is skipped. Call it under the spool lock, after the owner check.
+func applyAck(sp spool.Spool, token string, stderr io.Writer) {
+	b, err := base64.RawURLEncoding.DecodeString(token)
+	var items []ackItem
+	if err == nil {
+		err = json.Unmarshal(b, &items)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "mash hook: --ack: unreadable token\n")
+		return
+	}
+	for _, it := range items {
+		ref := spool.Ref{Stream: it.Stream, Seq: it.Seq}
+		if sp.IsDrained(ref) || !sp.Has(ref) {
+			continue
+		}
+		if it.Listed {
+			if !sp.IsListed(ref) {
+				err = sp.Listed(ref)
+			}
+		} else {
+			err = sp.Drained(ref)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "mash hook: acking #%s: %v\n", endpoint.FormatMsgRef(ref), err)
+		}
+	}
+}
+
+// hookAck is hook with ack, the token of `mash hook --ack` ("" for a delivery run).
+func hookAck(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string) string, ack string, stdin io.Reader, stdout, stderr io.Writer) int {
+	twoPhase := host.IsTwoPhase(adapter)
+	if ack != "" && !twoPhase {
+		return 0 // only a two-phase host offers a batch to ack
+	}
 	if cfgErr != nil || cfg.Inert() {
 		return 0
 	}
@@ -80,6 +159,9 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			fmt.Fprintf(stderr, "mash hook: recording the refusal: %v\n", err)
 		}
 		fmt.Fprintf(stderr, "mash hook: not this session's spool (%s); mail left for its owner\n", why)
+		if ack != "" {
+			return 0 // an ack of another session's batch: nothing is marked, nothing printed
+		}
 		told := false
 		if host.IsOtherLaunch(why) {
 			// Once per (session id, launch token): tell the model in-session, since status is pull-only (ADR 0043).
@@ -112,6 +194,10 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 		return 0
 	}
+	if ack != "" {
+		applyAck(sp, ack, stderr)
+		return 0
+	}
 	// Every run marks the session hooked, so serve spools from now on; before the first run it delivered by channel.
 	if err := sp.Touch(); err != nil {
 		return 0 // no spool: serve is not spooling for this endpoint
@@ -120,6 +206,18 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	if err != nil || len(waiting) == 0 {
 		noteWait()
 		return 0
+	}
+	if twoPhase {
+		// A batch this session was offered a moment ago and has not acked is not offered again yet.
+		now := time.Now()
+		waiting = slices.DeleteFunc(waiting, func(e spool.Entry) bool {
+			sess, at, ok := sp.Offered(e.Ref())
+			return ok && sess == id.SessionID && now.Sub(at) < reofferAfter
+		})
+		if len(waiting) == 0 {
+			noteWait()
+			return 0
+		}
 	}
 	// A message an earlier digest listed is not shown again in a digest (the model was told to read it, and a repeat on
 	// every tool call would be noise); it is shown only in full, in a run whose whole batch fits that way, which then
@@ -149,6 +247,14 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 	seqs := make([]spool.Ref, len(shown))
 	for i, e := range shown {
 		seqs[i] = e.Ref()
+	}
+	if twoPhase { // offered, not drained: the ack drains it once the host has accepted it
+		if err := sp.MarkOffered(id.SessionID, seqs...); err != nil {
+			fmt.Fprintf(stderr, "mash hook: recording what is being offered: %v; offering it anyway\n", err)
+		}
+		failpoint(env, stderr, "before-print")
+		_, _ = stdout.Write(adapter.(host.TwoPhaser).Offer(out, ackToken(shown))) // unwritten: still spooled
+		return 0
 	}
 	if err := sp.MarkShown(seqs...); err != nil {
 		fmt.Fprintf(stderr, "mash hook: recording what is being shown: %v; showing it anyway (a repeat after an interruption would not be flagged)\n", err)

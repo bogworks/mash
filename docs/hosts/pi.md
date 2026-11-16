@@ -64,11 +64,32 @@ runs `mash hook` and `mash spool-dir` with it; set them in the shell that starts
 extension, with `MASH_HOST=pi`:
 
 - runs `mash hook` after each tool result and before each agent start, and puts the text it prints into the model's
-  next request;
+  next request (see "Delivery" below: the hook only offers the mail, the extension acks it once Pi has taken it);
 - watches the directory `mash spool-dir` prints, and wakes an idle session with a new turn when mail arrives, holding
   the wake while the model is mid-answer until the turn settles.
 
 Restart Pi after copying it.
+
+## Delivery
+
+Delivery is two-phase, so a session change while the hook runs cannot lose mail (Claude Code's hook still drains in
+one step):
+
+1. `mash hook` (stdin `{"event":"tool_result"|"before_agent_start","session":"<id>"}`) prints nothing when no mail
+   waits. Otherwise it prints one JSON line, `{"text": "...", "ack": "<token>"}`, and leaves the mail spooled. The
+   token is opaque (it names the entries shown). The lease-wait and other-launch notices are `{"text": "..."}` with no
+   `ack`.
+2. After Pi has accepted the message, the extension runs `mash hook --ack <token>` with the same stdin. Under the spool
+   lock and after the same owner check, it marks exactly those entries delivered. An entry already delivered or gone
+   is skipped; a refused owner marks nothing.
+
+The extension acks right before it returns the augmented tool result or the `before_agent_start` message, and after
+`sendMessage` returns for a wake. If Pi changed session while the hook ran, it does not ack, and the mail stays
+spooled for the new session.
+
+Delivery is at-least-once. A batch that was offered and not acked (a crash, a session change) is offered again, and
+shown as a repeat. The same session is not offered a batch again for 60 seconds after the last offer, so an ack still
+on its way does not cause a repeat; after that, or for a different session, it is offered again.
 
 ## Known gaps
 

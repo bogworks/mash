@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -59,8 +60,27 @@ func (Pi) Trigger(stdin []byte, _ func(string) string) (Trigger, bool) {
 	return Trigger{}, false
 }
 
-// Notice is the text and a newline: the extension takes stdout as it is.
-func (Pi) Notice(_, text string) []byte { return []byte(text + "\n") }
+// Notice is {"text": "..."} and a newline, the shape of a delivery with no ack: the extension reads one JSON document
+// from every run of the hook, and a notice is not mail, so there is nothing to acknowledge.
+func (Pi) Notice(_, text string) []byte {
+	out, _ := json.Marshal(struct {
+		Text string `json:"text"`
+	}{text})
+	return append(out, '\n')
+}
+
+// TwoPhase: Pi's hook offers a batch and does not drain it; the extension acks it once Pi has accepted the message
+// (`mash hook --ack <token>`), so a session change between the two loses nothing.
+func (Pi) TwoPhase() bool { return true }
+
+// Offer wraps the text Present printed with the ack token as {"text": "...", "ack": "<token>"} and a newline.
+func (Pi) Offer(out []byte, token string) []byte {
+	b, _ := json.Marshal(struct {
+		Text string `json:"text"`
+		Ack  string `json:"ack"`
+	}{strings.TrimSuffix(string(out), "\n"), token})
+	return append(b, '\n')
+}
 
 // Present is the text Claude puts in additionalContext, with its trust-note frame and size cap, printed as it is.
 func (Pi) Present(p Presentation, waiting []spool.Entry) ([]byte, []spool.Entry) {

@@ -400,6 +400,39 @@ func (s Spool) MarkShown(refs ...Ref) error {
 	return nil
 }
 
+// MarkOffered is MarkShown for a two-phase host: the shown mark also records which session the batch was offered to
+// (its content) and when (its mtime), so a later hook can hold back a batch it offered a moment ago to the same
+// session and show it again to a new one.
+func (s Spool) MarkOffered(session string, refs ...Ref) error {
+	for _, r := range refs {
+		if err := checkStream(r.Stream); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(s.shown(), 0o700); err != nil {
+		return err
+	}
+	for _, r := range refs {
+		if err := os.WriteFile(s.shownFile(r), []byte(session), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Offered reports the session and the time of r's last MarkOffered; ok is false when r has no shown mark.
+func (s Spool) Offered(r Ref) (session string, at time.Time, ok bool) {
+	if checkStream(r.Stream) != nil {
+		return "", time.Time{}, false
+	}
+	fi, err := os.Stat(s.shownFile(r))
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	b, _ := os.ReadFile(s.shownFile(r))
+	return string(b), fi.ModTime(), true
+}
+
 // Listed marks seq as listed in a digest and not seen: its listed mark is written (atomically: a temporary file,
 // renamed) and its shown mark removed, so a later run does not flag it re-delivered. Its file stays, so a later hook
 // can show it in full; it is not drained, so serve does not ack it (ADR 0046).

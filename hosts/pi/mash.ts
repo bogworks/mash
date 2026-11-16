@@ -1,6 +1,7 @@
 // mash for Pi (ADR 0140). Pi has no hooks and takes no MCP channel, so this extension is both:
-//   - after each tool result and before each agent start it runs `mash hook` (MASH_HOST=pi) and puts the plain text
-//     it prints into the model's next request;
+//   - after each tool result and before each agent start it runs `mash hook` (MASH_HOST=pi), which offers the waiting
+//     mail as JSON {"text","ack"} without draining it; the extension puts the text into the model's next request and
+//     only then runs `mash hook --ack <token>`, so mail is never lost to a session change in between;
 //   - it watches the spool directory `mash spool-dir` prints, and wakes an idle session with sendMessage
 //     ({triggerTurn:true}) when mail arrives. While the model is mid-answer the wake is held until agent_settled.
 // Copy this file to the extensions/ directory of Pi's agent directory (~/.pi/agent, or $PI_CODING_AGENT_DIR).
@@ -28,10 +29,26 @@ function run(args: string[], input: string): Promise<string> {
   });
 }
 
+type Offer = { text: string; ack: string };
+
 // hook asks `mash hook` for the mail waiting for this session. event is the name the Go adapter (internal/host/pi.go)
-// reads: "tool_result" or "before_agent_start".
-const hook = (event: "tool_result" | "before_agent_start", session: string) =>
-  run(["hook"], JSON.stringify({ event, session }));
+// reads: "tool_result" or "before_agent_start". It prints nothing when no mail waits, else {"text","ack"} (a notice
+// has no "ack"). The hook only offers the batch: it stays spooled until ack() runs.
+async function hook(event: "tool_result" | "before_agent_start", session: string): Promise<Offer | undefined> {
+  const out = await run(["hook"], JSON.stringify({ event, session }));
+  if (!out) return undefined;
+  try {
+    const o = JSON.parse(out);
+    if (typeof o?.text === "string" && o.text) return { text: o.text, ack: typeof o.ack === "string" ? o.ack : "" };
+  } catch {}
+  return undefined;
+}
+
+// ack tells `mash hook` Pi has accepted the batch, so it marks exactly those messages delivered. Call it only after
+// Pi took the message and only while the session is the one the batch was offered to; otherwise do not call it, and the
+// mail stays spooled for the next session. A failed ack is not an error: the batch is offered again.
+const ack = (event: "tool_result" | "before_agent_start", session: string, offer: Offer) =>
+  offer.ack ? run(["hook", "--ack", offer.ack], JSON.stringify({ event, session })) : Promise.resolve("");
 
 export default function (pi: any) {
   let session = "";
@@ -51,9 +68,11 @@ export default function (pi: any) {
       return;
     }
     const g = gen;
-    const text = await hook("before_agent_start", session);
-    if (!text || g !== gen) return;
-    pi.sendMessage({ customType: "mash-mail", content: text, display: true }, { triggerTurn: true });
+    const s = session;
+    const offer = await hook("before_agent_start", s);
+    if (!offer || g !== gen) return; // the session changed: not acked, the mail stays spooled for the next one
+    pi.sendMessage({ customType: "mash-mail", content: offer.text, display: true }, { triggerTurn: true });
+    if (g === gen) await ack("before_agent_start", s, offer); // sendMessage did not throw
   };
 
   pi.on("session_start", async (_e: any, ctx: any) => {
@@ -111,16 +130,21 @@ export default function (pi: any) {
   // After a tool result: add the mail to that result, so the model sees it on its next step.
   pi.on("tool_result", async (event: any) => {
     const g = gen;
-    const text = await hook("tool_result", session);
-    if (!text || g !== gen) return;
-    return { content: [...event.content, { type: "text", text: "\n\n" + text }] };
+    const s = session;
+    const offer = await hook("tool_result", s);
+    if (!offer || g !== gen) return;
+    await ack("tool_result", s, offer); // right before handing the augmented content back
+    return { content: [...event.content, { type: "text", text: "\n\n" + offer.text }] };
   });
 
   // Before an agent start: put the mail in the request. A wake's own turn already carries its mail.
   pi.on("before_agent_start", async (event: any) => {
     if (event.messageType === "custom") return;
     const g = gen;
-    const text = await hook("before_agent_start", session);
-    if (text && g === gen) return { message: { customType: "mash-mail", content: text, display: true } };
+    const s = session;
+    const offer = await hook("before_agent_start", s);
+    if (!offer || g !== gen) return;
+    await ack("before_agent_start", s, offer); // right before handing the message back
+    return { message: { customType: "mash-mail", content: offer.text, display: true } };
   });
 }

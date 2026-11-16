@@ -155,7 +155,13 @@ func TestNotice(t *testing.T) {
 	if got, want := string(Claude{}.Notice("UserPromptSubmit", "x")), string(Notice("UserPromptSubmit", "x")); got != want {
 		t.Errorf("claude notice %q differs from Notice %q", got, want)
 	}
-	if got := string(Pi{}.Notice("PostToolUse", "mash: hello")); got != "mash: hello\n" {
+	if got := string(Pi{}.Notice("PostToolUse", "mash: hello")); got != `{"text":"mash: hello"}`+"\n" {
 		t.Errorf("pi notice %q", got)
+	}
+	if got := string(Pi{}.Offer([]byte("a\nb\n"), "tok")); got != `{"text":"a\nb","ack":"tok"}`+"\n" {
+		t.Errorf("pi offer %q", got)
+	}
+	if !IsTwoPhase(Pi{}) || IsTwoPhase(Claude{}) || IsTwoPhase(Headless{}) {
+		t.Error("only Pi delivers in two phases")
 	}
 }
