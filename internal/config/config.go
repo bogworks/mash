@@ -78,6 +78,10 @@ type Config struct {
 	// Servers is the declared server count of the deployment (config.json "servers", MASH_SERVERS); 0 is none declared.
 	// An unusable MASH_SERVERS reads as none here: the commands that act on the count refuse it in their own words.
 	Servers int
+	// WriteQuorum is the write quorum setting: "auto" (the default) or a whole number of servers (config.json
+	// "write_quorum", MASH_WRITE_QUORUM). It is kept as written and decided with Servers by WriteQuorum
+	// (EffectiveWriteQuorum): how many servers must answer before add, reissue and retire read or change the account JWT.
+	WriteQuorum string
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
@@ -136,6 +140,8 @@ type file struct {
 
 	Replicas json.RawMessage `json:"replicas"` // kept raw: the string "auto", "1" or "3", or the number 1 or 3
 	Servers  *int            `json:"servers"`
+
+	WriteQuorum json.RawMessage `json:"write_quorum"` // kept raw: the string "auto" or a number, or a numeric string
 
 	NameRuleFile     json.RawMessage `json:"name_rule_file"`     // kept raw: null, "" and non-strings are present but invalid
 	NameRuleRequired json.RawMessage `json:"name_rule_required"` // kept raw: only true and false are valid
@@ -355,7 +361,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if home != "" && env("MASH_CONFIG_DIR") == "" {
 		legacy = filepath.Join(home, ".config", "mash")
 	}
-	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits(), Replicas: "auto"}
+	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits(), Replicas: "auto", WriteQuorum: "auto"}
 
 	var f file
 	var raw []byte
@@ -431,6 +437,13 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if f.Servers != nil {
 		c.Servers = *f.Servers
 	}
+	if len(f.WriteQuorum) > 0 {
+		q, err := replicasValue(f.WriteQuorum)
+		if err != nil {
+			return c, errors.New("mash: config.json \"write_quorum\": want \"auto\" or a whole number of servers")
+		}
+		c.WriteQuorum = q
+	}
 
 	fileAgentSet := false
 	str := func(dst *string, key string) {
@@ -458,6 +471,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 	str(&c.TLSCert, "MASH_TLS_CERT")
 	str(&c.TLSKey, "MASH_TLS_KEY")
 	str(&c.Replicas, "MASH_REPLICAS")
+	str(&c.WriteQuorum, "MASH_WRITE_QUORUM")
 	if n, err := strconv.Atoi(strings.TrimSpace(env("MASH_SERVERS"))); err == nil && n > 0 {
 		c.Servers = n
 	}

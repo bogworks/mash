@@ -18,9 +18,11 @@ type baseJWT struct {
 	claims *jwt.AccountClaims
 	// warn is "" when every answering server holds the base, else a neutral line naming how many hold an older copy.
 	warn string
-	// short is "" when at least expect servers answered the lookup, else the neutral sentence saying how many did. A
-	// writer refuses on it; a read-only run prints it as a warning.
+	// short is "" when at least expect servers answered the lookup (the quorum, when one is set), else the neutral
+	// sentence saying how many did. A writer refuses on it; a read-only run prints it as a warning.
 	short string
+	// answered is how many servers answered the lookup.
+	answered int
 }
 
 // serverExpect is the number of servers a lookup should wait for: what the ping and the inventory say, or 0 (unknown,
@@ -37,15 +39,27 @@ func isoTime(unix int64) string { return time.Unix(unix, 0).UTC().Format("2006-0
 // do not decide anything: they are reported in warn, and the push that follows brings every server to the newest. A
 // resolver that answers with no JWT at all yields an empty token. what names the step in a transport error.
 func lookupBase(ctx context.Context, r Resolver, acct string, trust Trust, expect int, what string) (baseJWT, error) {
+	return lookupBaseQuorum(ctx, r, acct, trust, expect, 0, what)
+}
+
+// lookupBaseQuorum is lookupBase for a write that needs quorum answering servers instead of all (0: all, expect). The
+// lookup still waits for expect servers, so a slow one is heard, but a quorum of answers is enough: the newest copy among
+// them is the base, and any quorum overlaps the quorum that acknowledged the last write (ADR 0142).
+func lookupBaseQuorum(ctx context.Context, r Resolver, acct string, trust Trust, expect, quorum int, what string) (baseJWT, error) {
 	toks, err := r.LookupAll(ctx, acct, expect)
 	if err != nil && len(toks) == 0 {
 		return baseJWT{}, fmt.Errorf("%s: %w", what, err)
 	}
-	return chooseBase(toks, acct, trust, expect)
+	return chooseBaseQuorum(toks, acct, trust, expect, quorum)
 }
 
 // chooseBase picks the newest verified copy among the replies toks of a lookup that waited for expect servers.
 func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, error) {
+	return chooseBaseQuorum(toks, acct, trust, expect, 0)
+}
+
+// chooseBaseQuorum is chooseBase where quorum (when above 0) answers are enough, not expect.
+func chooseBaseQuorum(toks []string, acct string, trust Trust, expect, quorum int) (baseJWT, error) {
 	type copyT struct {
 		claims *jwt.AccountClaims
 		n      int
@@ -68,11 +82,14 @@ func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, e
 		copies[t] = &copyT{claims: claims, n: 1}
 	}
 	short := ""
-	if expect > 0 && len(toks) < expect {
+	switch {
+	case quorum > 0 && len(toks) < quorum:
+		short = quorumRefusalText(len(toks), max(expect, quorum), quorum)
+	case quorum <= 0 && expect > 0 && len(toks) < expect:
 		short = fmt.Sprintf("only %d of %d servers answered the account lookup", len(toks), expect)
 	}
 	if len(copies) == 0 {
-		return baseJWT{short: short}, nil
+		return baseJWT{short: short, answered: len(toks)}, nil
 	}
 	var newest int64
 	for _, c := range copies {
@@ -93,7 +110,7 @@ func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, e
 		}
 		return baseJWT{}, fmt.Errorf("the servers hold %d distinct account JWTs issued at the same time (iat %s; %s): which one is current cannot be told, so none is used; make the servers agree (for example with nsc push or by restoring the lagging server), then run the command again", len(top), isoTime(newest), strings.Join(parts, ", "))
 	}
-	b := baseJWT{token: top[0], claims: copies[top[0]].claims, short: short}
+	b := baseJWT{token: top[0], claims: copies[top[0]].claims, short: short, answered: len(toks)}
 	older := empty
 	var iats []string
 	seen := map[int64]bool{}
@@ -139,6 +156,12 @@ func notCompleteRefusal(why string) string {
 // answer, and check finds nothing wrong with any copy; "" is a match, else what was found. check is called with the
 // verified claims of a copy that is not want itself and returns what is missing ("" when that copy is fine).
 func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need int, tries int, wait time.Duration, want string, differs func(*jwt.AccountClaims) string) string {
+	return readBackQuorum(ctx, r, acct, trust, need, need, tries, wait, want, differs)
+}
+
+// readBackQuorum is readBack where the lookup waits for expect servers but at least need of them must answer (ADR 0142):
+// every server that does answer must still hold want.
+func readBackQuorum(ctx context.Context, r Resolver, acct string, trust Trust, expect, need int, tries int, wait time.Duration, want string, differs func(*jwt.AccountClaims) string) string {
 	if tries <= 0 {
 		tries = defaultVerifyTries
 	}
@@ -154,7 +177,7 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 			case <-time.After(wait):
 			}
 		}
-		toks, err := r.LookupAll(ctx, acct, need)
+		toks, err := r.LookupAll(ctx, acct, expect)
 		if err != nil && len(toks) == 0 {
 			last = "could not be read back: " + err.Error()
 			continue
@@ -188,6 +211,9 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 			last = fmt.Sprintf("%d of %d answering servers do not hold the pushed JWT: %s", stale, len(toks), detail)
 		case len(toks) < need:
 			last = fmt.Sprintf("only %d of %d servers answered the account JWT lookup (a server may be down or partitioned)", len(toks), need)
+			if need < expect {
+				last = quorumRefusalText(len(toks), expect, need)
+			}
 		default:
 			return ""
 		}

@@ -35,7 +35,22 @@ type clusterEnv struct {
 
 func newClusterEnv(t *testing.T, servers int, extra map[string]string) *clusterEnv {
 	t.Helper()
-	c := testenv.StartCluster(t, 3)
+	return newClusterEnvInterval(t, servers, extra, 0)
+}
+
+// newClusterEnvInterval is newClusterEnv with the resolver sync interval set (0: the harness default).
+func newClusterEnvInterval(t *testing.T, servers int, extra map[string]string, interval time.Duration) *clusterEnv {
+	t.Helper()
+	var c *testenv.Cluster
+	if interval > 0 {
+		c = testenv.StartClusterInterval(t, 3, interval)
+	} else {
+		c = testenv.StartCluster(t, 3)
+	}
+	// The package's tests revoke against a stub; these tests run the real revocation through the system account.
+	prevRevoke := revokeUsers
+	revokeUsers = revokeUserKeys
+	t.Cleanup(func() { revokeUsers = prevRevoke })
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -171,8 +186,9 @@ func (h *clusterEnv) receive(name string, n int) []string {
 }
 
 // A three-node cluster, objects created with replicas auto and three declared servers: every mash-owned object is R3.
-// With one node down the real verbs still work as far as the product lets them (the write gate of retire and add asks
-// every declared server), and the node comes back and catches up.
+// With one node down the real verbs work with MASH_SERVERS still 3 (the write quorum is 2 of 3, ADR 0142), and the node
+// comes back, catches up and the audit is clean again once it holds the revocation. TestLiveWriteQuorumOneNodeDown has
+// the full sequence; this one keeps the replica side of it.
 func TestLiveThreeNodesR3OneNodeDown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live three-node cluster")
@@ -195,27 +211,6 @@ func TestLiveThreeNodesR3OneNodeDown(t *testing.T) {
 	h.c.Stop(down)
 	time.Sleep(3 * time.Second) // leader election
 
-	// The write gate of add and retire reads the account JWT from every declared server.
-	_, errb, code := h.run("add", "b")
-	t.Logf("add with the node down and MASH_SERVERS=3: exit %d: %s", code, strings.TrimSpace(errb))
-	gateRefused := code != 0
-	if gateRefused && !strings.Contains(errb, "2 of 3") && !strings.Contains(errb, "only 2") {
-		t.Fatalf("add refused for another reason than the server count: %s", errb)
-	}
-	if gateRefused {
-		// The product genuinely requires the declared count to drop while a node is down (the revocation and the
-		// applied-policy check need every declared server to answer). Declaring 2 also makes `auto` resolve to 1.
-		h.env["MASH_SERVERS"] = "2"
-		defer func() { h.env["MASH_SERVERS"] = "3" }()
-	}
-	if gateRefused {
-		// Pinning replicas to 3 does not help: 3 needs three declared servers, so it is refused, naming the values.
-		h.env["MASH_REPLICAS"] = "3"
-		if _, errb, code := h.run("add", "b"); code == 0 || !strings.Contains(errb, "replicas 3 needs at least 3 servers") {
-			t.Fatalf("replicas 3 with 2 declared servers: %d %s", code, errb)
-		}
-		delete(h.env, "MASH_REPLICAS")
-	}
 	if out, errb, code := h.run("add", "b"); code != 0 {
 		t.Fatalf("add b with a node down (servers %s): %d %s %s", h.env["MASH_SERVERS"], code, out, errb)
 	}
@@ -231,12 +226,9 @@ func TestLiveThreeNodesR3OneNodeDown(t *testing.T) {
 	}
 
 	h.c.Start(down)
-	h.env["MASH_SERVERS"] = "3"
 	h.current(3)
 	h.wantAll(3, "KV_"+store.DirectoryBucket, store.LeaseStreamName, store.IssuedStreamName, store.AdoptionStreamName, "KV_"+store.RetiredBucket, sap.InboxStream("a"))
-	if out, errb, code := h.run("audit", "--strict"); code != 0 {
-		t.Fatalf("audit after: %d %s %s", code, out, errb)
-	}
+	h.auditClean(90 * time.Second)
 }
 
 // R1 on three nodes (replicas 1), a directory record, an issue record, a lease and mail; raise to R3 while a sender

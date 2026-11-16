@@ -25,10 +25,44 @@ const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or s
 // revokeUsers revokes user keys in the account JWT; a test replaces it.
 var revokeUsers = revokeUserKeys
 
+// revokeReport is what a revocation learned about the servers beyond its error: how many acknowledged against how
+// many are declared, the write quorum it needed, and which declared servers have not acknowledged (they converge when
+// they rejoin, ADR 0142). A caller that wants it puts one in the context with withRevokeReport.
+type revokeReport struct {
+	Quorum, Declared, Acked int
+	Pending                 []string
+}
+
+type revokeReportKey struct{}
+
+func withRevokeReport(ctx context.Context) (context.Context, *revokeReport) {
+	r := &revokeReport{}
+	return context.WithValue(ctx, revokeReportKey{}, r), r
+}
+
+// pendingLine is the one line that names the servers a revocation has not reached yet. It is plain text for people and
+// starts with pending_servers: so a script can find it.
+func pendingLine(pending []string) string {
+	return fmt.Sprintf("pending_servers: %s (they did not acknowledge the revocation and will converge when they rejoin: the account resolver gives them the account JWT then; `mashctl audit` reports revocation_pending until they hold it)", strings.Join(pending, ", "))
+}
+
+// withDeclared is servers, or the config's declared server count when the environment gave none.
+func withDeclared(cfg config.Config, servers int) int {
+	if servers == 0 {
+		return cfg.Servers
+	}
+	return servers
+}
+
 // revokeUserKeys opens the key store (the operator and account keys), connects with the system account credentials and
 // revokes each user key with apply.RevokeUsers, printing one line per key. It never prints a seed. A non-nil now is the
 // revocation time; nil means the current time.
 func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) string, servers int, users []string, stdout io.Writer, now func() time.Time) error {
+	servers = withDeclared(cfg, servers)
+	quorum, err := config.WriteQuorum(cfg.WriteQuorum, servers)
+	if err != nil {
+		return err
+	}
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
 		return err
@@ -47,9 +81,12 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Now: now}, users)
+	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Quorum: quorum, Now: now}, users)
 	if err != nil {
 		return err
+	}
+	if rep, ok := ctx.Value(revokeReportKey{}).(*revokeReport); ok {
+		rep.Quorum, rep.Declared, rep.Acked, rep.Pending = res.Quorum, res.Declared, res.Acked, res.Pending
 	}
 	if res.Warning != "" {
 		fmt.Fprintf(stdout, "warning: %s\n", res.Warning)
@@ -59,6 +96,9 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	}
 	for _, u := range res.Already {
 		fmt.Fprintf(stdout, "user key %s...: already revoked\n", ctl.ShortKey(u))
+	}
+	if len(res.Pending) > 0 {
+		fmt.Fprintln(stdout, pendingLine(res.Pending))
 	}
 	return nil
 }
@@ -78,6 +118,11 @@ func revokedInAccount(ctx context.Context, cfg config.Config, env func(string) s
 
 // readAccount opens the key store, connects with the system account credentials and runs read over every server.
 func readAccount(ctx context.Context, cfg config.Config, env func(string) string, servers int, read func(context.Context, apply.RevokeParams) (bool, error)) (bool, error) {
+	servers = withDeclared(cfg, servers)
+	quorum, err := config.WriteQuorum(cfg.WriteQuorum, servers)
+	if err != nil {
+		return false, err
+	}
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
 		return false, err
@@ -96,7 +141,7 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	return read(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers})
+	return read(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Quorum: quorum})
 }
 
 // parseServers reads MASH_SERVERS, the server count the revocation check waits for; 0 is none given.

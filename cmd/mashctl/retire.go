@@ -112,7 +112,8 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		user = r.User
 	}
 	var revokeOut bytes.Buffer
-	revokedOK := false // the revocation completed on every server
+	revokedOK := false         // the revocation completed on every server
+	var sawRevoke revokeReport // what the revocation learned about the servers (quorum, pending)
 	switch {
 	case user != "":
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
@@ -148,7 +149,10 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 						return fmt.Errorf("creds check: %w", err)
 					}
 				}
-				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
+				rctx, rep := withRevokeReport(ctx)
+				err := revokeUsers(rctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
+				sawRevoke = *rep
+				if err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}
@@ -253,6 +257,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	default:
 		io.WriteString(stdout, revokeOut.String())
 		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file is separate\n", ctl.ShortKey(user))
+		if sawRevoke.Quorum > 0 && len(sawRevoke.Pending) > 0 {
+			fmt.Fprintf(stdout, "%d of %d servers hold the revocation (write quorum %d)\n", sawRevoke.Declared-len(sawRevoke.Pending), sawRevoke.Declared, sawRevoke.Quorum)
+		}
 	}
 	return code
 }

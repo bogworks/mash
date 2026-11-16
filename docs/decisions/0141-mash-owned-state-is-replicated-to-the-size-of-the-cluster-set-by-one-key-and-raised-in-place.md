@@ -51,7 +51,7 @@ Chosen: the first option.
 * Good, because one node of three down no longer stops directory, lease, issue-record and inbox writes after a leader election.
 * Good, because a single server is unchanged, and an existing deployment is raised without a rebuild or a lost message.
 * Bad, because storage is three times what R1 used, per object, on the nodes that hold them.
-* Bad, because the write gate of `retire`, `reissue` and `add` still wants every declared server to answer, so working through an outage means lowering `MASH_SERVERS`, and `auto` then resolves to the lower count for objects made meanwhile. That is outside this decision and noted in the operations guide.
+* Bad, because the write gate of `retire`, `reissue` and `add` wanted every declared server to answer when this was decided, so working through an outage meant lowering `MASH_SERVERS`, and `auto` then resolved to the lower count. [ADR 0142](0142-a-revocation-write-needs-a-quorum-of-the-declared-servers-and-a-server-that-missed-it-takes-it-from-the-resolver.md) replaces that gate with a write quorum.
 * Neutral, because a raise needs every node up and with room, and says so before it changes anything.
 
 ### Confirmation

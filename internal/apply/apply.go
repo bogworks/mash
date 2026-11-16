@@ -67,6 +67,44 @@ func (s ServerSet) Complete(inventory int) bool {
 	return len(s.Names) >= s.need(inventory)
 }
 
+// Quorate says the set may take a write that needs quorum servers (ADR 0142): a reply from at least quorum servers,
+// no gateways or conflicting clusters (membership cannot be verified from here), and a cluster that does not report more
+// servers than the inventory declares (the quorum is a majority of the declared count, and a larger real cluster would
+// make it too small to overlap). The declared count is the denominator: a server that is down is pending, never ignored.
+// A quorum of 0 is "every server": it is Complete.
+func (s ServerSet) Quorate(inventory, quorum int) bool {
+	if quorum <= 0 {
+		return s.Complete(inventory)
+	}
+	if s.Gateways || s.ClusterConflict || len(s.Names) == 0 || inventory <= 0 || s.Expected > inventory {
+		return false
+	}
+	return len(s.Names) >= quorum
+}
+
+// QuorumWhy says, for a set that is not Quorate, why.
+func (s ServerSet) QuorumWhy(inventory, quorum int) string {
+	switch {
+	case quorum <= 0:
+		return s.Why(inventory)
+	case len(s.Names) == 0 || s.ClusterConflict || s.Gateways:
+		return s.Why(inventory)
+	case inventory <= 0:
+		return "the number of servers is not declared (MASH_SERVERS)"
+	case s.Expected > inventory:
+		return fmt.Sprintf("the cluster reports %d servers but %d are declared: declare them all (MASH_SERVERS), the write quorum is a majority of the declared count", s.Expected, inventory)
+	}
+	return quorumRefusalText(len(s.Names), s.need(inventory), quorum)
+}
+
+// quorumRefusalText is the one sentence that says too few servers answered.
+func quorumRefusalText(answered, declared, quorum int) string {
+	return fmt.Sprintf("%d of %d servers answered and the write quorum is %d: a server may be down: bring it back, or set write_quorum", answered, declared, quorum)
+}
+
+// unnamedPending is how a pending server is listed when it did not answer and so has no name to print.
+const unnamedPending = "a server that did not answer"
+
 // Why says, for an incomplete set, why it cannot be trusted.
 func (s ServerSet) Why(inventory int) string {
 	switch {
@@ -164,6 +202,55 @@ func pushAndCheck(ctx context.Context, r Resolver, token string, known []string)
 		parts = append(parts, "no acknowledgement from "+strings.Join(silent, ", ")+" (known from the system account ping)")
 	}
 	return acks, strings.Join(parts, "; ")
+}
+
+// pushAndCheckQuorum is pushAndCheck for a write that needs quorum acknowledgements instead of all (ADR 0142): a server
+// that refuses with another code than 200 is still a failure, a known server that does not answer is pending, and the
+// push stands when at least quorum distinct known servers acknowledged with 200. declared is the server count the
+// quorum is a majority of; pending lists every declared server that has not acknowledged (named when the ping saw it,
+// else unnamedPending). why is "" when the quorum acknowledged.
+func pushAndCheckQuorum(ctx context.Context, r Resolver, token string, known []string, declared, quorum int) (acks []ServerAck, pending []string, why string) {
+	acks, perr := r.Push(ctx, token, known)
+	knownSet := map[string]bool{}
+	for _, k := range known {
+		knownSet[k] = true
+	}
+	acked := map[string]bool{}
+	var bad []string
+	for _, a := range acks {
+		if !a.OK() {
+			bad = append(bad, fmt.Sprintf("%s: code %d %s", serverName(a), a.Code, config.Clean(a.Message)))
+			continue
+		}
+		if knownSet[a.Server] {
+			acked[a.Server] = true
+		}
+	}
+	names := make([]string, 0, len(known))
+	names = append(names, known...)
+	sort.Strings(names)
+	for _, k := range names {
+		if !acked[k] {
+			pending = append(pending, config.Clean(k))
+		}
+	}
+	for i := len(known); i < declared; i++ {
+		pending = append(pending, unnamedPending)
+	}
+	var parts []string
+	if perr != nil {
+		parts = append(parts, perr.Error())
+	}
+	if len(bad) > 0 {
+		parts = append(parts, "refused by "+strings.Join(bad, "; "))
+	}
+	if len(acked) < quorum {
+		parts = append(parts, quorumRefusalText(len(acked), declared, quorum))
+	}
+	if len(parts) == 0 {
+		return acks, pending, ""
+	}
+	return acks, pending, strings.Join(parts, "; ")
 }
 
 func serverName(a ServerAck) string {

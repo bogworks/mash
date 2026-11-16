@@ -22,6 +22,11 @@ import (
 // clusterWait bounds every wait of the cluster; a loaded runner under -race can be slow to elect a leader.
 const clusterWait = 60 * time.Second
 
+// clusterSync is how often each node's account resolver asks its peers for newer account JWTs. A node that was down gets
+// what it missed (a revocation) at its next sync; the product default is a minute, the cluster here uses a few seconds so a
+// test can wait for it.
+const clusterSync = 2 * time.Second
+
 // Cluster is N routed nats-server nodes in operator mode, JetStream on every node, each with a full account resolver
 // of its own. It has the operator, system account and MASH account of a real deployment, with their seeds in files:
 // what `mashctl` needs to retire a user through the system account. Each node keeps its client port, route port,
@@ -36,14 +41,15 @@ type Cluster struct {
 	// URL is every node's client URL, comma separated, so a connection finds a node that is up.
 	URL string
 
-	t       *testing.T
-	op      nkeys.KeyPair
-	opts    []*jwt.OperatorClaims
-	acctKP  nkeys.KeyPair
-	sysPub  string
-	nodes   []*clusterNode
-	cluster string
-	routes  string
+	t        *testing.T
+	op       nkeys.KeyPair
+	opts     []*jwt.OperatorClaims
+	acctKP   nkeys.KeyPair
+	sysPub   string
+	nodes    []*clusterNode
+	cluster  string
+	routes   string
+	interval time.Duration
 }
 
 type clusterNode struct {
@@ -67,10 +73,14 @@ func freeTCPPort(t *testing.T) int {
 
 // StartCluster starts n routed nodes and waits until JetStream is available for the MASH account on the cluster. The
 // nodes are shut down when the test ends.
-func StartCluster(t *testing.T, n int) *Cluster {
+func StartCluster(t *testing.T, n int) *Cluster { return StartClusterInterval(t, n, clusterSync) }
+
+// StartClusterInterval is StartCluster with the account resolver's sync interval set to interval (the `interval` key of
+// the resolver block) on every node.
+func StartClusterInterval(t *testing.T, n int, interval time.Duration) *Cluster {
 	t.Helper()
 	dir := t.TempDir()
-	c := &Cluster{Owner: Owner, t: t, cluster: "mash-test-cluster"}
+	c := &Cluster{Owner: Owner, t: t, cluster: "mash-test-cluster", interval: interval}
 	c.op = must(nkeys.CreateOperator())
 	opPub := must(c.op.PublicKey())
 	oc := jwt.NewOperatorClaims(opPub)
@@ -155,7 +165,7 @@ func (c *Cluster) userCreds(dir, name string, signer nkeys.KeyPair, p jwt.Permis
 
 func (c *Cluster) launch(i int) {
 	nd := c.nodes[i]
-	res := must(server.NewDirAccResolver(nd.resolver, 0, time.Hour, server.NoDelete))
+	res := must(server.NewDirAccResolver(nd.resolver, 0, c.interval, server.NoDelete))
 	o := &server.Options{
 		Host: "127.0.0.1", Port: nd.clientPort, ServerName: nd.name, NoLog: true, NoSigs: true,
 		TrustedOperators: c.opts, AccountResolver: res, SystemAccount: c.sysPub,
@@ -173,6 +183,9 @@ func (c *Cluster) await(i int) {
 		c.t.Fatalf("nats-server %s did not start", c.nodes[i].name)
 	}
 }
+
+// NodeName is node i's server name, as the servers report it in their answers.
+func (c *Cluster) NodeName(i int) string { return c.nodes[i].name }
 
 // Nodes is the number of nodes the cluster was started with.
 func (c *Cluster) Nodes() int { return len(c.nodes) }
@@ -202,6 +215,25 @@ func (c *Cluster) Start(i int) {
 	}
 	c.launch(i)
 	c.await(i)
+}
+
+// Launch starts stopped node i without waiting for it; Await waits until it serves clients. Start is both.
+func (c *Cluster) Launch(i int) {
+	c.t.Helper()
+	if c.nodes[i].srv == nil {
+		c.launch(i)
+	}
+}
+
+// Await waits until node i serves clients.
+func (c *Cluster) Await(i int) { c.t.Helper(); c.await(i) }
+
+// NumRoutes is the number of routes node i has formed (0 when it is down).
+func (c *Cluster) NumRoutes(i int) int {
+	if s := c.nodes[i].srv; s != nil {
+		return s.NumRoutes()
+	}
+	return 0
 }
 
 // Conn connects with the admin creds to every node (a node that is down is skipped); it is closed when the test ends.

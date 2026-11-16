@@ -9,9 +9,9 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// zoneGuard is the applied-zone-policy refusal shared by unzone, add and reissue (ADR 0091). A policy of an older
-// release leaves scoped signing keys in the account JWT, and the owner-wide permissions these commands mint would
-// bypass its mail restrictions, so they refuse while one is applied. The check reads the account JWT, which needs the
+// zoneGuard is the applied-zone-policy refusal of unzone (ADR 0091; add and reissue no longer ask it, ADR 0142). A policy of an older
+// release leaves scoped signing keys in the account JWT, and unzone refuses to migrate a record while one is applied: it would
+// build no migration for it. The check reads the account JWT, which needs the
 // system account credentials and the key store. It fails closed: when either is not configured, or the JWT cannot be
 // read or verified, it returns an error and the command changes nothing. There is no way to skip it. The error text
 // has no command prefix and ends with "nothing was changed".

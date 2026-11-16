@@ -24,6 +24,9 @@ type RevokeParams struct {
 	Resolver Resolver
 	// Servers is the number of servers in the deployment (--servers); 0 means not given.
 	Servers int
+	// Quorum is how many servers must answer the lookup and acknowledge the push (config.WriteQuorum, ADR 0142); 0 means
+	// every server (the set must be Complete), which is what a caller that sets no quorum gets.
+	Quorum int
 	// LockWait is how long to wait for the key directory lock (default 5s).
 	LockWait time.Duration
 	// VerifyTries and VerifyWait bound the read-back after the push (defaults 5 and 200ms).
@@ -42,6 +45,12 @@ type RevokeResult struct {
 	Acked int
 	// Complete says the acknowledging servers are the whole server set (always true when nothing was pushed).
 	Complete bool
+	// Pending are the declared servers that have not acknowledged the update (named when the ping saw them, else
+	// "a server that did not answer"); with a Quorum they converge when they rejoin, through the account resolver. It
+	// is empty when every server acknowledged.
+	Pending []string
+	// Quorum and Declared are the quorum the call needed (0: every server) and the declared server count it counted against.
+	Quorum, Declared int
 	// Warning is a neutral line when some servers held an older copy of the account JWT than the one the revocation
 	// was built from ("" when all agreed).
 	Warning string
@@ -101,7 +110,16 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 	if errors.Is(kerr, ErrServerSetRefused) {
 		return res, fmt.Errorf("revoke: refusing: %w (nothing was changed)", kerr)
 	}
-	if !set.Complete(p.Servers) {
+	res.Quorum, res.Declared = p.Quorum, expect
+	if p.Quorum > 0 {
+		if !set.Quorate(p.Servers, p.Quorum) {
+			why := set.QuorumWhy(p.Servers, p.Quorum)
+			if kerr != nil {
+				why = kerr.Error()
+			}
+			return res, fmt.Errorf("revoke: refusing: %s (nothing was revoked)", why)
+		}
+	} else if !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {
 			why = kerr.Error()
@@ -113,12 +131,12 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 	var token string
 	var want map[string]int64 // the least revocation time each key must show on read-back
 	for attempt := 0; ; attempt++ {
-		base, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT")
+		base, err := lookupBaseQuorum(ctx, p.Resolver, acctPub, trust, expect, p.Quorum, "look up the account JWT")
 		if err != nil {
 			return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
 		}
 		if base.short != "" {
-			return res, fmt.Errorf("revoke: refusing: %s (nothing was changed)", shortRefusal(base.short))
+			return res, fmt.Errorf("revoke: refusing: %s (nothing was changed)", shortText(base.short, p.Quorum))
 		}
 		cur := base.token
 		claims = base.claims
@@ -173,12 +191,12 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 			}
 		}
 		// Someone else may have pushed since the read: compute again from what is there now, once.
-		again, err := lookupBase(ctx, p.Resolver, acctPub, trust, expect, "look up the account JWT before the push")
+		again, err := lookupBaseQuorum(ctx, p.Resolver, acctPub, trust, expect, p.Quorum, "look up the account JWT before the push")
 		if err != nil {
 			return res, fmt.Errorf("revoke: %w (nothing was pushed)", err)
 		}
 		if again.short != "" {
-			return res, fmt.Errorf("revoke: refusing: %s (nothing was pushed)", shortRefusal(again.short))
+			return res, fmt.Errorf("revoke: refusing: %s (nothing was pushed)", shortText(again.short, p.Quorum))
 		}
 		if again.token == cur {
 			break
@@ -188,7 +206,13 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		}
 	}
 
-	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
+	var acks []ServerAck
+	var why string
+	if p.Quorum > 0 {
+		acks, res.Pending, why = pushAndCheckQuorum(ctx, p.Resolver, token, set.Names, expect, p.Quorum)
+	} else {
+		acks, why = pushAndCheck(ctx, p.Resolver, token, set.Names)
+	}
 	res.Acked = len(acks)
 	if why != "" {
 		return res, fmt.Errorf("revoke: %w: the update was not acknowledged: %s; running the revoke again is safe", ErrNotConfirmed, why)
@@ -201,7 +225,12 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		confirm = want
 	}
 	if msg := verifyRevoked(ctx, p, acctPub, trust, token, expect, confirm); msg != "" {
+		res.Complete = false
 		return res, fmt.Errorf("revoke: %w: %d server(s) acknowledged the update but the read-back %s; running the revoke again is safe", ErrNotConfirmed, len(acks), msg)
+	}
+	if p.Quorum > 0 {
+		res.Complete = len(res.Pending) == 0
+		return res, nil
 	}
 	res.Complete = set.Complete(p.Servers)
 	if !res.Complete {
@@ -230,7 +259,11 @@ func dedupe(l []string) []string {
 // verifyRevoked reads the account JWT back from every server until each answering one holds token, the JWT that was
 // pushed, and shows every key in want with a revocation at least as new as its time; "" is a match.
 func verifyRevoked(ctx context.Context, p RevokeParams, acctPub string, trust Trust, token string, need int, want map[string]int64) string {
-	return readBack(ctx, p.Resolver, acctPub, trust, need, p.VerifyTries, p.VerifyWait, token, func(got *jwt.AccountClaims) string {
+	quorum := need
+	if p.Quorum > 0 {
+		quorum = p.Quorum
+	}
+	return readBackQuorum(ctx, p.Resolver, acctPub, trust, need, quorum, p.VerifyTries, p.VerifyWait, token, func(got *jwt.AccountClaims) string {
 		var miss []string
 		for u, ts := range want {
 			if cur, ok := got.Revocations[u]; !ok || cur < ts {
@@ -243,4 +276,13 @@ func verifyRevoked(ctx context.Context, p RevokeParams, acctPub string, trust Tr
 		}
 		return "does not show the revocation of " + strings.Join(miss, ", ")
 	})
+}
+
+// shortText is the refusal of a write whose lookup was not answered by enough servers: with a quorum short already says
+// how many answered of how many and the quorum, so it is used as it is; without one it is the all-servers refusal.
+func shortText(short string, quorum int) string {
+	if quorum > 0 {
+		return short
+	}
+	return shortRefusal(short)
 }

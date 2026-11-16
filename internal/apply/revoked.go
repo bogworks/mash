@@ -8,8 +8,9 @@ import (
 	"github.com/nats-io/jwt/v2"
 )
 
-// accountClaims reads the account JWT from every server and returns each distinct verified copy. It is a read, and it
-// refuses to answer unless it has seen every server: the server set must be complete (as RevokeUsers requires), every
+// accountClaims reads the account JWT from the servers and returns each distinct verified copy. It is a read, and it
+// refuses to answer unless it has seen every server (or, with p.Quorum, a quorum of them: any quorum overlaps the quorum
+// that acknowledged the last revocation, ADR 0142): the server set must be complete (as RevokeUsers requires), every
 // expected server must answer the lookup, every server must hold a JWT, and every copy must verify against the
 // operator trust. A silent, unverifiable or incomplete set is an error.
 func accountClaims(ctx context.Context, p RevokeParams) ([]*jwt.AccountClaims, error) {
@@ -30,7 +31,15 @@ func accountClaims(ctx context.Context, p RevokeParams) ([]*jwt.AccountClaims, e
 	if errors.Is(kerr, ErrServerSetRefused) {
 		return nil, fmt.Errorf("refusing: %w", kerr)
 	}
-	if !set.Complete(p.Servers) {
+	if p.Quorum > 0 {
+		if !set.Quorate(p.Servers, p.Quorum) {
+			why := set.QuorumWhy(p.Servers, p.Quorum)
+			if kerr != nil {
+				why = kerr.Error()
+			}
+			return nil, fmt.Errorf("refusing: %s", why)
+		}
+	} else if !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {
 			why = kerr.Error()
@@ -41,7 +50,10 @@ func accountClaims(ctx context.Context, p RevokeParams) ([]*jwt.AccountClaims, e
 	if err != nil && len(toks) == 0 {
 		return nil, fmt.Errorf("revoked: look up the account JWT: %w", err)
 	}
-	if len(toks) < expect {
+	switch {
+	case p.Quorum > 0 && len(toks) < p.Quorum:
+		return nil, fmt.Errorf("refusing: %s", quorumRefusalText(len(toks), expect, p.Quorum))
+	case p.Quorum <= 0 && len(toks) < expect:
 		return nil, fmt.Errorf("refusing: %s", shortRefusal(fmt.Sprintf("only %d of %d servers answered the account lookup", len(toks), expect)))
 	}
 	var out []*jwt.AccountClaims

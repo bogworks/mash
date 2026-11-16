@@ -231,7 +231,7 @@ func capState(s string) string {
 }
 
 type auditProblem struct {
-	What  string `json:"what"` // record, creds, retired, lease or inbox
+	What  string `json:"what"` // record, creds, retired, lease, inbox, replicas or revocation_pending
 	Item  string `json:"item"` // the directory key or the file
 	Error string `json:"error"`
 }
@@ -695,6 +695,7 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 		}
 	}
 	rep := buildAudit(cfg.Owner, snap, dirs, creds, skip)
+	auditRevocations(ctx, adm, cfg, env, &rep)
 	if rep.Account, err = credsAccountKey(cfg.AdminCreds); err != nil {
 		return auditFailed(stderr, err)
 	}
@@ -731,7 +732,7 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 		if rep.Compare != nil {
 			moved, vanished, recreated, unknown, lost = rep.Compare.Moved, rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown, len(rep.Compare.RetiredFinalLost)
 		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable or retired-marker finding(s), %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable, retired-marker or revocation finding(s), %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
 			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated, lost)
 		if unknown > 0 {
 			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d legacy stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
