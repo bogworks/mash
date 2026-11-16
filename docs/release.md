@@ -79,11 +79,26 @@ when the draft has no signature yet. `RELEASE_SIGNERS` is for the tag only: the 
 `ci/release.allowed_signers`. A draft that already
 has a `SHA256SUMS.sig` that verifies keeps it, and the rerun needs no key. One that does not verify is refused, never
 replaced. Publishing is refused unless the draft carries a verifying `SHA256SUMS.sig`, and a published release is never
-amended. Anyone can verify a download:
+amended.
 
-    ssh-keygen -Y verify -f ci/release.allowed_signers -I release -n mash-release -s SHA256SUMS.sig < SHA256SUMS
+### Anyone can verify a download
 
-The reasoning is in [decision 0042](decisions/0042-sign-sha256sums-with-sshsig.md).
+Releases at or above the cutover version (see `docs/release-cutover`) are not signed with a key. Each binary has a
+build attestation: a statement, signed by GitHub, that this file was built from this tag by the release workflow.
+Download the binary and `SHA256SUMS` from the release page, then check the checksum and the attestation (`gh` must be
+installed and logged in; `<commit>` is the commit the tag points to):
+
+```sh
+grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c -        # macOS: shasum -a 256 -c -
+gh attestation verify mash-linux-amd64 -R bogworks/mash \
+  --signer-workflow bogworks/mash/.github/workflows/release.yml \
+  --source-ref refs/tags/v<version> --source-digest <commit>
+```
+
+Without `--source-digest` the check still proves the tag; with it, it also proves the commit. Releases below the
+cutover had no attestation and used the signature instead: `ssh-keygen -Y verify -f ci/release.allowed_signers -I
+release -n mash-release -s SHA256SUMS.sig < SHA256SUMS`. The reasoning is in
+[decision 0042](decisions/0042-sign-sha256sums-with-sshsig.md).
 
 ## Procedure by state
 
