@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -76,14 +77,77 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 	}
 }
 
-func TestHelpAfterDoubleDashIsNotHelp(t *testing.T) {
-	if _, ok := helpUsage([]string{"send", "bob", "--", "--help"}); ok {
-		t.Error("--help after -- was taken as help")
+// Help is only the first argument after the verb (after the sub-verb for admin): free text and values that contain
+// -h or --help, anywhere further along, are never help.
+func TestHelpUsageOnlyFirstArgument(t *testing.T) {
+	yes := [][]string{
+		{"send", "--help"}, {"send", "-h"}, {"prompt", "--help"}, {"prompt", "-h"},
+		{"read", "-h"}, {"inbox", "--help"}, {"who", "-h"}, {"serve", "-h"}, {"hook", "--help"},
+		{"plugin", "--help"}, {"plugin", "export", "-h"},
+		{"admin", "-h"}, {"admin", "--help"}, {"admin", "set-meta", "-h"}, {"admin", "suspend", "--help"},
 	}
-	if _, ok := helpUsage([]string{"send", "bob", "--help"}); !ok {
-		t.Error("--help not found")
+	for _, a := range yes {
+		if _, ok := helpUsage(a); !ok {
+			t.Errorf("%v: not help, want help", a)
+		}
 	}
-	if _, ok := helpUsage([]string{"nosuch", "--help"}); ok {
-		t.Error("unknown verb took help")
+	no := [][]string{
+		{"send", "y", "see", "the", "--help", "flag"}, {"send", "y", "-h"}, {"send", "y", "--help"},
+		{"send", "y", "--", "--help"}, {"send", "y", "--urgent", "-h"}, {"send", "y", "--kind", "--help", "x"},
+		{"prompt", "y", "what", "does", "-h", "do"}, {"prompt", "y", "--help"}, {"prompt", "y", "-h"},
+		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
+		{"who", "--owner", "-h"}, {"who", "x", "--help"},
+		{"admin", "set-meta", "y", "--help"}, {"admin", "set-meta", "y", "note", "-h"},
+		{"admin", "suspend", "y", "--help"}, {"admin", "suspend", "y", "-h"},
+		{"admin", "provision", "y", "--help"}, {"admin", "deprovision", "y", "-h"},
+		{"plugin", "export", "--help-me"}, {"plugin", "export", "dir", "-h"},
+		{"nosuch", "--help"},
+	}
+	for _, a := range no {
+		if _, ok := helpUsage(a); ok {
+			t.Errorf("%v: taken as help", a)
+		}
+	}
+}
+
+// A message that contains the words is sent whole; help as the first argument prints usage and sends nothing.
+func TestSendTextWithHelpWordsIsSent(t *testing.T) {
+	w := newWorld(t, "x", "y")
+	for i, text := range [][]string{{"see", "the", "--help", "flag"}, {"-h"}, {"--help"}, {"what", "does", "-h", "do"}} {
+		out, code := w.cli(t, "x", append([]string{"send", "y"}, text...)...)
+		if code != 0 || strings.HasPrefix(out, "usage:") || !strings.Contains(out, "sent #") {
+			t.Fatalf("send %v: %d %q", text, code, out)
+		}
+		out, code = w.cli(t, "y", "read", strconv.Itoa(i+1))
+		if want := strings.Join(text, " "); code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("read #%d: %d %q, want text %q", i+1, code, out, want)
+		}
+	}
+	for _, h := range []string{"--help", "-h"} {
+		out, code := w.cli(t, "x", "send", h)
+		if code != 0 || !strings.HasPrefix(out, "usage: mash send") {
+			t.Fatalf("send %s: %d %q", h, code, out)
+		}
+	}
+	if n := inboxCount(t, w, "y"); n != 4 {
+		t.Fatalf("y has %d messages, want the 4 sent and nothing from help", n)
+	}
+}
+
+// prompt needs a live responder, so the send path is tested as far as it goes: the words reach recipient lookup (an
+// unknown recipient is an error, not usage), and help as the first argument prints usage.
+func TestPromptTextWithHelpWordsIsNotHelp(t *testing.T) {
+	w := newWorld(t, "x")
+	for _, a := range [][]string{{"nosuch", "what", "does", "-h", "do"}, {"nosuch", "--help"}, {"nosuch", "-h"}} {
+		out, code := w.cli(t, "x", append([]string{"prompt"}, a...)...)
+		if code == 0 || strings.HasPrefix(out, "usage:") {
+			t.Errorf("prompt %v: %d %q, want a lookup error, not usage", a, code, out)
+		}
+	}
+	for _, h := range []string{"--help", "-h"} {
+		out, code := w.cli(t, "x", "prompt", h)
+		if code != 0 || !strings.HasPrefix(out, "usage: mash prompt") {
+			t.Errorf("prompt %s: %d %q", h, code, out)
+		}
 	}
 }
