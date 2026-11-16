@@ -30,7 +30,7 @@ go install github.com/bogworks/mash/cmd/mashctl@latest   # the admin tool
 mash version
 ```
 
-`mashctl` is not in the release assets: a release carries only the four `mash-<os>-<arch>` binaries, so install `mashctl` with `go install` as above. It needs a Go toolchain, and the directory `go install` writes to (`go env GOBIN`, or `$(go env GOPATH)/bin`) must be on your `PATH`.
+`mashctl` is not in the release assets: a release carries only the four `mash-<os>-<arch>` binaries, so install `mashctl` with `go install` as above. It needs Go 1.27.4 or newer (the version `go.mod` requires), and the directory `go install` writes to (`go env GOBIN`, or `$(go env GOPATH)/bin`) must be on your `PATH`.
 
 ## 2. The plugin
 
