@@ -341,6 +341,7 @@ resolver: {
   type: full
   dir: "/var/lib/mash/n1/resolver"
   allow_delete: false
+  interval: "5s"
 }
 jetstream: {
   store_dir: "/var/lib/mash/n1/jetstream"
@@ -353,6 +354,8 @@ cluster: {
 ```
 
    Listen on addresses the central host and the other nodes can reach, and use TLS for anything beyond a test (the template has none).
+
+   Set `interval` in every node's `resolver` block. The full resolver syncs from a timer only, one interval after the node starts (default one minute), and nothing holds clients back until it has. A node that was down while a key was revoked therefore accepts the revoked credential until its first sync; `interval: "5s"` shortens that to about the interval plus the time the routes take to form. To close it completely, keep the returning node's client port closed (a firewall rule, or listen on a private address first) until `mashctl audit` shows no `revocation_pending`.
 3. Start the nodes. Check that the cluster formed with `mashctl issued check --servers 3` once step 5 is done (it needs the admin creds and the issue record): its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did. `adopt` also prints `3 server(s) replied`.
 4. On the central host, copy the operator signing seed, the account identity seed and `sys.creds` from node 1, and run `adopt`. It creates the central host's config.json, imports the operator and account keys into its key store, copies `sys.creds` to `<config dir>/server/` and, with `--mint-admin`, writes `mashadmin.creds` there. A fresh central host has no configured owner, so pass `--owner`:
 
