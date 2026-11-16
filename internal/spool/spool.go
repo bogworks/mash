@@ -629,6 +629,20 @@ func (s Spool) OwnRecord(legacy, record string) error {
 	return s.writeOrRemove(sessionFile, legacy)
 }
 
+// ErrOwnerChanged is ReplaceOwnerRecord's refusal: the spool is no longer owned by the record the caller wrote.
+var ErrOwnerChanged = errors.New("spool: the owner record changed")
+
+// ReplaceOwnerRecord swaps the .owner record old, which the caller wrote, for record, and nothing else: refusals, told
+// notices and the legacy .session text stay. It is for a serve that learns its session id after it bound the spool
+// (Codex's thread id comes with the first tool call). It refuses with ErrOwnerChanged when .owner no longer is old
+// (another serve took the spool). The caller holds the spool lock.
+func (s Spool) ReplaceOwnerRecord(old, record string) error {
+	if s.Owner() != old {
+		return ErrOwnerChanged
+	}
+	return s.writeOrRemove(ownerFile, record)
+}
+
 // LegacyToken is the "pid:N" text an older hook understands, for a record: N is the record's pid, else this
 // process's parent (serve's parent, the Claude process). The one place that text is made.
 func LegacyToken(record string) string {

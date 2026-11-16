@@ -97,7 +97,7 @@ func TestSelectPi(t *testing.T) {
 	if a, err := Select(""); err != nil || a.Name() != "claude" {
 		t.Fatalf("Select(\"\") = %v, %v: no detection, the default stays Claude", a, err)
 	}
-	if got := strings.Join(Known(), ","); got != "claude,headless,pi" {
+	if got := strings.Join(Known(), ","); got != "claude,codex,headless,pi" {
 		t.Errorf("Known = %s", got)
 	}
 }

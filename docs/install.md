@@ -10,6 +10,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones, `status` warns). The plugin and the `mash` binary should be the same release (major and minor); `status` warns when they are not.
 
 Using Pi instead of Claude Code? [hosts/pi.md](hosts/pi.md) is the Pi-specific install; the rest of this page applies to it too.
+Using Codex instead? [hosts/codex.md](hosts/codex.md) is the Codex-specific install; the rest of this page applies to it too.
 
 ## 1. The binary
 

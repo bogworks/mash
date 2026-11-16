@@ -77,8 +77,10 @@ type ownerRecord struct {
 	PID     int    `json:"pid,omitempty"`
 	Session string `json:"session,omitempty"`
 	Launch  string `json:"launch,omitempty"`
-	// Host names a non-Claude host whose serve wrote the record (headless, ADR 0139). Claude's own record has none, and
-	// Claude's Match refuses any record that does.
+	// Host names the host whose serve wrote the record, only when its hook cannot tell it by itself: headless (ADR 0139,
+	// no hook drains it) and Codex (whose hook sees none of the MCP client's identity, so it reads its adapter from
+	// here and serve and hook agree). A hook matches a record only when the record's host is its own adapter's name or
+	// is empty; Claude's and Pi's records have none, so their bytes are unchanged.
 	Host string `json:"host,omitempty"`
 }
 
@@ -87,13 +89,29 @@ type ownerRecord struct {
 func (c Claude) OwnerToken(env func(string) string) string { return ownerToken(c, env) }
 
 // ownerToken is OwnerToken for the host a, whose SessionSources say which variable holds the session id.
-func ownerToken(a Adapter, env func(string) string) string {
-	r := ownerRecord{PID: os.Getppid()}
+func ownerToken(a Adapter, env func(string) string) string { return ownerTokenRec(a, env, "", "") }
+
+// ownerTokenRec is ownerToken with the record's Host and, when the session id is not in serve's environment, the
+// session id serve learned some other way (session, if non-empty).
+func ownerTokenRec(a Adapter, env func(string) string, hostName, session string) string {
+	r := ownerRecord{PID: os.Getppid(), Host: hostName}
 	if env != nil {
 		r.Session, r.Launch = SessionID(a, env), env("MASH_LAUNCH_TOKEN")
 	}
+	if session != "" {
+		r.Session = session
+	}
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+// OwnerHost is the host name an owner record carries, "" when it has none (Claude's and Pi's, and legacy text).
+func OwnerHost(owner string) string {
+	var r ownerRecord
+	if strings.HasPrefix(owner, "{") {
+		_ = json.Unmarshal([]byte(owner), &r)
+	}
+	return r.Host
 }
 
 // Owns reports whether the hook may drain a spool recorded with owner; see Match.
@@ -113,15 +131,21 @@ func (c Claude) Owns(owner string, h HookIdentity) bool {
 // as another launch (ADR 0043), tokens or not.
 //
 // A legacy owner ("pid:N" text) is checked by rule 3 alone; an empty or other older owner is accepted.
-func (Claude) Match(owner string, h HookIdentity) (bool, string) {
+func (Claude) Match(owner string, h HookIdentity) (bool, string) { return matchFor(Claude{}, owner, h) }
+
+// matchFor is Match under the rules of host a: rule 3 (process ancestry) runs only when a's SessionSources say its
+// process ancestry identifies one session. Codex's does not: with one shared app-server every thread's serve and hook
+// descend from it, so serve's parent being an ancestor of the hook proves nothing about which thread the hook is in.
+func matchFor(a Adapter, owner string, h HookIdentity) (bool, string) {
+	ancestryUnique := a.SessionSources().AncestryUnique
 	var r ownerRecord
 	switch {
 	case strings.HasPrefix(owner, "{"):
 		if json.Unmarshal([]byte(owner), &r) != nil {
 			return false, "owner record unreadable (is serve a different mash version than the hook?)"
 		}
-		if r.Host != "" { // another host's serve (headless): no Claude Code hook may drain its spool
-			return false, "owner is a " + r.Host + " serve; no hook drains it"
+		if r.Host != "" && r.Host != a.Name() { // another host's serve (headless, codex): this host's hook may not drain its spool
+			return false, "owner is a " + r.Host + " serve; a " + a.Name() + " hook does not drain it"
 		}
 	case strings.HasPrefix(owner, "pid:"):
 		n, err := strconv.Atoi(strings.TrimPrefix(owner, "pid:"))
@@ -147,7 +171,7 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	if h.LaunchToken != "" && r.Launch != "" && h.LaunchToken == r.Launch {
 		return true, "launch token"
 	}
-	if r.PID > 0 {
+	if r.PID > 0 && ancestryUnique {
 		for pid := range Ancestors { // lazy: stops at the owner
 			if pid == r.PID {
 				return true, "process ancestry"
@@ -156,6 +180,10 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	}
 	if sameSession && otherLaunch {
 		return false, otherLaunchWhy + ", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"
+	}
+	if !ancestryUnique {
+		return false, "session id " + differs(h.SessionID, r.Session) + ", launch token " + differs(h.LaunchToken, r.Launch) +
+			", and process ancestry does not identify a session for host " + a.Name()
 	}
 	return false, "session id " + differs(h.SessionID, r.Session) + ", launch token " + differs(h.LaunchToken, r.Launch) +
 		", process " + strconv.Itoa(r.PID) + " is not an ancestor of the hook"

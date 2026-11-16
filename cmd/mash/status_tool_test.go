@@ -16,6 +16,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/host"
 	"github.com/bogworks/mash/internal/mcp"
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -584,7 +585,12 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool := statusText(&statusSource{cfg: cfg, srv: &atomic.Pointer[mcp.Server]{}, home: home, getenv: envFrom(env)})
+	// serve gives the tool the detection it made, as the CLI makes its own from the same environment: both say the host.
+	det, err := host.Detect(cfg.Host, envFrom(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := statusText(&statusSource{cfg: cfg, adapter: det.Adapter, det: &det, srv: &atomic.Pointer[mcp.Server]{}, home: home, getenv: envFrom(env)})
 	shared := func(s string) []string {
 		var out []string
 		for _, l := range strings.Split(s, "\n") {

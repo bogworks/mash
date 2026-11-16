@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -407,5 +408,30 @@ func TestInitializeKeepsClientInfo(t *testing.T) {
 	h.next(t)
 	if n, v := h.s.ClientInfo(); n != "claude-code" || v != "2.1.316" {
 		t.Fatalf("clientInfo %q %q", n, v)
+	}
+}
+
+// The thread id a tools/call carries in _meta (Codex does) is kept, and OnThread hears each change once.
+func TestToolCallKeepsTheThreadID(t *testing.T) {
+	h := start(t, []Tool{{Name: "t", Schema: map[string]any{}, Call: func(context.Context, json.RawMessage) (string, error) { return "ok", nil }}})
+	if h.s.ThreadID() != "" {
+		t.Fatalf("thread before any call: %q", h.s.ThreadID())
+	}
+	var mu sync.Mutex
+	var heard []string
+	h.s.OnThread(func(id string) { mu.Lock(); heard = append(heard, id); mu.Unlock() })
+	h.send(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"t","arguments":{}}}`)
+	h.next(t)
+	if h.s.ThreadID() != "" {
+		t.Fatalf("a call with no _meta set a thread: %q", h.s.ThreadID())
+	}
+	for i, id := range []string{"th-1", "th-1", "th-2"} {
+		h.send(t, `{"jsonrpc":"2.0","id":`+strconv.Itoa(i+2)+`,"method":"tools/call","params":{"name":"t","arguments":{},"_meta":{"threadId":"`+id+`"}}}`)
+		h.next(t)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if h.s.ThreadID() != "th-2" || strings.Join(heard, ",") != "th-1,th-2" {
+		t.Fatalf("thread %q, heard %v", h.s.ThreadID(), heard)
 	}
 }

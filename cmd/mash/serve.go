@@ -170,7 +170,10 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 	"mash retries on its own and will tell you when mail is on."
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
-func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
+func serve(parent context.Context, cfg config.Config, cfgErr error, det host.Detection, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// adapter is the host as detected before the MCP client has spoken; hs settles it (see hostSettle) and the code
+	// that depends on the host's identity reads hs's answer instead.
+	adapter := det.Adapter
 	applyRetryTiming(cfg)
 	endpoint.SetSessionEnv(adapter.SessionSources().Env)
 	endpoint.SetNoSessionIdentity(host.IsHeadless(adapter)) // a headless serve is never the same session as another
@@ -180,9 +183,12 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 
 	// Without a usable identity, still answer MCP (the plugin may be enabled in every session) with only the
 	// tools that need no endpoint, version and status, and say why.
-	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: adapter, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: adapter, det: &det, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
 	headless := host.IsHeadless(adapter)
-	reportSettings(src, stderr)
+	hs := &hostSettle{det: det, src: src, stderr: stderr}
+	if !det.Pending() { // a pending host's settings checks wait for the client's name
+		reportSettings(src, stderr)
+	}
 	degraded := func(instr string, notify bool) int {
 		if headless {
 			// With no MCP client there is nobody to tell and nothing to serve the info tools to: the reason is on
@@ -192,6 +198,15 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, infoTools(src))
 		src.srv.Store(srv)
+		if det.Pending() {
+			go func() {
+				select {
+				case <-srv.ChannelReady():
+					hs.settle(srv)
+				case <-ctx.Done():
+				}
+			}()
+		}
 		if notify {
 			go func() {
 				select {
@@ -320,6 +335,8 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		case <-ctx.Done():
 			return
 		}
+		// The client has initialized: settle the host from its name. From here the adapter is the settled one.
+		adapter := hs.settle(srv)
 		if waited || headless { // headless: the endpoint is up whether or not it waited for the lease; say so on stderr
 			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
@@ -345,9 +362,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			})
 		}
 		boundAt := time.Now() // before the bind, so a hook run once this session owns the spool is never missed
+		ownerTok := adapter.OwnerToken(os.Getenv)
 		sdir, err := endpoint.SpoolDir(cfg)
 		if err == nil {
-			err = ep.SetSpool(spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
+			err = ep.SetSpool(spool.Spool{Dir: sdir}, ownerTok)
 		}
 		if err != nil {
 			if failClosed {
@@ -355,7 +373,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				go retrySpool(ctx, ep, func() (spool.Spool, error) {
 					d, err := endpoint.SpoolDir(cfg)
 					return spool.Spool{Dir: d}, err
-				}, adapter.OwnerToken(os.Getenv), &src.owned)
+				}, ownerTok, &src.owned)
 			} else if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
@@ -368,6 +386,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				fmt.Fprintf(stderr, "mash: spool: %v; mail stays on the channel\n", err)
 			}
 		} else if src.owned.Store(&boundAt); noChannel || cfg.SpoolFromStart || failClosed {
+			if so, ok := adapter.(host.SessionOwner); ok {
+				// This host's session id is not in serve's environment: it comes with the first tool call.
+				trackThread(ctx, srv, so, spool.Spool{Dir: sdir}, ownerTok, stderr)
+			}
 			// Claude Code drops channel events that arrive before its first user message, and its first hook runs
 			// with that message: only with a spool can early mail wait for a hook, so a failed SetSpool keeps the
 			// channel (#16).
@@ -428,7 +450,8 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			close(svcDone)
 			startSvc()
 		}
-		if err := ep.Run(ctx, adapter.Waker(srv.Notify)); err != nil && ctx.Err() == nil {
+		wake := host.WakerFor(adapter, host.WakeContext{Ctx: ctx, ThreadID: srv.ThreadID, Env: os.Getenv, Stderr: stderr}, srv.Notify)
+		if err := ep.Run(ctx, wake); err != nil && ctx.Err() == nil {
 			var lostTo *endpoint.LeaseLostError
 			if errors.As(err, &lostTo) && lostTo.SameSession {
 				// A newer serve of this same session holds the lease (ADR 0092): this one has stopped consuming and

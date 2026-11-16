@@ -31,7 +31,11 @@ import (
 type statusSource struct {
 	cfg config.Config
 	// adapter is the host the session runs in; nil reads as Claude Code, the only host there is.
-	adapter    host.Adapter
+	adapter host.Adapter
+	// det is how the host was chosen, for the host: line; nil (tests, callers that detected nothing) prints no line.
+	// late is the same once serve has settled it with the MCP client's name, and then wins.
+	det        *host.Detection
+	late       atomic.Pointer[host.Detection]
 	cfgErr     error
 	pluginRoot string
 	state      *atomic.Pointer[sessionState]
@@ -50,6 +54,9 @@ type statusSource struct {
 
 // host is the adapter status words and checks come from.
 func (s *statusSource) host() host.Adapter {
+	if d := s.late.Load(); d != nil {
+		return d.Adapter
+	}
 	if s.adapter == nil {
 		return host.Claude{}
 	}
@@ -117,6 +124,9 @@ func statusTool(src *statusSource) mcp.Tool {
 func statusText(src *statusSource) string {
 	cfg := src.cfg
 	lines := []string{nameLineFor(cfg, src.host().Words())}
+	if l := src.hostLine(); l != "" {
+		lines = append(lines, l)
+	}
 	if l := identityLine(cfg); l != "" {
 		lines = append(lines, l)
 	}
@@ -661,6 +671,25 @@ func hooklessFix(sp spool.Spool, own time.Time, w host.Words) string {
 // a failure.
 func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout io.Writer) int {
 	return statusCmdFor(cfg, cfgErr, nil, env, stdout)
+}
+
+// hostLine is the host: line, which says which host was chosen and how; "" when no detection was made.
+func (s *statusSource) hostLine() string {
+	if d := s.late.Load(); d != nil {
+		return d.Line()
+	}
+	if s.det != nil {
+		return s.det.Line()
+	}
+	return ""
+}
+
+// statusCmdDetected is statusCmdFor for a detected host: its status has the host: line. Nothing is connected, so the
+// MCP client's name is not known and an unnamed host with no environment marker reads as assumed.
+func statusCmdDetected(cfg config.Config, cfgErr error, d host.Detection, env func(string) string, stdout io.Writer) int {
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, adapter: d.Adapter, det: &d, cli: true, home: env("HOME"), getenv: env}
+	fmt.Fprintln(stdout, statusText(src))
+	return 0
 }
 
 // statusCmdFor is statusCmd for the host adapter; nil reads as Claude Code.

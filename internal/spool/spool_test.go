@@ -1,6 +1,7 @@
 package spool
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -554,5 +555,25 @@ func TestListedMarkLifecycle(t *testing.T) {
 	}
 	if err := s.Acked(Ref{Seq: 3}); err != nil || s.IsListed(Ref{Seq: 3}) {
 		t.Fatalf("Acked kept the listed mark: %v", err)
+	}
+}
+
+// ReplaceOwnerRecord swaps the record the caller wrote and leaves the legacy text; it refuses once another serve owns
+// the spool.
+func TestReplaceOwnerRecord(t *testing.T) {
+	s := newSpool(t)
+	old := `{"pid":42,"host":"codex"}`
+	if err := s.OwnRecord(LegacyToken(old), old); err != nil {
+		t.Fatal(err)
+	}
+	next := `{"pid":42,"session":"th-1","host":"codex"}`
+	if err := s.ReplaceOwnerRecord(old, next); err != nil || s.Owner() != next {
+		t.Fatalf("replace: %v, owner %q", err, s.Owner())
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.Dir, ".session")); string(b) != "pid:42" {
+		t.Fatalf(".session = %q", b)
+	}
+	if err := s.ReplaceOwnerRecord(old, `{"pid":1}`); !errors.Is(err, ErrOwnerChanged) || s.Owner() != next {
+		t.Fatalf("a stale replace: %v, owner %q", err, s.Owner())
 	}
 }

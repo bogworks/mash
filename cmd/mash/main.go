@@ -197,23 +197,35 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return 1
 	}
 	var adapter host.Adapter
+	var det host.Detection
 	if args[0] == "hook" || args[0] == "serve" {
 		// An unknown host is refused loudly, never read as claude: a hook that ran with the wrong adapter would
-		// drain mail into the wrong place.
+		// drain mail into the wrong place. Detect is MASH_HOST, then the host's environment markers, then Claude Code
+		// flagged as assumed; serve settles an assumed one with the MCP client's name once it has it.
 		var herr error
-		if adapter, herr = host.Select(cfg.Host); herr != nil {
+		if det, herr = host.Detect(cfg.Host, env); herr != nil {
 			fmt.Fprintln(stderr, herr)
 			return 1
 		}
+		adapter = det.Adapter
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
+		if !det.Named() {
+			// The hook cannot see the MCP client's name, which is how serve may have recognised the host (Codex):
+			// serve records the host in the spool's owner record, and the hook follows it, so both use one adapter.
+			adapter = adapterFromOwner(cfg, adapter)
+		}
 		return hookAck(cfg, err, adapter, env, ackArg(args[1:]), stdin, stdout, stderr)
 	}
 	if args[0] == "status" { // a report: a config error is a line of it
-		// status reads the host from MASH_HOST so a headless endpoint skips Claude Code's settings checks. A report never
-		// fails on it: an unknown host reads as the default here, and `mash serve` refuses it.
-		a, _ := host.Select(cfg.Host)
-		return statusCmdFor(cfg, err, a, env, stdout)
+		// status reads the host the way serve does, short of the MCP client's name, so a headless endpoint skips
+		// Claude Code's settings checks. A report never fails on it: an unknown host reads as the default here, and
+		// `mash serve` refuses it.
+		d, derr := host.Detect(cfg.Host, env)
+		if derr != nil {
+			d, _ = host.Detect("", env)
+		}
+		return statusCmdDetected(cfg, err, d, env, stdout)
 	}
 	if err != nil && args[0] != "serve" {
 		fmt.Fprintln(stderr, err)
@@ -221,7 +233,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	switch args[0] {
 	case "serve":
-		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
+		return serve(ctx, cfg, err, det, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "spool-dir":
 		return spoolDirCmd(cfg, stdout, stderr)
 	case "send", "read", "inbox", "who", "prompt":

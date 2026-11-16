@@ -54,6 +54,8 @@ type Server struct {
 
 	cmu                   sync.Mutex
 	clientName, clientVer string // clientInfo from the client's initialize request
+	thread                string // the last _meta.threadId seen on a tools/call
+	onThread              func(id string)
 
 	notified   atomic.Int64 // channel notifications written
 	notifiedAt atomic.Int64 // unix nanoseconds of the last one
@@ -64,6 +66,37 @@ func (s *Server) ClientInfo() (name, version string) {
 	s.cmu.Lock()
 	defer s.cmu.Unlock()
 	return s.clientName, s.clientVer
+}
+
+// ThreadID is the thread id the client last sent in a tools/call's _meta.threadId (Codex does); "" until one is seen.
+// It is the client's own text: callers validate it before use.
+func (s *Server) ThreadID() string {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	return s.thread
+}
+
+// noteThread records a thread id from a tools/call and, when it is new, runs OnThread with it.
+func (s *Server) noteThread(id string) {
+	if id == "" {
+		return
+	}
+	s.cmu.Lock()
+	changed, f := id != s.thread, s.onThread
+	s.thread = id
+	s.cmu.Unlock()
+	if changed && f != nil {
+		f(id)
+	}
+}
+
+// OnThread sets f to be called with a thread id each time a tools/call carries one that differs from the last (the
+// first one, for a client that sends one). It runs on the read loop: f must not block. It is safe to call while the
+// server runs.
+func (s *Server) OnThread(f func(id string)) {
+	s.cmu.Lock()
+	s.onThread = f
+	s.cmu.Unlock()
 }
 
 // ErrPingBusy is Ping's answer while an earlier ping is still being written: the client is not draining stdout, so
@@ -322,8 +355,12 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 		var p struct {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
+			Meta      struct {
+				ThreadID string `json:"threadId"`
+			} `json:"_meta"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
+		s.noteThread(p.Meta.ThreadID)
 		go s.call(ctx, req.ID, p.Name, p.Arguments)
 	default:
 		if isCall {

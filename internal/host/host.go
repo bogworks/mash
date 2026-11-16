@@ -135,14 +135,16 @@ type Presentation struct {
 	BatchMsgs, BatchBytes int
 }
 
-// Select returns the adapter for a host name: "" or "claude" is Claude Code, "pi" is Pi. The host is chosen by name
-// only (MASH_HOST); nothing is detected from the environment.
+// Select returns the adapter for a host name: "" or "claude" is Claude Code, "codex" is Codex, "pi" is Pi. It chooses
+// by name only; Detect is the choice a running mash makes, which also reads the environment and the MCP client.
 func Select(name string) (Adapter, error) {
 	switch name {
 	case "", "claude":
 		return Claude{}, nil
 	case "headless": // no host at all (ADR 0139); never detected, only named
 		return Headless{}, nil
+	case "codex":
+		return Codex{}, nil
 	case "pi":
 		return Pi{}, nil
 	}
@@ -150,4 +152,4 @@ func Select(name string) (Adapter, error) {
 }
 
 // Known lists the host names Select accepts.
-func Known() []string { return []string{"claude", "headless", "pi"} }
+func Known() []string { return []string{"claude", "codex", "headless", "pi"} }
