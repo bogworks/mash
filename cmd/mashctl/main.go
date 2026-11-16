@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/config"
@@ -32,6 +33,12 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
+	}
+	if isVerb(args[0]) && helpRequested(args[1:]) { // before any dispatch or config load: help changes nothing
+		fmt.Fprint(stdout, verbUsage(args[0]))
+		return 0
+	}
+	switch args[0] {
 	case "adopt": // takes over a server you already run: the config and the key store, not a server
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
@@ -71,4 +78,44 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		announceTarget(cfg, env, stderr, nil)
 	}
 	return ctl.Run("mashctl", cfg, args, stdout, stderr)
+}
+
+// helpRequested reports whether -h or --help is among a verb's arguments before a literal "--". Only exact tokens
+// count: a value such as `--label help` is not a flag.
+func helpRequested(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--":
+			return false
+		case "-h", "--help":
+			return true
+		}
+	}
+	return false
+}
+
+// verbUsage is the lines of the mashctl usage that begin with verb, or the whole usage when none does (a verb
+// whose usage lives in its own file).
+func verbUsage(verb string) string {
+	prefix := "  mashctl " + verb
+	var b strings.Builder
+	for _, l := range strings.SplitAfter(ctl.Usage("mashctl"), "\n") {
+		if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+			b.WriteString(l)
+		}
+	}
+	if b.Len() == 0 {
+		return ctl.Usage("mashctl")
+	}
+	return "usage:\n" + b.String()
+}
+
+// isVerb reports whether name is a verb run dispatches.
+func isVerb(name string) bool {
+	switch name {
+	case "adopt", "audit", "inbox", "issued", "add", "label", "unlabel", "retire", "unzone", "reissue",
+		"init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
+		return true
+	}
+	return false
 }
