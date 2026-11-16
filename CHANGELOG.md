@@ -8,80 +8,94 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-mash v0.5.0 removes zones and hardens what remains. Zones, the six-token mail subject and the commands that managed them are removed: the address is the fence, and mail keeps one five-token subject. Every credential mash issues is now recorded, and a revocation refuses when the record shows a later credential for the same key. New settings refuse plain-text connections and unspooled mail, and the plugin launcher can refuse an unverified binary. `mashctl inbox inspect` shows an endpoint's stored mail and its consumer without changing anything. Verify each download with its GitHub build attestation. Read Upgrading before you upgrade.
+**This is a breaking release. If you used zones, read Upgrading before you install it.**
+
+mash v0.5.0 does two things: it retires zones, and it tightens security in the parts that remain.
+
+**Zones are gone.** Zones were our first attempt at letting you control which agents may mail which other agents. In practice they didn't deliver what we wanted from a security policy: they were hard to reason about, they changed the shape of every mail address, and they didn't give a clean answer to "who is allowed to talk to whom". Rather than keep patching them, we're retiring them. A simpler, clearer way to say who can reach whom is planned for 0.6.0.
+
+Until then the rule is plain: **an agent's address is its fence.** Each agent has one inbox, and every agent under the same owner can reach it. All mail uses the same five-part address again (`agents.mail.<agent>.<owner>.<name>`), with no zone in the middle.
+
+**Also in this release:**
+
+- **A record of every credential.** `mashctl` now records each credential it hands out. `mashctl issued check` compares that record with who is actually connected and flags anything mash didn't issue. Revoking a credential is also safer: mash refuses when the record shows the revocation wouldn't actually take effect.
+- **Stricter settings you can turn on:**
+  - refuse unencrypted connections to remote servers (`MASH_REQUIRE_TLS`);
+  - never fall back to a less reliable delivery path (`MASH_SPOOL_REQUIRED`);
+  - have the Claude Code plugin refuse a mash binary it can't verify (`MASH_PLUGIN_REQUIRE_VERIFIED`).
+
+  All of them are off by default.
+- **A look inside an inbox.** `mashctl inbox inspect <agent>` shows the mail stored for an agent and whether it was delivered, without changing anything.
+- **An easier start.** The README now opens with a quick start for one person on one machine, with no account needed.
+- **Fixes:**
+  - `--help` after any command now prints help and does nothing else. Before, `mashctl init --help` ran `init`.
+  - `mashctl init --local` respects `XDG_CONFIG_HOME`.
+  - Long or odd prompts are handled safely.
+
+Every download comes with a GitHub build attestation; verify it before you run the binary.
 
 ### Upgrading
 
-Steps 1 and 2 are required, and the order matters.
+**If you never used zones**, upgrading is two steps:
 
-1. **Remove zones from your directory first: upgrade `mashctl` alone, run `unzone`, then upgrade the endpoints.** A directory record that still carries a zone blocks the upgrade: `mash serve` refuses to start while one exists, and `mashctl audit` and `mashctl drift` report it as an error. For each zoned record run `mashctl unzone <endpoint>`. It rewrites the record and moves the inbox to the five-token subject without losing stored mail, and is safe to run again. `unzone` does not give the endpoint a new credential, so then do that. `mashctl permissions <endpoint> --nsc` only prints the permission set as `nsc add user` flags and changes no user. Either run `mashctl reissue <endpoint>` where the endpoint's creds file is: it reads the user seed in that file, signs a user with the five-token permissions and rotates the key (add `--widen` if it refuses because the endpoint's current permissions are narrower than the owner-wide set). Or run the printed flags with `nsc` and regenerate the endpoint's creds file. `unzone` and a rotating `reissue` run where the account signing key is in the `mashctl` key store (`MASH_KEYS_DIR`), beside the system credentials, and `reissue` also needs the operator key to revoke the old key. Plan where that is before you start.
-2. **If a zone policy is applied, do not upgrade.** With zone signing keys in the account JWT there is no migration: `unzone` refuses. Stay on v0.4.0. `mashctl audit` says which case you are in.
-3. **Change admin scripts together.** Calls to `mashctl` or `mash admin` with `--zone`, `set-zone`, `--policy` or a six-token subject fail on v0.5.0, and the v0.4.0 zone policy commands no longer exist. The table in [docs/operations.md, "Upgrading admin tooling across zone removal"](docs/operations.md) lists each changed call.
-4. **Run `mash admin init` once.** It creates the new `mash-issued` bucket and marks the issue record so that a revocation can show the record is complete.
-5. **`mashctl add` and `reissue` now need the system-account credentials** (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` beside the admin credentials), to check that no zone policy is applied. `reissue --all` and `--changed` list what they would do and act only with `--yes`.
-6. **Plugin pinning.** The plugin published with this tag is not pinned to a binary. The plugin release that follows it (`0.5.0-pin.1`) pins the launcher to v0.5.0. If you set `MASH_PLUGIN_REQUIRE_VERIFIED`, do so only after updating to that pinned plugin.
+1. Install v0.5.0 (the `mash` binary and the plugin).
+2. Run `mash admin init` once. It creates the new credential record and hardens a setting on the server.
 
-### Added
+Also note: `mashctl add` and `mashctl reissue` now need the system account's credentials, so that they can check no zone policy is in force. Pass `--sys-creds FILE`, set `MASH_SYS_CREDS`, or keep a `sys.creds` file next to your admin credentials.
 
-- `mashctl` records every user JWT it issues (`add`, `reissue`, and the admin user at `init`) in a new `mash-issued` bucket that only
-  the admin connection writes and no endpoint can read or write, and `mashctl issued list` and `mashctl issued check` read it. The check
-  compares the user keys connected to every server with the record and reports any key mash did not issue (exit 1), reports a connected key the record holds as revoked (exit 1), and refuses an
-  incomplete server set (exit 2). Each entry carries a `purpose` (`issue`, `rotation`, or `probe`) and a
-  `revoked_at` time that `retire`, `deprovision` and a rotating `reissue` set after the revocation succeeds (a failure to
-  note it is a warning, never a failed revocation). The threat model gains "Who holds which key"
-  ([ADR 0101](docs/decisions/0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md)).
-  `mashctl adopt --mint-admin` now records the admin user it mints, and the check exempts no key. The record keeps the last 64 revisions of a key, and the check scans a server again when its connection pages do not agree with its own count, and reports the scan as incomplete when they still do not.
-- The plugin launcher honours MASH_PLUGIN_REQUIRE_VERIFIED: when set it refuses an unpinned plugin, a failed or mismatched download and a cached binary that fails verification instead of falling back to mash on PATH; by default nothing changes ([ADR 0096](docs/decisions/0096-the-plugin-launcher-takes-a-verification-setting-and-the-layer-above-owns-profiles.md)).
-- An endpoint now warns at start, and `mash status` shows a line, when the lease bucket still allows rollup writes; run `mash admin init` to harden it.
-- `mashctl inbox inspect <address>` shows one endpoint's stored messages and where its `deliver` consumer stands, for the test lane that
-  needs transport evidence: for each message the stream sequence, `Nats-Msg-Id`, the verified sender and trust label, store time, size,
-  kind and delivery state, then the consumer's totals. It is read only. It reads stream info, messages by sequence and the existing
-  consumer's info, and never creates, binds, fetches from or acknowledges a consumer or writes anything, so it is safe to run against a
-  live inbox. `--json` prints one object (`mash-inbox-inspect@1`, documented in `docs/mashctl.md`); `--from`, `--to` and `--limit`
-  choose the range; `--legacy` reads an alias's legacy inbox.
-  The state is derived from the consumer's cursors alone: `acked`, `undelivered`, or `delivered-unacked-or-acked-out-of-order`
-  (shown as `delivered, ack not confirmed`), because NATS does not report acknowledgements above the ack floor. Per-message delivery
-  count and ack time are not kept by JetStream or mash, so they are reported as null and the consumer's `num_redelivered` is the aggregate.
-- The release gate has a named `policy-tests` step, also run alone as `scripts/release-check --policy-tests`, and a
-  `policy-tests` CI job runs it when the NATS server version in `go.mod` changes and on every push to `main`: the listed
-  tests (compile, live and template-change) must start and pass, or the release is refused
-  ([docs/release.md](docs/release.md#policy-tests-on-every-release)).
-- Endpoint connections can now refuse plain text: set `MASH_REQUIRE_TLS=1` (or `"require_tls": true` in `config.json`) and `mash serve`, `mash hook` and the CLI commands refuse, before connecting, a plain URL (any scheme other than `tls` and `wss` is plain) to a host that is not `localhost` or a loopback address, naming the host and the fix (`tls://`, with `tls_ca` for a private CA); plain text to loopback is always allowed and pinned to loopback at dial time, and the setting is off by default. `mash status`, in the command and the tool, now warns `tls: WARN` for a plain URL to a remote host in every spelling, including an entry with no scheme or one in a list, which was silent before, and names the host
-  ([ADR 0108](docs/decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md)).
-- A new setting, `MASH_SPOOL_REQUIRED` (`spool_required`, default off), makes mail delivery fail closed: mail the spool cannot take is held unacked in the inbox and reported (stderr, a channel notice and a `spool: FAILING` line in the `status` tool) instead of falling back to the channel, and a spool that cannot be made at start is retried in the background
-  ([ADR 0107](docs/decisions/0107-mail-delivery-fails-closed-under-one-concrete-setting-mash-spool-required.md)).
+**If you used zones**, the order matters:
 
-### Changed
+1. **If you applied a zone policy, stay on v0.4.0 for now.** There's no automatic way out of an applied zone policy, and `mashctl unzone` refuses to touch it. Run `mashctl audit` to see which case you're in.
+2. **Otherwise, remove zones before you upgrade the agents:**
+   - Upgrade only `mashctl` first.
+   - Run `mashctl unzone <agent>` for each zoned agent. It moves the agent back to the plain address and keeps its stored mail. It is safe to run twice.
+   - Give each agent a fresh credential: run `mashctl reissue <agent>` where its credentials file lives. Add `--widen` if it refuses because the agent's old permissions were narrower.
+   - Then upgrade the agents. Until every zoned record is converted, `mash serve` refuses to start.
+3. **Update your scripts.**
+   - The zone options are gone: `--zone`, `set-zone` and `--policy`.
+   - So are the v0.4.0 `mashctl policy …` commands.
+   - The table in [Upgrading admin tooling across zone removal](https://github.com/bogworks/mash/blob/v0.5.0/docs/operations.md) lists each changed command.
+4. **Run `mash admin init` once.**
 
-- The lead's approval of a pull request is also a commit status `lead-review` on the exact head SHA, posted by `scripts/lead-approve <pr>` and required by the merge queue beside the `lead-approved` label for a migration week (2026-11-14 to 2026-11-21). A push drops the status by itself. It is bound to the head commit, not authenticated: any token with status access can post it, and `scripts/lead-approve --audit <pr>` flags a status from another creator ([ADR 0116](docs/decisions/0116-the-maintainers-review-is-a-commit-status-on-the-exact-head-and-the-queue-requires-it-beside-the-label-for-one-week.md)).
-- The merge queue's conditions on the GitHub Actions checks `pr-check`, `adr-lint` and `label-reset` are now written `@github-actions/<name>`, so only a check run posted by GitHub Actions satisfies them; a plain name matched a commit status of that name from anyone who can write statuses. `codex-review` and `lead-review` are commit statuses and stay plain.
-- The refused-send error no longer tells every sender to ask for `mashctl reissue --changed`: it now says the credentials may be older than the permissions mash issues now or the permissions were narrowed, and to ask the admin to check them.
-- The zone policy file is gone. Endpoints are now declared in the directory by `mashctl add`, and every endpoint's permissions are the owner-line set `admin.Permissions(owner, name)`, so nothing reads a file to decide who an endpoint is or what it may do ([ADR 0091](docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)).
-  `mashctl add NAME` mints the user, records it in the issue record, provisions the directory record and inbox and writes the creds file, and refuses a name the directory already holds; its `--describe` and `--cap` set the record's description and capabilities. `mashctl reissue` takes names directly or `--all` (every endpoint in the directory), and `--changed` still compares each creds file with what a mint issues now; `mashctl retire` and `mashctl label`/`unlabel` act on the directory record, and `label` sets or clears the labels there.
-  The v0.4.0 commands `mashctl policy check`, `test`, `apply`, `drift` and `repair`, the policy file, its compiler, its tests and `docs/policy-file.md` are removed, and `mashctl policy` no longer exists. `mashctl init --local` and `adopt` no longer write a `policy.yaml`.
-  The `--policy` flag, the `MASH_POLICY` variable and the policy-file setting are removed from `add`, `reissue`, `retire`, `label` and `unlabel`: `--policy` is now an unknown option, and the variable is no longer read. `label --sync` is removed too, because the record is where labels live.
-  `mashctl add` and `mashctl reissue` now need the system-account credentials: they check that no zone policy is applied before they mint (a minted user carries the owner-wide permissions, which would bypass an applied zone policy's mail restrictions), and refuse, changing nothing, when the check cannot run. Supply them with `--sys-creds FILE` where the verb takes it, with `MASH_SYS_CREDS`, or as `sys.creds` next to the admin credentials in the server directory; there is no way to skip the check.
-  `mashctl reissue --all` and `--changed` list the endpoints they would reissue and act only with `--yes`. A reissue never widens silently: a user whose permissions are narrower than the owner-wide set is skipped in a bulk run, and has to be named with `--widen` to be reissued.
-- Mail subjects are always five tokens, `agents.mail.<agent>.<owner>.<name>`: the zone is gone from the subject builders and filters, from the inbox stream (one mail subject, not a zoned and a legacy one), from the permission set and from admission, and `mash who --json` no longer has a `zone` key (the text output has no zone column). A directory record that still carries a zone from an older release is refused at upgrade, and `mashctl unzone` still converts it to the five-token form ([ADR 0091](docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)).
-- `mashctl set-zone` and `--zone` (on `provision` and `add`) are removed, as is the zone in `mashctl list` and `audit --json`; mail keeps its five-token subject ([ADR 0091](docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)).
-- Upgrade note: zones are removed ([ADR 0091](docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)), so a directory record that still carries a zone blocks the upgrade. `mashctl audit` and `mashctl drift` report such a record as an error, and `mash serve` refuses to run while one exists. Run `mashctl unzone <endpoint>` for each zoned record, then upgrade: it rewrites the record to the five-token form, moves the inbox stream's subjects to the five-token mail subject without losing stored mail, and is safe to re-run; `unzone` does not reissue the endpoint's user (mash holds no user seed), so after it run `mashctl permissions <endpoint> --nsc` to reissue the user with the five-token permissions. If a zone policy is applied (zone signing keys in the account JWT), there is no migration: `mashctl unzone` refuses (`unzone` needs the system credentials for its zone policy check and has no way to skip it; verify with `mashctl audit`), so stay on the last release that has zones.
-- The README now starts with a one-machine quick start that needs no account, ahead of the Synadia Cloud path. `docs/install.md` says the channel allowlist is optional for one person on one machine, and that the development flag is enough for a solo developer. `nats-server` is named as a prerequisite in the README, `docs/install.md` and `docs/operations.md`.
+**Plugin pinning.** The plugin in this release isn't yet pinned to a specific mash binary. A follow-up plugin release, `0.5.0-pin.1`, pins it to v0.5.0. Turn on `MASH_PLUGIN_REQUIRE_VERIFIED` only after you've updated to that plugin.
 
-### Fixed
+### Details
 
-- The ADR lint check no longer cancels its own run when a label is added or removed on the same head commit, so Mergify
-  no longer waits forever on a cancelled check: label events queue behind the run, and a new head starts a new group.
-- The live prompt text and the `mash who` output now show control characters as visible `\xNN` escapes instead of passing
-  them through, and `mash who` cuts each directory field at 256 characters. A live prompt is at most 32768 bytes: a longer
-  one is refused with an error to the caller (`prompt_too_large`, send the longer text as mail) instead of being cut, so
-  the session never answers a half request. Newlines and tabs in a prompt are kept.
-- Revoking a user by public key now refuses when the issue record shows that user's credentials were issued after the revocation time. NATS honours a revocation only for credentials issued at or before it, so a credential dated in the future (from a clock that ran ahead) would have stayed valid after a "revocation". `mashctl deprovision` and `mash admin deprovision` read the record before anything is written, name the key and the issue time, and change nothing; a key with no record (no bucket, or no entry for the key) prints one warning on stderr and the revocation goes ahead, but a record that cannot be read, or whose issued_at is missing or malformed, refuses the command and changes nothing (retry, or restore the record with `mashctl reissue NAME`). The check covers every revision of the key's record, not only the latest, so a reissue that keeps the key after a clock rollback cannot hide an older future-dated credential; a key whose history is at the cap of 64 revisions, where the oldest issue times may be gone, is refused too unless a retained revision is already future-dated. The revocation carries the same time the check used.
-- `mashctl retire` and a rotating `mashctl reissue` now make the same issue-record check as `deprovision` before they revoke a user key: they refuse, changing nothing, when a recorded credential of the key is dated after the revocation time. A key whose recorded history cannot be shown to be complete is refused too, because a revision may have been dropped before the bucket's history limit was raised from 8 to 64; the refusal says to revoke the key by hand in the account JWT, only after checking where it was issued. `mash admin init` now marks the issue-record stream (`mash_issued_history`: `full` for a new bucket, `raised:N:S` when it raises one) so the check can tell ([ADR 0115](docs/decisions/0115-a-revocation-needs-the-issue-record-to-show-a-keys-whole-history-and-the-bucket-says-so-in-its-stream-metadata.md)).
-- `mashctl` now refuses system-account credentials that other users can read, as it already did for admin and endpoint credentials.
-- The upgrade guard (ADR 0091) now refuses to start `serve` when a directory record could not be read, since that record may be a zoned one, and `AppliedZonePolicy` checks the account JWT of every server for a zone scope, not only the newest copy.
-- `-h` and `--help` are help only as the first argument after a verb; text further along, such as a message to `mash send` or `mash prompt`, is never read as help.
-- `mashctl init --local` now writes to `$XDG_CONFIG_HOME/mash` on a first run when `XDG_CONFIG_HOME` is an absolute path and `~/.config/mash` does not exist, instead of creating `~/.config/mash`. An existing `~/.config/mash` is still used, so no install moves. `init --local` now prints `config dir: DIR (set MASH_CONFIG_DIR to change)` before it writes anything.
-- `mash VERB --help` and `mashctl VERB --help` print the verb's usage and change nothing; before, `mashctl init --help` ran init, `mash plugin export --help` wrote a plugin tree into ./--help, and `mash serve --help` started the channel server. `mashctl issued check --help`, `unlabel --help` and `version --help` print their own usage.
+**Added**
+
+- **The credential record.** `mashctl` records every credential it issues (from `add`, `reissue` and `init`) in a bucket that only the admin can write.
+  - `mashctl issued list` shows the record.
+  - `mashctl issued check` reports connected credentials that mash didn't issue, or that it has revoked.
+  - [ADR 0101](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md) explains the design.
+- **`MASH_REQUIRE_TLS`.** Refuses plain-text connections to any host that isn't your own machine. `mash status` now warns about a plain-text remote address in every form ([ADR 0108](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0108-require-tls-makes-endpoint-connections-refuse-plain-text-to-a-remote-host.md)).
+- **`MASH_SPOOL_REQUIRED`.** If mail can't be handed to the session safely, it stays in the inbox and you're told, instead of being delivered another way ([ADR 0107](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0107-mail-delivery-fails-closed-under-one-concrete-setting-mash-spool-required.md)).
+- **`MASH_PLUGIN_REQUIRE_VERIFIED`.** The plugin refuses an unpinned plugin or an unverified binary, instead of falling back to whatever `mash` is on your PATH ([ADR 0096](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0096-the-plugin-launcher-takes-a-verification-setting-and-the-layer-above-owns-profiles.md)).
+- **`mashctl inbox inspect <agent>`.** Shows an agent's stored mail and its delivery state, read-only. Add `--json` for scripts.
+- **A lease bucket warning.** An agent warns at startup, and `mash status` shows a line, when a server bucket still needs hardening. `mash admin init` fixes it.
+
+**Changed**
+
+- **Zones are removed** ([ADR 0091](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)):
+  - every mail address has five parts;
+  - `set-zone`, `--zone` and the zone policy file and its commands are gone;
+  - `mash who` no longer shows a zone.
+- **Agents are declared with `mashctl add`.** It creates the agent's record, inbox and credential in one step. `reissue`, `retire`, `label` and `unlabel` all work from that record.
+- **Bulk changes ask first.** `mashctl reissue --all` and `--changed` list what they would change and only act with `--yes`. A reissue never quietly widens an agent's permissions.
+- **A clearer refusal.** When a send is refused, the message now says the credential may be out of date and suggests asking the admin to check it.
+- **The README** starts with a quick start for one machine. `nats-server` is listed as a prerequisite.
+
+**Fixed**
+
+- **`--help`** after any command (`mash` or `mashctl`) prints that command's help and does nothing else. Text later on the line, such as a message to `mash send`, is never mistaken for `--help`.
+- **Revocations that wouldn't take effect.** `deprovision`, `retire` and a rotating `reissue` refuse when the credential record shows that a credential was issued after the revocation time. NATS would otherwise keep honouring that credential. If the record can't be read, they change nothing ([ADR 0115](https://github.com/bogworks/mash/blob/v0.5.0/docs/decisions/0115-a-revocation-needs-the-issue-record-to-show-a-keys-whole-history-and-the-bucket-says-so-in-its-stream-metadata.md)).
+- **Prompts and `mash who`.**
+  - Control characters in a live prompt and in `mash who` output are shown as visible escapes.
+  - A prompt over 32 KB is refused with a clear error instead of being cut off.
+- **`mashctl init --local`** respects `XDG_CONFIG_HOME` on a first run and prints where it will write.
+- **System credentials.** `mashctl` refuses system credentials that other users can read.
+- **The upgrade check** won't start an agent if it can't read a record that might still be zoned.
+
+Full changes: [v0.4.0...v0.5.0](https://github.com/bogworks/mash/compare/v0.4.0...v0.5.0)
 
 ## [0.4.0] - 2026-11-12
 

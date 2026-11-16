@@ -253,6 +253,41 @@ runs `claude plugin uninstall mash@mash` and `claude plugin marketplace remove m
 directory's path is scrubbed from the receipt. It must have a single consumer for the whole run, and the tests must not
 run with `-parallel`.
 
+## Writing the release notes
+
+A release's notes are its change-log section, and the release page carries the same text. They follow these ten
+principles. The v0.5.0 notes are the example: <https://github.com/bogworks/mash/releases/tag/v0.5.0>. A plain-language
+read by someone outside the work comes before publishing.
+
+1. **Write for someone who doesn't know the project.**
+   - Use the words a user would use, not internal names: "agent", not "endpoint".
+   - Explain any term the reader needs.
+   - Say what each feature is for in one sentence before how it works.
+2. **Lead with what the release means for the reader.**
+   - The Summary opens with one or two sentences.
+   - A breaking change is said in the first line, bold, with a pointer to Upgrading.
+3. **Say why, plainly and kindly, especially for removals.** If something was a misfire, say so honestly, in kind words, with what replaces it.
+4. **Underpromise.**
+   - Name future work only as "planned for <version>", with no dates.
+   - Pick the later version when in doubt.
+5. **Upgrading is a checklist, split by audience.**
+   - Example split: "If you never used X: two steps." / "If you used X: the order matters."
+   - Use numbered steps, each starting with the action.
+6. **Details come after the story.**
+   - Group them as Added, Changed and Fixed.
+   - Each bullet opens with a bold lead of a few words, then one or two short sentences.
+   - Link decision records (ADRs) for whoever wants the depth.
+7. **Leave out the project's own plumbing.** CI, merge queue, review process and internal roles are not release notes; they belong in the repo's history.
+8. **Links work outside the repo.** Use absolute URLs pinned to the release tag, never repo-relative paths.
+9. **Tell people how to trust the download.** Use one line, such as "every download has a build attestation; verify it".
+10. **Keep the mechanical requirements** the release gate checks:
+    - a Summary section;
+    - an Upgrading section;
+    - a full-changes compare link;
+    - no commit lists.
+
+The gate's mechanical checks (above) do not change.
+
 ## Pinning the plugin after a release
 
 The launcher `plugin/scripts/mash` downloads a binary only when `plugin/scripts/mash.pins` names a version and the

@@ -23,6 +23,16 @@ sees and, where it helps, link the ADR or issue.
 ([ADR 0066](docs/decisions/0066-...md)).
 ```
 
+## How to write a fragment
+
+The assembled section is what readers see, so write each fragment as release notes
+(see [Writing the release notes](../docs/release.md#writing-the-release-notes)):
+
+- Plain words for a reader who does not know mash. Say what the change is for, then how it works.
+- Open with a short bold lead, then one or two short sentences.
+- Leave out CI, the merge queue, review steps and internal roles.
+- Link with absolute URLs, not repo-relative paths, so the link works on the release page.
+
 ## Check and assemble
 
 - `go run ./scripts/changelog check` lints the fragments (name, kind, not empty, no leading bullet or heading). CI runs
