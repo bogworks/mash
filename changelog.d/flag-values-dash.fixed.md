@@ -1,0 +1,1 @@
+A flag that takes a value now refuses a value that starts with `-` unless it is written `--flag=VALUE`, so `mashctl add n --note --help` no longer mints a note "--help". A bare `-` is still accepted as a value.

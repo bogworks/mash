@@ -21,17 +21,8 @@ func extractServerFlags(args []string, env func(string) string) (rest []string, 
 	var servers, sysCreds string
 	var haveServers, haveCreds bool
 	value := func(i *int, a, flag string) (string, error) {
-		if v, ok := strings.CutPrefix(a, flag+"="); ok {
-			if v == "" {
-				return "", fmt.Errorf("%s needs a value", flag)
-			}
-			return v, nil
-		}
-		if *i+1 >= len(args) || args[*i+1] == "" {
-			return "", fmt.Errorf("%s needs a value", flag)
-		}
-		*i++
-		return args[*i], nil
+		inline, hasInline := strings.CutPrefix(a, flag+"=")
+		return flagValue(args, i, flag, inline, hasInline)
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]

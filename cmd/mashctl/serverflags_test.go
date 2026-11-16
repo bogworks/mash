@@ -33,7 +33,7 @@ func TestExtractServerFlags(t *testing.T) {
 		{"servers only", []string{"a", "--servers", "5"}, []string{"a"}, "5", "/env/sys.creds", ""},
 		{"not a number", []string{"a", "--servers", "abc"}, nil, "", "", "must be a whole number of servers, 1 or more"},
 		{"zero", []string{"a", "--servers=0"}, nil, "", "", "must be a whole number of servers, 1 or more"},
-		{"negative", []string{"a", "--servers", "-1"}, nil, "", "", "must be a whole number of servers, 1 or more"},
+		{"negative", []string{"a", "--servers=-1"}, nil, "", "", "must be a whole number of servers, 1 or more"},
 		{"servers without value", []string{"a", "--servers"}, nil, "", "", "--servers needs a value"},
 		{"sys-creds without value", []string{"a", "--sys-creds"}, nil, "", "", "--sys-creds needs a value"},
 		{"empty equals", []string{"a", "--sys-creds="}, nil, "", "", "--sys-creds needs a value"},

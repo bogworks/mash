@@ -71,15 +71,9 @@ func parseAdoptArgs(args []string) (adoptOpts, error) {
 		if !ok {
 			return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
 		}
-		if !hasEq {
-			if i+1 >= len(args) {
-				return o, fmt.Errorf("%s needs a value", name)
-			}
-			i++
-			val = args[i]
-		}
-		if val == "" {
-			return o, fmt.Errorf("%s needs a value", name)
+		val, err := flagValue(args, &i, name, val, hasEq)
+		if err != nil {
+			return o, err
 		}
 		*dst = val
 	}
