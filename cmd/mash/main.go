@@ -154,6 +154,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	if u, ok := helpUsage(args); ok { // before any dispatch, config load or write: help changes nothing
+		fmt.Fprint(stdout, u)
+		return 0
+	}
 	if u, ok := verbUsage[args[0]]; ok && len(args) > 1 {
 		if args[1] == "--help" || args[1] == "-h" { // the verb's usage line, and the verb does not run
 			fmt.Fprintln(stdout, u)

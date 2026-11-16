@@ -100,6 +100,8 @@ The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 en
 - **Unique endpoints.** One NATS user per session name, and a lease that refuses a second live session under the same name.
 - **Live prompts too.** Because each session is a SAP agent, you can `mash prompt` it (or use any SAP client) and get a streamed answer.
 
+Policy commands (`mashctl policy`, allow lists) are not in this release; the engine arrives in 0.5.5.
+
 ## How it works
 
 ![A Claude Code session talks stdio (MCP) to mash serve, which holds one TLS connection to the NATS server (account MASH: inbox stream, mail subject, directory and lease KVs, SAP presence).](docs/images/007-session-and-server.svg)
