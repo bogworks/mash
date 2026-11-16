@@ -28,21 +28,21 @@ func accountClaims(ctx context.Context, p RevokeParams) ([]*jwt.AccountClaims, e
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
 	if errors.Is(kerr, ErrServerSetRefused) {
-		return nil, fmt.Errorf("revoked: refusing: %w", kerr)
+		return nil, fmt.Errorf("refusing: %w", kerr)
 	}
 	if !set.Complete(p.Servers) {
 		why := set.Why(p.Servers)
 		if kerr != nil {
 			why = kerr.Error()
 		}
-		return nil, fmt.Errorf("revoked: refusing: %s", notCompleteRefusal(why))
+		return nil, fmt.Errorf("refusing: %s", notCompleteRefusal(why))
 	}
 	toks, err := p.Resolver.LookupAll(ctx, acctPub, expect)
 	if err != nil && len(toks) == 0 {
 		return nil, fmt.Errorf("revoked: look up the account JWT: %w", err)
 	}
 	if len(toks) < expect {
-		return nil, fmt.Errorf("revoked: refusing: %s", shortRefusal(fmt.Sprintf("only %d of %d servers answered the account lookup", len(toks), expect)))
+		return nil, fmt.Errorf("refusing: %s", shortRefusal(fmt.Sprintf("only %d of %d servers answered the account lookup", len(toks), expect)))
 	}
 	var out []*jwt.AccountClaims
 	seen := map[string]bool{}
@@ -56,7 +56,7 @@ func accountClaims(ctx context.Context, p RevokeParams) ([]*jwt.AccountClaims, e
 		seen[t] = true
 		claims, err := VerifyAccountJWT(t, acctPub, trust)
 		if err != nil {
-			return nil, fmt.Errorf("revoked: refusing the resolver's account JWT: %w", err)
+			return nil, fmt.Errorf("refusing the resolver's account JWT: %w", err)
 		}
 		out = append(out, claims)
 	}

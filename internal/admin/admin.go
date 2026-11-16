@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -246,6 +247,9 @@ const clearLeaseTries = 3
 func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
 	if err != nil {
+		if down := bucketDown(store.DirectoryBucket, err); down != nil {
+			return nil, down
+		}
 		return nil, fmt.Errorf("mash: directory bucket (run `mash admin init`): %w", err)
 	}
 	return kv, nil
@@ -1101,6 +1105,9 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	defer adm.release(ctx)
 	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if err != nil {
+		if down := bucketDown(store.LeaseBucket, err); down != nil {
+			return down
+		}
 		return fmt.Errorf("mash: lease bucket: %w", err)
 	}
 	if err := lk.check(ctx); err != nil {
@@ -1666,14 +1673,14 @@ func (a *Admin) List(ctx context.Context) ([]store.Record, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, wordUnavailable(err)
 	}
 	slices.Sort(keys)
 	var out []store.Record
 	for _, k := range keys {
 		r, err := store.GetRecord(ctx, kv, k)
 		if err != nil {
-			return nil, err
+			return nil, wordUnavailable(err)
 		}
 		out = append(out, r)
 	}
@@ -1689,12 +1696,12 @@ func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
 	switch {
 	case errors.Is(err, jetstream.ErrBucketNotFound):
 	case err != nil:
-		return false, fmt.Errorf("mash: directory: %w", err)
+		return false, wordUnavailable(fmt.Errorf("mash: directory: %w", err))
 	default:
 		if _, err := kv.Get(ctx, name); err == nil {
 			return true, nil
 		} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
-			return false, fmt.Errorf("mash: directory %s: %w", name, err)
+			return false, wordUnavailable(fmt.Errorf("mash: directory %s: %w", name, err))
 		}
 	}
 	if _, err := a.js.Stream(ctx, sap.InboxStream(name)); err == nil {
@@ -1711,4 +1718,72 @@ func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// jsErrUnavailable is the JetStream API error code for "JetStream system temporarily unavailable" (no meta leader,
+// typically too few servers up to keep quorum).
+const jsErrUnavailable = 10008
+
+// unavailableText is the phrase NATS gives for jsErrUnavailable.
+const unavailableText = "JetStream system temporarily unavailable"
+
+const unavailableHint = "mash: JetStream is unavailable (a server is down, or too few servers are up to keep quorum): bring the servers back and run the command again"
+
+func isUnavailable(err error) bool {
+	var api *jetstream.APIError
+	return err != nil && ((errors.As(err, &api) && api.ErrorCode == jsErrUnavailable) || strings.Contains(err.Error(), unavailableText))
+}
+
+// wordUnavailable rewords a lost-quorum error; it returns err unchanged for any other.
+func wordUnavailable(err error) error {
+	if isUnavailable(err) {
+		return fmt.Errorf("%s: %w", unavailableHint, err)
+	}
+	return err
+}
+
+// streamNameInError finds the stream name in a NATS error text such as "stream inbox-a: nats: ...".
+var streamNameInError = regexp.MustCompile(`\bstream ([A-Za-z0-9_.-]+):`)
+
+const serverDownText = "is down: bring it back and run the command again"
+
+// RewordUnavailable puts a hint in front of the raw NATS text in an already formatted message: the lost-quorum hint
+// for "JetStream system temporarily unavailable", and, for "stream is offline" (err_code 10118), a line saying the
+// server that holds the stream or bucket is down. It leaves a message that has a hint, or carries neither text, as it
+// is.
+func RewordUnavailable(msg string) string {
+	if strings.Contains(msg, unavailableText) && !strings.Contains(msg, unavailableHint) {
+		return unavailableHint + ": " + msg
+	}
+	if (strings.Contains(msg, "stream is offline") || strings.Contains(msg, "err_code="+strconv.Itoa(jsErrStreamOffline))) && !strings.Contains(msg, serverDownText) {
+		what := "a stream or bucket"
+		if m := streamNameInError.FindStringSubmatch(msg); m != nil {
+			what = "stream " + m[1]
+		}
+		return "mash: the server holding " + what + " " + serverDownText + ": " + msg
+	}
+	return msg
+}
+
+// jsErrStreamOffline is the JetStream API error code for a stream whose server is down or not yet recovered.
+const jsErrStreamOffline = 10118
+
+// bucketDown words a NATS "stream is offline" error (err_code 10118) on a bucket: the server that holds the bucket's
+// stream is down, so the bucket exists and `mash admin init` would not help. It words err_code 10008 (JetStream
+// unavailable, no quorum) the same way. It returns nil for any other error.
+func bucketDown(bucket string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var api *jetstream.APIError
+	if (errors.As(err, &api) && api.ErrorCode == jsErrStreamOffline) || strings.Contains(err.Error(), "stream is offline") {
+		return fmt.Errorf("mash: the server holding bucket %s is down: bring it back and run the command again: %w", bucket, err)
+	}
+	if isUnavailable(err) {
+		return wordUnavailable(err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
+		return fmt.Errorf("mash: bucket %s did not answer in time: check that every server is up, then run the command again: %w", bucket, err)
+	}
+	return nil
 }

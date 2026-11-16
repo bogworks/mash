@@ -19,6 +19,9 @@ import (
 	"github.com/bogworks/mash/internal/ctlkeys"
 )
 
+// noSysCredsMsg is the refusal when no system account credentials are configured.
+const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)"
+
 // revokeUsers revokes user keys in the account JWT; a test replaces it.
 var revokeUsers = revokeUserKeys
 
@@ -35,7 +38,7 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 		return err
 	}
 	if _, err := sysCredsPath("", env, cfg); err != nil {
-		return errors.New("no system account credentials: set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)")
+		return errors.New(noSysCredsMsg)
 	}
 	nc, err := connectSys(cfg, "", env)
 	if err != nil {
@@ -84,7 +87,7 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 		return false, err
 	}
 	if _, err := sysCredsPath("", env, cfg); err != nil {
-		return false, errors.New("no system account credentials: set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)")
+		return false, errors.New(noSysCredsMsg)
 	}
 	nc, err := connectSys(cfg, "", env)
 	if err != nil {

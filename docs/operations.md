@@ -300,6 +300,75 @@ mash supports one NATS server, or a cluster, in the default JetStream domain, wi
 
 JetStream domains, leaf-node inboxes and subject mappings are not supported. The endpoint permissions that `mash admin permissions` generates (`$JS.API.*`, `$JS.ACK.<stream>.<consumer>.>`) and the client (`jetstream.New` with no domain or API prefix) assume the default domain. On a leaf node with its own domain, or behind subject mappings, the API and ACK subjects differ: acks can be denied (endless redelivery), the inbox may be unreachable, and signatures over mapped subjects may not verify. A `js_domain` setting is not implemented.
 
+## Several servers
+
+This section covers `mashctl` run from one central host against a NATS cluster of two or more servers. The recipe below was run live with three routed servers; a server behind TLS, gateways and two central hosts were not tried.
+
+### One central host
+
+Keep the admin credentials, the system account credentials and the key store (`operator.nk`, `account.nk`) on one host and run `mashctl` there. It reaches the servers only through their URLs and opens no server file. The endpoint hosts need only their own creds file.
+
+- `MASH_URL` lists every server, separated by commas, so a connection still succeeds when one of them is down.
+- `MASH_SERVERS=N` or `--servers N` is how many servers the cluster has. `add`, `reissue`, `retire`, `unzone` and `deprovision` take `--servers N`, which overrides `MASH_SERVERS`. A server count that is not a whole number of 1 or more is refused. Without it, a command that writes the account JWT waits for a quiet period instead of for N replies, and a cluster member that sees no peers is refused as an unverifiable server set.
+- `--sys-creds FILE` or `MASH_SYS_CREDS` names the system account creds. The same five verbs take `--sys-creds FILE`, which overrides `MASH_SYS_CREDS`. Without either, `mashctl` looks for `sys.creds` next to the admin creds, then in `<config dir>/server/` (where `adopt` puts it).
+
+```sh
+mashctl add design --servers 3 --sys-creds /secure/sys.creds
+mashctl retire design --servers 3 --sys-creds /secure/sys.creds
+```
+
+`add` writes `NAME.creds`, with the user seed, on the central host only. Copy the file to the endpoint's host. `reissue` needs that file on the central host again.
+
+### One server down
+
+- Each bucket and each inbox has one replica, on one node. Any one node down therefore blocks the writing commands (`add`, `reissue`, `retire`, `deprovision`), because each of them writes to a bucket or inbox that node may hold. `list` can still work when the directory bucket is on a live node. This stays so until the buckets get replicas.
+- `add`, `reissue`, `retire` and `deprovision` also refuse when fewer servers answer than the count says: `refusing: only N of M servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)`. It does not name the silent server, because the lookup does not say which one it was. Bring the server back first. Lower the count only when it was wrong.
+- When the server that holds a stream or bucket is down, the command says `the server holding bucket X is down: bring it back and run the command again` (`audit` and `issued` say `the server holding stream X is down`, or `a stream or bucket` when the error does not name it), followed by the raw NATS text. `mashctl init` does not help, because the bucket exists.
+- `retire` and `deprovision` check the server set before they change the directory record, the lease or the inbox. When it is short they print `nothing was revoked; the key is still valid` and leave the record as it was. Run the command again when the server is back. If the revoke failed after the update was pushed, the text says the revocation may already be in force on some servers and that the directory record was not changed; run the same command again (revoking again is safe). If the revocation completed and a later step failed, the PARTIAL message says the key was revoked, with the number of servers that acknowledged, and that the removal of the record, the lease and the inbox is still pending. Running the same command again finishes it.
+- `MASH_URL` (or `url` in config.json) takes a comma-separated list, so a connection still succeeds when the first server is down. If every listed server is down, the error is `no servers available for connection`, with a hint to check `MASH_URL` and that at least one listed server is up.
+
+### A three-node cluster
+
+`mashctl init --local` builds one node only: loopback, no TLS, `server_name: mash-local`, no cluster block. For a cluster:
+
+1. On node 1 run `mashctl init --local` (without `--start`). It writes `server.conf`, `operator.jwt`, `mashadmin.creds` and `sys.creds` in the server directory, and the signing keys in the key store on that host. Do not start node 1 yet.
+2. Edit node 1's own `server.conf`: give it a new `server_name` (it is `mash-local`) and add a `cluster` block. Then copy `operator.jwt` and `server.conf` to the other nodes as a template. In each copy set a different `server_name` and `listen` address, a different `dir` in the `resolver` block, a different `store_dir` in the `jetstream` block, and a different cluster `listen`. Keep the same `resolver_preload` (the system and account JWTs), so every node starts with the same accounts. The `operator` line is the path of `operator.jwt` on that node. The `cluster` block of node 1 in a three-node cluster on one test host looks like this; `routes` lists the other nodes' cluster addresses, and `name` is the same on every node:
+
+```
+server_name: mash-n1
+listen: 127.0.0.1:4222
+resolver: {
+  type: full
+  dir: "/var/lib/mash/n1/resolver"
+  allow_delete: false
+  interval: "5s"
+}
+jetstream: {
+  store_dir: "/var/lib/mash/n1/jetstream"
+}
+cluster: {
+  name: mashc
+  listen: 127.0.0.1:6222
+  routes: [nats-route://127.0.0.1:6223, nats-route://127.0.0.1:6224]
+}
+```
+
+   Listen on addresses the central host and the other nodes can reach, and use TLS for anything beyond a test (the template has none).
+
+   Set `interval` in every node's `resolver` block. The full resolver syncs from a timer only, one interval after the node starts (default one minute), and nothing holds clients back until it has. A node that was down while a key was revoked therefore accepts the revoked credential until its first sync; `interval: "5s"` shortens that to about the interval plus the time the routes take to form. To close it completely, keep the returning node's client port closed (a firewall rule, or listen on a private address first) until `mashctl audit` shows no `revocation_pending`.
+3. Start the nodes. Check that the cluster formed with `mashctl issued check --servers 3` once step 5 is done (it needs the admin creds and the issue record): its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did. `adopt` also prints `3 server(s) replied`.
+4. On the central host, copy the operator signing seed, the account identity seed and `sys.creds` from node 1, and run `adopt`. It creates the central host's config.json, imports the operator and account keys into its key store, copies `sys.creds` to `<config dir>/server/` and, with `--mint-admin`, writes `mashadmin.creds` there. A fresh central host has no configured owner, so pass `--owner`:
+
+```sh
+mashctl adopt --server tls://node1:4222 --owner O --account MASH \
+  --operator-key operator.nk --account-key account.nk --sys-creds sys.creds --mint-admin
+```
+
+5. On the central host run `mashctl init` (no `--local`). `adopt` does not create the directory and lease buckets; this does, over the cluster, with the admin creds `adopt` wrote. `init --local` is not run on the central host: it would make a second, local server and a second set of keys.
+6. Put every server in config.json's `url`, for example `"url": "tls://node1:4222,tls://node2:4222,tls://node3:4222"`, and set `MASH_SERVERS=3` (or pass `--servers 3`).
+
+`--account` must be the account name `init --local` chose, `MASH` by default; the default for `--account` is the owner, which fails when the owner is another name. `adopt` takes one `--server` URL and writes it to config.json. For a test cluster without TLS, run `adopt` as `MASH_INSECURE_LOOPBACK=1 mashctl adopt --server nats://127.0.0.1:4222 ...`; the variable is accepted for a loopback URL only and is needed for that command alone: `adopt` writes `insecure_loopback` into config.json, so the later commands do not need the variable. The seed files must be mode 0600. Delete the copies you made when `adopt` has stored the keys.
+
 ## Inbox limits
 
 By default each inbox keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest (both are configurable: see [Limits](#limits)). Single messages are limited to 1 MiB including headers, or to the server's `max_payload` when that is smaller: mash reads it from the server at connect time and refuses an oversize send locally with a clear error before anything is published. Synadia Cloud's free tier caps a payload at 512 KiB, so there the limit is 512 KiB. Message deletion and purging are denied on the stream itself, so even the account admin cannot quietly rewrite history; deleting the whole stream (deprovisioning) is the only way to remove it.

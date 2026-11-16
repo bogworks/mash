@@ -25,6 +25,13 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
+// CheckRevokeServers, when set (mashctl sets it), confirms before a deprovision changes anything that the revocation
+// can reach every server. An error means nothing was revoked and nothing was changed.
+var CheckRevokeServers func(ctx context.Context, cfg config.Config) error
+
+// NotRevoked is the line printed when a command stopped before it revoked anything.
+const NotRevoked = "nothing was revoked; the key is still valid"
+
 // RevokeUsers revokes NATS user keys in the account JWT; mashctl sets it, which has the key store. The system account
 // credentials come from MASH_SYS_CREDS or the init server's sys.creds, the server count from MASH_SERVERS. It stays nil
 // in `mash admin`, which has neither: deprovision then only advises.
@@ -103,9 +110,9 @@ func Usage(prog string) string {
 	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
 	removal := "remove the record and inbox;"
 	if prog == "mashctl" {
-		removal = "revoke the endpoint's user in the account JWT (--no-revoke skips it), then remove the record and inbox;"
+		removal = "revoke the endpoint's user in the account JWT (--no-revoke skips it; --servers N, else MASH_SERVERS, is how many servers must acknowledge; --sys-creds FILE, else MASH_SYS_CREDS, the system account creds), then remove the record and inbox;"
 	}
-	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]", removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
+	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]"+map[bool]string{true: " [--servers N] [--sys-creds FILE]"}[prog == "mashctl"], removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan, an undrained inbox, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
@@ -114,7 +121,7 @@ func Usage(prog string) string {
 		mintLines(line)
 		issuedLines(line)
 		retireLines(line)
-		line("unzone NAME [--sys-creds FILE]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
+		line("unzone NAME [--sys-creds FILE] [--servers N]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
 	}
 	return b.String()
 }
@@ -124,8 +131,8 @@ func adoptLines(line func(left, right string)) {
 }
 
 func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
-	line("reissue NAME... [--widen] | --all --yes | --changed --yes", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
+	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE]", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
+	line("reissue NAME... [--widen] | --all --yes | --changed --yes [--servers N] [--sys-creds FILE]", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -134,7 +141,7 @@ func issuedLines(line func(left, right string)) {
 }
 
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--delete-creds] [--force] [--no-revoke]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox")
+	line("retire NAME [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox; --servers N (else MASH_SERVERS) is how many servers must acknowledge, --sys-creds FILE (else MASH_SYS_CREDS) the system account creds")
 	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
 	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
 }
@@ -168,7 +175,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	}
 	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
+		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.NoServersHint(natsauth.TLSHint(err)), cfg.URL))
 	}
 	a, err := madmin.New(nc, cfg.Owner)
 	if err != nil {
@@ -340,7 +347,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
 		var noRevoke bool
 		if prog == "mashctl" {
-			deprovisionUsage += " [--no-revoke]"
+			deprovisionUsage += " [--no-revoke] [--servers N] [--sys-creds FILE]"
 			var err error
 			if args, noRevoke, err = splitRevokeFlags(args); err != nil {
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": " + err.Error()))
@@ -394,6 +401,17 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return nil
 			})
 		}
+		// precheck confirms the revocation can reach every server before anything is changed.
+		precheck := func() bool {
+			if RevokeUsers == nil || noRevoke || CheckRevokeServers == nil {
+				return true
+			}
+			if err := CheckRevokeServers(ctx, cfg); err != nil {
+				fmt.Fprintf(stderr, "%s: deprovision %s: %v\n%s\n", pfx, shown, err, NotRevoked)
+				return false
+			}
+			return true
+		}
 		// failRemoval reports a failed removal; a failed revocation also names the way around it.
 		failRemoval := func(err error) int {
 			if msg, ok := AliasedRefusal(err, args[1]); ok {
@@ -405,6 +423,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 			if revokeErr != nil && errors.Is(err, revokeErr) {
 				return fail(fmt.Errorf("%w (--no-revoke deprovisions without revoking)", err))
+			}
+			if revokedUser != "" {
+				fmt.Fprintf(stderr, "%s: deprovision %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running the same command again finishes it\n", pfx, shown, ShortKey(revokedUser))
+			} else if RevokeUsers != nil && !noRevoke {
+				fmt.Fprintf(stderr, "%s: deprovision %s: %s\n", pfx, shown, NotRevoked)
 			}
 			return fail(err)
 		}
@@ -463,6 +486,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				warnUser = recordUser()
 				noRevokeWarn(warnUser)
 			}
+			if !precheck() {
+				return 1
+			}
 			if err := adm.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
 				return failRemoval(err)
 			}
@@ -479,6 +505,9 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return usage(errors.New(deprovisionUsage + "\n" + pfx + ": --user wants a NATS user public key (U, then 55 upper-case base32 characters)"))
 			}
 			// The given key is revoked inside the removal, and only when the record names it.
+			if !precheck() {
+				return 1
+			}
 			noRevokeWarn(args[3])
 			if err := adm.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
 				return failRemoval(err)
@@ -489,9 +518,15 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		// Deprovision is idempotent, so rollbacks can call it freely; this verb refuses a name that was never there.
 		if ok, err := a.Exists(ctx, args[1]); err != nil {
+			if RevokeUsers != nil && !noRevoke {
+				return fail(fmt.Errorf("%w\n%s", err, NotRevoked))
+			}
 			return fail(err)
 		} else if !ok {
 			fmt.Fprintf(stderr, "no endpoint named %s\n", shown)
+			return 1
+		}
+		if !precheck() {
 			return 1
 		}
 		warnUser := ""

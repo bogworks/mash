@@ -71,8 +71,11 @@ func TestAppliedZonePolicyChecksEveryCopy(t *testing.T) {
 	if got, err := ask(&fake{servers: two, all: []string{clean, bad}}); err == nil || got {
 		t.Fatalf("an unverifiable copy: %v %v", got, err)
 	}
-	if got, err := ask(&fake{servers: two, all: []string{zoned}}); err == nil || got || !strings.Contains(err.Error(), "not every server was checked: only 1 of 2 servers answered the account lookup") {
+	if got, err := ask(&fake{servers: two, all: []string{zoned}}); err == nil || got || !strings.Contains(err.Error(), "only 1 of 2 servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)") {
 		t.Fatalf("fewer replies than servers: %v %v", got, err)
+	}
+	if err := RefuseZonePolicy(context.Background(), &fake{servers: two, all: []string{zoned}}, ks, 2, errors.New("applied")); err == nil || strings.Contains(err.Error(), "zone") || !strings.HasPrefix(err.Error(), "only 1 of 2 servers answered: ") {
+		t.Fatalf("the refusal names zones or the wrong fix: %v", err)
 	}
 	if got, err := ask(&fake{servers: two, serversErr: errors.New("boom"), all: []string{zoned, zoned}}); err == nil || got {
 		t.Fatalf("servers error: %v %v", got, err)

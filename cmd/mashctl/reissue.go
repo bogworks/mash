@@ -23,9 +23,10 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const reissueUsage = `usage: mashctl reissue NAME... [--widen]
-       mashctl reissue --all --yes
-       mashctl reissue --changed --yes
+const reissueUsage = `usage: mashctl reissue NAME... [--widen] [--servers N] [--sys-creds FILE]
+       mashctl reissue --all --yes [--servers N] [--sys-creds FILE]
+       mashctl reissue --changed --yes [--servers N] [--sys-creds FILE]
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
 `
 
 // runReissue is `mashctl reissue`. Every reissue signs with the creds file's stored user seed, so it first connects

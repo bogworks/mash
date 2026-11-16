@@ -66,7 +66,7 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-sys"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
 	nc, err := nats.Connect(cfg.URL, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("connect %s with the system account credentials: %v", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
+		return nil, fmt.Errorf("connect %s with the system account credentials: %v", config.RedactURL(cfg.URL), config.RedactErr(natsauth.NoServersHint(natsauth.TLSHint(err)), cfg.URL))
 	}
 	return nc, nil
 }

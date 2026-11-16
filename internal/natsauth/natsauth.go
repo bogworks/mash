@@ -142,6 +142,20 @@ func TLSHint(err error) error {
 	return err
 }
 
+const noServersHint = "(check MASH_URL and that at least one listed server is up)"
+
+// NoServersHint appends what to check to a "no servers available for connection" error: the URL list, and that one
+// listed server is up. Any other error is returned unchanged.
+func NoServersHint(err error) error {
+	if err == nil || strings.HasSuffix(err.Error(), noServersHint) {
+		return err
+	}
+	if errors.Is(err, nats.ErrNoServers) || strings.Contains(err.Error(), "no servers available for connection") {
+		return fmt.Errorf("%w %s", err, noServersHint)
+	}
+	return err
+}
+
 // isLoopbackHost reports whether host is localhost or a loopback IP literal (127.0.0.0/8, ::1).
 func isLoopbackHost(host string) bool {
 	host = strings.Trim(host, "[]")

@@ -131,21 +131,17 @@ func TestRetireBadServersAndUsage(t *testing.T) {
 		t.Fatalf("%d %q", code, errb)
 	}
 	delete(h.env, "MASH_SERVERS")
-	for _, f := range []string{"--sys-creds", "--sys-creds=/x", "--servers", "--servers=3"} {
-		if _, errb, code := h.run("retire", "a", f); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "[--no-revoke]") || strings.Contains(errb, "FILE] [--sys") {
-			t.Fatalf("%s: %d %q", f, code, errb)
-		}
+	if _, errb, code := h.run("retire", "a", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "[--no-revoke]") {
+		t.Fatalf("%d %q", code, errb)
 	}
 }
 
-func TestDeprovisionRejectsRemovedFlags(t *testing.T) {
+func TestDeprovisionAcceptsServersAndSysCredsFlags(t *testing.T) {
 	h := newAddEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	for _, f := range []string{"--sys-creds=/s.creds", "--servers=2"} {
-		if _, errb, code := h.run("deprovision", "a", f); code == 0 || !strings.Contains(errb, "usage: mashctl deprovision") || strings.Contains(errb, "--sys-creds FILE") || len(s.calls) != 0 || len(h.records()) != 1 {
-			t.Fatalf("%s: %d %q", f, code, errb)
-		}
+	if _, errb, code := h.run("deprovision", "a", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
+		t.Fatalf("%d %q %v %v", code, errb, s.srv, s.creds)
 	}
 }
 
@@ -154,7 +150,7 @@ func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error")
 	}
-	if !strings.Contains(err.Error(), "MASH_SYS_CREDS") || strings.Contains(err.Error(), "--sys-creds") {
+	if !strings.Contains(err.Error(), "pass --sys-creds FILE or set MASH_SYS_CREDS") {
 		t.Errorf("%v", err)
 	}
 }
@@ -268,7 +264,7 @@ func TestDeprovisionDrainedRevokes(t *testing.T) {
 }
 
 func TestUsageTexts(t *testing.T) {
-	if !strings.Contains(retireUsage, "[--force] [--no-revoke]") || strings.Contains(retireUsage, "--sys-creds") || strings.Contains(retireUsage, "--servers") {
+	if !strings.Contains(retireUsage, "[--force] [--no-revoke]") || !strings.Contains(retireUsage, "--sys-creds FILE") || !strings.Contains(retireUsage, "--servers N") {
 		t.Errorf("retireUsage %q", retireUsage)
 	}
 }

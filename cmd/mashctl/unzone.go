@@ -9,7 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 )
 
-const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE]\n  unzone gives the endpoint no new credential; afterwards run mashctl reissue NAME where its creds file is, or run the nsc flags that mashctl permissions NAME --nsc prints and regenerate the creds file\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
+const unzoneUsage = "usage: mashctl unzone NAME [--sys-creds FILE] [--servers N]\n  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS\n  unzone gives the endpoint no new credential; afterwards run mashctl reissue NAME where its creds file is, or run the nsc flags that mashctl permissions NAME --nsc prints and regenerate the creds file\n  run it while the endpoint receives no mail: a sender that cached the old six-token address gets a no-responders error (never a silent loss) until it refreshes the directory\n"
 
 // runUnzone is `mashctl unzone` (ADR 0091): it makes a zoned record five-token, moves its inbox stream's subjects to the
 // five-token mail subject without losing stored mail (admin.Unzone) and says how to give it a five-token credential. It

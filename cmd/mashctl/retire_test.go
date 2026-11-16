@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // provisionDeclared makes a directory record for a declared endpoint and returns its user key.
@@ -414,5 +417,24 @@ func TestCopyAndRemoveSyncFailureKeepsSource(t *testing.T) {
 	}
 	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
 		t.Error("half archive remains")
+	}
+}
+
+func TestRetireDirectoryReadFailureSaysNothingWasRevoked(t *testing.T) {
+	h := newFleetEnv(t)
+	h.provisionDeclared("b")
+	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := js.DeleteKeyValue(context.Background(), store.DirectoryBucket); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := h.run("retire", "b")
+	if code != 1 || out != "" {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(errb), "nothing was revoked; the key is still valid") {
+		t.Errorf("does not end with the not-revoked line: %q", errb)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -123,8 +124,7 @@ func runIssued(args []string, env func(string) string, lookup config.Lookup, std
 		return 2
 	}
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: issued %s: %s\n", verb, fmt.Sprintf(format, a...))
-		return 2
+		return issuedFailed(stderr, verb, fmt.Errorf(format, a...))
 	}
 	var sys *sysTarget
 	if verb == "check" {
@@ -144,6 +144,12 @@ func runIssued(args []string, env func(string) string, lookup config.Lookup, std
 		return printIssuedList(recs, present, o.json, stdout)
 	}
 	return runIssuedCheck(ctx, cfg, env, o, servers, recs, present, stdout, stderr)
+}
+
+// issuedFailed prints an issued failure, with the lost-quorum hint when JetStream is unavailable, and returns 2.
+func issuedFailed(stderr io.Writer, verb string, err error) int {
+	fmt.Fprintf(stderr, "mashctl: issued %s: %s\n", verb, admin.RewordUnavailable(err.Error()))
+	return 2
 }
 
 func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer) int {
@@ -289,7 +295,7 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 
 func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) string, o issuedOpts, servers int, recs []store.Issued, present bool, stdout, stderr io.Writer) int {
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: issued check: %s\n", fmt.Sprintf(format, a...))
+		fmt.Fprintf(stderr, "mashctl: issued check: %s\n", admin.RewordUnavailable(fmt.Sprintf(format, a...)))
 		return issuedNoAnswer
 	}
 	keys, err := openKeys(cfg, env)

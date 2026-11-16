@@ -632,6 +632,13 @@ func parseAuditArgs(args []string) (auditOpts, error) {
 
 // runAudit is `mashctl audit`: a read-only listing of mash's side of the population. It never writes to the server or
 // to disk.
+// auditFailed prints an error that kept audit from completing, with the lost-quorum hint when JetStream is
+// unavailable, and returns the could-not-complete exit code.
+func auditFailed(stderr io.Writer, err error) int {
+	fmt.Fprintln(stderr, admin.RewordUnavailable(err.Error()))
+	return exitAuditIncomplete
+}
+
 func runAudit(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	o, err := parseAuditArgs(args)
 	if err != nil {
@@ -642,27 +649,23 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	if o.compare != "" {
 		earlier, err = readEarlierAudit(o.compare)
 		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return exitAuditIncomplete
+			return auditFailed(stderr, err)
 		}
 	}
 	// audit changes nothing and acts as no endpoint, so a set agent_token (which makes the writing verbs refuse) is no
 	// reason to refuse it.
 	cfg, err := loadConfig(env, lookup)
 	if err != nil && !errors.Is(err, errAgentTokenSet) {
-		fmt.Fprintln(stderr, err)
-		return exitAuditIncomplete
+		return auditFailed(stderr, err)
 	}
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitAuditIncomplete
+		return auditFailed(stderr, err)
 	}
 	defer closeAdmin()
 	snap, err := adm.Audit(ctx)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitAuditIncomplete
+		return auditFailed(stderr, err)
 	}
 
 	dirs, optional := []string{}, true
@@ -677,8 +680,7 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	creds, notes, err := scanCreds(dirs, optional)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitAuditIncomplete
+		return auditFailed(stderr, err)
 	}
 	skip := map[string]bool{} // the admin's and the system account's creds are in the same directory but are no endpoint's
 	for _, p := range []string{cfg.AdminCreds, env("MASH_SYS_CREDS")} {
@@ -691,13 +693,11 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	rep := buildAudit(cfg.Owner, snap, dirs, creds, skip)
 	if rep.Account, err = credsAccountKey(cfg.AdminCreds); err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitAuditIncomplete
+		return auditFailed(stderr, err)
 	}
 	if earlier != nil {
 		if err := bindEarlierAudit(earlier, rep); err != nil {
-			fmt.Fprintln(stderr, err)
-			return exitAuditIncomplete
+			return auditFailed(stderr, err)
 		}
 	}
 	rep.Generated = auditNow().UTC().Format(time.RFC3339)
@@ -716,8 +716,7 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	if o.json {
 		b, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return exitAuditIncomplete
+			return auditFailed(stderr, err)
 		}
 		fmt.Fprintf(stdout, "%s\n", b)
 	} else {

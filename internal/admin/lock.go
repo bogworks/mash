@@ -120,6 +120,9 @@ func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 		}
 	}
 	if err != nil {
+		if down := bucketDown(store.LeaseBucket, err); down != nil {
+			return nil, down
+		}
 		return nil, fmt.Errorf("mash: lease bucket (run `mash admin init`): %w", err)
 	}
 	if err := store.HardenLeaseBucket(ctx, a.js); err != nil {
