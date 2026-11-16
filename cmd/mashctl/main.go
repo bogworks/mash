@@ -28,6 +28,10 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 	}
 	switch args[0] {
 	case "version":
+		if helpRequested(args[1:]) {
+			fmt.Fprintln(stdout, "usage: mashctl version")
+			return 0
+		}
 		fmt.Fprintf(stdout, "mashctl %s\n", endpoint.CurrentVersion())
 		return 0
 	case "help", "-h", "--help":
@@ -35,7 +39,7 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return 0
 	}
 	if isVerb(args[0]) && helpRequested(args[1:]) { // before any dispatch or config load: help changes nothing
-		fmt.Fprint(stdout, verbUsage(args[0]))
+		fmt.Fprint(stdout, verbUsage(args))
 		return 0
 	}
 	switch args[0] {
@@ -94,20 +98,27 @@ func helpRequested(args []string) bool {
 	return false
 }
 
-// verbUsage is the lines of the mashctl usage that begin with verb, or the whole usage when none does (a verb
+// verbUsage is the lines of the mashctl usage for the verb in args: those that begin with its first two words
+// when some do (`issued check`, `inbox inspect`), else with its first word; the whole usage when none does (a verb
 // whose usage lives in its own file).
-func verbUsage(verb string) string {
-	prefix := "  mashctl " + verb
-	var b strings.Builder
-	for _, l := range strings.SplitAfter(ctl.Usage("mashctl"), "\n") {
-		if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
-			b.WriteString(l)
+func verbUsage(args []string) string {
+	words := []string{args[0]}
+	if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+		words = append(words, args[1])
+	}
+	for n := len(words); n > 0; n-- {
+		prefix := "  mashctl " + strings.Join(words[:n], " ")
+		var b strings.Builder
+		for _, l := range strings.SplitAfter(ctl.Usage("mashctl"), "\n") {
+			if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+				b.WriteString(l)
+			}
+		}
+		if b.Len() > 0 {
+			return "usage:\n" + b.String()
 		}
 	}
-	if b.Len() == 0 {
-		return ctl.Usage("mashctl")
-	}
-	return "usage:\n" + b.String()
+	return ctl.Usage("mashctl")
 }
 
 // isVerb reports whether name is a verb run dispatches.

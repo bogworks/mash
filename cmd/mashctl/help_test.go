@@ -14,7 +14,7 @@ import (
 
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"add"}, {"label"}, {"unlabel"},
+	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"add"}, {"label"}, {"unlabel"},
 	{"retire"}, {"unzone"}, {"reissue"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
 	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"}, {"deprovision"}, {"list"},
 }
@@ -63,6 +63,32 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 	}
 }
 
+func TestVerbUsagePicksOwnLines(t *testing.T) {
+	cases := []struct {
+		args      []string
+		want, not string
+	}{
+		{[]string{"issued", "check"}, "mashctl issued check", "mashctl issued list"},
+		{[]string{"issued", "list"}, "mashctl issued list", "mashctl issued check"},
+		{[]string{"inbox", "inspect"}, "mashctl inbox inspect", ""},
+		{[]string{"unlabel"}, "mashctl unlabel", "mashctl label"},
+		{[]string{"label"}, "mashctl label", "mashctl unlabel"},
+		{[]string{"version"}, "usage: mashctl version", ""},
+	}
+	for _, c := range cases {
+		var out, errb bytes.Buffer
+		env := func(string) string { return "" }
+		lookup := func(string) (string, bool) { return "", false }
+		if rc := run(append(append([]string{}, c.args...), "--help"), env, lookup, &out, &errb); rc != 0 {
+			t.Errorf("%v: rc %d", c.args, rc)
+		}
+		got := out.String()
+		if !strings.Contains(got, c.want) || (c.not != "" && strings.Contains(got, c.not)) {
+			t.Errorf("%v: stdout %q, want %q and not %q", c.args, got, c.want, c.not)
+		}
+	}
+}
+
 func TestHelpRequestedReadsOnlyFlagTokensBeforeDoubleDash(t *testing.T) {
 	if helpRequested([]string{"add", "n", "--", "--help"}) {
 		t.Error("--help after -- was taken as help")
@@ -76,10 +102,10 @@ func TestHelpRequestedReadsOnlyFlagTokensBeforeDoubleDash(t *testing.T) {
 }
 
 func TestVerbUsageFallsBackToFull(t *testing.T) {
-	if got := verbUsage("init"); !strings.Contains(got, "mashctl init") || strings.Contains(got, "mashctl list") {
+	if got := verbUsage([]string{"init"}); !strings.Contains(got, "mashctl init") || strings.Contains(got, "mashctl list") {
 		t.Errorf("init usage = %q", got)
 	}
-	if got := verbUsage("nosuchverb"); got != ctl.Usage("mashctl") {
+	if got := verbUsage([]string{"nosuchverb"}); got != ctl.Usage("mashctl") {
 		t.Error("unmatched verb did not fall back to the full usage")
 	}
 }
