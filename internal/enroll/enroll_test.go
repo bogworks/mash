@@ -576,3 +576,46 @@ func TestConcurrentCreateOfOneAddressNeverBothSucceed(t *testing.T) {
 		})
 	}
 }
+
+// Two machines running the very same Create (same address, same public key) at the same moment both succeed and agree:
+// one identity, one directory record naming that key. It is idempotent, not a refusal.
+func TestConcurrentCreateWithTheSameKeyIsIdempotent(t *testing.T) {
+	const rounds = 10
+	h := newEnv(t)
+	h.smallInboxes(h.adm)
+	deps := [2]enroll.Deps{h.d, h.secondDeps(0)}
+	ctx := context.Background()
+	for r := 0; r < rounds; r++ {
+		a := addr(fmt.Sprintf("same%d", r))
+		_, k := newKey(t)
+		var res [2]enroll.Result
+		var errs [2]error
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				res[i], errs[i] = enroll.Create(ctx, deps[i], enroll.Request{Addr: a, PublicKey: k})
+			}()
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: Create %d: %v", r, i, err)
+			}
+			if res[i].PublicKey != k || res[i].Addr != a {
+				t.Fatalf("round %d: Create %d returned %q at %v, want %q at %v", r, i, res[i].PublicKey, res[i].Addr, k, a)
+			}
+		}
+		user, _, err := h.adm.UserOf(ctx, a)
+		if err != nil || user != k {
+			t.Fatalf("round %d: directory user %q (err %v), want %q", r, user, err, k)
+		}
+		if n := h.directoryKeys(); n != r+1 {
+			t.Fatalf("round %d: %d directory records, want %d", r, n, r+1)
+		}
+	}
+}
