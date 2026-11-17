@@ -36,8 +36,13 @@ command and its args and have some sense of what it means"), and the Bogworks co
 ```text
 mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N]
                         [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
-                        [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+                        [--public-key FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
 ```
+
+`--public-key FILE` takes the public half of a key the endpoint made itself (`mash credential key`, from the credential
+CLI design). With it `create` signs that key as the endpoint's user, writes no creds file, and the endpoint installs its
+own creds with `mash credential install`. Without it `create` mints the key on the central host and writes the creds file,
+as `add` does today. Both paths exist in 0.5.5 (the maintainer's ruling B).
 
 ### 2.1 Naming the endpoint
 
@@ -136,20 +141,19 @@ mashctl: refused: alice.dev.design already exists in the directory.
 The model plan (section 2) gives the account-side steps. This is how an operator drives them.
 
 ```text
-mashctl endpoint migrate [NAME | --all] --group G [--name N]
+mashctl endpoint migrate [NAME | --all] --group G [--name N] [--public-keys DIR]
                          [--finish] [--force] [--yes] [--dry-run] [--json]
                          [--servers N] [--sys-creds FILE]
 ```
 
-`NAME` is a legacy endpoint's name as `mashctl list` shows it today. The command changes one thing per step:
+`NAME` is a legacy endpoint's name as `mashctl list` shows it today. The command changes one thing per step. It is meant to run once, for every endpoint, in one sitting (the maintainer's
+ruling A; there is no bridge, section 3.2):
 
 | Command | What it does |
 |---|---|
 | `mashctl endpoint migrate --all --group dev --dry-run` | Plans every legacy endpoint. Changes nothing. |
-| `mashctl endpoint migrate design --group dev` | Step 1 for one endpoint: makes the new identity beside the old one (record, inbox, user, creds file). Revokes nothing. |
-| `mashctl endpoint migrate design --group dev --finish` | Step 2 for one endpoint: revokes the old credentials, ends the bridge, deletes the drained legacy inbox and record. |
-| `mashctl endpoint migrate --all --group dev --yes` | Step 1 for every legacy endpoint (it lists first, and acts only with `--yes`, as `reissue --all` does). |
-| `mashctl endpoint migrate --all --group dev --finish --yes` | Step 2 for every endpoint that has moved. Lists any that has not, and leaves its record. |
+| `mashctl endpoint migrate --all --group dev --yes` | Step 1 for every legacy endpoint: makes the new identity beside the old one (record, inbox, user, creds file or, with `--public-keys`, signed keys). Revokes nothing. It lists first, and acts only with `--yes`, as `reissue --all` does. |
+| `mashctl endpoint migrate --all --group dev --finish --yes` | Step 2 for every endpoint that has moved: revokes the old credentials, deletes the drained legacy inbox and record. Lists any that has not moved, and leaves its record. |
 
 - With no `NAME` and no `--all` the command exits 2 and says to name an endpoint or give `--all`. (The model plan has
   "no names plans all" as the default. The standard says a changing command changes nothing only under `--dry-run`
@@ -158,7 +162,13 @@ mashctl endpoint migrate [NAME | --all] --group G [--name N]
   endpoint, for the case where the legacy name is longer than 32 characters. Without it such an endpoint is `refused`.
 - `--finish` on an endpoint whose legacy inbox is not drained refuses with the count of unread messages, unless
   `--force` says to drop them.
-- Order within a run: endpoints are handled one at a time in name order; a refusal on one does not stop the others.
+- `--public-keys DIR` takes the public halves for the endpoints in the run. `DIR` holds one file per legacy name,
+  `NAME.pub` (the file `mash credential key` writes). An endpoint with a file there is signed from it and gets no creds
+  file; one without a file is minted on the central host and gets a creds file. A file for no legacy endpoint is
+  reported and ignored. Without `--public-keys` every endpoint is minted centrally.
+- `NAME` with `--finish` is not offered: the migration is all endpoints or none. `NAME` stays for step 1 of a repair
+  after a refusal (the one endpoint that was refused, once fixed).
+- Order within a run: endpoints are handled in name order; a refusal on one does not stop the others.
 
 ### 3.1 Output
 
@@ -166,11 +176,11 @@ Per endpoint, one line; the last line is the count.
 
 ```text
 $ mashctl endpoint migrate --all --group dev --dry-run
-planned  design     -> alice/dev/design   make the new identity; the old one keeps working
-planned  review     -> alice/dev/review   make the new identity; the old one keeps working
+planned  design     -> alice/dev/design   make the new identity; the old one is left in place
+planned  review     -> alice/dev/review   make the new identity; the old one is left in place
 refused  a-very-long-legacy-endpoint-name-of-forty-one -> (instance over 32 characters; pass --name)
 2 planned, 1 refused, 0 unchanged. Nothing was changed.
-next: mashctl endpoint migrate design
+next: stop every session, then mashctl endpoint migrate --all --group dev --yes
 ```
 
 ```json
@@ -190,7 +200,7 @@ next: mashctl endpoint migrate design
   ],
   "next_steps": [
     { "sender": "operator", "step": "migrate", "action": "make the new identity for design",
-      "address": "alice.dev.design", "purpose": "migrate", "detail": "mashctl endpoint migrate design --group dev" }
+      "address": "alice.dev.design", "purpose": "migrate", "detail": "mashctl endpoint migrate --all --group dev --yes" }
   ]
 }
 ```
@@ -206,34 +216,48 @@ next: mashctl endpoint migrate design
 
 ### 3.2 What the operator does, in order, and what breaks if endpoints move one at a time
 
-The migration is the cut-over of every identity in a deployment, mine included. It is safe to do one endpoint at a time,
-over days, because the model plan keeps old and new reaching each other for the whole window (the bridge, section 2.3
-of that plan). In order:
+The migration is the cut-over of every identity in a deployment, mine included. It is done in one sitting, for every
+endpoint, with no bridge between old and new (the maintainer's ruling A). In order:
 
-1. **Put the 0.5.5 `mashctl` on the host that runs it.** Nothing changes for running endpoints.
-2. **`mashctl endpoint migrate --all --group dev --dry-run`.** Read the plan. Fix each `refused` (a longer name needs `--name`; a
-   zoned record needs `mashctl unzone` first).
-3. **For one endpoint: `mashctl endpoint migrate NAME`.** The old session is untouched and keeps working.
-4. **Restart that endpoint's session with the new creds file and the 0.5.5 binary, together.** Both are needed: a 0.5.0
-   binary cannot serve the new form, and the new creds do not work for a 0.5.0 binary's subjects. Do not run the old
-   session and the new one on the same endpoint at once; the lease allows one reader of the old name.
-5. **Repeat 3 and 4** for every endpoint, in any order.
-6. **`mashctl endpoint migrate --all --group dev --finish --yes`.** It revokes the old credentials of every endpoint that moved, and
-   lists, without touching, any that did not. Run `mashctl audit` afterwards; it is clean when nothing is legacy.
+1. **Put the 0.5.5 `mashctl` on every central host that runs it.** Nothing changes for running endpoints. Keep the 0.5.0
+   binary and every creds file where they are; the rollback below needs them.
+2. **Optional: collect the public keys.** Each endpoint's owner runs `mash credential key` and leaves `NAME.pub` in one
+   directory. Endpoints with no file there get a key minted centrally.
+3. **`mashctl endpoint migrate --all --group dev --dry-run`** (add `--public-keys DIR` if used). Read the plan. Fix each
+   `refused` (a longer name needs `--name`; a zoned record needs `mashctl unzone` first).
+4. **Stop every session.** Old sessions and new ones cannot talk to each other, so none runs from here until step 7.
+5. **`mashctl endpoint migrate --all --group dev --yes`** (step 1). New identities now exist beside the old ones. The old
+   ones are untouched.
+6. **Install the new creds** on each endpoint (a creds file `mashctl` wrote, or `mash credential install` for a key the
+   endpoint made).
+7. **Start every session on the 0.5.5 binary with the new creds, and send one message through each** (`mash inbox` shows
+   it). Do not go on until each endpoint has received one.
+8. **`mashctl endpoint migrate --all --group dev --finish --yes`** (step 2). It revokes the old credentials, deletes the
+   drained legacy inboxes and records, and lists, without touching, any endpoint that did not move.
+   `mashctl audit` is clean when nothing is legacy.
 
-What breaks, from the model plan and the order above:
+Rollback, before step 8 (nothing was revoked, so the old identities still work):
 
-- **Running `--finish` before an endpoint has moved** revokes the credentials its running session holds: the session
-  loses its connection. Its mail is not lost (it waits in the legacy inbox) but `--finish` refuses while that inbox is
-  not drained, so the command stops it unless `--force` is given. Never give `--force` for an endpoint that has not
-  moved.
-- **A session restarted on the 0.5.5 binary before step 3** has no new creds and cannot connect as a new-form endpoint.
-- **While the window is open** the moved endpoints hold wider grants (the bridge) and `mashctl list` shows a moved and
-  a legacy endpoint under different addresses. Closing the window removes both.
-- **An endpoint nobody moves** keeps working until `--finish --all`, which lists it and leaves its record. It is not
-  deleted by accident.
-- **Several central hosts** each need the 0.5.5 `mashctl` before anyone runs `migrate`, because `migrate`, `create`
-  and the old `add` write different record forms and a 0.5.0 `mashctl add` after step 3 makes a legacy record again.
+1. Stop every session.
+2. Put the 0.5.0 binary and the old creds files back.
+3. Check that each old identity works: `mash inbox` under the old creds shows the old mail.
+4. Remove the new identities: `mashctl endpoint delete alice/dev/NAME` for each (the new creds and records go; the old
+   ones stay).
+
+After step 8 there is no rollback: the old credentials are revoked. Take the old creds files out of the rollback place
+only after step 7 is checked.
+
+What breaks:
+
+- **Moving endpoints one at a time** leaves some on the old form and some on the new, and they cannot reach each other:
+  a message from a new endpoint to an old one is not delivered, and the reverse. That is why `migrate` does not offer a
+  single-endpoint `--finish`, and why steps 4 to 7 are done for all endpoints together.
+- **Running step 8 before step 7 is checked** revokes the credentials a running old session holds, and the new endpoint
+  has not been shown to work. `--finish` refuses while a legacy inbox has unread mail unless `--force` is given; never
+  give `--force` for an endpoint that has not moved.
+- **A session started on the 0.5.5 binary before step 5** has no new creds and cannot connect as a new-form endpoint.
+- **Several central hosts** each need the 0.5.5 `mashctl` before anyone runs `migrate`, because `migrate`, `create` and
+  the old `add` write different record forms and a 0.5.0 `mashctl add` after step 5 makes a legacy record again.
 
 ## 4. `reissue` and `retire`
 
@@ -266,7 +290,7 @@ vocabulary: `deleted`, `unchanged`, `refused`, `partial`, `error`; `reissued`, `
 `mashctl endpoint list [--json]` (what `mashctl list` prints today, in the model's fields) and `mashctl endpoint show
 ADDRESS [--json]` (one record in full, with whether it has moved, which creds file belongs to it, and its issue-record
 state) complete the noun. They change nothing. `show` exists so that a refusal can say "`mashctl endpoint show ... shows
-it`". Their JSON uses the endpoint object of section 2.3 plus `state` (`current`, `legacy`, `moved`) during the window.
+it`". Their JSON uses the endpoint object of section 2.3 plus `state` (`current`, `legacy`, `moved`) during a migration.
 
 ## 5. `init --local`, the quick start and the README
 
@@ -304,7 +328,7 @@ The README's other changes for 0.5.5:
 
 - The words "agent" and "endpoint" are used as the glossary will fix them; `mashctl` is described as the tool that
   creates endpoints.
-- An "Upgrading from 0.5.0" paragraph: put 0.5.5 `mashctl` on the central host, run `mashctl endpoint migrate --all
+- An "Upgrading from 0.5.0" paragraph: stop every session, put 0.5.5 `mashctl` on the central host, run `mashctl endpoint migrate --all
   --group dev --dry-run`, and follow section 3.2. It links the operations page for the full order.
 - The SAP departure (the first slot is the owner) in the README's SAP section, as the model plan says.
 - `docs/mashctl.md` replaces "Adding an endpoint", "Re-issuing" and "Retiring an endpoint" with the sections of this note
@@ -319,7 +343,7 @@ The README's other changes for 0.5.5:
 | `mashctl endpoint delete ADDRESS` | noun verb positional | rules 1, 4, 7 | conforms (`retire` is not in the verb set; `delete` is) |
 | `mashctl endpoint list`, `show ADDRESS` | noun verb | rules 1, 4 | conforms |
 | `mashctl endpoint reissue ADDRESS` | noun verb positional | rule 4: `reissue` is not in the verb set | gap |
-| `mashctl endpoint migrate NAME` | noun verb positional | rule 4: `migrate` is not in the verb set | gap |
+| `mashctl endpoint migrate [NAME \| --all]` | noun verb positional | rule 4: `migrate` is not in the verb set | gap |
 | `--all`, `--changed`, `--finish`, `--force`, `--yes` | flags | rule 9 (long names), 15 (`--yes`) | conforms |
 
 Two verbs are outside the standard's table: `reissue` and `migrate`. The standard's set grows only by a change to the
@@ -340,7 +364,7 @@ on each changing command and no state change under it, a bad flag exits 2, and `
 
 - A table test of the naming forms in section 2.1 (the rows, the no-group refusal, the two-token refusal, a mixed form that disagrees).
 - Golden files for the text and the JSON of `create` (planned, created, each refusal code), `migrate` (plan, step 1,
-  step 2, partial) and the removed-verb messages. The goldens are the contract that `--json` consumers read.
+  step 2, partial, `--public-keys`) and the removed-verb messages. The goldens are the contract that `--json` consumers read.
 - The live proof of the model plan (its section 2.4) driven through these commands, not the library: two legacy
   endpoints, `--dry-run`, step 1, the move, step 2, the refusals, a killed run.
 - `--dry-run` leaves the directory, the issue record and the config directory byte-identical.
@@ -363,10 +387,9 @@ Settled with the model's owner on 2026-11-17:
 
 Open:
 
-6. **The credential carve-out.** The model plan offers the property of #698 (the endpoint makes its key and only the
-   public key reaches `mashctl`) in 0.5.5 without a list set, for 1.5 days. If taken, `endpoint create` gets
-   `--public-key FILE` and writes no creds file, and the `credential install` verb of the credential CLI design
-   completes the path. If not, `endpoint create` mints the user on the central host, as `add` does today.
-7. **The two verbs outside the standard** (section 6): add them to the table, or record the exception.
-8. **A flag-day alternative.** The model plan's section 6 costs a migration without the bridge. If that is chosen the
-   `migrate` flags may change (`--all --apply` and `--finish --all` stay); this note follows the bridge version until then.
+6. **The credential carve-out: ruled (B).** The endpoint makes its own key in 0.5.5. `endpoint create --public-key FILE`
+   and `migrate --public-keys DIR` take the public halves; `mash credential key|install` (the credential CLI design)
+   completes the path. Both paths exist: without a key file, `mashctl` mints centrally as `add` does.
+7. **The two verbs outside the standard** (section 6): still open (ruling C). `migrate` stays in the design until it is
+   decided; add them to the table, or record the exception.
+8. **The flag-day alternative: ruled (A).** One sitting, no bridge; section 3.2 carries the order and the rollback.
