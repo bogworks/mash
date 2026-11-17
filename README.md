@@ -63,19 +63,56 @@ This path needs no Synadia account and no server you run by hand. You need:
 - `nats-server`, a current 2.x release with JetStream, on your `PATH`. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases) (this repository builds and tests against 2.15).
 - Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry). A channel is how a plugin pushes a message into a running session.
 
+Start the server. `mashctl` is the tool that runs the server and makes endpoints; `mash` is what each session runs.
+
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@latest   # mashctl is not in the release assets
 mashctl init --local --owner alice --start                # a NATS server that only this machine can reach, plus keys and credentials
+```
+
+An agent is an endpoint with an address of three tokens, `owner.group.instance`. Here the owner is `alice`, the group is `dev` and the instances are `design` and `review`, so the addresses are `alice.dev.design` and `alice.dev.review`. A group has no default: you always name it.
+
+Make each endpoint in three commands. The endpoint makes its own key, `mashctl` signs the public half, and the endpoint joins the signed JWT to its seed. The seed never leaves the endpoint's machine.
+
+```sh
+mash key create --out design.seed                                        # writes design.seed and design.pub
+mashctl endpoint create alice/dev/design --public-key design.pub         # writes alice.dev.design.jwt
+mash credential create --seed design.seed --jwt alice.dev.design.jwt     # writes alice.dev.design.creds in the config directory
+
+mash key create --out review.seed
+mashctl endpoint create alice/dev/review --public-key review.pub
+mash credential create --seed review.seed --jwt alice.dev.review.jwt
+```
+
+When the endpoint and `mashctl` are on the same machine, one command does all three:
+
+```sh
+mashctl endpoint create alice/dev/design --make-key
+mashctl endpoint create alice/dev/review --make-key
+```
+
+`--make-key` has one limit: the host that runs `mashctl` makes the key and holds it while the command runs, so it is the wrong form when the endpoint is on another machine. Use the three-command form there ([an endpoint on another machine](docs/operations.md#an-endpoint-on-another-machine)).
+
+Then install the plugin and start two sessions:
+
+```sh
 mash plugin export ~/.mash-plugin
 claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
 MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
 MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
-MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send alice.dev.review "hello"   # from a shell
+```
+
+Send mail from a shell and read it:
+
+```sh
+MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send alice.dev.review "hello"
 MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
 ```
 
-An agent is an endpoint with an address of three tokens, `owner.group.instance` (here `alice.dev.design` and `alice.dev.review`): `MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance. Each endpoint needs a directory record (`mashctl provision`) and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is. Minting that file with one command (`mashctl endpoint create`) is coming; until it lands, the setup script mints it. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
+When you are done, stop the local server: `kill $(cat ~/.config/mash/server/server.pid)` (the path is `$MASH_CONFIG_DIR/server/server.pid` if you set it).
+
+`MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance, name the endpoint a session runs as. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
 
 `mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another.
 
@@ -174,11 +211,11 @@ claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
 ```
 
-Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and declare endpoints with `mashctl provision` (a one-command `mashctl endpoint create` is coming); `mash admin` is deprecated. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md).
+Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and make endpoints with `mashctl endpoint create`; `mash admin` is deprecated. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md).
 
 ## Status
 
-mash is v0.5.0 (released 2026-11-16). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.5.0 (released 2026-11-16). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 

@@ -245,9 +245,9 @@ have happened ([ADR-0025][0025]).
 |---|---|---|
 | Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
-| Users | Issued with your own tooling from `mashctl permissions <owner.group.instance>` (JSON or `nsc` flags). mash never holds a seed | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
-| Endpoints | `mashctl init` once, then `mashctl provision <owner.group.instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`, which runs `mashctl provision`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
-| Removing | `mashctl retire` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
+| Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
+| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
+| Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
 `MASH_NAME` set at launch. The idle wake also needs channels allowed for the plugin on that machine.
@@ -399,7 +399,7 @@ service's API token, which only the quickstart script ever sees.
 
 **Residual risks, summarised.** The model rests on each endpoint's seed staying private. A verified sender is trusted
 by design, so one compromised endpoint can direct its peers. Any endpoint can evict another's old mail by flooding it.
-`mash admin deprovision` does not revoke a user; `mashctl retire` and `mashctl deprovision` do, unless `--no-revoke`. The operator of the account keys can impersonate anyone.
+`mash admin deprovision` does not revoke a user; `mashctl endpoint delete` and `mashctl deprovision` do, unless `--no-revoke`. The operator of the account keys can impersonate anyone.
 
 ### 8.4 Naming and addressing
 

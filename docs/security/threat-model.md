@@ -339,7 +339,7 @@ Custody rule: the account signing key, and every key above it, stay with the min
 - A holder can: be that endpoint: connect as it, send mail within the permissions of its user, read its inbox, and sign
   `Agent-Sender` headers with its seed. It cannot mint, read or write the directory's records beyond reading them, and
   has no access to the issue record: its permissions grant nothing on `mash-issued` (a test asserts it).
-- If it leaks: `mashctl retire ADDRESS` revokes the user key (it also removes the record and inbox); the old key stays
+- If it leaks: `mashctl endpoint delete ADDRESS` revokes the user key (it also removes the record and inbox); the old key stays
   revoked, and a new credential for the address needs a new user key.
 
 **The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
