@@ -207,6 +207,30 @@ func TestKeycredHelp(t *testing.T) {
 	}
 }
 
+func TestCredentialHelpSaysWhatIsChecked(t *testing.T) {
+	for _, a := range [][]string{{"credential"}, {"credential", "create"}} {
+		_, out, _ := kcRun(t, "", append(append([]string{}, a...), "--help")...)
+		if !strings.Contains(out, "issuing account") || !strings.Contains(out, "expiry") {
+			t.Errorf("%v help: %q", a, out)
+		}
+	}
+}
+
+func TestKeyCreateMakesParentDirectory(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "new", "d.seed")
+	rc, out, errb := kcRun(t, "", "key", "create", "--out", seed)
+	if rc != 0 {
+		t.Fatalf("rc %d out %q err %q", rc, out, errb)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "new")); err != nil || st.Mode().Perm() != 0o700 {
+		t.Errorf("directory: %v, %v", st, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new", "d.pub")); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestFlagValueRule(t *testing.T) {
 	i := 0
 	if v, err := flagValue([]string{"--out", "f"}, &i, "--out", "", false); v != "f" || err != nil || i != 1 {

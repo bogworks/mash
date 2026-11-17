@@ -76,9 +76,9 @@ func exists(p string) (bool, error) {
 	return false, err
 }
 
-// CreateKey makes a user key pair and writes the seed (0600) and the public key. Both targets are checked first; if
-// either exists nothing is written and the result is a refusal. If the public file cannot be written, the seed file
-// this call made is removed.
+// CreateKey makes a user key pair and writes the seed (0600) and the public key, creating a missing parent directory
+// (0700). Both targets are checked first; if either exists nothing is written and the result is a refusal. The public
+// file is linked first, then the seed; if the seed cannot be linked, the public file this call linked is removed.
 func CreateKey(o KeyOptions) (KeyResult, error) {
 	if o.Out == "" {
 		return KeyResult{}, errors.New("no seed file given")
@@ -123,18 +123,35 @@ func CreateKey(o KeyOptions) (KeyResult, error) {
 	if err != nil {
 		return res, err
 	}
-	if err := writeExcl(o.Out, append(seed, '\n'), 0o600); err != nil {
-		return refuseExists(res, o.Out, err)
+	for _, p := range []string{o.Out, pub} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			return res, err
+		}
 	}
-	if err := writeExcl(pub, []byte(pk+"\n"), 0o644); err != nil {
-		os.Remove(o.Out) // the seed this run created
+	// Each file is written whole to a temp file next to its target, then published by link, so a run that is killed
+	// leaves no empty or partial seed or public file under a final name.
+	seedTmp, err := writeTemp(o.Out, ".seed-*", append(seed, '\n'), 0o600)
+	if err != nil {
+		return res, err
+	}
+	defer os.Remove(seedTmp) // the temp file this call made
+	pubTmp, err := writeTemp(pub, ".pub-*", []byte(pk+"\n"), 0o644)
+	if err != nil {
+		return res, err
+	}
+	defer os.Remove(pubTmp) // the temp file this call made
+	if err := os.Link(pubTmp, pub); err != nil {
 		return refuseExists(res, pub, err)
+	}
+	if err := os.Link(seedTmp, o.Out); err != nil {
+		os.Remove(pub) // the public file this call linked
+		return refuseExists(res, o.Out, err)
 	}
 	res.Outcome = Created
 	return res, nil
 }
 
-// refuseExists turns a lost race on O_EXCL into a refusal; any other error stays an error.
+// refuseExists turns a lost race on a link into a refusal; any other error stays an error.
 func refuseExists(res KeyResult, p string, err error) (KeyResult, error) {
 	if errors.Is(err, os.ErrExist) {
 		res.Outcome = Refused
@@ -144,21 +161,27 @@ func refuseExists(res KeyResult, p string, err error) (KeyResult, error) {
 	return res, err
 }
 
-func writeExcl(p string, data []byte, mode os.FileMode) error {
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+// writeTemp writes data to a new temp file in the directory of target and returns its name. On error the temp file
+// this call made is removed.
+func writeTemp(target, pattern string, data []byte, mode os.FileMode) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(target), pattern)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if _, err := f.Write(data); err != nil {
+	name := f.Name()
+	if err := f.Chmod(mode); err == nil {
+		_, err = f.Write(data)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err == nil {
+			return name, nil
+		}
+	} else {
 		f.Close()
-		os.Remove(p)
-		return err
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(p)
-		return err
-	}
-	return nil
+	os.Remove(name)
+	return "", err
 }
 
 // CredOptions are the inputs of CreateCredentials.

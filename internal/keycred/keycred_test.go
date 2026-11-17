@@ -107,15 +107,105 @@ func TestCreateKeyRefusesOverwrite(t *testing.T) {
 	}
 }
 
-func TestCreateKeyRemovesSeedWhenPublicFails(t *testing.T) {
+func TestCreateKeyPublicFailsLeavesNothing(t *testing.T) {
 	dir := t.TempDir()
 	seed := filepath.Join(dir, "d.seed")
-	_, err := CreateKey(KeyOptions{Out: seed, PubOut: filepath.Join(dir, "missing-dir", "d.pub")})
+	// The public file's directory is a regular file, so it cannot be made.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := CreateKey(KeyOptions{Out: seed, PubOut: filepath.Join(blocker, "d.pub")})
 	if err == nil {
 		t.Fatal("want an error")
 	}
 	if _, err := os.Stat(seed); !os.IsNotExist(err) {
 		t.Errorf("seed left behind: %v", err)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Errorf("files after failure: %v", ents)
+	}
+}
+
+func TestCreateKeyNoFinalFileOnWriteFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only directory does not stop root")
+	}
+	dir := t.TempDir()
+	pubDir := filepath.Join(dir, "pub")
+	if err := os.Mkdir(pubDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(pubDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(pubDir, 0o700) })
+	seed := filepath.Join(dir, "d.seed")
+	if _, err := CreateKey(KeyOptions{Out: seed, PubOut: filepath.Join(pubDir, "d.pub")}); err == nil {
+		t.Fatal("want an error")
+	}
+	if _, err := os.Stat(seed); !os.IsNotExist(err) {
+		t.Errorf("seed left behind: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pubDir, "d.pub")); !os.IsNotExist(err) {
+		t.Errorf("public file left behind: %v", err)
+	}
+	for _, d := range []string{dir, pubDir} {
+		ents, _ := os.ReadDir(d)
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), ".seed-") || strings.HasPrefix(e.Name(), ".pub-") {
+				t.Errorf("temp file left in %s: %s", d, e.Name())
+			}
+		}
+	}
+}
+
+func TestCreateKeyStaleTempDoesNotBlock(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, ".seed-12345")
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := CreateKey(KeyOptions{Out: filepath.Join(dir, "d.seed")})
+	if err != nil || res.Outcome != Created {
+		t.Fatalf("result %+v, %v", res, err)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("the stale file was removed: %v", err)
+	}
+}
+
+func TestCreateKeyLeavesNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	res, err := CreateKey(KeyOptions{Out: filepath.Join(dir, "d.seed")})
+	if err != nil || res.Outcome != Created {
+		t.Fatalf("result %+v, %v", res, err)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 2 {
+		t.Errorf("want the seed and the public file only: %v", ents)
+	}
+}
+
+func TestCreateKeyMakesParentDirectories(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "a", "b", "d.seed")
+	pub := filepath.Join(dir, "c", "d.pub")
+	res, err := CreateKey(KeyOptions{Out: seed, PubOut: pub})
+	if err != nil || res.Outcome != Created {
+		t.Fatalf("result %+v, %v", res, err)
+	}
+	for _, d := range []string{filepath.Dir(seed), filepath.Dir(pub)} {
+		if st, err := os.Stat(d); err != nil || st.Mode().Perm() != 0o700 {
+			t.Errorf("directory %s: %v, %v", d, st, err)
+		}
+	}
+	if res, err := CreateKey(KeyOptions{Out: filepath.Join(dir, "x", "y.seed"), DryRun: true}); err != nil || res.Outcome != Planned {
+		t.Fatalf("dry run %+v, %v", res, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "x")); !os.IsNotExist(err) {
+		t.Errorf("dry run made a directory: %v", err)
 	}
 }
 

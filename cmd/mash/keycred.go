@@ -24,7 +24,7 @@ Example:
 const keyCreateUsage = `usage: mash key create --out FILE [--pub-out FILE] [--json] [--dry-run]
 
 Make a user key pair. The seed goes to FILE (mode 0600); the public key goes to FILE with a trailing .seed replaced
-by .pub (FILE.pub if FILE does not end in .seed), or to --pub-out. It refuses to overwrite either file. It prints the
+by .pub (FILE.pub if FILE does not end in .seed), or to --pub-out. It makes a missing parent directory (mode 0700) and refuses to overwrite either file. It prints the
 public key and both paths, never the seed.
 
   --out FILE       the seed file (required)
@@ -42,6 +42,9 @@ mash credential builds a credentials file. It needs no server, no config file an
 
   create   join a seed and the user JWT issued for its public key into a credentials file
 
+It checks that the JWT is a user JWT with a valid self-signature that names the seed's key; it does not check the
+issuing account or the expiry.
+
 Example:
   mash credential create --seed design.seed --jwt design.jwt
 `
@@ -51,6 +54,9 @@ const credentialCreateUsage = `usage: mash credential create --seed FILE --jwt F
 Join a user seed and the user JWT issued for its public key into a credentials file (mode 0600). It refuses if the JWT
 was issued for a different key (key_mismatch) and refuses to replace an existing file unless --force is given. It
 prints the credentials path and the public key, never the seed or the JWT.
+
+It checks the structure of the JWT, its self-signature, and that it is a user JWT naming the seed's key; it does not
+check the issuing account or the expiry.
 
   --seed FILE   the seed file (required)
   --jwt FILE    the user JWT file (required)
