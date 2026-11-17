@@ -20,11 +20,7 @@ import (
 // ownedByPID reports whether the spool's owner record names pid as serve's parent.
 func ownedByPID(sp spool.Spool, pid int) bool {
 	var r struct{ PID int }
-	if json.Unmarshal([]byte(sp.Owner()), &r) != nil || r.PID != pid {
-		return false
-	}
-	b, err := os.ReadFile(filepath.Join(sp.Dir, ".session")) // an older hook reads only this
-	return err == nil && strings.TrimSpace(string(b)) == "pid:"+strconv.Itoa(pid)
+	return json.Unmarshal([]byte(sp.Owner()), &r) == nil && r.PID == pid
 }
 
 func skipOnWindows(t *testing.T) {
@@ -378,7 +374,7 @@ func TestHookOtherLaunchOfTheSameSessionIsRefusedAndToldOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = sp.OwnRecord("pid:"+strconv.Itoa(owner.pid), sp.Owner())
+	err = sp.Own(sp.Owner())
 	unlock()
 	if err != nil {
 		t.Fatal(err)

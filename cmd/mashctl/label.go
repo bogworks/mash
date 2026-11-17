@@ -100,9 +100,12 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		return fail("%v", err)
 	}
 	defer closeAdmin()
-	recs, err := adm.List(ctx)
+	recs, bad, err := adm.List(ctx)
 	if err != nil {
 		return fail("%v", err)
+	}
+	for _, b := range bad {
+		b.Warn(stderr, "mashctl")
 	}
 	rec, ok := findRecord(recs, o.addr)
 	if !ok {

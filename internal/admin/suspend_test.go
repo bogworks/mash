@@ -445,7 +445,7 @@ func intact(t *testing.T, a *admin.Admin, js jetstream.JetStream, name string) {
 	if _, err := js.Stream(context.Background(), "inbox-"+ep(t, name).Flat()); err != nil {
 		t.Fatalf("%s: stream gone: %v", name, err)
 	}
-	recs, err := a.List(context.Background())
+	recs, _, err := a.List(context.Background())
 	if err != nil || len(recs) != 1 || recs[0].Instance != name {
 		t.Fatalf("%s: records %v %v", name, recs, err)
 	}
@@ -502,7 +502,7 @@ func TestDeprovisionDrained(t *testing.T) {
 	if _, err := js.Stream(ctx, "inbox-o_dev_d"); err == nil {
 		t.Fatal("stream still there")
 	}
-	if recs, err := a.List(ctx); err != nil || len(recs) != 0 {
+	if recs, _, err := a.List(ctx); err != nil || len(recs) != 0 {
 		t.Fatalf("records %v %v", recs, err)
 	}
 	if err := a.DeprovisionDrained(ctx, sap.Address{Owner: "o", Group: "dev", Instance: "Bad Name"}, "x", 0); err == nil {

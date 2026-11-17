@@ -17,7 +17,7 @@ import (
 type Mail struct {
 	Seq uint64
 	// Stream names the stream Seq is a sequence of; empty for the endpoint's own (primary) stream, whose numbers are
-	// shown bare, and a legacy-stream message's with an L (Num). It is part of the message's identity (with Seq).
+	// shown bare. It is part of the message's identity (with Seq).
 	Stream string
 	From   string
 	// Instance is the sender's verified instance id; empty when it sent none
@@ -41,24 +41,17 @@ type Mail struct {
 	Redelivered bool
 }
 
-// LegacyStream is the Stream of a message in the legacy inbox stream, which an endpoint reads during the transition to
-// a new identity. Its numbers are shown with an L: #L5.
-const LegacyStream = "legacy"
-
-// Num is the text of a message number: "5" for the primary stream (Stream empty), "L5" for the legacy stream. A message
-// of any other stream has no short form and is written "<stream>:<seq>", for a log line.
+// Num is the text of a message number: "5" for the primary stream (Stream empty). A message of any other stream has no
+// short form and is written "<stream>:<seq>", for a log line.
 func Num(stream string, seq uint64) string {
 	n := strconv.FormatUint(seq, 10)
-	switch stream {
-	case "":
+	if stream == "" {
 		return n
-	case LegacyStream:
-		return "L" + n
 	}
 	return stream + ":" + n
 }
 
-// Num is the message's number as shown: "5", or "L5" for a legacy-stream message.
+// Num is the message's number as shown: "5".
 func (m Mail) Num() string { return Num(m.Stream, m.Seq) }
 
 const maxFirstLine = 120

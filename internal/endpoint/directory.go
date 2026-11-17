@@ -187,6 +187,7 @@ func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 	defer e.mu.Unlock()
 	dir := make(map[string]store.Record, len(got))
 	for key, r := range got {
+		e.warnBad(key, r)
 		switch {
 		case r.err == nil:
 			dir[key] = r.rec

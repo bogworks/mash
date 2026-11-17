@@ -125,7 +125,7 @@ func TestHookCrashMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			// The hook is a child of this process, so this process is the Claude process that owns the spool.
-			if err := sp.Own("pid:" + strconv.Itoa(os.Getpid())); err != nil {
+			if err := sp.Own(`{"pid":` + strconv.Itoa(os.Getpid()) + `}`); err != nil {
 				t.Fatal(err)
 			}
 			for i := 1; i <= 3; i++ {

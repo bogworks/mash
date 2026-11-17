@@ -44,9 +44,6 @@ type Entry struct {
 	Via      string    `json:"via,omitempty"`      // the verified relay declaration, "<origin> #<seq>"
 	At       time.Time `json:"at"`
 	Body     []byte    `json:"body"`
-	// Epoch is the legacy-lease epoch current when a legacy-stream entry was written (see epoch.go); absent for an
-	// own-stream entry and in files written before it existed.
-	Epoch uint64 `json:"epoch,omitempty"`
 	// Redelivered is set by Waiting, never persisted: a hook had begun to show this entry and did not finish
 	// draining it, so the session may already have seen it.
 	Redelivered bool `json:"-"`
@@ -124,7 +121,6 @@ func Dir(stateDir, owner, name string) string {
 const (
 	marker      = ".hooked"
 	streamFile  = ".stream"
-	sessionFile = ".session"
 	ownerFile   = ".owner"
 	refusedFile = ".refused"
 	toldFile    = ".told"
@@ -323,14 +319,12 @@ func (s Spool) Put(e Entry) error {
 
 // Waiting lists the spooled messages, oldest first (the primary stream, then each other stream in name order, each by
 // sequence). An unreadable file is skipped, not fatal: one bad entry must not stop the rest.
-// A legacy entry stamped with an epoch other than the current one (epoch.go) is skipped too: not shown, so not drained.
 func (s Spool) Waiting() ([]Entry, error) {
 	des, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return nil, err
 	}
 	var out []Entry
-	cur, curOK := s.Epoch()
 	for _, d := range des {
 		ref, ok := refOf(d.Name())
 		if !ok || !d.Type().IsRegular() {
@@ -341,7 +335,7 @@ func (s Spool) Waiting() ([]Entry, error) {
 			continue
 		}
 		var e Entry
-		if json.Unmarshal(b, &e) == nil && e.Ref() == ref && e.visible(cur, curOK) {
+		if json.Unmarshal(b, &e) == nil && e.Ref() == ref {
 			out = append(out, e)
 		}
 	}
@@ -555,16 +549,10 @@ func (s Spool) HookedSince(t time.Time) bool {
 	return err == nil && !fi.ModTime().Before(t)
 }
 
-// Own binds the spool to the owner token of the serve that holds the lease, so a hook of another session with the
-// same endpoint name leaves it alone (codex H1 on #21, round 3). It writes the legacy .session text and removes any
-// .owner record; "" removes the binding. Atomic: a hook never reads a half-written id.
-func (s Spool) Own(legacy string) error { return s.OwnRecord(legacy, "") }
-
-// OwnRecord is Own with the identity record (JSON {pid, session, launch}, ADR 0040) in .owner. .session keeps the
-// legacy "pid:N" text, so a hook built before the record existed still enforces ancestry instead of reading an
-// unknown owner as "accept all". The record is written first, then .session; each write is atomic and the caller
-// holds the spool lock. An empty record removes .owner.
-func (s Spool) OwnRecord(legacy, record string) error {
+// Own binds the spool to the owner record of the serve that holds the lease (JSON {pid, session, launch}, ADR 0040),
+// so a hook of another session with the same endpoint name leaves it alone (codex H1 on #21, round 3). "" removes the
+// binding. The caller holds the spool lock; the write is atomic, so a hook never reads a half-written record.
+func (s Spool) Own(record string) error {
 	// A new lease holder starts clean: a refusal recorded against the previous holder is not its.
 	if err := os.Remove(filepath.Join(s.Dir, refusedFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -581,22 +569,7 @@ func (s Spool) OwnRecord(legacy, record string) error {
 			return err
 		}
 	}
-	if err := s.writeOrRemove(ownerFile, record); err != nil {
-		return err
-	}
-	return s.writeOrRemove(sessionFile, legacy)
-}
-
-// LegacyToken is the "pid:N" text an older hook understands, for a record: N is the record's pid, else this
-// process's parent (serve's parent, the Claude process). The one place that text is made.
-func LegacyToken(record string) string {
-	var r struct {
-		PID int `json:"pid"`
-	}
-	if json.Unmarshal([]byte(record), &r) != nil || r.PID <= 0 {
-		r.PID = os.Getppid()
-	}
-	return "pid:" + strconv.Itoa(r.PID)
+	return s.writeOrRemove(ownerFile, record)
 }
 
 func (s Spool) writeOrRemove(name, content string) error {
@@ -632,8 +605,7 @@ func (s Spool) writeOrRemove(name, content string) error {
 // is not valid JSON, so the hook's Match refuses it: a damaged record is never read as "no owner".
 const OwnerUnreadable = "{owner record unreadable"
 
-// Owner is what a hook matches against: the JSON record in .owner when there is one, else the legacy .session text,
-// "" when neither exists (an older serve, or none).
+// Owner is what a hook matches against: the JSON record in .owner, "" when there is none.
 func (s Spool) Owner() string {
 	b, err := os.ReadFile(filepath.Join(s.Dir, ownerFile))
 	switch {
@@ -645,11 +617,7 @@ func (s Spool) Owner() string {
 	case !errors.Is(err, fs.ErrNotExist):
 		return OwnerUnreadable
 	}
-	b, err = os.ReadFile(filepath.Join(s.Dir, sessionFile))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
+	return ""
 }
 
 // Refusal is what a hook that matched none of the ownership rules leaves in .refused.
