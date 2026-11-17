@@ -193,13 +193,20 @@ var (
 	schemeUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s,]*@`)
 	// bareUserinfo matches user:pass@host with no scheme, as in a NATS server list.
 	bareUserinfo = regexp.MustCompile(`(^|[\s,'"(])[^\s/,@:'"]+:[^\s/,'"]*@`)
+	// jwtText matches a JWT (three base64url parts, the first starting with the encoded {"): a credential must never be
+	// carried into an error, a recorded failure or the status output.
+	jwtText = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*`)
+	// seedText matches an nkey seed: S, a type letter (operator, account, user, server, cluster, private, curve), and base32.
+	seedText = regexp.MustCompile(`S[OANCUPX][A-Z2-7]{50,}`)
 )
 
 // redactText replaces the credentials in every URL in s, however s parses: a url, a comma-separated server list, a
-// malformed url, or an error message that embeds one.
+// malformed url, or an error message that embeds one; and any JWT or nkey seed in it.
 func redactText(s string) string {
 	s = schemeUserinfo.ReplaceAllString(s, "${1}REDACTED@")
-	return bareUserinfo.ReplaceAllString(s, "${1}REDACTED@")
+	s = bareUserinfo.ReplaceAllString(s, "${1}REDACTED@")
+	s = jwtText.ReplaceAllString(s, "REDACTED")
+	return seedText.ReplaceAllString(s, "REDACTED")
 }
 
 func redactURL(s string) string { return redactText(s) }
