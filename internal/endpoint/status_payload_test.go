@@ -59,7 +59,8 @@ func TestLeakageGuardAndSharedBuilder(t *testing.T) {
 	ps := map[string]any{"state": "blocked", "kind": "permission"}
 	a.SetHeartbeatExtras(func() map[string]any { return map[string]any{"program_status": ps} })
 	a.SetStatusExtras(func() map[string]any {
-		return map[string]any{"program_detail": map[string]string{"title": "a (Claude Code)", "msg": "waiting for permission"}}
+		return map[string]any{"program_detail": map[string]string{"title": "a (Claude Code)", "msg": "waiting for permission"},
+			"delivery": map[string]string{"health": "holding", "reason": "held_unacked"}}
 	})
 
 	hm, hk := statusKeys(t, a.heartbeat())
@@ -67,17 +68,23 @@ func TestLeakageGuardAndSharedBuilder(t *testing.T) {
 		t.Fatalf("heartbeat keys %v, want %v", hk, want)
 	}
 	rm, rk := statusKeys(t, askStatus(t, f, a))
-	if want := withKeys(hk, "program_detail"); !reflect.DeepEqual(rk, want) {
+	if want := withKeys(hk, "program_detail", "delivery"); !reflect.DeepEqual(rk, want) {
 		t.Fatalf("reply keys %v, want %v", rk, want)
 	}
 	if !bytes.Equal(hm["program_status"], rm["program_status"]) {
 		t.Fatalf("program_status differs: %s vs %s", hm["program_status"], rm["program_status"])
 	}
+	if string(rm["delivery"]) != `{"health":"holding","reason":"held_unacked"}` {
+		t.Fatalf("delivery %s", rm["delivery"])
+	}
+	if _, ok := hm["delivery"]; ok {
+		t.Fatalf("heartbeat carries delivery: %s", hm["delivery"])
+	}
 	if string(hm["program_status"]) != `{"kind":"permission","state":"blocked"}` {
 		t.Fatalf("program_status %s", hm["program_status"])
 	}
 
-	// The published beat carries program_status and never program_detail.
+	// The published beat carries program_status and never program_detail or delivery.
 	nc := f.e.ConnAs(t, f.creds["a"], "a")
 	sub, err := nc.SubscribeSync(a.subj.HB)
 	if err != nil {

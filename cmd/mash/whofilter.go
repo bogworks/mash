@@ -117,6 +117,10 @@ type whoEntry struct {
 	// (the report is the peer's own and unsigned).
 	Activity      *whoActivity `json:"activity,omitempty"`
 	ActivityTrust string       `json:"activity_trust,omitempty"`
+	// Delivery and DeliveryReason are the peer's own mash delivery-health report (the reply's delivery object: ok,
+	// degraded, holding, and a reason class when not ok), present only when it reported known values. Additive.
+	Delivery       string `json:"delivery,omitempty"`
+	DeliveryReason string `json:"delivery_reason,omitempty"`
 }
 
 // whoActivity is the peer's reported state; kind only with blocked.
@@ -135,6 +139,19 @@ func whoStateCell(p endpoint.Presence, act map[string]endpoint.PeerState) string
 		return "?"
 	}
 	return st.Display()
+}
+
+// whoDeliveryCell is the delivery column of one entry: "?" no answer in time or refused (or an online endpoint missing
+// from act), "-" offline or answered without a delivery report, else the report. Never "ok" unless the peer said so.
+func whoDeliveryCell(p endpoint.Presence, act map[string]endpoint.PeerState) string {
+	if !p.Online {
+		return "-"
+	}
+	st, ok := act[p.Record.KeyOrName()]
+	if !ok {
+		return "?"
+	}
+	return st.DeliveryDisplay()
 }
 
 // whoAlias is the legacy identity a new-form record answers to.
@@ -176,6 +193,9 @@ func whoJSONAct(ps []endpoint.Presence, long bool, live map[string]endpoint.Leas
 		if st, ok := act[r.KeyOrName()]; ok && p.Online && st.Outcome == endpoint.PeerReported {
 			e.Activity = &whoActivity{State: st.State, Kind: st.Kind}
 			e.ActivityTrust = "claimed"
+		}
+		if st, ok := act[r.KeyOrName()]; ok && p.Online && st.Delivery != "" {
+			e.Delivery, e.DeliveryReason = st.Delivery, st.DeliveryReason
 		}
 		out = append(out, e)
 	}

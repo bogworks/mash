@@ -40,7 +40,7 @@ func TestWhoStateColumnAndJSON(t *testing.T) {
 		}
 	}
 	reply("blk", statusJSON(`,"program_status":{"state":"blocked","kind":"question"},"program_detail":{"msg":"HIDDEN"}`), 0)
-	reply("wrk", statusJSON(`,"program_status":{"state":"working"}`), 0)
+	reply("wrk", statusJSON(`,"program_status":{"state":"working"},"delivery":{"health":"holding","reason":"held_unacked","note":"HIDDEN2"}`), 0)
 	reply("plain", statusJSON(``), 0)
 	reply("slow", statusJSON(`,"program_status":{"state":"working"}`), 10*time.Second) // never back inside the budget
 	reply("gone", statusJSON(`,"program_status":{"state":"working"}`), 0)              // answers, but is listed offline
@@ -58,6 +58,7 @@ func TestWhoStateColumnAndJSON(t *testing.T) {
 	if _, asked := act["gone"]; asked {
 		t.Fatal("an offline endpoint was asked")
 	}
+	wantDel := map[string]string{"blk": "-", "gone": "-", "mute": "?", "plain": "-", "slow": "?", "wrk": "holding(held_unacked)"}
 	want := map[string]string{"blk": "blocked(question)", "gone": "-", "mute": "?", "plain": "-", "slow": "?", "wrk": "working"}
 	text := whoRender(ps, whoOutput{Activity: act}, false, nil)
 	lines := strings.Split(text, "\n")
@@ -66,16 +67,16 @@ func TestWhoStateColumnAndJSON(t *testing.T) {
 	}
 	for _, l := range lines {
 		cols := strings.Split(l, "\t")
-		last := cols[len(cols)-1]
+		// state is followed by the delivery column, last.
 		name := cols[0]
-		if last != "state "+want[name] {
-			t.Errorf("%s: last column %q, want %q (line %q)", name, last, "state "+want[name], l)
+		if len(cols) < 4 || cols[len(cols)-2] != "state "+want[name] || cols[len(cols)-1] != "delivery "+wantDel[name] {
+			t.Errorf("%s: columns %q, want state %q then delivery %q", name, cols, want[name], wantDel[name])
 		}
 		if cols[1] != "online" && cols[1] != "offline" {
 			t.Errorf("existing column moved: %q", l)
 		}
 	}
-	if strings.Contains(text, "HIDDEN") {
+	if strings.Contains(text, "HIDDEN") || strings.Contains(text, "delivery ok") {
 		t.Fatal("free text shown")
 	}
 	// Without the column asked for, the text is what it was.
@@ -97,10 +98,14 @@ func TestWhoStateColumnAndJSON(t *testing.T) {
 			}
 		case "wrk":
 			a, _ := e["activity"].(map[string]any)
-			if a["state"] != "working" || a["kind"] != nil || e["activity_trust"] != "claimed" {
+			if a["state"] != "working" || a["kind"] != nil || e["activity_trust"] != "claimed" ||
+				e["delivery"] != "holding" || e["delivery_reason"] != "held_unacked" {
 				t.Errorf("wrk: %v", e)
 			}
 		default:
+			if _, has := e["delivery"]; has || e["delivery_reason"] != nil {
+				t.Errorf("%s: delivery present though not reported: %v", name, e)
+			}
 			if _, has := e["activity"]; has || e["activity_trust"] != nil {
 				t.Errorf("%s: activity present though not reported: %v", name, e)
 			}
@@ -131,7 +136,7 @@ func TestWhoStateCLIDefaultUnchangedAndOptIn(t *testing.T) {
 	if got := line(out); !strings.HasPrefix(got, "p\tonline") || strings.Contains(got, "state") {
 		t.Fatalf("default who line: %q", got)
 	}
-	if strings.Contains(out, "state") || asked.Load() != 0 {
+	if strings.Contains(out, "state") || strings.Contains(out, "delivery") || asked.Load() != 0 {
 		t.Fatalf("default who: %q, %d status requests", out, asked.Load())
 	}
 	out, _ = w.cli(t, "a", "who", "--names")
@@ -141,7 +146,7 @@ func TestWhoStateCLIDefaultUnchangedAndOptIn(t *testing.T) {
 
 	before := asked.Load()
 	out, _ = w.cli(t, "a", "who", "--long")
-	if got := line(out); !strings.HasSuffix(got, "\tstate -") {
+	if got := line(out); !strings.HasSuffix(got, "\tstate -\tdelivery ok") {
 		t.Fatalf("--long line: %q", got)
 	}
 	if asked.Load() == before {
@@ -170,7 +175,7 @@ func TestWhoStateCLIDefaultUnchangedAndOptIn(t *testing.T) {
 		return r["content"].([]any)[0].(map[string]any)["text"].(string)
 	}
 	before = asked.Load()
-	if got := line(call(41, `{"name":"p"}`)); !strings.HasSuffix(got, "\tstate -") || asked.Load() == before {
+	if got := line(call(41, `{"name":"p"}`)); !strings.HasSuffix(got, "\tstate -\tdelivery ok") || asked.Load() == before {
 		t.Fatalf("MCP who text line: %q (%d new requests)", got, asked.Load()-before)
 	}
 	if txt := call(42, `{"name":"p","format":"json"}`); !strings.Contains(txt, `"name": "p"`) {

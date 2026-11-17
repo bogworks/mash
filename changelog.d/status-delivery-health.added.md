@@ -1,0 +1,3 @@
+A mash endpoint's status reply reports its delivery health as `delivery`, an object `{"health", "reason"}`: `health` is `ok`, `degraded` or `holding`, and `reason` (`spool_failing`, `channel_hidden`, `held_unacked`) appears when it is not ok. It never carries any content and is never in the heartbeat. `mash who --long`, `--json` and the `who` tool show it for online peers. A peer that did not answer shows `?`, never `ok`. The default `mash who` line is
+unchanged
+([ADR 0134](docs/decisions/0134-mash-asks-a-peers-reported-state-over-sap-status-and-shows-it-only-where-who-already-adds-fields.md)).

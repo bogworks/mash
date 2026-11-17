@@ -300,7 +300,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			clearWaiter() // this serve now holds the lease
 		}
 		ep.SetHeartbeatExtras(programStatus(src.tracker.Current))
-		ep.SetStatusExtras(programDetail(cfg.DisplayName(), src.tracker.Current))
+		// The one status-extras provider: program_detail and delivery, both reply only. delivery is read from the
+		// spool and channel state below once it is known.
+		var deliveryRead atomic.Pointer[func() (endpoint.Delivery, bool)]
+		ep.SetStatusExtras(statusExtras(programDetail(cfg.DisplayName(), src.tracker.Current), &deliveryRead))
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
 		select {
@@ -359,6 +362,15 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			// channel (#16).
 			ep.SpoolFromStart()
 		}
+		// The status reply's delivery health is read from this state each time it is asked for.
+		ds := deliveryState{BindFailed: err != nil, FailClosed: failClosed, NoChannel: noChannel,
+			FromStartHeld: err != nil && !failClosed && cfg.SpoolFromStart && !noChannel}
+		readDelivery := func() (endpoint.Delivery, bool) {
+			d := ds
+			_, d.FaultActive = ep.SpoolFaultLine()
+			return deliveryHealth(d), true
+		}
+		deliveryRead.Store(&readDelivery)
 		startSvc := func() {
 			if err := ep.StartService(ctx, func(p endpoint.PromptEvent) {
 				text, ok := promptNotice(p)
@@ -1031,7 +1043,7 @@ func whoTextAct(ps []endpoint.Presence, long bool, live map[string]endpoint.Leas
 			}
 		}
 		if act != nil {
-			fmt.Fprintf(&b, "\tstate %s", whoStateCell(p, act))
+			fmt.Fprintf(&b, "\tstate %s\tdelivery %s", whoStateCell(p, act), whoDeliveryCell(p, act))
 		}
 		b.WriteString("\n")
 	}

@@ -76,6 +76,10 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 		!strings.Contains(txt, "read it with the inbox and read tools; it is delivered once the spool recovers") {
 		t.Fatalf("status lacks the line:\n%s", txt)
 	}
+	// The status reply says so, by word and class only.
+	if out, _ := w.cli(t, "b", "who", "--long"); !strings.Contains(whoLine(t, out, "a"), "\tdelivery holding(channel_hidden)") || strings.Contains(out, "must stay unacked") {
+		t.Fatalf("who --long does not show the holding delivery:\n%s", out)
+	}
 	// Fix the spool directory: the retry binds it.
 	if err := os.Rename(state, state+".was"); err != nil {
 		t.Fatal(err)
@@ -90,6 +94,10 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	}
 	if txt := resultText(s.call(t, 31, "status", `{}`)); strings.Contains(txt, "spool: FAILING") {
 		t.Fatalf("status still has the line:\n%s", txt)
+	}
+	if out, _ := w.cli(t, "b", "who", "--long"); !strings.Contains(whoLine(t, out, "a"), "\tdelivery ok") {
+		// the peer cache is 5 s per process and each cli call is a new process, so this reads the live reply
+		t.Fatalf("who --long still not ok after recovery:\n%s", out)
 	}
 	got := runHook(t, w.env["a"], "UserPromptSubmit")
 	if !strings.Contains(got, "> must stay unacked") {

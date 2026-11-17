@@ -15,7 +15,7 @@ import (
 
 // What a peer reports about itself over the SAP status endpoint (SAP 0.3.1, section 8.3: an agent adds fields of its
 // own): the status reply is the heartbeat-shaped JSON plus, when the peer reports, the object program_status with
-// state and kind. The report is the peer's own and unsigned: it is information, never a grant.
+// state and kind, and the object delivery with health and reason. The report is the peer's own and unsigned: it is information, never a grant.
 const (
 	// PeerActivityTimeout is how long one status request waits for an answer (and how long it waits for a free slot).
 	PeerActivityTimeout = time.Second
@@ -47,6 +47,26 @@ type PeerState struct {
 	State      string
 	Kind       string
 	InstanceID string
+	// Delivery and DeliveryReason are mash's own delivery-health report (the reply's delivery object: health and
+	// reason), read whether or not a state was reported; empty when the peer did not report a known value. Only known
+	// words are kept.
+	Delivery       string
+	DeliveryReason string
+}
+
+// DeliveryDisplay is the short form of the delivery report: "holding(held_unacked)", "ok", "-" (answered, not
+// reported: never "ok") or "?" (no answer in time, or refused).
+func (p PeerState) DeliveryDisplay() string {
+	if p.Outcome == PeerNoAnswer || p.Outcome == PeerRefused {
+		return "?"
+	}
+	if p.Delivery == "" {
+		return "-"
+	}
+	if p.DeliveryReason != "" {
+		return p.Delivery + "(" + p.DeliveryReason + ")"
+	}
+	return p.Delivery
 }
 
 // Display is the short form a person or a model reads: "working", "blocked(question)", "-" (answered, not reported:
@@ -71,7 +91,8 @@ var (
 
 // parsePeerStatus reads a status reply body: program_status.state and program_status.kind. A non-object
 // program_status, or a state outside the five values, means not reported; a kind outside the three values, or without
-// blocked, is dropped; unknown members and keys (top-level state and kind included) are ignored.
+// blocked, is dropped; unknown members and keys (top-level state, kind, delivery and delivery_reason included) are ignored. delivery.health
+// and delivery.reason are read the same way: an unknown health is not reported, an unknown reason is dropped.
 func parsePeerStatus(body []byte) PeerState {
 	out := PeerState{Outcome: PeerNotReported}
 	var raw map[string]json.RawMessage
@@ -87,6 +108,15 @@ func parsePeerStatus(body []byte) PeerState {
 	}
 	if id := str(raw, "instance_id"); len(id) <= 128 {
 		out.InstanceID = config.Clean(id)
+	}
+	var dl map[string]json.RawMessage
+	if v, ok := raw["delivery"]; ok && json.Unmarshal(v, &dl) == nil && dl != nil {
+		h, r := str(dl, "health"), str(dl, "reason")
+		if KnownDelivery(Delivery{Health: h, Reason: r}) {
+			out.Delivery, out.DeliveryReason = h, r
+		} else if deliveryHealths[h] {
+			out.Delivery = h // a known word with an unknown class: keep the word, drop the class
+		}
 	}
 	var ps map[string]json.RawMessage
 	if v, ok := raw["program_status"]; !ok || json.Unmarshal(v, &ps) != nil || ps == nil {

@@ -41,20 +41,30 @@ func TestPeerActivityOutcomes(t *testing.T) {
 		peer, extra string
 		want        PeerState
 	}{
-		{"p1", `"program_status":{"state":"blocked","kind":"question"}`, PeerState{PeerReported, "blocked", "question", "INST1"}},
+		{"p1", `"program_status":{"state":"blocked","kind":"question"}`, PeerState{Outcome: PeerReported, State: "blocked", Kind: "question", InstanceID: "INST1"}},
 		{"p2", ``, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
 		{"p3", `"program_status":{"state":"sleeping"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
-		{"p4", `"program_status":{"state":"blocked","kind":"lunch"}`, PeerState{PeerReported, "blocked", "", "INST1"}},
-		{"p5", `"program_status":{"state":"working","msg":"SECRET-MSG","extra":1},"program_detail":{"title":"SECRET-TITLE","msg":"SECRET-MSG"},"progress":0.5,"app":"x","id":"y"`, PeerState{PeerReported, "working", "", "INST1"}},
-		{"p6", `"program_status":{"state":"working","kind":"question"}`, PeerState{PeerReported, "working", "", "INST1"}}, // kind means something only with blocked
+		{"p4", `"program_status":{"state":"blocked","kind":"lunch"}`, PeerState{Outcome: PeerReported, State: "blocked", Kind: "", InstanceID: "INST1"}},
+		{"p5", `"program_status":{"state":"working","msg":"SECRET-MSG","extra":1},"program_detail":{"title":"SECRET-TITLE","msg":"SECRET-MSG"},"progress":0.5,"app":"x","id":"y"`, PeerState{Outcome: PeerReported, State: "working", Kind: "", InstanceID: "INST1"}},
+		{"p6", `"program_status":{"state":"working","kind":"question"}`, PeerState{Outcome: PeerReported, State: "working", Kind: "", InstanceID: "INST1"}}, // kind means something only with blocked
 		{"p7", `"program_status":{"state":7}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
 		{"p9", `"program_status":"working"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
 		{"p10", `"program_status":null`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
 		{"p11", `"program_status":["working"]`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
 		{"p12", `"state":"working","kind":"question"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}}, // top-level keys are ignored
-		{"p13", `"state":"blocked","kind":"question","program_status":{"state":"idle"}`, PeerState{PeerReported, "idle", "", "INST1"}},
+		{"p13", `"state":"blocked","kind":"question","program_status":{"state":"idle"}`, PeerState{Outcome: PeerReported, State: "idle", Kind: "", InstanceID: "INST1"}},
 		{"p14", `"program_status":{"kind":"question"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
-		{"p15", `"program_status":{"state":"blocked","kind":"auth"}`, PeerState{PeerReported, "blocked", "auth", "INST1"}},
+		{"p15", `"program_status":{"state":"blocked","kind":"auth"}`, PeerState{Outcome: PeerReported, State: "blocked", Kind: "auth", InstanceID: "INST1"}},
+		// delivery is the object {health, reason}, read with or without a state; only known words and classes are kept.
+		{"d1", `"delivery":{"health":"holding","reason":"held_unacked"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1", Delivery: "holding", DeliveryReason: "held_unacked"}},
+		{"d2", `"program_status":{"state":"idle"},"delivery":{"health":"ok"}`, PeerState{Outcome: PeerReported, State: "idle", InstanceID: "INST1", Delivery: "ok"}},
+		{"d3", `"delivery":{"health":"fine","reason":"spool_failing"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"d4", `"delivery":{"health":"degraded","reason":"SECRET-ERR"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1", Delivery: "degraded"}},
+		{"d5", `"delivery":{"health":"ok","reason":"spool_failing"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1", Delivery: "ok"}},
+		{"d6", `"delivery":{"health":7,"reason":["x"]}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"d7", `"delivery":"holding","delivery_reason":"held_unacked"`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}}, // top-level forms are ignored
+		{"d8", `"delivery":null`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1"}},
+		{"d9", `"delivery":{"health":"holding"}`, PeerState{Outcome: PeerNotReported, InstanceID: "INST1", Delivery: "holding"}},
 	} {
 		f.fakePeer(t, c.peer, peerStatusBody(c.extra))
 		got := a.PeerActivity(context.Background(), c.peer)
@@ -85,6 +95,41 @@ func TestPeerStateDisplay(t *testing.T) {
 	} {
 		if got := c.st.Display(); got != c.want {
 			t.Errorf("%+v: %q, want %q", c.st, got, c.want)
+		}
+	}
+}
+
+func TestPeerStateDeliveryDisplay(t *testing.T) {
+	for _, c := range []struct {
+		st   PeerState
+		want string
+	}{
+		{PeerState{Outcome: PeerReported, State: "idle", Delivery: "ok"}, "ok"},
+		{PeerState{Outcome: PeerNotReported, Delivery: "holding", DeliveryReason: "held_unacked"}, "holding(held_unacked)"},
+		{PeerState{Outcome: PeerReported, State: "idle"}, "-"}, // answered, no delivery report: never "ok"
+		{PeerState{Outcome: PeerNotReported}, "-"},
+		{PeerState{Outcome: PeerNoAnswer}, "?"},
+		{PeerState{Outcome: PeerRefused}, "?"},
+	} {
+		if got := c.st.DeliveryDisplay(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.st, got, c.want)
+		}
+	}
+}
+
+func TestKnownDelivery(t *testing.T) {
+	for _, c := range []struct {
+		d    Delivery
+		want bool
+	}{
+		{Delivery{Health: DeliveryOK}, true},
+		{Delivery{DeliveryOK, "x"}, false},
+		{Delivery{DeliveryHolding, DeliveryReasonHeldUnacked}, true},
+		{Delivery{DeliveryDegraded, "disk full: /home/x"}, false},
+		{Delivery{Health: "SECRET-ERR"}, false},
+	} {
+		if got := KnownDelivery(c.d); got != c.want {
+			t.Errorf("%+v: %v, want %v", c.d, got, c.want)
 		}
 	}
 }
