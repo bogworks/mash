@@ -1,0 +1,35 @@
+{
+  "schema": "mashctl-endpoint-list@1",
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "user_public_key": "<USERKEY>",
+      "created": "<TIME>",
+      "note": "",
+      "labels": {},
+      "caps": [],
+      "description": "",
+      "role": "",
+      "host": ""
+    },
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "b",
+      "address": "o.g.b",
+      "key": "o_g_b",
+      "user_public_key": "<USERKEY>",
+      "created": "<TIME>",
+      "note": "",
+      "labels": {},
+      "caps": [],
+      "description": "",
+      "role": "",
+      "host": ""
+    }
+  ]
+}

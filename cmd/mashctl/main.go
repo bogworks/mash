@@ -61,6 +61,8 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runIssued(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the labels on the directory record
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
+	case "endpoint":
+		return runEndpoint(args[1:], env, lookup, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, lookup, stdout, stderr)
 	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
@@ -133,7 +135,7 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "adopt", "audit", "inbox", "issued", "label", "unlabel", "retire",
+	case "adopt", "audit", "endpoint", "inbox", "issued", "label", "unlabel", "retire",
 		"init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 		return true
 	}

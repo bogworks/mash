@@ -51,13 +51,29 @@ func seedsIn(t *testing.T, root string) []string {
 	return seeds
 }
 
+func TestInitLocalCommandsNameTheOwner(t *testing.T) {
+	e := newLocalEnv(t)
+	code, out, errs := e.run("init", "--local", "--owner", "carol", "--port", "4334")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	for _, want := range []string{"mashctl endpoint create carol/dev/design", "carol.dev.design.jwt"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "alice") {
+		t.Errorf("output names alice, not the owner:\n%s", out)
+	}
+}
+
 func TestInitLocalWithNoConfig(t *testing.T) {
 	e := newLocalEnv(t)
 	code, out, errs := e.run("init", "--local", "--owner", "alice", "--port", "4333")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
-	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl provision owner.group.instance", "no TLS", "127.0.0.1:4333"} {
+	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl endpoint create alice/dev/design", "alice.dev.design.jwt", "no TLS", "127.0.0.1:4333"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

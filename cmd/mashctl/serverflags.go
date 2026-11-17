@@ -11,7 +11,7 @@ import (
 )
 
 // serverFlagVerbs are the verbs that take --servers N and --sys-creds FILE among their own arguments.
-var serverFlagVerbs = map[string]bool{"retire": true, "deprovision": true}
+var serverFlagVerbs = map[string]bool{"endpoint": true, "retire": true, "deprovision": true}
 
 // extractServerFlags removes --servers N and --sys-creds FILE (and the --servers=N and --sys-creds=FILE forms) from
 // args and returns the rest with an environment in which MASH_SERVERS and MASH_SYS_CREDS answer with the flag values.

@@ -1,0 +1,120 @@
+# planned exit 0
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "planned",
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "credential",
+      "action": "make the creds file on the endpoint's machine",
+      "address": "o.g.design",
+      "purpose": "use",
+      "detail": "mash credential create --seed design.seed --jwt design.jwt"
+    }
+  ],
+  "refusal": null
+}
+# created exit 0
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "created",
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": true,
+  "user_public_key": "UPUBLICKEY",
+  "labels": {
+    "team": "x"
+  },
+  "caps": [
+    "c1"
+  ],
+  "description": "d",
+  "note": "n",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "credential",
+      "action": "make the creds file on the endpoint's machine",
+      "address": "o.g.design",
+      "purpose": "use",
+      "detail": "mash credential create --seed design.seed --jwt design.jwt"
+    }
+  ],
+  "refusal": null
+}
+# address_taken exit 1
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/other.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "address_taken",
+    "detail": "endpoint o.g.design already exists; use reissue to give it a new key"
+  }
+}
+# group_missing exit 2
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "group_missing",
+    "detail": "an endpoint needs a group; write --group dev or alice/dev/design"
+  }
+}
+# file_exists exit 1
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "two",
+  "address": "o.g.two",
+  "key": "o_g_two",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "file_exists",
+    "detail": "OUT/design.jwt already exists and is never overwritten; name another file with --jwt-out or remove it"
+  }
+}

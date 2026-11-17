@@ -1,0 +1,20 @@
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "mashctl endpoint list shows the endpoints that exist"
+  ],
+  "refusal": {
+    "code": "not_found",
+    "detail": "no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision o.g.a"
+  }
+}
