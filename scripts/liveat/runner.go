@@ -38,8 +38,17 @@ func NewHome(dir string) (Home, error) {
 }
 
 // BuildEnv is the whole environment of a child process, built from scratch values: nothing is read from the caller's
-// environment, so no MASH_*, NATS_* or HOME of the caller reaches a child. pathDirs are added after a minimal PATH.
+// environment, so no MASH_*, NATS_* or HOME of the caller reaches a child. The one exception is PATH, which names where the
+// tools live on this machine (the caller's PATH, or /usr/bin:/bin when it has none); pathDirs are added after it.
 // extra is a list of KEY=VALUE pairs that are added last and win over the base.
+// toolPath is the caller's PATH: where the tools the harness and the commands need live on this machine.
+func toolPath() string {
+	if p := os.Getenv("PATH"); p != "" {
+		return p
+	}
+	return "/usr/bin:/bin"
+}
+
 func BuildEnv(h Home, pathDirs []string, extra ...string) []string {
 	base := []string{
 		"HOME=" + h.Dir,
@@ -47,7 +56,7 @@ func BuildEnv(h Home, pathDirs []string, extra ...string) []string {
 		"MASH_KEYS_DIR=" + h.Keys,
 		"MASH_STATE_DIR=" + h.State,
 		"TMPDIR=" + h.Tmp,
-		"PATH=" + strings.Join(append([]string{"/usr/bin", "/bin"}, pathDirs...), ":"),
+		"PATH=" + strings.Join(append([]string{toolPath()}, pathDirs...), ":"),
 		"LC_ALL=C",
 	}
 	idx := map[string]int{}

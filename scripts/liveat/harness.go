@@ -68,15 +68,23 @@ func NewRun(repo string, port int, keep bool) (*Run, error) {
 	return r, nil
 }
 
-// Close stops anything still running by recorded PID, closes the log and, unless Keep, removes the run directory.
-func (r *Run) Close() {
+// StopProcs stops every process started with StartProc, by recorded PID, and waits for each to end (each Stop is
+// idempotent). A scenario calls it before it scans the captured output, so nothing can write after the scan.
+func (r *Run) StopProcs() {
 	r.mu.Lock()
-	procs := r.procs
-	pids := r.pids
+	procs := append([]*Proc(nil), r.procs...)
 	r.mu.Unlock()
 	for _, p := range procs {
 		p.Stop()
 	}
+}
+
+// Close stops anything still running by recorded PID, closes the log and, unless Keep, removes the run directory.
+func (r *Run) Close() {
+	r.StopProcs()
+	r.mu.Lock()
+	pids := r.pids
+	r.mu.Unlock()
 	for pid, name := range pids {
 		stopPID(pid, name, r.Runner.logf)
 	}

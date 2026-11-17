@@ -110,6 +110,7 @@ func TestBuildEnvInheritsNothing(t *testing.T) {
 	t.Setenv("NATS_URL", "nats://caller.invalid:2")
 	t.Setenv("HOME", "/caller/home")
 	t.Setenv("XDG_CONFIG_HOME", "/caller/xdg")
+	t.Setenv("PATH", "/opt/tools/bin:/usr/bin")
 	h, err := NewHome(filepath.Join(t.TempDir(), "h"))
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +135,7 @@ func TestBuildEnvInheritsNothing(t *testing.T) {
 			t.Errorf("inherited or unexpected variable %s", k)
 		}
 	}
-	if got["PATH"] != "/usr/bin:/bin:/opt/nats" {
+	if got["PATH"] != "/opt/tools/bin:/usr/bin:/opt/nats" { // the caller's PATH names where the tools are, plus the extras
 		t.Errorf("PATH %q", got["PATH"])
 	}
 	for _, v := range got {
@@ -250,5 +251,17 @@ func TestStopPIDRefusesAForeignCommandLine(t *testing.T) {
 	p.Stop()
 	if alive(pid) {
 		t.Fatal("Stop left the process")
+	}
+}
+
+func TestBuildEnvDefaultPathWhenTheCallerHasNone(t *testing.T) {
+	t.Setenv("PATH", "")
+	got := map[string]string{}
+	for _, kv := range BuildEnv(Home{Dir: "/h", Config: "/h/c", Keys: "/h/k", State: "/h/s", Tmp: "/h/t"}, nil) {
+		k, v, _ := strings.Cut(kv, "=")
+		got[k] = v
+	}
+	if got["PATH"] != "/usr/bin:/bin" {
+		t.Errorf("PATH %q", got["PATH"])
 	}
 }

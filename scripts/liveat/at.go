@@ -160,9 +160,10 @@ func (a *AT) Watch(label, path string) {
 	}
 }
 
-// Finish stops everything the scenario started, scans the output of this scenario for any seed or JWT, writes the
+// Finish stops (and waits for) everything the scenario started, scans the output of this scenario for any seed or JWT, writes the
 // record and returns it.
 func (a *AT) Finish(sc Scenario) Record {
+	a.R.StopProcs() // the sessions first, and wait: nothing may write after the scan below
 	a.StopServer()
 	found, err := scanDir(a.R.Out)
 	a.C.Check("INV-001: no command output holds a seed or a JWT", err == nil && len(a.ownLeaks(found)) == 0, "")
