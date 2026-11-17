@@ -144,7 +144,7 @@ if two run at once.
 | Live proof (section 2), docs (README SAP departure, `docs/sap.md`, `mashctl.md`, `operations.md`, name rule), ADR amendments, release note | 1.5 |
 | Credential primitive carve-out (section 3, in 0.5.5) | 1.5 |
 | **Core total** | **10.5** |
-| ctl: the `endpoint` CLI face (create, reissue, retire) with JSON | ctl's estimate |
+| ctl: the `endpoint` CLI face (create, reissue, delete) with JSON | ctl's estimate |
 
 The risk is the third row: the legacy code runs through `admin`, `endpoint`, `store`, `ctl` and the commands, and many tests
 carry legacy names. I count 10.5 with the golden-name tests rewritten, not deleted. The earlier 14 included 2.5 for
@@ -156,10 +156,24 @@ carry legacy names. I count 10.5 with the golden-name tests rewritten, not delet
   hard cut. It amends ADR 0005 (subjects), 0006 (one owner per deployment becomes: one account, owners are
   slot 1), 0011 (the record), 0074 and 0076 (their alias machinery is removed), 0077 (rule file keys) and
   0102 (the group is slot 2, not the owner).
-* The command names and flags belong to the CLI design that ctl writes (`mashctl endpoint create|reissue|retire`);
+* The command names and flags belong to the CLI design that ctl writes (`mashctl endpoint create|reissue|delete`);
   the field names in this note (`owner`, `group`, `instance`, `address`) are what ctl quotes in `--json`.
 * Key handling (from the 0.5.5 contract, revision 3; the verbs are ctl's): the endpoint-made key is the default, through
   `mash key create` and `mash credential create`; the same-host exception (proposed `--make-key`) is pending DEC-002.
   The JWT always goes to a file (`--jwt-out`) and is never printed. There is no stored group: no config key holds it, it
   is given on each create and by `MASH_GROUP` in a session. `credential revoke` is out: replacing a key goes through
   `reissue --public-key`.
+
+## 6. Aligned to contract revision 4 (ratified, decision 250)
+
+Where this note and `contracts/0.5.5-endpoint-model.md` differ, the contract wins. The differences:
+
+* The commands are `endpoint create|reissue|delete|list|show`; `retire` is `delete`. A deleted endpoint's flat key is
+  burned and `create` refuses it (`key_retired`). A group cannot be changed later: create a new endpoint, delete the old.
+* The same-host flag (proposed `--make-key`, DEC-002 closed yes) makes the key on the mashctl host; the endpoint-made key
+  stays the default. The refusals `public_key_invalid` and `public_key_issued` come with it.
+* A second mashctl machine (DEC-004) is set up with `adopt` and the same operator and account seeds and system credentials
+  as the first. A machine with its own signing key in the account JWT is not supported (ADR 0059).
+* Size, from the build plan: C1 (this model) 7.5 days, C2 (signing from a public key, same-host flag) 1.5, C3 (live proof
+  on one machine, release notes) 1.5, C4 (three real hosts, TLS and cluster configuration, the two-mashctl proof) 4.5
+  plus a reserve of 2. The 10.5 of section 4 is the single-machine scope; the contract adds C4.

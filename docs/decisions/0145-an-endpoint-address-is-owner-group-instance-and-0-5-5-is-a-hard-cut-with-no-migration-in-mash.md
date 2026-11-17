@@ -58,7 +58,10 @@ Chosen: one form, and a hard cut.
   owner. Narrowing to a group is a user's later choice, not in this release.
 * **The endpoint makes its own key in 0.5.5.** `endpoint create` takes the endpoint's public key, signed by the account
   signing key; no private key crosses to the central host. The group is never stored in configuration: it is given on
-  each create and by `MASH_GROUP`. This is the credential primitive of ADR 0136 lifted out of the
+  each create and by `MASH_GROUP`. A group cannot be changed later (create a
+  new endpoint, delete the old; its flat key is burned). An explicit same-host flag makes the key on the mashctl host; the
+  endpoint-made key stays the default. A second mashctl machine is set up by `adopt` with the same key material; an own
+  signing key in the account JWT is not supported (ADR 0059). This is the credential primitive of ADR 0136 lifted out of the
   list-set path.
 * **There is one form, no legacy and no migration in mash.** `mashctl add`, legacy `reissue`, `agent_token`, the `cc` form,
   its parsers and record code, and the alias machinery are removed. 0.5.5 does not read, convert or tolerate an old
