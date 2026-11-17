@@ -429,3 +429,19 @@ func TestDecodeIssuedAgainstContract(t *testing.T) {
 		t.Error("a file with no JWT must error")
 	}
 }
+
+// Two audits of an unchanged server that fall in different seconds hash alike: the "generated" stamp is not hashed.
+func TestWithoutGeneratedIgnoresTheTimestamp(t *testing.T) {
+	a := `{"version":2,"generated":"2026-11-17T10:00:00Z","records":[{"key":"a"}]}`
+	b := `{"records":[{"key":"a"}],"generated":"2026-11-17T10:00:01Z","version":2}`
+	if withoutGenerated(a) != withoutGenerated(b) {
+		t.Errorf("audits that differ only in generated and key order differ: %q vs %q", withoutGenerated(a), withoutGenerated(b))
+	}
+	c := `{"version":2,"generated":"2026-11-17T10:00:00Z","records":[{"key":"b"}]}`
+	if withoutGenerated(a) == withoutGenerated(c) {
+		t.Error("audits with different records are equal")
+	}
+	if got := withoutGenerated("not json"); got != "not json" {
+		t.Errorf("non-JSON changed: %q", got)
+	}
+}

@@ -292,7 +292,11 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 			s.Bad = append(s.Bad, fmt.Sprintf("%s exit %d", strings.Join(c.args, " "), r.Code))
 		}
 		s.Raw[c.name] = r.Stdout
-		s.Hash[c.name] = digest(r.Stdout)
+		hashed := r.Stdout
+		if c.name == "audit" {
+			hashed = withoutGenerated(r.Stdout)
+		}
+		s.Hash[c.name] = digest(hashed)
 	}
 	for _, h := range trees {
 		t, err := treeHash(h.Dir, "state", "tmp")
@@ -314,4 +318,20 @@ func (s Snapshot) Diff(o Snapshot) []string {
 	}
 	sort.Strings(d)
 	return d
+}
+
+// withoutGenerated is the audit JSON without its top-level "generated" timestamp, re-encoded with sorted keys: two audits of
+// an unchanged server are equal even when the calls fall in different seconds. Text that is not a JSON object is returned
+// as it is.
+func withoutGenerated(raw string) string {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return raw
+	}
+	delete(m, "generated")
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return string(b)
 }
