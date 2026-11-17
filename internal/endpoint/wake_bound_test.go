@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,13 +22,27 @@ const boundIdle = 3 * time.Second
 // boundFixture is kindFixtureSpool with the idle wake set before the endpoint starts (it is read while running).
 func boundFixture(t *testing.T, idle time.Duration) (*events, spool.Spool, *Endpoint) {
 	t.Helper()
+	_, ev, sp, b := boundFixtureE(t, idle)
+	return ev, sp, b
+}
+
+// boundFixtureE is boundFixture that also returns the serving endpoint, for tests that wait on what it holds.
+func boundFixtureE(t *testing.T, idle time.Duration) (*Endpoint, *events, spool.Spool, *Endpoint) {
+	t.Helper()
 	f := newFixture(t, "a", "b")
 	f.idle = idle
-	_, ev, sp := f.runSpooled(t, "a")
+	ep, ev, sp := f.runSpooled(t, "a")
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	return ev, sp, f.client(t, "b")
+	return ep, ev, sp, f.client(t, "b")
+}
+
+// waitHeld waits until the endpoint itself holds n mails. The spool count alone is not enough: the endpoint registers a
+// mail as held only after the spool Put, so a drain taken on the spool count can land before the last arrival is held.
+func waitHeld(t *testing.T, e *Endpoint, n int) {
+	t.Helper()
+	until(t, fmt.Sprintf("%d held by the endpoint", n), func() bool { return e.heldN.Load() == int32(n) })
 }
 
 // noWakeBefore fails if the session was woken again (beyond the already wakes seen) before d has passed since start; it
@@ -76,7 +91,7 @@ func drainAt(t *testing.T, sp interface{ Drained(spool.Ref) error }, seq uint64)
 // meantime: the spell restarts at the drain, so the wake comes an idle wake after it and not before. (Held fyi never
 // wakes by the idle spell, so a task stands for the held mail here.)
 func TestIdleSpellRunsFromTheLastDrain(t *testing.T) {
-	ev, sp, b := boundFixture(t, boundIdle)
+	ep, ev, sp, b := boundFixtureE(t, boundIdle)
 	ctx := context.Background()
 	for _, s := range []string{"held", "drained"} {
 		if _, err := b.SendWith(ctx, tdot("a"), s, SendOptions{Kind: kind.Task}); err != nil {
@@ -84,6 +99,7 @@ func TestIdleSpellRunsFromTheLastDrain(t *testing.T) {
 		}
 	}
 	until(t, "2 spooled", func() bool { return len(waiting(t, sp)) == 2 })
+	waitHeld(t, ep, 2)
 	time.Sleep(boundIdle / 2) // the held task is half an idle wake old: without the rule it wakes half an idle wake from now
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("woken before the idle wake: %q", got)
@@ -122,11 +138,12 @@ func TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell(t *testing.T) {
 	old := SpoolWakeCount
 	SpoolWakeCount = 5
 	t.Cleanup(func() { SpoolWakeCount = old })
-	ev, sp, b := boundFixture(t, boundIdle)
+	ep, ev, sp, b := boundFixtureE(t, boundIdle)
 	for i := 0; i < 6; i++ {
 		sendFYI(t, b, "fyi")
 	}
 	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	waitHeld(t, ep, 6)
 	// The six crowd the backlog and wake it, however late a slow runner delivers that wake; a slow runner can also wake
 	// at the fifth and again at the sixth. Let the wakes before the drain settle, then drain, so none of them can be
 	// taken for one that the drain should have held back.
@@ -155,11 +172,12 @@ func TestCrowdedBacklogGrowingAfterADrainWakesAtOnce(t *testing.T) {
 	SpoolWakeCount = 5
 	t.Cleanup(func() { SpoolWakeCount = old })
 	const idle = 20 * time.Second
-	ev, sp, b := boundFixture(t, idle)
+	ep, ev, sp, b := boundFixtureE(t, idle)
 	for i := 0; i < 6; i++ {
 		sendFYI(t, b, "fyi")
 	}
 	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	waitHeld(t, ep, 6)
 	// The first six crowd the backlog and wake it once; the drain then restarts the wake state.
 	ev.waitFor(t, 1, 10*time.Second)
 	at := drainAt(t, sp, 1) // 5 held
@@ -179,11 +197,12 @@ func TestCrowdedCountPastTheHardLineWakesAfterADrain(t *testing.T) {
 	SpoolWakeCount = 5 // hard line 7
 	t.Cleanup(func() { SpoolWakeCount = old })
 	const idle = 20 * time.Second
-	ev, sp, b := boundFixture(t, idle)
+	ep, ev, sp, b := boundFixtureE(t, idle)
 	for i := 0; i < 12; i++ {
 		sendFYI(t, b, "fyi")
 	}
 	until(t, "12 spooled", func() bool { return len(waiting(t, sp)) == 12 })
+	waitHeld(t, ep, 12)
 	ev.waitFor(t, 1, 10*time.Second)
 	at := drainAt(t, sp, 1) // 11 held: shrinking, bytes low, but past the count's hard line
 	until(t, "11 held", func() bool { return len(waiting(t, sp)) == 11 })
@@ -200,12 +219,13 @@ func TestCrowdedBytesPastTheHardLineWakeAfterADrain(t *testing.T) {
 	SpoolWakeBytes = 2 << 10
 	t.Cleanup(func() { SpoolWakeBytes, SpoolWakeCount = oldB, oldC })
 	const idle = 20 * time.Second
-	ev, sp, b := boundFixture(t, idle)
+	ep, ev, sp, b := boundFixtureE(t, idle)
 	body := strings.Repeat("x", 1<<10)
 	for i := 0; i < 7; i++ { // 7 KiB and more held: over 2 * SpoolWakeBytes after one drain
 		sendFYI(t, b, body)
 	}
 	until(t, "7 spooled", func() bool { return len(waiting(t, sp)) == 7 })
+	waitHeld(t, ep, 7)
 	at := drainAt(t, sp, 1)
 	until(t, "6 held", func() bool { return len(waiting(t, sp)) == 6 })
 	ev.waitFor(t, 1, 10*time.Second)
@@ -228,17 +248,20 @@ func fakeStreamBytes(t *testing.T, bytes, max uint64, err error) *atomic.Int32 {
 }
 
 // crowdedAfterADrain crowds the backlog, lets it wake once, then drains one: a shrinking crowded backlog right after a
-// drain. It returns the events and the drain time.
+// drain. It returns the events and the drain time. It waits for the endpoint's own held count, not just the spool's: the
+// endpoint registers a mail as held after the spool Put, so a sixth mail registered after the drain would count as growth
+// and wake the backlog at once without reading the stream.
 func crowdedAfterADrain(t *testing.T) (ev *events, at time.Time) {
 	t.Helper()
 	old := SpoolWakeCount
 	SpoolWakeCount = 5
 	t.Cleanup(func() { SpoolWakeCount = old })
-	ev, sp, b := boundFixture(t, 20*time.Second)
+	ep, ev, sp, b := boundFixtureE(t, 20*time.Second)
 	for i := 0; i < 6; i++ {
 		sendFYI(t, b, "fyi")
 	}
 	until(t, "6 spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	waitHeld(t, ep, 6)
 	ev.waitFor(t, 1, 10*time.Second)
 	at = drainAt(t, sp, 1)
 	until(t, "5 held", func() bool { return len(waiting(t, sp)) == 5 })
