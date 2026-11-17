@@ -38,4 +38,3 @@ docs/plans/2026-11-03-next-tranche.md	the \x63oordinator's call	dated plan: word
 docs/decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md	`randybias/\x72angehand`	the ADR cites the sibling project's repository by name as the source of the adopted process
 docs/decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md	github.com/randybias/\x72angehand/blob	the URL of the source ADR in the sibling project's repository
 docs/review/in-session-loop.md	`randybias/\x72angehand`	the page cites the sibling project's repository by name as the source of the adopted process
-scripts/gate	/\x72angehand/reviews/inloop-v1	must equal the review watcher's default store path

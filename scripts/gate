@@ -26,8 +26,8 @@
 # judges the head as round 1 and keeps the counter as it was (the cap never fires). Env knobs: GATE_REVIEWGATE (a
 # prebuilt reviewgate binary; default: built from ./scripts/reviewgate in the checkout), GATE_ROUNDS_DIR (round
 # counters, default ~/.local/state/mash/review-loop), GATE_REVIEW_STORE (pass records, default
-# ${XDG_DATA_HOME:-~/.local/share}/<the review watcher's directory>/reviews/inloop-v1, with the questions suffix: the path
-# the watcher reads with no env set), GATE_FINDINGS_LOG (the per-finding NDJSON log, default
+# ${XDG_DATA_HOME:-~/.local/share}/mash/reviews/inloop-v1, with the questions suffix; the program that runs the watcher
+# sets this variable to the store the watcher reads), GATE_FINDINGS_LOG (the per-finding NDJSON log, default
 # ~/.local/share/mash/reviews/findings-v1/<owner_name>.ndjson).
 # --pre-pr is the fast guard before opening a PR: on the same merged worktree it runs, in parallel and each to its own
 # log, the deterministic guards CI's conformance and adr-numbers jobs run: gofmt and go mod tidy, go build and go vet,
@@ -301,8 +301,8 @@ if [ "$review" = 1 ]; then # the in-session review loop (ADR 0080); see the head
 		>"$out/verdict.txt" 2>"$out/verdict.err" || vrc=$?
 	cat "$out/verdict.txt"; cat "$out/verdict.err" >&2
 	tier=$(sed -n 's/^tier: \([^ ]*\) .*/\1/p' "$out/verdict.txt" | head -1)
-	# The default is the review watcher's own default store (it names its own directory, not mash's), so the two agree with no env set.
-	store=${GATE_REVIEW_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/rangehand/reviews/inloop-v1${qtag}}
+	# The default is mash's own store; whoever runs the review watcher sets GATE_REVIEW_STORE to the store the watcher reads.
+	store=${GATE_REVIEW_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews/inloop-v1${qtag}}
 	# The findings log (docs/review/in-session-loop.md): one NDJSON line per OCR comment of every complete run, for the
 	# research re-score (which fills in "confirmed"). Best effort: a failed write never fails the gate.
 	flog=${GATE_FINDINGS_LOG:-${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews/findings-v1/${slug//\//_}.ndjson}
