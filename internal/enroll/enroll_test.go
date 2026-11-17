@@ -559,20 +559,11 @@ func TestConcurrentCreateOfOneAddressNeverBothSucceed(t *testing.T) {
 				if win < 0 {
 					t.Fatalf("round %d: neither succeeded: %v / %v", r, errs[0], errs[1])
 				}
-				// Within the lock bound the loser is refused address_taken at once. Past it (the two clocks disagree by more than
-				// lockTTL) one admin sees the other's lock as expired and takes it over, the first one's lock check fails, and the
-				// loser may get the retryable lock-lost error instead; running its Create again then gives address_taken. Neither
-				// case lets both succeed and the directory always names the winner.
+				// Whatever the skew (past lockTTL one admin sees the other's lock as expired and takes it over), the loser is
+				// refused address_taken: Create retries once when its name lock is lost.
 				var ref *enroll.Refusal
-				loser := errs[1-win]
-				if !errors.As(loser, &ref) || ref.Code != enroll.CodeAddressTaken {
-					if skew.Abs() <= 25*time.Second || !errors.Is(loser, admin.ErrLockLost) {
-						t.Fatalf("round %d: loser got %v, want address_taken", r, loser)
-					}
-					_, again := enroll.Create(ctx, deps[1-win], enroll.Request{Addr: a, PublicKey: keys[1-win]})
-					if !errors.As(again, &ref) || ref.Code != enroll.CodeAddressTaken {
-						t.Fatalf("round %d: the loser's second Create got %v, want address_taken", r, again)
-					}
+				if loser := errs[1-win]; !errors.As(loser, &ref) || ref.Code != enroll.CodeAddressTaken {
+					t.Fatalf("round %d: loser got %v, want address_taken", r, loser)
 				}
 				user, _, err := h.adm.UserOf(ctx, a)
 				if err != nil || user != keys[win] {

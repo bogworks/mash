@@ -192,7 +192,17 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 		return fail(err)
 	}
 	if !exists {
-		if _, err := d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta); err != nil {
+		_, err := d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta)
+		if errors.Is(err, admin.ErrLockLost) {
+			// The name lock was lost to another admin (clocks apart by more than the lock allows): one more attempt, which
+			// finds the winner's record and so reports address_taken instead of asking the caller to try again.
+			select {
+			case <-ctx.Done():
+			case <-time.After(200 * time.Millisecond):
+			}
+			_, err = d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta)
+		}
+		if err != nil {
 			// Lost the race for the address: whether Provision found the record (ErrAlreadyProvisioned) or lost its name
 			// lock to the winner (clocks apart by more than the lock allows), the address now names another key.
 			if user, _, uerr := d.Admin.UserOf(ctx, r.Addr); uerr == nil {
