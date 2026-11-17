@@ -122,4 +122,4 @@
 | [0126](0126-a-resumed-apply-gives-no-witness-to-a-sender-the-earlier-push-already-settled.md) | A resumed apply gives no witness to a sender the earlier push already settled | proposed | 2026-11-15 |
 | [0129](0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md) | The policy commands are not part of v0.5.0 and the engine stays internal until it works standalone | proposed | 2026-11-15 |
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
-| [0145](0145-an-endpoint-address-is-owner-group-instance-and-existing-endpoints-move-by-one-migration-command.md) | An endpoint address is owner, group, instance, and existing endpoints move by one migration command | proposed | 2026-11-17 |
+| [0145](0145-an-endpoint-address-is-owner-group-instance-and-0-5-5-is-a-hard-cut-with-no-migration-in-mash.md) | An endpoint address is owner, group, instance, and 0.5.5 is a hard cut with no migration in mash | proposed | 2026-11-17 |
