@@ -70,7 +70,6 @@ type Config struct {
 	SpoolFromStart bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
 	SpoolRequired  bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
 	Dir            string       // the config directory (ConfigDir); "" when none can be found
-	Legacy         string       // $HOME/.config/mash ("" with no home): where policy.md and default creds are also looked for
 	Limits         store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
@@ -206,39 +205,23 @@ func explicitDir(env func(string) string, v string) (string, error) {
 }
 
 // ConfigDir is the one place the whole binary looks for config.json, policy.md and default creds. In order:
-//  1. an absolute $MASH_CONFIG_DIR (an explicit choice, with no legacy fallback; Load rejects a relative one);
-//  2. with an absolute $XDG_CONFIG_HOME, $XDG_CONFIG_HOME/mash when it holds a config.json, or when the legacy
-//     directory $HOME/.config/mash does not exist at all (a fresh machine, so the first run lands where XDG says);
-//  3. $HOME/.config/mash, where existing installs keep theirs: it is used whenever it exists as a directory, with or
-//     without a config.json, so an install never moves because XDG_CONFIG_HOME was set later.
+//  1. an absolute $MASH_CONFIG_DIR (Load rejects a relative one);
+//  2. an absolute $XDG_CONFIG_HOME/mash;
+//  3. $HOME/.config/mash.
 //
 // A relative XDG_CONFIG_HOME is ignored. With no home it is the XDG directory if one is set, else "": never a
-// relative path.
+// relative path. No other location is read.
 func ConfigDir(env func(string) string, home string) string {
 	if d, _ := explicitDir(env, "MASH_CONFIG_DIR"); d != "" {
 		return d
 	}
-	xdg := ""
 	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
-		xdg = filepath.Join(x, "mash")
-		// Only a config.json that is absent falls through to the legacy checks. Any other error (permission denied,
-		// I/O) keeps the XDG directory so Load's read fails loudly instead of silently using a different config.
-		if _, err := os.Stat(filepath.Join(xdg, "config.json")); err == nil ||
-			!(errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
-			return xdg
-		}
+		return filepath.Join(x, "mash")
 	}
 	if home != "" {
-		legacy := filepath.Join(home, ".config", "mash")
-		if xdg != "" {
-			// A legacy path that is not a directory (or cannot be examined) is not an existing install to keep.
-			if fi, err := os.Stat(legacy); err != nil || !fi.IsDir() {
-				return xdg
-			}
-		}
-		return legacy
+		return filepath.Join(home, ".config", "mash")
 	}
-	return xdg
+	return ""
 }
 
 // Absent reports whether p is definitely not there: Lstat says not-exist or not-a-directory. Anything else, a symlink
@@ -249,43 +232,8 @@ func Absent(p string) bool {
 	return err != nil && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR))
 }
 
-// FindFile is the path of name (policy.md, a default creds file): in the XDG mash directory when it is there, else in
-// the legacy $HOME/.config/mash when it is there, else in ConfigDir, so messages and creation paths stay where they
-// were. The XDG copy wins when both exist.
-func FindFile(env func(string) string, home, name string) string {
-	if d, _ := explicitDir(env, "MASH_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, name)
-	}
-	var dirs []string
-	if x := env("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
-		dirs = append(dirs, filepath.Join(x, "mash"))
-	}
-	if home != "" {
-		dirs = append(dirs, filepath.Join(home, ".config", "mash"))
-	}
-	for _, d := range dirs {
-		p := filepath.Join(d, name)
-		if !Absent(p) {
-			return p
-		}
-	}
-	if d := ConfigDir(env, home); d != "" {
-		return filepath.Join(d, name)
-	}
-	return ""
-}
-
-// Find is FindFile for this Config: name in Dir if present, else in Legacy if present, else in Dir.
+// Find is the path of name (policy.md, a default creds file) in Dir; "" when there is no Dir.
 func (c Config) Find(name string) string {
-	for _, d := range []string{c.Dir, c.Legacy} {
-		if d == "" {
-			continue
-		}
-		p := filepath.Join(d, name)
-		if !Absent(p) {
-			return p
-		}
-	}
 	if c.Dir == "" {
 		return ""
 	}
@@ -342,11 +290,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 		}
 	}
 	dir := ConfigDir(env, home)
-	legacy := ""
-	if home != "" && env("MASH_CONFIG_DIR") == "" {
-		legacy = filepath.Join(home, ".config", "mash")
-	}
-	c := Config{Legacy: legacy, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
+	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
 
 	var f file
 	var raw []byte

@@ -53,8 +53,7 @@ func (Claude) Trigger(stdin []byte, env func(string) string) (Trigger, bool) {
 	return Trigger{Event: in.Event, SessionID: in.SessionID, Subagent: in.AgentID != ""}, true
 }
 
-// ownerRecord is the owner serve writes into the spool's .owner (ADR 0040; .session keeps the legacy "pid:N" text,
-// see spool.LegacyToken): the Claude process (serve's parent), the session id and the launch token serve was started
+// ownerRecord is the owner serve writes into the spool's .owner (ADR 0040): the Claude process (serve's parent), the session id and the launch token serve was started
 // with. Empty fields are omitted.
 type ownerRecord struct {
 	PID     int    `json:"pid,omitempty"`
@@ -89,7 +88,7 @@ func (c Claude) Owns(owner string, h HookIdentity) bool {
 // Before them: a hook that descends from a serve recorded as waiting for the lease, and not from the owner, is refused
 // as another launch (ADR 0043), tokens or not.
 //
-// A legacy owner ("pid:N" text) is checked by rule 3 alone; an empty or other older owner is accepted.
+// An empty owner (none recorded) is accepted.
 func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 	var r ownerRecord
 	switch {
@@ -97,12 +96,6 @@ func (Claude) Match(owner string, h HookIdentity) (bool, string) {
 		if json.Unmarshal([]byte(owner), &r) != nil {
 			return false, "owner record unreadable (is serve a different mash version than the hook?)"
 		}
-	case strings.HasPrefix(owner, "pid:"):
-		n, err := strconv.Atoi(strings.TrimPrefix(owner, "pid:"))
-		if err != nil {
-			return false, "owner record unreadable"
-		}
-		r.PID = n
 	default:
 		return true, "no owner recorded"
 	}
@@ -160,15 +153,11 @@ const otherLaunchWhy = "session id matches but launch token differs: another lau
 // IsOtherLaunch reports whether a Match refusal reason is the other-launch case.
 func IsOtherLaunch(why string) bool { return strings.HasPrefix(why, otherLaunchWhy) }
 
-// OwnerPID is the Claude process pid an owner record (JSON or legacy "pid:N") names, 0 if none.
+// OwnerPID is the Claude process pid an owner record names, 0 if none.
 func OwnerPID(owner string) int {
 	var r ownerRecord
-	if strings.HasPrefix(owner, "{") {
-		_ = json.Unmarshal([]byte(owner), &r)
-		return r.PID
-	}
-	n, _ := strconv.Atoi(strings.TrimPrefix(owner, "pid:"))
-	return n
+	_ = json.Unmarshal([]byte(owner), &r)
+	return r.PID
 }
 
 // Notice renders text as Claude Code hook additionalContext for event, in the shape Present uses.

@@ -112,12 +112,15 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		return fail("%v", err)
 	}
 	defer closeAdmin()
-	recs, err := adm.List(ctx)
+	recs, bad, err := adm.List(ctx)
 	if err != nil {
 		if !noRevoke {
 			return fail("%v\n%s", err, ctl.NotRevoked)
 		}
 		return fail("%v", err)
+	}
+	for _, b := range bad {
+		b.Warn(stderr, "mashctl")
 	}
 	user := ""
 	if r, ok := findRecord(recs, addr); ok {

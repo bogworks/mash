@@ -540,60 +540,6 @@ func TestXDGConfigHomeUsedWhenItHasConfig(t *testing.T) {
 	}
 }
 
-func TestOldConfigStillReadWhenXDGHasNone(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
-	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "XDG_CONFIG_HOME": xdg}), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.URL != "tls://old:1" || c.Dir != filepath.Join(home, ".config", "mash") {
-		t.Fatalf("got %+v", c)
-	}
-}
-
-func TestUnreadableXDGDirFailsLoudlyNotLegacy(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory modes")
-	}
-	home, xdg := t.TempDir(), t.TempDir()
-	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
-	mashDir := filepath.Join(xdg, "mash")
-	writeIn(t, mashDir, `{"url":"tls://new:1","owner":"new"}`)
-	if err := os.Chmod(mashDir, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(mashDir, 0o700) })
-	if _, err := os.Stat(filepath.Join(mashDir, "config.json")); err == nil {
-		t.Skip("the OS ignores the directory mode")
-	}
-	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "XDG_CONFIG_HOME": xdg}), home)
-	if err == nil {
-		t.Fatalf("Load succeeded with %+v, want an error", c)
-	}
-	if !strings.Contains(err.Error(), mashDir) {
-		t.Fatalf("error %q does not mention %s", err, mashDir)
-	}
-	if c.URL == "tls://old:1" {
-		t.Fatalf("used the legacy config: %+v", c)
-	}
-}
-
-func TestMissingXDGConfigFallsBackToLegacyEvenWithXDGDir(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
-	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "XDG_CONFIG_HOME": xdg}), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.URL != "tls://old:1" {
-		t.Fatalf("got %+v", c)
-	}
-}
-
 func TestRelativeXDGConfigHomeIgnored(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"url":"tls://old:1","owner":"old"}`)
@@ -685,129 +631,25 @@ func writeXDG(t *testing.T, xdg, body string) {
 	}
 }
 
-func TestFindFileFallsBackToLegacy(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	env := envOf(map[string]string{"XDG_CONFIG_HOME": xdg})
-	xdgDir, legacy := filepath.Join(xdg, "mash"), filepath.Join(home, ".config", "mash")
-	writeXDG(t, xdg, `{}`) // XDG config.json exists, so ConfigDir is the XDG directory
-	if got := ConfigDir(env, home); got != xdgDir {
-		t.Fatalf("ConfigDir %q", got)
-	}
-	if got, want := FindFile(env, home, "policy.md"), filepath.Join(xdgDir, "policy.md"); got != want {
-		t.Fatalf("neither exists: %q, want %q", got, want)
-	}
-	if err := os.MkdirAll(legacy, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lp := filepath.Join(legacy, "policy.md")
-	if err := os.WriteFile(lp, []byte("L"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := FindFile(env, home, "policy.md"); got != lp {
-		t.Fatalf("legacy only: %q, want %q", got, lp)
-	}
-	xp := filepath.Join(xdgDir, "policy.md")
-	if err := os.WriteFile(xp, []byte("X"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := FindFile(env, home, "policy.md"); got != xp {
-		t.Fatalf("both: %q, want %q", got, xp)
-	}
-}
-
-func TestLoadDefaultCredsFallBackToLegacy(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	writeXDG(t, xdg, `{"url":"tls://x:4222","owner":"o"}`)
-	legacy := filepath.Join(home, ".config", "mash")
-	if err := os.MkdirAll(legacy, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lp := filepath.Join(legacy, "o.g.a.creds")
-	if err := os.WriteFile(lp, []byte("c"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "XDG_CONFIG_HOME": xdg}), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Creds != lp {
-		t.Fatalf("creds %q, want %q", c.Creds, lp)
-	}
-}
-
-func TestFindDoesNotFallBackWhenXDGFileIsPresentButUnusable(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	env := envOf(map[string]string{"XDG_CONFIG_HOME": xdg})
-	xdgDir, legacy := filepath.Join(xdg, "mash"), filepath.Join(home, ".config", "mash")
-	writeXDG(t, xdg, `{}`)
-	if err := os.MkdirAll(legacy, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(legacy, "policy.md"), []byte("L"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	xp := filepath.Join(xdgDir, "policy.md")
-	check := func(label string) {
-		t.Helper()
-		if got := FindFile(env, home, "policy.md"); got != xp {
-			t.Fatalf("%s: FindFile %q, want %q", label, got, xp)
-		}
-		c := Config{Dir: xdgDir, Legacy: legacy}
-		if got := c.Find("policy.md"); got != xp {
-			t.Fatalf("%s: Find %q, want %q", label, got, xp)
-		}
-	}
-	if err := os.Symlink(filepath.Join(xdg, "nowhere"), xp); err != nil {
-		t.Skip("symlinks unavailable")
-	}
-	check("dangling symlink")
-	if err := os.Remove(xp); err != nil {
-		t.Fatal(err)
-	}
-	if os.Geteuid() == 0 {
-		return
-	}
-	locked := filepath.Join(xdg, "locked")
-	if err := os.MkdirAll(locked, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(locked, "policy.md")
-	if err := os.WriteFile(target, []byte("X"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
-	if _, err := os.Stat(target); err == nil {
-		t.Skip("the OS ignores the directory mode")
-	}
-	if err := os.Symlink(target, xp); err != nil {
-		t.Fatal(err)
-	}
-	check("symlink to inaccessible target")
-}
-
 func TestMashDirVariables(t *testing.T) {
 	home, xdg := t.TempDir(), t.TempDir()
-	writeXDG(t, xdg, `{"url":"u-xdg","owner":"o"}`) // an XDG config exists, and so does a legacy one
-	legacy := filepath.Join(home, ".config", "mash")
-	writeFile(t, home, `{"url":"u-legacy","owner":"o"}`)
+	writeXDG(t, xdg, `{"url":"u-xdg","owner":"o"}`)
+	homeDir := filepath.Join(home, ".config", "mash")
+	writeFile(t, home, `{"url":"u-home","owner":"o"}`)
 	mdir := t.TempDir()
 	cases := []struct {
 		name       string
 		env        map[string]string
 		dir, state string
-		legacy     bool
 		err        string
 	}{
-		{"defaults", nil, legacy, filepath.Join(home, ".local", "state", "mash"), true, ""},
-		{"xdg state", map[string]string{"XDG_STATE_HOME": "/x/s"}, legacy, "/x/s/mash", true, ""},
-		{"xdg state relative ignored", map[string]string{"XDG_STATE_HOME": "rel"}, legacy, filepath.Join(home, ".local", "state", "mash"), true, ""},
-		{"config dir beats xdg and legacy", map[string]string{"MASH_CONFIG_DIR": mdir, "XDG_CONFIG_HOME": xdg}, mdir, filepath.Join(home, ".local", "state", "mash"), false, ""},
-		{"state dir beats xdg", map[string]string{"MASH_STATE_DIR": "/m/s", "XDG_STATE_HOME": "/x/s"}, legacy, "/m/s", true, ""},
-		{"relative config dir", map[string]string{"MASH_CONFIG_DIR": "rel/c"}, "", "", false, "MASH_CONFIG_DIR"},
-		{"relative state dir", map[string]string{"MASH_STATE_DIR": "rel/s"}, "", "", false, "MASH_STATE_DIR"},
+		{"defaults", nil, homeDir, filepath.Join(home, ".local", "state", "mash"), ""},
+		{"xdg state", map[string]string{"XDG_STATE_HOME": "/x/s"}, homeDir, "/x/s/mash", ""},
+		{"xdg state relative ignored", map[string]string{"XDG_STATE_HOME": "rel"}, homeDir, filepath.Join(home, ".local", "state", "mash"), ""},
+		{"config dir beats xdg and home", map[string]string{"MASH_CONFIG_DIR": mdir, "XDG_CONFIG_HOME": xdg}, mdir, filepath.Join(home, ".local", "state", "mash"), ""},
+		{"state dir beats xdg", map[string]string{"MASH_STATE_DIR": "/m/s", "XDG_STATE_HOME": "/x/s"}, homeDir, "/m/s", ""},
+		{"relative config dir", map[string]string{"MASH_CONFIG_DIR": "rel/c"}, "", "", "MASH_CONFIG_DIR"},
+		{"relative state dir", map[string]string{"MASH_STATE_DIR": "rel/s"}, "", "", "MASH_STATE_DIR"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -828,28 +670,25 @@ func TestMashDirVariables(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.Dir != tc.dir || c.StateDir != tc.state || (c.Legacy != "") != tc.legacy {
-				t.Fatalf("dir %q state %q legacy %q, want %q %q (legacy %v)", c.Dir, c.StateDir, c.Legacy, tc.dir, tc.state, tc.legacy)
+			if c.Dir != tc.dir || c.StateDir != tc.state {
+				t.Fatalf("dir %q state %q, want %q %q", c.Dir, c.StateDir, tc.dir, tc.state)
 			}
 		})
 	}
 }
 
-// MASH_CONFIG_DIR is used for config.json, policy.md and default creds with no fallback to XDG or legacy.
+// MASH_CONFIG_DIR is used for config.json, policy.md and default creds with no fallback to XDG or the home directory.
 func TestMashConfigDirHasNoFallback(t *testing.T) {
 	home, xdg, mdir := t.TempDir(), t.TempDir(), t.TempDir()
 	writeXDG(t, xdg, `{"url":"u-xdg","owner":"o"}`)
-	legacy := filepath.Join(home, ".config", "mash")
-	writeFile(t, home, `{"url":"u-legacy","owner":"o"}`)
-	if err := os.WriteFile(filepath.Join(legacy, "policy.md"), []byte("p"), 0o600); err != nil {
+	homeDir := filepath.Join(home, ".config", "mash")
+	writeFile(t, home, `{"url":"u-home","owner":"o"}`)
+	if err := os.WriteFile(filepath.Join(homeDir, "policy.md"), []byte("p"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	env := envOf(map[string]string{"MASH_CONFIG_DIR": mdir, "XDG_CONFIG_HOME": xdg, "MASH_NAME": "a", "MASH_GROUP": "g"})
-	if got, want := FindFile(env, home, "policy.md"), filepath.Join(mdir, "policy.md"); got != want {
-		t.Fatalf("FindFile %q, want %q", got, want)
-	}
 	c, err := load(env, home)
-	if !errors.Is(err, ErrNoURL) { // nothing in MASH_CONFIG_DIR yet: neither the XDG nor the legacy url is read
+	if !errors.Is(err, ErrNoURL) { // nothing in MASH_CONFIG_DIR yet: neither the XDG nor the home url is read
 		t.Fatalf("err %v, want ErrNoURL", err)
 	}
 	if got, want := c.Find("policy.md"), filepath.Join(mdir, "policy.md"); got != want {
@@ -998,26 +837,22 @@ func load(env func(string) string, home string) (Config, error) {
 func TestConfigDirChoice(t *testing.T) {
 	mdir := t.TempDir()
 	cases := []struct {
-		name      string
-		xdg       string // "" unset, "abs" a fresh absolute dir, "rel" a relative one
-		noHome    bool
-		legacyDir bool   // $HOME/.config/mash exists
-		legacyCfg bool   // and holds a config.json
-		xdgCfg    bool   // $XDG_CONFIG_HOME/mash/config.json exists
-		explicit  bool   // MASH_CONFIG_DIR set
-		want      string // "xdg", "legacy", "explicit" or ""
+		name     string
+		xdg      string // "" unset, "abs" a fresh absolute dir, "rel" a relative one
+		noHome   bool
+		homeDir  bool   // $HOME/.config/mash exists
+		xdgCfg   bool   // $XDG_CONFIG_HOME/mash/config.json exists
+		explicit bool   // MASH_CONFIG_DIR set
+		want     string // "xdg", "home", "explicit" or ""
 	}{
 		{name: "fresh machine, xdg set", xdg: "abs", want: "xdg"},
-		{name: "legacy dir without config.json, xdg set", xdg: "abs", legacyDir: true, want: "legacy"},
-		{name: "xdg config.json exists", xdg: "abs", legacyDir: true, xdgCfg: true, want: "xdg"},
-		{name: "xdg config.json and no legacy dir", xdg: "abs", xdgCfg: true, want: "xdg"},
-		{name: "legacy config.json, xdg has none", xdg: "abs", legacyDir: true, legacyCfg: true, want: "legacy"},
-		{name: "both have config.json, xdg wins", xdg: "abs", legacyDir: true, legacyCfg: true, xdgCfg: true, want: "xdg"},
+		{name: "home dir exists, xdg set: xdg only", xdg: "abs", homeDir: true, want: "xdg"},
+		{name: "xdg config.json exists", xdg: "abs", homeDir: true, xdgCfg: true, want: "xdg"},
 		{name: "explicit wins on a fresh machine", xdg: "abs", explicit: true, want: "explicit"},
-		{name: "explicit wins over both configs", xdg: "abs", legacyDir: true, legacyCfg: true, xdgCfg: true, explicit: true, want: "explicit"},
-		{name: "relative xdg ignored, fresh machine", xdg: "rel", want: "legacy"},
-		{name: "relative xdg ignored, legacy exists", xdg: "rel", legacyDir: true, want: "legacy"},
-		{name: "no xdg, fresh machine", want: "legacy"},
+		{name: "explicit wins over both", xdg: "abs", homeDir: true, xdgCfg: true, explicit: true, want: "explicit"},
+		{name: "relative xdg ignored, fresh machine", xdg: "rel", want: "home"},
+		{name: "relative xdg ignored, home dir exists", xdg: "rel", homeDir: true, want: "home"},
+		{name: "no xdg, fresh machine", want: "home"},
 		{name: "no home, xdg set", xdg: "abs", noHome: true, want: "xdg"},
 		{name: "no home, relative xdg", xdg: "rel", noHome: true, want: ""},
 		{name: "no home, no xdg", noHome: true, want: ""},
@@ -1025,14 +860,11 @@ func TestConfigDirChoice(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			home, xdgBase := t.TempDir(), t.TempDir()
-			legacy, xdgDir := filepath.Join(home, ".config", "mash"), filepath.Join(xdgBase, "mash")
-			if tc.legacyDir {
-				if err := os.MkdirAll(legacy, 0o700); err != nil {
+			homeDir, xdgDir := filepath.Join(home, ".config", "mash"), filepath.Join(xdgBase, "mash")
+			if tc.homeDir {
+				if err := os.MkdirAll(homeDir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-			}
-			if tc.legacyCfg {
-				writeIn(t, legacy, `{}`)
 			}
 			if tc.xdgCfg {
 				writeIn(t, xdgDir, `{}`)
@@ -1051,23 +883,10 @@ func TestConfigDirChoice(t *testing.T) {
 			if tc.noHome {
 				h = ""
 			}
-			want := map[string]string{"xdg": xdgDir, "legacy": legacy, "explicit": mdir, "": ""}[tc.want]
+			want := map[string]string{"xdg": xdgDir, "home": homeDir, "explicit": mdir, "": ""}[tc.want]
 			if got := ConfigDir(envOf(env), h); got != want {
 				t.Fatalf("ConfigDir %q, want %q (%s)", got, want, tc.want)
 			}
 		})
-	}
-}
-
-func TestLegacyPathThatIsAFileDoesNotHoldTheConfigDir(t *testing.T) {
-	home, xdg := t.TempDir(), t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".config", "mash"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := ConfigDir(envOf(map[string]string{"XDG_CONFIG_HOME": xdg}), home), filepath.Join(xdg, "mash"); got != want {
-		t.Fatalf("ConfigDir %q, want %q", got, want)
 	}
 }

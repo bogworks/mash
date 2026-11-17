@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -491,10 +493,14 @@ func checkInboxConsumer(name string, got, want jetstream.ConsumerConfig) error {
 // changes for that endpoint), because it could discard stored mail; the other endpoints are still processed and the
 // errors are joined. It returns one line per endpoint saying what changed.
 func (a *Admin) ApplyLimits(ctx context.Context, addrs ...sap.Address) ([]string, error) {
+	var skipped []string
 	if len(addrs) == 0 {
-		recs, err := a.List(ctx)
+		recs, bad, err := a.List(ctx)
 		if err != nil {
 			return nil, err
+		}
+		for _, b := range bad {
+			skipped = append(skipped, "warning: skipping directory record "+config.Clean(b.Key)+": "+config.Clean(b.Error))
 		}
 		for _, r := range recs {
 			addr, err := r.Address()
@@ -504,7 +510,7 @@ func (a *Admin) ApplyLimits(ctx context.Context, addrs ...sap.Address) ([]string
 			addrs = append(addrs, addr)
 		}
 	}
-	var lines []string
+	lines := skipped
 	var errs []error
 	for _, addr := range addrs {
 		line, err := a.applyInboxLimits(ctx, addr)
@@ -1427,29 +1433,51 @@ func (a *Admin) deleteInbox(ctx context.Context, name string) error {
 	return nil
 }
 
-// List returns every directory record, sorted by name.
-func (a *Admin) List(ctx context.Context) ([]store.Record, error) {
+// BadRecord is a directory key whose value fails store.ParseRecord: the readers skip it, with a warning that names it.
+type BadRecord struct {
+	Key   string `json:"key"`
+	Error string `json:"error"`
+}
+
+// Warn writes the warning a reader owes for a skipped record: its key and why, on one line.
+func (b BadRecord) Warn(w io.Writer, prog string) {
+	fmt.Fprintf(w, "%s: warning: skipping directory record %s: %s\n", prog, config.Clean(b.Key), config.Clean(b.Error))
+}
+
+// List returns every directory record that parses, sorted by name, and the records that do not. A record that fails
+// store.ParseRecord is skipped, never fatal: the caller must report each BadRecord (the key and the error), never
+// silently.
+func (a *Admin) List(ctx context.Context) ([]store.Record, []BadRecord, error) {
 	kv, err := a.dir(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	keys, err := kv.Keys(ctx)
 	if errors.Is(err, jetstream.ErrNoKeysFound) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, wordUnavailable(err)
+		return nil, nil, wordUnavailable(err)
 	}
 	slices.Sort(keys)
 	var out []store.Record
+	var bad []BadRecord
 	for _, k := range keys {
-		r, err := store.GetRecord(ctx, kv, k)
+		e, err := kv.Get(ctx, k)
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			continue // deleted since the listing
+		}
 		if err != nil {
-			return nil, wordUnavailable(err)
+			return nil, nil, wordUnavailable(fmt.Errorf("directory %s: %w", k, err))
+		}
+		r, err := store.ParseRecord(k, e.Value())
+		if err != nil {
+			bad = append(bad, BadRecord{Key: k, Error: err.Error()})
+			continue
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out, bad, nil
 }
 
 // Exists reports whether addr has a directory record, an inbox stream or a live lease (not just the tombstone a
