@@ -155,9 +155,12 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 		return fail(6, "error", "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
-	recs, err := adm.List(ctx)
+	recs, badRecs, err := adm.List(ctx)
 	if err != nil {
 		return fail(6, "error", "server", admin.RewordUnavailable(err.Error()))
+	}
+	for _, b := range badRecs {
+		b.Warn(stderr, "mashctl")
 	}
 	var addrs []sap.Address
 	for _, r := range recs {
