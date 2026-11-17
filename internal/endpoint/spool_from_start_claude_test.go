@@ -121,3 +121,51 @@ func TestSpoolFromStartClaudeUnwritableSpoolFallsBackToTheChannelAfterAHook(t *t
 	}
 	until(t, "the fallback acks", func() bool { return unread(t, a) == 0 })
 }
+
+// A spool write failure is tracked in every mode, not only under ReportSpoolFaults: after a hook the message falls
+// back to the channel (held false); before one it stays unacked (held true). The next successful write clears it.
+func TestSpoolWriteFaultTrackedAndCleared(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through a 0500 directory")
+	}
+	for _, c := range []struct {
+		name     string
+		hooked   bool
+		wantHeld bool
+	}{{"before a hook holds", false, true}, {"after a hook falls back to the channel", true, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, "a", "b")
+			a, _, sp := f.runSpooledClaudeFromStart(t, "a")
+			if c.hooked {
+				if err := sp.Touch(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if on, _ := a.SpoolWriteFault(); on {
+				t.Fatal("fault before any failure")
+			}
+			if err := os.Chmod(sp.Dir, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
+			b := f.client(t, "b")
+			if _, err := b.Send(context.Background(), "a", "fails to spool", 0); err != nil {
+				t.Fatal(err)
+			}
+			until(t, "the fault is tracked with the disposition", func() bool {
+				on, held := a.SpoolWriteFault()
+				return on && held == c.wantHeld
+			})
+			if _, ok := a.SpoolFaultLine(); ok {
+				t.Fatal("status line with the report off")
+			}
+			if err := os.Chmod(sp.Dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Send(context.Background(), "a", "spools fine", 0); err != nil {
+				t.Fatal(err)
+			}
+			until(t, "a successful write clears it", func() bool { on, _ := a.SpoolWriteFault(); return !on })
+		})
+	}
+}

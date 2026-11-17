@@ -368,6 +368,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		readDelivery := func() (endpoint.Delivery, bool) {
 			d := ds
 			_, d.FaultActive = ep.SpoolFaultLine()
+			d.WriteFault, d.WriteHeld = ep.SpoolWriteFault()
 			return deliveryHealth(d), true
 		}
 		deliveryRead.Store(&readDelivery)

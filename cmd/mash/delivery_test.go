@@ -22,6 +22,11 @@ func TestDeliveryHealthMapping(t *testing.T) {
 		{"spool failed, from-start held", deliveryState{BindFailed: true, FromStartHeld: true}, d("holding", "held_unacked")},
 		{"spool required, failing at start", deliveryState{BindFailed: true, FailClosed: true, FaultActive: true}, d("holding", "channel_hidden")},
 		{"spool required, failing at run time", deliveryState{FailClosed: true, FaultActive: true}, d("holding", "channel_hidden")},
+		{"write failing, channel fallback", deliveryState{WriteFault: true}, d("degraded", "spool_failing")},
+		{"write failing, no-channel host", deliveryState{WriteFault: true, WriteHeld: true, NoChannel: true}, d("holding", "channel_hidden")},
+		{"write failing, from-start held", deliveryState{WriteFault: true, WriteHeld: true}, d("holding", "held_unacked")},
+		{"write failing, fail-closed", deliveryState{FailClosed: true, NoChannel: true, FaultActive: true, WriteFault: true, WriteHeld: true}, d("holding", "channel_hidden")},
+		{"write recovered", deliveryState{WriteHeld: true}, d("ok", "")},
 		{"spool required, recovered", deliveryState{BindFailed: true, FailClosed: true}, d("ok", "")},
 	} {
 		got := deliveryHealth(c.in)

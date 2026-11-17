@@ -214,9 +214,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 				continue
 			}
 			h.failed = false
-			if e.faultOn {
-				e.ClearSpoolFault()
-			}
+			e.ClearSpoolFault()
 			delete(h.fails, seq)
 			h.msgs[seq] = p
 			if ep != 0 {
@@ -236,8 +234,10 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 		// The channel would ack what no hook has shown; before a hook, Claude drops channel events too. And when the
 		// last HooklessWakes wakes started no turn, a wake is not landing, so a channel write is not proof of delivery
 		// (issue #40): hold it, unacked, until a hook or the read tool shows it.
+		e.noteFaultHeld(true)
 		hold(fallback)
 	} else if len(fallback) > 0 {
+		e.noteFaultHeld(false)
 		e.deliverBatch(deliver, fallback, seen)
 	}
 }

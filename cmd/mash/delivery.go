@@ -15,6 +15,10 @@ type deliveryState struct {
 	// FaultActive: under FailClosed, the spool is failing now (a start failure not yet recovered by retrySpool, or a
 	// write failure noted at run time). Cleared when the spool binds or works again.
 	FaultActive bool
+	// WriteFault and WriteHeld: a spool write failed at run time in any mode (endpoint.SpoolWriteFault) and no write
+	// has worked since. WriteHeld: the message is held unacked rather than left to the channel (no-channel host,
+	// spool-from-start before a hook, a wake not landing, or fail-closed).
+	WriteFault, WriteHeld bool
 	// NoChannel: the host takes no channel delivery (adapter.SpoolsFromStart).
 	NoChannel bool
 	// FromStartHeld: MASH_SPOOL_FROM_START on a host with a channel, spool failed: mail is held unacked (#16).
@@ -29,12 +33,22 @@ type deliveryState struct {
 //	          - FailClosed and the spool failing        -> channel_hidden (the channel is not used; spool required)
 //	          - NoChannel host with no spool            -> channel_hidden (the host never shows channel events)
 //	          - FromStartHeld (spool failed, held #16)  -> held_unacked
+//	runtime write failure (spool bound, a write failed, none has worked since):
+//	          - held unacked on a NoChannel host        -> holding/channel_hidden
+//	          - held unacked with a channel host        -> holding/held_unacked (spool-from-start before a hook)
+//	          - the message falls back to the channel   -> degraded/spool_failing
 //	degraded  the spool failed but the channel still delivers (the "mail stays on the channel" path of serve)
 //	          -> spool_failing: mail arrives, by the fallback, with the early-mail guarantee of the spool lost.
 func deliveryHealth(s deliveryState) endpoint.Delivery {
 	switch {
 	case s.FailClosed && s.FaultActive:
 		return endpoint.Delivery{Health: endpoint.DeliveryHolding, Reason: endpoint.DeliveryReasonChannelHidden}
+	case s.WriteFault && s.WriteHeld && s.NoChannel:
+		return endpoint.Delivery{Health: endpoint.DeliveryHolding, Reason: endpoint.DeliveryReasonChannelHidden}
+	case s.WriteFault && s.WriteHeld:
+		return endpoint.Delivery{Health: endpoint.DeliveryHolding, Reason: endpoint.DeliveryReasonHeldUnacked}
+	case s.WriteFault:
+		return endpoint.Delivery{Health: endpoint.DeliveryDegraded, Reason: endpoint.DeliveryReasonSpoolFailing}
 	case s.BindFailed && !s.FailClosed && s.NoChannel:
 		return endpoint.Delivery{Health: endpoint.DeliveryHolding, Reason: endpoint.DeliveryReasonChannelHidden}
 	case s.BindFailed && s.FromStartHeld:
