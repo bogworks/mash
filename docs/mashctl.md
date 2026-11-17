@@ -144,9 +144,11 @@ mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [-
 
 Gives an existing endpoint a new key. It revokes the old key on every server, then makes the directory record name the new key. The inbox and its unread mail stay. A session that runs as the endpoint must restart to read the new creds. `--public-key FILE`, `--make-key`, `--jwt-out`, `--dry-run` and `--json` work as for `create`. With `--make-key` the new creds replace `<config dir>/<address>.creds`.
 
-`--public-key` naming the key the endpoint already has is refused (`key_unchanged`): nothing would be rotated. Make a new key with `mash key create --out NAME.seed`.
+`--public-key` naming the key the endpoint already has is refused (`key_unchanged`): nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<jwt-out>.pending` while the key changes, and a rerun with the same key and `--jwt-out` finishes the JWT and removes the file.
 
-**Bulk.** `--all` reissues every endpoint that has a creds file on this host. `--changed` reissues the ones whose creds file carries a permission set that differs from the current one. Both take `--make-key` only, because many public keys cannot arrive in one command. An endpoint with no creds file on this host is skipped (`no_local_creds`), never rotated. Without `--yes`, or with `--dry-run`, the command lists what it would reissue and changes nothing. With `--yes` it reissues one endpoint at a time in address order. A refusal or error on one endpoint does not stop the rest. The JSON schema is `mashctl-endpoint-bulk@1`.
+Before it revokes, `reissue` refuses when the old key's issue record shows a JWT issued in the future (`future_issued`: fix the clock), because the revocation would not cover that JWT. With `--make-key` it also checks the existing creds file first: it must name this endpoint, hold a seed and a JWT for the same key, match the directory's key and the account that signs (`creds_mismatch`; an unreadable file is `creds_unreadable`). Move an unrelated file aside and run again.
+
+**Bulk.** `--all` reissues every endpoint that has a creds file on this host. `--changed` reissues the ones whose creds file carries a permission set that differs from the current one, and also those with a rotation left half done (`<creds file>.pending` exists) or whose current key is revoked. If it cannot check whether a key is revoked, it reports that endpoint as an error (`revocation_unknown`) and does not call it unchanged. Both take `--make-key` only, because many public keys cannot arrive in one command. An endpoint with no creds file on this host is skipped (`no_local_creds`), never rotated. Without `--yes`, or with `--dry-run`, the command lists what it would reissue and changes nothing. With `--yes` it reissues one endpoint at a time in address order. A refusal or error on one endpoint does not stop the rest. The JSON schema is `mashctl-endpoint-bulk@1`.
 
 **Exit codes.** 0 done, planned or unchanged, 1 refused, 2 usage error, 5 partial (a bulk run in which some endpoints were not reissued), 6 error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`.
 
@@ -217,11 +219,14 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `key_revoked` | 1 | create | The key was revoked: make a new key. |
 | `key_unchanged` | 1 | reissue | The key is already the endpoint's key. |
 | `endpoint_missing` | 1 | reissue | No such endpoint. |
+| `future_issued` | 1 | reissue, bulk | The old key's JWT was issued after now: fix the clock. Nothing was changed. |
+| `creds_mismatch` | 1 | reissue, bulk | The creds file at the creds path is not this endpoint's current creds. Move it aside. |
 | `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint holds its lock. If none runs, remove the `<creds file>.lock` directory it names. |
 | `server` | 6 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
 | `servers` | 6 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
 | `write` | 6 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
-| `creds_unreadable` | 6 | bulk | A creds file on this host cannot be read. |
+| `creds_unreadable` | 1 (6 in bulk) | reissue, bulk | A creds file on this host cannot be read or parsed. |
+| `revocation_unknown` | 6 | bulk | `--changed` could not check whether the endpoint's key is revoked. |
 | `no_local_creds` | 0 | bulk | Skipped: no creds file on this host. |
 
 `endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when there is no directory record on the server (`--force` still handles the creds file), too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.

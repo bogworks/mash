@@ -65,6 +65,8 @@ This path needs no Synadia account and no server you run by hand. You need:
 
 Start the server. `mashctl` is the tool that runs the server and makes endpoints; `mash` is what each session runs.
 
+If `MASH_URL`, `MASH_OWNER` or other `MASH_*` variables are set from another setup, clear them first (`unset $(env | sed -n 's/^\(MASH_[A-Z_]*\)=.*/\1/p')`). They override the config files, and the commands below would go to that other server.
+
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@latest   # mashctl is not in the release assets
 mashctl init --local --owner alice --start                # a NATS server that only this machine can reach, plus keys and credentials
