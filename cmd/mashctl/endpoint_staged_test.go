@@ -258,3 +258,36 @@ func TestEndpointDeleteReportsZeroAcknowledged(t *testing.T) {
 		t.Fatalf("text %d %q", code, so)
 	}
 }
+
+func TestEndpointStagedSeedMustBePrivate(t *testing.T) {
+	h := newFleetEnv(t)
+	calls := fakeRevoke(t, nil)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
+	a, b := ad("exposed"), ad("exposed2")
+	h.seed(b)
+	_, _, seed := epKey(t, t.TempDir(), "p")
+	for _, p := range []string{h.creds(a) + ".pending", h.creds(b) + ".pending"} {
+		if err := os.WriteFile(p, seed, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := epSnapshot(t, h, h.dir)
+	for _, args := range [][]string{
+		{"endpoint", "create", a.String(), "--make-key"},
+		{"endpoint", "reissue", b.String(), "--make-key"},
+	} {
+		_, se, code := h.run(args...)
+		if code == 0 || !strings.Contains(se, "exposes the seed") {
+			t.Fatalf("%v: %d %q", args, code, se)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Errorf("a key was revoked for an exposed staged seed: %v", *calls)
+	}
+	if epSnapshot(t, h, h.dir) != before {
+		t.Error("state changed")
+	}
+}
