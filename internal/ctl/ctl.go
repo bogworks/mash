@@ -133,7 +133,8 @@ func Usage(prog string) string {
 		line("inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
 		adoptLines(line)
 		issuedLines(line)
-		retireLines(line)
+		endpointLines(line)
+		labelLines(line)
 	}
 	return b.String()
 }
@@ -147,8 +148,15 @@ func issuedLines(line func(left, right string)) {
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
-func retireLines(line func(left, right string)) {
-	line("retire <owner.group.instance> [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user in the account JWT (--no-revoke skips it), then remove its record and inbox; --servers N (else MASH_SERVERS) is how many servers must acknowledge, --sys-creds FILE (else MASH_SYS_CREDS) the system account creds")
+func endpointLines(line func(left, right string)) {
+	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example alice/dev/design")
+	line("endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "revoke the old key on every server and name a new one")
+	line("endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
+	line("endpoint list [--json]", "the endpoints in the directory")
+	line("endpoint show ADDRESS [--json]", "one endpoint's directory record, creds file path and issue record")
+}
+
+func labelLines(line func(left, right string)) {
 	line("label <owner.group.instance> k=v... [--dry-run]", "set labels on the endpoint's directory record")
 	line("unlabel <owner.group.instance> k... [--dry-run]", "remove labels from the endpoint's directory record")
 }

@@ -26,6 +26,10 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2
 	}
+	if msg, ok := removedCommands[args[0]]; ok { // before any flag, config or dispatch: nothing runs
+		fmt.Fprintln(stderr, msg)
+		return 2
+	}
 	if serverFlagVerbs[args[0]] {
 		rest, env2, err := extractServerFlags(args[1:], env)
 		if err != nil {
@@ -63,8 +67,6 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "endpoint":
 		return runEndpoint(args[1:], env, lookup, stdout, stderr)
-	case "retire":
-		return runRetire(args[1:], env, lookup, stdout, stderr)
 	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
@@ -136,9 +138,16 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "adopt", "audit", "endpoint", "inbox", "issued", "label", "unlabel", "retire",
+	case "adopt", "audit", "endpoint", "inbox", "issued", "label", "unlabel",
 		"init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 		return true
 	}
 	return false
+}
+
+// removedCommands are the verbs `endpoint` replaced. They run nothing and name the replacement; they are not aliases.
+var removedCommands = map[string]string{
+	"add":     "mashctl: add was removed. Use: mashctl endpoint create alice/dev/design --public-key design.pub   (see: mashctl endpoint create --help)",
+	"reissue": "mashctl: reissue was removed. Use: mashctl endpoint reissue alice/dev/design --public-key FILE   (see: mashctl endpoint reissue --help)",
+	"retire":  "mashctl: retire was removed. Use: mashctl endpoint delete alice/dev/design   (see: mashctl endpoint delete --help)",
 }

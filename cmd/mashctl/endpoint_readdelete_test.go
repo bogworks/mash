@@ -153,7 +153,7 @@ func TestEndpointDeleteRefusesAsRetireDoes(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	// a record whose user key is replaced between the read and the removal is refused, as retire refuses it
-	_, retErr, retCode := h.run("retire", "o.g.zzz")
+	_, retErr, retCode := h.run("endpoint", "delete", "o.g.zzz")
 	_, delErr, delCode := h.run("endpoint", "delete", "o/g/zzz")
 	if retCode != 1 || delCode != 1 {
 		t.Fatalf("codes %d %d", retCode, delCode)

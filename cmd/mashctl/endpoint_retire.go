@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -18,10 +17,6 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/sap"
 )
-
-const retireUsage = `usage: mashctl retire <owner.group.instance> [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]
-  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
-`
 
 // credsFileFor is where the endpoint's creds live: an existing owner.group.instance.creds in the config directories.
 func credsFileFor(cfg config.Config, addr sap.Address) (string, error) {
@@ -48,18 +43,17 @@ var retireNow = time.Now
 // retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
 var retireRevokeNow = time.Now
 
-// noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
+// noRevokeNote is printed after a delete with --no-revoke: the user can still connect.
 const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
 
-// retireOpts are the choices of one removal and the words its messages use. `mashctl retire` and `mashctl endpoint
-// delete` run the same removal with different words.
+// retireOpts are the choices of one removal and the words its messages use. `mashctl endpoint delete` words them.
 type retireOpts struct {
 	deleteCreds, force, noRevoke, dryRun bool
-	verb                                 string // the command as messages name it: "retire" or "endpoint delete"
+	verb                                 string // the command as messages name it: "endpoint delete"
 	label                                string // how messages name the endpoint
 	full                                 string // the first line of the report names the endpoint this way
 	again                                string // the command that finishes a partial removal
-	done                                 string // the report's first word: "retired" or "deleted"
+	done                                 string // the report's first word: "deleted"
 	listHint                             string // added to the missing-record refusal, when set
 	usage                                string
 }
@@ -81,53 +75,6 @@ type retireResult struct {
 // ok is true for the kinds that end without a problem.
 func (r retireResult) ok() bool {
 	return r.kind == "deleted" || r.kind == "unchanged" || r.kind == "planned"
-}
-
-// runRetire is `mashctl retire`: the server removal (the revocation of the user key, then the directory record and
-// inbox) comes first and the creds file last, so a failure leaves the earlier, safer state.
-func runRetire(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	var arg string
-	var deleteCreds, force, noRevoke bool
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--delete-creds":
-			deleteCreds = true
-		case a == "--force":
-			force = true
-		case a == "--no-revoke":
-			noRevoke = true
-		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: retire: unknown %s\n%s", config.RejectedArg(a), retireUsage)
-			return 2
-		case arg != "":
-			fmt.Fprintf(stderr, "mashctl: retire: one endpoint address only\n%s", retireUsage)
-			return 2
-		default:
-			arg = a
-		}
-	}
-	if arg == "" {
-		fmt.Fprintf(stderr, "mashctl: retire: no endpoint address: give owner.group.instance\n%s", retireUsage)
-		return 2
-	}
-	addr, err := parseAddr(arg)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: retire: %v\n%s", err, retireUsage)
-		return 2
-	}
-	name := addr.String()
-	res := retireAddress(addr, retireOpts{
-		deleteCreds: deleteCreds, force: force, noRevoke: noRevoke,
-		verb: "retire", label: name, full: name, again: "mashctl retire " + name, done: "retired", usage: retireUsage,
-	}, env, lookup, stdout, stderr)
-	if res.pendingUsage {
-		return 2
-	}
-	if res.ok() {
-		return 0
-	}
-	return 1
 }
 
 // retireAddress removes the endpoint at addr as opts says and reports on stdout and stderr. A bad server list is a

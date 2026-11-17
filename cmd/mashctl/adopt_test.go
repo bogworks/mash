@@ -137,7 +137,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 	if code != 0 || errb != "" {
 		t.Fatalf("dry run: %d\n%s\n%s", code, out, errb)
 	}
-	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl retire` is the first to use it"} {
+	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl endpoint delete` is the first to use it"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run output lacks %q:\n%s", want, out)
 		}

@@ -50,7 +50,7 @@ func TestIssuedCheckRefusesForeignIssuer(t *testing.T) {
 	revokeUsers = revokeUserKeys // the real revocation reads the account JWT: the stub of the package would not
 	t.Cleanup(func() { revokeUsers = (&revokeStub{}).fn })
 	before := e.accountJWT()
-	for _, args := range [][]string{{"retire", "alice.g.x"}} {
+	for _, args := range [][]string{{"endpoint", "delete", "alice.g.x"}} {
 		out, errb, code := e.run(args...)
 		if code != 1 || !strings.Contains(out+errb, "not an accepted issuer") || !strings.Contains(out+errb, realPub) || !strings.Contains(out+errb, opPub) {
 			t.Fatalf("%v: exit %d\n%s\n%s", args, code, out, errb)

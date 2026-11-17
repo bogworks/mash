@@ -95,7 +95,7 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 	recs := h.records()
 	calls := fakeRevoke(t, nil)
 
-	out, errb, code := h.run("retire", "o.g.c")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c")
 	if code != 1 || out != "" || !strings.Contains(errb, unprovableText) || !strings.Contains(errb, "by hand") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -110,7 +110,7 @@ func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 	_, pub2 := h2.credsClaims(ad("c"))
 	h2.recordHistory(pub2, ad("c").Flat(), store.IssuedMinHistory-1)
 	calls2 := fakeRevoke(t, nil)
-	if out, errb, code := h2.run("retire", "o.g.c"); code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls2) != 1 {
+	if out, errb, code := h2.run("endpoint", "delete", "o.g.c"); code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls2) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls2)
 	}
 }
