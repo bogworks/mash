@@ -58,7 +58,7 @@ Two forms, one meaning. Mixing them is a usage error (exit 2) unless they agree.
   `mashctl endpoint create design` and never meets a group.
 - Each token follows the token rule of the model (`[a-z][a-z0-9-]*`, 1 to 32 characters, no `--`, no trailing dash;
   the whole address at most 64) and the name rule file. The flag is `--name` because that is the ruling; the JSON field
-  is `instance` (section 8, question 1).
+  is `instance` (section 8).
 - What the command prints for the address is the model's form: `alice.main.design` (dots, as it appears in a subject).
   What a person types is `alice/main/design`. Both are shown in the output so that neither has to be converted by hand.
 
@@ -151,8 +151,7 @@ mashctl endpoint migrate [NAME | --all] [--group G] [--name N]
 
 - With no `NAME` and no `--all` the command exits 2 and says to name an endpoint or give `--all`. (The model plan has
   "no names plans all" as the default. The standard says a changing command changes nothing only under `--dry-run`
-  (rule 11), and a bare `migrate` that does nothing is a trap for an agent that expects it to migrate. See section 8,
-  question 3.)
+  (rule 11), and a bare `migrate` that does nothing is a trap for an agent that expects it to migrate. See section 8.)
 - `--group G` sets the group for the endpoints in the run (default `main`). `--name N` sets the instance for one
   endpoint, for the case where the legacy name is longer than 32 characters. Without it such an endpoint is `refused`.
 - `--finish` on an endpoint whose legacy inbox is not drained refuses with the count of unread messages, unless
@@ -242,7 +241,7 @@ What breaks, from the model plan and the order above:
 | `mashctl reissue NAME... [--widen]` | `mashctl endpoint reissue ADDRESS [--widen] [--dry-run] [--json]` | One positional (standard rule 7). The bulk forms become flags: `--all --yes`, `--changed --yes`; a bulk run lists first and acts only with `--yes`, as today. |
 | `mashctl reissue --all` / `--changed` | `mashctl endpoint reissue --all` / `--changed` (with `--yes`) | Same. |
 | `mashctl retire NAME [--delete-creds] [--force] [--no-revoke]` | `mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json]` | `delete` is the standard's verb for "remove an object from where this tool manages it". The behaviour is `retire`'s: revoke the key, remove the record and inbox, rename the creds file to `.retired-<time>` (or remove it with `--delete-creds`). |
-| `mashctl deprovision NAME ...` | not an endpoint verb | It is the lower layer under `retire` and `retire` remains the safe path; the model plan's removal of the legacy record code decides whether `deprovision` survives as a documented repair (section 8, question 5). |
+| `mashctl deprovision NAME ...` | not an endpoint verb | It is the lower layer under `retire` and `retire` remains the safe path; the model plan's removal of the legacy record code leaves `deprovision` as a repair only where it keys by the new address (section 8). |
 
 After 0.5.5 the old spellings do nothing:
 
@@ -289,7 +288,7 @@ mashctl endpoint create review
 mash plugin export ~/.mash-plugin
 claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
-# 5. Two Claude Code sessions, one per endpoint (the exact way an endpoint names itself is section 8, question 4):
+# 5. Two Claude Code sessions, one per endpoint (`MASH_OWNER` and `MASH_GROUP` complete the address; the group defaults to `main`):
 #      terminal 1:  MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
 #      terminal 2:  MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash
 # 6. A third shell:
@@ -345,25 +344,27 @@ on each changing command and no state change under it, a bad flag exits 2, and `
 - `--dry-run` leaves the directory, the issue record and the config directory byte-identical.
 - The exit codes of section 1 for each outcome.
 
-## 8. Questions for the model's owner and for the maintainer
+## 8. Questions: settled and open
 
-1. **`--name` or `--instance`.** The ruling writes `--name design` and the shortcut. The model plan's word is
-   `instance`, and its `migrate --instance`. This note uses `--name` for every flag and `instance` for the JSON field
-   and the prose, so that the canonical form is the one the maintainer wrote. If `--instance` is wanted, it replaces `--name`
-   everywhere (no alias).
-2. **Slash or dot.** A person types `alice/main/design`; the subject and the stored address are `alice.main.design`. The
-   standard leaves the separator to the naming grammar. This note takes slash for typing (the ruling's shortcut) and dots
-   for the stored address, and shows both in output.
-3. **`migrate` with no name.** The model plan plans every endpoint when no name is given. This note exits 2 and asks for
-   `--all --dry-run` for the plan, so that a changing command changes nothing only under `--dry-run`.
-4. **How a session names its endpoint.** Today `MASH_NAME` is one token and the owner comes from configuration. With a
-   group in the address the session needs the owner, group and instance. Options: `MASH_NAME=design` with
-   `MASH_OWNER` and `MASH_GROUP` (default `main`), or `MASH_NAME=alice/dev/design` (the shortcut). The quick start above
-   writes the short form and needs this settled by core before the README is final.
-5. **`provision`, `deprovision`, `set-meta`, `permissions`.** They take legacy names. The model plan removes the legacy
-   record code. This note does not rename them; it needs a decision on which survive as documented repairs.
+Settled with the model's owner on 2026-11-17:
+
+1. **`--name`** is the flag everywhere, `migrate` included (it names the new instance when a legacy name is longer than
+   32 characters). The JSON field and the prose say `instance`.
+2. **Slash for typing, dots stored.** A person types `alice/main/design`; the subject and the stored address are
+   `alice.main.design`. Both are shown in output.
+3. **A bare `migrate` exits 2.** The plan is `--all --dry-run`.
+4. **A session names its endpoint with three variables:** `MASH_NAME=design`, `MASH_OWNER` (as today) and `MASH_GROUP`
+   (default `main`). One form, no `owner/group/instance` in `MASH_NAME`. The quick start in section 5 uses it.
+5. **`provision`, `deprovision`, `set-meta` and `permissions`** survive as repairs only where they key by the new
+   address (the flat key `owner_group_instance`). Any that takes a legacy name goes. The list is for the maintainer's
+   lead to confirm.
+
+Open:
+
 6. **The credential carve-out.** The model plan offers the property of #698 (the endpoint makes its key and only the
-   public key reaches `mashctl`) in 0.5.5 without a list set. If taken, `endpoint create` gets `--public-key FILE` and
-   writes no creds file, and the `credential install` verb of the credential CLI design completes the path. If not,
-   `endpoint create` mints the user on the central host, as `add` does today.
+   public key reaches `mashctl`) in 0.5.5 without a list set, for 1.5 days. If taken, `endpoint create` gets
+   `--public-key FILE` and writes no creds file, and the `credential install` verb of the credential CLI design
+   completes the path. If not, `endpoint create` mints the user on the central host, as `add` does today.
 7. **The two verbs outside the standard** (section 6): add them to the table, or record the exception.
+8. **A flag-day alternative.** The model plan's section 6 costs a migration without the bridge. If that is chosen the
+   `migrate` flags may change (`--all --apply` and `--finish --all` stay); this note follows the bridge version until then.
