@@ -54,6 +54,7 @@ func TestEndpointCommandTree(t *testing.T) {
 		t.Fatal("endpointVerbTable is empty")
 	}
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	pubDir := t.TempDir()
 	_, pubFile, _ := epKey(t, pubDir, "tree")
 	addr := ad("tree")
@@ -158,6 +159,7 @@ func TestEndpointCommandTree(t *testing.T) {
 // the create again with the same key finishes it, and running it once more makes nothing new.
 func TestEndpointCreateAfterKill(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	dir := t.TempDir()
 	pub, pubFile, _ := epKey(t, dir, "killed")
 	a := ad("design")

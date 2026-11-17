@@ -415,6 +415,7 @@ func TestEndpointRefusals(t *testing.T) {
 		seen[c.name] = true
 		t.Run(c.name, func(t *testing.T) {
 			h := newFleetEnv(t)
+			fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 			r := &refEnv{h: h, aux: privateDir(t)}
 			r.k1, r.pub, _ = epKey(t, r.aux, "one")
 			_, r.pub2, _ = epKey(t, r.aux, "two")
