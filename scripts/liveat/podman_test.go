@@ -277,7 +277,7 @@ func TestPodmanNoRuntimeFails(t *testing.T) {
 	// the command fails (non-zero) and does not skip; nothing is built first
 	t.Setenv("PATH", t.TempDir())
 	var so, se strings.Builder
-	code := realMain([]string{"at005", "--hosts", "podman"}, &so, &se)
+	code := realMain([]string{"at005", "--hosts", "podman", "--run-by", "manual", "--host-label", "t"}, &so, &se)
 	if code == 0 || code == 3 || !strings.Contains(se.String(), want) {
 		t.Fatalf("exit %d: %q", code, se.String())
 	}

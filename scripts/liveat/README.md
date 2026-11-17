@@ -6,11 +6,32 @@ contract against a build of this checkout, on one local NATS server, in scratch 
 ## AT-005: three machines, TLS, a cluster, two mashctl machines
 
 ```
-go run ./scripts/liveat at005 --hosts podman     # the acceptance run (CI job)
+go run ./scripts/liveat at005 --hosts podman --run-by manual --host-label dev-box --record-out at005-record.md
 go run ./scripts/liveat at005 --hosts local      # the harness's own selfcheck on a developer machine (the default)
 go run ./scripts/liveat at005 --hosts local --dry-setup
 go run ./scripts/liveat at005-cleanup --label mash-at005
 ```
+
+### Running AT-005 by hand
+
+AT-005 is run by hand on a developer machine with rootless podman:
+
+```
+go run ./scripts/liveat at005 --hosts podman --run-by manual --host-label dev-box --record-out at005-record.md
+```
+
+- `--run-by manual|ci` (required with `--hosts podman`): who ran it. Anything else is a usage error (exit 2).
+- `--host-label TEXT` (required with `--hosts podman`): a short label for the machine the containers ran on, such as a
+  role name. Letters, digits, dashes and dots only, at most 40 characters; anything else is a usage error (exit 2). The
+  label is not looked up: the harness never reads the machine's real host name into the record.
+- `--record-out FILE` (optional): also writes the record to FILE (mode 0600; refuses to overwrite an existing file).
+  The record is always printed to stdout as well.
+
+The record's environment holds the line `run: manual, host dev-box, substrate podman <version>` (the version is `unknown`
+if `podman version` fails). Attach the record file (the path printed at the end as `record file: ...`) to the contract's
+evidence. A `--hosts local` record says `run: local loopback (dry setup or developer check; not a record for the
+contract)` and its result line says `local substrate: not AT-005 evidence`; `--run-by` and `--host-label` are refused with
+`--hosts local`.
 
 AT-005 needs **rootless podman** and a `nats-server` on PATH that is a static binary (a release build or
 `CGO_ENABLED=0 go build`). With no podman the run **fails** (exit 4) with "podman is not installed: AT-005 needs rootless

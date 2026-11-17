@@ -112,6 +112,19 @@ func (p *Podman) Preflight() error {
 	return nil
 }
 
+// Version is the podman client version, or "unknown" when podman does not say.
+func (p *Podman) Version() string {
+	rt := p.Runner
+	if rt == nil {
+		rt = execRunner{}
+	}
+	out, _, code := rt.Run(Cmd{Argv: []string{"podman", "version", "--format", "{{.Client.Version}}"}})
+	if v := strings.TrimSpace(out); code == 0 && v != "" && !strings.ContainsAny(v, "\n \t") {
+		return v
+	}
+	return "unknown"
+}
+
 // podCtx is what the three nodes of one run share.
 type podCtx struct {
 	r       *Run

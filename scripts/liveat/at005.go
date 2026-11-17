@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,25 +27,25 @@ import (
 // --port: the ports are the reserved set of DefaultPorts. Exit 0: every assertion held; 1: one did not; 2: usage; 4:
 // the run could not be set up.
 func at005Main(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: liveat at005 [--dry-setup] [--hosts podman|local] [--keep] | liveat at005-cleanup [--label mash-at005]"
-	fs := flag.NewFlagSet("at005", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	dry := fs.Bool("dry-setup", false, "")
-	keep := fs.Bool("keep", false, "")
-	hosts := fs.String("hosts", "local", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, usage)
+	o, err := parseAt005(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "liveat at005:", err)
+		fmt.Fprintln(stderr, at005Usage)
 		return 2
 	}
+	dry, keep := &o.dry, &o.keep
 	var hs Hosts
-	switch *hosts {
+	switch o.hosts {
 	case "local":
 		hs = Local{}
 	case "podman":
 		hs = &Podman{}
-	default:
-		fmt.Fprintln(stderr, usage)
-		return 2
+	}
+	if o.recordOut != "" { // refuse early, before anything is built
+		if _, err := os.Lstat(o.recordOut); err == nil {
+			fmt.Fprintf(stderr, "liveat at005: --record-out %s exists: refusing to overwrite\n", o.recordOut)
+			return 2
+		}
 	}
 	if pf, ok := hs.(Preflighter); ok {
 		if err := pf.Preflight(); err != nil {
@@ -73,7 +74,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 		return 4
 	}
 	fmt.Fprintf(stdout, "run %s, revision %s\n", r.ID, r.Revision)
-	s := &At5{R: r, Hosts: machines, C: &Checks{}, secrets: map[string][]byte{}, dry: *dry}
+	s := &At5{R: r, Hosts: machines, C: &Checks{}, secrets: map[string][]byte{}, dry: *dry, runLine: runLine(hs, o.runBy, o.hostLabel)}
 	// An interrupt stops what the run started, by recorded PID, before it exits.
 	done := make(chan struct{})
 	defer close(done)
@@ -96,7 +97,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 		}
 	}()
 	s.Finish()
-	rec := Record{RunID: r.ID, Revision: r.Revision, AT: id, Scenario: scenario, Env: s.EnvLines(), Observed: s.observed(), Leaks: s.leaks}
+	rec := Record{RunID: r.ID, Revision: r.Revision, AT: id, Scenario: scenario, Env: s.EnvLines(), Observed: s.observed(), Leaks: s.leaks, LocalSubstrate: o.hosts == "local"}
 	text := rec.Markdown()
 	if err := noPrivate(text); err != nil {
 		fmt.Fprintln(stderr, "liveat at005:", err)
@@ -106,8 +107,17 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 4
 	}
+	if o.recordOut != "" {
+		if err := WriteRecord(o.recordOut, rec); err != nil {
+			fmt.Fprintln(stderr, "liveat at005: --record-out:", err)
+			return 4
+		}
+	}
 	fmt.Fprint(stdout, s.C.Table())
 	fmt.Fprintf(stdout, "\n%s\n", text)
+	if o.recordOut != "" {
+		fmt.Fprintf(stdout, "record file: %s\n", o.recordOut)
+	}
 	if *keep {
 		fmt.Fprintf(stdout, "kept: %s (record, output and scratch homes)\n", r.Dir)
 	}
@@ -115,6 +125,67 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+const at005Usage = "usage: liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL] [--hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--label mash-at005]"
+
+type at005Opts struct {
+	dry, keep                          bool
+	hosts, runBy, hostLabel, recordOut string
+}
+
+// hostLabelOK: letters, digits, dashes and dots, 1 to 40 characters. The label is never looked up.
+func hostLabelOK(l string) bool {
+	if l == "" || len(l) > 40 {
+		return false
+	}
+	for _, c := range l {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+func parseAt005(args []string) (at005Opts, error) {
+	var o at005Opts
+	fs := flag.NewFlagSet("at005", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&o.dry, "dry-setup", false, "")
+	fs.BoolVar(&o.keep, "keep", false, "")
+	fs.StringVar(&o.hosts, "hosts", "local", "")
+	fs.StringVar(&o.runBy, "run-by", "", "")
+	fs.StringVar(&o.hostLabel, "host-label", "", "")
+	fs.StringVar(&o.recordOut, "record-out", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return o, errors.New("bad arguments")
+	}
+	switch o.hosts {
+	case "podman":
+		if o.runBy != "manual" && o.runBy != "ci" {
+			return o, errors.New("--run-by is required with --hosts podman and must be manual or ci")
+		}
+		if !hostLabelOK(o.hostLabel) {
+			return o, errors.New("--host-label is required with --hosts podman: letters, digits, dashes and dots only, at most 40 characters")
+		}
+	case "local":
+		if o.runBy != "" || o.hostLabel != "" {
+			return o, errors.New("--run-by and --host-label are for --hosts podman only")
+		}
+	default:
+		return o, errors.New("--hosts is podman or local")
+	}
+	return o, nil
+}
+
+// runLine is the record's line saying who ran the test and on what substrate. The label is the caller's text: the
+// machine's own name is never read.
+func runLine(hs Hosts, runBy, label string) string {
+	p, ok := hs.(*Podman)
+	if !ok {
+		return "run: local loopback (dry setup or developer check; not a record for the contract)"
+	}
+	return fmt.Sprintf("run: %s, host %s, substrate podman %s", runBy, label, p.Version())
 }
 
 const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two mashctl machines: three NATS servers on three machines " +
@@ -132,7 +203,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 // cluster setup, without any key or certificate private part.
 func (s *At5) EnvLines() []string {
 	r := s.R
-	out := []string{"hosts: " + s.hostsName() + ": three machines M1, M2, M3 (roles, not host names)"}
+	out := []string{s.runLine, "hosts: " + s.hostsName() + ": three machines M1, M2, M3 (roles, not host names)"}
 	for _, h := range s.Hosts {
 		p := h.Ports()
 		mon := ""

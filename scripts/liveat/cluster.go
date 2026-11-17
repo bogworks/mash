@@ -121,6 +121,7 @@ type At5 struct {
 	srv        []*Proc // the three nats-server processes, by recorded PID
 	lastCreate string
 	dry        bool
+	runLine    string
 }
 
 func (s *At5) M(i int) Host { return s.Hosts[i-1] }
