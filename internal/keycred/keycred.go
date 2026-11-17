@@ -27,6 +27,7 @@ const (
 	CodeKeyMismatch = "key_mismatch"
 	CodeBadSeed     = "bad_seed"
 	CodeBadJWT      = "bad_jwt"
+	CodeOutIsInput  = "out_is_input"
 )
 
 // Refusal says why a run did nothing.
@@ -220,6 +221,14 @@ func CreateCredentials(o CredOptions) (CredResult, error) {
 		out = filepath.Join(o.ConfigDir, claims.Name+".creds")
 	}
 	res.CredsPath = out
+	// --force must never replace an input: a seed lost this way cannot be recovered.
+	if outFi, serr := os.Stat(out); serr == nil {
+		for _, in := range []string{o.Seed, o.JWT} {
+			if inFi, ierr := os.Stat(in); ierr == nil && os.SameFile(outFi, inFi) {
+				return refuse(res, CodeOutIsInput, out+" is the same file as the input "+in+"; choose another --out"), nil
+			}
+		}
+	}
 	ok, err := exists(out)
 	if err != nil {
 		return res, err

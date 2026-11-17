@@ -247,3 +247,27 @@ func TestCreateCredentialsDryRun(t *testing.T) {
 		t.Error("dry run wrote")
 	}
 }
+
+func TestCreateCredentialsRefusesInputAsOutput(t *testing.T) {
+	dir, seedPath, jwtPath, seed, tok, _ := credFixture(t, "design")
+	alias := filepath.Join(dir, "alias.seed")
+	if err := os.Symlink(seedPath, alias); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	hard := filepath.Join(dir, "hard.jwt")
+	if err := os.Link(jwtPath, hard); err != nil {
+		t.Skip("no hard links:", err)
+	}
+	for _, out := range []string{seedPath, jwtPath, alias, hard} {
+		res, err := CreateCredentials(CredOptions{Seed: seedPath, JWT: jwtPath, Out: out, Force: true})
+		if err != nil || res.Outcome != Refused || res.Refusal.Code != CodeOutIsInput {
+			t.Fatalf("out %s: %+v, %v", out, res, err)
+		}
+	}
+	if b, _ := os.ReadFile(seedPath); strings.TrimSpace(string(b)) != seed {
+		t.Error("seed file changed")
+	}
+	if b, _ := os.ReadFile(jwtPath); strings.TrimSpace(string(b)) != tok {
+		t.Error("jwt file changed")
+	}
+}
