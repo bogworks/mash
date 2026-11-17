@@ -3,15 +3,19 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 )
 
 // AT-005 runs on three machines M1, M2 and M3. A Hosts value says where they are; the scenario talks to a Host and
 // knows nothing else. Local puts all three on this machine (loopback, a directory tree each, three NATS processes).
-// SSH is the place for the real hosts of the contract (section 7); it is a stub.
+// Podman puts them in three rootless containers the test builds and destroys (podman.go). SSH is a stub that must not
+// be implemented: no test runs on a production host.
 
 // Ports are the ports of one node. The operator reserved 14222-14224 (clients), 16222-16224 (routes) and 18222 (the
 // monitor of node 1 only); nothing else may be used.
@@ -34,8 +38,19 @@ type Host interface {
 	Spawn(label string, args, env []string) (*Proc, error) // a long-running process, stopped by its recorded PID
 	Put(path string, data []byte, mode os.FileMode) error
 	Get(path string) ([]byte, error)
-	Remove(path string) error // one exact path
+	Remove(path string) error // one exact path (a file or an empty directory)
+	Exists(path string) bool
+	// WaitPortFree waits until nothing accepts connections on this machine's port (on its own address).
+	WaitPortFree(port int, d time.Duration) error
+	// HTTPGet fetches a URL from this machine (the monitor is reached from the node's own network).
+	HTTPGet(url string) ([]byte, error)
+	// Snapshot makes the machine's whole file tree (home, config, keys, server, tls) readable on the test's own
+	// filesystem for the secret search. dir is its root; done removes any copy the call made.
+	Snapshot() (dir string, done func(), err error)
 }
+
+// Preflighter is a Hosts value that can tell, before anything is built, that it cannot run here.
+type Preflighter interface{ Preflight() error }
 
 // Hosts opens the three machines for a run.
 type Hosts interface {
@@ -130,3 +145,16 @@ func (h *localHost) Remove(path string) error {
 	}
 	return os.Remove(path)
 }
+func (h *localHost) Exists(path string) bool                      { _, err := os.Stat(path); return err == nil }
+func (h *localHost) WaitPortFree(port int, d time.Duration) error { return waitPortFree(port, d) }
+func (h *localHost) HTTPGet(url string) ([]byte, error) {
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// Snapshot of a local machine is its directory itself: home, server and tls.
+func (h *localHost) Snapshot() (string, func(), error) { return h.dir, func() {}, nil }

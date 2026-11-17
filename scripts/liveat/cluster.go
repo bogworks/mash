@@ -3,9 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -115,7 +112,6 @@ type At5 struct {
 	Leaves []*Leaf
 	TLS    []TLSFiles
 	Confs  []string // rendered server.conf text per node (paths only), for the record
-	Carry  string   // the courier directory: what a person carries between machines (JWT files, public keys)
 
 	mu         sync.Mutex
 	secrets    map[string][]byte
@@ -123,8 +119,6 @@ type At5 struct {
 	notes      []string
 	leaks      []Leak
 	srv        []*Proc // the three nats-server processes, by recorded PID
-	skewIn     int
-	skewPast   int
 	lastCreate string
 	dry        bool
 }
@@ -193,17 +187,18 @@ func (s *At5) BuildCerts(now time.Time) error {
 	}
 	s.CA = ca
 	for i, h := range s.Hosts {
-		l, err := ca.Issue("mash-n"+strconv.Itoa(i+1), now)
+		sans := SANsFor(h.Addr())
+		l, err := ca.Issue("mash-n"+strconv.Itoa(i+1), now, sans...)
 		if err != nil {
 			return err
 		}
-		f, err := WriteTLS(h.TLSDir(), ca, l)
+		f, err := WriteTLS(h, ca, l)
 		if err != nil {
 			return err
 		}
 		s.Leaves = append(s.Leaves, l)
 		s.TLS = append(s.TLS, f)
-		if err := ca.Verify(l, now); err != nil {
+		if err := ca.Verify(l, now, sans...); err != nil {
 			return fmt.Errorf("leaf %s does not verify: %w", l.Name, err)
 		}
 	}
@@ -256,13 +251,13 @@ func (s *At5) InitM1() bool {
 func (s *At5) StartServers() bool {
 	for _, h := range s.Hosts {
 		for _, p := range []int{h.Ports().Client, h.Ports().Route} {
-			if err := waitPortFree(p, 3*time.Second); err != nil {
+			if err := h.WaitPortFree(p, 3*time.Second); err != nil {
 				s.check(h.Role()+": port "+strconv.Itoa(p)+" is free before the server starts", false, err.Error())
 				return false
 			}
 		}
 	}
-	if err := waitPortFree(DefaultPorts[0].Monitor, 3*time.Second); err != nil {
+	if err := s.M(1).WaitPortFree(DefaultPorts[0].Monitor, 3*time.Second); err != nil {
 		s.check("the monitor port is free", false, err.Error())
 		return false
 	}
@@ -276,20 +271,18 @@ func (s *At5) StartServers() bool {
 		s.R.Runner.logf("%s: nats-server pid=%d", h.Role(), p.PID)
 		s.notes = append(s.notes, fmt.Sprintf("%s nats-server pid %d", h.Role(), p.PID))
 	}
-	formed, detail := waitFormed(DefaultPorts[0].Monitor, 2, 40*time.Second)
+	m1 := s.M(1)
+	formed, detail := waitFormed(m1, "http://"+m1.Addr()+":"+strconv.Itoa(m1.Ports().Monitor)+"/routez", 2, 40*time.Second)
 	return s.check("the three NATS servers started and formed one cluster over TLS routes (node 1's monitor shows at least 2 routes; the server pools several connections per peer)", formed, detail)
 }
 
-// waitFormed polls http://127.0.0.1:port/routez until it reports want routes.
-func waitFormed(port, want int, d time.Duration) (bool, string) {
+// waitFormed polls the routez URL, fetched from h, until it reports want routes.
+func waitFormed(h Host, url string, want int, d time.Duration) (bool, string) {
 	deadline := time.Now().Add(d)
 	last := "no answer"
-	cl := &http.Client{Timeout: 2 * time.Second}
 	for {
-		resp, err := cl.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/routez")
+		b, err := h.HTTPGet(url)
 		if err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
 			var v struct {
 				NumRoutes int `json:"num_routes"`
 			}
@@ -361,7 +354,7 @@ func (s *At5) AdoptM2() bool {
 		for _, p := range copies {
 			_ = m2.Remove(p)
 		}
-		_ = os.Remove(in) // the directory this harness made, now empty
+		_ = m2.Remove(in) // the directory this harness made, now empty
 	}
 	for name, src := range files {
 		b, err := m1.Get(src)
@@ -387,7 +380,7 @@ func (s *At5) AdoptM2() bool {
 	cleanup()
 	gone := true
 	for _, p := range copies {
-		if _, err := os.Stat(p); err == nil {
+		if m2.Exists(p) {
 			gone = false
 		}
 	}
@@ -434,7 +427,7 @@ func (s *At5) Setup(now time.Time) bool {
 		s.check("the harness makes its certificate authority and one certificate per node", false, err.Error())
 		return false
 	}
-	s.check("the harness makes its certificate authority and one certificate per node, each chain verified with SANs 127.0.0.1 and localhost", true, "")
+	s.check("the harness makes its certificate authority and one certificate per node, each chain verified with the SANs of the node's address", true, "")
 	return s.InitM1() && s.StartServers() && s.InitBuckets() && s.AdoptM2() &&
 		s.ClusterCheck(s.M(1), "M1") && s.ClusterCheck(s.M(2), "M2") && s.listBoth()
 }

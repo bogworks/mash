@@ -21,19 +21,16 @@ import (
 	"time"
 )
 
-// at005Main is `liveat at005 [--dry-setup] [--skew N] [--past-skew N] [--faketime-lib PATH] [--hosts local|ssh] [--keep]`:
+// at005Main is `liveat at005 [--dry-setup] [--hosts podman|local] [--keep]`:
 // AT-005 of the 0.5.5 contract, across three machines, over TLS, on a cluster, from two mashctl machines. It needs no
 // --port: the ports are the reserved set of DefaultPorts. Exit 0: every assertion held; 1: one did not; 2: usage; 4:
 // the run could not be set up.
 func at005Main(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: liveat at005 [--dry-setup] [--skew N] [--past-skew N] [--faketime-lib PATH] [--hosts local|ssh] [--keep]"
+	usage := "usage: liveat at005 [--dry-setup] [--hosts podman|local] [--keep] | liveat at005-cleanup [--label mash-at005]"
 	fs := flag.NewFlagSet("at005", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dry := fs.Bool("dry-setup", false, "")
 	keep := fs.Bool("keep", false, "")
-	skew := fs.Int("skew", defaultSkew, "")
-	past := fs.Int("past-skew", defaultPastSkew, "")
-	lib := fs.String("faketime-lib", "", "")
 	hosts := fs.String("hosts", "local", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		fmt.Fprintln(stderr, usage)
@@ -43,11 +40,17 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	switch *hosts {
 	case "local":
 		hs = Local{}
-	case "ssh":
-		hs = SSH{}
+	case "podman":
+		hs = &Podman{}
 	default:
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	if pf, ok := hs.(Preflighter); ok {
+		if err := pf.Preflight(); err != nil {
+			fmt.Fprintln(stderr, "liveat at005:", err)
+			return 4
+		}
 	}
 	repo, err := repoRoot()
 	if err != nil {
@@ -71,11 +74,6 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "run %s, revision %s\n", r.ID, r.Revision)
 	s := &At5{R: r, Hosts: machines, C: &Checks{}, secrets: map[string][]byte{}, dry: *dry}
-	s.Carry = filepath.Join(r.Dir, "at005", "carry")
-	if err := os.Mkdir(s.Carry, 0o700); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 4
-	}
 	// An interrupt stops what the run started, by recorded PID, before it exits.
 	done := make(chan struct{})
 	defer close(done)
@@ -94,7 +92,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 			}
 		}()
 		if s.Setup(time.Now()) && !*dry {
-			s.Scenario(*skew, *past, *lib)
+			s.Scenario()
 		}
 	}()
 	s.Finish()
@@ -128,8 +126,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
 	"endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); " +
 	"a plain nats:// URL to a non-loopback address refused by an endpoint (ADR 0108) and by mashctl (ADR 0059); " +
-	"the same address created from M1 and M2 at the same moment, then again with M2's mashctl clock skewed within the bound " +
-	"and past it; a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output and of the homes on M1 and M2 for any endpoint seed and any JWT."
+	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output and of the homes on M1 and M2 for any endpoint seed and any JWT."
 
 // EnvLines is the environment section of the record: each machine by role, the NATS server version, and the TLS and
 // cluster setup, without any key or certificate private part.
@@ -142,7 +139,7 @@ func (s *At5) EnvLines() []string {
 		if p.Monitor > 0 {
 			mon = fmt.Sprintf(", monitor %d", p.Monitor)
 		}
-		out = append(out, fmt.Sprintf("%s: %s, address %s, own HOME, config dir, keys dir and server dir under the run directory; NATS client port %d, route port %d%s", h.Role(), h.Facts(), h.Addr(), p.Client, p.Route, mon))
+		out = append(out, fmt.Sprintf("%s: %s, address %s, own HOME, config dir, keys dir and server dir; NATS client port %d, route port %d%s", h.Role(), h.Facts(), h.Addr(), p.Client, p.Route, mon))
 	}
 	out = append(out, "go: "+goVersion(), "nats-server: "+r.NatsVer+" (the same binary on all three machines)")
 	out = append(out, "cluster: name mashc, server_name mash-n1..mash-n3, routes between all three, JetStream with a store directory per node, operator mode with the full resolver (interval 5s) and the same resolver_preload on every node; node 1 made by mashctl init --local (without --start) and its config edited and copied")
@@ -154,15 +151,18 @@ func (s *At5) EnvLines() []string {
 	for _, n := range s.skipped {
 		out = append(out, "not run: "+n)
 	}
-	out = append(out, fmt.Sprintf("skews: within-bound %ds, past-bound %ds (docs/operations.md: keep clocks within a few seconds; locks 30 s; status warns at 10 s; sap.LiveSkew 30 s)", s.skewIn, s.skewPast))
+	out = append(out, "clock: no clock offset is made (the nodes share the host's clock; the skewed case is an in-process test elsewhere)")
 	return out
 }
 
 func (s *At5) hostsName() string {
-	if _, ok := s.Hosts[0].(*localHost); ok {
-		return "local (all on this host: loopback, a directory tree each, one nats-server process each)"
+	switch s.Hosts[0].(type) {
+	case *localHost:
+		return "local (all on this host: loopback, a directory tree each, one nats-server process each; the harness's own selfcheck, not the acceptance run)"
+	case *podHost:
+		return "podman (three rootless containers built from this checkout, each its own filesystem and address on a private network, created and destroyed by the test)"
 	}
-	return "ssh"
+	return "unknown"
 }
 
 func goVersion() string { return runtimeVersion() }
@@ -286,7 +286,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 	if !s.check("the public key of "+e.name+" is carried to "+ctl.Role(), err == nil, errText(err)) {
 		return false
 	}
-	jwtCarry := filepath.Join(s.Carry, "alice.dev."+e.name+"."+verb+".jwt")
+	jwtCarry := filepath.Join(ctl.Home().Dir, "alice.dev."+e.name+"."+verb+".out.jwt") // written on ctl; the courier moves it
 	args := []string{"endpoint", verb, "alice/dev/" + e.name, "--public-key", pubOnCtl, "--jwt-out", jwtCarry}
 	r := s.ctl(ctl, "endpoint-"+verb+"-"+e.name, nil, args...)
 	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" alice/dev/"+e.name+" --public-key succeeds", r.Code == 0, exitSnip(r))
@@ -464,9 +464,8 @@ func primaryIPv4() string {
 
 // ---- the scenario --------------------------------------------------------------------------------------------------
 
-// Scenario runs AT-005 after Setup. skew and past are the clock offsets in seconds; lib is --faketime-lib.
-func (s *At5) Scenario(skew, past int, lib string) {
-	s.skewIn, s.skewPast = skew, past
+// Scenario runs AT-005 after Setup.
+func (s *At5) Scenario() {
 	m1, m2, m3 := s.M(1), s.M(2), s.M(3)
 
 	// 1. design from M1, key on M3; session on M3 connects to the server of M2.
@@ -548,7 +547,7 @@ func (s *At5) Scenario(skew, past int, lib string) {
 	s.plainRefusals(m1, m3)
 
 	// 8. concurrent creates.
-	s.races(skew, past, lib, design2, denv)
+	s.race("race0")
 }
 
 // revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show and issued check.
@@ -572,10 +571,14 @@ func (s *At5) revocationSeen() {
 
 // plainRefusals asserts ADR 0108 (an endpoint refuses a plain nats:// URL to a non-loopback address) and ADR 0059
 // (mashctl refuses an admin connection without TLS). No plain server is started: both refusals come before any
-// connection, so the harness points at this host's own non-loopback address on a port where nothing listens (the
-// servers listen on 127.0.0.1 only), and the refusal text, not a connection error, is what is asserted.
+// connection, so the harness points at a non-loopback address (on the local hosts this machine's own address, where
+// nothing listens; on the podman hosts the address of M1) and the refusal text, not a connection error, is what is
+// asserted.
 func (s *At5) plainRefusals(m1, m3 Host) {
-	ip := primaryIPv4()
+	ip := m1.Addr()
+	if _, local := m1.(*localHost); local {
+		ip = primaryIPv4()
+	}
 	if ip == "" {
 		s.skip("plain nats:// refusals (no non-loopback IPv4 address on this host)")
 		return
@@ -591,80 +594,60 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 	s.check("ADR 0059: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
 
-// races runs `endpoint create` of one address from M1 and M2 at the same moment: three times (no skew; M2's mashctl
-// skewed within the bound; skewed past it). Exactly one create succeeds and the other is refused address_taken, and one
-// identity exists afterwards. The skewed runs need libfaketime.
-func (s *At5) races(skew, past int, lib string, design2 ep5, denv []string) {
-	s.race("race0", nil, "no skew")
-	path, why := FindFaketime(lib)
-	if path == "" {
-		s.skip(fmt.Sprintf("the concurrent create with M2's clock %d s off, and %d s off (past the bound): %s", skew, past, why))
-		return
-	}
-	ok, d := s.faketimeWorks(s.M(3), path, skew, denv)
-	s.check(fmt.Sprintf("libfaketime moves the clock of a mash process by %d s (probe: mash status clock line)", skew), ok, d)
-	if !ok {
-		s.skip("the skewed concurrent creates: libfaketime does not move the clock of this build's processes")
-		return
-	}
-	s.race("race1", FaketimeEnv(path, skew), fmt.Sprintf("M2 clock +%d s (within the bound)", skew))
-	s.race("race2", FaketimeEnv(path, past), fmt.Sprintf("M2 clock +%d s (past the bound)", past))
-}
-
-// race: M1 and M2 each make a key on their own machine and create alice/dev/<addr> at the same moment.
-func (s *At5) race(addr string, m2Extra []string, label string) {
+// race: M1 and M2 each make a key on their own machine and create alice/dev/race0 at the same moment. The product
+// maps the race loser to address_taken, so exactly one create succeeds and the other is refused address_taken with exit
+// 1. (A retryable lock-lost error can only come past a 30 s clock skew, which AT-005 never has.) One identity exists
+// afterwards, and the loser's create, run again on its own, is refused address_taken too.
+func (s *At5) race(addr string) {
 	m1, m2 := s.M(1), s.M(2)
 	k1, ok1 := s.makeKey(m1, addr, "-m1")
 	k2, ok2 := s.makeKey(m2, addr, "-m2")
 	if !ok1 || !ok2 {
 		return
 	}
-	jwt1 := filepath.Join(s.Carry, addr+".m1.jwt")
-	jwt2 := filepath.Join(s.Carry, addr+".m2.jwt")
+	type side struct {
+		h   Host
+		pub string
+		jwt string
+	}
+	sides := []side{
+		{m1, k1.pub, filepath.Join(m1.Home().Dir, addr+".m1.jwt")},
+		{m2, k2.pub, filepath.Join(m2.Home().Dir, addr+".m2.jwt")},
+	}
 	var res [2]Result
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i, c := range []struct {
-		h     Host
-		pub   string
-		jwt   string
-		extra []string
-	}{{m1, k1.pub, jwt1, nil}, {m2, k2.pub, jwt2, m2Extra}} {
+	for i, c := range sides {
 		wg.Add(1)
-		go func(i int, c struct {
-			h     Host
-			pub   string
-			jwt   string
-			extra []string
-		}) {
+		go func(i int, c side) {
 			defer wg.Done()
 			<-start
-			res[i] = s.ctl(c.h, "race-"+addr, c.extra, "endpoint", "create", "alice/dev/"+addr, "--public-key", c.pub, "--jwt-out", c.jwt, "--json")
+			res[i] = s.ctl(c.h, "race-"+addr, nil, "endpoint", "create", "alice/dev/"+addr, "--public-key", c.pub, "--jwt-out", c.jwt, "--json")
 		}(i, c)
 	}
 	time.Sleep(200 * time.Millisecond)
 	close(start)
 	wg.Wait()
-	ok, taken := 0, 0
+	ok, taken, badExit := 0, 0, 0
 	for _, r := range res {
 		if r.Code == 0 {
 			ok++
 		} else if refusalCode5(r.Stdout) == "address_taken" || strings.Contains(r.Text(), "address_taken") {
 			taken++
+			if r.Code != 1 {
+				badExit++
+			}
 		}
 	}
-	s.check("concurrent endpoint create of alice/dev/"+addr+" from M1 and M2 ("+label+"): exactly one succeeds and the other is refused address_taken",
-		ok == 1 && taken == 1, fmt.Sprintf("M1 exit %d, M2 exit %d; refused address_taken: %d; %s | %s", res[0].Code, res[1].Code, taken, snip(res[0].Stdout), snip(res[1].Stdout)))
-	if addr == "race0" {
-		// The same create from the machine that lost, run again on its own after the race has settled.
-		var loser int
-		if res[1].Code != 0 {
-			loser = 1
-		}
-		lh, lk, lj := []Host{m1, m2}[loser], []ep5{k1, k2}[loser], []string{jwt1, jwt2}[loser]
-		again := s.ctl(lh, "race-again-"+addr, nil, "endpoint", "create", "alice/dev/"+addr, "--public-key", lk.pub, "--jwt-out", lj, "--json")
-		s.check("the loser's create, run again on its own, is refused address_taken", again.Code != 0 && refusalCode5(again.Stdout) == "address_taken", exitSnip(again))
+	s.check("concurrent endpoint create of alice/dev/"+addr+" from M1 and M2: exactly one succeeds and the other is refused address_taken with exit 1",
+		ok == 1 && taken == 1 && badExit == 0, fmt.Sprintf("M1 exit %d, M2 exit %d; refused address_taken: %d; %s | %s", res[0].Code, res[1].Code, taken, snip(res[0].Stdout), snip(res[1].Stdout)))
+	var loser int
+	if res[1].Code != 0 {
+		loser = 1
 	}
+	lk := []ep5{k1, k2}[loser]
+	again := s.ctl(sides[loser].h, "race-again-"+addr, nil, "endpoint", "create", "alice/dev/"+addr, "--public-key", lk.pub, "--jwt-out", sides[loser].jwt, "--json")
+	s.check("the loser's create, run again on its own, is refused address_taken", again.Code != 0 && refusalCode5(again.Stdout) == "address_taken", exitSnip(again))
 	r := s.ctl(m1, "list-after-"+addr, nil, "endpoint", "list", "--json")
 	n := 0
 	if v, err := parseJSON(r.Stdout); err == nil {
@@ -674,7 +657,7 @@ func (s *At5) race(addr string, m2Extra []string, label string) {
 			}
 		}
 	}
-	s.check("one identity exists for alice/dev/"+addr+" afterwards ("+label+")", r.Code == 0 && n == 1, fmt.Sprintf("%d record(s)", n))
+	s.check("one identity exists for alice/dev/"+addr+" afterwards", r.Code == 0 && n == 1, fmt.Sprintf("%d record(s)", n))
 }
 
 // Finish stops everything by recorded PID, frees the ports, removes nothing but what the run made (Close does that),
@@ -685,9 +668,9 @@ func (s *At5) Finish() {
 	}
 	s.StopServers(s.srv)
 	free := true
-	for _, p := range DefaultPorts {
+	for i, p := range DefaultPorts {
 		for _, port := range []int{p.Client, p.Route, p.Monitor} {
-			if port > 0 && waitPortFree(port, 10*time.Second) != nil {
+			if port > 0 && s.Hosts[i].WaitPortFree(port, 10*time.Second) != nil {
 				free = false
 			}
 		}
@@ -720,7 +703,11 @@ func (s *At5) search() {
 	s.leaks = append(s.leaks, specific...)
 	for _, i := range []int{1, 2} {
 		h := s.M(i)
-		home := filepath.Dir(h.Home().Dir) // the machine's directory: home, server and tls
+		home, done, err := h.Snapshot() // the machine's whole tree: home, config, keys, server and tls
+		if err != nil {
+			s.check(fmt.Sprintf("M%d's file tree is readable for the search", i), false, err.Error())
+			continue
+		}
 		secrets := map[string][]byte{}
 		for k, v := range s.secrets {
 			if i == 1 && (strings.Contains(k, "review") || strings.Contains(k, "race0-m1")) {
@@ -732,6 +719,7 @@ func (s *At5) search() {
 			secrets[k] = v
 		}
 		hits, err := scanFor5(home, secrets)
+		done()
 		s.check(fmt.Sprintf("a search of M%d's whole machine directory (home, config, keys, server) for the %d endpoint seeds and JWTs that do not belong on it finds nothing", i, len(secrets)), err == nil && len(hits) == 0, leakNames(hits))
 		s.leaks = append(s.leaks, hits...)
 	}

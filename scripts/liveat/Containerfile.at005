@@ -1,0 +1,6 @@
+# The image of an AT-005 node. The test builds it from this checkout (podman.go writes this file into a build context
+# next to the four static binaries); nothing is pulled, there is no base image, no shell and no package manager.
+# Certificates and keys are not in the image: the test copies them into each node when it starts.
+FROM scratch
+COPY mash mashctl nats-server nodeinit /bin/
+ENTRYPOINT []

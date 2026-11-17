@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -76,9 +75,21 @@ func NewCA(now time.Time) (*CA, error) {
 	return &CA{Cert: cert, CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), key: key}, nil
 }
 
-// Issue makes a leaf for one node: server and client authentication (routes use it both ways), SANs 127.0.0.1 and
-// localhost, a key of its own.
-func (ca *CA) Issue(name string, now time.Time) (*Leaf, error) {
+// SANsFor is the subject alternative names of a node reached on addr: the address itself (an IP SAN), plus localhost
+// when it is the loopback address.
+func SANsFor(addr string) []string {
+	if ip := net.ParseIP(addr); ip != nil && ip.IsLoopback() {
+		return []string{addr, "localhost"}
+	}
+	return []string{addr}
+}
+
+// Issue makes a leaf for one node: server and client authentication (routes use it both ways), the given SANs (an IP
+// address becomes an IP SAN, anything else a DNS name), a key of its own.
+func (ca *CA) Issue(name string, now time.Time, sans ...string) (*Leaf, error) {
+	if len(sans) == 0 {
+		return nil, errors.New("a certificate needs at least one SAN")
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -94,8 +105,13 @@ func (ca *CA) Issue(name string, now time.Time) (*Leaf, error) {
 		NotAfter:     now.Add(certValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	for _, san := range sans {
+		if ip := net.ParseIP(san); ip != nil {
+			tpl.IPAddresses = append(tpl.IPAddresses, ip)
+		} else {
+			tpl.DNSNames = append(tpl.DNSNames, san)
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, ca.Cert, &key.PublicKey, ca.key)
 	if err != nil {
@@ -116,8 +132,8 @@ func (ca *CA) Issue(name string, now time.Time) (*Leaf, error) {
 	}, nil
 }
 
-// Verify checks that the leaf chains to the CA for server and client use and covers 127.0.0.1 and localhost.
-func (ca *CA) Verify(l *Leaf, now time.Time) error {
+// Verify checks that the leaf chains to the CA for server and client use and covers each of the given names.
+func (ca *CA) Verify(l *Leaf, now time.Time, sans ...string) error {
 	pool := x509.NewCertPool()
 	pool.AddCert(ca.Cert)
 	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth} {
@@ -125,23 +141,27 @@ func (ca *CA) Verify(l *Leaf, now time.Time) error {
 			return err
 		}
 	}
-	if err := l.Cert.VerifyHostname("127.0.0.1"); err != nil {
-		return err
+	for _, san := range sans {
+		if err := l.Cert.VerifyHostname(san); err != nil {
+			return err
+		}
 	}
-	return l.Cert.VerifyHostname("localhost")
+	return nil
 }
 
 // TLSFiles are the paths of one node's TLS files.
 type TLSFiles struct{ CA, Cert, Key string }
 
-// WriteTLS writes ca.pem, cert.pem and key.pem into dir (0700), each file 0600.
-func WriteTLS(dir string, ca *CA, l *Leaf) (TLSFiles, error) {
+// WriteTLS puts ca.pem, cert.pem and key.pem into the host's TLS directory, each file 0600, through the host (so a
+// node in a container gets them by copy, never through a shared directory).
+func WriteTLS(h Host, ca *CA, l *Leaf) (TLSFiles, error) {
+	dir := h.TLSDir()
 	f := TLSFiles{CA: filepath.Join(dir, "ca.pem"), Cert: filepath.Join(dir, "cert.pem"), Key: filepath.Join(dir, "key.pem")}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return f, err
-	}
-	for p, b := range map[string][]byte{f.CA: ca.CertPEM, f.Cert: l.CertPEM, f.Key: l.KeyPEM} {
-		if err := os.WriteFile(p, b, 0o600); err != nil {
+	for _, e := range []struct {
+		p string
+		b []byte
+	}{{f.CA, ca.CertPEM}, {f.Cert, l.CertPEM}, {f.Key, l.KeyPEM}} {
+		if err := h.Put(e.p, e.b, 0o600); err != nil {
 			return f, err
 		}
 	}
@@ -158,7 +178,7 @@ func fingerprint(c *x509.Certificate) string {
 func TLSDescribe(ca *CA, leaves []*Leaf) []string {
 	out := []string{fmt.Sprintf("TLS: a certificate authority made by the harness for this run (ECDSA P-256, valid %s, CA key held in memory and never written), fingerprint %s", certValidity, fingerprint(ca.Cert))}
 	for _, l := range leaves {
-		out = append(out, fmt.Sprintf("TLS leaf %s: signed by that CA, server and client use, SANs 127.0.0.1 and localhost, key of its own (0600, not shown), fingerprint %s", l.Name, fingerprint(l.Cert)))
+		out = append(out, fmt.Sprintf("TLS leaf %s: signed by that CA, server and client use, SANs %s, key of its own (0600, not shown), fingerprint %s", l.Name, sanList(l.Cert), fingerprint(l.Cert)))
 	}
 	return out
 }
@@ -169,4 +189,12 @@ func noPrivate(text string) error {
 		return errors.New("text holds private key armour")
 	}
 	return nil
+}
+
+func sanList(c *x509.Certificate) string {
+	var out []string
+	for _, ip := range c.IPAddresses {
+		out = append(out, ip.String())
+	}
+	return strings.Join(append(out, c.DNSNames...), " and ")
 }

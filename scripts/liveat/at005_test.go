@@ -18,11 +18,11 @@ func TestAT5CertificateChain(t *testing.T) {
 	}
 	var leaves []*Leaf
 	for _, n := range []string{"mash-n1", "mash-n2", "mash-n3"} {
-		l, err := ca.Issue(n, now)
+		l, err := ca.Issue(n, now, SANsFor("127.0.0.1")...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := ca.Verify(l, now); err != nil {
+		if err := ca.Verify(l, now, "127.0.0.1", "localhost"); err != nil {
 			t.Fatalf("%s: %v", n, err)
 		}
 		if d := l.Cert.NotAfter.Sub(l.Cert.NotBefore); d > certValidity+2*time.Minute || d < certValidity {
@@ -36,11 +36,11 @@ func TestAT5CertificateChain(t *testing.T) {
 	if leaves[0].Cert.SerialNumber.Cmp(leaves[1].Cert.SerialNumber) == 0 || string(leaves[0].KeyPEM) == string(leaves[1].KeyPEM) {
 		t.Fatal("leaves are not distinct")
 	}
-	if err := ca.Verify(leaves[0], now.Add(48*time.Hour)); err == nil {
+	if err := ca.Verify(leaves[0], now.Add(48*time.Hour), "127.0.0.1"); err == nil {
 		t.Fatal("a leaf past its validity verifies")
 	}
 	other, _ := NewCA(now)
-	if err := other.Verify(leaves[0], now); err == nil {
+	if err := other.Verify(leaves[0], now, "127.0.0.1"); err == nil {
 		t.Fatal("a leaf verifies under another CA")
 	}
 	// The record text carries no private key and no certificate private part.
@@ -58,12 +58,33 @@ func TestAT5CertificateChain(t *testing.T) {
 	}
 }
 
+func TestAT5SANsFollowTheHostAddress(t *testing.T) {
+	now := time.Now()
+	ca, _ := NewCA(now)
+	l, err := ca.Issue("n", now, SANsFor("10.89.7.12")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ca.Verify(l, now, "10.89.7.12"); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Cert.DNSNames) != 0 || len(l.Cert.IPAddresses) != 1 || l.Cert.IPAddresses[0].String() != "10.89.7.12" {
+		t.Fatalf("SANs: %v %v", l.Cert.IPAddresses, l.Cert.DNSNames)
+	}
+	if ca.Verify(l, now, "127.0.0.1") == nil {
+		t.Fatal("a node certificate covers loopback")
+	}
+	if _, err := ca.Issue("n", now); err == nil {
+		t.Fatal("a certificate without a SAN was issued")
+	}
+}
+
 func TestAT5WriteTLSModes(t *testing.T) {
 	now := time.Now()
 	ca, _ := NewCA(now)
-	l, _ := ca.Issue("n", now)
-	dir := filepath.Join(t.TempDir(), "tls")
-	f, err := WriteTLS(dir, ca, l)
+	l, _ := ca.Issue("n", now, "127.0.0.1")
+	h := fakeHosts(t)[0]
+	f, err := WriteTLS(h, ca, l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,30 +244,6 @@ func TestAT5SSHIsAStub(t *testing.T) {
 	}
 	var _ Hosts = SSH{}
 	var _ Hosts = Local{}
-}
-
-func TestAT5Faketime(t *testing.T) {
-	env := strings.Join(FaketimeEnv("/lib/libfaketime.so.1", 5), " ")
-	if !strings.Contains(env, "LD_PRELOAD=/lib/libfaketime.so.1") || !strings.Contains(env, "FAKETIME=+5") {
-		t.Fatal(env)
-	}
-	if !strings.Contains(strings.Join(FaketimeEnv("/l", -3), " "), "FAKETIME=-3") {
-		t.Fatal("negative skew")
-	}
-	if p, why := FindFaketime("/nonexistent/lib"); p != "" || why == "" {
-		t.Fatal("a missing --faketime-lib is accepted")
-	}
-	f := filepath.Join(t.TempDir(), "libfaketime.so.1")
-	_ = os.WriteFile(f, []byte("x"), 0o600)
-	if p, _ := FindFaketime(f); p != f {
-		t.Fatal("an existing --faketime-lib is not used")
-	}
-	if v, ok := clockSeconds("name: OK\nclock: -4.2s from the server\n"); !ok || v != -4.2 {
-		t.Fatalf("%v %v", v, ok)
-	}
-	if _, ok := clockSeconds("clock: n/a - not connected"); ok {
-		t.Fatal("n/a read as a number")
-	}
 }
 
 func TestAT5Helpers(t *testing.T) {

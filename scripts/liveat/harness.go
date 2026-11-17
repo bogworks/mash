@@ -39,6 +39,15 @@ type Run struct {
 	mu    sync.Mutex
 	procs []*Proc
 	pids  map[int]string // recorded PIDs of processes this run started and has not yet stopped
+	undo  []func()       // what a host made outside Dir (containers, a network, an image), run by Close, last first
+}
+
+// OnClose registers a function that removes something a host made outside the run directory. Close runs them after
+// every recorded process is stopped, last registered first, whether or not the run passed.
+func (r *Run) OnClose(fn func()) {
+	r.mu.Lock()
+	r.undo = append(r.undo, fn)
+	r.mu.Unlock()
 }
 
 // NewRun makes the run directory and its output directory, and opens the run log.
@@ -87,6 +96,13 @@ func (r *Run) Close() {
 	r.mu.Unlock()
 	for pid, name := range pids {
 		stopPID(pid, name, r.Runner.logf)
+	}
+	r.mu.Lock()
+	undo := r.undo
+	r.undo = nil
+	r.mu.Unlock()
+	for i := len(undo) - 1; i >= 0; i-- {
+		undo[i]()
 	}
 	if r.LogFile != nil {
 		r.LogFile.Close()
