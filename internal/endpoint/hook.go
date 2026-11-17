@@ -219,7 +219,8 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			}
 			delete(h.fails, seq)
 			h.msgs[seq] = p
-			e.closeAnswered(p) // durably spooled: the ask it answered is closed
+			// The ask it answered stays open: it is closed when the entry is drained and acked (ackDrained), so a restart
+			// before then redelivers the reply and it still matches.
 			if ep != 0 {
 				if h.epochs == nil {
 					h.epochs = map[spool.Ref]uint64{}
@@ -521,6 +522,7 @@ func (e *Endpoint) ackDrained(p pending) {
 	if e.failBeforeAck != nil {
 		e.failBeforeAck(p.mail.Seq)
 	}
+	e.closeAnswered(p) // shown: the ask it answered is closed (a redelivery is acked by its tombstone, never matched again)
 	e.ack(p)
 }
 

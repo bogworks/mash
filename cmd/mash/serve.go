@@ -755,7 +755,16 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				seq := res.Seq
 				if res.Duplicate {
-					return fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID), nil
+					// The first attempt's acknowledgement may have been lost: its ask is recorded now, once (Add is
+					// idempotent on recipient and receipt sequence), so the reply still wakes this sender.
+					dup := fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID)
+					if answerNow {
+						if _, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within); err != nil {
+							return "", fmt.Errorf("%s\nthe answer=now ask could not be recorded: %v", dup, err)
+						}
+						dup += "\n" + answerNowLine
+					}
+					return dup, nil
 				}
 				receipt := fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To)))
 				if tagged {

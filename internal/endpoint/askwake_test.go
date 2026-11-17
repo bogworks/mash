@@ -13,6 +13,7 @@ import (
 
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/spool"
 )
 
 func TestParseAnswerWithin(t *testing.T) {
@@ -149,12 +150,15 @@ func TestAnswerNowReplyWakesWhateverTheKind(t *testing.T) {
 	if w := ev.waitFor(t, 1, 3*time.Second); len(w) != 1 {
 		t.Fatalf("wake %q", w)
 	}
-	if tb.Len() != 0 {
-		t.Fatal("the ask stayed open")
+	// Spooled is not settled: the ask stays open until a hook shows the reply and serve acks it.
+	if tb.Len() != 1 {
+		t.Fatal("the ask closed when the reply was only spooled")
 	}
 	var got *struct{ wake, urgent bool }
+	var answer spool.Entry
 	for _, e := range waiting(t, sp) {
 		if string(e.Body) == "the answer" {
+			answer = e
 			got = &struct{ wake, urgent bool }{e.AnswerWake, e.Urgent}
 			m := MailOf(e)
 			if m.Trust != sap.TrustVerified || m.Kind != kind.FYI || m.ReplyTo != 7 {
@@ -165,11 +169,15 @@ func TestAnswerNowReplyWakesWhateverTheKind(t *testing.T) {
 	if got == nil || !got.wake || got.urgent {
 		t.Fatalf("spooled %+v", got)
 	}
+	if err := sp.Drained(answer.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the ask closed once the reply was shown and acked", func() bool { return tb.Len() == 0 })
 	// a second reply follows its own kind: it does not wake
 	if _, err := b.SendWith(ctx, "a", "and again", SendOptions{Kind: kind.FYI, InReplyTo: 7}); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "second reply spooled", func() bool { return len(waiting(t, sp)) == 6 })
+	until(t, "second reply spooled", func() bool { return len(waiting(t, sp)) == 5 })
 	// The held answer may ring again by the ordinary backoff, as a held urgent mail does; the second reply itself is
 	// ordinary fyi mail: it carries no answer wake and the ask stays closed.
 	for _, e := range waiting(t, sp) {
@@ -243,4 +251,64 @@ func TestAnswerNowAskStaysOpenUntilDelivered(t *testing.T) {
 	ev.fail.Store(0)
 	ev.waitFor(t, 1, 5*time.Second)
 	until(t, "the ask closed", func() bool { return tb.Len() == 0 })
+}
+
+// A reply spooled but not yet shown leaves its ask open in the file, so a serve that restarts before the drain still
+// matches the redelivered reply; once the hook drains it and serve acks it, the ask is closed.
+func TestAnswerNowAskSurvivesRestartUntilSpoolDrained(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a, _, sp := f.runSpooled(t, "a")
+	if err := sp.Touch(); err != nil {
+		t.Fatal(err)
+	}
+	b := f.client(t, "b")
+	ctx := context.Background()
+	rec, err := a.lookup(ctx, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "asks.json")
+	tb := OpenAskTable(path)
+	a.SetReplyWaker(tb)
+	if _, err := tb.Add("b", rec.User, 7, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.SendWith(ctx, "a", "the answer", SendOptions{Kind: kind.FYI, InReplyTo: 7}); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "reply spooled", func() bool { return len(waiting(t, sp)) == 1 })
+	time.Sleep(300 * time.Millisecond)
+	// a restart: a new table loaded from the file still matches the redelivered reply
+	if re := OpenAskTable(path); re.Len() != 1 || !re.AnswerMatches(rec.User, 7) {
+		t.Fatal("the ask was closed by the spool write")
+	}
+	ent := waiting(t, sp)[0]
+	if err := sp.Drained(ent.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the ask closed after drain and ack", func() bool { return OpenAskTable(path).Len() == 0 })
+}
+
+// Add is idempotent on (recipient key, receipt sequence): a repeat keeps the first ask, adds none, extends nothing.
+func TestAskTableAddIsIdempotent(t *testing.T) {
+	tb := OpenAskTable(filepath.Join(t.TempDir(), "asks.json"))
+	first, err := tb.Add("b", "UB", 5, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := tb.Add("b", "UB", 5, time.Hour)
+	if err != nil || again.ID != first.ID || !again.Deadline.Equal(first.Deadline) || tb.Len() != 1 {
+		t.Fatalf("repeat: %+v %v len %d", again, err, tb.Len())
+	}
+	if _, err := tb.Add("b", "UB", 6, time.Minute); err != nil || tb.Len() != 2 {
+		t.Fatal("a different receipt must add an ask")
+	}
+	for i := tb.Len(); i < MaxOpenAsks; i++ {
+		if _, err := tb.Add("b", "UB", uint64(100+i), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tb.Add("b", "UB", 5, time.Minute); err != nil {
+		t.Fatalf("a repeat of a recorded ask needs no slot: %v", err)
+	}
 }

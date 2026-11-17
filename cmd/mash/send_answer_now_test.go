@@ -98,3 +98,46 @@ func TestCLISendIgnoresAnswerNow(t *testing.T) {
 		t.Fatal(sendUsage)
 	}
 }
+
+// A retried answer=now send with the same id (its first acknowledgement was lost) records its ask once: the duplicate
+// receipt carries the wake line, and a second retry adds no ask.
+func TestServeSendAnswerNowDuplicateRecordsOneAsk(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	state := t.TempDir()
+	w.env["a"]["MASH_STATE_DIR"] = state
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	args := `{"to":"b","text":"need it","kind":"fyi","answer":"now","id":"dup-1"}`
+	count := func() int {
+		var file string
+		_ = filepath.Walk(filepath.Join(state, "asks"), func(p string, fi os.FileInfo, err error) error {
+			if err == nil && !fi.IsDir() && strings.HasSuffix(p, ".json") {
+				file = p
+			}
+			return nil
+		})
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tbl struct {
+			Asks []struct{} `json:"asks"`
+		}
+		if err := json.Unmarshal(b, &tbl); err != nil {
+			t.Fatal(err)
+		}
+		return len(tbl.Asks)
+	}
+	if out, bad := s.callSend(t, 31, args); bad || !strings.HasSuffix(out, "will wake you on the reply") {
+		t.Fatalf("first: %q %v", out, bad)
+	}
+	for i := 0; i < 2; i++ {
+		out, bad := s.callSend(t, 32+i, args)
+		if bad || !strings.Contains(out, "duplicate of id") || !strings.HasSuffix(out, "\nwill wake you on the reply") {
+			t.Fatalf("duplicate %d: %q %v", i, out, bad)
+		}
+		if n := count(); n != 1 {
+			t.Fatalf("after duplicate %d: %d asks", i, n)
+		}
+	}
+}

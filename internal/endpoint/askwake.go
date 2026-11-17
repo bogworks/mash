@@ -188,11 +188,18 @@ func ParseAnswerWithin(answer, within string) (d time.Duration, ok bool, err err
 }
 
 // Add records an ask for the message the send's receipt acknowledged and persists the table. It fails when the table is
-// full (the send is already made; callers run Check first).
+// full (the send is already made; callers run Check first). It is idempotent on (recipientKey, receiptSeq): an open
+// ask with that pair is returned as it is (not duplicated, deadline not extended, no slot taken), so a retried send
+// whose receipt was a duplicate can record its ask safely.
 func (t *AskTable) Add(recipient, recipientKey string, receiptSeq uint64, within time.Duration) (OpenAsk, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.prune()
+	for _, a := range t.asks {
+		if a.RecipientKey == recipientKey && a.ReceiptSeq == receiptSeq {
+			return a, nil
+		}
+	}
 	if len(t.asks) >= MaxOpenAsks {
 		return OpenAsk{}, fmt.Errorf("mash: %d answer=now asks are already open", MaxOpenAsks)
 	}
@@ -240,8 +247,8 @@ func (t *AskTable) CloseAnswered(userKey string, replyTo uint64) bool {
 	return false
 }
 
-// closeAnswered closes the ask p answered, if it answered one: called when p is settled (durably spooled, or delivered
-// by the channel), never before.
+// closeAnswered closes the ask p answered, if it answered one: called when p is settled (shown by a hook and acked, or
+// delivered by the channel), never before.
 func (e *Endpoint) closeAnswered(p pending) {
 	if p.askSeq == 0 {
 		return
