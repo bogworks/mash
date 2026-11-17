@@ -142,7 +142,7 @@ The model plan (section 2) gives the account-side steps. This is how an operator
 
 ```text
 mashctl endpoint migrate [NAME | --all] --group G [--name N] [--public-keys DIR]
-                         [--finish] [--force] [--yes] [--dry-run] [--json]
+                         [--finish | --rollback] [--force] [--yes] [--dry-run] [--json]
                          [--servers N] [--sys-creds FILE]
 ```
 
@@ -153,6 +153,7 @@ ruling A; there is no bridge, section 3.2):
 |---|---|
 | `mashctl endpoint migrate --all --group dev --dry-run` | Plans every legacy endpoint. Changes nothing. |
 | `mashctl endpoint migrate --all --group dev --yes` | Step 1 for every legacy endpoint: makes the new identity beside the old one (record, inbox, user, creds file or, with `--public-keys`, signed keys). Revokes nothing. It lists first, and acts only with `--yes`, as `reissue --all` does. |
+| `mashctl endpoint migrate --all --group dev --rollback --yes` | Undoes step 1 for every endpoint that has not been finished: removes the new identities and burns no flat key, so the same addresses can be used again; leaves the old identities. Refuses an endpoint with unread mail on its new inbox unless `--force`, and refuses every endpoint after `--finish`. (`endpoint delete` is not the same: it burns the flat key.) |
 | `mashctl endpoint migrate --all --group dev --finish --yes` | Step 2 for every endpoint that has moved: revokes the old credentials, deletes the drained legacy inbox and record. Lists any that has not moved, and leaves its record. |
 
 - With no `NAME` and no `--all` the command exits 2 and says to name an endpoint or give `--all`. (The model plan has
@@ -164,7 +165,7 @@ ruling A; there is no bridge, section 3.2):
   `--force` says to drop them.
 - `--public-keys DIR` takes the public halves for the endpoints in the run. `DIR` holds one file per legacy name,
   `NAME.pub` (the file `mash credential key` writes). An endpoint with a file there is signed from it and gets no creds
-  file; one without a file is minted on the central host and gets a creds file. A file for no legacy endpoint is
+  file; one without a file is minted on the central host and gets a creds file (this mixing is DEC-002 in the contract, pending). A file for no legacy endpoint is
   reported and ignored. Without `--public-keys` every endpoint is minted centrally.
 - `NAME` with `--finish` is not offered: the migration is all endpoints or none. `NAME` stays for step 1 of a repair
   after a refusal (the one endpoint that was refused, once fixed).
@@ -212,7 +213,8 @@ next: stop every session, then mashctl endpoint migrate --all --group dev --yes
   `user_public_key`. After step 1 the `next_steps` entry says where the new creds file is and that the endpoint's
   session must be restarted with it under the 0.5.5 binary.
 - Refusal codes: `instance_too_long`, `name_invalid`, `name_rule`, `address_taken`, `key_retired`, `zone_record`
-  (run `unzone` first), `legacy_inbox_undrained` (with `unread`), `not_moved`.
+  (run `unzone` first), `legacy_inbox_undrained` (with `unread`), `not_moved`, `never_connected` (finish), `new_inbox_unread` (rollback, with
+  `unread`), `already_finished` (rollback).
 
 ### 3.2 What the operator does, in order, and what breaks if endpoints move one at a time
 
@@ -233,16 +235,19 @@ endpoint, with no bridge between old and new (the maintainer's ruling A). In ord
 7. **Start every session on the 0.5.5 binary with the new creds, and send one message through each** (`mash inbox` shows
    it). Do not go on until each endpoint has received one.
 8. **`mashctl endpoint migrate --all --group dev --finish --yes`** (step 2). It revokes the old credentials, deletes the
-   drained legacy inboxes and records, and lists, without touching, any endpoint that did not move.
+   drained legacy inboxes and records, and lists, without touching, any endpoint that did not move, and refuses an endpoint that never connected under its new
+   identity unless `--force`.
    `mashctl audit` is clean when nothing is legacy.
 
 Rollback, before step 8 (nothing was revoked, so the old identities still work):
 
 1. Stop every session.
 2. Put the 0.5.0 binary and the old creds files back.
-3. Check that each old identity works: `mash inbox` under the old creds shows the old mail.
-4. Remove the new identities: `mashctl endpoint delete alice/dev/NAME` for each (the new creds and records go; the old
-   ones stay).
+3. Read any mail that reached the new inboxes: `mash inbox` under the NEW creds, before the next step.
+4. Remove the new identities: `mashctl endpoint migrate --all --group dev --rollback --yes` (the new creds and records
+   go; the old ones stay, and the flat keys stay free, so the sitting can be run again with the same addresses). It
+   refuses an endpoint with unread mail on its new inbox unless `--force`, and refuses after step 8.
+5. Check that each old identity works: `mash inbox` under the old creds shows the old mail.
 
 After step 8 there is no rollback: the old credentials are revoked. Take the old creds files out of the rollback place
 only after step 7 is checked.
