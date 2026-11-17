@@ -34,7 +34,7 @@ func TestServeSendAnswerNow(t *testing.T) {
 		t.Fatalf("plain: %q %v", out, bad)
 	}
 	out, bad = call(`{"to":"b","text":"need it","kind":"fyi","answer":"now","answer_within":"30m"}`)
-	if bad || !strings.HasPrefix(out, "sent #2 to b") || !strings.HasSuffix(out, "\nwill wake you on the reply") {
+	if bad || !strings.HasPrefix(out, "sent #2 to b") || !strings.Contains(out, "\nwill wake you on the reply, or at ") || !strings.HasSuffix(out, "Z with its state if none came") {
 		t.Fatalf("answer now: %q %v", out, bad)
 	}
 	var file string
@@ -128,12 +128,12 @@ func TestServeSendAnswerNowDuplicateRecordsOneAsk(t *testing.T) {
 		}
 		return len(tbl.Asks)
 	}
-	if out, bad := s.callSend(t, 31, args); bad || !strings.HasSuffix(out, "will wake you on the reply") {
+	if out, bad := s.callSend(t, 31, args); bad || !strings.Contains(out, "will wake you on the reply") {
 		t.Fatalf("first: %q %v", out, bad)
 	}
 	for i := 0; i < 2; i++ {
 		out, bad := s.callSend(t, 32+i, args)
-		if bad || !strings.Contains(out, "duplicate of id") || !strings.HasSuffix(out, "\nwill wake you on the reply") {
+		if bad || !strings.Contains(out, "duplicate of id") || !strings.Contains(out, "\nwill wake you on the reply") {
 			t.Fatalf("duplicate %d: %q %v", i, out, bad)
 		}
 		if n := count(); n != 1 {

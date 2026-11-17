@@ -276,9 +276,8 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		notify := func(text string) {
-			_ = srv.Notify(text, nil)
-		}
+		notifyErr := func(text string) error { return srv.Notify(text, nil) }
+		notify := func(text string) { _ = notifyErr(text) }
 		waited := ep == nil
 		if waited {
 			var ok bool
@@ -289,7 +288,8 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
-		src.asks.Reload() // the lease is held: pick up asks the previous holder recorded while this serve waited
+		src.asks.Reload()      // the lease is held: pick up asks the previous holder recorded while this serve waited
+		stopWatch := func() {} // replaced once the deadline watcher starts
 		ep.SetReplyWaker(src.asks)
 		select {
 		case <-srv.ChannelReady():
@@ -299,6 +299,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		if waited {
 			notify(fmt.Sprintf("mash: endpoint %s is online; mail is on for this session.", cfg.DisplayName()))
 		}
+		// The deadline wake of answer=now asks (endpoint/askdeadline.go), delivered as a local notice like the others here (after the channel is ready).
+		// The watcher has its own context so it can be stopped, and joined, before the endpoint is closed or superseded:
+		// a watcher that outlived its endpoint would keep scanning and rewriting the ask file beside the newer serve.
+		stopWatch = startAskWatch(ctx, ep.AskWatchOf(src.asks, notifyErr), endpoint.AskWatchEvery, askWatchStopWait, stderr)
+		defer stopWatch() // runs before closeEP
 		go pingClient(ctx, srv, ep)
 		go warnLeaseRollup(ctx, ep, stderr)
 		// Hook delivery: once the plugin's hook has run in this session, mail goes through the spool (endpoint/hook.go).
@@ -397,6 +402,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				// A newer serve of this same session holds the lease (ADR 0092): this one has stopped consuming and
 				// refreshing. It stays up, inactive and labelled, until its client closes it or its parent changes.
 				stopSvc()
+				stopWatch()
 				state.Store(&sessionState{superseded: lostTo})
 				closeEP()
 				fmt.Fprintf(stderr, "%v; superseded by a newer mash serve of this session (pid %s); this server is inactive\n", err, lostTo.PID)
@@ -429,6 +435,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			// the shutdown. Lease loss after a start stays terminal.
 			lost.Store(true)
 			stopSvc()
+			stopWatch()
 			fmt.Fprintln(stderr, err)
 			told := make(chan struct{})
 			go func() {
@@ -451,6 +458,38 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	return 0
 }
+
+// askWatchStopWait bounds how long stopWatch waits for the deadline watcher to return. A Notify stuck on a blocked
+// stdout must not hang shutdown; the ask file stays consistent because every table write is a locked merge-write-rename.
+const askWatchStopWait = 5 * time.Second
+
+// startAskWatch runs w on its own context under ctx and returns its stop function: cancel, then wait up to wait for Run
+// to return. If it has not, one line goes to stderr and the caller closes anyway. Safe to call more than once.
+func startAskWatch(ctx context.Context, w endpoint.AskWatch, every, wait time.Duration, stderr io.Writer) (stop func()) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	if w.Logf == nil {
+		w.Logf = func(format string, args ...any) { fmt.Fprintf(stderr, format, args...) }
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(watchCtx, every)
+		askWatchEnded.Add(1)
+	}()
+	return sync.OnceFunc(func() {
+		cancel()
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			fmt.Fprintf(stderr, "mash: answer-now watcher did not stop within %s; closing anyway\n", wait)
+		}
+	})
+}
+
+// askWatchEnded counts deadline watchers whose Run has returned (a test reads it).
+var askWatchEnded atomic.Int64
 
 // acquire retries the Open every leaseRetry (backing off after transient failures) until it succeeds, ctx ends
 // or a permanent error stops it. It starts from the first Open's failure: a held lease, or else startErr, a
@@ -621,9 +660,6 @@ func kindProp() map[string]any {
 		"description": "optional, default task: blocker|question|task wake an idle recipient; result|fyi (opt-in) wait for its next turn"}
 }
 
-// answerNowLine is the receipt line of an answer=now send. The deadline wording is added to this sentence.
-const answerNowLine = "will wake you on the reply"
-
 // recipientStateLine is the advisory line a send receipt carries: what the recipient reports about itself, waiting for
 // the answer at most until PeerActivityTimeout after the send started.
 func recipientStateLine(peer <-chan endpoint.PeerState, started time.Time) string {
@@ -760,10 +796,11 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					// idempotent on recipient and receipt sequence), so the reply still wakes this sender.
 					dup := fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID)
 					if answerNow {
-						if _, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within); err != nil {
+						ask, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within)
+						if err != nil {
 							return "", fmt.Errorf("%s\nthe answer=now ask could not be recorded: %v", dup, err)
 						}
-						dup += "\n" + answerNowLine
+						dup += "\n" + endpoint.DeadlineText(ask.Deadline)
 					}
 					return dup, nil
 				}
@@ -775,10 +812,11 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					receipt += "\n" + recipientStateLine(peer, started)
 				}
 				if answerNow {
-					if _, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within); err != nil {
+					ask, err := src.asks.Add(sap.KeyOf(a.To), res.RecipientUser, seq, within)
+					if err != nil {
 						return "", fmt.Errorf("%s\nthe message was sent, but the answer=now ask could not be recorded: %v", receipt, err)
 					}
-					receipt += "\n" + answerNowLine
+					receipt += "\n" + endpoint.DeadlineText(ask.Deadline)
 				}
 				return receipt, nil
 			})},

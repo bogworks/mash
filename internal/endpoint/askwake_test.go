@@ -42,7 +42,7 @@ func TestParseAnswerWithin(t *testing.T) {
 }
 
 // The table is capped, persists across a restart (a reopen of the same file), closes an ask on its first match only,
-// and drops entries older than a day.
+// and drops entries long past their deadline.
 func TestAskTablePersistsCapsAndExpires(t *testing.T) {
 	dir := t.TempDir()
 	path := AskTablePath(dir, "o", "a")
@@ -82,9 +82,9 @@ func TestAskTablePersistsCapsAndExpires(t *testing.T) {
 		t.Fatal("the close was not persisted")
 	}
 	old := OpenAskTable(path)
-	old.now = func() time.Time { return time.Now().Add(AskTTL + time.Minute) }
+	old.now = func() time.Time { return time.Now().Add(time.Minute + AskSettleGrace + time.Minute) }
 	if old.Len() != 0 {
-		t.Fatalf("%d asks survived 24h", old.Len())
+		t.Fatalf("%d asks survived their deadline plus the settle grace", old.Len())
 	}
 	if filepath.Dir(path) != filepath.Join(dir, "asks", "o") {
 		t.Fatal(path)
@@ -321,9 +321,6 @@ func TestAskTableReloadSeesOtherHoldersAsks(t *testing.T) {
 	if _, err := holder.Add("b", "UB", 7, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if waiting.AnswerMatches("UB", 7) {
-		t.Fatal("the stale snapshot should not know the ask yet")
-	}
 	waiting.Reload()
 	if !waiting.AnswerMatches("UB", 7) || waiting.Len() != 1 {
 		t.Fatal("Reload must make the new ask visible")
@@ -334,5 +331,168 @@ func TestAskTableReloadSeesOtherHoldersAsks(t *testing.T) {
 	waiting.Reload()
 	if !waiting.AnswerMatches("UB", 7) {
 		t.Fatal("a malformed file must keep the current asks")
+	}
+}
+
+// Two tables of one file (an older serve of a session beside a newer one): a write by one never drops an ask the other
+// added, and never brings back one the other closed.
+func TestAskTableTwoWritersMerge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asks.json")
+	seed := OpenAskTable(path)
+	old, err := seed.Add("p", "UP", 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := OpenAskTable(path), OpenAskTable(path)
+	added, err := b.Add("q", "UQ", 2, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Close(old.ID) { // a's expiry of the old ask must keep b's new one
+		t.Fatal("old ask not open in a")
+	}
+	got := OpenAskTable(path).Asks()
+	if len(got) != 1 || got[0].ID != added.ID {
+		t.Fatalf("after a's close the file holds %v, want only %s", got, added.ID)
+	}
+	// b closes the new ask; a's next write must not resurrect it.
+	if !b.CloseAnswered("UQ", 2) {
+		t.Fatal("reply did not close the ask in b")
+	}
+	z, err := a.Add("r", "UR", 3, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = OpenAskTable(path).Asks()
+	if len(got) != 1 || got[0].ID != z.ID {
+		t.Fatalf("the file holds %v, want only %s", got, z.ID)
+	}
+}
+
+// An ask with the longest answer_within (24h) is still in the table just after its deadline, so the watcher can settle
+// it; so is one that a restart finds past its deadline. Only the settle grace past the deadline removes it.
+func TestAskTableKeepsExpiredAskUntilSettled(t *testing.T) {
+	path := AskTablePath(t.TempDir(), "o", "a")
+	clock := time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC)
+	tb := OpenAskTable(path)
+	tb.now = func() time.Time { return clock }
+	if _, err := tb.Add("b", "UB", 7, MaxAnswerWithin); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(MaxAnswerWithin + time.Second)
+	if got := tb.Expired(clock); len(got) != 1 || got[0].ReceiptSeq != 7 {
+		t.Fatalf("expired just after the deadline: %+v", got)
+	}
+	re := OpenAskTable(path)
+	re.now = func() time.Time { return clock.Add(time.Hour) }
+	if got := re.Expired(re.now()); len(got) != 1 {
+		t.Fatalf("a restart after the deadline lost the ask: %+v", got)
+	}
+	if !re.Close(re.Expired(re.now())[0].ID) || len(OpenAskTable(path).Asks()) != 0 {
+		t.Fatal("settling the ask did not remove it")
+	}
+	if _, err := tb.Add("b", "UB", 8, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(time.Minute + AskSettleGrace + time.Second)
+	if got := tb.Expired(clock); len(got) != 0 {
+		t.Fatalf("an ask past the settle grace is still held: %+v", got)
+	}
+}
+
+// Two tables on one file (two serve processes) adding and closing concurrently end with the union of the adds minus the
+// closes, and no temp file is left.
+func TestAskTableTwoWritersOneFile(t *testing.T) {
+	dir := t.TempDir()
+	path := AskTablePath(dir, "o", "a")
+	tabs := []*AskTable{OpenAskTable(path), OpenAskTable(path)}
+	const n = 40
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	want := map[string]bool{}
+	for w, tb := range tabs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var mine []string
+			for i := 0; i < n; i++ {
+				a, err := tb.Add("b", "UB", uint64(w*1000+i+1), time.Hour)
+				if err != nil {
+					// the cap is shared through the file: close what this writer added and carry on
+					for _, id := range mine {
+						tb.Close(id)
+					}
+					mine = nil
+					continue
+				}
+				mine = append(mine, a.ID)
+				if i%3 == 0 {
+					tb.Close(mine[0])
+					mine = mine[1:]
+				}
+			}
+			mu.Lock()
+			for _, id := range mine {
+				want[id] = true
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	got := map[string]bool{}
+	for _, a := range OpenAskTable(path).Asks() {
+		got[a.ID] = true
+	}
+	for id := range want {
+		if !got[id] {
+			t.Errorf("ask %s was lost to the other writer", id)
+		}
+	}
+	ents, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if strings.HasSuffix(e.Name(), askTableTemp) {
+			t.Errorf("stray temp file %s", e.Name())
+		}
+	}
+}
+
+// A table that loaded the file before another serve added an ask still matches that ask's reply and reports its deadline,
+// with no write of its own in between.
+func TestAskTableRefreshesFromFileBeforeReading(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asks.json")
+	a, b := OpenAskTable(path), OpenAskTable(path) // both load the empty (missing) file
+	if _, err := b.Add("q", "UQ", 5, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if !a.AnswerMatches("UQ", 5) {
+		t.Fatal("a did not see the ask b added after a loaded")
+	}
+	if !a.CloseAnswered("UQ", 5) {
+		t.Fatal("a did not close the ask b added after a loaded")
+	}
+	if got := OpenAskTable(path).Asks(); len(got) != 0 {
+		t.Fatalf("the ask is still in the file after its reply: %v", got)
+	}
+	if a.AnswerMatches("UQ", 5) || b.AnswerMatches("UQ", 5) || a.CloseAnswered("UQ", 5) || b.CloseAnswered("UQ", 5) {
+		t.Fatal("a closed ask matched again")
+	}
+
+	// A deadline too: d adds an ask that is already expired by c's clock.
+	c := OpenAskTable(path)
+	d := OpenAskTable(path)
+	d.now = func() time.Time { return time.Now().Add(-time.Hour) }
+	added, err := d.Add("r", "UR", 6, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Expired(time.Now())
+	if len(got) != 1 || got[0].ID != added.ID {
+		t.Fatalf("c.Expired = %v, want the ask d added", got)
+	}
+	if !c.Close(added.ID) || d.Len() != 0 {
+		t.Fatal("c's close did not reach d")
 	}
 }

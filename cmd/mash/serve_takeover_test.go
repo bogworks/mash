@@ -65,6 +65,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
 
 	attempts := acquireAttempts.Load()
+	watchEnded := askWatchEnded.Load()
 	fresh := startServe(t, w.env["a"])
 	fresh.initialize(t)
 	fresh.tools(t)
@@ -90,6 +91,8 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	eventually(t, 5*time.Second, "the old serve steps down", func() bool {
 		return strings.Contains(resultText(old.call(t, 20, "status", `{}`)), "SUPERSEDED")
 	})
+	// Its deadline watcher was stopped and joined on the way (before its endpoint closed); the new serve's still runs.
+	eventually(t, 5*time.Second, "the old serve's deadline watcher has stopped", func() bool { return askWatchEnded.Load() == watchEnded+1 })
 	if txt := resultText(old.call(t, 21, "status", `{}`)); !strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "inactive") {
 		t.Fatalf("the old serve's status: %s", txt)
 	}

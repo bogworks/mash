@@ -63,13 +63,27 @@ A message that fails any of the three conditions, including an unverifiable or f
 
 **What this amends.** ADR 0027 says the kind decides wake or wait. For the one reply that answers an `answer: now` ask, the asker's own instruction decides instead. A kind still never grants trust, and neither does this.
 
-**Next.** A deadline wake, with the recipient's reported state when no reply has come by `answer_within`, uses the same table. It is a separate change and amends this record.
+**The deadline wake.** `mash serve` scans the open asks every 5 s. When an ask's deadline passes and it is still open, mash first looks at the asker's inbox.
+* If a verified message from the recipient was stored since the ask, the notice says so: `<recipient> sent mail at <time> (not marked as an answer to #<seq>)`.
+* Otherwise mash asks the recipient's status and wakes the session with a notice such as `No answer to #<seq> to <recipient> after 10m. It reports: blocked (question).` Each other outcome has its own sentence: working, not reporting, no answer, and not available.
+* The ask is then closed. A reply that closes the ask first means no notice.
+
+The notice is mash's own:
+* It goes through serve's existing local-notice path, and its lines start `mash:`.
+* It has no peer sender, no inbox sequence of its own and no trust label.
+* It carries only state words and mash's own numbers, never text the peer sent.
+
+Asks that expired while serve was not running are reported once, in one combined notice at the next start.
+
+The send receipt says `will wake you on the reply, or at <HH:MMZ> with its state if none came`.
+
+Limitation: like serve's other local notices, it is a channel event. On a host that takes no channel delivery, it may not reach the session.
 
 ### Consequences
 
 * Good, because an answer reaches the asker at once, even when the replier sent it as `fyi`.
 * Good, because every fact that causes the wake is signed. A third party cannot forge the in-reply-to or the sender.
-* Bad, because a replier whose mash does not set `in_reply_to` is not recognised. Its reply follows its own kind, and the deadline wake, still to come, covers that case.
+* Bad, because a replier whose mash does not set `in_reply_to` is not recognised. Its reply follows its own kind. The deadline wake then reports, at the deadline, that the recipient sent mail.
 * Bad, because a reply that arrives in the few milliseconds between the send's acknowledgement and the ask being recorded is missed. Such a reply follows its own kind.
 * Neutral, because a held answer-wake mail can ring again on the normal idle backoff, as a held urgent mail does.
 
