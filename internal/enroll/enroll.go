@@ -137,6 +137,24 @@ func (d Deps) record(ctx context.Context, addr sap.Address, publicKey, purpose s
 	return err
 }
 
+func addressTaken(a sap.Address) *Refusal {
+	return &Refusal{Code: CodeAddressTaken, Msg: fmt.Sprintf("endpoint %s already exists; use reissue to give it a new key", a)}
+}
+
+// checkAddress reports whether addr already has a record naming pub (a rerun of this Create), and refuses with
+// address_taken when the record names another key.
+func (d Deps) checkAddress(ctx context.Context, addr sap.Address, pub string) (exists bool, err error) {
+	switch user, _, err := d.Admin.UserOf(ctx, addr); {
+	case errors.Is(err, admin.ErrNoRecord):
+		return false, nil
+	case err != nil:
+		return false, err
+	case user != pub:
+		return false, addressTaken(addr)
+	}
+	return true, nil
+}
+
 // Create enrolls the endpoint at r.Addr. A run that stopped part-way is finished by running it again with the same
 // public key; the JWT is signed again. The same-host path makes a new key on every run, so a rerun after a kill leaves
 // the earlier key's issue record unused (and unrevoked until retire).
@@ -157,18 +175,17 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 		return fail(&Refusal{Code: CodeKeyRetired, Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", r.Addr)})
 	}
 	// An address that already has a record is refused before anything is written, so the key is not bound to it.
-	exists := false
-	switch user, _, err := d.Admin.UserOf(ctx, r.Addr); {
-	case errors.Is(err, admin.ErrNoRecord):
-	case err != nil:
+	exists, err := d.checkAddress(ctx, r.Addr, pub)
+	if err != nil {
 		return fail(err)
-	case user != pub:
-		return fail(&Refusal{Code: CodeAddressTaken, Msg: fmt.Sprintf("endpoint %s already exists; use reissue to give it a new key", r.Addr)})
-	default:
-		exists = true // a rerun of this Create
 	}
 	tok, err := d.sign(r.Addr, pub)
 	if err != nil {
+		return fail(err)
+	}
+	// Looked at again just before the issue record is written (the sign above takes time), so the window in which a
+	// concurrent Create of the same address can win unseen is only the gap to Provision's own check under the lock.
+	if exists, err = d.checkAddress(ctx, r.Addr, pub); err != nil {
 		return fail(err)
 	}
 	if err := d.record(ctx, r.Addr, pub, store.PurposeIssue); err != nil {
@@ -176,6 +193,16 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 	}
 	if !exists {
 		if _, err := d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta); err != nil {
+			// Lost the race for the address: whether Provision found the record (ErrAlreadyProvisioned) or lost its name
+			// lock to the winner (clocks apart by more than the lock allows), the address now names another key.
+			if user, _, uerr := d.Admin.UserOf(ctx, r.Addr); uerr == nil {
+				switch {
+				case user != pub:
+					return fail(addressTaken(r.Addr))
+				case errors.Is(err, admin.ErrAlreadyProvisioned):
+					return Result{Addr: r.Addr, PublicKey: pub, JWT: tok, Seed: seed}, nil // a rerun's own record
+				}
+			}
 			return fail(err)
 		}
 	}

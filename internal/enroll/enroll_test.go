@@ -3,11 +3,14 @@ package enroll_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
@@ -471,5 +474,114 @@ func TestWrongDepsAccount(t *testing.T) {
 	}
 	if _, found, _ := h.adm.IssuedByKey(ctx, nw); found {
 		t.Fatal("wrong account left an issue record")
+	}
+}
+
+// secondDeps is another admin on the same server with its own clock (offset from the real one) and its own Deps.
+func (h *env) secondDeps(skew time.Duration) enroll.Deps {
+	h.t.Helper()
+	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	adm.UseClock(func() time.Time { return time.Now().Add(skew) })
+	h.smallInboxes(adm)
+	d := h.d
+	d.Admin = adm
+	return d
+}
+
+// smallInboxes gives adm the smallest inbox cap allowed, so many inboxes fit the test server's disk quota.
+func (h *env) smallInboxes(adm *admin.Admin) {
+	h.t.Helper()
+	l := store.DefaultLimits()
+	l.InboxMaxBytes = 2 * store.MaxMsgSize
+	if err := adm.SetLimits(l); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// directoryKeys is how many records the directory holds.
+func (h *env) directoryKeys() int {
+	h.t.Helper()
+	js, err := jetstream.New(h.adm.Conn())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	kv, err := js.KeyValue(context.Background(), store.DirectoryBucket)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	keys, err := kv.Keys(context.Background())
+	if err != nil && !errors.Is(err, jetstream.ErrNoKeysFound) {
+		h.t.Fatal(err)
+	}
+	return len(keys)
+}
+
+// REQ-003 / AT-004: two machines creating one address at once, whatever their clocks say: exactly one succeeds, the
+// other is refused address_taken, and the directory names the winner's key only (the loser's key is not bound).
+func TestConcurrentCreateOfOneAddressNeverBothSucceed(t *testing.T) {
+	const rounds = 20
+	for _, skew := range []time.Duration{0, 5 * time.Second, 25 * time.Second, -25 * time.Second, 45 * time.Second, -45 * time.Second} {
+		t.Run(skew.String(), func(t *testing.T) {
+			h := newEnv(t)
+			h.smallInboxes(h.adm)
+			deps := [2]enroll.Deps{h.d, h.secondDeps(skew)}
+			ctx := context.Background()
+			for r := 0; r < rounds; r++ {
+				a := addr(fmt.Sprintf("race%d", r))
+				_, k1 := newKey(t)
+				_, k2 := newKey(t)
+				keys := [2]string{k1, k2}
+				var errs [2]error
+				start := make(chan struct{})
+				var wg sync.WaitGroup
+				for i := range 2 {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						<-start
+						_, errs[i] = enroll.Create(ctx, deps[i], enroll.Request{Addr: a, PublicKey: keys[i]})
+					}()
+				}
+				close(start)
+				wg.Wait()
+				win := -1
+				for i, err := range errs {
+					if err == nil {
+						if win >= 0 {
+							t.Fatalf("round %d: both Creates succeeded", r)
+						}
+						win = i
+					}
+				}
+				if win < 0 {
+					t.Fatalf("round %d: neither succeeded: %v / %v", r, errs[0], errs[1])
+				}
+				// Within the lock bound the loser is refused address_taken at once. Past it (the two clocks disagree by more than
+				// lockTTL) one admin sees the other's lock as expired and takes it over, the first one's lock check fails, and the
+				// loser may get the retryable lock-lost error instead; running its Create again then gives address_taken. Neither
+				// case lets both succeed and the directory always names the winner.
+				var ref *enroll.Refusal
+				loser := errs[1-win]
+				if !errors.As(loser, &ref) || ref.Code != enroll.CodeAddressTaken {
+					if skew.Abs() <= 25*time.Second || !errors.Is(loser, admin.ErrLockLost) {
+						t.Fatalf("round %d: loser got %v, want address_taken", r, loser)
+					}
+					_, again := enroll.Create(ctx, deps[1-win], enroll.Request{Addr: a, PublicKey: keys[1-win]})
+					if !errors.As(again, &ref) || ref.Code != enroll.CodeAddressTaken {
+						t.Fatalf("round %d: the loser's second Create got %v, want address_taken", r, again)
+					}
+				}
+				user, _, err := h.adm.UserOf(ctx, a)
+				if err != nil || user != keys[win] {
+					t.Fatalf("round %d: directory user %q (err %v), want the winner's key", r, user, err)
+				}
+				if n := h.directoryKeys(); n != r+1 {
+					t.Fatalf("round %d: %d directory records, want %d", r, n, r+1)
+				}
+			}
+		})
 	}
 }

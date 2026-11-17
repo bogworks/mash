@@ -32,6 +32,19 @@ type Admin struct {
 	rule   *namerule.Rule // nil: no name rule (see WithNameRule)
 
 	accountWait time.Duration // 0: AccountLockWait (see WithAccountLockWait)
+
+	clock func() time.Time // nil: time.Now (see UseClock)
+}
+
+// UseClock sets the clock this Admin's locks read. For tests: lets a test give two Admins clocks that disagree.
+// Copies made from a (the With methods) keep it.
+func (a *Admin) UseClock(f func() time.Time) { a.clock = f }
+
+func (a *Admin) now() time.Time {
+	if a.clock != nil {
+		return a.clock()
+	}
+	return time.Now()
 }
 
 // WithAccountLockWait returns a copy of a that waits d, not AccountLockWait, for the account lock. a itself is
