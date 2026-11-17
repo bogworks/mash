@@ -333,3 +333,143 @@ func TestReissueSameHostReturnsSeed(t *testing.T) {
 		t.Fatal("seed does not match")
 	}
 }
+
+func TestCreateAddressTakenWritesNothing(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	a := addr("taken")
+	_, first := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: first}); err != nil {
+		t.Fatal(err)
+	}
+	_, other := newKey(t)
+	_, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: other})
+	wantCode(t, err, enroll.CodeAddressTaken)
+	if _, found, _ := h.adm.IssuedByKey(ctx, other); found {
+		t.Fatal("a refused create bound the key to the address")
+	}
+	// a rerun with the same key still completes
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: first}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateRefusalOrder(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	// retired beats taken
+	gone := addr("gone2")
+	_, k1 := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: gone, PublicKey: k1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.adm.Deprovision(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	_, k2 := newKey(t)
+	_, err := enroll.Create(ctx, h.d, enroll.Request{Addr: gone, PublicKey: k2})
+	wantCode(t, err, enroll.CodeKeyRetired)
+	// taken beats issued: k3 is issued to a, and b is taken by k4
+	a, b := addr("oa"), addr("ob")
+	_, k3 := newKey(t)
+	_, k4 := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: b, PublicKey: k4}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = enroll.Create(ctx, h.d, enroll.Request{Addr: b, PublicKey: k3})
+	wantCode(t, err, enroll.CodeAddressTaken)
+	// issued
+	_, err = enroll.Create(ctx, h.d, enroll.Request{Addr: addr("oc"), PublicKey: k3})
+	wantCode(t, err, enroll.CodePublicKeyIssued)
+	// invalid beats retired
+	_, err = enroll.Create(ctx, h.d, enroll.Request{Addr: gone, PublicKey: "UABC"})
+	wantCode(t, err, enroll.CodePublicKeyInvalid)
+}
+
+func TestCreateKeyRevokedTyped(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	_, old := newKey(t)
+	a := addr("rv")
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: old}); err != nil {
+		t.Fatal(err)
+	}
+	_, nw := newKey(t)
+	if _, err := enroll.Reissue(ctx, h.d, a, nw); err != nil {
+		t.Fatal(err)
+	}
+	_, err := enroll.Create(ctx, h.d, enroll.Request{Addr: addr("rv2"), PublicKey: old})
+	wantCode(t, err, enroll.CodeKeyRevoked)
+}
+
+func TestReissueRequiresRevoke(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	a := addr("nr")
+	_, old := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: old}); err != nil {
+		t.Fatal(err)
+	}
+	d := h.d
+	d.Revoke = nil
+	_, nw := newKey(t)
+	if _, err := enroll.Reissue(ctx, d, a, nw); err == nil {
+		t.Fatal("reissue without Revoke succeeded")
+	}
+	if _, found, _ := h.adm.IssuedByKey(ctx, nw); found {
+		t.Fatal("a refused reissue wrote an issue record")
+	}
+	if rec, _, _ := h.adm.IssuedByKey(ctx, old); rec.RevokedAt != "" {
+		t.Fatal("old key marked revoked")
+	}
+}
+
+func TestReissueBurnedRefused(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	a := addr("bu")
+	_, old := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.adm.Deprovision(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	_, nw := newKey(t)
+	_, err := enroll.Reissue(ctx, h.d, a, nw)
+	wantCode(t, err, enroll.CodeKeyRetired)
+	if _, found, _ := h.adm.IssuedByKey(ctx, nw); found {
+		t.Fatal("a burned address left an issue record")
+	}
+}
+
+func TestWrongDepsAccount(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	other, _ := nkeys.CreateAccount()
+	otherPub, _ := other.PublicKey()
+	d := h.d
+	d.Account = otherPub
+	_, pub := newKey(t)
+	_, err := enroll.Create(ctx, d, enroll.Request{Addr: addr("wa"), PublicKey: pub})
+	if err == nil || !strings.Contains(err.Error(), "Deps.Account") {
+		t.Fatalf("create: %v", err)
+	}
+	if _, found, _ := h.adm.IssuedByKey(ctx, pub); found {
+		t.Fatal("wrong account left an issue record")
+	}
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: addr("wb"), PublicKey: pub}); err != nil {
+		t.Fatal(err)
+	}
+	_, nw := newKey(t)
+	_, err = enroll.Reissue(ctx, d, addr("wb"), nw)
+	if err == nil || !strings.Contains(err.Error(), "Deps.Account") {
+		t.Fatalf("reissue: %v", err)
+	}
+	if _, found, _ := h.adm.IssuedByKey(ctx, nw); found {
+		t.Fatal("wrong account left an issue record")
+	}
+}

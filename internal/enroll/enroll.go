@@ -25,11 +25,21 @@ type Deps struct {
 	Keys    mint.Keys
 	Admin   *admin.Admin
 	Account string // account public key
-	// Revoke revokes one user key on every server; nil revokes nothing.
+	// Revoke revokes one user key on every server. Reissue requires it.
 	Revoke func(ctx context.Context, userPub string) error
 }
 
-// Refusal is a refusal a caller reports by its Code: "public_key_invalid", "public_key_issued" or "key_retired".
+// The refusal codes. When several apply, Create reports the first of: CodePublicKeyInvalid, CodeKeyRetired,
+// CodeAddressTaken, CodePublicKeyIssued, CodeKeyRevoked.
+const (
+	CodePublicKeyInvalid = "public_key_invalid"
+	CodeKeyRetired       = "key_retired"
+	CodeAddressTaken     = "address_taken"
+	CodePublicKeyIssued  = "public_key_issued"
+	CodeKeyRevoked       = "key_revoked"
+)
+
+// Refusal is a refusal a caller reports by its Code (the Code constants).
 type Refusal struct{ Code, Msg string }
 
 func (r *Refusal) Error() string { return r.Msg }
@@ -53,7 +63,7 @@ type Result struct {
 }
 
 func invalidKey() *Refusal {
-	return &Refusal{Code: "public_key_invalid", Msg: "the public key is not a NATS user public key (U, then 55 base32 characters)"}
+	return &Refusal{Code: CodePublicKeyInvalid, Msg: "the public key is not a NATS user public key (U, then 55 base32 characters)"}
 }
 
 // SignUser signs the user credential of addr for publicKey. It accepts only a user public key, never a seed or an
@@ -67,6 +77,24 @@ func (d Deps) SignUser(addr sap.Address, publicKey string) (string, error) {
 	}
 	tok, _, err := mint.SignUser(d.Keys, addr, publicKey)
 	return tok, err
+}
+
+// sign is SignUser that also checks the signing account is Deps.Account, before anything is written.
+func (d Deps) sign(addr sap.Address, publicKey string) (string, error) {
+	if !nkeys.IsValidPublicUserKey(publicKey) {
+		return "", invalidKey()
+	}
+	if err := addr.Validate(); err != nil {
+		return "", fmt.Errorf("enroll: %w", err)
+	}
+	tok, acct, err := mint.SignUser(d.Keys, addr, publicKey)
+	if err != nil {
+		return "", err
+	}
+	if acct != d.Account {
+		return "", errors.New("enroll: Deps.Account is not the account that signs")
+	}
+	return tok, nil
 }
 
 // key returns the key to use: the given public key, or a fresh one with its seed (same-host).
@@ -102,9 +130,9 @@ func (d Deps) record(ctx context.Context, addr sap.Address, publicKey, purpose s
 	case err == nil:
 		return nil
 	case errors.Is(err, store.ErrKeyBoundElsewhere):
-		return &Refusal{Code: "public_key_issued", Msg: fmt.Sprintf("the public key %s... was already issued to another address", short(publicKey))}
+		return &Refusal{Code: CodePublicKeyIssued, Msg: fmt.Sprintf("the public key %s... was already issued to another address", short(publicKey))}
 	case errors.Is(err, store.ErrKeyRevoked):
-		return fmt.Errorf("enroll: the public key %s... has been revoked; make a new key: %w", short(publicKey), err)
+		return &Refusal{Code: CodeKeyRevoked, Msg: fmt.Sprintf("the public key %s... has been revoked; make a new key", short(publicKey))}
 	}
 	return err
 }
@@ -126,33 +154,43 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 		return fail(err)
 	}
 	if burned {
-		return fail(&Refusal{Code: "key_retired", Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", r.Addr)})
+		return fail(&Refusal{Code: CodeKeyRetired, Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", r.Addr)})
 	}
-	tok, err := d.SignUser(r.Addr, pub)
+	// An address that already has a record is refused before anything is written, so the key is not bound to it.
+	exists := false
+	switch user, _, err := d.Admin.UserOf(ctx, r.Addr); {
+	case errors.Is(err, admin.ErrNoRecord):
+	case err != nil:
+		return fail(err)
+	case user != pub:
+		return fail(&Refusal{Code: CodeAddressTaken, Msg: fmt.Sprintf("endpoint %s already exists; use reissue to give it a new key", r.Addr)})
+	default:
+		exists = true // a rerun of this Create
+	}
+	tok, err := d.sign(r.Addr, pub)
 	if err != nil {
 		return fail(err)
 	}
 	if err := d.record(ctx, r.Addr, pub, store.PurposeIssue); err != nil {
 		return fail(err)
 	}
-	switch user, _, err := d.Admin.UserOf(ctx, r.Addr); {
-	case errors.Is(err, admin.ErrNoRecord):
+	if !exists {
 		if _, err := d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta); err != nil {
 			return fail(err)
 		}
-	case err != nil:
-		return fail(err)
-	case user != pub:
-		return fail(fmt.Errorf("enroll: endpoint %s already exists with another user key; use reissue", r.Addr))
 	}
 	return Result{Addr: r.Addr, PublicKey: pub, JWT: tok, Seed: seed}, nil
 }
 
 // Reissue gives the existing endpoint at addr a new key (publicKey, or one made here when ""): the old key stays valid
-// until the directory record names the new one, then it is revoked. A killed run is finished by running it again; if
-// the kill came after the record changed, the old key is no longer known to a rerun that names the new key, so rerun
-// without a key (a further key is made and the then-current one is revoked) or retire the endpoint.
+// until the directory record names the new one, then it is revoked. d.Revoke is required. The whole sequence runs under
+// the address's name lock. A killed run is finished by running it again; if the kill came after the record changed,
+// the old key is no longer known to a rerun that names the new key, so rerun without a key (a further key is made and
+// the then-current one is revoked) or retire the endpoint.
 func Reissue(ctx context.Context, d Deps, addr sap.Address, publicKey string) (Result, error) {
+	if d.Revoke == nil {
+		return Result{}, errors.New("enroll: Deps.Revoke is required to reissue")
+	}
 	if err := addr.Validate(); err != nil {
 		return Result{}, fmt.Errorf("enroll: %w", err)
 	}
@@ -161,34 +199,43 @@ func Reissue(ctx context.Context, d Deps, addr sap.Address, publicKey string) (R
 		return Result{}, err
 	}
 	fail := func(err error) (Result, error) { clear(seed); return Result{}, err }
-	old, _, err := d.Admin.UserOf(ctx, addr)
-	if errors.Is(err, admin.ErrNoRecord) {
-		return fail(fmt.Errorf("enroll: endpoint %s does not exist", addr))
-	}
+	burned, err := d.Admin.IsBurned(ctx, addr)
 	if err != nil {
 		return fail(err)
 	}
-	tok, err := d.SignUser(addr, pub)
-	if err != nil {
-		return fail(err)
+	if burned {
+		return fail(&Refusal{Code: CodeKeyRetired, Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", addr)})
 	}
-	if err := d.record(ctx, addr, pub, store.PurposeRotation); err != nil {
-		return fail(err)
-	}
-	// The old key is revoked before the directory record moves to the new one: a run killed between the two leaves the
-	// old key revoked and the record on it, and running the same command again moves the record (revoking again is
-	// safe). The other order would leave the old key valid with nothing that names it.
-	if old != pub {
-		if d.Revoke != nil {
+	var tok string
+	err = d.Admin.WithNameLock(ctx, addr, func(ctx context.Context, l admin.NameLock) error {
+		old, _, err := d.Admin.UserOfLocked(ctx, l, addr)
+		if errors.Is(err, admin.ErrNoRecord) {
+			return fmt.Errorf("enroll: endpoint %s does not exist", addr)
+		}
+		if err != nil {
+			return err
+		}
+		if tok, err = d.sign(addr, pub); err != nil {
+			return err
+		}
+		if err := d.record(ctx, addr, pub, store.PurposeRotation); err != nil {
+			return err
+		}
+		// The old key is revoked before the directory record moves to the new one: a run killed between the two leaves
+		// the old key revoked and the record on it, and running the same command again moves the record (revoking again
+		// is safe). The other order would leave the old key valid with nothing that names it.
+		if old != pub {
 			if err := d.Revoke(ctx, old); err != nil {
-				return fail(fmt.Errorf("enroll: the old key %s... was not revoked, nothing else was changed: %w", short(old), err))
+				return fmt.Errorf("enroll: the old key %s... was not revoked, nothing else was changed: %w", short(old), err)
+			}
+			if err := d.Admin.MarkRevoked(ctx, old, time.Now()); err != nil && !errors.Is(err, admin.ErrNotRecorded) {
+				return err
 			}
 		}
-		if err := d.Admin.MarkRevoked(ctx, old, time.Now()); err != nil && !errors.Is(err, admin.ErrNotRecorded) {
-			return fail(err)
-		}
-	}
-	if _, err := d.Admin.SetUser(ctx, addr, d.Account, old, pub); err != nil {
+		_, err = d.Admin.SetUserLocked(ctx, l, addr, d.Account, old, pub)
+		return err
+	})
+	if err != nil {
 		return fail(err)
 	}
 	return Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: true}, nil
