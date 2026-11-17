@@ -227,7 +227,7 @@ func TestHookAcceptsSpoolOfItsClaudeProcess(t *testing.T) {
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.Own("pid:222"); err != nil {
+	if err := sp.Own(`{"pid":222}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := sp.Put(spool.Entry{Seq: 1, From: "b", Trust: "claimed", At: time.Now(), Body: []byte("hello")}); err != nil {
@@ -248,7 +248,7 @@ func TestHookIgnoresAnotherProcessesSpool(t *testing.T) {
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.Own("pid:999"); err != nil {
+	if err := sp.Own(`{"pid":999}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := sp.Put(spool.Entry{Seq: 1, From: "b", Trust: "claimed", At: time.Now(), Body: []byte("secret")}); err != nil {
@@ -333,7 +333,7 @@ func TestHookContextCountsUTF16Units(t *testing.T) {
 	}
 }
 
-// With no .session file (an older serve, or one without a session id) any session's hook drains, as before.
+// With no .owner file any session's hook drains, as before.
 func TestHookUnownedSpoolDrainsForAnySession(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)

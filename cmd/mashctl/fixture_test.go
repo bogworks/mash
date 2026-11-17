@@ -185,7 +185,7 @@ func noSecrets(t *testing.T, outs ...string) {
 // records is "owner.group.instance//user" for every directory record.
 func (h *fleetEnv) records() []string {
 	h.t.Helper()
-	recs, err := h.adminOf().List(context.Background())
+	recs, _, err := h.adminOf().List(context.Background())
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func (h *fleetEnv) records() []string {
 // record is the directory record of the endpoint at a, or false when there is none.
 func (h *fleetEnv) record(a sap.Address) (store.Record, bool) {
 	h.t.Helper()
-	recs, err := h.adminOf().List(context.Background())
+	recs, _, err := h.adminOf().List(context.Background())
 	if err != nil {
 		h.t.Fatal(err)
 	}

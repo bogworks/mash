@@ -569,10 +569,8 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	if o.credsDir != "" {
 		dirs, optional = []string{filepath.Clean(o.credsDir)}, false
 	} else {
-		for _, d := range []string{cfg.Dir, cfg.Legacy} {
-			if d != "" && !slices.Contains(dirs, filepath.Clean(d)) {
-				dirs = append(dirs, filepath.Clean(d))
-			}
+		if cfg.Dir != "" {
+			dirs = append(dirs, filepath.Clean(cfg.Dir))
 		}
 	}
 	creds, notes, err := scanCreds(dirs, optional)
