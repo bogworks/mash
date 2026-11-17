@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -225,5 +226,63 @@ func TestEndpointReissueMakeKeyChecksCreds(t *testing.T) {
 	bd := bulkDoc(t, bo)
 	if code != 5 || bd.Counts.Refused != 2 || bd.Counts.Reissued != 2 {
 		t.Fatalf("bulk: %d %q", code, bo)
+	}
+}
+
+// A reissue whose key was replaced by another run before the check removes its output and reports superseded.
+func TestEndpointReissueSupersededRemovesOutput(t *testing.T) {
+	for _, mode := range []string{"public-key", "make-key"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newFleetEnv(t)
+			fakeRevoke(t, nil)
+			a := ad("sup")
+			h.seed(a)
+			out := t.TempDir()
+			target := filepath.Join(out, "new.jwt")
+			args := []string{"endpoint", "reissue", a.String(), "--json"}
+			if mode == "make-key" {
+				target = h.creds(a)
+				args = append(args, "--make-key")
+			} else {
+				_, file1, _ := epKey(t, out, "k1")
+				args = append(args, "--public-key", file1, "--jwt-out", target)
+			}
+			epBeforeVerify = func() {
+				rec, _ := h.record(a)
+				_, other := h.e.Mint(t, ad("sup2"))
+				if _, err := h.adminOf().SetUser(context.Background(), a, h.e.Account, rec.User, other); err != nil {
+					t.Error(err)
+				}
+			}
+			t.Cleanup(func() { epBeforeVerify = nil })
+			_, se, code := h.run(args...)
+			if code != 6 || !strings.Contains(se, "superseded") {
+				t.Fatalf("%d %q", code, se)
+			}
+			if _, err := os.Lstat(target); !os.IsNotExist(err) {
+				t.Errorf("the output file was kept: %v", err)
+			}
+			if _, err := os.Lstat(target + ".pending"); !os.IsNotExist(err) {
+				t.Errorf("a pending file was left: %v", err)
+			}
+		})
+	}
+}
+
+// With nothing changing the record, the check passes and the output stays.
+func TestEndpointReissueVerifyPassesOnNormalRun(t *testing.T) {
+	h := newFleetEnv(t)
+	fakeRevoke(t, nil)
+	a := ad("nrm")
+	h.seed(a)
+	called := false
+	epBeforeVerify = func() { called = true }
+	t.Cleanup(func() { epBeforeVerify = nil })
+	_, se, code := h.run("endpoint", "reissue", a.String(), "--make-key")
+	if code != 0 || !called {
+		t.Fatalf("%d %v %q", code, called, se)
+	}
+	if _, err := os.Stat(h.creds(a)); err != nil {
+		t.Error(err)
 	}
 }

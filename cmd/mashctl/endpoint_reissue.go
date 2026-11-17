@@ -49,6 +49,8 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -559,14 +561,33 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		}
 		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v); %s", addr, outPath, werr, finish)}
 	}
+	// enroll.Reissue released the server's name lock before the file was written, and the lock above is local to this
+	// host: a run on another host may have changed the key since. Read the record again and compare.
+	if epBeforeVerify != nil {
+		epBeforeVerify()
+	}
+	cur, _, verr := r.adm.UserOf(r.ctx, addr)
+	if verr != nil {
+		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file", addr, outPath, admin.RewordUnavailable(verr.Error()), epShortcut(addr))}
+	}
+	if cur != res.PublicKey {
+		os.Remove(outPath)
+		os.Remove(marker)
+		if makeKey {
+			os.Remove(pending)
+		}
+		return "", 0, &epFail{code: "superseded", detail: fmt.Sprintf("another reissue changed %s's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again", addr)}
+	}
 	return res.PublicKey, acked, nil
 }
 
 // epAfterStage and epAfterEnroll are test seams: after the key is staged, and after the directory is written and
-// before the creds file is. A hook that panics stops the run at that point, as a kill would.
+// before the creds file is. A hook that panics stops the run at that point, as a kill would. epBeforeVerify runs
+// right before the directory record is read again to confirm the key.
 var (
-	epAfterStage  func()
-	epAfterEnroll func()
+	epAfterStage   func()
+	epAfterEnroll  func()
+	epBeforeVerify func()
 )
 
 // epStageKey returns the key a --make-key run uses, kept in the pending file at path so a run killed at any later
