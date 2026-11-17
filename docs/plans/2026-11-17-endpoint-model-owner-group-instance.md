@@ -158,3 +158,8 @@ carry legacy names. I count 10.5 with the golden-name tests rewritten, not delet
   0102 (the group is slot 2, not the owner).
 * The command names and flags belong to the CLI design that ctl writes (`mashctl endpoint create|reissue|retire`);
   the field names in this note (`owner`, `group`, `instance`, `address`) are what ctl quotes in `--json`.
+* Key handling (from the 0.5.5 contract, revision 3; the verbs are ctl's): the endpoint-made key is the default, through
+  `mash key create` and `mash credential create`; the same-host exception (proposed `--make-key`) is pending DEC-002.
+  The JWT always goes to a file (`--jwt-out`) and is never printed. There is no stored group: no config key holds it, it
+  is given on each create and by `MASH_GROUP` in a session. `credential revoke` is out: replacing a key goes through
+  `reissue --public-key`.

@@ -57,7 +57,8 @@ Chosen: one form, and a hard cut.
   status and to `agents.hb.<owner>.*.*`. The owner is a literal in every peer line, so no credential reaches another
   owner. Narrowing to a group is a user's later choice, not in this release.
 * **The endpoint makes its own key in 0.5.5.** `endpoint create` takes the endpoint's public key, signed by the account
-  signing key; no private key crosses to the central host. This is the credential primitive of ADR 0136 lifted out of the
+  signing key; no private key crosses to the central host. The group is never stored in configuration: it is given on
+  each create and by `MASH_GROUP`. This is the credential primitive of ADR 0136 lifted out of the
   list-set path.
 * **There is one form, no legacy and no migration in mash.** `mashctl add`, legacy `reissue`, `agent_token`, the `cc` form,
   its parsers and record code, and the alias machinery are removed. 0.5.5 does not read, convert or tolerate an old
