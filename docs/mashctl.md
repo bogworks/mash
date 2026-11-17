@@ -230,7 +230,7 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `address_taken` | 1 | create | The endpoint exists: use `endpoint reissue`. |
 | `key_retired` | 1 | create, reissue | The address was deleted and is never reassigned. |
 | `public_key_issued` | 1 | create, reissue | The key was issued to another address: make a new key. |
-| `key_revoked` | 1 | create | The key was revoked: make a new key. |
+| `key_revoked` | 1 | create, reissue | The key was revoked in the account JWT, or was issued and revoked before: make a new key. A supplied key is checked before it is signed. |
 | `key_unchanged` | 1 | reissue | The key is already the endpoint's key. |
 | `endpoint_missing` | 1 | reissue | No such endpoint. |
 | `future_issued` | 1 | reissue, bulk | The old key's JWT was issued after now: fix the clock. Nothing was changed. |
@@ -241,7 +241,7 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `servers` | 6 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
 | `write` | 6 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
 | `creds_unreadable` | 1 (6 in bulk) | reissue, bulk | A creds file on this host cannot be read or parsed. |
-| `revocation_unknown` | 6 | bulk | `--changed` could not check whether the endpoint's key is revoked. |
+| `revocation_unknown` | 6 | create, reissue, bulk | Whether a key is revoked could not be checked (a server did not answer). Nothing was changed. |
 | `no_local_creds` | 0 | bulk | Skipped: no creds file on this host. |
 
 `endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when there is no directory record on the server (`--force` still handles the creds file), too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
