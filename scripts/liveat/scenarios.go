@@ -43,7 +43,18 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCr
 	ok = a.C.Check("mash key create makes "+name+"'s key on its own machine", r.Code == 0, exitDetail(r)) && ok
 	a.Watch("seed "+name, e.seed)
 	a.checkMode(name+" seed file is mode 0600", e.seed)
-	r = a.Ctl("endpoint-create-"+name, ctl, a.Conn(), "endpoint", "create", who, "--public-key", e.pub, "--jwt-out", ctlJWT)
+	pubForCtl := e.pub
+	if ctl.Dir != keyHome.Dir {
+		// separate machines: the operator carries the public key file to the mashctl host; mashctl never reads the
+		// endpoint machine's home.
+		pubForCtl = filepath.Join(ctl.Dir, name+".pub")
+		pb, err := os.ReadFile(e.pub)
+		if err == nil {
+			err = os.WriteFile(pubForCtl, pb, 0o644)
+		}
+		ok = a.C.Check("the public key file is carried to the mashctl host", err == nil, "") && ok
+	}
+	r = a.Ctl("endpoint-create-"+name, ctl, a.Conn(), "endpoint", "create", who, "--public-key", pubForCtl, "--jwt-out", ctlJWT)
 	ok = a.C.Check("mashctl endpoint create "+who+" --public-key signs for the endpoint's own key", r.Code == 0, exitDetail(r)) && ok
 	a.Watch("jwt "+name, ctlJWT)
 	a.checkMode(name+" JWT file is mode 0600", ctlJWT)
