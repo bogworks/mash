@@ -77,7 +77,9 @@ func TestEndpointCreateNaming(t *testing.T) {
 		{"name disagrees", []string{owner + "/dev/a9", "--name", "b", "--dry-run"}, 2, "different name"},
 		{"owner disagrees", []string{owner + "/dev/a10", "--owner", "zed", "--dry-run"}, 2, "different owner"},
 		{"agreeing forms", []string{owner + "/dev/a11", "--owner", owner, "--group", "dev", "--name", "a11", "--dry-run"}, 0, ""},
-		{"bad token", []string{owner + "/dev/Bad--name", "--dry-run"}, 2, "instance"},
+		{"bad token", []string{owner + "/dev/Bad--name", "--dry-run"}, 1, "instance"},
+		{"empty token", []string{owner + "//a12", "--dry-run"}, 1, "name_invalid"},
+		{"four tokens", []string{owner + "/dev/a13/x", "--dry-run"}, 1, "name_invalid"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -217,12 +219,12 @@ func TestEndpointCreateMakeKey(t *testing.T) {
 		t.Fatalf("code %d %q %q", code, so, se)
 	}
 	var doc epDoc
-	if err := json.Unmarshal([]byte(so), &doc); err != nil || doc.Outcome != "created" || doc.Creds == nil || !doc.Creds.Written || doc.JWT != nil {
+	if err := json.Unmarshal([]byte(so), &doc); err != nil || doc.Outcome != "created" || doc.CredsWritten == nil || !*doc.CredsWritten || doc.JWTPath != "" {
 		t.Fatalf("doc %q %v", so, err)
 	}
 	p := h.creds(a)
-	if doc.Creds.Path != p || fileMode(t, p) != 0o600 {
-		t.Fatalf("creds path %q", doc.Creds.Path)
+	if doc.CredsPath != p || fileMode(t, p) != 0o600 {
+		t.Fatalf("creds path %q", doc.CredsPath)
 	}
 	raw, _ := os.ReadFile(p)
 	tok, err := jwt.ParseDecoratedJWT(raw)
@@ -376,7 +378,7 @@ func TestEndpointReissue(t *testing.T) {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	var doc epDoc
-	if err := json.Unmarshal([]byte(so), &doc); err != nil || doc.Outcome != "reissued" || doc.UserPublicKey != newPub || doc.JWT == nil || !doc.JWT.Written {
+	if err := json.Unmarshal([]byte(so), &doc); err != nil || doc.Outcome != "reissued" || doc.UserPublicKey != newPub || doc.JWTWritten == nil || !*doc.JWTWritten {
 		t.Fatalf("doc %q %v", so, err)
 	}
 	if rec, _ := h.record(a); rec.User != newPub {

@@ -1,13 +1,11 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "refused",
-  "endpoint": {
-    "owner": "o",
-    "group": "g",
-    "instance": "a",
-    "address": "o.g.a",
-    "key": "o_g_a"
-  },
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
   "creds": {
     "path": "",
     "action": "none"

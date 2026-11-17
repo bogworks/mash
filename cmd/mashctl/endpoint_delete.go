@@ -25,7 +25,7 @@ Example:
   mashctl endpoint delete alice/dev/design --dry-run
 `
 
-// endpointObject is the endpoint object of the delete and show JSON.
+// endpointObject holds the names of an endpoint; the delete and show JSON carry them at the top level.
 type endpointObject struct {
 	Owner    string `json:"owner"`
 	Group    string `json:"group"`
@@ -45,9 +45,9 @@ type refusalJSON struct {
 }
 
 type deleteJSON struct {
-	Schema    string          `json:"schema"`
-	Outcome   string          `json:"outcome"`
-	Endpoint  endpointObject  `json:"endpoint"`
+	Schema  string `json:"schema"`
+	Outcome string `json:"outcome"`
+	endpointObject
 	Creds     deleteCredsJSON `json:"creds"`
 	NextSteps []string        `json:"next_steps"`
 	Refusal   *refusalJSON    `json:"refusal"`
@@ -70,7 +70,17 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 	}
 	var arg string
 	var opts retireOpts
-	var asJSON bool
+	asJSON := jsonRequested(args)
+	var names endpointObject
+	// usageErr answers a usage error: the sentence on stderr, and with --json the document on stdout.
+	usageErr := func(code, msg string) int {
+		fmt.Fprintf(stderr, "mashctl: endpoint delete: %s\n", msg)
+		if asJSON {
+			writeJSON(stdout, deleteJSON{Schema: endpointSchema, Outcome: "error", endpointObject: names,
+				Creds: deleteCredsJSON{Action: "none"}, NextSteps: []string{}, Refusal: &refusalJSON{Code: code, Detail: msg}})
+		}
+		return 2
+	}
 	for _, a := range args {
 		switch {
 		case a == "--delete-creds":
@@ -82,29 +92,25 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 		case a == "--dry-run":
 			opts.dryRun = true
 		case a == "--json":
-			asJSON = true
 		case a == "--help" || a == "-h":
 			fmt.Fprint(stdout, endpointDeleteUsage)
 			return 0
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: endpoint delete: unknown %s; try: mashctl endpoint delete --help\n", config.RejectedArg(a))
-			return 2
+			return usageErr("unknown_flag", fmt.Sprintf("unknown %s; try: mashctl endpoint delete --help", config.RejectedArg(a)))
 		case arg != "":
-			fmt.Fprintf(stderr, "mashctl: endpoint delete: one endpoint address only; try: mashctl endpoint delete --help\n")
-			return 2
+			return usageErr("usage", "one endpoint address only; try: mashctl endpoint delete --help")
 		default:
 			arg = a
 		}
 	}
 	if arg == "" {
-		fmt.Fprintf(stderr, "mashctl: endpoint delete: no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint delete --help\n")
-		return 2
+		return usageErr("address_missing", "no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint delete --help")
 	}
 	addr, err := parseEndpointRef(arg)
 	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: endpoint delete: %v\n", err)
-		return 2
+		return usageErr("address_invalid", err.Error())
 	}
+	names = endpointObject{Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance, Address: addr.String(), Key: addr.Flat()}
 	short := slashForm(addr)
 	opts.verb = "endpoint delete"
 	opts.label = short
@@ -119,12 +125,15 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 	}
 	res := retireAddress(addr, opts, env, lookup, out, stderr)
 	if res.pendingUsage {
+		if asJSON {
+			writeJSON(stdout, deleteJSON{Schema: endpointSchema, Outcome: "error", endpointObject: names,
+				Creds: deleteCredsJSON{Action: "none"}, NextSteps: []string{}, Refusal: &refusalJSON{Code: "servers_invalid", Detail: res.detail}})
+		}
 		return 2
 	}
 	if asJSON {
 		j := deleteJSON{
-			Schema: "mashctl-endpoint@1", Outcome: res.kind,
-			Endpoint:  endpointObject{Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance, Address: addr.String(), Key: addr.Flat()},
+			Schema: endpointSchema, Outcome: res.kind, endpointObject: names,
 			Creds:     deleteCredsJSON{Path: res.credsPath, Action: res.credsAction},
 			NextSteps: res.nextSteps,
 		}

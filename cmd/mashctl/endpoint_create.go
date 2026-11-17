@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ const endpointCreateUsage = `usage: mashctl endpoint create [ADDRESS] [--owner O
   ADDRESS is alice/dev/design, or one token (the instance) with --group. There is no default group.
   --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out
   --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600)
+  A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
   exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
 Example:
   mashctl endpoint create alice/dev/design --public-key design.pub
@@ -35,23 +37,6 @@ Example:
 
 // endpointSchema is the schema field of the JSON of the endpoint verbs.
 const endpointSchema = "mashctl-endpoint@1"
-
-type epEndpoint struct {
-	Owner       string            `json:"owner"`
-	Group       string            `json:"group"`
-	Instance    string            `json:"instance"`
-	Address     string            `json:"address"`
-	Key         string            `json:"key"`
-	Labels      map[string]string `json:"labels"`
-	Caps        []string          `json:"caps"`
-	Description string            `json:"description"`
-	Note        string            `json:"note"`
-}
-
-type epFile struct {
-	Path    string `json:"path"`
-	Written bool   `json:"written"`
-}
 
 type epStep struct {
 	Sender  string `json:"sender"`
@@ -67,16 +52,72 @@ type epRefusal struct {
 	Detail string `json:"detail"`
 }
 
-// epDoc is the JSON document of create and reissue. No field holds a seed or a JWT.
+// epDoc is the JSON document of create and reissue. The fields of the contract (REQ-003) are at the top level. No field
+// holds a seed or a JWT.
 type epDoc struct {
-	Schema        string     `json:"schema"`
-	Outcome       string     `json:"outcome"`
-	Endpoint      epEndpoint `json:"endpoint"`
-	JWT           *epFile    `json:"jwt,omitempty"`
-	Creds         *epFile    `json:"creds,omitempty"`
-	UserPublicKey string     `json:"user_public_key,omitempty"`
-	NextSteps     []epStep   `json:"next_steps"`
-	Refusal       *epRefusal `json:"refusal"`
+	Schema        string            `json:"schema"`
+	Outcome       string            `json:"outcome"`
+	Owner         string            `json:"owner"`
+	Group         string            `json:"group"`
+	Instance      string            `json:"instance"`
+	Address       string            `json:"address"`
+	Key           string            `json:"key"`
+	JWTPath       string            `json:"jwt_path,omitempty"`
+	JWTWritten    *bool             `json:"jwt_written,omitempty"`
+	CredsPath     string            `json:"creds_path,omitempty"`
+	CredsWritten  *bool             `json:"creds_written,omitempty"`
+	UserPublicKey string            `json:"user_public_key,omitempty"`
+	Labels        map[string]string `json:"labels"`
+	Caps          []string          `json:"caps"`
+	Description   string            `json:"description"`
+	Note          string            `json:"note"`
+	NextSteps     []epStep          `json:"next_steps"`
+	Refusal       *epRefusal        `json:"refusal"`
+}
+
+// epDocFor is the document of an endpoint at addr (a zero addr leaves the names empty).
+func epDocFor(addr sap.Address) epDoc {
+	d := epDoc{Schema: endpointSchema, Outcome: "refused", Labels: map[string]string{}, Caps: []string{}}
+	d.setAddr(addr)
+	return d
+}
+
+func (d *epDoc) setAddr(a sap.Address) {
+	if a.Instance == "" {
+		return
+	}
+	d.Owner, d.Group, d.Instance, d.Address, d.Key = a.Owner, a.Group, a.Instance, a.String(), a.Flat()
+}
+
+// epOutput is the file a create or reissue writes: the JWT file, or with --make-key the creds file.
+type epOutput struct {
+	doc   *epDoc
+	creds bool
+}
+
+func (o epOutput) set(path string) {
+	f := false
+	if o.creds {
+		o.doc.CredsPath, o.doc.CredsWritten = path, &f
+	} else {
+		o.doc.JWTPath, o.doc.JWTWritten = path, &f
+	}
+}
+
+func (o epOutput) path() string {
+	if o.creds {
+		return o.doc.CredsPath
+	}
+	return o.doc.JWTPath
+}
+
+func (o epOutput) written() {
+	t := true
+	if o.creds {
+		o.doc.CredsWritten = &t
+	} else {
+		o.doc.JWTWritten = &t
+	}
 }
 
 // epCommon are the flags create and reissue share.
@@ -122,6 +163,12 @@ func splitFlag(args []string, i int) (flag, inline string, hasInline bool) {
 func epReport(verb string, doc epDoc, text func(io.Writer), code int, stdout, stderr io.Writer, jsonOut bool) int {
 	if doc.Refusal != nil {
 		doc.NextSteps = nil
+		if doc.Refusal.Code == enroll.CodePublicKeyIssued {
+			// Each key is used at one address; the remedy is a new key for this endpoint.
+			doc.Refusal.Detail += "; each key is used at one address: make a new key for this endpoint with: mash key create --out " + doc.Instance + ".seed"
+			doc.NextSteps = []epStep{{Sender: "endpoint", Step: "key", Action: "make a new key for this endpoint on its machine",
+				Address: doc.Address, Purpose: "use", Detail: "mash key create --out " + doc.Instance + ".seed"}}
+		}
 	}
 	if doc.NextSteps == nil {
 		doc.NextSteps = []epStep{}
@@ -138,9 +185,36 @@ func epReport(verb string, doc epDoc, text func(io.Writer), code int, stdout, st
 	return code
 }
 
-func epEndpointOf(a sap.Address) epEndpoint {
-	return epEndpoint{Owner: a.Owner, Group: a.Group, Instance: a.Instance, Address: a.String(), Key: a.Flat(),
-		Labels: map[string]string{}, Caps: []string{}}
+// epValueFlags are the flags of create and reissue that take a value, for the scan that finds --json before parsing.
+var epValueFlags = []string{"--owner", "--group", "--name", "--note", "--describe", "--cap", "--label", "--public-key", "--jwt-out", "--servers", "--sys-creds"}
+
+// jsonRequested reports whether args hold a bare --json, so a usage error can be answered in JSON. The value after a
+// flag that takes one is skipped.
+func jsonRequested(args []string, valueFlags ...string) bool {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--json" {
+			return true
+		}
+		for _, f := range valueFlags {
+			if args[i] == f {
+				i++
+				break
+			}
+		}
+	}
+	return false
+}
+
+// epUsage reports a usage error: the sentence and the usage text on stderr, and with jsonOut the document on stdout.
+func epUsage(verb, usageText string, doc epDoc, code, msg string, jsonOut bool, stdout, stderr io.Writer) int {
+	fmt.Fprintf(stderr, "mashctl: endpoint %s: %s\n%s", verb, msg, usageText)
+	if jsonOut {
+		doc.Outcome = "error"
+		doc.Refusal = &epRefusal{code, msg}
+		doc.NextSteps = []epStep{}
+		writeJSON(stdout, doc)
+	}
+	return 2
 }
 
 func epShortcut(a sap.Address) string { return a.Owner + "/" + a.Group + "/" + a.Instance }
@@ -166,27 +240,40 @@ func epPathFree(path string) *epRefusal {
 	return nil
 }
 
-// epWriteNew writes data to a new file, mode 0600, never over an existing file.
+// epTemp writes data to a new 0600 temp file in dir, named after base, and returns its path. On any failure the temp
+// file is removed.
+func epTemp(dir, base string, data []byte) (string, error) {
+	f, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmp := f.Name()
+	err = f.Chmod(0o600)
+	if err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return tmp, nil
+}
+
+// epWriteNew writes data to a new file, mode 0600, never over an existing file: a temp file in the same directory,
+// then a hard link that fails with fs.ErrExist when path exists. A run killed part-way leaves no truncated path.
 func epWriteNew(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	tmp, err := epTemp(filepath.Dir(path), filepath.Base(path), data)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(path)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(path)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(path)
-		return err
-	}
-	return nil
+	defer os.Remove(tmp) // the temp this call made; path keeps its own link
+	return os.Link(tmp, path)
 }
 
 // epPrepDir makes the creds directory 0700 when it is missing and checks it is one only the user can swap files in.
@@ -212,7 +299,7 @@ func epWriteCredsNew(path string, creds []byte) error {
 		return err
 	}
 	if !created {
-		return fmt.Errorf("creds file %s exists", path)
+		return fmt.Errorf("creds file %s exists: %w", path, fs.ErrExist)
 	}
 	return nil
 }
@@ -223,24 +310,8 @@ func epReplaceCreds(path string, creds []byte) error {
 	if err := epPrepDir(dir); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".creds-*")
+	tmp, err := epTemp(dir, filepath.Base(path), creds)
 	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if err := f.Chmod(0o600); err == nil {
-		_, err = f.Write(creds)
-		if err == nil {
-			err = f.Sync()
-		}
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-	} else {
-		f.Close()
-	}
-	if err != nil {
-		os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -286,6 +357,22 @@ func epNextSession(a sap.Address) epStep {
 		Detail: fmt.Sprintf("MASH_OWNER=%s MASH_GROUP=%s MASH_NAME=%s", a.Owner, a.Group, a.Instance)}
 }
 
+// epIssuedRefusal is the refusal enroll.Create would make for publicKey from the issue record, or nil. It is the same
+// read and the same order as the issue record write: a revoked key, then a key bound to another address.
+func epIssuedRefusal(ctx context.Context, adm *admin.Admin, addr sap.Address, publicKey string) (*epRefusal, error) {
+	rec, found, err := adm.IssuedByKey(ctx, publicKey)
+	if err != nil || !found {
+		return nil, err
+	}
+	switch {
+	case rec.RevokedAt != "":
+		return &epRefusal{enroll.CodeKeyRevoked, fmt.Sprintf("the public key %.8s... has been revoked; make a new key", publicKey)}, nil
+	case rec.Address != addr.Flat():
+		return &epRefusal{enroll.CodePublicKeyIssued, fmt.Sprintf("the public key %.8s... was already issued to another address", publicKey)}, nil
+	}
+	return nil, nil
+}
+
 // runEndpointCreate is `mashctl endpoint create`.
 func runEndpointCreate(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -301,9 +388,14 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		caps               []string
 		labels             = map[string]string{}
 	)
+	c.jsonOut = jsonRequested(args, epValueFlags...)
+	var addr sap.Address
+	doc := epDocFor(addr)
+	usageCode := "usage"
 	usage := func(msg string) int {
-		fmt.Fprintf(stderr, "mashctl: endpoint create: %s\n%s", msg, endpointCreateUsage)
-		return 2
+		code := usageCode
+		usageCode = "usage"
+		return epUsage("create", endpointCreateUsage, doc, code, msg, c.jsonOut, stdout, stderr)
 	}
 	for i := 0; i < len(args); i++ {
 		flag, inline, hasInline := splitFlag(args, i)
@@ -348,6 +440,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 			}
 		default:
 			if strings.HasPrefix(flag, "-") {
+				usageCode = "unknown_flag"
 				return usage("unknown " + config.RejectedArg(flag))
 			}
 			if positional != "" {
@@ -363,15 +456,10 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	}
 
 	// refuse reports a usage-level refusal (exit 2) or a refusal (exit 1) with the endpoint as far as it is known.
-	var addr sap.Address
-	doc := epDoc{Schema: endpointSchema, Outcome: "refused"}
 	refuse := func(code int, ref *epRefusal) int {
 		doc.Refusal = ref
 		if code == 2 {
 			doc.Outcome = "error"
-		}
-		if doc.Endpoint.Address == "" {
-			doc.Endpoint = epEndpointOf(addr)
 		}
 		return epReport("create", doc, nil, code, stdout, stderr, c.jsonOut)
 	}
@@ -382,13 +470,16 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		toks := strings.Split(strings.ReplaceAll(positional, ".", "/"), "/")
 		switch len(toks) {
 		case 3:
+			if toks[0] == "" || toks[1] == "" || toks[2] == "" {
+				return refuse(1, &epRefusal{"name_invalid", "an address has three tokens, none empty: owner/group/instance"})
+			}
 			sOwner, sGroup, sInstance = toks[0], toks[1], toks[2]
 		case 1:
 			sInstance = toks[0]
 		case 2:
 			return refuse(2, &epRefusal{"address_ambiguous", "two tokens are ambiguous; write alice/dev/design or --group dev design"})
 		default:
-			return refuse(2, &epRefusal{"name_invalid", "an address has three tokens: owner/group/instance"})
+			return refuse(1, &epRefusal{"name_invalid", "an address has three tokens: owner/group/instance"})
 		}
 	}
 	pick := func(what, shortcut, flagv string) (string, *epRefusal) {
@@ -411,9 +502,6 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		return refuse(2, ref)
 	}
 	if group == "" {
-		group = env("MASH_GROUP")
-	}
-	if group == "" {
 		return refuse(2, &epRefusal{"group_missing", "an endpoint needs a group; write --group dev or alice/dev/design"})
 	}
 	if owner == "" {
@@ -427,11 +515,11 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	}
 	var err error
 	if addr, err = sap.NewAddress(owner, group, name); err != nil {
-		return refuse(2, &epRefusal{"name_invalid", err.Error()})
+		return refuse(1, &epRefusal{"name_invalid", err.Error()})
 	}
-	doc.Endpoint = epEndpointOf(addr)
+	doc.setAddr(addr)
 	if err := admin.CheckProvision(cfg.NameRule, addr); err != nil {
-		return refuse(2, &epRefusal{"name_rule", err.Error()})
+		return refuse(1, &epRefusal{"name_rule", err.Error()})
 	}
 	switch {
 	case c.makeKey && c.publicKey != "":
@@ -448,9 +536,9 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	if err := store.ValidLabels(labels); err != nil {
 		return refuse(2, &epRefusal{"labels_invalid", err.Error()})
 	}
-	doc.Endpoint.Labels, doc.Endpoint.Description, doc.Endpoint.Note = labels, describe, note
+	doc.Labels, doc.Description, doc.Note = labels, describe, note
 	if caps != nil {
-		doc.Endpoint.Caps = caps
+		doc.Caps = caps
 	}
 	if cfgErr != nil {
 		fmt.Fprintln(stderr, cfgErr)
@@ -461,15 +549,14 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 
 	// Everything that does not write: the key file, the output path, the account key.
 	var pub, outPath string
-	var outFile *epFile
+	out := epOutput{doc: &doc, creds: c.makeKey}
 	if c.makeKey {
 		p, err := credsFileFor(cfg, addr)
 		if err != nil {
 			return refuse(1, &epRefusal{"no_config_dir", "no config directory to write the creds file in; set MASH_CONFIG_DIR"})
 		}
 		outPath = p
-		doc.Creds = &epFile{Path: p}
-		outFile = doc.Creds
+		out.set(p)
 	} else {
 		if pub, ref = epReadPublicKey(c.publicKey); ref != nil {
 			return refuse(1, ref)
@@ -480,8 +567,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 			outPath = addr.String() + ".jwt"
 			display = "./" + outPath
 		}
-		doc.JWT = &epFile{Path: display}
-		outFile = doc.JWT
+		out.set(display)
 	}
 	if ref := epPathFree(outPath); ref != nil {
 		return refuse(1, ref)
@@ -503,7 +589,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	if c.makeKey {
 		step = epNextSession(addr)
 	} else {
-		step = epNextCredential(addr, outFile.Path)
+		step = epNextCredential(addr, out.path())
 	}
 	doc.NextSteps = []epStep{step}
 	nextLine := "next: on the endpoint's machine, run: " + step.Detail
@@ -513,9 +599,9 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	where := func(w io.Writer) {
 		fmt.Fprintf(w, "  address  %s\n", addr)
 		if c.makeKey {
-			fmt.Fprintf(w, "  creds    %s\n", outFile.Path)
+			fmt.Fprintf(w, "  creds    %s\n", out.path())
 		} else {
-			fmt.Fprintf(w, "  jwt      %s\n", outFile.Path)
+			fmt.Fprintf(w, "  jwt      %s\n", out.path())
 		}
 		fmt.Fprintln(w, nextLine)
 	}
@@ -534,6 +620,13 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 			return epErr(doc, "create", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
 		case c.makeKey || user != pub:
 			return refuse(1, &epRefusal{enroll.CodeAddressTaken, fmt.Sprintf("endpoint %s already exists; mashctl endpoint show %s shows it, mashctl endpoint reissue %s gives it a new key", addr, epShortcut(addr), epShortcut(addr))})
+		}
+		if !c.makeKey {
+			if ref, err := epIssuedRefusal(ctx, adm, addr, pub); err != nil {
+				return epErr(doc, "create", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
+			} else if ref != nil {
+				return refuse(1, ref)
+			}
 		}
 		doc.Outcome = "planned"
 		return epReport("create", doc, func(w io.Writer) {
@@ -566,6 +659,9 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	} else {
 		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
 	}
+	if errors.Is(werr, fs.ErrExist) {
+		return refuse(1, &epRefusal{"file_exists", fmt.Sprintf("%s appeared while the command ran and is never overwritten; endpoint %s is recorded: run the same command again with another --jwt-out", outPath, addr)})
+	}
 	if werr != nil {
 		finish := "run the same command again to finish it (it signs again and writes the JWT)"
 		if c.makeKey {
@@ -573,7 +669,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		}
 		return epErr(doc, "create", "write", fmt.Sprintf("endpoint %s is recorded but the file %s was not written (%v); %s", addr, outPath, werr, finish), c.jsonOut, stdout, stderr)
 	}
-	outFile.Written = true
+	out.written()
 	doc.Outcome = "created"
 	return epReport("create", doc, func(w io.Writer) {
 		fmt.Fprintf(w, "created endpoint %s\n", epShortcut(addr))

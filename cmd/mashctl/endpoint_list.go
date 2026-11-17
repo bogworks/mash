@@ -92,20 +92,30 @@ func recordSuffix(r store.Record) string {
 
 // runEndpointList is `mashctl endpoint list`.
 func runEndpointList(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	asJSON := false
+	asJSON := jsonRequested(args)
+	// usageErr answers a usage error: the sentence on stderr, and with --json the document on stdout.
+	usageErr := func(code, msg string) int {
+		fmt.Fprintf(stderr, "mashctl: endpoint list: %s\n", msg)
+		if asJSON {
+			writeJSON(stdout, struct {
+				Schema    string               `json:"schema"`
+				Outcome   string               `json:"outcome"`
+				Endpoints []endpointRecordJSON `json:"endpoints"`
+				Refusal   *refusalJSON         `json:"refusal"`
+			}{"mashctl-endpoint-list@1", "error", []endpointRecordJSON{}, &refusalJSON{Code: code, Detail: msg}})
+		}
+		return 2
+	}
 	for _, a := range args {
 		switch {
 		case a == "--help" || a == "-h":
 			fmt.Fprint(stdout, endpointListUsage)
 			return 0
 		case a == "--json":
-			asJSON = true
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: endpoint list: unknown %s; try: mashctl endpoint list --help\n", config.RejectedArg(a))
-			return 2
+			return usageErr("unknown_flag", fmt.Sprintf("unknown %s; try: mashctl endpoint list --help", config.RejectedArg(a)))
 		default:
-			fmt.Fprintf(stderr, "mashctl: endpoint list: takes no argument; try: mashctl endpoint show ADDRESS for one endpoint, or mashctl endpoint list --help\n")
-			return 2
+			return usageErr("usage", "takes no argument; try: mashctl endpoint show ADDRESS for one endpoint, or mashctl endpoint list --help")
 		}
 	}
 	fail := func(err error) int {

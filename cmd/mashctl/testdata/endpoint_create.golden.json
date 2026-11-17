@@ -2,21 +2,17 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "planned",
-  "endpoint": {
-    "owner": "o",
-    "group": "g",
-    "instance": "design",
-    "address": "o.g.design",
-    "key": "o_g_design",
-    "labels": {},
-    "caps": [],
-    "description": "",
-    "note": ""
-  },
-  "jwt": {
-    "path": "OUT/design.jwt",
-    "written": false
-  },
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
   "next_steps": [
     {
       "sender": "endpoint",
@@ -33,26 +29,22 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "created",
-  "endpoint": {
-    "owner": "o",
-    "group": "g",
-    "instance": "design",
-    "address": "o.g.design",
-    "key": "o_g_design",
-    "labels": {
-      "team": "x"
-    },
-    "caps": [
-      "c1"
-    ],
-    "description": "d",
-    "note": "n"
-  },
-  "jwt": {
-    "path": "OUT/design.jwt",
-    "written": true
-  },
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": true,
   "user_public_key": "UPUBLICKEY",
+  "labels": {
+    "team": "x"
+  },
+  "caps": [
+    "c1"
+  ],
+  "description": "d",
+  "note": "n",
   "next_steps": [
     {
       "sender": "endpoint",
@@ -69,21 +61,17 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "refused",
-  "endpoint": {
-    "owner": "o",
-    "group": "g",
-    "instance": "design",
-    "address": "o.g.design",
-    "key": "o_g_design",
-    "labels": {},
-    "caps": [],
-    "description": "",
-    "note": ""
-  },
-  "jwt": {
-    "path": "OUT/other.jwt",
-    "written": false
-  },
+  "owner": "o",
+  "group": "g",
+  "instance": "design",
+  "address": "o.g.design",
+  "key": "o_g_design",
+  "jwt_path": "OUT/other.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
   "next_steps": [],
   "refusal": {
     "code": "address_taken",
@@ -94,17 +82,15 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "error",
-  "endpoint": {
-    "owner": "",
-    "group": "",
-    "instance": "",
-    "address": "..",
-    "key": "__",
-    "labels": {},
-    "caps": [],
-    "description": "",
-    "note": ""
-  },
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
   "next_steps": [],
   "refusal": {
     "code": "group_missing",
@@ -115,21 +101,17 @@
 {
   "schema": "mashctl-endpoint@1",
   "outcome": "refused",
-  "endpoint": {
-    "owner": "o",
-    "group": "g",
-    "instance": "two",
-    "address": "o.g.two",
-    "key": "o_g_two",
-    "labels": {},
-    "caps": [],
-    "description": "",
-    "note": ""
-  },
-  "jwt": {
-    "path": "OUT/design.jwt",
-    "written": false
-  },
+  "owner": "o",
+  "group": "g",
+  "instance": "two",
+  "address": "o.g.two",
+  "key": "o_g_two",
+  "jwt_path": "OUT/design.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
   "next_steps": [],
   "refusal": {
     "code": "file_exists",

@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 
@@ -28,6 +32,31 @@ Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
 `
 
+// errEpBusy is returned by epLock when the lock stayed held for epLockWait.
+var errEpBusy = errors.New("lock busy")
+
+// epLockWait is how long epLock waits for a lock held by another run.
+var epLockWait = 10 * time.Second
+
+// epLock takes the lock directory at path: os.Mkdir is exclusive, the attempt repeats every 50 ms for epLockWait. The
+// returned function removes the directory this call made.
+func epLock(path string) (unlock func(), err error) {
+	deadline := time.Now().Add(epLockWait)
+	for {
+		err := os.Mkdir(path, 0o700)
+		if err == nil {
+			return func() { os.Remove(path) }, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			return nil, errEpBusy
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // runEndpointReissue is `mashctl endpoint reissue`.
 func runEndpointReissue(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -36,9 +65,13 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	}
 	var c epCommon
 	var positional string
+	c.jsonOut = jsonRequested(args, epValueFlags...)
+	doc := epDocFor(sap.Address{})
+	usageCode := "usage"
 	usage := func(msg string) int {
-		fmt.Fprintf(stderr, "mashctl: endpoint reissue: %s\n%s", msg, endpointReissueUsage)
-		return 2
+		code := usageCode
+		usageCode = "usage"
+		return epUsage("reissue", endpointReissueUsage, doc, code, msg, c.jsonOut, stdout, stderr)
 	}
 	for i := 0; i < len(args); i++ {
 		flag, inline, hasInline := splitFlag(args, i)
@@ -51,8 +84,10 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		}
 		switch {
 		case flag == "--all" || flag == "--changed" || flag == "--yes":
+			usageCode = "bulk_unavailable"
 			return usage("the bulk forms (--all, --changed) are not available; run endpoint reissue ADDRESS once per endpoint")
 		case strings.HasPrefix(flag, "-"):
+			usageCode = "unknown_flag"
 			return usage("unknown " + config.RejectedArg(flag))
 		case positional != "":
 			return usage("one endpoint address only")
@@ -60,7 +95,6 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 			positional = flag
 		}
 	}
-	doc := epDoc{Schema: endpointSchema, Outcome: "refused"}
 	var addr sap.Address
 	refuse := func(code int, ref *epRefusal) int {
 		doc.Refusal = ref
@@ -74,9 +108,9 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	}
 	addr, err := parseEndpointRef(positional)
 	if err != nil {
-		return refuse(2, &epRefusal{"name_invalid", err.Error()})
+		return refuse(2, &epRefusal{"address_invalid", err.Error()})
 	}
-	doc.Endpoint = epEndpointOf(addr)
+	doc.setAddr(addr)
 	switch {
 	case c.makeKey && c.publicKey != "":
 		return refuse(2, &epRefusal{"key_both", "give one of --public-key FILE and --make-key, not both"})
@@ -93,7 +127,7 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	}
 
 	var pub, outPath string
-	var outFile *epFile
+	out := epOutput{doc: &doc, creds: c.makeKey}
 	var ref *epRefusal
 	if c.makeKey {
 		p, err := credsFileFor(cfg, addr)
@@ -101,8 +135,7 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 			return refuse(1, &epRefusal{"no_config_dir", "no config directory to write the creds file in; set MASH_CONFIG_DIR"})
 		}
 		outPath = p
-		doc.Creds = &epFile{Path: p}
-		outFile = doc.Creds
+		out.set(p)
 	} else {
 		if pub, ref = epReadPublicKey(c.publicKey); ref != nil {
 			return refuse(1, ref)
@@ -116,8 +149,7 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		if ref := epPathFree(outPath); ref != nil {
 			return refuse(1, ref)
 		}
-		doc.JWT = &epFile{Path: display}
-		outFile = doc.JWT
+		out.set(display)
 	}
 	keys, acct, err := epAccountOf(cfg, env)
 	if err != nil {
@@ -147,19 +179,26 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	var step epStep
 	if c.makeKey {
 		step = epStep{Sender: "endpoint", Step: "session", Action: "restart the sessions of this endpoint so they read the new creds",
-			Address: addr.String(), Purpose: "use", Detail: "creds file " + outFile.Path}
+			Address: addr.String(), Purpose: "use", Detail: "creds file " + out.path()}
 	} else {
-		step = epNextCredential(addr, outFile.Path)
+		step = epNextCredential(addr, out.path())
 	}
 	doc.NextSteps = []epStep{step}
 	lines := func(w io.Writer) {
 		fmt.Fprintf(w, "  address  %s\n", addr)
 		if c.makeKey {
-			fmt.Fprintf(w, "  creds    %s\n", outFile.Path)
+			fmt.Fprintf(w, "  creds    %s\n", out.path())
 			fmt.Fprintln(w, "next: restart the sessions of this endpoint so they read the new creds")
 		} else {
-			fmt.Fprintf(w, "  jwt      %s\n", outFile.Path)
+			fmt.Fprintf(w, "  jwt      %s\n", out.path())
 			fmt.Fprintln(w, "next: on the endpoint's machine, run: "+step.Detail)
+		}
+	}
+	if c.dryRun && !c.makeKey {
+		if ref, err := epIssuedRefusal(ctx, adm, addr, pub); err != nil {
+			return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
+		} else if ref != nil {
+			return refuse(1, ref)
 		}
 	}
 	if c.dryRun {
@@ -172,6 +211,21 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 
 	if err := checkServerSet(ctx, cfg, env, servers); err != nil {
 		return epErr(doc, "reissue", "servers", fmt.Sprintf("%v; %s", err, ctl.NotRevoked), c.jsonOut, stdout, stderr)
+	}
+	if c.makeKey {
+		// One reissue at a time per creds file: enroll.Reissue and the replace of the file are one step, so two runs
+		// cannot leave the directory on one key and the file on the other.
+		if err := epPrepDir(filepath.Dir(outPath)); err != nil {
+			return epErr(doc, "reissue", "write", fmt.Sprintf("the creds directory is not usable: %v; nothing was changed", err), c.jsonOut, stdout, stderr)
+		}
+		unlock, lerr := epLock(outPath + ".lock")
+		if errors.Is(lerr, errEpBusy) {
+			return refuse(1, &epRefusal{"reissue_busy", fmt.Sprintf("another reissue of %s is running; if none is (a run was killed), remove the directory %s and run this again", addr, outPath+".lock")})
+		}
+		if lerr != nil {
+			return epErr(doc, "reissue", "write", fmt.Sprintf("cannot take the lock %s: %v; nothing was changed", outPath+".lock", lerr), c.jsonOut, stdout, stderr)
+		}
+		defer unlock()
 	}
 	deps := enroll.Deps{Keys: keys, Admin: adm, Account: acct,
 		Revoke: func(ctx context.Context, u string) error {
@@ -202,6 +256,9 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	} else {
 		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
 	}
+	if errors.Is(werr, fs.ErrExist) {
+		return refuse(1, &epRefusal{"file_exists", fmt.Sprintf("%s appeared while the command ran and is never overwritten; endpoint %s was reissued: run the same command again with another --jwt-out", outPath, addr)})
+	}
 	if werr != nil {
 		finish := "run the same command with --public-key again to write the JWT"
 		if c.makeKey {
@@ -209,7 +266,7 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		}
 		return epErr(doc, "reissue", "write", fmt.Sprintf("endpoint %s was reissued but %s was not written (%v); %s", addr, outPath, werr, finish), c.jsonOut, stdout, stderr)
 	}
-	outFile.Written = true
+	out.written()
 	doc.Outcome = "reissued"
 	return epReport("reissue", doc, func(w io.Writer) {
 		fmt.Fprintf(w, "reissued endpoint %s\n", epShortcut(addr))

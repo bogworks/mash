@@ -7,6 +7,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -39,44 +40,60 @@ type showIssuedJSON struct {
 	Revoked  bool   `json:"revoked"`
 }
 
+// showJSON carries the directory record at the top level; on a refusal only the names are filled.
 type showJSON struct {
-	Schema   string                  `json:"schema"`
-	Outcome  string                  `json:"outcome"`
-	Endpoint *endpointShowRecordJSON `json:"endpoint"`
-	Creds    showCredsJSON           `json:"creds"`
-	Issued   *showIssuedJSON         `json:"issued"`
-	Refusal  *refusalJSON            `json:"refusal"`
+	Schema  string `json:"schema"`
+	Outcome string `json:"outcome"`
+	endpointShowRecordJSON
+	Creds   showCredsJSON   `json:"creds"`
+	Issued  *showIssuedJSON `json:"issued"`
+	Refusal *refusalJSON    `json:"refusal"`
+}
+
+// showNames is the record fields of a document for an address with no record.
+func showNames(addr sap.Address) endpointShowRecordJSON {
+	var r endpointShowRecordJSON
+	r.Labels, r.Caps = map[string]string{}, []string{}
+	if addr.Instance != "" {
+		r.Owner, r.Group, r.Instance, r.Address, r.Key = addr.Owner, addr.Group, addr.Instance, addr.String(), addr.Flat()
+	}
+	return r
 }
 
 // runEndpointShow is `mashctl endpoint show`.
 func runEndpointShow(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	var arg string
-	asJSON := false
+	asJSON := jsonRequested(args)
+	var names sap.Address
+	// usageErr answers a usage error: the sentence on stderr, and with --json the document on stdout.
+	usageErr := func(code, msg string) int {
+		fmt.Fprintf(stderr, "mashctl: endpoint show: %s\n", msg)
+		if asJSON {
+			writeJSON(stdout, showJSON{Schema: endpointSchema, Outcome: "error", endpointShowRecordJSON: showNames(names),
+				Refusal: &refusalJSON{Code: code, Detail: msg}})
+		}
+		return 2
+	}
 	for _, a := range args {
 		switch {
 		case a == "--help" || a == "-h":
 			fmt.Fprint(stdout, endpointShowUsage)
 			return 0
 		case a == "--json":
-			asJSON = true
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintf(stderr, "mashctl: endpoint show: unknown %s; try: mashctl endpoint show --help\n", config.RejectedArg(a))
-			return 2
+			return usageErr("unknown_flag", fmt.Sprintf("unknown %s; try: mashctl endpoint show --help", config.RejectedArg(a)))
 		case arg != "":
-			fmt.Fprintf(stderr, "mashctl: endpoint show: one endpoint address only; try: mashctl endpoint show --help\n")
-			return 2
+			return usageErr("usage", "one endpoint address only; try: mashctl endpoint show --help")
 		default:
 			arg = a
 		}
 	}
 	if arg == "" {
-		fmt.Fprintf(stderr, "mashctl: endpoint show: no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint show --help\n")
-		return 2
+		return usageErr("address_missing", "no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint show --help")
 	}
 	addr, err := parseEndpointRef(arg)
 	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: endpoint show: %v\n", err)
-		return 2
+		return usageErr("address_invalid", err.Error())
 	}
 	short := slashForm(addr)
 	fail := func(err error) int {
@@ -106,7 +123,7 @@ func runEndpointShow(args []string, env func(string) string, lookup config.Looku
 	if !found {
 		detail := "no directory record for " + short + "; mashctl endpoint list shows the endpoints that exist"
 		if asJSON {
-			writeJSON(stdout, showJSON{Schema: "mashctl-endpoint@1", Outcome: "refused",
+			writeJSON(stdout, showJSON{Schema: endpointSchema, Outcome: "refused", endpointShowRecordJSON: showNames(addr),
 				Creds:   showCredsJSON{Path: credsPath, Exists: credsPath != ""},
 				Refusal: &refusalJSON{Code: "not_found", Detail: detail}})
 		} else {
@@ -126,9 +143,9 @@ func runEndpointShow(args []string, env func(string) string, lookup config.Looku
 	}
 	if asJSON {
 		j := showJSON{
-			Schema: "mashctl-endpoint@1", Outcome: "shown",
-			Endpoint: &endpointShowRecordJSON{endpointRecordJSON: recordJSON(rec), Agent: rec.Agent, Account: rec.Account, MailSubject: rec.MailSubject},
-			Creds:    showCredsJSON{Path: credsPath, Exists: credsPath != ""},
+			Schema: endpointSchema, Outcome: "shown",
+			endpointShowRecordJSON: endpointShowRecordJSON{endpointRecordJSON: recordJSON(rec), Agent: rec.Agent, Account: rec.Account, MailSubject: rec.MailSubject},
+			Creds:                  showCredsJSON{Path: credsPath, Exists: credsPath != ""},
 		}
 		if issued != nil {
 			j.Issued = &showIssuedJSON{Purpose: issued.EffectivePurpose(), IssuedAt: issued.IssuedAt, Revoked: issued.RevokedAt != ""}
