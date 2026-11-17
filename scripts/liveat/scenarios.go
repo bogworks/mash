@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,6 +162,57 @@ func (a *AT) permissions(h Home, owner, group, name string) {
 	fails, owners := checkPermissions(owner, group, name, pub, sub, deny)
 	a.C.Check("REQ-005: the credential's publish and subscribe set is exactly the contract's", len(fails) == 0, strings.Join(fails, "; "))
 	a.C.Check("INV-002: no line names another owner or a wildcard in the owner slot", len(owners) == 0, strings.Join(owners, "; "))
+}
+
+// issuedPermissions decodes the user JWT in path (a bare JWT file or a creds file) in memory and applies the same
+// contract comparison to the permissions it carries. The token and payload are never recorded.
+func (a *AT) issuedPermissions(path, owner, group, name string) {
+	const check = "REQ-005: the issued credential's publish and subscribe set is exactly the contract's (decoded from the JWT)"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		a.C.Check(check, false, "the JWT file could not be read")
+		return
+	}
+	pub, sub, deny, claimName, err := decodeIssued(string(b))
+	if err != nil {
+		a.C.Check(check, false, err.Error())
+		return
+	}
+	fails, _ := checkPermissions(owner, group, name, pub, sub, deny)
+	if want := owner + "." + group + "." + name; claimName != want {
+		fails = append(fails, "the JWT name claim is not the dotted address "+want)
+	}
+	a.C.Check(check, len(fails) == 0, strings.Join(fails, "; "))
+}
+
+// decodeIssued finds the JWT in text and returns its allow lists, deny entries (tagged like permissionLists) and
+// name claim. Errors never include token or payload content.
+func decodeIssued(text string) (pub, sub, deny []string, name string, err error) {
+	tok := jwtRE.FindString(text)
+	if tok == "" {
+		return nil, nil, nil, "", fmt.Errorf("no JWT found in the file")
+	}
+	raw, derr := base64.RawURLEncoding.DecodeString(strings.Split(tok, ".")[1])
+	if derr != nil {
+		return nil, nil, nil, "", fmt.Errorf("the JWT payload is not base64url")
+	}
+	var v struct {
+		Name string `json:"name"`
+		NATS struct {
+			Pub struct{ Allow, Deny []string } `json:"pub"`
+			Sub struct{ Allow, Deny []string } `json:"sub"`
+		} `json:"nats"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return nil, nil, nil, "", fmt.Errorf("the JWT payload is not JSON")
+	}
+	for _, d := range v.NATS.Pub.Deny {
+		deny = append(deny, "publish "+d)
+	}
+	for _, d := range v.NATS.Sub.Deny {
+		deny = append(deny, "subscribe "+d)
+	}
+	return v.NATS.Pub.Allow, v.NATS.Sub.Allow, deny, v.Name, nil
 }
 
 // permissionLists reads the allow lists and any deny entries from the printed permission JSON.
@@ -329,6 +382,7 @@ var AT001 = Scenario{
 		}
 
 		a.permissions(h, "alice", "dev", "design")
+		a.issuedPermissions(filepath.Join(h.Dir, "alice.dev.design.jwt"), "alice", "dev", "design")
 
 		// endpoint delete retires the creds file in the config directory, so the revoked key is kept at a private path first.
 		revokedCreds := filepath.Join(a.Dir, "review-before-delete.creds")

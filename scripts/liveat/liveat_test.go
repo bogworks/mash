@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +17,16 @@ var (
 	fakeSeed = "SU" + strings.Repeat("B", 54)
 	fakeJWT  = "eyJ" + strings.Repeat("c", 12) + ".payload12345.sig_-"
 )
+
+// tool resolves a program on PATH, failing the test when it is missing.
+func tool(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatalf("required tool %q is not on PATH: %v", name, err)
+	}
+	return p
+}
 
 func TestScanBytes(t *testing.T) {
 	for _, c := range []struct {
@@ -72,10 +85,10 @@ func TestRunnerSavesEveryCommandAndFlagsALeak(t *testing.T) {
 	r := &Runner{Out: out, Cwd: out, Log: &log}
 	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
 	env := BuildEnv(h, nil)
-	a := r.Run("Say Hi", []string{"/bin/echo", "hello"}, env, "")
-	b := r.Run("fail", []string{"/bin/sh", "-c", "echo oops >&2; exit 3"}, env, "")
-	c := r.Run("leaky", []string{"/bin/echo", fakeSeed}, env, "")
-	d := r.Run("stdin", []string{"/bin/cat"}, env, "from stdin")
+	a := r.Run("Say Hi", []string{tool(t, "echo"), "hello"}, env, "")
+	b := r.Run("fail", []string{tool(t, "sh"), "-c", "echo oops >&2; exit 3"}, env, "")
+	c := r.Run("leaky", []string{tool(t, "echo"), fakeSeed}, env, "")
+	d := r.Run("stdin", []string{tool(t, "cat")}, env, "from stdin")
 	if a.Code != 0 || a.Stdout != "hello\n" || b.Code != 3 || b.Stderr != "oops\n" || c.Code != 0 || d.Stdout != "from stdin" {
 		t.Fatalf("results: %+v %+v %+v %+v", a, b, c, d)
 	}
@@ -101,7 +114,7 @@ func TestRunnerTimeout(t *testing.T) {
 	out := t.TempDir()
 	r := &Runner{Out: out, Cwd: out, Timeout: 300 * time.Millisecond}
 	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
-	res := r.Run("sleepy", []string{"/bin/sleep", "5"}, BuildEnv(h, nil), "")
+	res := r.Run("sleepy", []string{tool(t, "sleep"), "5"}, BuildEnv(h, nil), "")
 	if res.Code != -1 || !strings.Contains(res.Stderr, "killed after") {
 		t.Fatalf("%+v", res)
 	}
@@ -241,7 +254,7 @@ func TestStopPIDRefusesAForeignCommandLine(t *testing.T) {
 	out := t.TempDir()
 	run := &Runner{Out: out, Cwd: out}
 	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
-	p, err := run.Start("cat", []string{"/bin/cat"}, BuildEnv(h, nil))
+	p, err := run.Start("cat", []string{tool(t, "cat")}, BuildEnv(h, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +326,7 @@ func finishFor(t *testing.T, out string) (*Runner, []Assertion) {
 	r := &Runner{Out: out, Cwd: dir}
 	a := &AT{R: &Run{Dir: dir, Out: out, Runner: r, pids: map[int]string{}}, ID: "x", Dir: dir, C: &Checks{}, secrets: map[string][]byte{}}
 	h, _ := NewHome(filepath.Join(dir, "h"))
-	a.R.Runner.Run("echo", []string{"/bin/echo", "hi"}, BuildEnv(h, nil), "")
+	a.R.Runner.Run("echo", []string{tool(t, "echo"), "hi"}, BuildEnv(h, nil), "")
 	a.Finish(Scenario{ID: "x"})
 	return r, a.C.All()
 }
@@ -346,7 +359,7 @@ func TestCaptureErrorFailsTheScenario(t *testing.T) {
 	if c == nil || c.Pass || !strings.Contains(c.Detail, "01-echo.out") {
 		t.Fatalf("check %+v", c)
 	}
-	res := r.Run("again", []string{"/bin/echo", "hi"}, os.Environ(), "")
+	res := r.Run("again", []string{tool(t, "echo"), "hi"}, os.Environ(), "")
 	if res.CaptureErr == "" || res.Code != 0 {
 		t.Fatalf("result %+v", res)
 	}
@@ -356,7 +369,7 @@ func TestProcReadBackErrorIsRecorded(t *testing.T) {
 	out := t.TempDir()
 	r := &Runner{Out: out, Cwd: out}
 	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
-	p, err := r.Start("cat", []string{"/bin/cat"}, BuildEnv(h, nil))
+	p, err := r.Start("cat", []string{tool(t, "cat")}, BuildEnv(h, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,5 +380,52 @@ func TestProcReadBackErrorIsRecorded(t *testing.T) {
 	errs := r.CaptureErrors()
 	if len(errs) != 1 || !strings.Contains(errs[0], "reading back") {
 		t.Fatalf("errors %v", errs)
+	}
+}
+
+// fakeJWT builds header.payload.signature at run time with a fake signature.
+func fakeIssuedJWT(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := base64.RawURLEncoding
+	return e.EncodeToString([]byte(`{"typ":"JWT","alg":"x"}`)) + "." + e.EncodeToString(b) + "." + e.EncodeToString([]byte("sig"))
+}
+
+func TestDecodeIssuedAgainstContract(t *testing.T) {
+	wp, ws := expectedPermissions("alice", "dev", "design")
+	claims := func(name string, extraPub string, deny []string) map[string]any {
+		pub := slices.Clone(wp)
+		if extraPub != "" {
+			pub = append(pub, extraPub)
+		}
+		return map[string]any{"name": name, "nats": map[string]any{
+			"pub": map[string]any{"allow": pub, "deny": deny}, "sub": map[string]any{"allow": ws}}}
+	}
+	cases := []struct {
+		label string
+		c     map[string]any
+		ok    bool
+	}{
+		{"exact", claims("alice.dev.design", "", nil), true},
+		{"extra grant", claims("alice.dev.design", "other.>", nil), false},
+		{"deny", claims("alice.dev.design", "", []string{"x.>"}), false},
+		{"wrong name", claims("alice.dev.review", "", nil), false},
+	}
+	for _, c := range cases {
+		pub, sub, deny, name, err := decodeIssued("-----BEGIN NATS USER JWT-----\n" + fakeIssuedJWT(t, c.c) + "\n------END NATS USER JWT------\n")
+		if err != nil {
+			t.Fatalf("%s: %v", c.label, err)
+		}
+		fails, _ := checkPermissions("alice", "dev", "design", pub, sub, deny)
+		got := len(fails) == 0 && name == "alice.dev.design"
+		if got != c.ok {
+			t.Errorf("%s: pass=%v want %v (%v)", c.label, got, c.ok, fails)
+		}
+	}
+	if _, _, _, _, err := decodeIssued("nothing here"); err == nil {
+		t.Error("a file with no JWT must error")
 	}
 }
