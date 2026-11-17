@@ -19,3 +19,12 @@ func lockAskFile(f *os.File) error {
 }
 
 func unlockAskFile(f *os.File) { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }
+
+// pidGone reports whether no process pid exists on this host (signal 0 finds ESRCH). A process that exists but is not
+// ours (EPERM) is there.
+func pidGone(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+}

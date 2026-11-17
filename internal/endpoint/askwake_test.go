@@ -496,3 +496,86 @@ func TestAskTableRefreshesFromFileBeforeReading(t *testing.T) {
 		t.Fatal("c's close did not reach d")
 	}
 }
+
+// Two serves of one session share one file: reservations count across them, so exactly one gets the last slot.
+func TestAskTableReservationsAreSharedAcrossServes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asks.json")
+	a, b := OpenAskTable(path), OpenAskTable(path)
+	for i := 0; i < MaxOpenAsks-1; i++ {
+		if _, err := a.Add("p", "UP", uint64(i+1), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var got []func()
+	for _, tb := range []*AskTable{a, b, a, b} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rel, err := tb.Reserve(); err == nil {
+				mu.Lock()
+				got = append(got, rel)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(got) != 1 {
+		t.Fatalf("%d serves got the last slot, want exactly 1", len(got))
+	}
+	if a.Check() == nil || b.Check() == nil {
+		t.Fatal("Check ignored a live reservation")
+	}
+	got[0]()
+	got[0]()
+	if _, err := b.Reserve(); err != nil {
+		t.Fatalf("a released slot was not free for the other serve: %v", err)
+	}
+	if _, err := a.Reserve(); err == nil {
+		t.Fatal("the slot was granted twice")
+	}
+}
+
+func TestAskTableExpiredReservationIsIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asks.json")
+	a, b := OpenAskTable(path), OpenAskTable(path)
+	for i := 0; i < MaxOpenAsks-1; i++ {
+		if _, err := a.Add("p", "UP", uint64(i+1), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.Reserve(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Reserve(); err == nil {
+		t.Fatal("a live reservation did not hold the slot")
+	}
+	b.now = func() time.Time { return time.Now().Add(ReservationLease + time.Second) }
+	rel, err := b.Reserve()
+	if err != nil {
+		t.Fatalf("a lapsed reservation still held the slot: %v", err)
+	}
+	rel()
+}
+
+func TestAskTableFileWithoutReservationsLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asks.json")
+	old := `{"asks":[{"id":"1-1","recipient_key":"UB","recipient":"b","receipt_seq":4,"sent_at":"` +
+		time.Now().UTC().Format(time.RFC3339) + `","deadline":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}]}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tb := OpenAskTable(path)
+	if tb.Len() != 1 || !tb.AnswerMatches("UB", 4) {
+		t.Fatal("old-format file did not load")
+	}
+	rel, err := tb.Reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel()
+	if OpenAskTable(path).Len() != 1 {
+		t.Fatal("reserving rewrote the asks")
+	}
+}

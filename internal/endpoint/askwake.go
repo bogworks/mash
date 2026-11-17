@@ -27,6 +27,12 @@ const (
 	// expired ask within seconds of a serve running, and one still unsettled after this long (no serve ran, or its inbox
 	// could not be read) is one it can no longer act on. A table never drops an expired ask before then.
 	AskSettleGrace = 7 * 24 * time.Hour
+	// ReservationLease is how long a reserved slot holds the table when its holder never releases it (the process died
+	// or hung). A send's slot is held from Reserve to the end of the tool call: the publish, its acknowledgement wait and
+	// the Add, which the caller's context bounds well inside this. A holder that is gone is also dropped at once (same
+	// host, process no longer exists), so the lease only matters for a hung or foreign holder, and over-holding a slot
+	// for two minutes only ever over-refuses.
+	ReservationLease = 2 * time.Minute
 )
 
 // ReplyWaker is what the mail loop asks about a verified message whose signed in-reply-to verified. AnswerMatches
@@ -57,6 +63,14 @@ type OpenAsk struct {
 	Deadline     time.Time `json:"deadline"` // sent_at + answer_within; stored here, acted on by the deadline wake
 }
 
+// Reservation is one slot a send in flight holds in the table file, shared by every serve of the session so that two
+// overlapping serves cannot both take the last slot. It lapses at Until, or when its process (PID, on this host) is gone.
+type Reservation struct {
+	ID    string    `json:"id"`
+	PID   int       `json:"pid"`
+	Until time.Time `json:"until"`
+}
+
 // askTableTemp is the suffix of the unique temp file a write makes beside the table file, and askTableLock is appended
 // to the table file's path for the lock file that serialises writers (created, never removed).
 const (
@@ -80,8 +94,10 @@ type AskTable struct {
 	now  func() time.Time
 	asks []OpenAsk
 	seq  uint64
-	// pending counts slots reserved by sends in flight (Reserve), so concurrent sends cannot all pass the limit.
-	pending int
+	// res is the slots reserved by sends in flight (Reserve), in this process or another serve of the file; mine is the
+	// ids this table reserved and has not released: the file is authoritative for the rest.
+	res  []Reservation
+	mine map[string]bool
 	// onDisk is the ids the file held when this table last read or wrote it: save compares the file against it to tell
 	// what another writer added or closed since (see merge).
 	onDisk map[string]bool
@@ -90,18 +106,20 @@ type AskTable struct {
 }
 
 type askFile struct {
-	Asks []OpenAsk `json:"asks"`
+	Asks         []OpenAsk     `json:"asks"`
+	Reservations []Reservation `json:"reservations,omitempty"` // absent in files older than shared reservations
 }
 
 // OpenAskTable loads the table at path (missing is empty; unreadable or malformed starts empty, and the next write
 // replaces it). Entries AskSettleGrace past their deadline are dropped.
 func OpenAskTable(path string) *AskTable {
-	t := &AskTable{path: path, now: time.Now}
+	t := &AskTable{path: path, now: time.Now, mine: map[string]bool{}}
 	if path != "" {
 		if b, err := os.ReadFile(path); err == nil {
 			var f askFile
 			if json.Unmarshal(b, &f) == nil {
 				t.asks = f.Asks
+				t.res = f.Reservations
 			}
 		}
 	}
@@ -112,7 +130,7 @@ func OpenAskTable(path string) *AskTable {
 
 // Reload re-reads the table file now (one locked refresh, even when the file looks unchanged), so a serve that waited
 // for the endpoint lease sees the asks the previous holder recorded meanwhile. A missing, unreadable or malformed file
-// keeps the current asks. Reserved slots (pending) are untouched.
+// keeps the current asks. Reserved slots this table holds are kept.
 func (t *AskTable) Reload() {
 	if t == nil || t.path == "" {
 		return
@@ -174,30 +192,74 @@ func (t *AskTable) Check() error {
 	return t.fullLocked()
 }
 
+// liveRes is the number of reservations that have not lapsed: not past Until and, for one of this host, with its
+// process still there. Hold t.mu.
+func (t *AskTable) liveRes() int {
+	return len(t.liveResList())
+}
+
+func (t *AskTable) liveResList() []Reservation {
+	now := t.now()
+	out := make([]Reservation, 0, len(t.res))
+	for _, r := range t.res {
+		if r.Until.Before(now) || (r.PID != os.Getpid() && pidGone(r.PID)) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 func (t *AskTable) fullLocked() error {
-	if len(t.asks)+t.pending >= MaxOpenAsks {
+	if len(t.asks)+t.liveRes() >= MaxOpenAsks {
 		return fmt.Errorf("mash: %d answer=now asks are already open (the limit); wait for a reply or for one to be settled at its deadline, or send without answer=now", MaxOpenAsks)
 	}
 	return nil
 }
 
-// Reserve takes one slot atomically before a send, refusing when open asks plus reserved slots fill the table. The
-// caller runs release once the send has failed, or after Add (release is idempotent).
+// Reserve takes one slot before a send, refusing when open asks plus live reservations fill the table. The reservation
+// is written to the table file in one locked update, so it counts against every serve of the session, not just this
+// process. The caller runs release once the send has failed, or after Add (release is idempotent, and a slot held
+// briefly beyond Add only over-refuses). With no file the reservations live in memory.
 func (t *AskTable) Reserve() (release func(), err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.refresh()
-	t.prune()
-	if err := t.fullLocked(); err != nil {
-		return nil, err
+	var full error
+	var id string
+	uerr := t.update(func() bool {
+		t.prune()
+		t.res = t.liveResList()
+		if full = t.fullLocked(); full != nil {
+			return true // persist the dropped lapsed reservations too
+		}
+		t.seq++
+		id = fmt.Sprintf("r%d-%d-%d", os.Getpid(), t.now().UnixNano(), t.seq)
+		t.res = append(t.res, Reservation{ID: id, PID: os.Getpid(), Until: t.now().Add(ReservationLease).UTC()})
+		t.mine[id] = true
+		return true
+	})
+	if full != nil {
+		return nil, full
 	}
-	t.pending++
+	if id == "" {
+		return nil, uerr
+	}
+	// A file that could not be locked or written leaves the reservation in memory only (this process still counts it).
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			t.mu.Lock()
-			t.pending--
-			t.mu.Unlock()
+			defer t.mu.Unlock()
+			delete(t.mine, id)
+			_ = t.update(func() bool {
+				for i, r := range t.res {
+					if r.ID == id {
+						t.res = append(t.res[:i:i], t.res[i+1:]...)
+						return true
+					}
+				}
+				return false
+			})
 		})
 	}, nil
 }
@@ -381,7 +443,7 @@ func (t *AskTable) refresh() {
 // holds the file's lock. Hold t.mu.
 func (t *AskTable) write() error {
 	dir := filepath.Dir(t.path)
-	b, err := json.Marshal(askFile{Asks: append([]OpenAsk{}, t.asks...)})
+	b, err := json.Marshal(askFile{Asks: append([]OpenAsk{}, t.asks...), Reservations: t.liveResList()})
 	if err != nil {
 		return err
 	}
@@ -423,6 +485,20 @@ func (t *AskTable) merge() {
 	if json.Unmarshal(b, &f) != nil {
 		return
 	}
+	// Reservations: the file is authoritative for other holders' (one released or lapsed there is gone); this table's
+	// own unreleased ones stay even when the file lost them. Both are minus the lapsed.
+	onFile := make(map[string]bool, len(f.Reservations))
+	res := append([]Reservation(nil), f.Reservations...)
+	for _, r := range f.Reservations {
+		onFile[r.ID] = true
+	}
+	for _, r := range t.res {
+		if t.mine[r.ID] && !onFile[r.ID] {
+			res = append(res, r)
+		}
+	}
+	t.res = res
+	t.res = t.liveResList()
 	disk := idsOf(f.Asks)
 	kept := t.asks[:0:0]
 	for _, a := range t.asks {
