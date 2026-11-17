@@ -243,3 +243,51 @@ carry legacy names. I count 12.5 with the golden-name tests rewritten, not delet
   0102 (the group is slot 2, not the owner).
 * The command names and flags belong to the CLI design that ctl writes (`mashctl endpoint create|reissue|retire|migrate`);
   the field names in this note (`owner`, `group`, `instance`, `address`, outcome words) are what ctl quotes in `--json`.
+
+## 6. Addendum: the flag-day alternative, costed
+
+The plan above moves endpoints one at a time and bridges the window. With one user and a few endpoints the bridge may not
+earn its code. The alternative, **flag day**: no bridge grants, no alias read, no legacy lease are built or kept.
+
+**What the operator does.**
+
+1. `mashctl endpoint migrate` (no names) plans every endpoint and changes nothing, as in 2.1.
+2. `mashctl endpoint migrate --all --apply` makes every new identity at once (record, inbox stream, key, creds file) and
+   leaves the legacy records, inboxes and old credentials untouched. For each endpoint it copies the unread mail of the
+   legacy inbox into the new inbox, so mail is carried over by copy, not by a second read path.
+3. The operator stops every session and restarts each with its new creds file under the 0.5.5 binary.
+4. `mashctl endpoint migrate --finish --all` runs right after: it revokes every old credential, deletes the legacy inboxes
+   and removes the legacy records. It refuses while an endpoint has not connected under its new identity, unless `--force`.
+
+**What it saves.** The bridge grants, the alias read (two streams, one session), the legacy lease, the `audit` window
+state and the mixed-window tests are never built for 0.5.5, and the ADR 0076 alias code is deleted now instead of in
+0.6.0. The cost moved in is the copy of unread mail at `--apply` and a connected-check at `--finish`.
+
+**What breaks.**
+
+* Between steps 2 and 3, old and new sessions cannot reach each other: old senders publish to `cc.O.N`, which the new
+  inboxes do not carry; new credentials do not reach the legacy subjects. A restarted session cannot send to one not yet
+  restarted. The operator's restart pass is the whole window, so it should be short: stop all, restart all.
+* A session that is **not restarted** keeps working on its old credentials until step 4 and then is cut off: its
+  connection is refused and mail sent to its old address after `--finish` has no inbox and is lost to the sender
+  (publishing to a subject with no stream). Mail that reached the legacy inbox between `--apply` and `--finish` is not
+  lost: `--finish` repeats the copy per endpoint first, and refuses on a legacy inbox it cannot read.
+* There is no way to move one endpoint and wait: a single endpoint can be migrated (`NAME --apply`), but it cannot talk to
+  the others until they have all moved.
+* The move is not reversible after step 4, as before.
+
+**Size, in person-days (core).** Flag day replaces the migration row (3) with 2: plan, `--all --apply`, the mail copy,
+the connected-check and `--finish`; the live proof drops from 2 to 1.5 (no mixed-window steps); and the removal row rises
+from 3 to 3.5 because the alias machinery goes now. Net: **11.5 days against 12.5** in 0.5.5, and the 0.6.0 deletion of
+the alias code (about 1 day) is not needed. The bridge buys the ability to move one session at a time over days; it costs
+about 1 day now and 1 day later.
+
+**Size with and without the credential-primitive carve-out (section 3, #698).**
+
+* Without the carve-out: 12.5 days (bridge) or 11.5 days (flag day).
+* With the carve-out: 14 days (bridge) or 13 days (flag day).
+
+**Recommendation.** For one user with a few endpoints the flag day is enough: the cost of the bridge is real code that is
+deleted again in 0.6.0, and the only thing it buys is moving sessions on different days. If any endpoint cannot be
+restarted in one pass, the bridge earns its place; that is the maintainer's call, and the ADR (0145) records whichever is
+chosen. The ADR text above describes the bridge and changes if the flag day is chosen.
