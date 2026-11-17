@@ -285,6 +285,11 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 		doc.NextSteps = append(doc.NextSteps, epStep{Sender: "endpoint", Step: "session",
 			Action: "restart the sessions of the reissued endpoints so they read the new creds", Purpose: "use"})
 	}
+	if doc.Outcome == "partial" {
+		doc.NextSteps = append(doc.NextSteps, epStep{Sender: "operator", Step: "rerun",
+			Action: "reissue the endpoints that did not finish; --changed leaves the ones that succeeded alone", Purpose: "use",
+			Detail: "mashctl endpoint reissue --changed --make-key --yes"})
+	}
 	if n.Planned > 0 {
 		doc.NextSteps = append(doc.NextSteps, epStep{Sender: "operator", Step: "confirm",
 			Action: "reissue these endpoints", Purpose: "use", Detail: bulkAgain(a)})
@@ -320,6 +325,9 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 			fmt.Fprintf(w, "would reissue %d; nothing was changed; to do it run: %s\n", n.Planned, bulkAgain(a))
 		case n.Reissued+bad == 0:
 			fmt.Fprintln(w, "nothing to reissue")
+		case doc.Outcome == "partial":
+			fmt.Fprintln(w, "partial: some endpoints did not finish; rerun with --changed, not --all (--all rotates the ones that succeeded again): mashctl endpoint reissue --changed --make-key --yes")
+			fmt.Fprintln(w, "next: restart the sessions of the reissued endpoints so they read the new creds")
 		case n.Reissued > 0:
 			fmt.Fprintln(w, "next: restart the sessions of the reissued endpoints so they read the new creds")
 		}

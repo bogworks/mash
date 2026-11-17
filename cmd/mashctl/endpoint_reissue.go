@@ -40,6 +40,8 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -457,6 +459,16 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		// The creds file is checked under the lock, before anything is staged or revoked: a file that is not this
 		// endpoint's current creds is never overwritten.
 		stagedPub := epStagedPub(pending)
+		if stagedPub != "" {
+			// A staged key that the account JWT has revoked can never be used: refuse before anything changes.
+			revoked, rerr := keyRevoked(r.ctx, r.cfg, r.env, r.servers, stagedPub)
+			if rerr != nil {
+				return "", 0, &epFail{code: "revocation_unknown", detail: fmt.Sprintf("cannot tell whether the staged key %s is revoked: %v; nothing was changed", pending, rerr)}
+			}
+			if revoked {
+				return "", 0, &epFail{refused: true, code: "staged_key_revoked", detail: fmt.Sprintf("the staged key %s was revoked; remove %s and run the command again", pending, pending)}
+			}
+		}
 		staged := stagedPub != "" && stagedPub == old
 		if f := epCheckCreds(outPath, addr, old, dirAcct, staged); f != nil {
 			return "", 0, f

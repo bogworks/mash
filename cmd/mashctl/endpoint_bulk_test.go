@@ -381,6 +381,7 @@ func noPending(t *testing.T, h *fleetEnv) {
 
 func TestEndpointCreateMakeKeyKilledAfterEnroll(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeRevoke(t, nil)
 	a := ad("k1")
 	args := []string{"endpoint", "create", a.String(), "--make-key", "--json"}
 	if code := killAt(h, &epAfterEnroll, args...); code != -1 {
@@ -419,6 +420,7 @@ func TestEndpointCreateMakeKeyKilledAfterEnroll(t *testing.T) {
 
 func TestEndpointCreateMakeKeyKilledAfterStage(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeRevoke(t, nil)
 	a := ad("k2")
 	args := []string{"endpoint", "create", a.String(), "--make-key"}
 	if code := killAt(h, &epAfterStage, args...); code != -1 {
@@ -439,6 +441,7 @@ func TestEndpointCreateMakeKeyKilledAfterStage(t *testing.T) {
 
 func TestEndpointCreateMakeKeyCredsExist(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeRevoke(t, nil)
 	a := ad("k3")
 	args := []string{"endpoint", "create", a.String(), "--make-key", "--json"}
 	if _, se, code := h.run(args...); code != 0 {
