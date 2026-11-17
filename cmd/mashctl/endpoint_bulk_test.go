@@ -31,7 +31,7 @@ func bulkDoc(t *testing.T, so string) epBulkDoc {
 // credsPub is the user public key of the creds file of a.
 func credsPub(t *testing.T, h *fleetEnv, a sap.Address) string {
 	t.Helper()
-	pub, err := epCredsUser(h.creds(a))
+	pub, err := epCredsUser(h.creds(a), a)
 	if err != nil {
 		t.Fatal(err)
 	}

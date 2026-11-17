@@ -599,7 +599,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	credsArePending := false
 	if pendingKey != "" {
 		if _, lerr := os.Lstat(outPath); lerr == nil {
-			have, cerr := epCredsUser(outPath)
+			have, cerr := epCredsUser(outPath, addr)
 			if cerr != nil || have != pendingKey {
 				return refuse(1, &epRefusal{"creds_exists", fmt.Sprintf("%s already exists for another key and is never overwritten; move it aside and run the same command again", outPath)})
 			}
@@ -788,8 +788,10 @@ func epErr(doc epDoc, verb, code, detail string, jsonOut bool, stdout, stderr io
 	return epReport(verb, doc, nil, 6, stdout, stderr, jsonOut)
 }
 
-// epCredsUser is the user public key a creds file names.
-func epCredsUser(path string) (string, error) {
+// epCredsUser is the user public key a creds file names, once the file is shown to be usable: it holds a user JWT
+// whose name is the address and a seed whose public key is the JWT's subject. A JWT without its seed, or with another
+// key's seed, is an error, never a key.
+func epCredsUser(path string, addr sap.Address) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -802,6 +804,18 @@ func epCredsUser(path string) (string, error) {
 	uc, err := jwt.DecodeUserClaims(tok)
 	if err != nil {
 		return "", err
+	}
+	if uc.Name != addr.String() {
+		return "", fmt.Errorf("the JWT in %s is for %q, not %s", path, uc.Name, addr)
+	}
+	kp, err := jwt.ParseDecoratedUserNKey(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s holds no usable seed: %w", path, err)
+	}
+	defer kp.Wipe()
+	pub, err := kp.PublicKey()
+	if err != nil || pub != uc.Subject {
+		return "", fmt.Errorf("the seed in %s is not the key of its JWT", path)
 	}
 	return uc.Subject, nil
 }

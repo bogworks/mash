@@ -305,3 +305,38 @@ func TestEpOwnedByCaller(t *testing.T) {
 		t.Error("a file this process made is not owned by the caller")
 	}
 }
+
+func TestEndpointShortcutNeedsASeedInTheCreds(t *testing.T) {
+	h := newFleetEnv(t)
+	fakeRevoke(t, nil)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
+	a := ad("noseed")
+	// a finished create: the record names the key and the creds file holds the JWT and the seed
+	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+		t.Fatalf("create: %q", se)
+	}
+	seed := credsSeed(t, h.creds(a))
+	pending := h.creds(a) + ".pending"
+	if err := os.WriteFile(pending, seed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// the creds file loses its seed: only the JWT is left
+	raw, err := os.ReadFile(h.creds(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.creds(a), []byte(tok+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	so, _, code := h.run("endpoint", "create", a.String(), "--make-key", "--json")
+	if code != 1 || refusalCode(t, so) != "creds_exists" {
+		t.Fatalf("%d %q", code, so)
+	}
+	if _, err := os.Stat(pending); err != nil {
+		t.Errorf("the staged seed was removed: %v", err)
+	}
+}
