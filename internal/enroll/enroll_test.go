@@ -619,3 +619,39 @@ func TestConcurrentCreateWithTheSameKeyIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// A Create stopped between the issue record and the directory record (AfterIssueHook panics, as a kill would) leaves a
+// recorded key and no endpoint; running Create again with the same key completes with one identity.
+func TestCreateKilledAfterTheIssueRecordCompletesOnRerun(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	a := addr("killed")
+	_, k := newKey(t)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the hook did not stop the run")
+			}
+		}()
+		enroll.AfterIssueHook = func() { panic("killed here") }
+		defer func() { enroll.AfterIssueHook = nil }()
+		_, _ = enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k})
+	}()
+	if _, found, err := h.adm.IssuedByKey(ctx, k); err != nil || !found {
+		t.Fatalf("the issue record is missing after the kill: found %v, err %v", found, err)
+	}
+	if user, _, err := h.adm.UserOf(ctx, a); err == nil {
+		t.Fatalf("a directory record exists after the kill: user %q", user)
+	}
+	res, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k})
+	if err != nil || res.PublicKey != k {
+		t.Fatalf("rerun: %+v %v", res, err)
+	}
+	if user, _, err := h.adm.UserOf(ctx, a); err != nil || user != k {
+		t.Fatalf("directory user %q (err %v), want %q", user, err, k)
+	}
+	recs, _, err := h.adm.List(ctx)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("%d directory records (err %v), want 1", len(recs), err)
+	}
+}

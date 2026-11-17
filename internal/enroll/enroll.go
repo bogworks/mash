@@ -39,6 +39,12 @@ const (
 	CodeKeyRevoked       = "key_revoked"
 )
 
+// AfterIssueHook is a test seam: Create calls it after the issue record is written and before the directory record
+// is, the window in which a killed run leaves a signed, recorded key with no endpoint. A test sets it to stop the run
+// there (by panicking, in-process) and then runs Create again to see it complete. Nil in production; nothing in a
+// shipped binary sets it.
+var AfterIssueHook func()
+
 // Refusal is a refusal a caller reports by its Code (the Code constants).
 type Refusal struct{ Code, Msg string }
 
@@ -190,6 +196,9 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 	}
 	if err := d.record(ctx, r.Addr, pub, store.PurposeIssue); err != nil {
 		return fail(err)
+	}
+	if AfterIssueHook != nil {
+		AfterIssueHook()
 	}
 	if !exists {
 		_, err := d.Admin.Provision(ctx, r.Addr, pub, d.Account, r.Note, r.Meta)
