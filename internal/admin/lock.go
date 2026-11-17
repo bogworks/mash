@@ -54,6 +54,10 @@ var (
 // ErrLockExpiring is the cause of a bound context that ended because its lock was about to expire.
 var ErrLockExpiring = errors.New("the name lock is about to expire")
 
+// ErrLockLost is wrapped by the error of an operation that stopped because its lock was lost to another admin or was about to
+// expire. Nothing further was changed, and running the command again is safe.
+var ErrLockLost = errors.New("the lock was lost or is about to expire")
+
 // lockCheckTimeout bounds the re-read check makes of the lock key.
 const lockCheckTimeout = 3 * time.Second
 
@@ -85,6 +89,7 @@ type streamLock struct {
 	name  string
 	key   string
 	owner string
+	now   func() time.Time // the acquiring admin's clock
 
 	mu       sync.Mutex // guards rev, deadline and lost; held across a refresh write and a check read
 	rev      uint64
@@ -165,12 +170,12 @@ func (a *Admin) lockNamed(ctx context.Context, name string, wait time.Duration, 
 	}
 	owner := hex.EncodeToString(raw[:])
 	key := lockKey(name)
-	giveUp := time.Now().Add(wait)
+	giveUp := a.now().Add(wait)
 	for {
-		start := time.Now() // before the call, so the deadline is never later than the key's expiry
+		start := a.now() // before the call, so the deadline is never later than the key's expiry
 		rev, err := kv.Create(ctx, key, newLockValue(owner, start))
 		if err == nil {
-			return newHeldLock(kv, name, key, owner, rev, start, refresh), nil
+			return newHeldLock(kv, name, key, owner, rev, start, refresh, a.now), nil
 		}
 		if !errors.Is(err, jetstream.ErrKeyExists) {
 			return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
@@ -188,32 +193,32 @@ func (a *Admin) lockNamed(ctx context.Context, name string, wait time.Duration, 
 		if perr == nil {
 			until, perr = time.Parse(time.RFC3339, cur.Until)
 		}
-		if perr != nil || !time.Now().Before(until) {
+		if perr != nil || !a.now().Before(until) {
 			// Expired, or unreadable and so no one's: take it over only if it is still the revision we read.
-			start := time.Now()
+			start := a.now()
 			rev, err := kv.Update(ctx, key, newLockValue(owner, start), e.Revision())
 			if err == nil {
-				return newHeldLock(kv, name, key, owner, rev, start, refresh), nil
+				return newHeldLock(kv, name, key, owner, rev, start, refresh, a.now), nil
 			}
 			if !isRevisionConflict(err) {
 				return nil, fmt.Errorf("mash: limits lock of %s: %w", name, err)
 			}
 			continue // someone else took it first; look again
 		}
-		if !time.Now().Before(giveUp) {
+		if !a.now().Before(giveUp) {
 			return nil, &lockBusyError{name: name, until: until}
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(min(lockPause(), time.Until(giveUp))):
+		case <-time.After(min(lockPause(), giveUp.Sub(a.now()))):
 		}
 	}
 }
 
 // newHeldLock builds the handle of a lock just acquired at start and, with refresh, starts its refresh goroutine.
-func newHeldLock(kv jetstream.KeyValue, name, key, owner string, rev uint64, start time.Time, refresh bool) *streamLock {
-	l := &streamLock{kv: kv, name: name, key: key, owner: owner, rev: rev, deadline: start.Add(lockTTL)}
+func newHeldLock(kv jetstream.KeyValue, name, key, owner string, rev uint64, start time.Time, refresh bool, now func() time.Time) *streamLock {
+	l := &streamLock{now: now, kv: kv, name: name, key: key, owner: owner, rev: rev, deadline: start.Add(lockTTL)}
 	if refresh {
 		l.stop, l.done = make(chan struct{}), make(chan struct{})
 		go l.refreshLoop()
@@ -247,7 +252,7 @@ func (l *streamLock) refreshOnce() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lockCheckTimeout)
 	defer cancel()
-	start := time.Now()
+	start := l.now()
 	rev, err := l.kv.Update(ctx, l.key, newLockValue(l.owner, start), l.rev)
 	switch {
 	case err == nil:
@@ -281,17 +286,18 @@ func (l *streamLock) bound(ctx context.Context) (context.Context, context.Cancel
 	l.mu.Lock()
 	d := l.deadline
 	l.mu.Unlock()
-	return context.WithDeadlineCause(ctx, d.Add(-lockSafety), ErrLockExpiring)
+	// The remaining time is read on the holder's own clock, the one the deadline was set on.
+	return context.WithTimeoutCause(ctx, d.Add(-lockSafety).Sub(l.now()), ErrLockExpiring)
 }
 
 // check refuses unless the lock is still this admin's (the stored revision is the one it wrote) and not within
 // lockSafety of its deadline. Call it immediately before a write that cannot be undone or that another admin could
 // invalidate.
 func (l *streamLock) check(ctx context.Context) error {
-	lost := fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again", l.name)
+	lost := fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again: %w", l.name, ErrLockLost)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.lost || !time.Now().Before(l.deadline.Add(-lockSafety)) {
+	if l.lost || !l.now().Before(l.deadline.Add(-lockSafety)) {
 		return lost
 	}
 	if err := ctx.Err(); err != nil {
@@ -306,7 +312,7 @@ func (l *streamLock) check(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %v", lost, err)
 	}
-	if e.Revision() != l.rev || l.lost || !time.Now().Before(l.deadline.Add(-lockSafety)) {
+	if e.Revision() != l.rev || l.lost || !l.now().Before(l.deadline.Add(-lockSafety)) {
 		return lost
 	}
 	return nil

@@ -79,7 +79,7 @@ func (a *Admin) Provision(ctx context.Context, addr sap.Address, user, account, 
 		return store.Record{}, err
 	}
 	if _, err := kv.Get(ctx, flat); err == nil {
-		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", addr)
+		return store.Record{}, &alreadyProvisionedError{addr}
 	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
 		return store.Record{}, err
 	}
@@ -116,12 +116,22 @@ func (a *Admin) Provision(ctx context.Context, addr sap.Address, user, account, 
 	}
 	if _, err := kv.Create(ctx, flat, val); err != nil {
 		if errors.Is(err, jetstream.ErrKeyExists) {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", addr)
+			return store.Record{}, &alreadyProvisionedError{addr}
 		}
 		return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
 	}
 	return rec, nil
 }
+
+// ErrAlreadyProvisioned is wrapped by the error of a Provision that found the address's directory record present.
+var ErrAlreadyProvisioned = errors.New("already provisioned")
+
+type alreadyProvisionedError struct{ addr sap.Address }
+
+func (e *alreadyProvisionedError) Error() string {
+	return fmt.Sprintf("mash: endpoint %s is already provisioned", e.addr)
+}
+func (e *alreadyProvisionedError) Is(target error) bool { return target == ErrAlreadyProvisioned }
 
 // retiredMarkerReserve is the room, in bytes, that provisioning wants free in the retired-name bucket: a marker is
 // written when the endpoint is deprovisioned, and a bucket without room would make that fail.
