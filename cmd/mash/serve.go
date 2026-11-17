@@ -213,7 +213,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// stdin EOF during it is seen once it returns. A held lease is waited out, and a transient failure (a
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
 	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
-	// Removed on every exit, and at once when the first attempt binds (the bind also removes it, spool.OwnRecord).
+	// Removed on every exit, and at once when the first attempt binds (the bind also removes it).
 	clearWaiter, noteHeld := noteWaiting(cfg)
 	defer clearWaiter()
 	startPPID := getppid()
