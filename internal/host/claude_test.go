@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -99,10 +98,10 @@ func TestOwnsStopsAtTheOwner(t *testing.T) {
 		maxCalls  int
 		wantExact int // -1: use maxCalls
 	}{
-		{"pid:" + strconv.Itoa(pp), true, 0, 0},
-		{"pid:5001", true, 1, 1},
-		{"pid:5002", true, 2, 2},
-		{"pid:4242", false, 10, -1},
+		{ownerJSON(pp, "", ""), true, 0, 0},
+		{ownerJSON(5001, "", ""), true, 1, 1},
+		{ownerJSON(5002, "", ""), true, 2, 2},
+		{ownerJSON(4242, "", ""), false, 10, -1},
 		{"", true, 0, 0},
 		{"older-session-id", true, 0, 0},
 	} {
@@ -185,19 +184,6 @@ func TestOwnsEmptyTokensNeverMatch(t *testing.T) {
 	// Empty session ids never match either, and a token on one side only is not a match.
 	if (Claude{}).Owns(ownerJSON(4242, "", "tok"), HookIdentity{}) || (Claude{}).Owns(ownerJSON(4242, "", ""), HookIdentity{LaunchToken: "tok"}) {
 		t.Error("an empty side matched")
-	}
-}
-
-func TestOwnsLegacyPidOwner(t *testing.T) {
-	unrelated(t)
-	if !(Claude{}).Owns("pid:5002", HookIdentity{}) {
-		t.Error("legacy pid owner in the chain refused")
-	}
-	if (Claude{}).Owns("pid:4242", HookIdentity{SessionID: "S1", LaunchToken: "t"}) {
-		t.Error("legacy pid owner outside the chain accepted")
-	}
-	if !(Claude{}).Owns("", HookIdentity{}) {
-		t.Error("empty owner refused")
 	}
 }
 
@@ -305,5 +291,12 @@ func TestPresentMarksDigestEntriesListed(t *testing.T) {
 	p.BatchBytes = 1000
 	if _, shown = (Claude{}).Present(p, mk(true)); shown[0].Listed {
 		t.Fatal("a mark Waiting set survived a full showing")
+	}
+}
+
+func TestOwnsEmptyOwner(t *testing.T) {
+	unrelated(t)
+	if !(Claude{}).Owns("", HookIdentity{}) {
+		t.Error("empty owner refused")
 	}
 }

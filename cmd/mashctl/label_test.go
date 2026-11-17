@@ -16,7 +16,7 @@ func (h *fleetEnv) recordLabels(name string) (map[string]string, bool) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	recs, err := adm.List(context.Background())
+	recs, _, err := adm.List(context.Background())
 	if err != nil {
 		h.t.Fatal(err)
 	}

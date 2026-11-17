@@ -439,10 +439,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 		}
 		recordUser := func() string {
-			recs, err := a.List(ctx)
+			recs, bad, err := a.List(ctx)
 			if err != nil {
 				return ""
 			}
+			warnBad(stderr, pfx, bad)
 			for _, r := range recs {
 				if ra, err := r.Address(); err == nil && ra == addr {
 					return r.User
@@ -529,10 +530,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "deprovisioned %s (%s)\n", shown, note())
 		noRevokeWarn(warnUser)
 	case "list":
-		recs, err := a.List(ctx)
+		recs, bad, err := a.List(ctx)
 		if err != nil {
 			return fail(err)
 		}
+		warnBad(stderr, pfx, bad)
 		for _, r := range recs {
 			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", config.Clean(r.Owner+"."+r.Group+"."+r.Instance), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note))
 		}
@@ -815,4 +817,11 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		}
 	}
 	return nil
+}
+
+// warnBad reports each directory record a list skipped because it fails store.ParseRecord: its key and why, on stderr.
+func warnBad(stderr io.Writer, prog string, bad []madmin.BadRecord) {
+	for _, b := range bad {
+		b.Warn(stderr, prog)
+	}
 }

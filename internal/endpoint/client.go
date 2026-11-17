@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -162,6 +163,7 @@ type recordResult struct {
 	rec  store.Record
 	err  error
 	gone bool
+	bad  bool // the value is there but fails store.ParseRecord: skipped, with a warning naming the key
 }
 
 // fetchRecordHook, set only by tests, fails the read of a key before it is made.
@@ -180,7 +182,26 @@ func (e *Endpoint) fetchRecord(ctx context.Context, key string) recordResult {
 			gone: errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted)}
 	}
 	rec, err := store.ParseRecord(key, v)
-	return recordResult{rec: rec, err: err, gone: err != nil}
+	return recordResult{rec: rec, err: err, gone: err != nil, bad: err != nil}
+}
+
+// warnBad is the one rule for a directory record that fails store.ParseRecord: the record is skipped, never fatal and
+// never silent. The warning names the key, once for each distinct error (a poll reads the record again and again). Call
+// it with e.mu held.
+func (e *Endpoint) warnBad(key string, r recordResult) {
+	if r.bad {
+		if e.badSeen[key] != r.err.Error() {
+			if e.badSeen == nil {
+				e.badSeen = map[string]string{}
+			}
+			e.badSeen[key] = r.err.Error()
+			e.log.Printf("warning: skipping directory record %s: %v", config.Clean(key), r.err)
+		}
+		return
+	}
+	if r.err == nil {
+		delete(e.badSeen, key)
+	}
 }
 
 // recordKey reports whether key is safe to put in a subject: a directory key is an endpoint name, but the keys of a
@@ -363,6 +384,7 @@ func (e *Endpoint) learn(got map[string]recordResult) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for name, r := range got {
+		e.warnBad(name, r)
 		if r.err == nil {
 			e.dir[name] = r.rec
 			e.byUser[r.rec.User] = name

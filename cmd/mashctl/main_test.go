@@ -57,7 +57,7 @@ func TestMashctlVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recs, err := adm.List(context.Background()); err != nil || len(recs) != 0 {
+	if recs, _, err := adm.List(context.Background()); err != nil || len(recs) != 0 {
 		t.Fatalf("after deprovision: %v %v", recs, err)
 	}
 }

@@ -232,7 +232,7 @@ func TestConfigAMashAdminProvision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recs, err := adm.List(context.Background())
+	recs, _, err := adm.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

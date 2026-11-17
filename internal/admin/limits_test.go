@@ -269,7 +269,7 @@ func TestProvisionNeverLowersExistingInbox(t *testing.T) {
 			if after := inboxCfg(t, js, "alpha"); after.MaxBytes != before.MaxBytes || after.MaxAge != before.MaxAge {
 				t.Fatalf("changed despite refusal: %+v -> %+v", before, after)
 			}
-			recs, err := a.List(ctx)
+			recs, _, err := a.List(ctx)
 			if err != nil || len(recs) != 0 {
 				t.Fatalf("directory records %v err %v", recs, err)
 			}

@@ -207,22 +207,22 @@ func TestOwn(t *testing.T) {
 	if s.Owner() != "" {
 		t.Fatalf("owner %q before Own", s.Owner())
 	}
-	if err := s.Own("S1"); err != nil {
+	if err := s.Own(`{"session":"S1"}`); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Owner(); got != "S1" {
+	if got := s.Owner(); got != `{"session":"S1"}` {
 		t.Fatalf("owner %q", got)
 	}
-	if m := mode(t, filepath.Join(s.Dir, ".session")); m != 0o600 {
+	if m := mode(t, filepath.Join(s.Dir, ".owner")); m != 0o600 {
 		t.Fatalf("mode %v", m)
 	}
-	if err := s.Own("S2"); err != nil || s.Owner() != "S2" {
+	if err := s.Own(`{"session":"S2"}`); err != nil || s.Owner() != `{"session":"S2"}` {
 		t.Fatalf("re-own: %v %q", err, s.Owner())
 	}
 	if err := s.Own(""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(s.Dir, ".session")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.Dir, ".owner")); !os.IsNotExist(err) {
 		t.Fatalf("file remains: %v", err)
 	}
 	if err := s.Own(""); err != nil {
@@ -366,7 +366,7 @@ func TestRefusedIsThrottledAndClearedByOwn(t *testing.T) {
 	if _, why, _ := s.Refused(); why != "third" {
 		t.Fatalf("an old file is rewritten: %q", why)
 	}
-	if err := s.Own("S1"); err != nil {
+	if err := s.Own(`{"session":"S1"}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := s.Refused(); ok {
@@ -374,17 +374,12 @@ func TestRefusedIsThrottledAndClearedByOwn(t *testing.T) {
 	}
 }
 
-// Own writes the legacy pid text to .session (what an older hook reads) and the JSON record to .owner; an empty
-// record removes .owner; Owner prefers .owner; a damaged .owner is unreadable, never "no owner".
-func TestOwnRecordKeepsLegacySessionText(t *testing.T) {
+// Own writes the JSON record to .owner; an empty record removes it; a damaged .owner is unreadable, never "no owner".
+func TestOwnRecord(t *testing.T) {
 	s := newSpool(t)
 	rec := `{"pid":42,"session":"S","launch":"L"}`
-	if err := s.OwnRecord(LegacyToken(rec), rec); err != nil {
+	if err := s.Own(rec); err != nil {
 		t.Fatal(err)
-	}
-	old, err := os.ReadFile(filepath.Join(s.Dir, ".session")) // an old-style reader looks here only
-	if err != nil || string(old) != "pid:42" {
-		t.Fatalf(".session = %q, %v", old, err)
 	}
 	b, err := os.ReadFile(filepath.Join(s.Dir, ".owner"))
 	if err != nil || string(b) != rec {
@@ -396,13 +391,16 @@ func TestOwnRecordKeepsLegacySessionText(t *testing.T) {
 	if s.Owner() != rec {
 		t.Fatalf("Owner = %q", s.Owner())
 	}
-	if err := s.OwnRecord("pid:7", ""); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, ".session")); !os.IsNotExist(err) {
+		t.Fatalf(".session written: %v", err)
+	}
+	if err := s.Own(""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, ".owner")); !os.IsNotExist(err) {
 		t.Fatalf(".owner left after an empty record: %v", err)
 	}
-	if s.Owner() != "pid:7" {
+	if s.Owner() != "" {
 		t.Fatalf("Owner = %q", s.Owner())
 	}
 	if err := os.WriteFile(filepath.Join(s.Dir, ".owner"), nil, 0o600); err != nil {
@@ -410,24 +408,6 @@ func TestOwnRecordKeepsLegacySessionText(t *testing.T) {
 	}
 	if s.Owner() != OwnerUnreadable {
 		t.Fatalf("empty .owner read as %q", s.Owner())
-	}
-	if err := os.Remove(filepath.Join(s.Dir, ".session")); err != nil { // a missing .session plus a present .owner works
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(s.Dir, ".owner"), []byte(rec), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if s.Owner() != rec {
-		t.Fatalf("Owner without .session = %q", s.Owner())
-	}
-}
-
-func TestLegacyToken(t *testing.T) {
-	if got := LegacyToken(`{"pid":9}`); got != "pid:9" {
-		t.Fatal(got)
-	}
-	if got := LegacyToken(`{"session":"x"}`); got != "pid:"+strconv.Itoa(os.Getppid()) {
-		t.Fatal(got)
 	}
 }
 
@@ -480,7 +460,7 @@ func TestWaiters(t *testing.T) {
 	if got := s.Waiters(); len(got) != 0 {
 		t.Fatalf("after ClearWaiter: %v", got)
 	}
-	// OwnRecord deletes every .waiting.* naming the new owner's pid, and keeps the others
+	// Own deletes every .waiting.* naming the new owner's pid, and keeps the others
 	if err := s.NoteWaiter(WaiterRecord{PID: self}); err != nil {
 		t.Fatal(err)
 	}
@@ -488,12 +468,12 @@ func TestWaiters(t *testing.T) {
 	if err := s.NoteWaiter(WaiterRecord{PID: other}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.OwnRecord("pid:"+strconv.Itoa(self), `{"pid":`+strconv.Itoa(self)+`}`); err != nil {
+	if err := s.Own(`{"pid":` + strconv.Itoa(self) + `}`); err != nil {
 		t.Fatal(err)
 	}
 	got = s.Waiters()
 	if len(got) != 1 || got[0].PID != other {
-		t.Fatalf("after OwnRecord: %+v", got)
+		t.Fatalf("after Own: %+v", got)
 	}
 	// a waiting message spool is not touched by waiter files, and vice versa
 	if err := s.ClearWaiting(); err != nil {
