@@ -57,6 +57,7 @@ func enrollCreate(h *fleetEnv, a sap.Address, pub string) (enroll.Result, error)
 
 func TestEndpointCreateNaming(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubFile, _ := epKey(t, out, "k")
 	owner := testenv.Owner
@@ -127,6 +128,7 @@ func TestEndpointCreateKeyFlags(t *testing.T) {
 
 func TestEndpointCreatePublicKey(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	pub, pubFile, seed := epKey(t, out, "k")
 	a := ad("design")
@@ -195,6 +197,7 @@ func TestEndpointCreatePublicKey(t *testing.T) {
 
 func TestEndpointCreateRerunCompletes(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	pub, pubFile, _ := epKey(t, out, "k")
 	a := ad("again")
@@ -283,6 +286,7 @@ func epSnapshot(t *testing.T, h *fleetEnv, dirs ...string) string {
 
 func TestEndpointCreateDryRun(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubFile, _ := epKey(t, out, "k")
 	before := epSnapshot(t, h, h.dir, out)
@@ -321,6 +325,7 @@ func TestEndpointCreateHelp(t *testing.T) {
 
 func TestEndpointCreateGolden(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	pub, pubFile, _ := epKey(t, out, "k")
 	_, otherFile, _ := epKey(t, out, "other")

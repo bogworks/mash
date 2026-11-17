@@ -27,7 +27,9 @@ const endpointCreateUsage = `usage: mashctl endpoint create [ADDRESS] [--owner O
                                [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
   ADDRESS is alice/dev/design, or one token (the instance) with --group. There is no default group.
-  --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out
+  --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out.
+                     A key the account JWT revokes is refused (key_revoked); a check that cannot be made is an error
+                     (revocation_unknown), and nothing is changed
   --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
                      <creds file>.pending until the creds file is written, so the same command run again after a kill
                      finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
@@ -171,6 +173,10 @@ func epReport(verb string, doc epDoc, text func(io.Writer), code int, stdout, st
 		if doc.Refusal.Code == enroll.CodePublicKeyIssued {
 			// Each key is used at one address; the remedy is a new key for this endpoint.
 			doc.Refusal.Detail += "; each key is used at one address: make a new key for this endpoint with: mash key create --out " + doc.Instance + ".seed"
+			doc.NextSteps = []epStep{{Sender: "endpoint", Step: "key", Action: "make a new key for this endpoint on its machine",
+				Address: doc.Address, Purpose: "use", Detail: "mash key create --out " + doc.Instance + ".seed"}}
+		}
+		if doc.Refusal.Code == enroll.CodeKeyRevoked {
 			doc.NextSteps = []epStep{{Sender: "endpoint", Step: "key", Action: "make a new key for this endpoint on its machine",
 				Address: doc.Address, Purpose: "use", Detail: "mash key create --out " + doc.Instance + ".seed"}}
 		}
@@ -385,6 +391,20 @@ func epIssuedRefusal(ctx context.Context, adm *admin.Admin, addr sap.Address, pu
 		return &epRefusal{enroll.CodePublicKeyIssued, fmt.Sprintf("the public key %.8s... was already issued to another address", publicKey)}, nil
 	}
 	return nil, nil
+}
+
+// epKeyRevokedFail is nil when the account JWT does not revoke the user key pub. A revoked key is the refusal
+// key_revoked: a JWT issued for it after the revocation time could authenticate, so it is never signed. A check that
+// cannot be made is the error revocation_unknown.
+func epKeyRevokedFail(ctx context.Context, cfg config.Config, env func(string) string, servers int, pub string) *epFail {
+	revoked, err := keyRevoked(ctx, cfg, env, servers, pub)
+	if err != nil {
+		return &epFail{code: "revocation_unknown", detail: fmt.Sprintf("cannot tell whether the public key %.8s... is revoked: %v; nothing was changed", pub, err)}
+	}
+	if revoked {
+		return &epFail{refused: true, code: enroll.CodeKeyRevoked, detail: fmt.Sprintf("the public key %.8s... was revoked; make a new key with: mash key create --out NAME.seed", pub)}
+	}
+	return nil
 }
 
 // runEndpointCreate is `mashctl endpoint create`.
@@ -623,6 +643,20 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	}
 	defer closeAdmin()
 
+	// A supplied key that the account JWT revokes is never signed, whether or not an issue record says so (a JWT
+	// issued after the revocation time would authenticate). This runs in a dry run too.
+	if !c.makeKey {
+		servers, serr := parseServers(env)
+		if serr != nil {
+			return refuse(2, &epRefusal{"servers_invalid", serr.Error()})
+		}
+		if f := epKeyRevokedFail(ctx, cfg, env, servers, pub); f != nil {
+			if f.refused {
+				return refuse(1, &epRefusal{f.code, f.detail})
+			}
+			return epErr(doc, "create", f.code, f.detail, c.jsonOut, stdout, stderr)
+		}
+	}
 	// A staged key that the account JWT has revoked can never be used again: refuse, nothing was changed.
 	if pendingKey != "" {
 		servers, serr := parseServers(env)

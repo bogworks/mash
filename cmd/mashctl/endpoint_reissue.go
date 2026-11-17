@@ -40,6 +40,9 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
   A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
   a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
@@ -207,6 +210,11 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	}
 
 	if !c.makeKey {
+		// The supplied key is never signed (or re-signed, in the resume and restore cases of epKeyUnchanged, where it
+		// is the directory's current key) while the account JWT revokes it. A refusal here leaves any marker as it is.
+		if f := epKeyRevokedFail(ctx, cfg, env, servers, pub); f != nil {
+			return failed(f)
+		}
 		ref, res, err := epKeyUnchanged(ctx, adm, addr, pub, outPath)
 		if err != nil {
 			return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)

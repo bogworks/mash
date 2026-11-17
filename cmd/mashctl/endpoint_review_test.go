@@ -112,6 +112,7 @@ func TestEpReplaceCredsLeavesNoTemp(t *testing.T) {
 
 func TestEndpointCreateFlatJSON(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubFile, _ := epKey(t, out, "k")
 	a := ad("flat")
@@ -340,6 +341,7 @@ func TestEndpointReissueBusy(t *testing.T) {
 
 func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubA, _ := epKey(t, out, "a")
 	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "a.jwt")); code != 0 {
@@ -364,6 +366,7 @@ func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 
 func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	var mu sync.Mutex
 	rotations := 0
 	prev := revokeUsers
