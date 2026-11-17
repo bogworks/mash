@@ -38,6 +38,10 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash status                                  what a session would see (name, config, creds, channel allowlist), before launch;
                                                connects to nothing; the live parts say they need a running session
   mash admin <verb> ...                        deprecated; use mashctl
+  mash key create --out FILE [--pub-out FILE] [--json] [--dry-run]
+                                               make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config
+  mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [--dry-run]
+                                               join a seed and its user JWT into a credentials file; needs no config
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 
@@ -180,6 +184,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	if args[0] == "plugin" { // before config: an install runs it with no endpoint and no environment
 		return pluginCmd(args[1:], stdout, stderr)
+	}
+	if args[0] == "key" || args[0] == "credential" { // before config: these need no endpoint, config file or account key
+		return keycredCmd(args, env, stdout, stderr)
 	}
 	home := env("HOME")
 	if home == "" {
