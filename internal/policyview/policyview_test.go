@@ -1,6 +1,7 @@
 package policyview
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -455,5 +456,51 @@ func TestDirectoryResolver(t *testing.T) {
 	}
 	if _, ok, err := resolve(ctx, "UNKNOWN"); err != nil || ok {
 		t.Fatalf("unknown: ok=%v err=%v", ok, err)
+	}
+}
+
+// A directory record that fails store.ParseRecord is skipped with a warning naming its key (once), never fatal: the
+// good records still resolve.
+func TestDirectoryResolverWarnsOnBadRecord(t *testing.T) {
+	e := testenv.Start(t)
+	ctx := context.Background()
+	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adm.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id, err := sap.NewAddress("r", "o", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, user := e.Mint(t, id)
+	if _, err := adm.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	js, err := jetstream.New(e.Conn(t, e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := js.KeyValue(ctx, store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Put(ctx, "junk_key", []byte(`{"owner":"x"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	old := warnOut
+	warnOut = &buf
+	t.Cleanup(func() { warnOut = old })
+	resolve := DirectoryResolver(kv, time.Nanosecond)
+	for i := 0; i < 2; i++ {
+		if a, ok, err := resolve(ctx, user); err != nil || !ok || a != "r.o.a" {
+			t.Fatalf("good record: %q %v %v", a, ok, err)
+		}
+	}
+	if strings.Count(buf.String(), "skipping directory record junk_key") != 1 {
+		t.Fatalf("warnings %q, want one naming junk_key", buf.String())
 	}
 }

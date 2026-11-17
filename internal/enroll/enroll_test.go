@@ -217,7 +217,7 @@ func TestRerunAfterKillCompletes(t *testing.T) {
 	if err != nil || again.PublicKey != res.PublicKey {
 		t.Fatalf("second run: %+v %v", again, err)
 	}
-	recs, err := h.adm.List(ctx)
+	recs, _, err := h.adm.List(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

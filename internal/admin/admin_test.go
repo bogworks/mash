@@ -69,7 +69,7 @@ func TestProvisionCreatesInboxConsumerRecord(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, rec) {
 		t.Fatalf("directory: %+v %v", got, err)
 	}
-	lst, err := a.List(ctx)
+	lst, _, err := a.List(ctx)
 	if err != nil || len(lst) != 1 || lst[0].Instance != "alpha" {
 		t.Fatalf("list %+v %v", lst, err)
 	}
@@ -368,5 +368,30 @@ func TestEnsureInboxRejectsAWrongInbox(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A directory value that fails store.ParseRecord is skipped by List, never fatal: the good records are listed and the
+// bad one comes back by key with its error, for the caller to report.
+func TestListSkipsBadRecordAndReportsIt(t *testing.T) {
+	e, a, js := setup(t)
+	ctx := context.Background()
+	_, user := e.Mint(t, ep(t, "alpha"))
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if _, err := kv.Put(ctx, "aaa_junk", []byte(`{"owner":"x"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Put(ctx, "zzz_not_json", []byte(`not json`)); err != nil {
+		t.Fatal(err)
+	}
+	recs, bad, err := a.List(ctx)
+	if err != nil || len(recs) != 1 || recs[0].Instance != "alpha" {
+		t.Fatalf("list %+v %v", recs, err)
+	}
+	if len(bad) != 2 || bad[0].Key != "aaa_junk" || bad[1].Key != "zzz_not_json" || bad[0].Error == "" {
+		t.Fatalf("bad %+v", bad)
 	}
 }

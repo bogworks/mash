@@ -97,11 +97,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	}
 	// Only the lease holder gets here: bind the spool to its session, so a waiting session's hooks (same MASH_NAME)
 	// cannot drain this one's mail (codex H1 on #21, round 3).
-	legacy := ""
-	if owner != "" {
-		legacy = spool.LegacyToken(owner) // an older hook reads only this, and so still enforces ancestry
-	}
-	if err := s.OwnRecord(legacy, owner); err != nil {
+	if err := s.Own(owner); err != nil {
 		return err
 	}
 	e.spool, e.since = &s, time.Now()

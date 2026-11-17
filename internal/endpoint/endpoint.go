@@ -59,14 +59,15 @@ type Endpoint struct {
 	cfg config.Config
 	// ident is the endpoint's address (cfg.Identity()) and key its directory, stream and lease key, ident.Flat():
 	// owner_group_instance. Every key and subject of the endpoint derives from these.
-	ident sap.Address
-	key   string
-	nc    *nats.Conn
-	js    jetstream.JetStream
-	id    sap.Identity
-	subj  sap.Subjects
-	self  store.Record
-	log   *log.Logger
+	ident   sap.Address
+	key     string
+	nc      *nats.Conn
+	js      jetstream.JetStream
+	id      sap.Identity
+	subj    sap.Subjects
+	self    store.Record
+	log     *log.Logger
+	badSeen map[string]string // directory key -> the error last warned about (guarded by mu)
 
 	instance    string // this process's id (lease holder, SAP instance)
 	dirKV       jetstream.KeyValue
