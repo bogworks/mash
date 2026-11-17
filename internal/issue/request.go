@@ -1,5 +1,5 @@
 // Package issue is the issue service (REQ-013, ADR 0104): it takes a request that holds a sender's PUBLIC key and the
-// address the key is for, countersigned by the wrangler on the sender's host, and returns a user JWT for that key,
+// address the key is for, countersigned by the requester on the sender's host, and returns a user JWT for that key,
 // signed with the owner group's scoped signing key and carrying the tags mash's own table gives that address.
 //
 // No private key is made, received, stored or logged on this path. Nothing in a request except the address, the public
@@ -23,7 +23,7 @@ import (
 // RequestVersion is the only version of the request this service accepts.
 const RequestVersion = 1
 
-// ProofPrefix opens the canonical bytes the wrangler signs; it names the format so a signature made for another
+// ProofPrefix opens the canonical bytes the requester signs; it names the format so a signature made for another
 // purpose cannot be taken for an issue proof.
 const ProofPrefix = "mash-issue-v1"
 
@@ -46,11 +46,11 @@ type Request struct {
 	Version   int    `json:"version"`
 	Address   string `json:"address"`    // range.owner.name
 	PublicKey string `json:"public_key"` // a NATS user public key; never a seed
-	Host      string `json:"host"`       // the name the wrangler is registered under
+	Host      string `json:"host"`       // the name the requester is registered under
 	Nonce     string `json:"nonce"`      // base64url, at least MinNonceBytes random bytes
 	Expires   int64  `json:"expires"`    // unix seconds
-	Proof     string `json:"proof"`      // base64url ed25519 signature by the wrangler over CanonicalBytes
-	Wrangler  string `json:"wrangler"`   // the wrangler's public key
+	Proof     string `json:"proof"`      // base64url ed25519 signature by the requester over CanonicalBytes
+	Requester string `json:"requester"`  // the requester's public key
 }
 
 // Response is the reply: a JWT, or an error and its stable code.
@@ -68,7 +68,7 @@ const (
 	CodeExpired      = "expired"
 	CodeWindow       = "expiry_too_far"
 	CodeReplay       = "replayed_nonce"
-	CodeUnregistered = "wrangler_not_registered"
+	CodeUnregistered = "requester_not_registered"
 	CodeBadProof     = "bad_proof"
 	CodeUnlisted     = "address_not_listed"
 	CodeRevoked      = "key_revoked"
@@ -94,7 +94,7 @@ func refuse(code, format string, a ...any) *Refusal {
 	return &Refusal{Code: code, Msg: fmt.Sprintf(format, a...)}
 }
 
-// CanonicalBytes are the bytes the wrangler signs:
+// CanonicalBytes are the bytes the requester signs:
 //
 //	mash-issue-v1\n<address>\n<public_key>\n<host>\n<nonce>\n<expires>
 //
@@ -137,8 +137,8 @@ func (r Request) Validate() *Refusal {
 	if !nkeys.IsValidPublicUserKey(r.PublicKey) {
 		return refuse(CodeBadKey, "public_key is not a NATS user public key")
 	}
-	if !nkeys.IsValidPublicUserKey(r.Wrangler) {
-		return refuse(CodeMalformed, "wrangler is not a NATS user public key")
+	if !nkeys.IsValidPublicUserKey(r.Requester) {
+		return refuse(CodeMalformed, "requester is not a NATS user public key")
 	}
 	if !validHost(r.Host) {
 		return refuse(CodeMalformed, "host is empty, too long or has a space or control character")
@@ -190,9 +190,9 @@ func (r Request) Group() string {
 	return id.Owner + "." + id.Group
 }
 
-// verifyProof reports whether the request's proof is the wrangler's signature over the canonical bytes.
+// verifyProof reports whether the request's proof is the requester's signature over the canonical bytes.
 func (r Request) verifyProof() bool {
-	kp, err := nkeys.FromPublicKey(r.Wrangler)
+	kp, err := nkeys.FromPublicKey(r.Requester)
 	if err != nil {
 		return false
 	}
@@ -203,10 +203,10 @@ func (r Request) verifyProof() bool {
 	return kp.Verify(r.Canonical(), sig) == nil
 }
 
-// SignProof is the wrangler side: the proof of a request, signed with the wrangler's key pair. It is here so tests
-// and the wrangler's own code share one definition of the canonical bytes.
-func SignProof(wrangler nkeys.KeyPair, address, publicKey, host, nonce string, expires int64) (string, error) {
-	sig, err := wrangler.Sign(CanonicalBytes(address, publicKey, host, nonce, expires))
+// SignProof is the requester side: the proof of a request, signed with the requester's key pair. It is here so tests
+// and the requester's own code share one definition of the canonical bytes.
+func SignProof(requester nkeys.KeyPair, address, publicKey, host, nonce string, expires int64) (string, error) {
+	sig, err := requester.Sign(CanonicalBytes(address, publicKey, host, nonce, expires))
 	if err != nil {
 		return "", err
 	}

@@ -19,7 +19,7 @@ import (
 // Mash must be fully usable with only NATS, its SAP and its runtime dependencies: no Claude or other agent-orchestration
 // config. These tests prove it through the built binary, run with a scrubbed environment.
 
-var foreignTools = []string{"range", "claude"}
+var foreignTools = []string{"claude"}
 
 // forbiddenWords splits a comma-separated word list: trimmed, lowercased, empty entries dropped.
 func forbiddenWords(list string) []string {
@@ -60,8 +60,8 @@ func assertToolsAbsent(t *testing.T, env []string) {
 		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
 			path = v
 		}
-		for _, bad := range []string{"RANGE_", "CLAUDE"} {
-			if strings.HasPrefix(kv, bad) {
+		for _, tool := range allForeignTools() {
+			if bad := strings.ToUpper(tool); strings.HasPrefix(kv, bad) {
 				t.Fatalf("environment leaks %s", kv)
 			}
 		}

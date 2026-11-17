@@ -10,7 +10,7 @@ zone command-line items, frozen on 2026-11-10, are unfrozen.
 
 ## Ruling (D188, 2026-11-11)
 
-The maintainer: "There's no zones. I see no reason for them. The natural boundaries in homerange are the range, herd,
+The maintainer: "There's no zones. I see no reason for them. The natural boundaries in the maintainer's fleet are the range, herd,
 and lane." This is the direction section 6 recommends: remove zones, keep the mail subject at SAP's five tokens, and
 let the existing address (the herd part of it) be the fence (alternative A).
 

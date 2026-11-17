@@ -1,4 +1,4 @@
-package wranglerreg
+package requesterreg
 
 import (
 	"errors"
@@ -406,7 +406,7 @@ func TestReadersDuringAnEditSeeACompleteFile(t *testing.T) {
 }
 
 // A directory that a group or other user can write is refused by every entry point: another member of the group could
-// replace the registry by rename and register their own wrangler key. 0700 and 0755 are accepted.
+// replace the registry by rename and register their own requester key. 0700 and 0755 are accepted.
 func TestParentDirectoryMustNotBeWritableByGroupOrOthers(t *testing.T) {
 	for _, mode := range []os.FileMode{0o770, 0o775, 0o720, 0o777, 0o757} {
 		path, a := newReg(t)
