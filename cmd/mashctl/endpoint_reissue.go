@@ -401,6 +401,15 @@ type epRun struct {
 	stderr  io.Writer
 }
 
+// epBeforeRevokeCheck is a test seam called inside the revoke hook, under the name's lock, before its future-issued check.
+var epBeforeRevokeCheck func()
+
+// epFutureIssuedError is the revoke hook's refusal of a key whose issue history is dated after the revocation time.
+type epFutureIssuedError struct{ err error }
+
+func (e *epFutureIssuedError) Error() string { return e.err.Error() }
+func (e *epFutureIssuedError) Unwrap() error { return e.err }
+
 // epFail is a refusal (refused, exit 1) or an error (exit 6) of one endpoint, by its code.
 type epFail struct {
 	refused      bool
@@ -521,6 +530,14 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	acked := 0
 	deps := enroll.Deps{Keys: r.keys, Admin: r.adm, Account: r.acct,
 		Revoke: func(ctx context.Context, u string) error {
+			if epBeforeRevokeCheck != nil {
+				epBeforeRevokeCheck()
+			}
+			// Under the name's lock, for exactly the key about to be revoked: another reissue may have changed the key
+			// since the early look, so this is the check that counts. A refusal revokes nothing.
+			if err := ctl.CheckNotFutureIssued(ctx, r.adm, []ctl.RevokeTarget{{Name: addr.String(), Key: u}}, revokeAt, r.stderr); err != nil {
+				return &epFutureIssuedError{err}
+			}
 			var out bytes.Buffer
 			n, err := revokeUsers(ctx, r.cfg, r.env, r.servers, []string{u}, &out, func() time.Time { return revokeAt })
 			r.stderr.Write(out.Bytes())
@@ -529,6 +546,15 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		}}
 	res, err := enroll.Reissue(r.ctx, deps, addr, pub)
 	if err != nil {
+		var fi *epFutureIssuedError
+		if errors.As(err, &fi) {
+			if makeKey {
+				os.Remove(pending) // a refusal changed nothing: the staged key is not needed
+			} else if !resume {
+				os.Remove(marker)
+			}
+			return "", 0, &epFail{refused: true, code: "future_issued", detail: fi.err.Error()}
+		}
 		if ref, ok := epRefusalOf(err); ok {
 			if makeKey {
 				os.Remove(pending) // a refusal changed nothing: the staged key is not needed
@@ -662,6 +688,14 @@ func epPublishStaged(jwtText string, seed []byte, path, pending string, replace 
 	if err != nil {
 		return err
 	}
+	// The new creds must be durable before the staged seed goes: a crash after the removal must not leave the old file
+	// with the seed gone. A failed sync keeps the pending file.
+	if err := epSyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("the creds file %s was written but the directory could not be synced (%w); the staged key %s was kept", path, err, pending)
+	}
 	os.Remove(pending)
 	return nil
 }
+
+// epSyncDir syncs a directory; a test replaces it to record the order against the removal of the staged seed.
+var epSyncDir = syncDir

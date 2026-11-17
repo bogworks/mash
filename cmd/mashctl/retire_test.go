@@ -253,11 +253,12 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 		t.Errorf("a partial failure said nothing was changed: %q", errb)
 	}
 
-	// the record is gone: a retry refuses and points at deprovision and --force
+	// the record is gone and the stand-in finished everything else: a retry finds the final marker and nothing left,
+	// so it changes nothing and succeeds
 	deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
-	_, errb, code = h.run("retire", "o.g.b")
-	if code != 1 || !strings.Contains(errb, "no directory record") || !strings.Contains(errb, "mashctl deprovision o.g.b") || !strings.Contains(errb, "--force") {
-		t.Fatalf("%d %q", code, errb)
+	out, errb, code = h.run("retire", "o.g.b")
+	if code != 0 || !strings.Contains(out, "already retired") {
+		t.Fatalf("%d %q %q", code, out, errb)
 	}
 
 	// the stand-in removed everything, so deprovision has nothing left to finish and says so

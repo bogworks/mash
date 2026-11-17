@@ -181,28 +181,36 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	if r, ok := findRecord(recs, addr); ok {
 		user = r.User
 	}
-	if user == "" && !force {
-		// A run killed after the record was removed and before the creds step: the address is burned and a creds file
-		// is still there. The same command finishes it, with no --force.
-		finishing := false
-		if credsPath != "" {
-			if _, lerr := os.Lstat(credsPath); lerr == nil {
-				burned, berr := adm.IsBurned(ctx, addr)
-				if berr != nil {
-					return stop("error", "", nil, "%v", berr)
-				}
-				finishing = burned
+	burnedAlready := false
+	cleaned := false // the server-side cleanup of an interrupted retirement did work
+	if user == "" {
+		// No record. A run killed after the record was purged leaves the retirement marker pending, and maybe the lease
+		// and the inbox stream. The same command finishes it (ADR 0088), with or without a creds file.
+		state, serr := adm.RetireState(ctx, addr)
+		if serr != nil {
+			return stop("error", "server", nil, "%v", serr)
+		}
+		burned := state != ""
+		burnedAlready = burned
+		if !burned && !force {
+			hint := ""
+			if opts.listHint != "" {
+				hint = opts.listHint + "; "
 			}
-		}
-		if finishing {
-			fmt.Fprintf(stderr, "mashctl: %s %s: the address is already retired; finishing the creds file\n", opts.verb, label)
-		}
-		hint := ""
-		if opts.listHint != "" {
-			hint = opts.listHint + "; "
-		}
-		if !finishing {
 			return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", hint, name)
+		}
+		if burned && !opts.dryRun {
+			left, eerr := adm.Exists(ctx, addr)
+			if eerr != nil {
+				return stop("error", "server", nil, "%v", eerr)
+			}
+			if state == "pending" || left {
+				fmt.Fprintf(stderr, "mashctl: %s %s: the address is already retired; finishing the retirement on the server\n", opts.verb, label)
+				if derr := adm.Deprovision(ctx, addr); derr != nil {
+					return stop("error", "server", []string{"run " + opts.again + " again once the cause is fixed"}, "finishing the retirement failed: %v", derr)
+				}
+				cleaned = true
+			}
 		}
 	}
 	if opts.dryRun {
@@ -338,7 +346,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 			}
 		}
 	}
-	if user == "" && res.kind == "deleted" && res.credsAction == "none" {
+	if user == "" && !cleaned && res.kind == "deleted" && res.credsAction == "none" {
 		res.kind = "unchanged"
 	}
 
@@ -348,6 +356,10 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		fmt.Fprintf(stdout, "creds file renamed to %s (--delete-creds removes it instead)\n", res.renamedTo)
 	}
 	switch {
+	case user == "" && cleaned:
+		fmt.Fprintln(stdout, "finished the retirement on the server: the marker is final and the lease fence and the inbox are removed")
+	case user == "" && burnedAlready:
+		fmt.Fprintln(stdout, "the address was already retired and nothing was left on the server")
 	case user == "":
 	case noRevoke:
 		fmt.Fprintf(stdout, "%s: %s\n", label, noRevokeNote)

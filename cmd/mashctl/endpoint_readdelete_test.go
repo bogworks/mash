@@ -281,8 +281,8 @@ func TestEndpointGoldens(t *testing.T) {
 	checkGolden(t, "endpoint_delete.golden.json", h.scrub(out))
 
 	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--json")
-	if code != 1 {
+	if code != 0 {
 		t.Fatalf("delete again: %d %q", code, errb)
 	}
-	checkGolden(t, "endpoint_delete_refused.golden.json", h.scrub(out))
+	checkGolden(t, "endpoint_delete_unchanged.golden.json", h.scrub(out))
 }

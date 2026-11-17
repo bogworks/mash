@@ -151,7 +151,7 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 		if res.kind == "deleted" {
 			j.ServersAcknowledged = &res.acked
 		}
-		if res.kind == "refused" {
+		if res.kind == "refused" || (res.kind == "error" && res.refusalCode != "") {
 			j.Refusal = &refusalJSON{Code: res.refusalCode, Detail: res.detail}
 		}
 		writeJSON(stdout, j)
