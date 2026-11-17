@@ -68,15 +68,11 @@ func Mint(keys Keys, addr sap.Address, userSeed []byte) (*Minted, error) {
 	seed = append([]byte(nil), seed...)
 	defer clear(seed)
 
-	uc := jwt.NewUserClaims(userPub)
-	name := addr.String()
-	uc.Name = name
-	// The account's own key signs, so the user carries its permissions in the JWT itself.
-	uc.Permissions = *admin.Permissions(addr)
-	token, err := uc.Encode(acctKP)
+	token, err := signUser(acctKP, addr, userPub)
 	if err != nil {
-		return nil, fmt.Errorf("mint: sign: %w", err)
+		return nil, err
 	}
+	name := addr.String()
 	creds, err := jwt.FormatUserConfig(token, seed)
 	if err != nil {
 		return nil, fmt.Errorf("mint: creds: %w", err)
@@ -84,4 +80,35 @@ func Mint(keys Keys, addr sap.Address, userSeed []byte) (*Minted, error) {
 	return &Minted{
 		Name: name, UserPub: userPub, AccountPub: acctPub, JWT: token, Creds: creds,
 	}, nil
+}
+
+// SignUser signs the user JWT of the endpoint at addr for userPub, a user public key the endpoint made: no seed is
+// involved. The claims are Mint's: the dotted address as name, admin.Permissions(addr), no tag, signed by the account
+// signing key. It returns the JWT and the account public key.
+func SignUser(keys Keys, addr sap.Address, userPub string) (token, acctPub string, err error) {
+	if !nkeys.IsValidPublicUserKey(userPub) {
+		return "", "", errors.New("mint: not a user public key")
+	}
+	acctKP, acctPub, err := keys.Account()
+	if err != nil {
+		return "", "", err
+	}
+	defer acctKP.Wipe()
+	if !nkeys.IsValidPublicAccountKey(acctPub) {
+		return "", "", errors.New("mint: the account signing key is not an account key")
+	}
+	token, err = signUser(acctKP, addr, userPub)
+	return token, acctPub, err
+}
+
+func signUser(acctKP nkeys.KeyPair, addr sap.Address, userPub string) (string, error) {
+	uc := jwt.NewUserClaims(userPub)
+	uc.Name = addr.String()
+	// The account's own key signs, so the user carries its permissions in the JWT itself.
+	uc.Permissions = *admin.Permissions(addr)
+	token, err := uc.Encode(acctKP)
+	if err != nil {
+		return "", fmt.Errorf("mint: sign: %w", err)
+	}
+	return token, nil
 }

@@ -347,3 +347,16 @@ func (a *Admin) abortRetire(ctx context.Context, lk *streamLock, pm *retireMark,
 	}
 	return err
 }
+
+// IsBurned reports whether addr's flat key has a retired marker, pending or final (INV-002): the address is never
+// reassigned. It reads the marker without taking the name's lock; Provision checks again under it.
+func (a *Admin) IsBurned(ctx context.Context, addr sap.Address) (bool, error) {
+	if err := addr.Validate(); err != nil {
+		return false, fmt.Errorf("mash: burned: %w", err)
+	}
+	pm, err := a.loadRetire(ctx, addr)
+	if err != nil {
+		return false, err
+	}
+	return pm != nil, nil
+}
