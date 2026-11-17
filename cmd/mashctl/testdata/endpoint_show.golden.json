@@ -1,0 +1,32 @@
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "shown",
+  "endpoint": {
+    "owner": "o",
+    "group": "g",
+    "instance": "a",
+    "address": "o.g.a",
+    "key": "o_g_a",
+    "user_public_key": "<USERKEY>",
+    "created": "<TIME>",
+    "note": "",
+    "labels": {},
+    "caps": [],
+    "description": "",
+    "role": "",
+    "host": "",
+    "agent": "claude-code",
+    "account": "<ACCOUNT>",
+    "mail_subject": "agents.mail.o.g.a"
+  },
+  "creds": {
+    "path": "<DIR>/o.g.a.creds",
+    "exists": true
+  },
+  "issued": {
+    "purpose": "issue",
+    "issued_at": "<TIME>",
+    "revoked": false
+  },
+  "refusal": null
+}

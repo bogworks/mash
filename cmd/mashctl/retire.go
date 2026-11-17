@@ -51,6 +51,37 @@ var retireRevokeNow = time.Now
 // noRevokeNote is printed after a retire with --no-revoke: the user can still connect.
 const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
 
+// retireOpts are the choices of one removal and the words its messages use. `mashctl retire` and `mashctl endpoint
+// delete` run the same removal with different words.
+type retireOpts struct {
+	deleteCreds, force, noRevoke, dryRun bool
+	verb                                 string // the command as messages name it: "retire" or "endpoint delete"
+	label                                string // how messages name the endpoint
+	full                                 string // the first line of the report names the endpoint this way
+	again                                string // the command that finishes a partial removal
+	done                                 string // the report's first word: "retired" or "deleted"
+	listHint                             string // added to the missing-record refusal, when set
+	usage                                string
+}
+
+// retireResult is what one removal did. kind is deleted, unchanged, refused, partial, error or planned.
+type retireResult struct {
+	kind         string
+	refusalCode  string
+	detail       string
+	user         string
+	credsPath    string
+	credsAction  string // renamed, removed or none
+	renamedTo    string
+	nextSteps    []string
+	pendingUsage bool
+}
+
+// ok is true for the kinds that end without a problem.
+func (r retireResult) ok() bool {
+	return r.kind == "deleted" || r.kind == "unchanged" || r.kind == "planned"
+}
+
 // runRetire is `mashctl retire`: the server removal (the revocation of the user key, then the directory record and
 // inbox) comes first and the creds file last, so a failure leaves the earlier, safer state.
 func runRetire(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
@@ -85,23 +116,47 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		return 2
 	}
 	name := addr.String()
-	servers, err := parseServers(env)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: retire: %v\n%s", err, retireUsage)
+	res := retireAddress(addr, retireOpts{
+		deleteCreds: deleteCreds, force: force, noRevoke: noRevoke,
+		verb: "retire", label: name, full: name, again: "mashctl retire " + name, done: "retired", usage: retireUsage,
+	}, env, lookup, stdout, stderr)
+	if res.pendingUsage {
 		return 2
 	}
-	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: retire %s: %s\n", name, admin.RewordUnavailable(fmt.Sprintf(format, a...)))
-		return 1
+	if res.ok() {
+		return 0
+	}
+	return 1
+}
+
+// retireAddress removes the endpoint at addr as opts says and reports on stdout and stderr. A bad server list is a
+// usage error (pendingUsage).
+func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) retireResult {
+	name := addr.String()
+	label := opts.label
+	deleteCreds, force, noRevoke := opts.deleteCreds, opts.force, opts.noRevoke
+	servers, err := parseServers(env)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: %s: %v\n%s", opts.verb, err, opts.usage)
+		return retireResult{kind: "error", detail: err.Error(), pendingUsage: true}
+	}
+	var user string
+	stop := func(kind, code string, next []string, format string, a ...any) retireResult {
+		msg := admin.RewordUnavailable(fmt.Sprintf(format, a...))
+		fmt.Fprintf(stderr, "mashctl: %s %s: %s\n", opts.verb, label, msg)
+		return retireResult{kind: kind, refusalCode: code, detail: msg, user: user, nextSteps: next}
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return retireResult{kind: "error", detail: err.Error()}
 	}
 	credsPath, credsErr := credsFileFor(cfg, addr)
 	if credsErr != nil && deleteCreds {
-		return fail("%v", credsErr)
+		return stop("refused", "no_creds_file", []string{"run again without --delete-creds"}, "%v", credsErr)
+	}
+	if credsErr != nil {
+		credsPath = ""
 	}
 
 	// (1) the guarded server removal. The user key comes from the directory record, so a record someone replaced
@@ -109,27 +164,35 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return fail("%v", err)
+		return stop("error", "", nil, "%v", err)
 	}
 	defer closeAdmin()
 	recs, bad, err := adm.List(ctx)
 	if err != nil {
 		if !noRevoke {
-			return fail("%v\n%s", err, ctl.NotRevoked)
+			return stop("error", "", nil, "%v\n%s", err, ctl.NotRevoked)
 		}
-		return fail("%v", err)
+		return stop("error", "", nil, "%v", err)
 	}
 	for _, b := range bad {
 		b.Warn(stderr, "mashctl")
 	}
-	user := ""
 	if r, ok := findRecord(recs, addr); ok {
 		user = r.User
 	}
+	if user == "" && !force {
+		hint := ""
+		if opts.listHint != "" {
+			hint = opts.listHint + "; "
+		}
+		return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", hint, name)
+	}
+	if opts.dryRun {
+		return planRetire(opts, user, credsPath, stdout)
+	}
 	var revokeOut bytes.Buffer
 	revokedOK := false // the revocation completed on every server
-	switch {
-	case user != "":
+	if user != "" {
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
 		var revokeErr, checkErr error
@@ -151,7 +214,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 					checkErr = err
 					return err
 				}
-				if credsErr == nil {
+				if credsPath != "" {
 					claims, err := credsIssuedClaims(credsPath, u)
 					if err == nil {
 						err = refuseFutureIssued(name, claims, revokeAt)
@@ -179,8 +242,9 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		// changes nothing.
 		if !noRevoke {
 			if err := checkServerSet(ctx, cfg, env, servers); err != nil {
-				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n%s\n", name, err, ctl.NotRevoked)
-				return 1
+				fmt.Fprintf(stderr, "mashctl: %s %s: %v\n%s\n", opts.verb, label, err, ctl.NotRevoked)
+				return retireResult{kind: "refused", refusalCode: "server_set", detail: err.Error(), user: user,
+					nextSteps: []string{"start the missing servers or name them with --servers, then run " + opts.again}}
 			}
 		}
 		// partialNote says what a revocation that completed left behind, when the removal then did not finish.
@@ -189,84 +253,121 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 				return
 			}
 			io.WriteString(stdout, revokeOut.String())
-			fmt.Fprintf(stderr, "mashctl: retire %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running it again finishes it\n", name, ctl.ShortKey(user))
+			fmt.Fprintf(stderr, "mashctl: %s %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running it again finishes it\n", opts.verb, label, ctl.ShortKey(user))
 		}
+		again := []string{"run " + opts.again}
 		if err := deprovisionIfUser(adm, ctx, addr, user); err != nil {
 			if admin.IsRefusal(err) {
 				if checkErr != nil && errors.Is(err, checkErr) {
-					return fail("%v", checkErr)
+					return stop("refused", "future_issued", nil, "%v", checkErr)
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					if errors.Is(revokeErr, apply.ErrNotConfirmed) {
-						return fail("%v: the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)", err)
+						return stop("refused", "revoke_not_confirmed", []string{"run " + opts.again + " --no-revoke to remove without revoking"}, "%v: the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)", err)
 					}
-					return fail("%v: %s; the directory record was not changed (--no-revoke retires without revoking)", err, ctl.NotRevoked)
+					return stop("refused", "revoke_failed", []string{"run " + opts.again + " --no-revoke to remove without revoking"}, "%v: %s; the directory record was not changed (--no-revoke retires without revoking)", err, ctl.NotRevoked)
 				}
-				return fail("%v: nothing was changed", err)
+				return stop("refused", "refused", nil, "%v: nothing was changed", err)
 			}
 			if admin.IsPartial(err) {
 				partialNote()
-				return fail("%v; run mashctl retire %s again", err, name)
+				return stop("partial", "", again, "%v; run %s again", err, opts.again)
 			}
 			if !noRevoke && !revokedOK {
-				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n%s; run the command again once the cause is fixed\n", name, err, ctl.NotRevoked)
-				return 1
+				fmt.Fprintf(stderr, "mashctl: %s %s: %v\n%s; run the command again once the cause is fixed\n", opts.verb, label, err, ctl.NotRevoked)
+				return retireResult{kind: "error", detail: err.Error(), user: user, nextSteps: []string{"run the command again once the cause is fixed"}}
 			}
 			partialNote()
-			return fail("PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left)", err, name)
+			return stop("partial", "", []string{"finish with: mashctl deprovision " + name}, "PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left)", err, name)
 		}
-	case force:
-		fmt.Fprintf(stderr, "mashctl: retire %s: no directory record on the server, so no user key is known and nothing was revoked; only the creds file is handled\n", name)
-	default:
-		return fail("no directory record on the server (--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", name)
+	} else {
+		fmt.Fprintf(stderr, "mashctl: %s %s: no directory record on the server, so no user key is known and nothing was revoked; only the creds file is handled\n", opts.verb, label)
 	}
 
 	// (2) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
 	// aside; --delete-creds removes it.
-	code := 0
-	renamed := ""
-	if credsErr == nil {
+	res := retireResult{kind: "deleted", user: user, credsPath: credsPath, credsAction: "none"}
+	credsFail := func(format string, a ...any) {
+		fmt.Fprintf(stderr, "mashctl: %s %s: "+format+"\n", append([]any{opts.verb, label}, a...)...)
+		res.kind = "partial"
+		res.nextSteps = append(res.nextSteps, "handle the creds file by hand")
+	}
+	if credsPath != "" {
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
-			fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
-			code = 1
+			credsFail("%v", err)
 		case !fi.Mode().IsRegular():
-			fmt.Fprintf(stderr, "mashctl: retire %s: %s is not a regular file: left in place\n", name, credsPath)
-			code = 1
+			credsFail("%s is not a regular file: left in place", credsPath)
 		case deleteCreds:
 			if err := os.Remove(credsPath); err != nil {
-				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
-				code = 1
+				credsFail("%v", err)
+			} else {
+				res.credsAction = "removed"
 			}
 		default:
 			dest := credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
 			final, err := archiveNoReplace(credsPath, dest)
 			if err != nil {
-				fmt.Fprintf(stderr, "mashctl: retire %s: %v\n", name, err)
-				code = 1
+				credsFail("%v", err)
 			} else {
-				renamed = final
+				res.credsAction = "renamed"
+				res.renamedTo = final
 			}
 		}
 	}
+	if user == "" && res.kind == "deleted" && res.credsAction == "none" {
+		res.kind = "unchanged"
+	}
 
 	// (3) report.
-	fmt.Fprintf(stdout, "retired %s\n", name)
-	if renamed != "" {
-		fmt.Fprintf(stdout, "creds file renamed to %s (--delete-creds removes it instead)\n", renamed)
+	fmt.Fprintf(stdout, "%s %s\n", opts.done, opts.full)
+	if res.renamedTo != "" {
+		fmt.Fprintf(stdout, "creds file renamed to %s (--delete-creds removes it instead)\n", res.renamedTo)
 	}
 	switch {
 	case user == "":
 	case noRevoke:
-		fmt.Fprintf(stdout, "%s: %s\n", name, noRevokeNote)
+		fmt.Fprintf(stdout, "%s: %s\n", label, noRevokeNote)
 		fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 	default:
 		io.WriteString(stdout, revokeOut.String())
 		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file is separate\n", ctl.ShortKey(user))
 	}
-	return code
+	return res
+}
+
+// planRetire prints what a removal would do and changes nothing.
+func planRetire(opts retireOpts, user, credsPath string, stdout io.Writer) retireResult {
+	res := retireResult{kind: "planned", user: user, credsPath: credsPath, credsAction: "none"}
+	fmt.Fprintf(stdout, "would delete %s (nothing was changed)\n", opts.full)
+	switch {
+	case user == "":
+		fmt.Fprintln(stdout, "no directory record: no user key is known and none would be revoked")
+	case opts.noRevoke:
+		fmt.Fprintf(stdout, "would not revoke user key %s... (--no-revoke)\n", ctl.ShortKey(user))
+	default:
+		fmt.Fprintf(stdout, "would revoke user key %s...\n", ctl.ShortKey(user))
+	}
+	if user != "" {
+		fmt.Fprintln(stdout, "would remove the directory record and the inbox, and burn the address")
+	}
+	if credsPath != "" {
+		if fi, err := os.Lstat(credsPath); err == nil && fi.Mode().IsRegular() {
+			if opts.deleteCreds {
+				res.credsAction = "removed"
+				fmt.Fprintf(stdout, "would remove creds file %s\n", credsPath)
+			} else {
+				res.credsAction = "renamed"
+				fmt.Fprintf(stdout, "would rename creds file %s to %s.retired-<time>\n", credsPath, credsPath)
+			}
+		}
+	}
+	if res.credsAction == "none" {
+		fmt.Fprintln(stdout, "no creds file would be changed")
+	}
+	return res
 }
 
 // archiveNoReplace moves src to dest without ever replacing an existing file. If dest exists it tries dest.1,

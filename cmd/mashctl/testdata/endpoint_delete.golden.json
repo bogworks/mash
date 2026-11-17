@@ -1,0 +1,17 @@
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "deleted",
+  "endpoint": {
+    "owner": "o",
+    "group": "g",
+    "instance": "a",
+    "address": "o.g.a",
+    "key": "o_g_a"
+  },
+  "creds": {
+    "path": "<DIR>/o.g.a.creds",
+    "action": "renamed"
+  },
+  "next_steps": [],
+  "refusal": null
+}
