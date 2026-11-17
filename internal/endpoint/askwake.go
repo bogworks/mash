@@ -98,6 +98,31 @@ func OpenAskTable(path string) *AskTable {
 	return t
 }
 
+// Reload re-reads the table file and replaces the in-memory asks, so a serve that waited for the endpoint lease sees
+// the asks the previous holder recorded meanwhile. A missing file is empty; an unreadable or malformed one keeps the
+// current asks. Reserved slots (pending) are untouched.
+func (t *AskTable) Reload() {
+	if t == nil || t.path == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b, err := os.ReadFile(t.path)
+	switch {
+	case err == nil:
+		var f askFile
+		if json.Unmarshal(b, &f) != nil {
+			return
+		}
+		t.asks = f.Asks
+	case os.IsNotExist(err):
+		t.asks = nil
+	default:
+		return
+	}
+	t.prune()
+}
+
 func (t *AskTable) prune() {
 	cut := t.now().Add(-AskTTL)
 	kept := t.asks[:0]

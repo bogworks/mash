@@ -289,6 +289,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
+		src.asks.Reload() // the lease is held: pick up asks the previous holder recorded while this serve waited
 		ep.SetReplyWaker(src.asks)
 		select {
 		case <-srv.ChannelReady():

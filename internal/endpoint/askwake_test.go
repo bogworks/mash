@@ -312,3 +312,27 @@ func TestAskTableAddIsIdempotent(t *testing.T) {
 		t.Fatalf("a repeat of a recorded ask needs no slot: %v", err)
 	}
 }
+
+// Reload picks up asks another holder wrote to the file, and a malformed file keeps the asks in memory.
+func TestAskTableReloadSeesOtherHoldersAsks(t *testing.T) {
+	path := AskTablePath(t.TempDir(), "o", "a")
+	waiting := OpenAskTable(path)
+	holder := OpenAskTable(path)
+	if _, err := holder.Add("b", "UB", 7, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if waiting.AnswerMatches("UB", 7) {
+		t.Fatal("the stale snapshot should not know the ask yet")
+	}
+	waiting.Reload()
+	if !waiting.AnswerMatches("UB", 7) || waiting.Len() != 1 {
+		t.Fatal("Reload must make the new ask visible")
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waiting.Reload()
+	if !waiting.AnswerMatches("UB", 7) {
+		t.Fatal("a malformed file must keep the current asks")
+	}
+}
