@@ -77,6 +77,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 - `RETRYING - could not reach the server, last error: ...`: mash retries on its own. Check the `url`, that the host is reachable, and the clock (below). On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
 - `FAILED - ... Next: fix the cause (see the creds and config lines) and restart Claude Code`: the first failure was permanent. Fix what the earlier lines show.
+- `mash status` from a shell makes no connection, but it shows a failure the session recorded: `connection: FAILED - ... Authorization Violation (recorded by the session at T)` means the endpoint was deleted or its key reissued, so the old credentials no longer work; ask whoever runs mashctl for a new credentials file (`mashctl endpoint show <address>`). The record is kept in the endpoint's state directory (`connection.json`, no secret) and is cleared when a session connects again.
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
 - Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).
 

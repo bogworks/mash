@@ -34,6 +34,10 @@ type Endpoint struct {
 	// refusals routes the connection's publish permission violations to the sends waiting on them (refusal.go).
 	refusals *refusals
 
+	// connHook is called with a terminal authorization failure of the live connection, and with nil when it
+	// (re)connects (see SetConnectionHook); nil when unset.
+	connHook *atomic.Pointer[func(error)]
+
 	// The last answered ping of serve's MCP client (unix seconds, 0 for none), written into the lease.
 	mcpSeen atomic.Int64
 
@@ -363,6 +367,12 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, err
 	}
 	refs := newRefusals()
+	hook := &atomic.Pointer[func(error)]{}
+	call := func(err error) {
+		if f := hook.Load(); f != nil {
+			(*f)(err)
+		}
+	}
 	nc, err := connect(ctx, cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
@@ -373,14 +383,18 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 			log.New(os.Stderr, "mash: ", 0).Printf("nats: %v", err)
 			refs.note(err)
+			if isAuthFailure(err) {
+				call(err)
+			}
 		}),
+		nats.ReconnectHandler(func(*nats.Conn) { call(nil) }),
 	)...)
 	if err != nil {
 		return nil, fmt.Errorf("mash: connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
 	}
 	refs.flush = nc.FlushWithContext
 	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
-		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs,
+		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs, connHook: hook,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),
 		dir: map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
 	if opts.Presence {
